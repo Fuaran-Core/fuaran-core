@@ -8,6 +8,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 // ---- Propagation ----
 
 /// The recursive Tarjan this phase replaced, verbatim, as the reference the iterative one must
@@ -175,7 +182,7 @@ let private throwing: RuleFamily<RNode, string> =
 
 let private table (cols: (string * ColumnType * Cell list) list) : Table =
     { Schema = cols |> List.map (fun (n, ty, _) -> n, ty)
-      Columns = cols |> List.map (fun (n, ty, cells) -> Column.create n ty cells) }
+      Columns = cols |> List.map (fun (n, ty, cells) -> cellColumn n ty cells) }
 
 let private orFail (r: Result<'a, RegistrationError>) : 'a =
     r |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
@@ -285,8 +292,8 @@ let private validatorTests =
               let ragged =
                   { Schema = [ "a", IntType; "b", IntType ]
                     Columns =
-                      [ Column.create "a" IntType [ Int 1; Int 2; Int 3 ]
-                        Column.create "b" IntType [ Int 1 ] ] }
+                      [ cellColumn "a" IntType [ Int 1; Int 2; Int 3 ]
+                        cellColumn "b" IntType [ Int 1 ] ] }
 
               let reg = ColumnValidator.ofRules [ ColumnValidator.unique [ "a"; "b" ] ] |> orFail
 

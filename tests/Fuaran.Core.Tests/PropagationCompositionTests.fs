@@ -368,14 +368,25 @@ let private partTests =
 //  the smallest form that is still a cache the prior carries: the derived column's cells, the
 //  formula they were built with, and how many rows the last build recomputed.
 
+/// A column of cells that fit its type (Phase 417: `Column.ofCells`, which refuses one that does not).
+let private column (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
+/// `c` rebuilt over `cells`, keeping its name and type, or why the cells do not fit it.
+let private rebuild (c: Column) (cells: Cell list) : Result<Column, string> =
+    Column.ofCells c.Name c.Type cells
+    |> Result.mapError (sprintf "column %s cannot hold the edit: %A" c.Name)
+
 let private orders (n: int) : Table =
     let rows = [ 0 .. n - 1 ]
 
     { Schema = [ "id", IntType; "qty", IntType; "price", FloatType ]
       Columns =
-        [ Column.create "id" IntType (rows |> List.map (fun i -> Int(i + 1)))
-          Column.create "qty" IntType (rows |> List.map (fun i -> Int(1 + i % 7)))
-          Column.create "price" FloatType (rows |> List.map (fun i -> Float(0.25 * float (1 + i % 40)))) ] }
+        [ column "id" IntType (rows |> List.map (fun i -> Int(i + 1)))
+          column "qty" IntType (rows |> List.map (fun i -> Int(1 + i % 7)))
+          column "price" FloatType (rows |> List.map (fun i -> Float(0.25 * float (1 + i % 40)))) ] }
 
 /// The rows an edit moved, in place: `Rows` when the row set is unchanged and only these rows'
 /// cells moved, `AllRows` when the edit cannot say more (an append, a whole column).
@@ -385,7 +396,7 @@ type RowDelta =
 
 let private cellsOf (col: string) (t: Table) : Cell list =
     match Table.tryColumn col t with
-    | Some c -> c.Cells
+    | Some c -> Column.toCells c
     | None -> []
 
 let private withColumn (c: Column) (t: Table) : Table =
@@ -399,15 +410,15 @@ let private applyEdit (edit: SourceEdit) (t: Table) : Result<Table * RowDelta, s
     | EditCell(col, row, v) ->
         match Table.tryColumn col t with
         | Some c when row >= 0 && row < Column.length c ->
-            let cells = c.Cells |> List.mapi (fun i x -> if i = row then v else x)
+            let cells = Column.toCells c |> List.mapi (fun i x -> if i = row then v else x)
 
-            Ok(
-                withColumn { c with Cells = cells } t,
+            rebuild c cells
+            |> Result.map (fun c' ->
+                withColumn c' t,
                 (if Column.cell row c = v then
                      Rows Set.empty
                  else
-                     Rows(Set.singleton row))
-            )
+                     Rows(Set.singleton row)))
         | _ -> Error(sprintf "no cell %s[%d]" col row)
     | AppendRow cells ->
         let cellFor name =
@@ -415,15 +426,17 @@ let private applyEdit (edit: SourceEdit) (t: Table) : Result<Table * RowDelta, s
             |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
             |> Option.defaultValue Null
 
-        Ok(
-            { t with
-                Columns =
-                    t.Columns
-                    |> List.map (fun c ->
-                        { c with
-                            Cells = c.Cells @ [ cellFor c.Name ] }) },
-            AllRows
-        )
+        let appended =
+            List.foldBack
+                (fun c acc ->
+                    match rebuild c (Column.toCells c @ [ cellFor c.Name ]), acc with
+                    | Ok c', Ok cs -> Ok(c' :: cs)
+                    | Error e, _
+                    | _, Error e -> Error e)
+                t.Columns
+                (Ok [])
+
+        appended |> Result.map (fun columns -> { t with Columns = columns }, AllRows)
     | ReplaceColumn c when Table.tryColumn c.Name t |> Option.isSome && Column.length c = Table.rowCount t ->
         Ok(withColumn c t, AllRows)
     | ReplaceColumn c -> Error(sprintf "column %s does not fit the table" c.Name)
@@ -522,7 +535,7 @@ let private sumColumn (t: Table) (col: string) : Cell =
     match Table.tryColumn col t with
     | None -> Null
     | Some c ->
-        c.Cells
+        Column.toCells c
         |> List.sumBy (function
             | Int i -> float i
             | Float f -> f
@@ -549,7 +562,7 @@ let private amountOf (f: LineFormula) (qty: Cell) (price: Cell) : Cell =
 
 let private linesTable (amounts: Cell list) : Table =
     { Schema = [ "amount", FloatType ]
-      Columns = [ Column.create "amount" FloatType amounts ] }
+      Columns = [ column "amount" FloatType amounts ] }
 
 /// Every row, from scratch: the state a prime builds.
 let private primeLines (f: LineFormula) (source: Table) : Result<LineState, string> =
@@ -557,7 +570,7 @@ let private primeLines (f: LineFormula) (source: Table) : Result<LineState, stri
     | Some q, Some p ->
         Ok
             { Formula = f
-              Amounts = List.map2 (amountOf f) q.Cells p.Cells
+              Amounts = List.map2 (amountOf f) (Column.toCells q) (Column.toCells p)
               Recomputed = Table.rowCount source }
     | _ -> Error(sprintf "lines reads %s and %s, and the source has %A" f.Qty f.Price (Table.columnNames source))
 
@@ -702,10 +715,7 @@ let evaluatorWitness: EvaluatorWitness<Sheet, SheetValue> =
                 | 1 -> dataEdit (EditCell("qty", row, Int(v + 1))) s
                 | 2 -> dataEdit (EditCell("id", row, Int(1000 + v))) s
                 | 3 -> dataEdit (AppendRow [ "id", Int(2000 + v); "qty", Int 1; "price", Float 1.0 ]) s
-                | 4 ->
-                    dataEdit
-                        (ReplaceColumn(Column.create "qty" IntType [ for i in 0 .. rows - 1 -> Int((i + v) % 5) ]))
-                        s
+                | 4 -> dataEdit (ReplaceColumn(column "qty" IntType [ for i in 0 .. rows - 1 -> Int((i + v) % 5) ])) s
                 | 5 -> sheetEdit (redefineLines (float (v % 3 + 1))) s
                 // A redefinition the evaluator refuses (a column the source does not have), so the
                 // failing-evaluator arm of the agreement law is reached.

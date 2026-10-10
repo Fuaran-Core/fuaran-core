@@ -13,24 +13,196 @@ namespace Fuaran.Core
 //  self-contained data strand. FSharp.Core only; Fable-clean on encode and decode
 //  (it reuses `Fuaran.Core.Wire`'s canonical-float / escaping / parser rules, so a
 //  numeric column is byte-identical across the .NET and Fable hosts).
+//
+//  Since Phase 417 (the `1.0.0` slot) a column's storage is one typed `Vector` per
+//  column behind the `ColumnData` union, with a validity mask beside it, where it
+//  was a `Cell list`: a consumer holds typed storage, an indexed read is O(1), and
+//  a cell outside its column's type cannot be represented. `Cell` stays the scalar
+//  read type; `Column.ofCells` / `Column.toCells` are the migration bridge.
 // ============================================================================
 
-/// A typed, null-aware column. `Cells` co-indexes with the table's rows; a `Null` cell is the
-/// validity-mask "absent" marker. `Type` is the declared column type; a present cell must be of a
-/// type that WIDENS into it (`ColumnType.widens`) — the codec refuses any other at decode,
-/// `Table.validate` (and so `ColumnCodec.tryEncode`) before encode, and `Column.aggregate` by name
-/// (Phase 299). `Column.create` checks nothing; a column built by hand is checked where it is used.
+/// The validity mask of a column (Phase 417): one `bool` per row, `true` where the cell is
+/// PRESENT and `false` where it is the `Null` the wire's validity array marks absent. The in-memory
+/// form of that array. Its shape is this phase's; Phase 420 elides it for a null-free column.
+type Validity = Vector<bool>
+
+/// Validity-mask reads and constructors.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Validity =
+
+    /// Every one of `n` rows present.
+    let all (n: int) : Validity = Vector.init n (fun _ -> true)
+
+    /// A mask over ITS OWN COPY of `present`.
+    let ofArray (present: bool[]) : Validity = Vector.ofArray present
+
+    /// A mask of the list's bits, in order.
+    let ofList (present: bool list) : Validity = Vector.ofList present
+
+    /// Is row `i` present? `false` for an out-of-range index — total.
+    let isPresent (i: int) (v: Validity) : bool = i >= 0 && i < v.Length && v[i]
+
+    /// How many rows are present.
+    let presentCount (v: Validity) : int =
+        Vector.fold (fun n b -> if b then n + 1 else n) 0 v
+
+/// Equality over a column's storage (Phase 417): two typed vectors with their masks hold the same
+/// cells when the masks agree and, at every PRESENT row, the elements are equal under the vector's
+/// element identity. The element at an absent row is not a cell and takes no part — a builder that
+/// copies writes the type's zero there, and a builder that adopts leaves what it was handed.
+module internal ColumnStorage =
+
+    /// Equal at every present row, under `VectorElements.equal`.
+    let presentEqual (xs: Vector<'T>) (vx: Validity) (ys: Vector<'T>) (vy: Validity) : bool =
+        xs.Length = ys.Length
+        && vx = vy
+        && (let mutable same = true
+            let mutable i = 0
+
+            while same && i < xs.Length do
+                if Validity.isPresent i vx then
+                    same <- VectorElements.equal xs[i] ys[i]
+
+                i <- i + 1
+
+            same)
+
+    /// A hash agreeing with `presentEqual`: the length, the mask, and the first few present elements.
+    let presentHash (xs: Vector<'T>) (vx: Validity) : int =
+        let mutable h = xs.Length * 31 + vx.GetHashCode()
+        let mutable seen = 0
+        let mutable i = 0
+
+        while seen < VectorElements.HashedPrefix && i < xs.Length do
+            if Validity.isPresent i vx then
+                h <- (h * 31) + VectorElements.hashOf xs[i]
+                seen <- seen + 1
+
+            i <- i + 1
+
+        h
+
+/// A column's storage (Phase 417): one typed, immutable `Vector` of values and the `Validity` mask
+/// that says which rows are present, one case per `ColumnType`. The element at an absent row is a
+/// placeholder, never a cell — a reader that wants the cell asks `Column.cell`, which answers
+/// `Null` there. `values` and `validity` have one length; `Table.validate` names a pair that does
+/// not (`LengthMismatch`).
+///
+/// A widened cell is held NORMALISED: an `Int` in a float column is the float it widens to, and in
+/// a decimal column the decimal text of its digits, exactly as decode already normalised it; so
+/// `Floats` holds floats only and `Decimals` decimal text only. `Dates` and `Timestamps` hold their
+/// canonical ISO-8601 text in this phase, as the cells do; Phase 422 makes them integers.
+///
+/// Equality is by the CELLS: two storages are equal when their masks agree and every present
+/// element is equal under the vector's identity (every NaN one value, `-0.0` equal to `0.0`), so a
+/// column compares the way `Cell.compare` compares its cells, on every host.
+[<CustomEquality; NoComparison>]
+type ColumnData =
+    /// An `int` column's values and mask.
+    | Ints of values: Vector<int> * validity: Validity
+    /// A `float` column's values and mask; a widened `Int` is held as its float.
+    | Floats of values: Vector<float> * validity: Validity
+    /// A `bool` column's values and mask.
+    | Bools of values: Vector<bool> * validity: Validity
+    /// A `string` column's values and mask.
+    | Strs of values: Vector<string> * validity: Validity
+    /// A `date` column's canonical `YYYY-MM-DD` texts and mask.
+    | Dates of values: Vector<string> * validity: Validity
+    /// A `timestamp` column's canonical `YYYY-MM-DDThh:mm:ssZ` texts and mask.
+    | Timestamps of values: Vector<string> * validity: Validity
+    /// A `decimal` column's canonical decimal texts and mask; a widened `Int` is held as its digits.
+    | Decimals of values: Vector<string> * validity: Validity
+
+    /// The column type the case carries.
+    member this.Type: ColumnType =
+        match this with
+        | Ints _ -> IntType
+        | Floats _ -> FloatType
+        | Bools _ -> BoolType
+        | Strs _ -> StringType
+        | Dates _ -> DateType
+        | Timestamps _ -> TimestampType
+        | Decimals _ -> DecimalType
+
+    /// The validity mask, whatever the case.
+    member this.Validity: Validity =
+        match this with
+        | Ints(_, v)
+        | Floats(_, v)
+        | Bools(_, v)
+        | Strs(_, v)
+        | Dates(_, v)
+        | Timestamps(_, v)
+        | Decimals(_, v) -> v
+
+    /// The number of rows — the values vector's length.
+    member this.Length: int =
+        match this with
+        | Ints(xs, _) -> xs.Length
+        | Floats(xs, _) -> xs.Length
+        | Bools(xs, _) -> xs.Length
+        | Strs(xs, _)
+        | Dates(xs, _)
+        | Timestamps(xs, _)
+        | Decimals(xs, _) -> xs.Length
+
+    /// Equal by their cells (see the type).
+    override this.Equals(other: obj) : bool =
+        match other with
+        | :? ColumnData as that ->
+            match this, that with
+            | Ints(xs, vx), Ints(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Floats(xs, vx), Floats(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Bools(xs, vx), Bools(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Strs(xs, vx), Strs(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Dates(xs, vx), Dates(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Timestamps(xs, vx), Timestamps(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Decimals(xs, vx), Decimals(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | _ -> false
+        | _ -> false
+
+    /// A hash agreeing with `Equals`.
+    override this.GetHashCode() : int =
+        let tag =
+            match this with
+            | Ints _ -> 1
+            | Floats _ -> 2
+            | Bools _ -> 3
+            | Strs _ -> 4
+            | Dates _ -> 5
+            | Timestamps _ -> 6
+            | Decimals _ -> 7
+
+        let body =
+            match this with
+            | Ints(xs, v) -> ColumnStorage.presentHash xs v
+            | Floats(xs, v) -> ColumnStorage.presentHash xs v
+            | Bools(xs, v) -> ColumnStorage.presentHash xs v
+            | Strs(xs, v)
+            | Dates(xs, v)
+            | Timestamps(xs, v)
+            | Decimals(xs, v) -> ColumnStorage.presentHash xs v
+
+        (tag * 397) ^^^ body
+
+/// A typed, null-aware column (Phase 417: typed storage, where it was a `Cell list`). `Data` holds
+/// one typed vector and a validity mask that co-index with the table's rows; the column's `Type` is
+/// the case `Data` carries, so a column cannot disagree with its own storage and a present cell is
+/// always of its column's type. The codec refuses a value outside the column's type at decode,
+/// `Column.ofCells` refuses a cell outside it at construction; the typed builders check nothing
+/// beyond what their types state, and a column built by hand is checked where it is used
+/// (`Table.validate`).
 type Column =
     {
         /// The key a table matches against its schema entry and looks the column up by; unique
         /// within a table (`Table.validate`), compared exactly.
         Name: string
-        /// The declared type, which must equal the column's schema entry; a present cell must be of
-        /// a type that widens into it.
-        Type: ColumnType
-        /// One cell per row, in row order. A linked list, so an indexed read (`Column.cell`) is O(i).
-        Cells: Cell list
+        /// The storage: one typed vector and its validity mask, in row order.
+        Data: ColumnData
     }
+
+    /// The declared type — the case `Data` carries.
+    member c.Type: ColumnType = c.Data.Type
 
 /// A group/window aggregate function (Phase 36, lifted from the DataFrame evaluator's `GroupBy` so it
 /// is a public, single-source surface). `Count` is non-null count; `Sum` keeps the source numeric type;
@@ -81,41 +253,274 @@ type AggregateError =
     /// float for a float-valued aggregate. `detail` says which, with the offending value or column.
     | AggregateOverflow of detail: string
     /// A present cell outside its column's type (Phase 299): the column, its declared type
-    /// (`ColumnType` since Phase 391; its tag before `1.0.0`), and the cell — its type's tag, or, for
-    /// a `Decimal` cell, the text that is not decimal text. The
-    /// aggregate used to read cells by shape and trust the column's type: a `Float` in an int
-    /// column was truncated into an int `Sum`, and one in a decimal column was dropped from `Sum`
-    /// and counted in `Mean`. Now it is refused, by name, before any aggregate reads it.
+    /// (`ColumnType` since Phase 391; its tag before `1.0.0`), and the cell — for a `Decimal` cell,
+    /// the text that is not decimal text. Since Phase 417 a cell of another TYPE cannot sit in a
+    /// column (`Column.ofCells` refuses it, and the typed storage cannot hold it), so the one cell
+    /// this names is a `Decimal` whose text is not decimal: refused, by name, before any aggregate
+    /// reads it.
     | CellOutsideType of column: string * colType: ColumnType * cell: string
 
-/// Column reads and the pinned aggregate semantics — the single `aggregate` the compute layer's
-/// grouping and pivoting call rather than copy.
+/// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec, of `Table.validate` and of
+/// `Column.ofCells`, the substrate's recoverable error discipline (GP4/GP5): every failure *names
+/// what went wrong* and, where a closed set is expected, *enumerates the alternatives*. Its size is
+/// stated nowhere but in this type: a new case is a breaking-source change for every exhaustive
+/// match (FS0025), and is classed as one in STABILITY.md.
+type ColumnError =
+    /// The input was not valid JSON at all — the parser's structured failure (`Json.parseDetailed`):
+    /// its classified kind, its message and its position (Phase 299; it carried the string form,
+    /// already prefixed, before).
+    | NotJson of error: JsonError
+    /// A required field was absent from an object (`schema` / `values` / `validity` / `name` / `type`).
+    | MissingField of field: string
+    /// A value had the wrong JSON shape for its position (expected object/array/string where another
+    /// kind appeared), or a cell's TEXT is not its type's canonical form — decimal text, or an
+    /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
+    | MalformedShape of detail: string
+    /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid types, in
+    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `1.0.0`).
+    | UnknownType of got: string * expected: ColumnType list
+    /// A present cell's type does not widen into its column's declared type — its JSON kind on
+    /// decode, its `Cell` case in `Column.ofCells` (Phase 417; `Table.validate` until then, which
+    /// now cannot meet one) — or a column's `Type` disagrees with its schema entry. `expected` is the
+    /// declared type (`ColumnType` since Phase 391; its tag before `1.0.0`); `got` is what was found
+    /// — a JSON value's kind on decode, a `Cell`'s or a column's type tag otherwise.
+    | TypeMismatch of column: string * expected: ColumnType * got: string
+    /// A column's `values` and `validity` arrays had different lengths (they must co-index) — on the
+    /// wire, or in a `ColumnData` built by hand (Phase 417).
+    | LengthMismatch of column: string * values: int * validity: int
+    /// A present `Float` cell was non-finite (`NaN` / `Infinity` / `-Infinity`); the Fuaran wire has no
+    /// non-finite float (the same posture as the tree wire's `Json.tryRender`, Phase 12) — `encode`
+    /// would otherwise emit the JSON *string* `"NaN"`, which fails to decode back to a `FloatType` cell.
+    | NonFiniteFloat of column: string * value: string
+    /// The `Table` was structurally malformed (a duplicate schema or column name, or a schema/column
+    /// name disagreement) — `Table.validate` names the fault.
+    | Malformed of detail: string
+    /// The table's columns are not one length (Phase 299): `column` has `got` rows where the first
+    /// column has `expected`. Distinct from `LengthMismatch`, which is ONE column's `values` and
+    /// `validity` arrays disagreeing on the wire.
+    | RaggedColumns of column: string * expected: int * got: int
+
+/// Column reads, the typed builders and readers, the cell-list bridge, and the pinned aggregate
+/// semantics — the single `aggregate` the compute layer's grouping and pivoting call rather than copy.
 module Column =
 
     /// The number of rows in a column.
-    let length (c: Column) : int = List.length c.Cells
+    let length (c: Column) : int = c.Data.Length
 
-    /// The cell at row `i` (`Null` for an out-of-range index — total).
-    ///
-    /// O(i) in the row index, because `Cells` is a linked list and this walks it. That is a property
-    /// of the representation, not of this function: the only way to make a single indexed read O(1)
-    /// is to change what `Cells` is, which would break every consumer's construction sites for a
-    /// cost nobody pays once the CALLERS stop indexing (Phase 206). A loop that wants every row
-    /// reads the column list once, in order, and does not come through here at all.
-    ///
-    /// What did change is the constant: the bounds test was a second full `List.length` walk of the
-    /// same list before the `List.item` walk, so every read cost one-and-a-half traversals where
-    /// `List.tryItem` — total for a negative index as well as a too-large one — costs at most one.
+    /// The validity mask: which rows are present.
+    let validity (c: Column) : Validity = c.Data.Validity
+
+    /// Is row `i` present (not `Null`)? `false` for an out-of-range index — total.
+    let isPresent (i: int) (c: Column) : bool = Validity.isPresent i c.Data.Validity
+
+    /// The cell at row `i` (`Null` for an absent row and for an out-of-range index — total). O(1)
+    /// since Phase 417: one mask read and one vector read.
     let cell (i: int) (c: Column) : Cell =
-        match List.tryItem i c.Cells with
-        | Some v -> v
-        | None -> Null
+        if not (Validity.isPresent i c.Data.Validity) then
+            Null
+        else
+            match c.Data with
+            | Ints(xs, _) -> Int xs[i]
+            | Floats(xs, _) -> Float xs[i]
+            | Bools(xs, _) -> Bool xs[i]
+            | Strs(xs, _) -> Str xs[i]
+            | Dates(xs, _) -> Date xs[i]
+            | Timestamps(xs, _) -> Timestamp xs[i]
+            | Decimals(xs, _) -> Decimal xs[i]
 
-    /// Build a typed column from a name + cell list (no validation — the codec validates the wire).
-    let create (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    // ---- the typed builders and readers (Phase 417) ----
+    // Each builder takes the storage as built — a `Vector` the caller copied into (`Vector.ofArray`)
+    // or adopted (`Vector.adopt`) — and checks nothing: `values` and `validity` are expected to be
+    // one length, and `Table.validate` names a pair that is not. Each reader answers the values
+    // vector where the column is of that type, with no conversion and no copy; the mask is
+    // `Column.validity`.
+
+    /// An `int` column over `values`, present where `validity` says.
+    let ofInts (name: string) (values: Vector<int>) (validity: Validity) : Column =
         { Name = name
-          Type = ty
-          Cells = cells }
+          Data = Ints(values, validity) }
+
+    /// A `float` column over `values`, present where `validity` says.
+    let ofFloats (name: string) (values: Vector<float>) (validity: Validity) : Column =
+        { Name = name
+          Data = Floats(values, validity) }
+
+    /// A `bool` column over `values`, present where `validity` says.
+    let ofBools (name: string) (values: Vector<bool>) (validity: Validity) : Column =
+        { Name = name
+          Data = Bools(values, validity) }
+
+    /// A `string` column over `values`, present where `validity` says.
+    let ofStrs (name: string) (values: Vector<string>) (validity: Validity) : Column =
+        { Name = name
+          Data = Strs(values, validity) }
+
+    /// A `date` column over canonical `YYYY-MM-DD` texts, present where `validity` says.
+    let ofDates (name: string) (values: Vector<string>) (validity: Validity) : Column =
+        { Name = name
+          Data = Dates(values, validity) }
+
+    /// A `timestamp` column over canonical `YYYY-MM-DDThh:mm:ssZ` texts, present where `validity` says.
+    let ofTimestamps (name: string) (values: Vector<string>) (validity: Validity) : Column =
+        { Name = name
+          Data = Timestamps(values, validity) }
+
+    /// A `decimal` column over canonical decimal texts, present where `validity` says.
+    let ofDecimals (name: string) (values: Vector<string>) (validity: Validity) : Column =
+        { Name = name
+          Data = Decimals(values, validity) }
+
+    /// The values of an `int` column, or `None` for a column of another type.
+    let tryInts (c: Column) : Vector<int> option =
+        match c.Data with
+        | Ints(xs, _) -> Some xs
+        | _ -> None
+
+    /// The values of a `float` column, or `None` for a column of another type.
+    let tryFloats (c: Column) : Vector<float> option =
+        match c.Data with
+        | Floats(xs, _) -> Some xs
+        | _ -> None
+
+    /// The values of a `bool` column, or `None` for a column of another type.
+    let tryBools (c: Column) : Vector<bool> option =
+        match c.Data with
+        | Bools(xs, _) -> Some xs
+        | _ -> None
+
+    /// The values of a `string` column, or `None` for a column of another type.
+    let tryStrs (c: Column) : Vector<string> option =
+        match c.Data with
+        | Strs(xs, _) -> Some xs
+        | _ -> None
+
+    /// The texts of a `date` column, or `None` for a column of another type.
+    let tryDates (c: Column) : Vector<string> option =
+        match c.Data with
+        | Dates(xs, _) -> Some xs
+        | _ -> None
+
+    /// The texts of a `timestamp` column, or `None` for a column of another type.
+    let tryTimestamps (c: Column) : Vector<string> option =
+        match c.Data with
+        | Timestamps(xs, _) -> Some xs
+        | _ -> None
+
+    /// The texts of a `decimal` column, or `None` for a column of another type.
+    let tryDecimals (c: Column) : Vector<string> option =
+        match c.Data with
+        | Decimals(xs, _) -> Some xs
+        | _ -> None
+
+    // ---- the cell-list bridge (Phase 417) ----
+
+    /// The typed storage of `cells` for a column of type `ty`, or the first present cell whose type
+    /// does not widen into `ty` (`ColumnType.widens`) as the `TypeMismatch` naming it, in row order.
+    /// A widened cell is normalised (an `Int` in a float column to its float, in a decimal column to
+    /// its digits); the type's zero is written at every absent row. Everything else a cell can carry
+    /// is held as found — a non-finite float, decimal, date or timestamp text that is not canonical —
+    /// and is `Table.validate`'s to refuse at the codec, as before.
+    let private storageOfCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<ColumnData, ColumnError> =
+        let n = List.length cells
+        let mask = Array.zeroCreate<bool> n
+
+        /// Fill `out` from the cells through `pick`, which reads the typed value of a present cell
+        /// that fits, or names the type that does not.
+        let fill (out: 'T[]) (pick: Cell -> Result<'T option, ColumnType>) =
+            let mutable fault = None
+            let mutable i = 0
+            let mutable rest = cells
+
+            while fault.IsNone && not rest.IsEmpty do
+                match pick rest.Head with
+                | Ok(Some v) ->
+                    out[i] <- v
+                    mask[i] <- true
+                | Ok None -> ()
+                | Error got -> fault <- Some(TypeMismatch(name, ty, ColumnType.tag got))
+
+                i <- i + 1
+                rest <- rest.Tail
+
+            match fault with
+            | Some e -> Error e
+            | None -> Ok(Vector.adopt out, Vector.adopt mask)
+
+        let outside (c: Cell) : Result<'T option, ColumnType> =
+            match Cell.typeOf c with
+            | Some t -> Error t
+            | None -> Ok None
+
+        match ty with
+        | IntType ->
+            fill (Array.zeroCreate n) (fun c ->
+                match c with
+                | Int i -> Ok(Some i)
+                | other -> outside other)
+            |> Result.map Ints
+        | FloatType ->
+            fill (Array.zeroCreate n) (fun c ->
+                match c with
+                | Float f -> Ok(Some f)
+                | Int i -> Ok(Some(float i))
+                | other -> outside other)
+            |> Result.map Floats
+        | BoolType ->
+            fill (Array.zeroCreate n) (fun c ->
+                match c with
+                | Bool b -> Ok(Some b)
+                | other -> outside other)
+            |> Result.map Bools
+        | StringType ->
+            fill (Array.create n "") (fun c ->
+                match c with
+                | Str s -> Ok(Some s)
+                | other -> outside other)
+            |> Result.map Strs
+        | DateType ->
+            fill (Array.create n "") (fun c ->
+                match c with
+                | Date s -> Ok(Some s)
+                | other -> outside other)
+            |> Result.map Dates
+        | TimestampType ->
+            fill (Array.create n "") (fun c ->
+                match c with
+                | Timestamp s -> Ok(Some s)
+                | other -> outside other)
+            |> Result.map Timestamps
+        | DecimalType ->
+            fill (Array.create n DecimalText.zero) (fun c ->
+                match c with
+                | Decimal s -> Ok(Some s)
+                | Int i -> Ok(Some(string i))
+                | other -> outside other)
+            |> Result.map Decimals
+
+    /// A column of type `ty` holding `cells`, in row order — the migration bridge from the `Cell
+    /// list` column (Phase 417), and the one construction that reads cells. It REFUSES the first
+    /// present cell whose type does not widen into `ty` (`ColumnType.widens`), as the `TypeMismatch`
+    /// `Table.validate` used to name for it: the typed storage cannot hold a `Bool` in an int column,
+    /// so no column can. A widened cell is normalised at construction, as decode normalises it: an
+    /// `Int` in a float column is held as its float and read back as a `Float`, and in a decimal
+    /// column as its digits and read back as a `Decimal`. What the type CAN hold is held as found
+    /// and refused where it always was — a non-finite float, and decimal, date or timestamp text
+    /// that is not canonical, by `Table.validate` and so by `ColumnCodec.tryEncode`; a `Decimal`
+    /// whose text is not decimal by `Column.aggregate`.
+    let ofCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<Column, ColumnError> =
+        storageOfCells name ty cells
+        |> Result.map (fun data -> { Name = name; Data = data })
+
+    /// The column's cells, in row order — a `Null` at every absent row (Phase 417). The bridge back
+    /// to the `Cell list` for a reader that has not moved to the typed vectors; a fresh list each call.
+    let toCells (c: Column) : Cell list =
+        let mutable acc = []
+
+        for i in length c - 1 .. -1 .. 0 do
+            acc <- cell i c :: acc
+
+        acc
+
 
     // ---- pinned aggregate semantics (Phase 36) — the single source the compute layer's GroupBy/Pivot call ----
 
@@ -145,26 +550,17 @@ module Column =
         | Last -> "last"
         | CountDistinct -> "countDistinct"
 
-    /// A present cell as `aggregate` admits it (Phase 299): a cell of a type that widens into
-    /// `col.Type` passes, a `Decimal` cell passes CANONICALISED, and anything else — a cell outside
-    /// the column's type, or a `Decimal` whose text is not decimal text — is a named
-    /// `CellOutsideType`. `Null` is type-agnostic and passes.
+    /// A present cell as `aggregate` admits it (Phase 299): a `Decimal` cell passes CANONICALISED,
+    /// and one whose text is not decimal text is a named `CellOutsideType`. Every other cell passes:
+    /// since Phase 417 a cell read from a column is of its column's type by construction, so the
+    /// type check this once made is the storage's, and `Null` is type-agnostic.
     let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
         match c with
-        | Null -> Ok Null
-        | Decimal s when
-            (match col.Type with
-             | DecimalType -> true
-             | _ -> false)
-            ->
+        | Decimal s ->
             match DecimalText.tryCanonical s with
             | Some canonical -> Ok(Decimal canonical)
             | None -> Error(CellOutsideType(col.Name, col.Type, "decimal text '" + s + "' (not decimal)"))
-        | _ ->
-            match Cell.typeOf c with
-            | Some t when ColumnType.widens t col.Type -> Ok c
-            | Some t -> Error(CellOutsideType(col.Name, col.Type, ColumnType.tag t))
-            | None -> Ok c
+        | _ -> Ok c
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
         if r >= int64 System.Int32.MinValue && r <= int64 System.Int32.MaxValue then
@@ -243,10 +639,11 @@ module Column =
         let mutable first = Null
         let mutable last = Null
         let mutable count = 0
-        let mutable rest = col.Cells
+        let n = length col
+        let mutable i = 0
 
-        while outside.IsNone && not rest.IsEmpty do
-            match admit col rest.Head with
+        while outside.IsNone && i < n do
+            match admit col (cell i col) with
             | Error e -> outside <- Some e
             | Ok cell ->
                 if not seenAny then
@@ -261,7 +658,7 @@ module Column =
                     count <- count + 1
                     step cell
 
-            rest <- rest.Tail
+            i <- i + 1
 
         match outside with
         | Some e -> Error e
@@ -429,7 +826,7 @@ module Column =
             else
                 let xs = ResizeArray<float>()
 
-                for c in col.Cells do
+                for c in toCells col do
                     match admit col c with
                     | Ok cell ->
                         match aggAsNum cell with

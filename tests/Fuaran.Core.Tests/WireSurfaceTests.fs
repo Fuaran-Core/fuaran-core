@@ -233,6 +233,21 @@ let rec private build
         let arr = Array.CreateInstance(t.GetElementType(), 1)
         arr.SetValue(recur (t.GetElementType()), 0)
         box arr
+    elif isGeneric typedefof<Vector<_>> t then
+        // Phase 417 — a column's storage is an opaque `Vector<'T>` with no public constructor, built
+        // through the public `Vector.adopt`. Two rows, so a column's values and its validity mask
+        // (a `Vector<bool>`, exhibited as `[true; false]`) carry one present row and one ABSENT row:
+        // the absent slot the `Cell.Null` document exhibited while `Cell` was a wire-reachable type
+        // stays in every column document, under the type that now carries it.
+        let elemT = t.GetGenericArguments()[0]
+        let arr = Array.CreateInstance(elemT, 2)
+        arr.SetValue(recur elemT, 0)
+        arr.SetValue((if elemT = typeof<bool> then box false else recur elemT), 1)
+
+        let adopt =
+            typeof<Vector<int>>.Assembly.GetType("Fuaran.Core.Vector").GetMethod("adopt").MakeGenericMethod(elemT)
+
+        adopt.Invoke(null, [| box arr |])
     elif isMap t then
         let args = t.GetGenericArguments()
         let tupleT = FSharpType.MakeTupleType args
@@ -383,7 +398,8 @@ let internal notWire: (string * string) list =
       "Fuaran.Core.Conformance",
       "a law kit; the law corpus it exports is pinned by its own emission test (`--emit-laws`)"
       "Fuaran.Core.Idl.Cli", "a command-line host over Fuaran.Core.Idl; it emits through it"
-      "Fuaran.Core.ContentAddress", "a digest of a document's canonical text; emits no document of its own" ]
+      "Fuaran.Core.ContentAddress", "a digest of a document's canonical text; emits no document of its own"
+      "Fuaran.Core.Unit", "a unit's canonical text is a string another package's document carries; emits no document" ]
 
 /// Build every document of one root: `(name, emitted bytes)`, plus the construction logs for the
 /// per-case documents so the suite can prove each reached its case.

@@ -772,15 +772,16 @@ module ColumnValidator =
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
             | Some c ->
-                c.Cells
-                |> List.mapi (fun i cell -> i, cell)
-                |> List.filter (fun (_, cell) -> Cell.isNull cell)
-                |> List.map (fun (i, _) ->
-                    Defect.create
-                        "COL-NOTNULL"
-                        Severity.Error
-                        ("null in non-null column '" + column + "'")
-                        (Some(locOf column i))))
+                // The validity mask IS the answer (Phase 417): an absent row is a `Null` cell.
+                let mask = Column.validity c
+
+                [ for i in 0 .. Column.length c - 1 do
+                      if not (Validity.isPresent i mask) then
+                          Defect.create
+                              "COL-NOTNULL"
+                              Severity.Error
+                              ("null in non-null column '" + column + "'")
+                              (Some(locOf column i)) ])
 
     /// Every PRESENT cell in `column` must carry type `ty` (a `Null` is type-agnostic — use `notNull`).
     let ofType (column: string) (ty: ColumnType) : ColumnRule =
@@ -788,7 +789,7 @@ module ColumnValidator =
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
             | Some c ->
-                c.Cells
+                Column.toCells c
                 |> List.mapi (fun i cell -> i, cell)
                 |> List.choose (fun (i, cell) ->
                     match Cell.typeOf cell with
@@ -833,7 +834,7 @@ module ColumnValidator =
                       ("column '" + column + "' range bounds are not numbers")
                       (Some column) ]
             | Some c ->
-                c.Cells
+                Column.toCells c
                 |> List.mapi (fun i cell -> i, cell)
                 |> List.choose (fun (i, cell) ->
                     let v =
@@ -909,7 +910,7 @@ module ColumnValidator =
                     columns
                     |> List.map (fun c ->
                         let col = Table.tryColumn c t |> Option.get
-                        col.Name, List.toArray col.Cells)
+                        col.Name, List.toArray (Column.toCells col))
 
                 match cols |> List.filter (fun (_, cells) -> cells.Length <> rc) with
                 | _ :: _ as ragged ->

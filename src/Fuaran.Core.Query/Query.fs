@@ -340,11 +340,18 @@ module internal QueryShape =
     /// The one-cell table a literal is checked, written and read as — so a literal is carried by
     /// THE cell codec the column strand owns, exactly as a query argument is (`decodeArgsJson`).
     let private oneCell (column: string) (ty: ColumnType) (c: Cell) : Table =
-        { Schema = [ column, ty ]
-          Columns =
-            [ { Name = column
-                Type = ty
-                Cells = [ c ] } ] }
+        // Admission held the literal to its column's type, so the first build succeeds; a cell that
+        // somehow does not fit is carried at its own type rather than raised on (total, Phase 417).
+        let col =
+            match Column.ofCells column ty [ c ] with
+            | Ok col -> col
+            | Error _ ->
+                match Column.ofCells column (Cell.typeOf c |> Option.defaultValue ty) [ c ] with
+                | Ok col -> col
+                | Error _ -> Column.ofStrs column Vector.empty Vector.empty
+
+        { Schema = [ column, col.Type ]
+          Columns = [ col ] }
 
     /// A literal's JSON value: the value the column codec writes for that one cell. A literal is
     /// written only after admission, which holds it to its column's exact type and to what
@@ -365,7 +372,7 @@ module internal QueryShape =
                   "columns", JObj [ column, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
 
         match ColumnCodec.decodeJson doc with
-        | Ok(Embedded { Columns = [ { Cells = [ cell ] } ] }) -> Some cell
+        | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Some(Column.cell 0 c)
         | _ -> None
 
     /// A predicate as its wire document: `"$type"` its tag, `column`, and — for a comparison — the

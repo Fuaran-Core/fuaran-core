@@ -58,9 +58,7 @@ module internal ColumnarSeamLaws =
 
                               Cell.decimal text |> Option.defaultValue Null ]
 
-            let col = Column.create "c" ty cells
             let present = cells |> List.filter (fun c -> not (Cell.isNull c))
-            let presentCol = Column.create "c" ty present
 
             for c in present do
                 match c with
@@ -69,13 +67,19 @@ module internal ColumnarSeamLaws =
                 | Decimal _ -> decimalCells <- decimalCells + 1
                 | _ -> ()
 
-            (match Column.aggregate Count col with
-             | Ok(Int n) when n = List.length present -> nullSkip.Saw()
-             | other -> nullSkip.Check(false, fun () -> at (sprintf "Count ≠ present count (%A)" other)))
+            // Every drawn cell is of its column's type, so both builds succeed; a refusal here is a
+            // defect in the kit's own draw, and the law says so rather than skipping the iteration.
+            match Column.ofCells "c" ty cells, Column.ofCells "c" ty present with
+            | Ok col, Ok presentCol ->
+                (match Column.aggregate Count col with
+                 | Ok(Int n) when n = List.length present -> nullSkip.Saw()
+                 | other -> nullSkip.Check(false, fun () -> at (sprintf "Count ≠ present count (%A)" other)))
 
-            match Column.aggregate Sum col, Column.aggregate Sum presentCol with
-            | Ok a, Ok b when a = b -> nullSkip.Saw()
-            | a, b -> nullSkip.Check(false, fun () -> at (sprintf "Sum not null-skipping (%A vs %A)" a b)))
+                match Column.aggregate Sum col, Column.aggregate Sum presentCol with
+                | Ok a, Ok b when a = b -> nullSkip.Saw()
+                | a, b -> nullSkip.Check(false, fun () -> at (sprintf "Sum not null-skipping (%A vs %A)" a b))
+            | a, b ->
+                nullSkip.Check(false, fun () -> at (sprintf "the drawn cells did not build a column (%A / %A)" a b)))
 
         LawKit.results [ nullSkip ]
         @ [ SampleAdequacy.reached
@@ -176,9 +180,22 @@ module internal ColumnarSeamLaws =
             let sCells = aCells |> List.map (fun _ -> Str "x")
             let aType = if decimalColumn then DecimalType else IntType
 
+            // Every drawn cell is of its column's type, so each build succeeds; a refusal is a defect
+            // in the kit's own draw, named through the determinism law rather than skipped.
+            let built (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+                match Column.ofCells name ty cells with
+                | Ok col -> col
+                | Error e ->
+                    determinism.Check(
+                        false,
+                        fun () -> at (sprintf "the kit's own draw did not build column %s (%A)" name e)
+                    )
+
+                    Column.ofStrs name Vector.empty Vector.empty
+
             let t: Table =
                 { Schema = [ "a", aType; "s", StringType ]
-                  Columns = [ Column.create "a" aType aCells; Column.create "s" StringType sCells ] }
+                  Columns = [ built "a" aType aCells; built "s" StringType sCells ] }
 
             let defects = ColumnValidator.validate reg t
 
@@ -247,3 +264,270 @@ module internal ColumnarSeamLaws =
                 "column type"
                 seed
                 [ "int cell", intCells; "decimal cell", decimalCells ] ]
+
+    // ---- the typed column (Phase 417) ----
+    // The column holds one typed `Vector` per column behind `ColumnData`, and three things about
+    // that representation are a consumer's to rely on across hosts: equality is the cells' equality,
+    // the cell-list bridge and the typed builders build one column, and every read over a vector
+    // agrees with its indexer. The kit is compiled on both pipelines, so a law here is certified
+    // under Fable as on .NET — which is where array equality and NaN diverge between hosts.
+
+    /// The cell-level reading `=` on columns is held to: one length, one validity mask, and at every
+    /// present row `Cell.compare` answers `Some 0`.
+    let private cellsEqual (a: Column) (b: Column) : bool =
+        Column.length a = Column.length b
+        && Column.validity a = Column.validity b
+        && (let mutable same = true
+            let mutable i = 0
+
+            while same && i < Column.length a do
+                if Column.isPresent i a then
+                    same <- Cell.compare (Column.cell i a) (Column.cell i b) = Some 0
+
+                i <- i + 1
+
+            same)
+
+    /// The typed-column laws (Phase 417). Over a seed-replayable sample of column pairs of one type
+    /// — int, float, bool, string and canonical decimal, with nulls, the drawn pair identical, moved
+    /// at one row, or differing only in the element UNDER an absent row — it certifies three laws:
+    ///
+    /// 1. **Equality is cell equality.** `a = b` exactly when `cellsEqual a b`: one length, one
+    ///    validity mask, and `Cell.compare` answering `Some 0` at every present row — so a float
+    ///    column holding a NaN equals another holding a NaN there, `-0.0` equals `0.0`, the element
+    ///    under an absent row takes no part, and equal columns hash equal. Three pairs are built every
+    ///    iteration whatever the draw: a NaN pair, a signed-zero pair, and a pair that differs only
+    ///    under an absent row. The law is stated over columns in the storage's contract (canonical
+    ///    decimal text): a non-canonical decimal text is a column `Table.validate` refuses, and its
+    ///    equality is by text.
+    /// 2. **The bridge and the typed builders build one column.** `Column.ofCells` over the drawn
+    ///    cells equals the typed builder over the drawn vector and mask, `toCells` reads the drawn
+    ///    cells back, and the typed reader hands back the vector the builder was given.
+    /// 3. **Every vector read agrees with the indexer.** `toList`, `toArray`, `fold`, `iter`, `iteri`,
+    ///    `map`, `mapi`, `exists`, `tryFindIndex`, `tryItem`, a `slice` and a borrowed array all answer
+    ///    what indexing answers, over the drawn vector.
+    let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
+        let equality =
+            LawKit.LawCell "column equality is cell equality under Cell.compare, and equal columns hash equal"
+
+        let bridge =
+            LawKit.LawCell "Column.ofCells and the typed builders build one column; toCells reads it back"
+
+        let reads = LawKit.LawCell "every Vector read agrees with the indexer"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let n = 1 + rng.IntBelow 6
+            let maskA = Array.init n (fun _ -> rng.IntBelow 4 <> 0)
+
+            let maskB =
+                if rng.IntBelow 3 = 0 then
+                    Array.init n (fun _ -> rng.IntBelow 4 <> 0)
+                else
+                    Array.copy maskA
+
+            // 0: the same values; 1: one value moved (at a present or an absent row, as the draw
+            // falls); 2: a value moved under an absent row only.
+            let perturb = rng.IntBelow 3
+
+            let checkEquality (what: string) (a: Column) (b: Column) =
+                let expected = cellsEqual a b
+
+                equality.Check(
+                    (a = b) = expected && (b = a) = expected,
+                    fun () -> at (sprintf "%s: = answered %b where the cells say %b" what (a = b) expected)
+                )
+
+                if expected then
+                    equality.Check(
+                        hash a = hash b,
+                        fun () -> at (sprintf "%s: equal columns with different hashes" what)
+                    )
+
+            /// Two columns of one type from one draw, through the typed builder, with the typed
+            /// reader and the cell bridge held to the same storage.
+            let drawn
+                (what: string)
+                (draw: unit -> 'T)
+                (bump: 'T -> 'T)
+                (build: string -> Vector<'T> -> Validity -> Column)
+                (read: Column -> Vector<'T> option)
+                (cellOf: 'T -> Cell)
+                =
+                let xs = Array.init n (fun _ -> draw ())
+                let ys = Array.copy xs
+
+                match perturb with
+                | 1 ->
+                    let k = rng.IntBelow n
+                    ys[k] <- bump ys[k]
+                | 2 ->
+                    match Array.tryFindIndex not maskA with
+                    | Some j -> ys[j] <- bump ys[j]
+                    | None -> ()
+                | _ -> ()
+
+                let va = Vector.adopt xs
+                let a = build "c" va (Validity.ofArray maskA)
+                let b = build "c" (Vector.adopt ys) (Validity.ofArray maskB)
+                checkEquality what a b
+
+                // The bridge: the same cells through `ofCells`, and back out through `toCells`.
+                let cells = [ for i in 0 .. n - 1 -> if maskA[i] then cellOf xs[i] else Null ]
+
+                match Column.ofCells "c" a.Type cells with
+                | Ok viaCells ->
+                    bridge.Check(
+                        (viaCells = a),
+                        fun () -> at (sprintf "%s: ofCells and the typed builder disagree" what)
+                    )
+
+                    bridge.Check(
+                        List.map Cell.token (Column.toCells viaCells) = List.map Cell.token cells
+                        && List.map Cell.token (Column.toCells a) = List.map Cell.token cells,
+                        fun () -> at (sprintf "%s: toCells does not read the cells back" what)
+                    )
+                | Error e ->
+                    bridge.Check(false, fun () -> at (sprintf "%s: ofCells refused the drawn cells (%A)" what e))
+
+                bridge.Check(
+                    (match read a with
+                     | Some v -> obj.ReferenceEquals(v, va)
+                     | None -> false)
+                    && Column.validity a = Validity.ofList (List.ofArray maskA)
+                    && Validity.presentCount (Column.validity a) = (maskA |> Array.filter id |> Array.length)
+                    && Column.length a = n
+                    && (Column.validity (build "c" va (Validity.all n))) = Validity.ofArray (Array.create n true),
+                    fun () ->
+                        at (sprintf "%s: the typed reader, the mask or the length disagree with what was built" what)
+                )
+
+                va
+
+            let floats = [| 0.0; -0.0; nan; 1.5; -2.0; 1e300; 0.1 |]
+            let texts = [| ""; "a"; "b"; "é" |]
+            let decimals = [| "0"; "1.5"; "-0.3"; "2"; "12.25" |]
+            let dates = [| "2026-01-01"; "2026-02-28"; "1999-12-31" |]
+            let instants = [| "2026-01-01T00:00:00Z"; "2026-06-22T17:00:00Z" |]
+
+            let vector: Vector<float> =
+                match rng.IntBelow 7 with
+                | 0 ->
+                    drawn "int" (fun () -> rng.IntBelow 5 - 2) ((+) 1) Column.ofInts Column.tryInts Int
+                    |> Vector.map float
+                | 1 ->
+                    drawn
+                        "float"
+                        (fun () -> floats[rng.IntBelow floats.Length])
+                        (fun f -> if System.Double.IsNaN f then 1.0 else f + 1.0)
+                        Column.ofFloats
+                        Column.tryFloats
+                        Float
+                | 2 ->
+                    drawn "bool" (fun () -> rng.IntBelow 2 = 0) not Column.ofBools Column.tryBools Bool
+                    |> Vector.map (fun b -> if b then 1.0 else 0.0)
+                | 3 ->
+                    drawn
+                        "string"
+                        (fun () -> texts[rng.IntBelow texts.Length])
+                        (fun s -> s + "x")
+                        Column.ofStrs
+                        Column.tryStrs
+                        Str
+                    |> Vector.map (fun s -> float s.Length)
+                | 4 ->
+                    drawn
+                        "decimal"
+                        (fun () -> decimals[rng.IntBelow decimals.Length])
+                        (fun s -> if s = "0" then "1" else s + "5")
+                        Column.ofDecimals
+                        Column.tryDecimals
+                        Decimal
+                    |> Vector.map (fun s -> float s.Length)
+                | 5 ->
+                    drawn
+                        "date"
+                        (fun () -> dates[rng.IntBelow dates.Length])
+                        (fun s -> if s = "2026-01-01" then "2026-01-02" else "2026-01-01")
+                        Column.ofDates
+                        Column.tryDates
+                        Date
+                    |> Vector.map (fun s -> float s.Length)
+                | _ ->
+                    drawn
+                        "timestamp"
+                        (fun () -> instants[rng.IntBelow instants.Length])
+                        (fun s -> if s = instants[0] then instants[1] else instants[0])
+                        Column.ofTimestamps
+                        Column.tryTimestamps
+                        Timestamp
+                    |> Vector.map (fun s -> float s.Length)
+
+            // The three pairs every iteration builds, whatever the draw.
+            let one (f: float) =
+                Column.ofFloats "f" (Vector.ofList [ f ]) (Validity.all 1)
+
+            checkEquality "NaN pair" (one nan) (one nan)
+            checkEquality "signed-zero pair" (one -0.0) (one 0.0)
+
+            checkEquality
+                "absent-row pair"
+                (Column.ofFloats "f" (Vector.adopt [| 1.0 |]) (Validity.ofList [ false ]))
+                (Column.ofFloats "f" (Vector.adopt [| 2.0 |]) (Validity.ofList [ false ]))
+
+            // Law 3: every read over the drawn vector (as floats) agrees with its indexer.
+            let v = vector
+            let m = Vector.length v
+            let byIndex = [ for i in 0 .. m - 1 -> v[i] ]
+            let arr = Vector.toArray v
+
+            let iterated = ResizeArray<float>()
+            Vector.iter iterated.Add v
+            let indexed = ResizeArray<int * float>()
+            Vector.iteri (fun i x -> indexed.Add(i, x)) v
+            let start = rng.IntBelow(m + 1)
+            let count = rng.IntBelow(m - start + 1)
+            let sliced = Vector.slice start count v
+            let borrowed = Vector.Unsafe.borrow sliced
+
+            let bump (x: float) =
+                if System.Double.IsNaN x then 0.0 else x + 1.0
+
+            // Two float lists held equal under the cell's float identity — a drawn NaN is one value
+            // here, where `=` on a `float list` would call it unequal to itself.
+            let same (xs: float list) (ys: float list) =
+                List.length xs = List.length ys
+                && List.forall2 (fun a b -> Cell.compare (Float a) (Float b) = Some 0) xs ys
+
+            let agree =
+                m = v.Length
+                && Vector.isEmpty v = (m = 0)
+                && Vector.isEmpty Vector.empty<float>
+                && same (Vector.toList v) byIndex
+                && same (List.ofArray arr) byIndex
+                && same (Vector.fold (fun acc x -> x :: acc) [] v) (List.rev byIndex)
+                && same (List.ofSeq iterated) byIndex
+                && (indexed |> Seq.map fst |> List.ofSeq) = [ 0 .. m - 1 ]
+                && same (indexed |> Seq.map snd |> List.ofSeq) byIndex
+                && same (Vector.toList (Vector.map bump v)) (List.map bump byIndex)
+                && same
+                    (Vector.toList (Vector.mapi (fun i x -> float i + bump x) v))
+                    (List.mapi (fun i x -> float i + bump x) byIndex)
+                && Vector.exists (fun x -> x > 1.0) v = List.exists (fun x -> x > 1.0) byIndex
+                && Vector.tryFindIndex (fun x -> x > 1.0) v = List.tryFindIndex (fun x -> x > 1.0) byIndex
+                && Vector.tryItem m v = None
+                && Vector.tryItem -1 v = None
+                && (m = 0
+                    || (match Vector.tryItem 0 v with
+                        | Some x -> same [ x ] [ Vector.item 0 v ]
+                        | None -> false))
+                && Vector.length sliced = count
+                && same [ for i in 0 .. count - 1 -> sliced[i] ] (byIndex |> List.skip start |> List.truncate count)
+                && borrowed.Length = count
+                && same [ for i in 0 .. count - 1 -> borrowed.Array[borrowed.Offset + i] ] (Vector.toList sliced)
+                && Vector.ofArray arr = v
+                && Vector.ofSeq (Seq.ofList byIndex) = v
+                && Vector.init m (fun i -> v[i]) = v
+
+            reads.Check(agree, fun () -> at "a Vector read disagreed with the indexer"))
+
+        LawKit.results [ equality; bridge; reads ]

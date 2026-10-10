@@ -253,7 +253,10 @@ let private expected: (string * string) list =
       "decimalCodec/decode-refuses-bool", "refused:TypeMismatch"
       "decimalAggregate/sum", "m:5"
       "decimalAggregate/min", "m:-0.3"
-      "decimalAggregate/max", "i:2"
+      // Phase 417: `m:2`, where it was `i:2`. The column is built from cells that include `Int 2`;
+      // the typed column holds a widened `Int` as the decimal `2` at construction — as decode
+      // already held it for the same document — so `Max` answers the decimal cell as it stands.
+      "decimalAggregate/max", "m:2"
       "decimalAggregate/mean", "f:0.8333333333333334"
       "decimalAggregate/median", "f:0.85"
       "decimalAggregate/stddev", "f:0.8634555897992412"

@@ -104,6 +104,12 @@
       "undocumented": []
     },
     {
+      "package": "Fuaran.Core.Unit",
+      "documented": 26,
+      "total": 26,
+      "undocumented": []
+    },
+    {
       "package": "Fuaran.Core.Validator",
       "documented": 93,
       "total": 93,

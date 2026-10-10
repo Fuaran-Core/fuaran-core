@@ -288,7 +288,7 @@ module QueryCodec =
                 )
 
         match ColumnCodec.decodeJson oneCell with
-        | Ok(Embedded { Columns = [ { Cells = [ cell ] } ] }) -> Ok(name, cell)
+        | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Ok(name, Column.cell 0 c)
         | _ -> refused ()
 
     /// Read a model's argument object — the shape `Query.toJsonSchema` describes — into the typed

@@ -44,6 +44,7 @@ let spine: string list =
       "Fuaran.Core.OpStream.Dag"
       "Fuaran.Core.Wire"
       "Fuaran.Core.ContentAddress"
+      "Fuaran.Core.Unit"
       "Fuaran.Core.Column"
       "Fuaran.Core.Validator"
       "Fuaran.Core.Observer"

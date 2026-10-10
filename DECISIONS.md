@@ -1,5 +1,111 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-10 — D142: a column's storage is an opaque immutable `Vector<'T>` per column behind the `ColumnData` union, on the `1.0.0` slot; `Column.Type` is derived from the storage; a widened cell is normalised at construction; no `Cells` fallback survives in Core; and this reverses the 2026-09-26 out-of-scope clause
+
+**Context.** `Column.Cells` was a `Cell list` (`Column.fs:23-33`): an indexed read was O(i), a present
+integer cost some fifty-six bytes, and every consumer that wanted arrays converted. The compute strand
+proved the alternative inside its evaluator and then spent four phases (267, 268, 327, 342) reducing
+the cost of converting back at the `Table` boundary. Requirement `suggest-2026-10-09-column-typed-vectors`
+(operator, 2026-10-09) moves the representation into Core on the untagged `1.0.0` draft slot, which
+already carries breaking moves (D133, Phase 391), and rules the storage an opaque type rather than
+raw arrays after the long-term review of Phase 418's first draft. Phase 417 ships it; this entry
+records the design and the rulings the shard left open.
+
+**D142.1 — `Vector<'T>`, the type and what it compiles to.** A sealed class over `(items: 'T[],
+offset, length)`: an indexer bounds-checked against the view's own length (so a view never reads its
+parent's storage past its end, and an out-of-range read under Fable raises rather than answering
+`undefined`), `Length`, and a module with `fold` / `iter` / `iteri` / `map` / `mapi` (a new vector),
+`exists` / `tryFindIndex` / `tryItem`, a zero-copy `slice` (the same array, a new range), `toArray` and
+`toList` (copies), builders that copy (`ofArray`; `ofList` / `ofSeq` / `init` build a fresh array and
+own it), `adopt` (ownership without a copy — the caller promises not to touch the array again), and
+`Vector.Unsafe.borrow`, the one route to the backing array, which lends `{ Array; Offset; Length }`
+under the written rule that the borrower does not write. Equality and hashing are element-wise under
+the cell's float identity — every NaN one value, `-0.0` equal to `0.0` — chosen by a type test on the
+BOXED element (`box x :? float`) rather than on the type parameter, because that reads the same under
+Fable, where a generic parameter is erased and an array built generically (`Vector.map`) may be a
+plain array rather than a `Float64Array`, and a dispatch keyed on either would diverge between hosts.
+The hash reads the length and the first eighteen elements, the bound FSharp.Core's structural hash of
+a list keeps. The type has no comparison: a column is not sorted by its contents, and `Column` and
+`Table` are therefore equatable and not comparable (no consumer compared them).
+
+On .NET the indexer is a bounds check and an array read. **Under Fable it is the same class, and
+`[<Erase>]` was not a candidate**: an erased type IS its one field, so it can carry neither the
+slice's offset nor an equality of its own — two of the four reasons the type exists (storage freedom,
+equality, views, safety by construction). What was measured instead is the class's cost. A summing
+loop over two million floats under node 25 (Fable 5.0.0, `performance.now`, best of seven): raw
+`Float64Array` indexing 4.2–4.3 ns/element, the class with an offset 4.4–4.5, a class holding the
+array alone 4.4–4.5. The class costs 3–8 % under node and the offset nothing measurable; on .NET
+(Release, `Stopwatch`) all three read 0.68–0.71 ns/element. The one-field class buys nothing over the
+view, so the view it is. Phase 326's direct-index accessors are where a Fable consumer that still
+indexes through a shared helper will meet the saving; this measurement says the type itself is not in
+the way.
+
+**D142.2 — `ColumnData`, one case per column type, each with its validity.** `Ints of Vector<int> *
+Validity`, `Floats of Vector<float> * Validity`, `Bools`, `Strs`, `Dates`, `Timestamps`, `Decimals`
+(the last three `Vector<string>`: `Dates` and `Timestamps` hold their canonical ISO-8601 text in this
+phase, as the cells do — Phase 422 makes them integers with a timestamp unit, and nothing here is
+shaped against it; `Decimals` holds canonical decimal text, as the cells do). `Validity` is
+`Vector<bool>` with a module (`all`, `ofArray`, `ofList`, `isPresent`, `presentCount`); Phase 420
+settles its shape (a null-free column carrying no array) on the same slot, and every in-repo reader
+goes through the module so that change is local. The element under an absent row is not a cell: the
+builders that copy write the type's zero there, `adopt` leaves what it was handed, the encoder writes
+the wire's absent slot whatever is there, and **`ColumnData` compares by its cells** — masks equal and
+every present element equal under the vector's identity — so two columns are equal exactly when
+`Cell.compare` says their cells are, which `Conformance.columnVectorLaws` holds on both pipelines.
+`values` and `validity` are one length by every builder; a hand-built pair that is not is
+`Table.validate`'s `LengthMismatch`.
+
+**D142.3 — `Column.Type` is derived, not stored.** The shard sketched `{ Name; Type; Data }`. A stored
+`Type` beside typed storage is a second source of truth that can disagree with the first — exactly the
+class of ill-formed column (`CellOutsideType`, Phase 299) the programme exists to make
+unrepresentable — so `Column` is `{ Name; Data }` and `Type` is a property reading the case. Every
+`c.Type` reader compiles unchanged; a record literal that set `Type` does not, which is the point.
+Phase 422's timestamp unit rides the `Timestamps` case and `Type` derives it.
+
+**D142.4 — a widened cell is normalised at construction.** An `Int` in a float column is held as its
+float and in a decimal column as its digits, exactly as decode already normalised it, and reads back
+as the `Float` or `Decimal` it widened to. The `ofCells` / `toCells` round trip is therefore to the
+normal form the codec's round trip was always to (`proofs/WireColumn.fst`). One consequence was not
+foreseen and is recorded rather than hidden: the law vector `aggregate-max` (and the `ParityVectors`
+row `decimalAggregate/max`) answers `m:2` where it answered `i:2`, because `Max` over a decimal column
+built from cells that include `Int 2` used to return that cell as an `Int` while decode of the same
+document already answered the decimal. The two readings were the representation leak; the typed
+column has one, and the vector is re-pinned with the reason beside it.
+
+**D142.5 — no `Cells of Cell[]` fallback in Core.** A fallback case is the ill-typed column
+reintroduced under another name: the one thing it could hold is a cell outside its column's type,
+and holding it would keep `Table.validate`'s clause-(e) `TypeMismatch`, `Column.aggregate`'s
+type-shape `CellOutsideType` and the trusts-nothing tests alive for a column no builder should make.
+So `Column.ofCells` is `Result`-typed and REFUSES that cell, in row order, as the `TypeMismatch`
+`validate` named for it; `CellOutsideType` survives for the one thing the storage can still hold
+that the aggregate cannot read, a `Decimal` whose text is not decimal. There is no total `create`:
+a total builder with the old signature would compile at every consumer site and raise at run time,
+which is the silent failure the surface gate exists to prevent. The compute frame keeps whatever
+internal form it needs (Phase 423); Core does not carry it.
+
+**D142.6 — what else moved.** `ColumnError` lives in `Column.fs` (same type, same cases), because
+`ofCells` names its `TypeMismatch`. `Table.validate` reads the typed storage directly — a float
+column scanned for a non-finite value, a text column for a non-canonical text, at present rows —
+with the mask-length arm added and the dead type-shape arm removed; `Column.aggregate` keeps its
+pinned semantics over `Column.cell` (Phase 421 types the loops). The oracle's wild generator no
+longer draws a cell of another type and its non-normal pool falls from 355 to 192 tables at the
+pinned seed, both because the representation now excludes what the pool drew; Phase 419 restates the
+clause-for-clause claim as a refinement theorem. The doc-comment ratchet reads an indexed property's
+XML id as the property (it carried the parameter list, and the baseline's token does not), and the
+wire-surface exemplar builder constructs a `Vector<'T>` through `Vector.adopt`.
+
+**D142.7 — the 2026-09-26 clause.** Requirement `suggest-2026-09-26-core-compute-performance` placed
+"Changing `Column.Cells` in Core" out of scope and held "Column unchanged in Core". That clause is
+REVERSED for the `1.0.0` slot onward by the 2026-10-09 requirement (the operator's ruling that the
+1.0 freeze may be broken for it); its other clauses stand, and nothing it pinned about float
+summation order or any aggregate's bytes moves here.
+
+**Consequences.** `removal` on `Fuaran.Core.Column`, paid by the major
+([`docs/releases/1.0.0.md`](docs/releases/1.0.0.md)); STABILITY.md's Column strand names the three
+promises the storage carries. Phase 418 writes the ownership contract in full with its law family;
+Phase 424 carries every downstream consumer of `Column.Cells` / `Column.create` onto
+`ofCells` / `toCells` and the typed builders.
+
 ## 2026-10-08 — D141: the long multi-module files are divided one module per file, the 2,000-line rule is a test, and `Families.fs` joins D125's exceptions as the same class
 
 **Recorded by Phase 401. `src/Fuaran.Core.Wire/`, `.Ops/`, `.Idl/`, `.Column/` and `.Query/` (files
