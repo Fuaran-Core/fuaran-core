@@ -1329,8 +1329,14 @@ let proofCoverageTests =
               let inputs = liveInputs ()
               let used = inputs.Exclusions |> List.map _.Reason |> Set.ofList
 
+              // `model-scheduled` is carried exactly while a package has shipped ahead of its model
+              // — Phase 426 filed the first such entry, for `Fuaran.Core.Unit`, and Phase 428's model
+              // retired it — and the term stays in the vocabulary for the next such interval
+              // (operator decision 2026-10-10), as `obsolete` stays in the operation classes below.
+              let exempt = Set.singleton "model-scheduled"
+
               Expect.equal
-                  (Set.difference inputs.Reasons used)
+                  (Set.difference (Set.difference inputs.Reasons used) exempt)
                   Set.empty
                   "a reason no entry carries is a vocabulary term nothing tests — carry it or drop it"
 

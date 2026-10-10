@@ -4243,6 +4243,150 @@
           "Table.tryField"
         ]
       }
+    },
+    {
+      "id": "unit-exponent-group",
+      "level": "proved",
+      "claim": "THE EXPONENT VECTORS FORM AN ABELIAN GROUP (Phase 428). `proofs/Unit.fst` models `src/Fuaran.Core.Unit/Unit.fs` clause for clause: the canonical product of prefixed atoms with non-zero integer exponents (`UnitOfMeasure`), the merge `tryCombine` performs as a strictly sorted insert that sums on an equal key (`combine`), and `Unit.mul` / `div` / `pow` over it with production's `int32` bound checked where production checks it. Over well-formed factor lists the merge is commutative (`combine_comm`), associative (`combine_assoc`), has the empty product as its identity (`combine_unit`) and every element its inverse (`combine_inverse`), and `div` is multiplication by the inverse (`div_is_mul_inverse`) — each through the exponent law `combine_exp` (the merge adds exponent vectors) and `ext` (two well-formed lists with one exponent vector are one list), and `mul_wf` / `div_wf` / `pow_wf` say the algebra stays inside the well-formed lists. Measured red with the merge's sorted insert dropping the sum on an equal key.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "combine_comm",
+        "model": "proofs/Unit.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Unit.div",
+          "Unit.mul",
+          "Unit.pow"
+        ]
+      }
+    },
+    {
+      "id": "unit-one-text",
+      "level": "proved",
+      "claim": "ONE CANONICAL TEXT PER UNIT, AND IT READS BACK (Phase 428): for every canonical unit — well-formed, every exponent within production's bound, every atom admitted (its prefix-and-symbol token lexes as one symbol token and `resolve`s to the atom itself) — `parse (render u) == Ok u` (`parse_render`). `render` is a function, so equal units have one text; the theorem is the half that is not free: the text reads back to the unit that wrote it, so two different canonical units have two texts. Proved along the text left to right: the symbol loop reads exactly the token (`read_sym_app`), the exponent loop reads exactly the digits written (`read_exp_digits`, with the bound never crossed on the way: `read_digits_app`), one component is one fold into the open term (`comp_token`), the separator arm threads the rest (`loop`), and the folded product is the unit's own list because every atom is written once with its exponent (`ext` again). The identity is STRUCTURAL, as Phase 426 ruled it: `km/h` and `m/s` are different units with two texts, compatible with factor 5/18. Measured red with `render` writing the denominators before the numerators, and with the exponent writer dropping the magnitude.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "parse_render",
+        "model": "proofs/Unit.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Unit.parse",
+          "Unit.render",
+          "UnitOfMeasure.ToString"
+        ]
+      }
+    },
+    {
+      "id": "unit-compatible-is-dimension",
+      "level": "proved",
+      "claim": "COMPATIBILITY IS EQUALITY OF DIMENSION (Phase 428). `dimension` is modelled as production computes it — the base-dimension and currency map, every atom's exponents times the factor's — and `compatible a b` holds exactly when every base dimension's and every currency's exponent agrees (`compatible_iff`, through `dim_val`, the dimension read directly off the factors). The dimension of a product is the sum (`dim_combine`), so compatibility is a congruence for the algebra (`compatible_mul`): compatible operands multiply to compatible products. Measured red with the base-dimension entries written at the wrong index.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "compatible_iff",
+        "model": "proofs/Unit.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Unit.compatible"
+        ]
+      }
+    },
+    {
+      "id": "unit-factors-compose",
+      "level": "proved",
+      "claim": "CONVERSION FACTORS COMPOSE AND ARE EXACT (Phase 428). The scale of a product is the product of the scales and of a quotient the quotient (`scale_combine`, `scale_combine_div`, through `rpow_add` — a power of a sum is a product of powers — and the merge's insert), so for any `a`, `b`, `c` the factor from `a` to `c` is the product of the factors through `b` as rationals (`factor_compose`), a unit's factor to itself is one (`factor_self`) and the two directions multiply to one (`factor_inverse`); `conversionFactor` answers these exactly when the units are compatible, and refuses otherwise naming both. `reduce` — production's gcd to lowest terms — changes no value (`reduce_exact`, over Euclid's `gcd` proved to divide both terms): the `Ratio` a consumer receives IS the exact quotient of the two scales. Measured red with the power law's mixed-sign case swapping numerator and denominator.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "factor_compose",
+        "model": "proofs/Unit.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Unit.conversionFactor"
+        ]
+      }
+    },
+    {
+      "id": "unit-differential",
+      "level": "tested",
+      "claim": "The extracted unit algebra agrees with the shipped one (Phase 428): `Unit.parse` beside the model's over a drawn pool of units (every admitted atom, prefixed and bare, under exponents in -3..3, in products of up to three) and a refusal corpus reaching every refusal class with the token and position it names; `Unit.render` of every parsed unit beside the model's text; `mul` / `div` / `pow`, `compatible` and `conversionFactor` over drawn pairs, the factor compared as production's `Ratio` against the model's reduced pair — which is where two lowest-terms pairs of one value being one pair, a fact the model does not prove, is held. Every unit the shipped parser and algebra answer is CANONICAL in the model's sense (`canonical`: well-formed, in range, every atom admitted) — the closure the theorems' premise rests on, sampled. The go-red is the canonicaliser that SKIPS THE MERGE — the model's `render` handed the concatenation of two factor lists rather than their merge — which loses on exactly the draws whose concatenation is not already the merge, and on no other.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Unit.fst",
+        "cases": [
+          "the unit oracle agrees with Unit.parse and Unit.render over the drawn pool and the refusal corpus",
+          "the unit oracle agrees with mul, div, pow, compatible and conversionFactor over drawn pairs",
+          "a canonicaliser that skips the merge loses - on exactly the reordered draws"
+        ],
+        "operations": [
+          "Unit.compatible",
+          "Unit.conversionFactor",
+          "Unit.div",
+          "Unit.mul",
+          "Unit.parse",
+          "Unit.pow",
+          "Unit.render",
+          "UnitOfMeasure.ToString"
+        ]
+      }
+    },
+    {
+      "id": "field-codec-round-trip",
+      "level": "proved",
+      "claim": "A FIELD'S METADATA SURVIVES ENCODE THEN DECODE (Phase 428, over Phase 427's `Field`). `proofs/WireColumn.fst` section 10 models the schema entry as a field — name, type, an optional unit (`Unit.fst`'s value), an optional label and description, and the extension map as a key-unique association list — with `ColumnCodec.fieldJson` / `decodeField` clause for clause (`field_json`, `decode_field`: the unit's text parsed by `Unit.parse` and refused when it does not parse, the text members held to strings, the extension object to string members, an unknown member read past), and `encodeJson` / `decodeJson` as Phase 427 left them (`encode_json_f`, `decode_json_f`: the schema as fields, the columns by the entries' names and types, the final `validate` over the stripped table). For a well-formed field — its unit canonical, its extension keys distinct — `decode_field (field_json f) == Good f` (`decode_field_inverts`, the unit through `Unit.parse_render` and the alphabet bridge `unit_text_inverse`), and for every table whose stripped form `validate` accepts and whose fields are well-formed, `decode_json_f (encode_json_f (Embedded_f t)) == Good (Embedded_f (normal_table_f t))` (`round_trip_f`): the columns in theorem 15's normal form, every field's metadata intact. The image stands as before (`decode_image_f_is_valid`), and a field decode that answers is the entry decode with metadata on top (`decode_field_entry`). Measured red with the extension reader dropping a member, and with the unit written by its non-canonical spelling.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "round_trip_f",
+        "model": "proofs/WireColumn.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "ColumnCodec.decodeField",
+          "ColumnCodec.decodeJson",
+          "ColumnCodec.encodeJson",
+          "ColumnCodec.fieldJson",
+          "Field.withDescription",
+          "Field.withExt",
+          "Field.withLabel",
+          "Field.withUnit"
+        ]
+      }
+    },
+    {
+      "id": "field-codec-plain-entry",
+      "level": "proved",
+      "claim": "AN ENTRY WITHOUT METADATA ENCODES EXACTLY AS BEFORE (Phase 428): a field that states no unit, label, description or extension member (`Field.hasMetadata` false) encodes to the two-member object section 4's `schema_json_items` wrote for `(name, type)` (`field_json_plain`), and a table whose every field is such encodes, through `encode_json_f`, to BYTE FOR BYTE the document `encode_json` writes for its stripped form (`encode_json_f_plain`) — so every column document written before Phase 427 is the document written after it, which is what the corpus families and the pinned-bytes tests sample.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "theorem": "encode_json_f_plain",
+        "model": "proofs/WireColumn.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "ColumnCodec.encodeJson",
+          "ColumnCodec.fieldJson",
+          "Field.create",
+          "Field.hasMetadata"
+        ]
+      }
+    },
+    {
+      "id": "field-codec-differential",
+      "level": "tested",
+      "claim": "The extracted field codec agrees with the shipped one (Phase 428): `ColumnCodec.fieldJson` beside the model's `field_json` over drawn fields (every column type the list model spells, a unit from the drawn pool or none, a label, a description and up to three extension members, each stated or not), the rendered documents compared byte for byte; `ColumnCodec.decodeField` beside `decode_field` over those documents and a hand-written set — a missing name, an unknown type, a unit the kit does not parse, a non-canonical and an aliased unit spelling read to the unit, a non-string label, an extension object that is not an object and one with a non-string member, and an unknown member read past — the field compared member by member and the refusal by its class; and `encodeJson` / `decodeJson` beside `encode_json_f` / `decode_json_f` over tables carrying metadata, the round trip held to the model's `normal_table_f` with every field intact. The go-red is the bridge that hands the model the extension members in REVERSED order — production holds a map, which writes them in key order — and it loses on exactly the fields with two or more extension members, and on no other.",
+      "phase": "fuaran-core#428",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/WireColumn.fst",
+        "cases": [
+          "the field oracle agrees with fieldJson and decodeField over drawn fields and the hand-written documents",
+          "the field codec oracle agrees with encodeJson and decodeJson over tables with metadata, and the round trip keeps every field",
+          "a bridge that drops the extension order loses - on exactly the fields with two or more extension members"
+        ],
+        "operations": [
+          "ColumnCodec.decodeField",
+          "ColumnCodec.decodeJson",
+          "ColumnCodec.encodeJson",
+          "ColumnCodec.fieldJson"
+        ]
+      }
     }
   ]
 }

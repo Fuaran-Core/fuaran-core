@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 310 claims — 224 proved across 29 models, 50 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 318 claims — 230 proved across 30 models, 52 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -981,10 +981,10 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
-| `Fuaran.Core.Unit` | 9 | 0 | 0 | 1 | 1 | 0 | 0 | 7 |
+| `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1202 | 180 | 434 | 30 | 14 | 0 | 3 | 541 |
+| **Total** | 1202 | 188 | 434 | 30 | 13 | 0 | 3 | 534 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -6661,8 +6661,9 @@ theorems were still true of their model; whether they said anything about the sh
 the open question, and this is the cheapest sound answer: one refinement, not a re-proof.)_
 
 `ColumnRefinement.fst` models the column as `Column.fs` has held it since Phase 417, clause for
-clause: `Validity` and `Validity.isPresent`, the `ColumnData` union (one typed vector and a mask per
-case) with `Column`'s derived `Type`, `Column.cell`, `Column.toCells`, `Column.ofCells` with its
+clause: `Validity` — since Phase 420 `AllValid | Mask`, section 7 modelling both cases and the
+materialised mask (`Validity.toMask`) the rest reads — and `Validity.isPresent`, the `ColumnData` union
+(one typed vector and a validity per case) with `Column`'s derived `Type`, `Column.cell`, `Column.toCells`, `Column.ofCells` with its
 private `storageOfCells` (the per-type `pick`, the `fill` loop, the type's zero at an absent row),
 `ColumnData.Equals` through `ColumnStorage.presentEqual`, the typed form `Table.firstUncarriableCell`
 took in that phase with `Table.validate` over it, and `ColumnCodec.columnJson`'s two walks off the
@@ -6679,7 +6680,8 @@ offset, a shared backing array or a borrow. The models see contents, not storage
   every present cell's type widens into the column's, refusing otherwise as the `TypeMismatch`
   naming the column (`of_cells_good_iff`); a list column `validate`'s clause (e) passes is therefore
   one `ofCells` builds and reads back as its normal form (`validated_cells_build`).
-- **`of_cells_to_cells`.** For every well-formed typed column (mask and values one length),
+- **`of_cells_to_cells`.** For every well-formed typed column (its materialised mask the values'
+  length — an `AllValid` column always is, section 7's `all_valid_wf`),
   `ofCells` of its `toCells` builds a column EQUAL to it under `ColumnData.Equals` — one mask, equal
   at every present row — and the column ITSELF where the absent rows hold the type's zero
   (`of_cells_to_cells_exact`), which every column `ofCells` or decode builds does
@@ -6689,8 +6691,8 @@ offset, a shared backing array or a borrow. The models see contents, not storage
   the columns `validate` accepts, which is what lets every list-level theorem transfer.
 - **`validate_agrees`.** The typed `Table.validate` answers, on every table whose columns are
   well-formed, what theorem 15's `validate` answers of the table's image; and a typed table it
-  accepts IS well-formed (`validate_t_good_wf`), since clause (e) names a mask of the wrong length
-  first. That clause is the one place the two validators differ, and it is reached only by a column
+  accepts IS well-formed (`validate_t_good_wf`), since clause (e) names a `Mask` of the wrong length
+  first (an `AllValid` column has no length to be wrong). That clause is the one place the two validators differ, and it is reached only by a column
   the list model cannot express — a list column has one length. The one arm the list model has and
   the typed scan does not, a present cell outside its column's type, is proved unreachable through the
   map: `toCells` writes a cell of the column's own type at every present row.
@@ -6737,7 +6739,11 @@ and their model lives in this module when they land.
    `of_cells_to_cells_needs_wf`, `validate_agrees`, `validate_t_good_wf`, `encode_agrees`,
    `try_encode_agrees`, `norm_cells_vacuous`, `normal_columns_are_the_columns`,
    `typed_decode_image_is_valid`, `typed_round_trip`, `typed_round_trip_in_schema_order`, and
-   `cell_at_is_nth_to_cells` (the O(1) read is the list read). F\* 2026.09.06, Z3 4.13.3, every query
+   `cell_at_is_nth_to_cells` (the O(1) read is the list read); and, since Phase 420, section 7's
+   `all_valid_reads_all_true`, `all_valid_wf`, `of_mask_to_mask`, `of_mask_normal` and
+   `same_mask_is_mask_equality` — the two-case `Validity` materialises to the mask the rest reads, the
+   normalising constructors lose nothing and never build an all-true `Mask`, and `sameMask` is equality
+   of the materialised masks. F\* 2026.09.06, Z3 4.13.3, every query
    3/3 under `--quake 3` at the leg's rlimit of 40, `--report_assumes error` on, no `assume`, no
    `admit`. Default fuel, `--ifuel 2` scoped to the per-case closure lemmas, one `--fuel 2 --ifuel 1`
    block for the exhibited witness; `--ext context_pruning` as `WireColumn` carries it. Opens
@@ -6767,6 +6773,117 @@ and their model lives in this module when they land.
    `decode_json`, reached through `encode_agrees`. The typed builders and readers
    (`Column.ofInts` … `Column.tryDecimals`), which check nothing and convert nothing. `Column.aggregate`.
    Anything about a `Vector`'s storage: slices, sharing, the borrow.
+
+## Theorem 20 — the unit algebra: a group, one text per unit, dimension and exact factors; and the field codec, metadata intact (Phase 428)
+
+_(This directory's twentieth. Phase 426 gave Core a unit as a runtime value — `Fuaran.Core.Unit`, a
+dimension algebra over a UCUM subset and ISO 4217 currencies with one canonical text per unit — and
+Phase 427 put that unit, with a label, a description and an extension map, on the schema entry
+`WireColumn.fst` models. Both were sampled by their tests; this phase proves them, and retires the
+`model-scheduled` exclusion Phase 426 filed for the package.)_
+
+`Unit.fst` models `src/Fuaran.Core.Unit/Unit.fs` clause for clause, over an enumerated ASCII
+alphabet whose codes are the ordinal order production's string comparison is: the canonical product
+of prefixed atoms with non-zero integer exponents, the vocabulary tables generated from the source
+row for row (opaque to the solver — no theorem reads a row; the twins do, by normalisation),
+`tryCombine` as a strictly sorted insert that sums on an equal key with production's `int32` bound
+checked where production checks it, `dimension` / `compatible`, `scale` with Euclid's `gcd` to lowest
+terms and `conversionFactor` over it, `render`, and the iterative `parse` over its stack of open terms
+with every refusal class naming the token and its position (`Malformed`'s prose `expected` as an
+enumeration). Its integers are F\*'s unbounded `int`; production's bound is a refusal here as there.
+
+**The four theorems.**
+
+- **The group** (`combine_comm`, `combine_assoc`, `combine_unit`, `combine_inverse`,
+  `div_is_mul_inverse`). The merge is written once over any key type with a strict total order
+  (`smap`), with the exponent law `combine_exp` — the merge adds exponent vectors — and
+  extensionality `ext` — two well-formed lists with one exponent vector are one list — and every
+  group law is the two composed. `mul_wf` / `div_wf` / `pow_wf` keep the algebra inside the
+  well-formed lists.
+- **One text** (`parse_render`). For every CANONICAL unit — well-formed, in range, every atom
+  admitted: its prefix-and-symbol token lexes as one symbol token and `resolve`s to the atom —
+  `parse (render u) == Ok u`. `render` is a function, so equal units have one text; the theorem is
+  the half that is not free, that the text reads back to the unit that wrote it, so two different
+  canonical units have two texts. The proof follows the text left to right: the symbol loop reads
+  exactly the token (`read_sym_app`), the exponent loop reads exactly the digits written and never
+  crosses the bound on the way (`read_exp_digits`, `read_digits_app`), one component is one fold
+  into the open term (`comp_token`), the separator arm threads the rest (`loop`), and the folded
+  product is the unit's own list because every atom is written once (`ext`). The identity is
+  STRUCTURAL, as Phase 426 ruled: `km/h` and `m/s` are two units with two texts, compatible with
+  factor 5/18.
+- **Compatibility is equality of dimension** (`compatible_iff`, `dim_combine`, `compatible_mul`).
+  `compatible a b` holds exactly when every base dimension's and every currency's exponent agrees,
+  the dimension of a product is the sum, and compatible operands multiply to compatible products.
+- **Factors compose and are exact** (`scale_combine`, `factor_compose`, `factor_self`,
+  `factor_inverse`, `reduce_exact`). The scale is multiplicative over the merge (through `rpow_add`,
+  a power of a sum is a product of powers), so the factor from `a` to `c` is the product of the
+  factors through any `b` as rationals, and `reduce` — Euclid's gcd, proved to divide both terms —
+  changes no value: the `Ratio` a consumer receives IS the exact quotient of the two scales.
+
+**The field codec** (`WireColumn.fst`, section 10). `Table.validate` reads a field's name and type
+and nothing else, so the table model of theorem 15 stands unchanged as the model of the entry's
+name-and-type half, and the field is a layer over it: `field` with its builders and `has_metadata`
+clause for clause with `Field.fs` (the extension map a key-unique association list — production
+holds a `Map`, and the two are one map), `field_json` / `decode_field` with `ColumnCodec.fieldJson`
+/ `decodeField` (the unit's text parsed by `Unit.parse` and refused when it does not parse, the text
+members held to strings, the extension object to string members, an unknown member read past), and
+`encode_json_f` / `decode_json_f` as Phase 427 left `encodeJson` / `decodeJson`. The unit's text
+crosses between the two alphabets through `ch_of_uch` / `uch_of_ch`, inverse on every character a
+canonical text carries (`uch_ch_inverse`, `unit_text_inverse`, with `Unit.render_no_other`). Then:
+an entry without metadata encodes EXACTLY as before — `field_json_plain`, and `encode_json_f_plain`
+makes a metadata-free table's document byte for byte the one `encode_json` writes; a well-formed
+field (unit canonical, extension keys distinct) reads back from its own document
+(`decode_field_inverts`, the unit through `parse_render`); and for every table whose stripped form
+`validate` accepts and whose fields are well-formed, `decode_json_f (encode_json_f (Embedded_f t))`
+is `Good (Embedded_f (normal_table_f t))` (`round_trip_f`) — theorem 15's normal form of the
+columns, every field's metadata intact. The image stands (`decode_image_f_is_valid`), and a field
+decode that answers is the entry decode with metadata on top (`decode_field_entry`). The timestamp
+unit inside `ColumnType` (Phase 422) is not modelled here; it is Phase 430's.
+
+**The differentials, and their go-reds.** The extracted `Unit.fs` runs beside the shipped algebra:
+`parse` over a drawn pool (every admitted atom, prefixed and bare, under exponents in -3..3, in
+products of up to three) and a refusal corpus reaching every refusal class with its token and
+position; `render` of every parsed unit; `mul` / `div` / `pow`, `compatible` and `conversionFactor`
+over drawn pairs, the factor compared as production's `Ratio` against the model's reduced pair; and
+every unit the shipped side answers checked `canonical` in the model's sense — the closure the
+theorems' premise rests on, sampled. Its go-red is the canonicaliser that SKIPS THE MERGE: the model's
+`render` handed the concatenation of two factor lists rather than their merge loses on exactly the
+draws whose concatenation is not already the merge. The extracted field codec runs beside
+`fieldJson` / `decodeField` over drawn fields and a hand-written set of documents, and beside
+`encodeJson` / `decodeJson` over tables carrying metadata, the round trip held to `normal_table_f`;
+its go-red hands the model the extension members in reversed order, which loses on exactly the
+fields with two or more of them. Beside them, `ParityVectors` carries unit rows now, so the
+downstream value check compares parse, render, compatibility and the factor between .NET and
+JavaScript.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** In `Unit.fst`: `combine_comm`, `combine_assoc`,
+   `combine_unit`, `combine_inverse`, `div_is_mul_inverse`, `combine_exp`, `ext`, `mul_wf`, `div_wf`,
+   `pow_wf`; `compatible_iff`, `dim_combine`, `compatible_mul`; `rpow_add`, `scale_combine`,
+   `scale_combine_div`, `reduce_exact`, `factor_compose`, `factor_self`, `factor_inverse`;
+   `read_sym_app`, `read_digits_app`, `read_exp_digits`, `resolve_pos`, `comp_token`, `loop`,
+   `parse_render`, `render_no_other`. In `WireColumn.fst`: `uch_ch_inverse`, `unit_text_inverse`,
+   `field_json_plain`, `encode_json_f_plain`, `decode_ext_inverts`, `decode_field_inverts`,
+   `round_trip_f`, `ref_round_trip_f`, `decode_image_f_is_valid`, `decode_field_entry`. F\*
+   2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3` at the leg's rlimit of 40 (`--z3rlimit 80`
+   scoped to `comp_token`, `loop` and `parse_render`, `120` to `decode_field_inverts`),
+   `--report_assumes error` on, no `assume`, no `admit`. Each theorem was measured red under one
+   perturbation, one per prover run — the list, with the lemma each failed at, is in the phase's
+   outcome.
+2. **Tested.** **`unit-differential`** and **`field-codec-differential`** — the six `Proofs.Oracle`
+   cases above; plus the model's six and the codec's two new twins under twin evaluation.
+3. **Assumed, and stated as such.** Nothing new: the field codec inherits theorem 15's
+   **`column-int-layouts`** and **`column-codec-abstractions`** (the same host record, the same dropped
+   prose), and the unit model is self-contained.
+4. **Not claimed.** That two lowest-terms pairs of one value are one pair (uniqueness of the reduced
+   form, a fact about gcd): `factor_compose` is stated as equality of VALUE, and the differential holds
+   production's `Ratio` to the model's reduced pair. That every unit `parse` answers is canonical, as a
+   theorem: sampled by the differential (the model's `canonical` over every answer), not proved. That
+   the vocabulary's every atom under every prefix it takes is admitted: the theorems are stated over
+   the `admitted` predicate, and the differential draws every atom prefixed and bare. The timestamp
+   unit of `ColumnType` (Phase 430). `Schema.diff` / `classify` / `fingerprint` over fields, which
+   theorem 15 never modelled either.
 
 ## Next
 

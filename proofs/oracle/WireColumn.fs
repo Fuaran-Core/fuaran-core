@@ -1769,6 +1769,1080 @@ let single_column_table = (fun ( n  :  Prims.list<WireCanon.ch> ) ( ty  :  colum
 
 let reordered_table = (fun ( a  :  Prims.list<WireCanon.ch> ) ( b  :  Prims.list<WireCanon.ch> ) -> {schema = (((a), (IntType)))::(((b), (IntType)))::[]; columns = ({name = b; ctype = IntType; cells = []})::({name = a; ctype = IntType; cells = []})::[]})
 
+
+let unit_key : Prims.list<WireCanon.ch> = (WireCanon.CLu)::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("t"))::[]
+
+
+let label_key : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("l"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CHexCh (WireCanon.HDb))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("l"))::[]
+
+
+let description_key : Prims.list<WireCanon.ch> = (WireCanon.CHexCh (WireCanon.HDd))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("s"))::(WireCanon.CHexCh (WireCanon.HDc))::(WireCanon.CPlain ("r"))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("p"))::(WireCanon.CPlain ("t"))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("o"))::(WireCanon.CPlain ("n"))::[]
+
+
+let ext_key : Prims.list<WireCanon.ch> = (WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("x"))::(WireCanon.CPlain ("t"))::[]
+
+
+let ch_of_uch : Unit.uch  ->  WireCanon.ch = (fun ( c  :  Unit.uch ) -> (match (c) with
+| Unit.La -> begin
+     WireCanon.CHexCh (WireCanon.HDa)
+     end
+| Unit.Lb -> begin
+     WireCanon.CHexCh (WireCanon.HDb)
+     end
+| Unit.Lc -> begin
+     WireCanon.CHexCh (WireCanon.HDc)
+     end
+| Unit.Ld -> begin
+     WireCanon.CHexCh (WireCanon.HDd)
+     end
+| Unit.Le -> begin
+     WireCanon.CHexCh (WireCanon.HDe)
+     end
+| Unit.Lf -> begin
+     WireCanon.CHexCh (WireCanon.HDf)
+     end
+| Unit.Lg -> begin
+     WireCanon.CPlain ("g")
+     end
+| Unit.Lh -> begin
+     WireCanon.CPlain ("h")
+     end
+| Unit.Li -> begin
+     WireCanon.CPlain ("i")
+     end
+| Unit.Lj -> begin
+     WireCanon.CPlain ("j")
+     end
+| Unit.Lk -> begin
+     WireCanon.CPlain ("k")
+     end
+| Unit.Ll -> begin
+     WireCanon.CPlain ("l")
+     end
+| Unit.Lm -> begin
+     WireCanon.CPlain ("m")
+     end
+| Unit.Ln -> begin
+     WireCanon.CPlain ("n")
+     end
+| Unit.Lo -> begin
+     WireCanon.CPlain ("o")
+     end
+| Unit.Lp -> begin
+     WireCanon.CPlain ("p")
+     end
+| Unit.Lq -> begin
+     WireCanon.CPlain ("q")
+     end
+| Unit.Lr -> begin
+     WireCanon.CPlain ("r")
+     end
+| Unit.Ls -> begin
+     WireCanon.CPlain ("s")
+     end
+| Unit.Lt -> begin
+     WireCanon.CPlain ("t")
+     end
+| Unit.Lu -> begin
+     WireCanon.CLu
+     end
+| Unit.Lv -> begin
+     WireCanon.CPlain ("v")
+     end
+| Unit.Lw -> begin
+     WireCanon.CPlain ("w")
+     end
+| Unit.Lx -> begin
+     WireCanon.CPlain ("x")
+     end
+| Unit.Ly -> begin
+     WireCanon.CPlain ("y")
+     end
+| Unit.Lz -> begin
+     WireCanon.CPlain ("z")
+     end
+| Unit.UA -> begin
+     WireCanon.CPlain ("A")
+     end
+| Unit.UB -> begin
+     WireCanon.CPlain ("B")
+     end
+| Unit.UC -> begin
+     WireCanon.CPlain ("C")
+     end
+| Unit.UD -> begin
+     WireCanon.CPlain ("D")
+     end
+| Unit.UE -> begin
+     WireCanon.CUpE
+     end
+| Unit.UF -> begin
+     WireCanon.CPlain ("F")
+     end
+| Unit.UG -> begin
+     WireCanon.CPlain ("G")
+     end
+| Unit.UH -> begin
+     WireCanon.CPlain ("H")
+     end
+| Unit.UI -> begin
+     WireCanon.CPlain ("I")
+     end
+| Unit.UJ -> begin
+     WireCanon.CPlain ("J")
+     end
+| Unit.UK -> begin
+     WireCanon.CPlain ("K")
+     end
+| Unit.UL -> begin
+     WireCanon.CPlain ("L")
+     end
+| Unit.UM -> begin
+     WireCanon.CPlain ("M")
+     end
+| Unit.UN -> begin
+     WireCanon.CPlain ("N")
+     end
+| Unit.UO -> begin
+     WireCanon.CPlain ("O")
+     end
+| Unit.UP -> begin
+     WireCanon.CPlain ("P")
+     end
+| Unit.UQ -> begin
+     WireCanon.CPlain ("Q")
+     end
+| Unit.UR -> begin
+     WireCanon.CPlain ("R")
+     end
+| Unit.US -> begin
+     WireCanon.CPlain ("S")
+     end
+| Unit.UT -> begin
+     WireCanon.CPlain ("T")
+     end
+| Unit.UU -> begin
+     WireCanon.CPlain ("U")
+     end
+| Unit.UV -> begin
+     WireCanon.CPlain ("V")
+     end
+| Unit.UW -> begin
+     WireCanon.CPlain ("W")
+     end
+| Unit.UX -> begin
+     WireCanon.CPlain ("X")
+     end
+| Unit.UY -> begin
+     WireCanon.CPlain ("Y")
+     end
+| Unit.UZ -> begin
+     WireCanon.CPlain ("Z")
+     end
+| Unit.D0 -> begin
+     WireCanon.CHexCh (WireCanon.HD0)
+     end
+| Unit.D1 -> begin
+     WireCanon.CHexCh (WireCanon.HD1)
+     end
+| Unit.D2 -> begin
+     WireCanon.CHexCh (WireCanon.HD2)
+     end
+| Unit.D3 -> begin
+     WireCanon.CHexCh (WireCanon.HD3)
+     end
+| Unit.D4 -> begin
+     WireCanon.CHexCh (WireCanon.HD4)
+     end
+| Unit.D5 -> begin
+     WireCanon.CHexCh (WireCanon.HD5)
+     end
+| Unit.D6 -> begin
+     WireCanon.CHexCh (WireCanon.HD6)
+     end
+| Unit.D7 -> begin
+     WireCanon.CHexCh (WireCanon.HD7)
+     end
+| Unit.D8 -> begin
+     WireCanon.CHexCh (WireCanon.HD8)
+     end
+| Unit.D9 -> begin
+     WireCanon.CHexCh (WireCanon.HD9)
+     end
+| Unit.Dot -> begin
+     WireCanon.CDot
+     end
+| Unit.Slash -> begin
+     WireCanon.CPlain ("/")
+     end
+| Unit.LPar -> begin
+     WireCanon.CPlain ("(")
+     end
+| Unit.RPar -> begin
+     WireCanon.CPlain (")")
+     end
+| Unit.LBr -> begin
+     WireCanon.CLBrack
+     end
+| Unit.RBr -> begin
+     WireCanon.CRBrack
+     end
+| Unit.LCur -> begin
+     WireCanon.CLBrace
+     end
+| Unit.RCur -> begin
+     WireCanon.CRBrace
+     end
+| Unit.Pct -> begin
+     WireCanon.CPlain ("%")
+     end
+| Unit.Under -> begin
+     WireCanon.CPlain ("_")
+     end
+| Unit.Apos -> begin
+     WireCanon.CPlain ("\'")
+     end
+| Unit.Minus -> begin
+     WireCanon.CMinus
+     end
+| Unit.Plus -> begin
+     WireCanon.CPlus
+     end
+| Unit.Star -> begin
+     WireCanon.CPlain ("*")
+     end
+| Unit.Caret -> begin
+     WireCanon.CPlain ("^")
+     end
+| Unit.Other -> begin
+     WireCanon.CPlain ("?")
+     end))
+
+
+let uch_of_plain : Prims.string  ->  Unit.uch = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "g") then begin
+     Unit.Lg
+     end else begin
+      
+if (Prims.op_Equals s "h") then begin
+     Unit.Lh
+     end else begin
+      
+if (Prims.op_Equals s "i") then begin
+     Unit.Li
+     end else begin
+      
+if (Prims.op_Equals s "j") then begin
+     Unit.Lj
+     end else begin
+      
+if (Prims.op_Equals s "k") then begin
+     Unit.Lk
+     end else begin
+      
+if (Prims.op_Equals s "l") then begin
+     Unit.Ll
+     end else begin
+      
+if (Prims.op_Equals s "m") then begin
+     Unit.Lm
+     end else begin
+      
+if (Prims.op_Equals s "n") then begin
+     Unit.Ln
+     end else begin
+      
+if (Prims.op_Equals s "o") then begin
+     Unit.Lo
+     end else begin
+      
+if (Prims.op_Equals s "p") then begin
+     Unit.Lp
+     end else begin
+      
+if (Prims.op_Equals s "q") then begin
+     Unit.Lq
+     end else begin
+      
+if (Prims.op_Equals s "r") then begin
+     Unit.Lr
+     end else begin
+      
+if (Prims.op_Equals s "s") then begin
+     Unit.Ls
+     end else begin
+      
+if (Prims.op_Equals s "t") then begin
+     Unit.Lt
+     end else begin
+      
+if (Prims.op_Equals s "v") then begin
+     Unit.Lv
+     end else begin
+      
+if (Prims.op_Equals s "w") then begin
+     Unit.Lw
+     end else begin
+      
+if (Prims.op_Equals s "x") then begin
+     Unit.Lx
+     end else begin
+      
+if (Prims.op_Equals s "y") then begin
+     Unit.Ly
+     end else begin
+      
+if (Prims.op_Equals s "z") then begin
+     Unit.Lz
+     end else begin
+      
+if (Prims.op_Equals s "A") then begin
+     Unit.UA
+     end else begin
+      
+if (Prims.op_Equals s "B") then begin
+     Unit.UB
+     end else begin
+      
+if (Prims.op_Equals s "C") then begin
+     Unit.UC
+     end else begin
+      
+if (Prims.op_Equals s "D") then begin
+     Unit.UD
+     end else begin
+      
+if (Prims.op_Equals s "F") then begin
+     Unit.UF
+     end else begin
+      
+if (Prims.op_Equals s "G") then begin
+     Unit.UG
+     end else begin
+      
+if (Prims.op_Equals s "H") then begin
+     Unit.UH
+     end else begin
+      
+if (Prims.op_Equals s "I") then begin
+     Unit.UI
+     end else begin
+      
+if (Prims.op_Equals s "J") then begin
+     Unit.UJ
+     end else begin
+      
+if (Prims.op_Equals s "K") then begin
+     Unit.UK
+     end else begin
+      
+if (Prims.op_Equals s "L") then begin
+     Unit.UL
+     end else begin
+      
+if (Prims.op_Equals s "M") then begin
+     Unit.UM
+     end else begin
+      
+if (Prims.op_Equals s "N") then begin
+     Unit.UN
+     end else begin
+      
+if (Prims.op_Equals s "O") then begin
+     Unit.UO
+     end else begin
+      
+if (Prims.op_Equals s "P") then begin
+     Unit.UP
+     end else begin
+      
+if (Prims.op_Equals s "Q") then begin
+     Unit.UQ
+     end else begin
+      
+if (Prims.op_Equals s "R") then begin
+     Unit.UR
+     end else begin
+      
+if (Prims.op_Equals s "S") then begin
+     Unit.US
+     end else begin
+      
+if (Prims.op_Equals s "T") then begin
+     Unit.UT
+     end else begin
+      
+if (Prims.op_Equals s "U") then begin
+     Unit.UU
+     end else begin
+      
+if (Prims.op_Equals s "V") then begin
+     Unit.UV
+     end else begin
+      
+if (Prims.op_Equals s "W") then begin
+     Unit.UW
+     end else begin
+      
+if (Prims.op_Equals s "X") then begin
+     Unit.UX
+     end else begin
+      
+if (Prims.op_Equals s "Y") then begin
+     Unit.UY
+     end else begin
+      
+if (Prims.op_Equals s "Z") then begin
+     Unit.UZ
+     end else begin
+      
+if (Prims.op_Equals s "/") then begin
+     Unit.Slash
+     end else begin
+      
+if (Prims.op_Equals s "(") then begin
+     Unit.LPar
+     end else begin
+      
+if (Prims.op_Equals s ")") then begin
+     Unit.RPar
+     end else begin
+      
+if (Prims.op_Equals s "%") then begin
+     Unit.Pct
+     end else begin
+      
+if (Prims.op_Equals s "_") then begin
+     Unit.Under
+     end else begin
+      
+if (Prims.op_Equals s "\'") then begin
+     Unit.Apos
+     end else begin
+      
+if (Prims.op_Equals s "*") then begin
+     Unit.Star
+     end else begin
+      
+if (Prims.op_Equals s "^") then begin
+     Unit.Caret
+     end else begin
+     Unit.Other
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end)
+
+
+let uch_of_ch : WireCanon.ch  ->  Unit.uch = (fun ( c  :  WireCanon.ch ) -> (match (c) with
+| WireCanon.CHexCh (d) -> begin
+     (match (d) with
+| WireCanon.HD0 -> begin
+     Unit.D0
+     end
+| WireCanon.HD1 -> begin
+     Unit.D1
+     end
+| WireCanon.HD2 -> begin
+     Unit.D2
+     end
+| WireCanon.HD3 -> begin
+     Unit.D3
+     end
+| WireCanon.HD4 -> begin
+     Unit.D4
+     end
+| WireCanon.HD5 -> begin
+     Unit.D5
+     end
+| WireCanon.HD6 -> begin
+     Unit.D6
+     end
+| WireCanon.HD7 -> begin
+     Unit.D7
+     end
+| WireCanon.HD8 -> begin
+     Unit.D8
+     end
+| WireCanon.HD9 -> begin
+     Unit.D9
+     end
+| WireCanon.HDa -> begin
+     Unit.La
+     end
+| WireCanon.HDb -> begin
+     Unit.Lb
+     end
+| WireCanon.HDc -> begin
+     Unit.Lc
+     end
+| WireCanon.HDd -> begin
+     Unit.Ld
+     end
+| WireCanon.HDe -> begin
+     Unit.Le
+     end
+| WireCanon.HDf -> begin
+     Unit.Lf
+     end)
+     end
+| WireCanon.CLu -> begin
+     Unit.Lu
+     end
+| WireCanon.CUpE -> begin
+     Unit.UE
+     end
+| WireCanon.CDot -> begin
+     Unit.Dot
+     end
+| WireCanon.CMinus -> begin
+     Unit.Minus
+     end
+| WireCanon.CPlus -> begin
+     Unit.Plus
+     end
+| WireCanon.CLBrack -> begin
+     Unit.LBr
+     end
+| WireCanon.CRBrack -> begin
+     Unit.RBr
+     end
+| WireCanon.CLBrace -> begin
+     Unit.LCur
+     end
+| WireCanon.CRBrace -> begin
+     Unit.RCur
+     end
+| WireCanon.CPlain (s) -> begin
+     (uch_of_plain s)
+     end
+| uu___ -> begin
+     Unit.Other
+     end))
+
+
+let rec unit_text_of : Unit.text  ->  Prims.list<WireCanon.ch> = (fun ( t  :  Unit.text ) -> (match (t) with
+| [] -> begin
+     []
+     end
+| (c)::r -> begin
+     ((ch_of_uch c))::(unit_text_of r)
+     end))
+
+
+let rec unit_text_to : Prims.list<WireCanon.ch>  ->  Unit.text = (fun ( s  :  Prims.list<WireCanon.ch> ) -> (match (s) with
+| [] -> begin
+     []
+     end
+| (c)::r -> begin
+     ((uch_of_ch c))::(unit_text_to r)
+     end))
+
+type field = {fname : Prims.list<WireCanon.ch>; fty : column_type; funit : FStar_Pervasives_Native.option<Unit.uom>; flabel : FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>>; fdesc : FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>>; fext : Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)>}
+
+
+let __proj__Mkfield__item__fname : field  ->  Prims.list<WireCanon.ch> = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     fname
+     end))
+
+
+let __proj__Mkfield__item__fty : field  ->  column_type = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     fty
+     end))
+
+
+let __proj__Mkfield__item__funit : field  ->  FStar_Pervasives_Native.option<Unit.uom> = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     funit
+     end))
+
+
+let __proj__Mkfield__item__flabel : field  ->  FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>> = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     flabel
+     end))
+
+
+let __proj__Mkfield__item__fdesc : field  ->  FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>> = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     fdesc
+     end))
+
+
+let __proj__Mkfield__item__fext : field  ->  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> = (fun ( projectee  :  field ) -> (match (projectee) with
+| {fname = fname; fty = fty; funit = funit; flabel = flabel; fdesc = fdesc; fext = fext} -> begin
+     fext
+     end))
+
+
+let field_create : Prims.list<WireCanon.ch>  ->  column_type  ->  field = (fun ( n  :  Prims.list<WireCanon.ch> ) ( ty  :  column_type ) -> {fname = n; fty = ty; funit = FStar_Pervasives_Native.None; flabel = FStar_Pervasives_Native.None; fdesc = FStar_Pervasives_Native.None; fext = []})
+
+
+let rec ext_add : Prims.list<WireCanon.ch>  ->  Prims.list<WireCanon.ch>  ->  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)>  ->  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> = (fun ( k  :  Prims.list<WireCanon.ch> ) ( v  :  Prims.list<WireCanon.ch> ) ( m  :  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> ) -> (match (m) with
+| [] -> begin
+     (((k), (v)))::[]
+     end
+| ((k', v'))::t -> begin
+      
+if (Prims.op_Equals k' k) then begin
+     (((k), (v)))::t
+     end else begin
+     (((k'), (v')))::(ext_add k v t)
+     end
+     end))
+
+
+let with_unit : Unit.uom  ->  field  ->  field = (fun ( u  :  Unit.uom ) ( f  :  field ) -> {fname = f.fname; fty = f.fty; funit = FStar_Pervasives_Native.Some (u); flabel = f.flabel; fdesc = f.fdesc; fext = f.fext})
+
+
+let with_label : Prims.list<WireCanon.ch>  ->  field  ->  field = (fun ( l  :  Prims.list<WireCanon.ch> ) ( f  :  field ) -> {fname = f.fname; fty = f.fty; funit = f.funit; flabel = FStar_Pervasives_Native.Some (l); fdesc = f.fdesc; fext = f.fext})
+
+
+let with_description : Prims.list<WireCanon.ch>  ->  field  ->  field = (fun ( d  :  Prims.list<WireCanon.ch> ) ( f  :  field ) -> {fname = f.fname; fty = f.fty; funit = f.funit; flabel = f.flabel; fdesc = FStar_Pervasives_Native.Some (d); fext = f.fext})
+
+
+let with_ext : Prims.list<WireCanon.ch>  ->  Prims.list<WireCanon.ch>  ->  field  ->  field = (fun ( k  :  Prims.list<WireCanon.ch> ) ( v  :  Prims.list<WireCanon.ch> ) ( f  :  field ) -> {fname = f.fname; fty = f.fty; funit = f.funit; flabel = f.flabel; fdesc = f.fdesc; fext = (ext_add k v f.fext)})
+
+
+let has_metadata : field  ->  Prims.bool = (fun ( f  :  field ) -> ((((match (f.funit) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) || (match (f.flabel) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) || (match (f.fdesc) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) || (match (f.fext) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)))
+
+
+let entry_of : field  ->  (Prims.list<WireCanon.ch> * column_type) = (fun ( f  :  field ) -> ((f.fname), (f.fty)))
+
+
+let rec entries : Prims.list<field>  ->  Prims.list<(Prims.list<WireCanon.ch> * column_type)> = (fun ( fs  :  Prims.list<field> ) -> (match (fs) with
+| [] -> begin
+     []
+     end
+| (f)::t -> begin
+     ((entry_of f))::(entries t)
+     end))
+
+type table_f<'num, 'flt> = {fschema : Prims.list<field>; fcolumns : Prims.list<column<'num, 'flt>>}
+
+
+let __proj__Mktable_f__item__fschema = (fun ( projectee  :  table_f<'num, 'flt> ) -> (match (projectee) with
+| {fschema = fschema; fcolumns = fcolumns} -> begin
+     fschema
+     end))
+
+
+let __proj__Mktable_f__item__fcolumns = (fun ( projectee  :  table_f<'num, 'flt> ) -> (match (projectee) with
+| {fschema = fschema; fcolumns = fcolumns} -> begin
+     fcolumns
+     end))
+
+type data_source_f<'num, 'flt> =
+| Embedded_f of table_f<'num, 'flt>
+| Ref_f of Prims.list<WireCanon.ch>
+
+
+let uu___is_Embedded_f = (fun ( projectee  :  data_source_f<'num, 'flt> ) -> (match (projectee) with
+| Embedded_f (t) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Embedded_f__item__t = (fun ( projectee  :  data_source_f<'num, 'flt> ) -> (match (projectee) with
+| Embedded_f (t) -> begin
+     t
+     end))
+
+
+let uu___is_Ref_f = (fun ( projectee  :  data_source_f<'num, 'flt> ) -> (match (projectee) with
+| Ref_f (r) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Ref_f__item__r = (fun ( projectee  :  data_source_f<'num, 'flt> ) -> (match (projectee) with
+| Ref_f (r) -> begin
+     r
+     end))
+
+
+let strip = (fun ( t  :  table_f<'num, 'flt> ) -> {schema = (entries t.fschema); columns = t.fcolumns})
+
+
+let validate_f = (fun ( h  :  host<'num, 'flt> ) ( t  :  table_f<'num, 'flt> ) -> (validate h (strip t)))
+
+
+let stated = (fun ( k  :  Prims.list<WireCanon.ch> ) ( v  :  FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>> ) -> (match (v) with
+| FStar_Pervasives_Native.Some (s) -> begin
+     (((k), (WireCanon.JStr (s))))::[]
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let rec ext_json = (fun ( m  :  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> ) -> (match (m) with
+| [] -> begin
+     []
+     end
+| ((k, v))::t -> begin
+     (((k), (WireCanon.JStr (v))))::(ext_json t)
+     end))
+
+
+let unit_text : FStar_Pervasives_Native.option<Unit.uom>  ->  FStar_Pervasives_Native.option<Prims.list<WireCanon.ch>> = (fun ( u  :  FStar_Pervasives_Native.option<Unit.uom> ) -> (match (u) with
+| FStar_Pervasives_Native.Some (u1) -> begin
+     FStar_Pervasives_Native.Some ((unit_text_of (Unit.render u1)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let field_json = (fun ( f  :  field ) -> WireCanon.JObj ((WireCanon.app ((((name_key), (WireCanon.JStr (f.fname))))::(((type_key), (WireCanon.JStr ((tag f.fty)))))::[]) (WireCanon.app (stated unit_key (unit_text f.funit)) (WireCanon.app (stated label_key f.flabel) (WireCanon.app (stated description_key f.fdesc) (match (f.fext) with
+| [] -> begin
+     []
+     end
+| uu___ -> begin
+     (((ext_key), (WireCanon.JObj ((ext_json f.fext)))))::[]
+     end)))))))
+
+
+let rec fields_json = (fun ( fs  :  Prims.list<field> ) -> (match (fs) with
+| [] -> begin
+     []
+     end
+| (f)::t -> begin
+     ((field_json f))::(fields_json t)
+     end))
+
+
+let encode_json_f = (fun ( h  :  host<'num, 'flt> ) ( src  :  data_source_f<'num, 'flt> ) -> (match (src) with
+| Embedded_f (t) -> begin
+     WireCanon.JObj ((((schema_key), (WireCanon.JArr ((fields_json t.fschema)))))::(((columns_key), (WireCanon.JObj ((columns_json h (entries t.fschema) t.fcolumns)))))::[])
+     end
+| Ref_f (r) -> begin
+     WireCanon.JObj ((((schema_key), (WireCanon.JArr ([]))))::(((ref_key), (WireCanon.JStr (r))))::[])
+     end))
+
+
+let optional_text = (fun ( k  :  Prims.list<WireCanon.ch> ) ( el  :  WireCanon.jval<'num, 'flt> ) -> (match ((try_prop k el)) with
+| FStar_Pervasives_Native.None -> begin
+     Good (FStar_Pervasives_Native.None)
+     end
+| FStar_Pervasives_Native.Some (WireCanon.JStr (s)) -> begin
+     Good (FStar_Pervasives_Native.Some (s))
+     end
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     Bad (MalformedShape)
+     end))
+
+
+let rec decode_ext = (fun ( f  :  field ) ( ms  :  Prims.list<(Prims.list<WireCanon.ch> * WireCanon.jval<'num, 'flt>)> ) -> (match (ms) with
+| [] -> begin
+     Good (f)
+     end
+| ((k, v))::rest -> begin
+     (match (v) with
+| WireCanon.JStr (s) -> begin
+     (decode_ext (with_ext k s f) rest)
+     end
+| uu___ -> begin
+     Bad (MalformedShape)
+     end)
+     end))
+
+
+let decode_field_tail = (fun ( el  :  WireCanon.jval<'num, 'flt> ) ( f  :  field ) -> (match ((optional_text label_key el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (l) -> begin
+     (
+
+let f1 = (match (l) with
+| FStar_Pervasives_Native.Some (l1) -> begin
+     (with_label l1 f)
+     end
+| FStar_Pervasives_Native.None -> begin
+     f
+     end)
+in (match ((optional_text description_key el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (d) -> begin
+     (
+
+let f2 = (match (d) with
+| FStar_Pervasives_Native.Some (d1) -> begin
+     (with_description d1 f1)
+     end
+| FStar_Pervasives_Native.None -> begin
+     f1
+     end)
+in (match ((try_prop ext_key el)) with
+| FStar_Pervasives_Native.None -> begin
+     Good (f2)
+     end
+| FStar_Pervasives_Native.Some (WireCanon.JObj (ms)) -> begin
+     (decode_ext f2 ms)
+     end
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     Bad (MalformedShape)
+     end))
+     end))
+     end))
+
+
+let decode_field = (fun ( el  :  WireCanon.jval<'num, 'flt> ) -> (match ((decode_schema_entry el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (n, ty) -> begin
+     (
+
+let f0 = (field_create n ty)
+in (match ((optional_text unit_key el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (FStar_Pervasives_Native.None) -> begin
+     (decode_field_tail el f0)
+     end
+| Good (FStar_Pervasives_Native.Some (text)) -> begin
+     (match ((Unit.parse (unit_text_to text))) with
+| Unit.Ok (u) -> begin
+     (decode_field_tail el (with_unit u f0))
+     end
+| Unit.Refused (uu___) -> begin
+     Bad (MalformedShape)
+     end)
+     end))
+     end))
+
+
+let rec decode_fields = (fun ( xs  :  Prims.list<WireCanon.jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     Good ([])
+     end
+| (x)::rest -> begin
+     (match ((decode_field x)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (f) -> begin
+     (match ((decode_fields rest)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (fs) -> begin
+     Good ((f)::fs)
+     end)
+     end)
+     end))
+
+
+let decode_schema_f = (fun ( el  :  WireCanon.jval<'num, 'flt> ) -> (match ((as_arr el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (xs) -> begin
+     (decode_fields xs)
+     end))
+
+
+let decode_json_f = (fun ( h  :  host<'num, 'flt> ) ( el  :  WireCanon.jval<'num, 'flt> ) -> (
+
+let schema_r = (match ((try_prop schema_key el)) with
+| FStar_Pervasives_Native.Some (schema_el) -> begin
+     (match ((decode_schema_f schema_el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (fs) -> begin
+     Good (FStar_Pervasives_Native.Some (fs))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Good (FStar_Pervasives_Native.None)
+     end)
+in (match (schema_r) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (schema_opt) -> begin
+     (match ((try_prop ref_key el)) with
+| FStar_Pervasives_Native.Some (ref_el) -> begin
+     (match ((as_str ref_el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (r) -> begin
+     Good (Ref_f (r))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (match ((get_field columns_key el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (columns_el) -> begin
+     (match ((unique_column_keys columns_el)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (columns_obj) -> begin
+     (match (schema_opt) with
+| FStar_Pervasives_Native.None -> begin
+     Bad (OutOfModel)
+     end
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (match ((decode_columns h columns_obj (entries fs))) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (cs) -> begin
+     (
+
+let t = {fschema = fs; fcolumns = cs}
+in (match ((validate_f h t)) with
+| Bad (e) -> begin
+     Bad (e)
+     end
+| Good (uu___) -> begin
+     Good (Embedded_f (t))
+     end))
+     end)
+     end)
+     end)
+     end)
+     end)
+     end)))
+
+
+let normal_table_f = (fun ( h  :  host<'num, 'flt> ) ( t  :  table_f<'num, 'flt> ) -> {fschema = t.fschema; fcolumns = (normal_columns h (entries t.fschema) t.fcolumns)})
+
+
+let rec ext_keys : Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)>  ->  Prims.list<Prims.list<WireCanon.ch>> = (fun ( m  :  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> ) -> (match (m) with
+| [] -> begin
+     []
+     end
+| ((k, uu___))::t -> begin
+     (k)::(ext_keys t)
+     end))
+
+
+let rec ext_distinct : Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)>  ->  Prims.bool = (fun ( m  :  Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)> ) -> (match (m) with
+| [] -> begin
+     true
+     end
+| ((k, uu___))::t -> begin
+     ((not ((WireCanon.mem k (ext_keys t)))) && (ext_distinct t))
+     end))
+
+
+let field_wf : field  ->  Prims.bool = (fun ( f  :  field ) -> ((match (f.funit) with
+| FStar_Pervasives_Native.None -> begin
+     true
+     end
+| FStar_Pervasives_Native.Some (u) -> begin
+     (Unit.canonical u)
+     end) && (ext_distinct f.fext)))
+
+
+let rec fields_wf : Prims.list<field>  ->  Prims.bool = (fun ( fs  :  Prims.list<field> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| (f)::t -> begin
+     ((field_wf f) && (fields_wf t))
+     end))
+
+
+let rec all_plain : Prims.list<field>  ->  Prims.bool = (fun ( fs  :  Prims.list<field> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| (f)::t -> begin
+     ((not ((has_metadata f))) && (all_plain t))
+     end))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -1793,7 +2867,10 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::[]
+let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::({tname = "field-json-plain-is-the-entry"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field_json (field_create ((WireCanon.CPlain ("x"))::[]) IntType)) (WireCanon.JObj ((((name_key), (WireCanon.JStr ((WireCanon.CPlain ("x"))::[]))))::(((type_key), (WireCanon.JStr ((tag IntType)))))::[]))))})::({tname = "decode-field-reads-a-unit-back"; tholds = (fun ( uu___  :  unit ) -> (
+
+let f = (with_label ((WireCanon.CPlain ("s"))::[]) (with_unit Unit.km_per_h (field_create ((WireCanon.CPlain ("v"))::[]) FloatType)))
+in (Prims.op_Equals (decode_field (field_json f)) (Good (f)))))})::[]
 
 
 
