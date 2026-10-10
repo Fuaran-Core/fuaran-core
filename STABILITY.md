@@ -461,9 +461,16 @@ are **conformance-certified**, not asserted. Stable surfaces:
   `AllValid` exactly when no row is absent, `Column.mask` / `Validity.toMask` materialise the mask on
   request, and the wire writes the same all-true validity array it always did; the typed builders
   hold the `Validity` they are handed as given. The shape of `Validity` is stable from `1.0.0`:
-  adding a third case is **major**. What is NOT promised: the storage of `Dates` and `Timestamps`
-  (canonical text in this slot; Phase 422 makes them integers with a unit) — it rides the untagged
-  `1.0.0` draft and is decided before it is cut, which is why it is named here rather than frozen.
+  adding a third case is **major**. **Temporal columns are integers (Phase 422, DECISIONS.md D143)**:
+  `Dates` holds `int32` days since 1970-01-01, and `Timestamps` a `TimeUnit`, integer-valued `float64`
+  epoch seconds and, for a sub-second unit, an `int32` fraction scaled to the unit (`None` reading as
+  every fraction zero, compared materialised as a mask is); `ColumnType.TimestampType` carries the
+  unit, `timestamp` is the seconds tag and `timestamp_ms` / `_us` / `_ns` the others, and a coarser unit
+  widens into a finer one. The canonical instant text is the MINIMAL one — one text per instant
+  whatever unit holds it — and `Cell.compare` orders timestamps chronologically. Stable from `1.0.0`:
+  the two cases' shapes, the unit's four cases and their tags, and the text and order rules; a fifth
+  unit, or a change to the text or the order, is **major**. No .NET date type is storage: `DateOnly`
+  and `DateTimeOffset` are edge accessors, absent under Fable.
 - **The ownership contract of `Vector` (Phase 418, `1.0.0`)** — the type is the contract, not a
   convention over arrays. **Guaranteed:** no public member of `Vector<'T>`, of the `Vector` module or
   of the column layer writes into a vector's storage, so a vector's contents never change after

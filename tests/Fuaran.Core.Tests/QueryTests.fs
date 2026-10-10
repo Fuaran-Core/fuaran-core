@@ -709,6 +709,30 @@ let whereOrderByTests =
                   (Error(PredicateTypeMismatch("revenue", FloatType, IntType)))
                   "a literal of another type: no widening in a filter"
 
+              // Phase 422: an instant's cell type is the coarsest unit that holds it, so a timestamp
+              // literal fits a column at least as fine as its unit, and a finer literal is refused.
+              let atMs =
+                  { shaped with
+                      ResultSchema = shaped.ResultSchema @ [ "atMs", TimestampType TimeUnit.Milliseconds ] }
+
+              let register where =
+                  QueryRegistry.register { atMs with Where = where } QueryRegistry.empty
+
+              Expect.isOk
+                  (register [ ColumnPredicate.AtLeast("atMs", Timestamp "2026-06-22T17:00:00Z") ])
+                  "a whole-second literal in a millisecond column"
+
+              Expect.isOk
+                  (register [ ColumnPredicate.AtLeast("atMs", Timestamp "2026-06-22T17:00:00.5Z") ])
+                  "a millisecond literal in a millisecond column"
+
+              Expect.equal
+                  (register [ ColumnPredicate.AtLeast("at", Timestamp "2026-06-22T17:00:00.5Z") ])
+                  (Error(
+                      PredicateTypeMismatch("at", TimestampType TimeUnit.Seconds, TimestampType TimeUnit.Milliseconds)
+                  ))
+                  "a millisecond literal in a seconds column"
+
               Expect.equal
                   (refusal [ ColumnPredicate.Contains("n", "1") ] [])
                   (Error(PredicateNotApplicable("contains", "n", IntType)))

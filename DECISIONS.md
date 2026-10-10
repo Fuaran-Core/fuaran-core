@@ -109,6 +109,18 @@ integer form, and the dated pipeline in the compute benchmark corpus, are Phase 
 0.36.0 until that phase raises it. The specification and corpus vectors of the three tags are
 fuaran#2206's.
 
+**D143.8 — measured, and the `Vector<bool>` verdict.** At 100,000 rows a date column holds 4 bytes a
+row where its text held 56 (.NET) and 40 (node), and a timestamp column 8 (seconds) or 12 (a sub-second
+unit) where its text held 72 to 95 and 48 to 56; a range filter and a group-by-month over the integers
+are as fast or faster on both hosts, and a read of every CELL is slower, because the cell is text and
+is now rendered on request (the release entry carries the table). Beside it, Fable's `bool[]` measured
+as a plain JavaScript array at eight bytes a row against a `Uint8Array`'s one, with a counting read
+about twice as slow over the typed array. **Not built here**: a typed backing for one element type
+changes what `Vector.Unsafe.borrow` lends — Phase 418's contract lends the backing array as `'T[]`, and
+a `Uint8Array` is not a `bool[]` a borrower can read as one — so whether `Vector<bool>` may be backed
+differently under Fable is a decision about the ownership contract, escalated rather than taken inside
+a representation phase.
+
 ## 2026-10-10 — D142: a column's storage is an opaque immutable `Vector<'T>` per column behind the `ColumnData` union, on the `1.0.0` slot; `Column.Type` is derived from the storage; a widened cell is normalised at construction; no `Cells` fallback survives in Core; and this reverses the 2026-09-26 out-of-scope clause
 
 **Context.** `Column.Cells` was a `Cell list` (`Column.fs:23-33`): an indexed read was O(i), a present
