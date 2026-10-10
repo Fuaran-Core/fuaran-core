@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 299 claims — 218 proved across 28 models, 46 tested, 33 assumed (6 `domain-obligation`, 21 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 306 claims — 223 proved across 29 models, 47 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -659,7 +659,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 33 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 34 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -675,7 +675,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 21 rows.
+  `unscheduled` where something could and nobody has. 22 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -730,6 +730,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
 | `propagation-evaluator-total` | `premise` | — |
 | `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
+| `column-vector-is-its-contents` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -965,7 +966,7 @@ families credit are credited over nested batches as well as flat ones.
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
-| `Fuaran.Core.Column` | 85 | 6 | 53 | 3 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Column` | 85 | 8 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 149 | 1 | 102 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
@@ -983,7 +984,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 0 | 0 | 1 | 1 | 0 | 0 | 7 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1166 | 141 | 437 | 30 | 14 | 0 | 3 | 541 |
+| **Total** | 1166 | 143 | 435 | 30 | 14 | 0 | 3 | 541 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -6366,6 +6367,16 @@ suite's generative codec law asserts the literal round trip and passes because i
 builds tables already in normal form: this model's differential samples OUTSIDE the normal form and
 holds production to `normal_table`, with the literal comparison as its go-red.
 
+**Since Phase 417 the column this model describes is reached through a bridge (Phase 419).** The
+source holds a typed `Vector` and a validity mask per column, not a `Cell list`; this module keeps
+the list form, and theorem 19's `ColumnRefinement.fst` is what makes its theorems about the code
+that runs — the typed column modelled clause for clause, the map to this module's column proved a
+bijection on validated columns under which `validate` and `encodeJson` agree, and the two theorems
+above restated of the typed column. One consequence lands in this model's own differential: a
+production float or decimal column cannot hold an `Int` any more (`Column.ofCells` normalises it at
+construction), so of the three refutations above only column order still arises from production,
+and the pool's "outside the normal form" count fell from 355 to 192 at the pinned seed.
+
 ### The claims ladder, for this theorem
 
 | Row | Level | What it says |
@@ -6640,6 +6651,122 @@ question about `WriteGate`, not about this model.
    Anything about an allow-list beyond the witness above. Slot writes: no skeleton op writes one,
    and the clause is carried only because `targetsOfOne` carries it. Keyed positions and container
    capability, as for theorem 2.
+
+## Theorem 19 — the typed column is the cell-list column it replaces: a refinement that carries theorem 15's column half across the representation change (Phase 419)
+
+_(This directory's nineteenth. Phase 417 put a typed `Vector` and a validity mask behind every
+column where a `Cell list` had been, and from that commit on theorem 15's `WireColumn.fst` —
+modelled clause for clause over cells — described a column the code no longer builds. Its two
+theorems were still true of their model; whether they said anything about the shipped codec was
+the open question, and this is the cheapest sound answer: one refinement, not a re-proof.)_
+
+`ColumnRefinement.fst` models the column as `Column.fs` has held it since Phase 417, clause for
+clause: `Validity` and `Validity.isPresent`, the `ColumnData` union (one typed vector and a mask per
+case) with `Column`'s derived `Type`, `Column.cell`, `Column.toCells`, `Column.ofCells` with its
+private `storageOfCells` (the per-type `pick`, the `fill` loop, the type's zero at an absent row),
+`ColumnData.Equals` through `ColumnStorage.presentEqual`, the typed form `Table.firstUncarriableCell`
+took in that phase with `Table.validate` over it, and `ColumnCodec.columnJson`'s two walks off the
+typed storage with `encodeJson` / `tryEncode` over them. **A `Vector<'T>` is read through
+`Vector.toArray` and nothing else**: the model sees a list of the elements a vector holds — never an
+offset, a shared backing array or a borrow. The models see contents, not storage.
+
+**The map, and the four theorems.** `to_list_column` takes a typed column to theorem 15's list column
+— its name, the type its case carries, and `toCells`. Under it:
+
+- **`to_cells_of_cells`.** When `ofCells n ty cs` builds, `toCells` of what it built is
+  `WireColumn.norm_cells ty cs` — the SAME function theorem 15's round trip is stated up to, so a
+  widened `Int` is normalised at construction exactly as decode normalises it. It builds exactly when
+  every present cell's type widens into the column's, refusing otherwise as the `TypeMismatch`
+  naming the column (`of_cells_good_iff`); a list column `validate`'s clause (e) passes is therefore
+  one `ofCells` builds and reads back as its normal form (`validated_cells_build`).
+- **`of_cells_to_cells`.** For every well-formed typed column (mask and values one length),
+  `ofCells` of its `toCells` builds a column EQUAL to it under `ColumnData.Equals` — one mask, equal
+  at every present row — and the column ITSELF where the absent rows hold the type's zero
+  (`of_cells_to_cells_exact`), which every column `ofCells` or decode builds does
+  (`of_cells_wf_zeroed`). Well-formedness is NEEDED, and the witness is in the file
+  (`of_cells_to_cells_needs_wf`): a column whose mask is shorter than its values reads its tail as
+  absent and comes back with a longer mask. Together with the first theorem the map is a bijection on
+  the columns `validate` accepts, which is what lets every list-level theorem transfer.
+- **`validate_agrees`.** The typed `Table.validate` answers, on every table whose columns are
+  well-formed, what theorem 15's `validate` answers of the table's image; and a typed table it
+  accepts IS well-formed (`validate_t_good_wf`), since clause (e) names a mask of the wrong length
+  first. That clause is the one place the two validators differ, and it is reached only by a column
+  the list model cannot express — a list column has one length. The one arm the list model has and
+  the typed scan does not, a present cell outside its column's type, is proved unreachable through the
+  map: `toCells` writes a cell of the column's own type at every present row.
+- **`encode_agrees`.** `columnJson`'s walks write exactly what `cellJson` wrote over the cells, so
+  `encodeJson` agrees through the map on EVERY typed source — valid or not, well-formed or not — because
+  both walk the values' length and read the mask the same way, off its end included.
+
+**What follows, for the typed column.** `norm_cells_vacuous`: the widening half of theorem 15's normal
+form is the IDENTITY on a typed column — an `Int` cell comes only from an `Ints` column, where
+`norm_cell` changes nothing — so the normal form of a typed table moves its column ORDER and nothing
+else (`normal_table_t`, whose columns are the table's own found by schema name:
+`normal_columns_are_the_columns`). Hence **`typed_round_trip`**: for every typed table the typed
+`validate` accepts, `decode_json (encode_json_t (TEmbedded t))` is
+`Good (Embedded (to_list_table (normal_table_t t)))`; **`typed_round_trip_in_schema_order`**: when the
+table's columns are already in schema order that is `to_list_table t` itself — the LITERAL round trip,
+which theorem 15 refuted three ways for the list column and which fails one way for the typed column;
+and **`typed_decode_image_is_valid`**: a well-formed typed table whose image is what decode answered is
+one the typed `validate` accepts. Each is theorem 15's statement composed with the agreements above.
+
+**The differential, and its go-red.** The extracted refinement runs beside the shipped column over drawn
+cell lists of every type with nulls and widened cells — `Column.ofCells` beside `of_cells` (the verdict,
+the refusal's class, the cells of what each built, the masks, and the model's `Equals` between the two),
+`Column.toCells` beside `to_cells` of the production column read through its typed reader and
+`Vector.toArray` — and over theorem 15's table pools, `Table.validate` beside `validate_t` and
+`encodeJson` beside `encode_json_t`, both over the typed column, with `validate_t` also held to the list
+model's `validate` of the table's image (the theorem evaluated on the extracted code). The go-red is the
+bridge that DROPS the widening normalisation — `toCells (ofCells cs)` held to `cs` itself — which loses
+on exactly the draws holding an `Int` in a float or decimal column, and on no other.
+
+**What is out of the model's reach, and where it lives.** The ownership contract — that a vector's
+contents never change after construction, no public member writing, `adopt` taking a fresh array,
+`Vector.Unsafe.borrow` lending under a written rule — cannot be stated in a model that has no mutation
+to speak of; it is Phase 418's, in `STABILITY.md` and in the consumer-runnable law family that hashes
+every column before and after an operation and names the column whose bytes moved. The ladder carries
+it as the assumed row `column-vector-is-its-contents`, with the element identity (`VectorElements.equal`
+reading every NaN as one value and `-0.0` as `0.0`, where the model's `=` is its carrier's) beside it.
+The temporal encodings — dates and timestamps are canonical text in this slot — move with Phase 422,
+and their model lives in this module when they land.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** `to_cells_of_cells`, `of_cells_good_iff`,
+   `validated_cells_build`, `of_cells_to_cells`, `of_cells_to_cells_exact`, `of_cells_wf_zeroed`,
+   `of_cells_to_cells_needs_wf`, `validate_agrees`, `validate_t_good_wf`, `encode_agrees`,
+   `try_encode_agrees`, `norm_cells_vacuous`, `normal_columns_are_the_columns`,
+   `typed_decode_image_is_valid`, `typed_round_trip`, `typed_round_trip_in_schema_order`, and
+   `cell_at_is_nth_to_cells` (the O(1) read is the list read). F\* 2026.09.06, Z3 4.13.3, every query
+   3/3 under `--quake 3` at the leg's rlimit of 40, `--report_assumes error` on, no `assume`, no
+   `admit`. Default fuel, `--ifuel 2` scoped to the per-case closure lemmas, one `--fuel 2 --ifuel 1`
+   block for the exhibited witness; `--ext context_pruning` as `WireColumn` carries it. Opens
+   `WireCanon` and `WireColumn`; of the latter's proofs it takes `round_trip`,
+   `decode_image_is_valid` and `first_dup_none`. Each theorem was measured red under one perturbation,
+   one per prover run: `pick`'s widening arm writing the wrong value (`to_cells_of_cells`, at
+   `pick_float_agrees`); the model's `toCells` ignoring an absent bit (first caught at
+   `cells_of_nth`, the indexed-read lemma over the same arm `of_cells_to_cells` reads); the scan
+   reading an absent row (`validate_agrees`, at `first_uncarriable_scan`); the mask check dropped
+   (`validate_t_good_wf`, at `cells_fault_none_wf`); the stored element written at an absent row
+   (`encode_agrees`, at `values_json_agree`); `Equals` not comparing the masks
+   (`of_cells_to_cells_needs_wf`); and the typed normal form dropping a schema entry
+   (`typed_round_trip`, at `normal_columns_agree`).
+2. **Tested.** **`column-refinement-differential`** — the three `Proofs.Oracle` cases above, over
+   1,500 drawn cell lists per pool (every type reached, more than 150 widened draws, more than 400
+   with a null, more than 150 refusals in the wild pool, all `TypeMismatch`) and theorem 15's 2,000-
+   and 3,000-table pools; plus the model's six twins under twin evaluation.
+3. **Assumed, and stated as such.** **`column-vector-is-its-contents`** (model-bridge, permanent) — a
+   vector is the list its `toArray` answers and its contents do not change after construction; the
+   element identity sampled by the differential, the ownership contract held by Phase 418's law family.
+   It inherits theorem 15's **`column-int-layouts`** and **`column-codec-abstractions`** unchanged:
+   the host record is the same record.
+4. **Not claimed.** Anything about the typed DECODER beyond what the differential samples: that the
+   column `decodeColumn` fills through the typed readers has `toCells` equal to the list model's
+   decoded cells is measured by theorem 15's differential (which reads every production column through
+   `Column.toCells`) and by this one's, not proved — the theorems here are stated of the list model's
+   `decode_json`, reached through `encode_agrees`. The typed builders and readers
+   (`Column.ofInts` … `Column.tryDecimals`), which check nothing and convert nothing. `Column.aggregate`.
+   Anything about a `Vector`'s storage: slices, sharing, the borrow.
 
 ## Next
 

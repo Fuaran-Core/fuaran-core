@@ -4033,6 +4033,107 @@
       "evidence": {
         "assumption": "WriteGate.targetsOf, decide and applyGated compute what TreeFrame.fst's targets_of, decide and apply_gated compute, read through the witness — sampled by Conformance.writeGateLaws"
       }
+    },
+    {
+      "id": "column-refinement-to-cells-of-cells",
+      "level": "proved",
+      "claim": "`toCells (ofCells n ty cs)` IS THE NORMAL FORM OF THE CELLS (Phase 419). `proofs/ColumnRefinement.fst` models the column Phase 417 left — `Validity`, the `ColumnData` union, `Column.toCells`, `Column.ofCells` with its per-type `pick`, `fill` loop and the type's zero at an absent row — clause for clause, every `Vector` read through `toArray`. When `ofCells` builds, the cells its column reads back are `WireColumn.norm_cells` of the cells it was handed — the SAME function the codec model's round trip is stated up to, so a widened `Int` is normalised at construction exactly as decode normalises it (`to_cells_of_cells`). It builds exactly when every present cell's type widens into the column's, and refuses otherwise as the `TypeMismatch` naming the column (`of_cells_good_iff`); so a list column `validate`'s clause (e) passes is one `ofCells` builds, and reads back as its normal form (`validated_cells_build`). Measured red with `pick`'s widening arm writing the wrong value.",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "theorem": "to_cells_of_cells",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Column.ofCells",
+          "Column.toCells"
+        ]
+      }
+    },
+    {
+      "id": "column-refinement-of-cells-to-cells",
+      "level": "proved",
+      "claim": "`ofCells n ty (toCells c)` IS `c` (Phase 419): for every well-formed typed column — its mask the values' length — `ofCells` of its `toCells` builds a column EQUAL to it under `ColumnData.Equals` (`ColumnStorage.presentEqual`, modelled: one case, one mask, equal at every present row), and is the column ITSELF where the absent rows hold the type's zero (`of_cells_to_cells_exact`), which every column `ofCells` or decode builds does (`of_cells_wf_zeroed`). With `column-refinement-to-cells-of-cells` this makes the map from the typed column to the list column a bijection on the columns `validate` accepts, which is what lets every list-level theorem transfer. Well-formedness is NEEDED and the witness is in the file: a column whose mask is shorter than its values reads its tail as absent and comes back with a longer mask (`of_cells_to_cells_needs_wf`). Measured red with the model's `toCells` ignoring an absent bit, and with `Equals` not comparing the masks.",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "theorem": "of_cells_to_cells",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Column.ofCells",
+          "Column.toCells"
+        ]
+      }
+    },
+    {
+      "id": "column-refinement-validate-agrees",
+      "level": "proved",
+      "claim": "THE TYPED `Table.validate` IS THE LIST MODEL'S, THROUGH THE MAP (Phase 419). `validate_t` is `Table.validate` as Phase 417 left it, clause for clause — (a)-(d) over a column's name, type and length, and (e) the typed `firstUncarriableCell`: a mask that is not the values' length first (`LengthMismatch`), then one scan per case at the present rows. On every typed table whose columns are well-formed it answers what `WireColumn.validate` answers of the table's image (`validate_agrees`), and a typed table it accepts IS well-formed (`validate_t_good_wf`), so the agreement covers every table either validator accepts. The one arm the list model has and the typed scan does not — a present cell outside its column's type — is proved unreachable through the map: `toCells` writes a cell of the column's own type at every present row (`first_uncarriable_agree`). Measured red with the scan reading an absent row, and with the mask check dropped.",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "theorem": "validate_agrees",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Table.validate"
+        ]
+      }
+    },
+    {
+      "id": "column-refinement-encode-agrees",
+      "level": "proved",
+      "claim": "THE TYPED ENCODER WRITES WHAT THE CELL ENCODER WROTE (Phase 419). `ColumnCodec.columnJson`'s two walks off the typed storage — the element's JSON value at a present row and the absent slot at an absent one, never what the vector holds there, and one validity bit per row — are modelled as the walks, and `encodeJson` / `tryEncode` over them; `encode_agrees` says the typed encoder's `JVal` is the list model's `encode_json` of the table's image on EVERY typed source, valid or not, well-formed or not, because both walk the values' length and read the mask the same way (`try_encode_agrees` adds the guard, on the tables the two validators agree about). Measured red with the model writing the stored element at an absent row.",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "theorem": "encode_agrees",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "ColumnCodec.encodeJson"
+        ]
+      }
+    },
+    {
+      "id": "column-refinement-ladder-transfers",
+      "level": "proved",
+      "claim": "`WireColumn`'S TWO THEOREMS, STATED OF THE TYPED COLUMN (Phase 419). The widening half of the codec model's normal form is the IDENTITY on a typed column — an `Int` cell comes only from an `Ints` column, where `norm_cell` changes nothing (`norm_cells_vacuous`) — so the normal form of a typed table moves its column ORDER and nothing else: `normal_table_t`'s columns are the table's own, found by schema name (`normal_columns_are_the_columns`). Composed with the agreements: `typed_round_trip` — for every typed table the typed `validate` accepts, `decode_json (encode_json_t (TEmbedded t))` is `Good (Embedded (to_list_table (normal_table_t t)))`; `typed_round_trip_in_schema_order` — when the columns are already in schema order that is the table itself, the LITERAL round trip, false of the list column three ways and of the typed column one; and `typed_decode_image_is_valid` — a well-formed typed table whose image is what decode answered is one the typed `validate` accepts. Measured red with the typed normal form dropping a schema entry. What stays with the differential: that the typed column production's decode builds through the typed readers has `toCells` equal to the model's decoded cells (`column-refinement-differential`).",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "theorem": "typed_round_trip",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-refinement-differential",
+      "level": "tested",
+      "claim": "The extracted refinement agrees with the shipped column over drawn columns of every type, with nulls and widened cells (Phase 419). Per drawn cell list: `Column.ofCells` beside the model's `of_cells` — the verdict, the refusal's class and column, and the cells of what each built; `Column.toCells` beside the model's `to_cells` of the production column read through its typed reader and `Vector.toArray` (the bridge the theorems are stated over). Per drawn table (the Phase 306 pools, valid and wild): `Table.validate` beside `validate_t`, and `ColumnCodec.encodeJson` beside `encode_json_t`, both over the typed column rather than its cells. The go-red is the bridge that DROPS the widening normalisation — `toCells (ofCells cs)` held to `cs` itself rather than to `norm_cells` — which loses on exactly the draws holding an `Int` in a float or decimal column and on no other. The draws are asserted to reach every column type, nulls, widened cells and every refusal class `ofCells` has, so a pool that stopped sampling one would say so.",
+      "phase": "fuaran-core#419",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/ColumnRefinement.fst",
+        "cases": [
+          "the refinement oracle agrees with Column.ofCells and Column.toCells over drawn columns of every type, with nulls and widened cells",
+          "the typed validate and encodeJson agree with production through the refinement, over the column pools",
+          "a bridge that drops the widening normalisation loses — on exactly the widened draws"
+        ],
+        "operations": [
+          "Column.ofCells",
+          "Column.toCells",
+          "ColumnCodec.encodeJson",
+          "Table.validate"
+        ]
+      }
+    },
+    {
+      "id": "column-vector-is-its-contents",
+      "level": "assumed",
+      "claim": "A `Vector` IS WHAT ITS `toArray` ANSWERS, AND STAYS SO (Phase 419). The refinement model reads every vector through `Vector.toArray` — a list of its elements — and sees no storage: no offset, no sharing, no backing array, and no mutation to speak of. Two things are therefore assumed rather than proved. That the read is faithful: `toArray`, `Length` and the indexer agree, which the element identity `VectorElements.equal` (every NaN one value, `-0.0` equal to `0.0`) qualifies and the differential samples with the host record's other fields. And that the contents never change after construction — no public member of `Vector` writes, `adopt` takes a fresh array, `Vector.Unsafe.borrow` lends under a written rule — which is out of the model's reach: the ownership contract is Phase 418's, stated in `STABILITY.md` and held by the consumer-runnable law family that hashes every column before and after an operation and names the column whose bytes moved. Permanent: a model of mutation is a model of a different language.",
+      "phase": "fuaran-core#419",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "a Vector is the list its toArray answers and its contents do not change after construction — the element identity sampled by the differential, the ownership contract held by Phase 418's law family"
+      }
     }
   ]
 }
