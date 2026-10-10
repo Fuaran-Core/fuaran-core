@@ -128,7 +128,11 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  match OpStream.toJsonl sw recs |> OpStream.fromJsonl sw with
+                  match
+                      OpStream.toJsonl sw recs
+                      |> OpStream.fromJsonl sw
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Ok restored ->
                       Expect.equal restored recs "records (typed actor included) survive the round-trip"
                       Expect.isTrue (OpStream.verifyChain h sw restored) "restored chain still verifies"
@@ -174,7 +178,10 @@ let tests =
                   // a pre-320 file on disk: bare-string actors
                   let file = toLegacyJsonl legacy
 
-                  match OpStream.fromJsonlLegacyActor sw file with
+                  match
+                      OpStream.fromJsonlLegacyActor sw file
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Ok read ->
                       Expect.equal read legacy "the legacy reader lifts each bare-string actor to Human"
 

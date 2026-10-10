@@ -450,7 +450,7 @@ let tests =
               Expect.stringContains text "\\u000a" "the line carries the canonical spelling"
               Expect.isFalse (text.Contains "\\n") "and never the short form"
 
-              match OpStream.fromJsonlVerified h sw text with
+              match OpStream.fromJsonlVerified h sw text |> Result.mapError StreamLoadFault.toString with
               | Ok back -> Expect.equal back recs "round-trip is exact and the chain verifies"
               | Error e -> failtestf "fromJsonlVerified: %s" e
 
@@ -470,7 +470,7 @@ let tests =
               Expect.stringContains text "\\u000d" "the node line carries the canonical spelling"
               Expect.isFalse (text.Contains "\\r") "and never the short form"
 
-              match Dag.fromJsonlVerified h sw text with
+              match Dag.fromJsonlVerified h sw text |> Result.mapError Dag.loadFaultToString with
               | Ok back -> Expect.equal back dag "round-trip is exact and the DAG verifies"
               | Error e -> failtestf "Dag.fromJsonlVerified: %s" e
 

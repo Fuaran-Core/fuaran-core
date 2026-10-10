@@ -882,8 +882,8 @@ attestation remain host-side behind the `IAttestationSink` seam, exactly as befo
 
 Integrity is also **opt-in on load**: `OpStream.fromJsonl` / `Dag.fromJsonl` decode *structurally*
 and do not verify — a tampered, dangling-parent, or cyclic input decodes to a clean `Ok`. Use
-`fromJsonlVerified` (Phase 13) to gate the load on `verifyChain` / `verifyDag`, or call the verifier
-explicitly before trusting a decoded stream/DAG.
+`fromJsonlVerified` (Phase 13; `Dag.loadLanesVerified` for lanes) or verify before trusting. Every load
+answers a typed `StreamLoadFault` from `1.0.0`: a break first, then `Undecodable` ops (Phase 416, D146).
 
 **Compaction reads the boundary, it does not check it — verify, then compact (Phase 227).**
 `OpStream.Snapshots.compact`, in either mode and under any config, reads the boundary record's hash

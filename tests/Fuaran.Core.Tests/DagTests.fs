@@ -80,7 +80,10 @@ let tests =
               let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built
               let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3 |> Reference.built
 
-              match Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4) with
+              match
+                  Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4)
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Ok d4' ->
                   Expect.equal d4'.Nodes d4.Nodes "round-trip preserves every node"
                   Expect.isTrue (Dag.verifyDag h sw d4') "the decoded DAG re-verifies"
@@ -100,7 +103,7 @@ let tests =
 
           testCase "a malformed line is a named Error, not an exception"
           <| fun _ ->
-              match Dag.fromJsonl sw "{ not json" with
+              match Dag.fromJsonl sw "{ not json" |> Result.mapError Dag.loadFaultToString with
               | Error e -> Expect.stringContains e "line 1" "the Error names the offending line"
               | Ok _ -> failtest "expected a named Error"
 
@@ -111,7 +114,7 @@ let tests =
                   + sw.Encode(Inc 1)
                   + "}"
 
-              match Dag.fromJsonl sw line with
+              match Dag.fromJsonl sw line |> Result.mapError Dag.loadFaultToString with
               | Ok dag -> Expect.isFalse (Dag.verifyDag h sw dag) "a missing parent breaks verifyDag"
               | Error e -> failtestf "structural parse should succeed: %s" e
 
@@ -125,11 +128,17 @@ let tests =
                   + sw.Encode(Inc 1)
                   + "}"
 
-              match Dag.fromJsonl sw (node (Actor.encode (Human "ann"))) with
+              match
+                  Dag.fromJsonl sw (node (Actor.encode (Human "ann")))
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Ok dag -> Expect.equal (Map.find "n" dag.Nodes).Actor (Human "ann") "a human actor decodes as Human"
               | Error e -> failtestf "a known kind must decode: %s" e
 
-              match Dag.fromJsonl sw (node (Actor.encode (Agent("m", "v", "bot")))) with
+              match
+                  Dag.fromJsonl sw (node (Actor.encode (Agent("m", "v", "bot"))))
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Ok dag ->
                   Expect.equal (Map.find "n" dag.Nodes).Actor (Agent("m", "v", "bot")) "an agent actor decodes as Agent"
               | Error e -> failtestf "a known kind must decode: %s" e
@@ -143,13 +152,19 @@ let tests =
                   + sw.Encode(Inc 1)
                   + "}"
 
-              match Dag.fromJsonl sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}") with
+              match
+                  Dag.fromJsonl sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}")
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e ->
                   Expect.stringContains e "line 1" "names the failing line"
                   Expect.stringContains e "unknown actor kind \"service\"" "names the kind it does not know"
               | Ok dag -> failtestf "an unknown kind must not decode, got %A" dag
 
-              match Dag.fromJsonl sw (node "{\"id\":\"ann\"}") with
+              match
+                  Dag.fromJsonl sw (node "{\"id\":\"ann\"}")
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e -> Expect.stringContains e "no kind" "a kind-less actor is refused too, not read as Human"
               | Ok dag -> failtestf "a kind-less actor must not decode, got %A" dag
 
@@ -169,7 +184,7 @@ let tests =
               let bLine =
                   (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
 
-              match Dag.fromJsonlVerified h sw bLine with
+              match Dag.fromJsonlVerified h sw bLine |> Result.mapError Dag.loadFaultToString with
               | Error e -> Expect.stringContains e "parent" "the load is gated on verifyDag (missing parent)"
               | Ok _ -> failtest "expected the dangling-parent DAG to be refused on load"
 
@@ -273,7 +288,7 @@ let tests =
               let bLine =
                   (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
 
-              match Dag.fromJsonlVerified h sw bLine with
+              match Dag.fromJsonlVerified h sw bLine |> Result.mapError Dag.loadFaultToString with
               | Error e ->
                   Expect.equal
                       e
@@ -469,7 +484,10 @@ let refusalTests =
                   + sw.Encode(Inc 0)
                   + "}"
 
-              match Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4 + "\n" + spliced) with
+              match
+                  Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4 + "\n" + spliced)
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e -> Expect.stringContains e "content-id collision" "the spliced node is refused"
               | Ok _ -> failtest "a node colliding with the merge must be refused"
 
@@ -501,7 +519,7 @@ let refusalTests =
               let good = Dag.toJsonl sw.Encode d1
 
               let refused (text: string) (expect: string) =
-                  match Dag.fromJsonl sw text with
+                  match Dag.fromJsonl sw text |> Result.mapError Dag.loadFaultToString with
                   | Error e ->
                       Expect.stringContains e "line 3:" "the line counts the blank one"
                       Expect.stringContains e expect "and names the reason"
@@ -513,7 +531,26 @@ let refusalTests =
                   (good + "\n\n" + good.Replace("\"parents\":[]", "\"parents\":[1]"))
                   "field parents is not an array of strings"
 
-              refused (good + "\n\n" + good.Replace("\"kind\":\"inc\"", "\"kind\":\"bogus\"")) "unknown op kind: bogus" ]
+              // Since Phase 416 an op the witness refuses does not stop the read, so a line repeating a
+              // held id with an op it cannot decode is what it is: a content-id collision.
+              refused (good + "\n\n" + good.Replace("\"kind\":\"inc\"", "\"kind\":\"bogus\"")) "content-id collision"
+
+              // ...and the same op under an id of its own is the one undecodable site, at its line.
+              let fresh =
+                  good
+                      .Replace("\"id\":\"" + a + "\"", "\"id\":\"n2\"")
+                      .Replace("\"kind\":\"inc\"", "\"kind\":\"bogus\"")
+
+              Expect.equal
+                  (Dag.fromJsonl sw (good + "\n\n" + fresh))
+                  (Error(
+                      StreamLoadFault.Undecodable
+                          [ { Lane = None
+                              Line = 3
+                              NodeId = "n2"
+                              Reason = "unknown op kind: bogus" } ]
+                  ))
+                  "the undecodable op is named by its line and id" ]
 
 // ---- Phase 329 — the verified append: the parent is replayed and a handed-in state that is not its
 // state is refused ----
@@ -705,13 +742,82 @@ let parentsScanTests =
                   [ "[\"" + a + "]", "unterminated string"
                     "[\"a\\qb\"]", "invalid escape \\q"
                     "[\"\\uZZZZ\"]", "invalid escape \\uZZZZ" ] do
-                  match Dag.fromJsonl sw (good + "\n" + lineWith "n2" parents) with
+                  match
+                      Dag.fromJsonl sw (good + "\n" + lineWith "n2" parents)
+                      |> Result.mapError Dag.loadFaultToString
+                  with
                   | Error e ->
                       Expect.stringContains e "line 2:" "the second line is named"
                       Expect.stringContains e reason (sprintf "and the scanner's reason, for %s" parents)
                   | Ok dag -> failtestf "a parents array %s must be refused, read %A" parents dag
 
               // the well-formed spelling of the same line reads
-              match Dag.fromJsonl sw (good + "\n" + lineWith "n2" ("[\"" + a + "\"]")) with
+              match
+                  Dag.fromJsonl sw (good + "\n" + lineWith "n2" ("[\"" + a + "\"]"))
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Ok dag -> Expect.equal (dag.Nodes |> Map.find "n2").Parents [ a ] "the parent is read"
               | Error e -> failtestf "the well-formed line must read: %s" e ]
+
+// ---- Phase 416: one DAG text written by a newer host ----
+
+[<Tests>]
+let newerDagTests =
+    let nw = OpStreamTests.Newer.witness
+    let x = Human "x"
+
+    let built r =
+        match r with
+        | Ok(c: Dag.CheckedAppend<int, OpStreamTests.Newer.NewerOp>) -> c.Id, c.Dag
+        | Error e -> failwithf "the newer host could not write: %A" e
+
+    // g; r1 = reset on g; a on r1; r2 = reset on a
+    let newerDag () =
+        let g, d1 =
+            Dag.appendChecked h nw x (OpStreamTests.Newer.Known(Inc 1)) 0 "" Dag.empty
+            |> built
+
+        let r1, d2 = Dag.appendChecked h nw x OpStreamTests.Newer.Reset 1 g d1 |> built
+
+        let a, d3 =
+            Dag.appendChecked h nw x (OpStreamTests.Newer.Known(Inc 2)) 0 r1 d2 |> built
+
+        let r2, d4 = Dag.appendChecked h nw x OpStreamTests.Newer.Reset 2 a d3 |> built
+        d4, [ r1; r2 ]
+
+    testList
+        "Dag loads type their faults (Phase 416)"
+        [ testCase "an intact DAG holding ops this witness does not know is Undecodable, naming every one in line order"
+          <| fun _ ->
+              let dag, resets = newerDag ()
+              let text = Dag.toJsonl nw.Encode dag
+
+              let lineOf (id: string) =
+                  1
+                  + (text.Split('\n')
+                     |> Array.findIndex (fun l -> l.Contains("\"id\":\"" + id + "\"")))
+
+              let expected =
+                  resets
+                  |> List.map (fun id ->
+                      { Lane = None
+                        Line = lineOf id
+                        NodeId = id
+                        Reason = OpStreamTests.Newer.refusal })
+                  |> List.sortBy (fun s -> s.Line)
+
+              Expect.equal (Dag.fromJsonlVerified h sw text) (Error(StreamLoadFault.Undecodable expected)) "verified"
+              Expect.equal (Dag.fromJsonl sw text) (Error(StreamLoadFault.Undecodable expected)) "structural"
+              Expect.equal (Dag.fromJsonlVerified h nw text) (Ok dag) "the newer witness reads it"
+
+          testCase "a tampered DAG answers the break whatever else it holds"
+          <| fun _ ->
+              let dag, resets = newerDag ()
+              let text = Dag.toJsonl nw.Encode dag
+              let r1 = resets.Head
+              let tampered = text.Replace("\"id\":\"" + r1 + "\"", "\"id\":\"" + r1 + "0\"")
+              Expect.notEqual tampered text "the probe flipped the id"
+
+              match Dag.fromJsonlVerified h sw tampered with
+              | Error(StreamLoadFault.Broken _) -> ()
+              | other -> failtestf "expected the break, got %A" other ]

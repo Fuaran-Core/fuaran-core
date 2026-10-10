@@ -1140,7 +1140,7 @@ module internal DagStreamLaws =
 
         let render (l: Dag.Loaded<'Op>) = Dag.lanesToJsonl sw.Encode l, l.LaneOf
 
-        let renderLoad (r: Result<Dag.Loaded<'Op>, Dag.LaneLoadFault>) =
+        let renderLoad (r: Result<Dag.Loaded<'Op>, StreamLoadFault<Dag.LaneBreak>>) =
             r |> Result.map render |> Result.mapError (sprintf "%A")
 
         LawKit.run iterations seed (fun rng i at ->
@@ -1312,7 +1312,10 @@ module internal DagStreamLaws =
 
                     let expected =
                         Error(
-                            sprintf "%A" (Dag.LaneLoadFault.Collision(held.Id, [ store.LaneOf[held.Id]; "zz-forged" ]))
+                            sprintf
+                                "%A"
+                                (StreamLoadFault<Dag.LaneBreak>
+                                    .Collision(held.Id, [ store.LaneOf[held.Id]; "zz-forged" ]))
                         )
 
                     let got = renderLoad (Dag.loadLanes sw (rng.Shuffle(texts @ [ forged ])))

@@ -526,19 +526,20 @@ let tests =
                     Expect.equal (Dag.toJsonl sw.Encode concatenated) (Dag.toJsonl sw.Encode loaded.Dag) "concatenated"
                     Expect.equal (Dag.tryLanesToJsonl sw.Encode loaded) (Ok texts) "the checked writer agrees"
 
-                testCase "loadLanes refuses a duplicate lane, an unparseable lane and a cross-lane collision"
+                testCase "loadLanes refuses a duplicate lane, an unreadable lane and a cross-lane collision"
                 <| fun _ ->
                     let loaded = fixtureStore ()
                     let texts = Dag.lanesToJsonl sw.Encode loaded
 
                     Expect.equal
                         (Dag.loadLanes sw (texts @ [ texts[0] ]))
-                        (Error(Dag.LaneLoadFault.DuplicateLane "alpha"))
+                        (Error(StreamLoadFault.DuplicateLane "alpha"))
                         "duplicate"
 
                     match Dag.loadLanes sw (texts @ [ "zeta", "{not json" ]) with
-                    | Error(Dag.LaneLoadFault.Unparseable("zeta", _)) -> ()
-                    | other -> failtestf "expected Unparseable zeta, got %A" other
+                    | Error(StreamLoadFault.Unreadable(Some "zeta", f)) ->
+                        Expect.equal f.Line 1 "the typed fault names the lane's line"
+                    | other -> failtestf "expected Unreadable zeta, got %A" other
 
                     let some =
                         loaded.Dag.Nodes
@@ -558,7 +559,7 @@ let tests =
 
                     Expect.equal
                         (Dag.loadLanes sw (texts @ [ forged ]))
-                        (Error(Dag.LaneLoadFault.Collision(some.Id, [ "aardvark"; "beta" ])))
+                        (Error(StreamLoadFault.Collision(some.Id, [ "aardvark"; "beta" ])))
                         "a different node under one id"
 
                 testCase "verifyLanes names the lane of the earliest faulty node"
@@ -817,3 +818,112 @@ let laneLawTests =
                   |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.laneLaws"))
 
               Expect.isFalse guard.Passed "the lane-shape guard is red" ]
+
+// ---- Phase 416: a lane store written by a newer host ----
+
+/// Two lanes written by the newer host (`OpStreamTests.Newer`): alpha holds counter ops only; beta
+/// holds one `reset` this build's witness does not know, with a counter op on top of it. Answers the
+/// store and the reset's node id.
+let private newerStore () =
+    let nw = OpStreamTests.Newer.witness
+
+    let mutable store: Dag.Loaded<OpStreamTests.Newer.NewerOp> =
+        { Dag = Dag.empty; LaneOf = Map.empty }
+
+    let mutable tips: Map<string, string> = Map.empty
+
+    let write lane op (parents: string list) =
+        let id, s = Dag.appendOnLane h nw (Human lane) op parents lane store |> ok
+        store <- s
+        tips <- Map.add lane id tips
+        id
+
+    let g = write "alpha" (OpStreamTests.Newer.Known(Inc 1)) []
+    write "beta" (OpStreamTests.Newer.Known(Inc 2)) [ g ] |> ignore
+    let reset = write "beta" OpStreamTests.Newer.Reset [ tips["beta"] ]
+    write "beta" (OpStreamTests.Newer.Known(Inc 3)) [ reset ] |> ignore
+    write "alpha" (OpStreamTests.Newer.Known(Inc 4)) [ tips["alpha"] ] |> ignore
+    store, reset
+
+/// The 1-based line of `text` holding node `id`.
+let private lineOfNode (text: string) (id: string) =
+    1
+    + (text.Split('\n')
+       |> Array.findIndex (fun l -> l.Contains("\"id\":\"" + id + "\"")))
+
+[<Tests>]
+let newerStoreTests =
+    testList
+        "a lane store written by a newer host (Phase 416)"
+        [ testCase "one op kind this witness does not know loads to Undecodable, naming that site and only it"
+          <| fun _ ->
+              let store, reset = newerStore ()
+              let texts = Dag.lanesToJsonl OpStreamTests.Newer.witness.Encode store
+              let beta = texts |> List.find (fun (l, _) -> l = "beta") |> snd
+
+              let site =
+                  { Lane = Some "beta"
+                    Line = lineOfNode beta reset
+                    NodeId = reset
+                    Reason = OpStreamTests.Newer.refusal }
+
+              Expect.equal (Dag.loadLanesVerified h sw texts) (Error(StreamLoadFault.Undecodable [ site ])) "verified"
+              Expect.equal (Dag.loadLanes sw texts) (Error(StreamLoadFault.Undecodable [ site ])) "structural"
+
+              Expect.equal
+                  (Dag.loadLanesVerified h sw texts |> Result.mapError Dag.laneLoadFaultToString)
+                  (Error(sprintf "lane beta: line %d: %s (position 0)" site.Line OpStreamTests.Newer.refusal))
+                  "the site renders with its lane"
+
+              // the newer host reads its own store, verified and attributed
+              let back = Dag.loadLanesVerified h OpStreamTests.Newer.witness texts |> ok
+              Expect.equal back.LaneOf store.LaneOf "the newer witness reads it"
+
+          testCase "the same store with one byte flipped in a content id answers the chain break, not Undecodable"
+          <| fun _ ->
+              let store, reset = newerStore ()
+              let texts = Dag.lanesToJsonl OpStreamTests.Newer.witness.Encode store
+
+              let flipped =
+                  reset.Substring(0, reset.Length - 1) + (if reset.EndsWith "0" then "1" else "0")
+
+              let tampered =
+                  texts
+                  |> List.map (fun (lane, text) ->
+                      lane, text.Replace("\"id\":\"" + reset + "\"", "\"id\":\"" + flipped + "\""))
+
+              Expect.notEqual tampered texts "the probe flipped a byte"
+
+              match Dag.loadLanesVerified h sw tampered with
+              | Error(StreamLoadFault.Broken lb) -> Expect.equal lb.Lane "beta" "the break is in the lane holding it"
+              | other -> failtestf "expected the chain break, got %A" other
+
+              // a structural load cannot see the break, and still names the op it could not decode
+              match Dag.loadLanes sw tampered with
+              | Error(StreamLoadFault.Undecodable [ s ]) -> Expect.equal s.NodeId flipped "the stored id"
+              | other -> failtestf "expected Undecodable from the structural load, got %A" other
+
+          testCase "loadLanesVerified answers what loadLanes then verifyLanes answer on a decodable store"
+          <| fun _ ->
+              let loaded = fixtureStore ()
+              let texts = Dag.lanesToJsonl sw.Encode loaded
+              let verified = Dag.loadLanesVerified h sw texts |> ok
+              Expect.equal verified.LaneOf loaded.LaneOf "the attribution"
+              Expect.equal verified.Dag.Nodes loaded.Dag.Nodes "the nodes"
+
+              let victim =
+                  loaded.Dag.Nodes
+                  |> Map.toList
+                  |> List.find (fun (id, _) -> loaded.LaneOf[id] = "gamma")
+                  |> fst
+
+              let tampered =
+                  texts
+                  |> List.map (fun (lane, text) ->
+                      lane, text.Replace("\"id\":\"" + victim + "\"", "\"id\":\"" + victim + "x\""))
+
+              let viaVerify = Dag.loadLanes sw tampered |> ok |> Dag.verifyLanes h sw
+
+              match Dag.loadLanesVerified h sw tampered, viaVerify with
+              | Error(StreamLoadFault.Broken lb), Error b -> Expect.equal lb b "the same break"
+              | other -> failtestf "expected both to break, got %A" other ]

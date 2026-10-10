@@ -579,7 +579,10 @@ let tests =
                         let recs =
                             OpStream.appendChainOnly OpStream.defaultHash w.Encode actor (Counter.Inc 1) []
 
-                        match OpStream.fromJsonl w (OpStream.toJsonl w recs) with
+                        match
+                            OpStream.fromJsonl w (OpStream.toJsonl w recs)
+                            |> Result.mapError StreamLoadFault.toString
+                        with
                         | Error e -> Expect.stringContains e "the actor in actor has an empty id" "the refusal names it"
                         | Ok _ -> failtestf "an empty %A was read back" actor
 

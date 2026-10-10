@@ -97,6 +97,97 @@ module JsonlFault =
     let toString (f: JsonlFault) : string =
         sprintf "line %d: %s (position %d)" f.Line (reasonText f.Reason) f.Position
 
+/// One stored op a stream load read but its witness could not decode (Phase 416): where it sits and
+/// what the witness said. Every other part of its line parsed, and the op's text is exactly what the
+/// store holds.
+type UndecodableOp =
+    {
+        /// The lane whose file holds the op, or `None` for a load of one text.
+        Lane: string option
+        /// 1-based line of that text, counted over every line, blank lines included — what an editor
+        /// shows.
+        Line: int
+        /// The content id the store gives the op: a DAG node's id, or a linear record's stored `hash`.
+        NodeId: string
+        /// The witness's own `Decode` error, verbatim.
+        Reason: string
+    }
+
+/// Why a stream load refused (Phase 416) — the one answer every JSONL op-stream load in
+/// `Fuaran.Core.OpStream` and `Fuaran.Core.OpStream.Dag` gives, where each used to give a string.
+/// `'Break` is the integrity fault of the stream the load reads: `ChainBreak` for a linear stream,
+/// `DagBreak` for a DAG, `Dag.LaneBreak` for a lane store. A structural load (one that does not
+/// verify) never answers `Broken`.
+///
+/// The cases separate the three things a host must tell apart. `Unreadable`, `DuplicateLane`,
+/// `Collision` and `UnreadableCheckpoint` say the bytes are not a store. `Broken` says they are a
+/// store that does not verify: damage. `Undecodable` says every line parsed, every content id and
+/// parent verified (on a verifying load), and the only thing wrong is that the witness could not
+/// decode some ops: the signature of a store written by a newer host, whose op vocabulary this build
+/// predates. A load answers the first that holds in that order, so a decode failure in a store that
+/// is also damaged is not reported beside the damage.
+[<RequireQualifiedAccess>]
+type StreamLoadFault<'Break> =
+    /// A line the one scanner, or the record reader over it, refused: the lane whose text holds it
+    /// (`None` for a load of one text) and the fault, by its line.
+    | Unreadable of lane: string option * fault: JsonlFault
+    /// The stream parsed and does not verify: the first break, exactly as the stream's own walker
+    /// reports it.
+    | Broken of 'Break
+    /// The stream parsed (and, on a verifying load, verified) and the witness refused one or more ops.
+    /// EVERY such op, in lane and then line order.
+    | Undecodable of sites: UndecodableOp list
+    /// Two of the lane texts handed to a lane load carry one lane id.
+    | DuplicateLane of lane: string
+    /// Two lanes hold one content id for different content (parents modulo order, actor or op): the
+    /// node and the two lanes, sorted ordinally.
+    | Collision of nodeId: string * lanes: string list
+    /// A line of a DAG's checkpoint sidecar was refused: the fault, by its sidecar line.
+    | UnreadableCheckpoint of fault: JsonlFault
+
+/// Render a `StreamLoadFault` (Phase 416). Each case renders as the string the load answered before
+/// the fault was typed, where it answered one, so a host that printed the message keeps its bytes.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module StreamLoadFault =
+
+    /// One undecodable op as `line N: <the witness's reason> (position 0)` — the bytes a JSONL reader
+    /// gave a witness decode `Error` before Phase 416 — prefixed `lane L: ` when it has a lane.
+    let siteText (s: UndecodableOp) : string =
+        let at = sprintf "line %d: %s (position 0)" s.Line s.Reason
+
+        match s.Lane with
+        | Some lane -> "lane " + lane + ": " + at
+        | None -> at
+
+    /// The fault as text, with `renderBreak` rendering a `Broken` stream's break. A load of one text
+    /// renders `Unreadable` as `JsonlFault.toString` and a single undecodable op as `siteText`, the
+    /// pre-416 bytes; several undecodable ops are their `siteText`s joined by `; `.
+    let toStringWith (renderBreak: 'Break -> string) (f: StreamLoadFault<'Break>) : string =
+        match f with
+        | StreamLoadFault.Unreadable(None, fault) -> JsonlFault.toString fault
+        | StreamLoadFault.Unreadable(Some lane, fault) -> "lane " + lane + ": " + JsonlFault.toString fault
+        | StreamLoadFault.Broken b -> renderBreak b
+        | StreamLoadFault.Undecodable sites -> sites |> List.map siteText |> String.concat "; "
+        | StreamLoadFault.DuplicateLane lane -> "lane " + lane + " is given twice"
+        | StreamLoadFault.Collision(nodeId, lanes) ->
+            "node "
+            + nodeId
+            + " is held with different content by lanes "
+            + String.concat ", " lanes
+        | StreamLoadFault.UnreadableCheckpoint fault -> "checkpoint sidecar: " + JsonlFault.toString fault
+
+    /// A linear stream load's fault as text — `OpStream.fromJsonlVerified`'s message for a break,
+    /// `OpStream.fromJsonlVerified: chain breaks at record N — <reason>`, byte for byte as before
+    /// Phase 416.
+    let toString (f: StreamLoadFault<ChainBreak>) : string =
+        toStringWith
+            (fun (b: ChainBreak) ->
+                sprintf
+                    "OpStream.fromJsonlVerified: chain breaks at record %d — %s"
+                    b.Index
+                    (ChainBreakReason.toString b.Reason))
+            f
+
 /// WHY a JSONL writer refused to embed a raw span (Phase 301). A writer embeds a domain encoding —
 /// an op, a captured value, a snapshot's state — verbatim, and the reader hands the decoder the
 /// value's exact span; so the line round-trips only when the encoding IS one JSON value that sits on
@@ -852,18 +943,20 @@ module internal OpStreamJsonl =
 
     /// The records-and-snapshot reader, parameterised on how the `actor` member decodes — the
     /// canonical typed object, or the legacy bare string. One snapshot line is admitted, and only as
-    /// the first line of the stream (Phase 296); a second, or one after a record, is refused.
+    /// the first line of the stream (Phase 296); a second, or one after a record, is refused. Each
+    /// record comes with the 1-based line that holds it.
     let private scanJsonlWithSnapshots
         (actorOf: JsonlLine -> Result<Actor, JsonlFault>)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<OpRecord<'Op> list * string list, JsonlFault> =
+        : Result<(int * OpRecord<'Op>) list * string list, JsonlFault> =
         text
         |> Jsonl.scanRecords (fun line ->
             if isSnapshotLine line then
                 Ok(Choice2Of2 line)
             else
-                recordOf actorOf w line |> Result.map Choice1Of2)
+                recordOf actorOf w line
+                |> Result.map (fun r -> Choice1Of2(Jsonl.lineNumber line, r)))
         |> bindR (fun items ->
             let rec go (first: bool) recs snaps =
                 function
@@ -880,34 +973,93 @@ module internal OpStreamJsonl =
 
             go true [] [] items)
 
+    /// The witness a load reads through (Phase 416): it never refuses, carrying each op's stored text
+    /// beside the real witness's answer, so a decode failure stops neither the scan nor the
+    /// verification. It encodes a decoded op by the real witness, as verification always has, and an
+    /// undecoded one as its stored text — the bytes the checked writer embedded verbatim, so the
+    /// content id still recomputes over exactly what was hashed.
+    let private carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
+        { Apply = fun _ s -> Ok s
+          Encode =
+            fun (raw, decoded) ->
+                match decoded with
+                | Ok op -> w.Encode op
+                | Error _ -> raw
+          Decode = fun raw -> Ok(raw, w.Decode raw) }
+
+    /// The records of a carried read, decoded — or EVERY record the witness refused, by line and
+    /// stored hash.
+    let private settle
+        (reads: (int * OpRecord<string * Result<'Op, string>>) list)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
+        let decoded =
+            reads
+            |> List.map (fun (line, r) ->
+                match snd r.Op with
+                | Ok op ->
+                    Ok
+                        { Seq = r.Seq
+                          Actor = r.Actor
+                          Op = op
+                          PrevHash = r.PrevHash
+                          Hash = r.Hash }
+                | Error why ->
+                    Error
+                        { Lane = None
+                          Line = line
+                          NodeId = r.Hash
+                          Reason = why })
+
+        match
+            decoded
+            |> List.choose (function
+                | Error site -> Some site
+                | Ok _ -> None)
+        with
+        | [] ->
+            Ok(
+                decoded
+                |> List.choose (function
+                    | Ok r -> Some r
+                    | Error _ -> None)
+            )
+        | sites -> Error(StreamLoadFault.Undecodable sites)
+
+    let private readCarried
+        (actorOf: JsonlLine -> Result<Actor, JsonlFault>)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        =
+        scanJsonlWithSnapshots actorOf (carry w) text
+        |> Result.mapError (fun f -> StreamLoadFault.Unreadable(None, f))
+
     let fromJsonlWithSnapshots
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<OpRecord<'Op> list * string list, string> =
-        scanJsonlWithSnapshots (Jsonl.actorField "actor") w text
-        |> Result.mapError JsonlFault.toString
+        : Result<OpRecord<'Op> list * string list, StreamLoadFault<ChainBreak>> =
+        readCarried (Jsonl.actorField "actor") w text
+        |> bindR (fun (reads, snaps) -> settle reads |> Result.map (fun recs -> recs, snaps))
 
-    let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
+    let fromJsonl
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         fromJsonlWithSnapshots w text |> Result.map fst
 
-    let fromJsonlLegacyActor (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
-        scanJsonlWithSnapshots (fun line -> Jsonl.stringField "actor" line |> Result.map Actor.ofLegacyString) w text
-        |> Result.map fst
-        |> Result.mapError JsonlFault.toString
+    let fromJsonlLegacyActor
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
+        readCarried (fun line -> Jsonl.stringField "actor" line |> Result.map Actor.ofLegacyString) w text
+        |> bindR (fst >> settle)
 
     let fromJsonlVerified
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<OpRecord<'Op> list, string> =
-        fromJsonl w text
-        |> Result.bind (fun recs ->
-            match firstChainBreak hashFn w recs with
-            | None -> Ok recs
-            | Some b ->
-                Error(
-                    sprintf
-                        "OpStream.fromJsonlVerified: chain breaks at record %d — %s"
-                        b.Index
-                        (ChainBreakReason.toString b.Reason)
-                ))
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
+        readCarried (Jsonl.actorField "actor") w text
+        |> bindR (fun (reads, _) ->
+            match firstChainBreak hashFn (carry w) (List.map snd reads) with
+            | Some b -> Error(StreamLoadFault.Broken b)
+            | None -> settle reads)

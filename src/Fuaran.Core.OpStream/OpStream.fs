@@ -454,16 +454,19 @@ module OpStream =
     /// snapshot list means the file was compacted — replaying the records from origin would be wrong.
     /// Fully portable (Phase 241).
     ///
-    /// **Refusals (Phase 296).** A malformed line, a witness decode `Error`, a member of the wrong
-    /// kind (`"prevHash":null`, `"seq":0x2`), or a snapshot line anywhere but the first line is an
-    /// `Error` rendering the typed `JsonlFault` — `line N: <reason> (position P)`, `N` 1-based over
-    /// every line of the text. At most one snapshot line is returned. The `op` raw span is preserved
-    /// byte-for-byte, so a round-trip is identical. Since Phase 320 the `actor` member is the typed
-    /// object; use `fromJsonlLegacyActor` for a pre-320 file.
+    /// **Refusals (Phase 296; typed since Phase 416).** A malformed line, a member of the wrong kind
+    /// (`"prevHash":null`, `"seq":0x2`), or a snapshot line anywhere but the first line is
+    /// `StreamLoadFault.Unreadable` carrying the `JsonlFault`, its line 1-based over every line of the
+    /// text. A witness decode `Error` does not stop the read: when every line parses and only the
+    /// witness refused, the answer is `StreamLoadFault.Undecodable` naming EVERY such op by line and
+    /// stored hash — the signature of a stream written by a newer host. Structural, so never
+    /// `Broken`. `StreamLoadFault.toString` renders the pre-416 message. At most one snapshot line is
+    /// returned. The `op` raw span is preserved byte-for-byte, so a round-trip is identical. Since
+    /// Phase 320 the `actor` member is the typed object; use `fromJsonlLegacyActor` for a pre-320 file.
     let fromJsonlWithSnapshots
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<OpRecord<'Op> list * string list, string> =
+        : Result<OpRecord<'Op> list * string list, StreamLoadFault<ChainBreak>> =
         OpStreamJsonl.fromJsonlWithSnapshots w text
 
     /// Parse JSONL back into records, **dropping the snapshot line** (Phase 244) — correct for a
@@ -472,7 +475,10 @@ module OpStream =
     /// replaying from origin is then wrong, so read a possibly-compacted file with
     /// `fromJsonlWithSnapshots` instead. Refuses exactly what that reader refuses; the `op` raw span
     /// round-trips.
-    let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
+    let fromJsonl
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         OpStreamJsonl.fromJsonl w text
 
     /// Read a **pre-Phase-320** JSONL file (Phase 320 migration) — the `actor` member is still a bare
@@ -480,19 +486,28 @@ module OpStream =
     /// stored `PrevHash` / `Hash` (computed under the old bare-string payload), so they
     /// `verifyChainWith legacyActorConfig` and then `rehash legacyActorConfig canonicalConfig` to the
     /// new typed form. The snapshot line is dropped. Refuses what `fromJsonl` refuses.
-    let fromJsonlLegacyActor (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
+    let fromJsonlLegacyActor
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         OpStreamJsonl.fromJsonlLegacyActor w text
 
     /// `fromJsonl` + a chain-integrity gate (Phase 13). Parses the records, then `verifyChain`s
-    /// them — a broken prev-link / reordered / tampered record is a named `Error`, not a silent
-    /// `Ok` of a corrupt stream. For a linear, uncompacted stream; a compacted file (snapshot +
-    /// tail) does not start its chain at genesis, so read it with `fromJsonlWithSnapshots` and
-    /// verify the boundary with `Snapshots.verify` instead.
+    /// them — a broken prev-link / reordered / tampered record is `StreamLoadFault.Broken` with the
+    /// first `ChainBreak`, not a silent `Ok` of a corrupt stream. For a linear, uncompacted stream; a
+    /// compacted file (snapshot + tail) does not start its chain at genesis, so read it with
+    /// `fromJsonlWithSnapshots` and verify the boundary with `Snapshots.verify` instead.
+    ///
+    /// **The chain is verified before any op must decode (Phase 416).** A record the witness cannot
+    /// decode is hashed over its stored op text, the bytes the writer embedded, so the chain verifies
+    /// without it; only then are the ops decoded. A broken chain answers `Broken` whatever else is
+    /// wrong; an intact chain with ops the witness refused answers `Undecodable`, naming every one.
+    /// `StreamLoadFault.toString` renders the pre-416 message, break included.
     let fromJsonlVerified
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<OpRecord<'Op> list, string> =
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         OpStreamJsonl.fromJsonlVerified hashFn w text
 
     // ---- snapshot / compaction (Phase 244; one family since Phase 296) (bodies in Snapshot.fs) ----

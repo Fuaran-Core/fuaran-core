@@ -49,10 +49,10 @@ let private h = OpStream.defaultHash
 let private pV1 = OpStream.EncodingProfile.V1
 let private pV2 = OpStream.EncodingProfile.V2
 
-let private ok (r: Result<'a, string>) : 'a =
+let private ok (r: Result<'a, 'e>) : 'a =
     match r with
     | Ok v -> v
-    | Error e -> failtestf "did not load: %s" e
+    | Error e -> failtestf "did not load: %A" e
 
 let private linear () =
     OpStream.fromJsonl jvalWitness (linear030.Trim()) |> ok

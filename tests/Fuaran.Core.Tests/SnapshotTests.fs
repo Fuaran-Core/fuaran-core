@@ -161,7 +161,10 @@ let tests =
                       let file =
                           SnapshotMatrix.snapshotToJsonl stateEnc snap + "\n" + OpStream.toJsonl sw tail
 
-                      match OpStream.fromJsonlWithSnapshots sw file with
+                      match
+                          OpStream.fromJsonlWithSnapshots sw file
+                          |> Result.mapError StreamLoadFault.toString
+                      with
                       | Ok(recs', snaps) ->
                           Expect.equal recs' tail "tail records recovered"
                           Expect.equal (List.length snaps) 1 "the snapshot line is surfaced, not dropped"
@@ -436,7 +439,10 @@ let tests =
                       // in chain-only mode, and replays to the live state.
                       let file = line + "\n" + OpStream.toJsonl sw tail
 
-                      match OpStream.fromJsonlWithSnapshots sw file with
+                      match
+                          OpStream.fromJsonlWithSnapshots sw file
+                          |> Result.mapError StreamLoadFault.toString
+                      with
                       | Ok(recs', [ snapLine ]) ->
                           Expect.equal recs' tail "tail recovered"
 

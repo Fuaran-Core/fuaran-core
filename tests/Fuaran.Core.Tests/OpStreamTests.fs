@@ -106,7 +106,11 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  match OpStream.toJsonl sw recs |> OpStream.fromJsonl sw with
+                  match
+                      OpStream.toJsonl sw recs
+                      |> OpStream.fromJsonl sw
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Ok restored ->
                       Expect.equal restored recs "records survive the round-trip"
 
@@ -122,7 +126,7 @@ let tests =
               let bad =
                   "{\"seq\":0,\"actor\":{\"kind\":\"human\",\"id\":\"x\"},\"op\":{\"kind\":\"bogus\",\"n\":1},\"prevHash\":\"\",\"hash\":\"h\"}"
 
-              match OpStream.fromJsonl sw bad with
+              match OpStream.fromJsonl sw bad |> Result.mapError StreamLoadFault.toString with
               | Error m -> Expect.stringContains m "line 1" "names the failing line"
               | Ok _ -> failtest "expected a decode Error"
 
@@ -220,7 +224,10 @@ let tests =
                   let tampered =
                       recs |> List.mapi (fun i r -> if i = 1 then { r with Op = Inc 99 } else r)
 
-                  match OpStream.fromJsonlVerified OpStream.defaultHash sw (OpStream.toJsonl sw tampered) with
+                  match
+                      OpStream.fromJsonlVerified OpStream.defaultHash sw (OpStream.toJsonl sw tampered)
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Error m -> Expect.stringContains m "record 1" "the load error names where it broke"
                   | Ok _ -> failtest "expected the tampered stream to be refused"
               | Error e -> failtestf "unexpected %A" e
@@ -371,7 +378,7 @@ let tests =
               let line =
                   """{"seq":0,"actor":{"kind":"human","id":"first"},"actor":{"kind":"human","id":"second"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
 
-              match OpStream.fromJsonl sw line with
+              match OpStream.fromJsonl sw line |> Result.mapError StreamLoadFault.toString with
               | Ok [ r ] -> Expect.equal r.Actor (Human "first") "the first occurrence of a duplicate key wins"
               | other -> failtestf "expected one record, got %A" other
 
@@ -382,7 +389,7 @@ let tests =
               let line =
                   """{"seq":0,"actor":"a\u","op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
 
-              match OpStream.fromJsonl sw line with
+              match OpStream.fromJsonl sw line |> Result.mapError StreamLoadFault.toString with
               | Ok _
               | Error _ -> ()
 
@@ -393,11 +400,17 @@ let tests =
               let line actor =
                   sprintf """{"seq":0,"actor":%s,"op":{"kind":"inc","n":5},"prevHash":"","hash":""}""" actor
 
-              match OpStream.fromJsonl sw (line (Actor.encode (Human "ann"))) with
+              match
+                  OpStream.fromJsonl sw (line (Actor.encode (Human "ann")))
+                  |> Result.mapError StreamLoadFault.toString
+              with
               | Ok [ r ] -> Expect.equal r.Actor (Human "ann") "a human actor decodes as Human"
               | other -> failtestf "expected one record, got %A" other
 
-              match OpStream.fromJsonl sw (line (Actor.encode (Agent("m", "v", "bot")))) with
+              match
+                  OpStream.fromJsonl sw (line (Actor.encode (Agent("m", "v", "bot"))))
+                  |> Result.mapError StreamLoadFault.toString
+              with
               | Ok [ r ] -> Expect.equal r.Actor (Agent("m", "v", "bot")) "an agent actor decodes as Agent"
               | other -> failtestf "expected one record, got %A" other
 
@@ -406,7 +419,7 @@ let tests =
               let line =
                   """{"seq":0,"actor":{"kind":"service","id":"svc-1"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
 
-              match OpStream.fromJsonl sw line with
+              match OpStream.fromJsonl sw line |> Result.mapError StreamLoadFault.toString with
               | Error m ->
                   Expect.stringContains m "line 1" "names the failing line"
                   Expect.stringContains m "unknown actor kind \"service\"" "names the kind it does not know"
@@ -417,7 +430,7 @@ let tests =
               let line =
                   """{"seq":0,"actor":{"id":"ann"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
 
-              match OpStream.fromJsonl sw line with
+              match OpStream.fromJsonl sw line |> Result.mapError StreamLoadFault.toString with
               | Error m -> Expect.stringContains m "no kind" "names the absence"
               | Ok recs -> failtestf "a kind-less actor must not decode, got %A" recs
 
@@ -521,7 +534,11 @@ let attributedTests =
           <| fun _ ->
               match buildAttr [ attr "a" "s1" (Some 1) "t0" (Inc 5); attr "b" "s2" None "t1" (Dec 2) ] with
               | Ok(_, recs) ->
-                  match OpStream.toJsonl liftedSw recs |> OpStream.fromJsonl liftedSw with
+                  match
+                      OpStream.toJsonl liftedSw recs
+                      |> OpStream.fromJsonl liftedSw
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Ok restored ->
                       Expect.equal restored recs "attributed records survive the round-trip byte-for-byte"
 
@@ -688,7 +705,7 @@ let private lineWith (field: string) (raw: string) =
     + "}"
 
 let private refusedAs (text: string) (lineNo: int) (expect: string) =
-    match OpStream.fromJsonl sw text with
+    match OpStream.fromJsonl sw text |> Result.mapError StreamLoadFault.toString with
     | Error m ->
         Expect.stringContains m (sprintf "line %d:" lineNo) "names the 1-based line"
         Expect.stringContains m expect "names the reason"
@@ -757,7 +774,10 @@ let scannerRefusalTests =
                       let snapLine = OpStream.Snapshots.toJsonl enc snap
                       let body = OpStream.toJsonl sw tail
 
-                      match OpStream.fromJsonlWithSnapshots sw (snapLine + "\n" + body) with
+                      match
+                          OpStream.fromJsonlWithSnapshots sw (snapLine + "\n" + body)
+                          |> Result.mapError StreamLoadFault.toString
+                      with
                       | Ok(t, [ s ]) ->
                           Expect.equal s snapLine "the head snapshot is returned verbatim"
                           Expect.equal t tail "the tail records"
@@ -779,7 +799,10 @@ let scannerRefusalTests =
                   let line = OpStream.toJsonl sw [ List.head recs ]
                   let withMember = line.Substring(0, line.Length - 1) + ",\"snapshot\":true}"
 
-                  match OpStream.fromJsonlWithSnapshots sw withMember with
+                  match
+                      OpStream.fromJsonlWithSnapshots sw withMember
+                      |> Result.mapError StreamLoadFault.toString
+                  with
                   | Ok([ r ], []) -> Expect.equal r (List.head recs) "read as the record it is"
                   | other -> failtestf "expected one record and no snapshot, got %A" other
               | Error e -> failtestf "build failed: %A" e
@@ -1198,7 +1221,7 @@ let checkedWriterTests =
               | Ok text ->
                   Expect.equal text (OpStream.toJsonl rawWitness good) "byte for byte the unchecked writer's"
 
-                  match OpStream.fromJsonl rawWitness text with
+                  match OpStream.fromJsonl rawWitness text |> Result.mapError StreamLoadFault.toString with
                   | Ok back ->
                       Expect.equal back good "reads back to the same records"
                       Expect.isTrue (OpStream.verifyChain OpStream.defaultHash rawWitness back) "and verifies"
@@ -1366,3 +1389,205 @@ let strictReplayTests =
                       (OpStream.isDeterminismLabel label)
                       (Effect.tryDeterminismOfTag label |> Option.isSome)
                       (sprintf "%A" label) ]
+
+// ---- Phase 416: a stream load types its faults, and names the ops it could not decode ----
+
+/// The counter's op vocabulary as a NEWER host writes it: every counter op, and a `reset` that this
+/// build's witness (`Reference.Counter`) has never heard of. A store this writes is intact, and the
+/// older witness refuses exactly its `reset` ops — `unknown op kind: reset`.
+module Newer =
+
+    type NewerOp =
+        | Known of CounterOp
+        | Reset
+
+    let resetText = Json.render (Json.kindObj "reset" [ "n", JInt 0 ])
+
+    let witness: StreamWitness<NewerOp, int, string> =
+        { Apply =
+            fun op st ->
+                match op with
+                | Known k -> sw.Apply k st
+                | Reset -> Ok 0
+          Encode =
+            function
+            | Known k -> sw.Encode k
+            | Reset -> resetText
+          Decode =
+            fun s ->
+                if s = resetText then
+                    Ok Reset
+                else
+                    sw.Decode s |> Result.map Known }
+
+    /// What the older witness says of a `reset`.
+    let refusal = "unknown op kind: reset"
+
+/// The public loads of the two stream packages, found by reflection: every public method named
+/// `fromJsonl…` or `loadLanes…`.
+let private publicLoads () =
+    [ typeof<OpRecord<int>>.Assembly; typeof<DagBreak>.Assembly ]
+    |> List.collect (fun asm ->
+        asm.GetExportedTypes()
+        |> Array.collect (fun t ->
+            t.GetMethods(
+                System.Reflection.BindingFlags.Public
+                ||| System.Reflection.BindingFlags.Static
+                ||| System.Reflection.BindingFlags.DeclaredOnly
+            ))
+        |> Array.filter (fun m -> m.Name.StartsWith "fromJsonl" || m.Name.StartsWith "loadLanes")
+        |> Array.map (fun m -> m.DeclaringType.Name + "." + m.Name, m.ReturnType)
+        |> List.ofArray)
+
+[<Tests>]
+let streamLoadFaultTests =
+    let h = OpStream.defaultHash
+
+    // seq 0 inc, seq 1 reset, seq 2 inc, seq 3 reset — written by the newer host.
+    let newerRecords () =
+        [ Newer.Known(Inc 5); Newer.Reset; Newer.Known(Inc 2); Newer.Reset ]
+        |> List.fold
+            (fun acc op ->
+                acc
+                |> Result.bind (fun (st, recs) -> OpStream.append h Newer.witness (Human "newer") op st recs))
+            (Ok(0, OpStream.empty))
+        |> function
+            | Ok(_, recs) -> recs
+            | Error e -> failwithf "the newer host could not write: %A" e
+
+    testList
+        "a stream load types its faults (Phase 416)"
+        [ testCase "an intact stream holding ops this witness does not know is Undecodable, naming every one"
+          <| fun _ ->
+              let recs = newerRecords ()
+              let text = OpStream.toJsonl Newer.witness recs
+
+              let expected =
+                  [ 1; 3 ]
+                  |> List.map (fun i ->
+                      { Lane = None
+                        Line = i + 1
+                        NodeId = recs[i].Hash
+                        Reason = Newer.refusal })
+
+              for name, load in
+                  [ "fromJsonl", OpStream.fromJsonl sw text
+                    "fromJsonlVerified", OpStream.fromJsonlVerified h sw text
+                    "fromJsonlLegacyActor",
+                    OpStream.fromJsonlLegacyActor
+                        sw
+                        (text.Replace("{\"kind\":\"human\",\"id\":\"newer\"}", "\"newer\""))
+                    "fromJsonlWithSnapshots", OpStream.fromJsonlWithSnapshots sw text |> Result.map fst ] do
+                  match load with
+                  | Error(StreamLoadFault.Undecodable sites) -> Expect.equal sites expected (name + " names both sites")
+                  | other -> failtestf "%s: expected Undecodable, got %A" name other
+
+              // the newer host reads its own stream, verified
+              Expect.equal (OpStream.fromJsonlVerified h Newer.witness text) (Ok recs) "the newer witness reads it"
+
+          testCase "a broken chain answers the break, not the ops it could not decode"
+          <| fun _ ->
+              let recs = newerRecords ()
+              let text = OpStream.toJsonl Newer.witness recs
+              // flip one byte of the reset record's stored hash
+              let h1 = recs[1].Hash
+
+              let flipped =
+                  h1.Substring(0, h1.Length - 1) + (if h1.EndsWith "0" then "1" else "0")
+
+              let tampered =
+                  text.Replace("\"hash\":\"" + h1 + "\"", "\"hash\":\"" + flipped + "\"")
+
+              Expect.notEqual tampered text "the probe flipped a byte"
+
+              match OpStream.fromJsonlVerified h sw tampered with
+              | Error(StreamLoadFault.Broken b) -> Expect.equal b.Index 1 "the break is at the flipped record"
+              | other -> failtestf "expected the chain break, got %A" other
+
+          testCase "toString keeps the pre-416 bytes: a decode failure, a scanner fault and a break"
+          <| fun _ ->
+              let recs = newerRecords ()
+              let one = OpStream.toJsonl Newer.witness (List.truncate 2 recs)
+
+              Expect.equal
+                  (OpStream.fromJsonl sw one |> Result.mapError StreamLoadFault.toString)
+                  (Error("line 2: " + Newer.refusal + " (position 0)"))
+                  "one undecodable op renders as the reader's old message"
+
+              let site =
+                  { Lane = Some "beta"
+                    Line = 4
+                    NodeId = "n"
+                    Reason = "why" }
+
+              Expect.equal (StreamLoadFault.siteText site) "lane beta: line 4: why (position 0)" "a site with a lane"
+
+              Expect.equal
+                  (StreamLoadFault.toStringWith
+                      string
+                      (StreamLoadFault<int>.Undecodable [ site; { site with Lane = None; Line = 5 } ]))
+                  "lane beta: line 4: why (position 0); line 5: why (position 0)"
+                  "several sites are joined, each as siteText renders it"
+
+              Expect.equal
+                  (StreamLoadFault.toStringWith (sprintf "break %d") (StreamLoadFault.Broken 7))
+                  "break 7"
+                  "toStringWith renders a break by the renderer it is handed"
+
+              Expect.equal
+                  (OpStream.fromJsonl sw "{" |> Result.mapError StreamLoadFault.toString)
+                  (Error "line 1: the line ends inside the object (position 1)")
+                  "a scanner fault renders as JsonlFault.toString"
+
+              match build () with
+              | Ok(_, good) ->
+                  let tampered =
+                      good |> List.mapi (fun i r -> if i = 1 then { r with Op = Inc 999 } else r)
+
+                  match OpStream.fromJsonlVerified h sw (OpStream.toJsonl sw tampered) with
+                  | Error(StreamLoadFault.Broken b as f) ->
+                      Expect.equal
+                          (StreamLoadFault.toString f)
+                          (sprintf
+                              "OpStream.fromJsonlVerified: chain breaks at record %d — %s"
+                              b.Index
+                              (ChainBreakReason.toString b.Reason))
+                          "a break renders as the verified reader's old message"
+                  | other -> failtestf "expected a break, got %A" other
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "no public stream load answers with a string (reflection over both packages)"
+          <| fun _ ->
+              let loads = publicLoads ()
+              let names = loads |> List.map fst |> Set.ofList
+
+              // non-vacuity: the loads the phase names are all found
+              for expected in
+                  [ "OpStream.fromJsonl"
+                    "OpStream.fromJsonlVerified"
+                    "OpStream.fromJsonlLegacyActor"
+                    "OpStream.fromJsonlWithSnapshots"
+                    "Dag.fromJsonl"
+                    "Dag.fromJsonlVerified"
+                    "Dag.fromJsonlWithCheckpoints"
+                    "Dag.loadLanes"
+                    "Dag.loadLanesVerified" ] do
+                  Expect.isTrue (names.Contains expected) (sprintf "%s is found by the probe" expected)
+
+              let stringly =
+                  loads
+                  |> List.filter (fun (_, rt) ->
+                      rt.IsGenericType
+                      && rt.GetGenericTypeDefinition() = typedefof<Result<int, int>>
+                      && rt.GetGenericArguments()[1] = typeof<string>)
+
+              Expect.isEmpty stringly "every load's fault is typed"
+
+              // the probe goes red on the shape it hunts: a Result<_, string>
+              let probe = typeof<Result<OpRecord<int> list, string>>
+
+              Expect.isTrue
+                  (probe.IsGenericType
+                   && probe.GetGenericTypeDefinition() = typedefof<Result<int, int>>
+                   && probe.GetGenericArguments()[1] = typeof<string>)
+                  "the predicate recognises a stringly load" ]

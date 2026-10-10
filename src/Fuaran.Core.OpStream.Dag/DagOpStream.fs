@@ -1181,26 +1181,31 @@ module Dag =
 
         go 0 [] (dag.Nodes |> Map.toList |> List.map snd)
 
-    /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`) through the ONE
-    /// JSONL scanner, `OpStream.Jsonl` (Phase 296; until then this module carried a verbatim copy).
-    /// Fully portable — runs under .NET and Fable. A malformed line, a member of the wrong kind
-    /// (`"id":12`, a non-string parent), an unknown actor kind, or a witness decode `Error` is an
-    /// `Error` rendering the typed `JsonlFault` — `line N: <reason> (position P)`, `N` 1-based over
-    /// every line of the text — never an exception (GP4). The `op` raw span is preserved
-    /// byte-for-byte, so a round-trip is identical.
-    ///
-    /// **A repeated id (Phase 296).** A line repeating a node already read deduplicates, as `append`
-    /// does; a line naming an id already held for DIFFERENT content — parents modulo order, actor, or
-    /// op — is refused as a content-id collision rather than replacing the node read first.
-    ///
-    /// **Structural only — this does NOT verify integrity.** Nodes are keyed by their *stored* id;
-    /// a tampered id, a dangling parent, or a cycle decodes to a clean `Ok` here. Run `verifyDag`
-    /// afterwards (or use `fromJsonlVerified`, Phase 13) to recompute content ids and confirm every
-    /// parent exists before trusting the DAG.
-    let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<T<'Op>, string> =
+    /// The witness a load reads through (Phase 416) — the linear reader's, which that package keeps
+    /// internal: it never refuses, carrying each op's stored text beside the real witness's answer, so
+    /// a decode failure stops neither the read nor the verification. A decoded op encodes by the real
+    /// witness, as every check always has; an undecoded one encodes as its stored text, the bytes the
+    /// writer embedded verbatim, so its content id still recomputes over exactly what was hashed.
+    let private carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
+        { Apply = fun _ s -> Ok s
+          Encode =
+            fun (raw, decoded) ->
+                match decoded with
+                | Ok op -> w.Encode op
+                | Error _ -> raw
+          Decode = fun raw -> Ok(raw, w.Decode raw) }
+
+    /// One text's nodes, read through `carry` (Phase 296's reader, Phase 416's witness): the DAG and,
+    /// for each node, the 1-based line first holding it. A repeated id with the same content is one
+    /// node; with different content it is refused at its line as a content-id collision.
+    let private readCarried
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<T<string * Result<'Op, string>> * Map<string, int>, JsonlFault> =
+        let cw = carry w
         let bind f r = Result.bind f r
 
-        let nodeOf (line: JsonlLine) : Result<JsonlLine * DagNode<'Op>, JsonlFault> =
+        let nodeOf (line: JsonlLine) =
             OpStream.Jsonl.stringField "id" line
             |> bind (fun id ->
                 OpStream.Jsonl.stringsField "parents" line
@@ -1208,7 +1213,7 @@ module Dag =
                     OpStream.Jsonl.actorField "actor" line
                     |> bind (fun actor ->
                         OpStream.Jsonl.rawField "op" line
-                        |> bind (fun raw -> w.Decode raw |> Result.mapError (OpStream.Jsonl.refuse line))
+                        |> bind (fun raw -> cw.Decode raw |> Result.mapError (OpStream.Jsonl.refuse line))
                         |> Result.map (fun op ->
                             line,
                             { Id = id
@@ -1219,13 +1224,13 @@ module Dag =
         text
         |> OpStream.Jsonl.scanRecords nodeOf
         |> bind (fun lines ->
-            let rec go (acc: Map<string, DagNode<'Op>>) =
+            let rec go (acc: Map<string, DagNode<string * Result<'Op, string>>>) (at: Map<string, int>) =
                 function
-                | [] -> Ok { NodeMap = acc }
-                | (line, node: DagNode<'Op>) :: rest ->
+                | [] -> Ok({ NodeMap = acc }, at)
+                | (line, node: DagNode<string * Result<'Op, string>>) :: rest ->
                     match Map.tryFind node.Id acc with
-                    | None -> go (Map.add node.Id node acc) rest
-                    | Some held when sameNode w.Encode held node.Parents node.Actor node.Op -> go acc rest
+                    | None -> go (Map.add node.Id node acc) (Map.add node.Id (OpStream.Jsonl.lineNumber line) at) rest
+                    | Some held when sameNode cw.Encode held node.Parents node.Actor node.Op -> go acc at rest
                     | Some _ ->
                         Error(
                             OpStream.Jsonl.refuse
@@ -1235,26 +1240,100 @@ module Dag =
                                  + " is already held with different content (a content-id collision)")
                         )
 
-            go Map.empty lines)
-        |> Result.mapError JsonlFault.toString
+            go Map.empty Map.empty lines)
 
-    /// `fromJsonl` + the integrity gate (Phase 13): parses structurally, then runs `verifyDag` so a
-    /// tampered id, a dangling parent, or a (hash-impossible-to-forge, so id-mismatching) cycle is a
-    /// named `Error` instead of a silently-corrupt `Ok`. The load-time analogue of the discipline
-    /// `Dag.fromJsonl`'s docstring used to imply but did not enforce.
+    /// A carried DAG decoded — or EVERY node the witness refused, in lane and then line order, each by
+    /// the lane `laneOf` names (`None` for a load of one text) and the line `lineOf` names.
+    let private settle
+        (laneOf: string -> string option)
+        (lineOf: Map<string, int>)
+        (dag: T<string * Result<'Op, string>>)
+        : Result<T<'Op>, StreamLoadFault<'Break>> =
+        let sites =
+            dag.Nodes
+            |> Map.toList
+            |> List.choose (fun (id, n) ->
+                match snd n.Op with
+                | Ok _ -> None
+                | Error why ->
+                    Some
+                        { Lane = laneOf id
+                          Line = Map.tryFind id lineOf |> Option.defaultValue 0
+                          NodeId = id
+                          Reason = why })
+            |> List.sortWith (fun a b ->
+                match System.String.CompareOrdinal(Option.defaultValue "" a.Lane, Option.defaultValue "" b.Lane) with
+                | 0 -> compare a.Line b.Line
+                | c -> c)
+
+        match sites with
+        | [] ->
+            Ok
+                { NodeMap =
+                    dag.Nodes
+                    |> Map.map (fun _ n ->
+                        { Id = n.Id
+                          Parents = n.Parents
+                          Actor = n.Actor
+                          Op =
+                            match snd n.Op with
+                            | Ok op -> op
+                            | Error why -> invalidOp why }) }
+        | _ -> Error(StreamLoadFault.Undecodable sites)
+
+    /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`) through the ONE
+    /// JSONL scanner, `OpStream.Jsonl` (Phase 296; until then this module carried a verbatim copy).
+    /// Fully portable — runs under .NET and Fable. A malformed line, a member of the wrong kind
+    /// (`"id":12`, a non-string parent) or an unknown actor kind is `StreamLoadFault.Unreadable`
+    /// carrying the `JsonlFault`, its line 1-based over every line of the text — never an exception
+    /// (GP4). The `op` raw span is preserved byte-for-byte, so a round-trip is identical.
+    ///
+    /// **An op the witness refuses (Phase 416)** does not stop the read: when every line parses and
+    /// only the witness refused, the answer is `StreamLoadFault.Undecodable`, naming EVERY such node by
+    /// line and id — the signature of a store written by a newer host. `loadFaultToString` renders the
+    /// pre-416 message.
+    ///
+    /// **A repeated id (Phase 296).** A line repeating a node already read deduplicates, as `append`
+    /// does; a line naming an id already held for DIFFERENT content — parents modulo order, actor, or
+    /// op — is refused as a content-id collision rather than replacing the node read first.
+    ///
+    /// **Structural only — this does NOT verify integrity, and never answers `Broken`.** Nodes are
+    /// keyed by their *stored* id; a tampered id, a dangling parent, or a cycle decodes to a clean `Ok`
+    /// here. Run `verifyDag` afterwards (or use `fromJsonlVerified`, Phase 13) to recompute content ids
+    /// and confirm every parent exists before trusting the DAG.
+    let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<T<'Op>, StreamLoadFault<DagBreak>> =
+        match readCarried w text with
+        | Error f -> Error(StreamLoadFault.Unreadable(None, f))
+        | Ok(carried, lineOf) -> settle (fun _ -> None) lineOf carried
+
+    /// `fromJsonl` + the integrity gate (Phase 13): parses structurally, then runs `firstBreak` so a
+    /// tampered id, a dangling parent, or a (hash-impossible-to-forge, so id-mismatching) cycle is
+    /// `StreamLoadFault.Broken` with the first `DagBreak`, instead of a silently-corrupt `Ok`.
+    ///
+    /// **The DAG is verified before any op must decode (Phase 416).** A node the witness cannot decode
+    /// is hashed over its stored op text, so every content id and parent is checked without it; only
+    /// then are the ops decoded. A break answers `Broken` whatever else is wrong; an intact DAG with
+    /// ops the witness refused answers `Undecodable`, naming every one. `loadFaultToString` renders the
+    /// pre-416 message, a break's included.
     let fromJsonlVerified
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
-        : Result<T<'Op>, string> =
-        fromJsonl w text
-        |> Result.bind (fun dag ->
-            match firstBreak hashFn w dag with
-            | None -> Ok dag
-            | Some b ->
-                // `toString` renders the pre-0.24.0 spelling, so this error's bytes are unchanged by
-                // Phase 147 — a consumer matching this text keeps matching it.
-                Error(sprintf "Dag.fromJsonlVerified: %s at node %s" (DagBreakReason.toString b.Reason) b.NodeId))
+        : Result<T<'Op>, StreamLoadFault<DagBreak>> =
+        match readCarried w text with
+        | Error f -> Error(StreamLoadFault.Unreadable(None, f))
+        | Ok(carried, lineOf) ->
+            match firstBreak hashFn (carry w) carried with
+            | Some b -> Error(StreamLoadFault.Broken b)
+            | None -> settle (fun _ -> None) lineOf carried
+
+    /// A DAG load's fault as text (Phase 416): a break as `Dag.fromJsonlVerified: <reason> at node <id>`
+    /// — the pre-0.24.0 spelling `fromJsonlVerified` answered as its `Error` string until Phase 416,
+    /// byte for byte — and every other case as `StreamLoadFault.toStringWith` renders it.
+    let loadFaultToString (f: StreamLoadFault<DagBreak>) : string =
+        f
+        |> StreamLoadFault.toStringWith (fun b ->
+            sprintf "Dag.fromJsonlVerified: %s at node %s" (DagBreakReason.toString b.Reason) b.NodeId)
 
     // ---- merge-base / branch-delta (Phase 08) ----
     // The *generic* half of a merge: locate the divergence point of two heads and enumerate
@@ -2650,14 +2729,16 @@ module Dag =
     /// DAG file with NO sidecar (`None`) reads exactly as `fromJsonl` reads it, with no checkpoints. A
     /// sidecar is read through the one scanner, a line per checkpoint, in file order; a line that is not a
     /// strict snapshot line at sequence zero with a node in `prevHash`, or whose state `stateDecode`
-    /// refuses, is an `Error` reading `checkpoint sidecar: line N: <reason> (position P)`. Structural only,
-    /// as `fromJsonl` is: verify with `verifyCheckpoint` / `verifyDagFrom` before trusting either.
+    /// refuses, is `StreamLoadFault.UnreadableCheckpoint` carrying the `JsonlFault` by its sidecar line
+    /// (`loadFaultToString` renders `checkpoint sidecar: line N: <reason> (position P)`, as before Phase
+    /// 416). The lane's own faults are `fromJsonl`'s, and come first. Structural only, as `fromJsonl` is:
+    /// verify with `verifyCheckpoint` / `verifyDagFrom` before trusting either.
     let fromJsonlWithCheckpoints
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (stateDecode: string -> Result<'State, string>)
         (text: string)
         (sidecar: string option)
-        : Result<T<'Op> * Checkpoint<'State> list, string> =
+        : Result<T<'Op> * Checkpoint<'State> list, StreamLoadFault<DagBreak>> =
         fromJsonl w text
         |> Result.bind (fun dag ->
             match sidecar with
@@ -2665,7 +2746,7 @@ module Dag =
             | Some side ->
                 OpStream.Jsonl.scanRecords (checkpointOf stateDecode) side
                 |> Result.map (fun cps -> dag, cps)
-                |> Result.mapError (fun f -> "checkpoint sidecar: " + JsonlFault.toString f))
+                |> Result.mapError StreamLoadFault.UnreadableCheckpoint)
 
     // ---- lanes (Phase 311) ----
     // A multi-writer store keeps one file per writer — a LANE (`<store>/ops/<lane>.jsonl` is the shape
@@ -2689,17 +2770,6 @@ module Dag =
             LaneOf: Map<string, string>
         }
 
-    /// Why `loadLanes` refused (Phase 311).
-    [<RequireQualifiedAccess>]
-    type LaneLoadFault =
-        /// Two of the lane texts carry one lane id.
-        | DuplicateLane of lane: string
-        /// A lane's text does not parse: `fromJsonl`'s rendered fault.
-        | Unparseable of lane: string * reason: string
-        /// Two lanes hold one content id for DIFFERENT content (parents modulo order, actor or op) — the
-        /// two lanes, sorted ordinally.
-        | Collision of nodeId: string * lanes: string list
-
     /// A lane store's first integrity fault, and the lane whose file holds the node at fault (Phase 311).
     type LaneBreak =
         {
@@ -2718,48 +2788,102 @@ module Dag =
         |> List.map (fun (lane, ns) -> lane, { NodeMap = Map.ofList ns })
         |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
 
-    /// Load a lane store (Phase 311): one `(lane id, JSONL text)` per lane file, in any order. Each text
-    /// is read by `fromJsonl` — structural, so run `verifyLanes` before trusting the union — and the union
-    /// holds every node once. A node two lanes hold with the SAME content is one node, attributed to the
-    /// ordinally smallest of those lanes; with different content it is refused (`Collision`). The lanes
-    /// are read in ordinal lane-id order whatever order they are handed in, so the store is a function of
-    /// the lane SET. Refused by name: a lane id given twice (`DuplicateLane`), a text that does not parse
-    /// (`Unparseable`, the first such lane in lane-id order), and a collision across lanes. Equal, as a
-    /// DAG, to `fromJsonl` of the lanes' texts concatenated — the union is the union whichever way it is
-    /// read — with the attribution beside it.
-    let loadLanes
+    /// The union of a lane store, read through `carry` (Phase 416): every lane text structurally, in
+    /// ordinal lane order, with each node's lane and the line of that lane's text holding it. The faults
+    /// a lane SET has — a lane id given twice, a lane text that does not parse (the first in lane
+    /// order), a node two lanes hold with different content — are refused here; an op the witness
+    /// refused is not.
+    let private loadCarried
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (lanes: (string * string) list)
-        : Result<Loaded<'Op>, LaneLoadFault> =
+        : Result<Loaded<string * Result<'Op, string>> * Map<string, int>, StreamLoadFault<LaneBreak>> =
+        let cw = carry w
+
         let sorted =
             lanes |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
 
         match sorted |> List.pairwise |> List.tryFind (fun ((a, _), (b, _)) -> a = b) with
-        | Some((l, _), _) -> Error(LaneLoadFault.DuplicateLane l)
+        | Some((l, _), _) -> Error(StreamLoadFault.DuplicateLane l)
         | None ->
-            let add (lane: string) (st: Result<Loaded<'Op>, LaneLoadFault>) (id: string) (n: DagNode<'Op>) =
-                st
-                |> Result.bind (fun (l: Loaded<'Op>) ->
-                    match Map.tryFind id l.Dag.Nodes with
-                    | None ->
-                        Ok
-                            { Dag = { NodeMap = Map.add id n l.Dag.Nodes }
-                              LaneOf = Map.add id lane l.LaneOf }
-                    | Some held when sameNode w.Encode held n.Parents n.Actor n.Op -> Ok l
-                    | Some _ -> Error(LaneLoadFault.Collision(id, ordinalSort [ l.LaneOf[id]; lane ])))
-
-            let rec go (acc: Loaded<'Op>) =
+            let rec go (acc: Loaded<string * Result<'Op, string>>) (at: Map<string, int>) =
                 function
-                | [] -> Ok acc
+                | [] -> Ok(acc, at)
                 | (lane: string, text: string) :: rest ->
-                    match fromJsonl w text with
-                    | Error e -> Error(LaneLoadFault.Unparseable(lane, e))
-                    | Ok d ->
-                        match Map.fold (add lane) (Ok acc) d.Nodes with
-                        | Ok acc' -> go acc' rest
+                    match readCarried w text with
+                    | Error f -> Error(StreamLoadFault.Unreadable(Some lane, f))
+                    | Ok(d, lineOf) ->
+                        let step st (id: string) (n: DagNode<string * Result<'Op, string>>) =
+                            st
+                            |> Result.bind (fun (l: Loaded<string * Result<'Op, string>>, at: Map<string, int>) ->
+                                match Map.tryFind id l.Dag.Nodes with
+                                | None ->
+                                    Ok(
+                                        { Dag = { NodeMap = Map.add id n l.Dag.Nodes }
+                                          LaneOf = Map.add id lane l.LaneOf },
+                                        Map.add id lineOf[id] at
+                                    )
+                                | Some held when sameNode cw.Encode held n.Parents n.Actor n.Op -> Ok(l, at)
+                                | Some _ -> Error(StreamLoadFault.Collision(id, ordinalSort [ l.LaneOf[id]; lane ])))
+
+                        match Map.fold step (Ok(acc, at)) d.Nodes with
+                        | Ok(acc', at') -> go acc' at' rest
                         | Error f -> Error f
 
-            go { Dag = empty; LaneOf = Map.empty } sorted
+            go { Dag = empty; LaneOf = Map.empty } Map.empty sorted
+
+    /// A carried lane store decoded — or every op the witness refused, by lane and line.
+    let private settleLanes
+        (loaded: Loaded<string * Result<'Op, string>>, lineOf: Map<string, int>)
+        : Result<Loaded<'Op>, StreamLoadFault<LaneBreak>> =
+        settle (fun id -> Some(Map.tryFind id loaded.LaneOf |> Option.defaultValue "")) lineOf loaded.Dag
+        |> Result.map (fun dag -> { Dag = dag; LaneOf = loaded.LaneOf })
+
+    /// Load a lane store (Phase 311): one `(lane id, JSONL text)` per lane file, in any order. Each text
+    /// is read as `fromJsonl` reads it — structural, so run `verifyLanes` before trusting the union, or
+    /// load with `loadLanesVerified` — and the union holds every node once. A node two lanes hold with
+    /// the SAME content is one node, attributed to the ordinally smallest of those lanes; with different
+    /// content it is refused (`StreamLoadFault.Collision`). The lanes are read in ordinal lane-id order
+    /// whatever order they are handed in, so the store is a function of the lane SET. Refused by name: a
+    /// lane id given twice (`DuplicateLane`), a text that does not parse (`Unreadable` with its lane and
+    /// the typed `JsonlFault`, the first such lane in lane-id order), and a collision across lanes. Then,
+    /// since Phase 416, the ops: when only the witness refused, `Undecodable` names every such op by lane,
+    /// line and node id. Never `Broken`. Equal, as a DAG, to `fromJsonl` of the lanes' texts concatenated
+    /// — the union is the union whichever way it is read — with the attribution beside it.
+    let loadLanes
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (lanes: (string * string) list)
+        : Result<Loaded<'Op>, StreamLoadFault<LaneBreak>> =
+        loadCarried w lanes |> Result.bind settleLanes
+
+    /// `loadLanes` + the integrity gate (Phase 416): the union is verified as `verifyLanes` verifies it
+    /// BEFORE any op must decode — a node the witness cannot decode is hashed over its stored op text — so
+    /// a lane store answers exactly one of three things about its history. `Broken` with the first
+    /// `LaneBreak`: a content id that does not recompute or a parent that does not resolve, damage,
+    /// whatever else is wrong. `Undecodable`, every site named by lane, line and node id: the store is
+    /// intact and the witness predates some of its ops — the store was written by a newer host. `Ok`: the
+    /// store, verified. The lane-set faults of `loadLanes` come first.
+    let loadLanesVerified
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (lanes: (string * string) list)
+        : Result<Loaded<'Op>, StreamLoadFault<LaneBreak>> =
+        loadCarried w lanes
+        |> Result.bind (fun (loaded, lineOf) ->
+            match firstBreak hashFn (carry w) loaded.Dag with
+            | Some b ->
+                Error(
+                    StreamLoadFault.Broken
+                        { Lane = Map.tryFind b.NodeId loaded.LaneOf |> Option.defaultValue ""
+                          Break = b }
+                )
+            | None -> settleLanes (loaded, lineOf))
+
+    /// A lane load's fault as text (Phase 416): a break as `lane <lane>: ` and then `loadFaultToString`'s
+    /// spelling of the union's break, and every other case as `StreamLoadFault.toStringWith` renders it.
+    let laneLoadFaultToString (f: StreamLoadFault<LaneBreak>) : string =
+        f
+        |> StreamLoadFault.toStringWith (fun lb ->
+            "lane " + lb.Lane + ": " + loadFaultToString (StreamLoadFault.Broken lb.Break))
 
     /// The lane files of a store (Phase 311): one `(lane id, text)` per lane, in ordinal lane order, each
     /// text `toJsonl` of exactly the nodes `LaneOf` attributes to that lane — so `loadLanes` of the result

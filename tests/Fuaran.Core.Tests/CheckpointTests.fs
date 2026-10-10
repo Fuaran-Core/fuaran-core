@@ -142,7 +142,10 @@ let tests =
               for i in [ at "\"state\":"; at "\"prevHash\":\""; at "\"hash\":\"" ] do
                   let tampered = flipAt i side
 
-                  match Dag.fromJsonlWithCheckpoints sw dec lane (Some tampered) with
+                  match
+                      Dag.fromJsonlWithCheckpoints sw dec lane (Some tampered)
+                      |> Result.mapError Dag.loadFaultToString
+                  with
                   | Ok(d, [ cp' ]) ->
                       Expect.isError (Dag.verifyCheckpoint h enc sw cp' d) (sprintf "byte %d changed: %s" i tampered)
                   | other -> failtestf "byte %d changed: the sidecar read as %A" i other
@@ -310,7 +313,10 @@ let tests =
               let lane, side = Dag.toJsonlWithCheckpoints encode enc small [ cp ]
 
               let verifies (laneText: string) (sideText: string) =
-                  match Dag.fromJsonlWithCheckpoints sw dec laneText (Some sideText) with
+                  match
+                      Dag.fromJsonlWithCheckpoints sw dec laneText (Some sideText)
+                      |> Result.mapError Dag.loadFaultToString
+                  with
                   | Ok(d, [ cp' ]) -> Dag.verifyDagFrom h enc sw cp' d
                   | _ -> false
 
@@ -461,7 +467,10 @@ let tests =
               let lane, side = Dag.toJsonlWithCheckpoints encode enc dag [ cp ]
 
               let refused (sidecar: string) (fragment: string) =
-                  match Dag.fromJsonlWithCheckpoints sw dec lane (Some sidecar) with
+                  match
+                      Dag.fromJsonlWithCheckpoints sw dec lane (Some sidecar)
+                      |> Result.mapError Dag.loadFaultToString
+                  with
                   | Error e ->
                       Expect.stringStarts e "checkpoint sidecar: line " "named as the sidecar's"
                       Expect.stringContains e fragment "and why"
@@ -477,7 +486,10 @@ let tests =
               refused (side.Replace("\"prevHash\":\"" + m + "\"", "\"prevHash\":\"\"")) "empty"
               refused (side.Replace("\"state\":10", "\"state\":\"ten\"")) "not an int"
 
-              match Dag.fromJsonlWithCheckpoints sw dec lane (Some(side + "\n" + "{")) with
+              match
+                  Dag.fromJsonlWithCheckpoints sw dec lane (Some(side + "\n" + "{"))
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e -> Expect.stringStarts e "checkpoint sidecar: line 2:" "the line number"
               | Ok v -> failtestf "accepted %A" v ]
 

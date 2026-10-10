@@ -58,7 +58,11 @@ module internal ChainStreamLaws =
                         OpStream.verifyChain hashFn sw back && OpStream.toJsonl sw back = text,
                         fun () -> at "the chain read back from its JSONL does not verify or re-write identically"
                     )
-                | Error e -> jsonl.Check(false, fun () -> at ("the written JSONL did not read back: " + e))
+                | Error e ->
+                    jsonl.Check(
+                        false,
+                        fun () -> at ("the written JSONL did not read back: " + StreamLoadFault.toString e)
+                    )
 
             match OpStream.replay sw gen.State0 recs with
             | Ok s when s = state -> replay.Saw()

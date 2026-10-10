@@ -143,7 +143,7 @@ let streamW : StreamWitness<MyOp, MyState, MyRej> =
 OpStream.append OpStream.defaultHash streamW actor op state recs   // hash-chained
 OpStream.replay streamW state0 records                              // deterministic
 OpStream.verifyChain OpStream.defaultHash streamW records          // tamper-evident
-OpStream.fromJsonl streamW jsonl  : Result<_, string>              // portable — runs in-browser
+OpStream.fromJsonl streamW jsonl  : Result<_, StreamLoadFault<_>>   // portable — runs in-browser; a typed fault
 ```
 
 ## 4. Offer the domain as something to invoke

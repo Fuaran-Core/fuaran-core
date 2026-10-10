@@ -1302,6 +1302,33 @@
     },
     {
       "members": [
+        "StreamLoadFault.siteText",
+        "StreamLoadFault.toString",
+        "StreamLoadFault.toStringWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a stream load's typed fault (Phase 416) as the text the loads answered before it was typed; example-tested byte for byte at a decode failure, a scanner fault and a chain break.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "Dag.laneLoadFaultToString",
+        "Dag.loadLanesVerified"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The verified lane load and the DAG loads' fault renderers (Phase 416), beside the rostered lane core: the lane tests hold the verified load equal to `loadLanes` then `verifyLanes` on a decodable store, and name the undecodable site and the break on a store written by a newer host.",
+      "standIn": "tests/Fuaran.Core.Tests/LaneTests.fs"
+    },
+    {
+      "members": [
+        "Dag.loadFaultToString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a DAG load's typed fault (Phase 416) as the text the loads answered before it was typed; the DAG tests read the loads' errors through it, a break's pre-0.24.0 spelling byte for byte.",
+      "standIn": "tests/Fuaran.Core.Tests/DagTests.fs"
+    },
+    {
+      "members": [
         "JsonlWriteFault.reasonText"
       ],
       "class": "measured-elsewhere",

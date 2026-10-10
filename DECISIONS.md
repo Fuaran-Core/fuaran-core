@@ -1,5 +1,116 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-10 — D146: a stream load answers `StreamLoadFault<'Break>`, a closed union over its unreadable lines, its integrity break and the ops its witness could not decode; a decode failure is reported, never fatal to the verification, because an undecodable op is hashed over its stored text; and `Dag.LaneLoadFault` folds into it
+
+**Context.** Core's stream loads answered strings: `OpStream.fromJsonl` / `fromJsonlVerified` /
+`fromJsonlLegacyActor` / `fromJsonlWithSnapshots` and `Dag.fromJsonl` / `fromJsonlVerified` /
+`fromJsonlWithCheckpoints` returned `Result<_, string>`, and `Dag.LaneLoadFault.Unparseable` carried a
+rendered `reason: string`. Phase 296 typed the scanner's faults (`JsonlFault`) and Phase 311 the lane
+set's, but neither type left the load. Above all a load could not say that every line parsed, every
+content id recomputed and every parent resolved, and the only thing wrong was that the witness could not
+decode some ops. That is the signature of a store written by a newer host, and it calls for a different
+remedy from damage. The first host to need it built the distinction itself: it wrapped its witness in a
+decode that never fails, loaded with that, and walked the nodes for failures afterwards. A string frozen
+at `1.0.0` stays a string until `2.0.0`, so Phase 416 types the answer on the `1.0.0` slot, in place.
+
+**D146.1 — the premise: the content id is computed over the op's ENCODING, which the store holds
+verbatim, so the chain verifies without decoding.** The shard made the rest conditional on this. Both
+chains hash the witness's `Encode` output: a linear record's hash is `HashFn prev (Payload seq actor
+(Encode op))` (`OpStreamChain.walkRecords`), and a DAG node's id is `nodeHash` over its parents, actor
+and `Encode op`. Every writer embeds that encoding verbatim as the line's `op` member, and the reader
+hands the decoder exactly that span (Phase 301's checked writers refuse an encoding that would not read
+back as itself). So for an op the witness cannot decode, the stored text IS the bytes the id was minted
+over, and hashing it checks the id exactly. The verification needs no decode. Verified before anything
+else was built; the first host's workaround relies on the same fact (its carried witness encodes as the
+stored text).
+
+**D146.2 — the carried witness: a decoded op is encoded by the real witness, an undecoded one as its
+stored text.** Every load reads through a private witness that never refuses: it decodes to the stored
+text paired with the real witness's answer. Two encoders were weighed for it.
+
+1. **Hash every op over its stored text.** Rejected. It changes what a load verifies for every store,
+   not only a newer one: a witness whose `Encode` does not reproduce the text it decoded (a
+   non-canonical spelling on disk) would verify at load and then fail `verifyDag` on the value the load
+   returned. A verified load must mean what `verifyChain` / `verifyDag` mean of its result.
+2. **Re-encode a decoded op and hash the stored text only where there is no op (CHOSEN).** For a store
+   whose ops all decode, every hash, every break, every collision check and every answer is the one the
+   string loads gave, to the byte. The stored text enters only where nothing else exists to hash, and
+   there D146.1 makes it exact.
+
+The collision checks (`Dag.fromJsonl`'s repeated id, the lane union's) read through the same encoder,
+so they too are unchanged for a decodable store.
+
+**D146.3 — one closed union, generic over the break: `StreamLoadFault<'Break>`.** It lives in
+`Fuaran.Core.OpStream` beside `JsonlFault`, and every stream load in both packages answers it, with
+`'Break` the stream's own integrity type: `ChainBreak` (linear), `DagBreak` (a DAG text), `Dag.LaneBreak`
+(a lane store). Six cases: `Unreadable of lane option * JsonlFault`, `Broken of 'Break`, `Undecodable of
+UndecodableOp list`, `DuplicateLane`, `Collision`, `UnreadableCheckpoint of JsonlFault`. An
+`UndecodableOp` names the lane (where there is one), the 1-based physical line, the content id (a node's
+id, a linear record's stored hash) and the witness's reason, verbatim. The name follows `STABILITY.md`'s
+vocabulary: a load that could not complete is a `…Fault`. Alternatives weighed:
+
+1. **One union per package (`StreamLoadFault` for the linear stream, a second in the DAG package).**
+   Rejected. Two unions for one question, with the same four cases, is the drift the shard exists to
+   close, and a host reading both kinds of store would match twice.
+2. **A union in the DAG package naming `DagBreak` directly.** Impossible without inverting the package
+   dependency: the linear package cannot reference it.
+3. **Keep `Dag.LaneLoadFault` and nest it as a case.** Rejected for the same dependency reason, and
+   because its three cases carry only strings and lists of strings, so they need no DAG type: they fold
+   into the one union as `Unreadable(Some lane, fault)`, `DuplicateLane` and `Collision`, and
+   `LaneLoadFault` leaves (`removal`, paid by the major). There is no stringly twin beside any load.
+4. **A non-generic union with a `ChainBreak` case and a `DagBreak` case.** Rejected: impossible across
+   the dependency, as 2.
+
+A structural load (one that does not verify) is typed with its stream's break and never answers
+`Broken`; that is stated on each load. `'Break` is a phantom there, which is cheaper than a second
+union for the structural loads.
+
+**D146.4 — precedence: unreadable, then broken, then undecodable.** A load answers the first that holds.
+A malformed line, a duplicate lane, a cross-lane collision or a refused checkpoint line says the bytes
+are not a store. A break says the store is damaged; it wins over any decode failure, which on a damaged
+store is not a separate finding. `Undecodable` is answered only when everything before it held, and it
+names EVERY site, in lane and then line order. Two consequences, both deliberate:
+
+- a line that repeats a held id with an op the witness cannot decode is now refused as a content-id
+  collision (the bytes say two different things under one id), where it used to be refused as a decode
+  error because the decode ran first (`DagTests` records the move);
+- a structural load answers `Undecodable` after a scanner fault anywhere in the text has been ruled out,
+  where it used to answer the first decode failure in line order.
+
+**D146.5 — the rendered bytes are kept, through the renderers.** `StreamLoadFault.toStringWith renderBreak`
+renders each case; `StreamLoadFault.toString` (linear), `Dag.loadFaultToString` and
+`Dag.laneLoadFaultToString` fix the break's spelling. Each pre-416 message keeps its bytes: a scanner
+fault is `JsonlFault.toString`; one undecodable op is `line N: <reason> (position 0)`, what the reader's
+refusal rendered; a linear break is `OpStream.fromJsonlVerified: chain breaks at record N — <reason>`; a
+DAG break is `Dag.fromJsonlVerified: <reason> at node <id>` (the `DagTests` byte pin passes through
+`loadFaultToString` unchanged); a checkpoint line is `checkpoint sidecar: <fault>`. The conformance laws
+pin no load's error bytes directly (`dagBreakReasonLaws` certifies `DagBreakReason.toString`, which the
+DAG renderer uses), so nothing was re-pinned.
+
+**D146.6 — `Dag.loadLanesVerified`.** A host meeting a lane store needs the three-way answer in one call,
+and the answer needs the verification to run before the decode, which `loadLanes` then `verifyLanes`
+cannot give (the second needs decoded ops). So the verified lane load is added, as `fromJsonlVerified` is
+the verified form of `fromJsonl`: lane-set faults, then `Broken` with the `LaneBreak` `verifyLanes` would
+name, then `Undecodable`. On a decodable store it answers exactly what `loadLanes` then `verifyLanes`
+answer (`LaneTests`).
+
+**D146.7 — what was not retyped, and why.** `OpStream.captureFromJsonl`, `Snapshots.ofJsonl` and
+`Attributed.decodeEnvelope` still answer strings. None is an op-stream load: the first reads an effect
+capture log, the other two a single line, and none reads through a stream witness, so the distinction
+this phase exists for (newer store or damaged store) does not arise in them. They are named here so the
+reflection test's scope (`fromJsonl…` and `loadLanes…`, every public member of both packages so named)
+reads as a decision rather than an oversight.
+
+**Consequences.** The surface gate, against the pre-phase baselines: `Fuaran.Core.OpStream` **`retype`**
+(35 moves: the four linear loads' error type, with the union, its module and `UndecodableOp` additive),
+and `Fuaran.Core.OpStream.Dag` **`removal`** (19 moves: `LaneLoadFault` leaves; the four DAG loads'
+error type moves; `loadLanesVerified`, `loadFaultToString` and `laneLoadFaultToString` are additive). All
+paid by the major, on the untagged `1.0.0` draft slot. No wire byte, digest, chain pre-image, law vector
+or `ParityVectors` row moves. A consumer matches the union, or calls the renderer for the old text
+([the 1.0.0 migration](docs/migrations/1.0.0.md)). The first host's carried witness and its post-load
+walk become deletable at its `1.0.0` raise: `loadLanesVerified` answers the case it built for itself as
+`Undecodable` with every site.
+
 ## 2026-10-10 — D145: under Fable a `Vector<bool>` holds a byte a row in a `Uint8ClampedArray`, and `Vector.Unsafe.borrow` lends that array as it is; every read answers a boolean; `adopt` packs a boolean array, the one place it copies; on .NET nothing moves; and `Column.ofTimestamps` refuses an instant its text could not name
 
 **Context.** Under Fable a `bool[]` is a plain JavaScript array, eight bytes a row, and every
