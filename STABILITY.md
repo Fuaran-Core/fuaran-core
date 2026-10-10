@@ -499,7 +499,7 @@ rest of the substrate.
 
 ### Public because a sibling Core package calls it (`0.19.0`)
 
-`Fuaran.Core.*` is eighteen packable assemblies. Between them it grants `InternalsVisibleTo` in
+`Fuaran.Core.*` is nineteen packable assemblies. Between them it grants `InternalsVisibleTo` in
 exactly four declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
 `Fuaran.Core.ContentAddress`, and `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen` and to
 `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (DECISIONS.md D129); the two
