@@ -50,7 +50,7 @@ type StreamGen<'Op, 'State> =
 ///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
 ///   refused dispatch.
 ///
-/// The domain's BODY is not a field (Phase 391; `Body`, a thunk-returning function, before `1.0.0`):
+/// The domain's BODY is not a field (Phase 391; `Body`, a thunk-returning function, before `0.37.0`):
 /// it is what the family hands `Dispatch` on each call, so it is the family's per-call argument
 /// (`Conformance.capabilityLawsAt w body`), which the kit wraps to count how often it runs. The record
 /// names the seam — its oracle, its host path and the calls a model could make — and freezes that
@@ -77,7 +77,7 @@ type CapabilitySeamWitness<'v> =
 /// (`QueryRegistry.dispatch queries` for a host that delegates to Core), and `GenQuery` the calls a
 /// model could make. The domain's resolver is the family's per-call argument
 /// (`Conformance.queryLawsAt w resolver`), as the capability body is (Phase 391; the field
-/// `Resolver` before `1.0.0`, DECISIONS.md D138).
+/// `Resolver` before `0.37.0`, DECISIONS.md D138).
 type QuerySeamWitness =
     {
         /// The oracle: whether a call should reach the resolver, and which error refuses it

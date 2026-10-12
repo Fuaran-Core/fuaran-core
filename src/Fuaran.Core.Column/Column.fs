@@ -14,7 +14,7 @@ namespace Fuaran.Core
 //  (it reuses `Fuaran.Core.Wire`'s canonical-float / escaping / parser rules, so a
 //  numeric column is byte-identical across the .NET and Fable hosts).
 //
-//  Since Phase 417 (the `1.0.0` slot) a column's storage is one typed `Vector` per
+//  Since Phase 417 (the `0.37.0` slot) a column's storage is one typed `Vector` per
 //  column behind the `ColumnData` union, with its `Validity` beside it, where it
 //  was a `Cell list`: a consumer holds typed storage, an indexed read is O(1), and
 //  a cell outside its column's type cannot be represented. Since Phase 420 a
@@ -400,14 +400,14 @@ type AggFn =
 type AggregateError =
     /// A numeric aggregate over a non-numeric column: `fn` is the aggregate, `colType` the column's
     /// type, and `expected` the numeric types (`IntType`, `FloatType`, `DecimalType`). Typed since
-    /// Phase 391; their tags before `1.0.0`.
+    /// Phase 391; their tags before `0.37.0`.
     | IncompatibleAggType of fn: AggFn * colType: ColumnType * expected: ColumnType list
     /// An answer outside its type's range: an int `Sum` past int32, a float `Sum` or a float
     /// statistic that left the float range over finite input, or a decimal too large to read as a
     /// float for a float-valued aggregate. `detail` says which, with the offending value or column.
     | AggregateOverflow of detail: string
     /// A present cell outside its column's type (Phase 299): the column, its declared type
-    /// (`ColumnType` since Phase 391; its tag before `1.0.0`), and the cell — for a `Decimal` cell,
+    /// (`ColumnType` since Phase 391; its tag before `0.37.0`), and the cell — for a `Decimal` cell,
     /// the text that is not decimal text. Since Phase 417 a cell of another TYPE cannot sit in a
     /// column (`Column.ofCells` refuses it, and the typed storage cannot hold it), so the one cell
     /// this names is a `Decimal` whose text is not decimal: refused, by name, before any aggregate
@@ -434,12 +434,12 @@ type ColumnError =
     /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
     | MalformedShape of detail: string
     /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid types, in
-    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `1.0.0`).
+    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `0.37.0`).
     | UnknownType of got: string * expected: ColumnType list
     /// A present cell's type does not widen into its column's declared type — its JSON kind on
     /// decode, its `Cell` case in `Column.ofCells` (Phase 417; `Table.validate` until then, which
     /// now cannot meet one) — or a column's `Type` disagrees with its schema entry. `expected` is the
-    /// declared type (`ColumnType` since Phase 391; its tag before `1.0.0`); `got` is what was found
+    /// declared type (`ColumnType` since Phase 391; its tag before `0.37.0`); `got` is what was found
     /// — a JSON value's kind on decode, a `Cell`'s or a column's type tag otherwise.
     | TypeMismatch of column: string * expected: ColumnType * got: string
     /// A column's `values` and `validity` arrays had different lengths (they must co-index) — on the

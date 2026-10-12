@@ -4,7 +4,7 @@ namespace Fuaran.Core
 /// of node-introspection / capability discovery): "what data may I acquire, with what typed params,
 /// producing what schema". Default-deny by shape on dispatch — only a registered id resolves.
 ///
-/// OPAQUE since `1.0.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
+/// OPAQUE since `0.37.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
 /// policy are reachable only through this module's verbs, so `register` — and its admission gate —
 /// is the only way a query gets in.
 type QueryRegistry =
@@ -286,7 +286,7 @@ module QueryRegistry =
     /// `QueryError.describe`'s sentence before Phase 385), and `Pending` leaves it open with the
     /// returned `Ticket`. A refusal before the resolver journals nothing; a deterministic query
     /// journals nothing. The `Outcome` is exactly `dispatch`'s; a `CapturedDispatch` since Phase 391
-    /// (a positional triple before `1.0.0`).
+    /// (a positional triple before `0.37.0`).
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -435,7 +435,7 @@ module QueryRegistry =
     /// unsettled attempt as `Pending`. A deterministic query resolves live. A journal that cannot
     /// answer is `ReplayFailure.Unanswered` with the `KeyedCaptureFault`, never a live fetch; every
     /// refusal of the seam, live or recorded, is `ReplayFailure.Refused`. A `ReplayedDispatch` since
-    /// Phase 391 (a nested `Result` before `1.0.0`).
+    /// Phase 391 (a nested `Result` before `0.37.0`).
     let dispatchReplayed
         (decode: string -> Result<QueryResult, string>)
         (r: QueryRegistry)

@@ -41,7 +41,7 @@ let private deriveDrift (input: CellInput) : DriftFlag list =
 
     if abs delta > 1e-9 then [ RecomputeDrift delta ] else []
 
-// Until `1.0.0` these drove the `InMemoryObserver` adapter; it left with the
+// Until `0.37.0` these drove the `InMemoryObserver` adapter; it left with the
 // `Fuaran.Core.Observer` namespace (Phase 386), so each now drives the witness
 // functions the adapter wrapped. Subscription is host state: an emission is the
 // value a function returns, so "what a subscriber hears" is that value.

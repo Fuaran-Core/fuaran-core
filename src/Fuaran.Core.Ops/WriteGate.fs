@@ -22,7 +22,7 @@ namespace Fuaran.Core
 //  FSharp.Core + Fuaran.Core.Tree only, as `Ops` is; Fable-clean.
 // ============================================================================
 
-/// The mode of a write gate (Phase 391; an `option` before `1.0.0`, `None` for the deny-list and
+/// The mode of a write gate (Phase 391; an `option` before `0.37.0`, `None` for the deny-list and
 /// `Some ids` for the allow-list): what is writable besides what the gate locks. The locks are the
 /// gate's `Locked` in both modes, so the deny-list case carries no set of its own — a second one
 /// would be a second place to say what is locked, and a lock wins inside an allow-list.

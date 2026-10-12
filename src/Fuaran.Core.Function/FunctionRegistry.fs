@@ -306,7 +306,7 @@ module FunctionRegistry =
             |> Result.bind (fun () -> InvokeError.settle (body e ()))
 
     /// Narrow a registered function's signature under a new id (Phase 50; `partiallyApply` before
-    /// `1.0.0`, renamed by Phase 391 because it binds no value: it narrows the signature and binds
+    /// `0.37.0`, renamed by Phase 391 because it binds no value: it narrows the signature and binds
     /// nothing) — the content-pack formalism. Produce a
     /// NEW entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's
     /// (the bound holes drop out — a narrowed signature, fewer required holes), with the source's result

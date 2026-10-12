@@ -63,7 +63,7 @@ type SnapshotBreak =
 /// The bodies of the `OpStream` snapshot members (Phase 332): the `OpStream.Snapshots` family.
 /// Internal: a consumer reaches each one through its forward in `OpStream` (OpStream.fs), which
 /// carries the member's contract and documentation. (The pre-Phase-296 matrix that was forwarded
-/// over it left at `1.0.0`, Phase 386.)
+/// over it left at `0.37.0`, Phase 386.)
 module internal OpStreamSnapshot =
     open Fuaran.Core.OpStreamChain
     open Fuaran.Core.OpStreamJsonl

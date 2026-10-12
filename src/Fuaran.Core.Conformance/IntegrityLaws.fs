@@ -208,7 +208,7 @@ module internal IntegrityLaws =
     /// was ever compared. The search stops at the first collision, as it always did.
     ///
     /// `family` is the roster id the guard is labelled with — `Conformance.encoderInjectivityLawsAt`, or
-    /// the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    /// the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let encoderInjectivityLawsAt
         (family: string)
         (w: ArtifactWitness<'Node, 'Id>)
@@ -409,7 +409,7 @@ module internal IntegrityLaws =
     /// Opt-in like `snapshotLaws` / `dagLaws`. `'State` needs equality (replay-equivalence).
     ///
     /// `family` is the roster id the guard is labelled with — `Conformance.attestationLawsAt`, or the
-    /// bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    /// bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let attestationLawsAt
         (family: string)
         (sw: StreamWitness<'Op, 'State, 'Rej>)

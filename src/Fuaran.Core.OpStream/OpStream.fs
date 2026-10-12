@@ -515,7 +515,7 @@ module OpStream =
     /// THE snapshot family (Phase 296) — one set of entry points taking the `SnapshotMode` and the
     /// `StreamConfig`, where seventeen members formed a strict/chain-only × canonical/config matrix.
     /// The mode is carried ON the `Snapshot`, so everything after `take` reads it from the snapshot
-    /// rather than from an argument or a re-parse of the line. Since `1.0.0` it stands alone: the
+    /// rather than from an argument or a re-parse of the line. Since `0.37.0` it stands alone: the
     /// pre-Phase-296 entry points, whose names chose a verification that could contradict the
     /// snapshot's own `Mode`, left with Phase 386, and no member takes a mode that overrides the one
     /// the snapshot carries (confirmed by Phase 391).
@@ -1036,7 +1036,7 @@ module OpStream =
     /// open and the returned `Occurrence` is what `settleEffectKeyed` settles it with later. A
     /// `deterministic` label journals nothing (occurrence `0`, the journal unchanged), as
     /// `captureEffect`'s does. A `CapturedEffect` since Phase 391 (a positional triple before
-    /// `1.0.0`).
+    /// `0.37.0`).
     let captureEffectKeyed
         (hashFn: HashFn)
         (encode: 'v -> string)

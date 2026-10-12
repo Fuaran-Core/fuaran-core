@@ -237,7 +237,7 @@ module Space =
 /// a hash over `toSchema`'s bytes, so moving the descriptor onto the document spelling would re-pin
 /// every published pack (DECISIONS D104). That spelling is WRITTEN and never READ: `decoder` takes
 /// the document spelling only, and an object with a `"kind"` and no `"$type"` is refused as a
-/// missing `"$type"`. The lenient read of the descriptor spelling left at `1.0.0` (Phase 405),
+/// missing `"$type"`. The lenient read of the descriptor spelling left at `0.37.0` (Phase 405),
 /// together with the arm of the verified model (`proofs/Capability.fst`, `space_of_j`) that pinned
 /// it, so the 1.x line freezes ONE reader spelling of a value space (DECISIONS.md D133, amended).
 module SpaceCodec =

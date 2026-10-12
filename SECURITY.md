@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Fuaran.Core follows semantic versioning from `1.0.0`. Security fixes are applied to the latest
-minor of the current major, on the `main` branch. Earlier minors, and the `0.x` line, are not
-maintained.
+Fuaran.Core is on the `0.x` line; semantic versioning starts at `1.0.0` (STABILITY.md, "Versioning
+policy"). Security fixes are applied to the latest released minor, on the `main` branch. Earlier
+minors are not maintained.
 
 ## Reporting a vulnerability
 

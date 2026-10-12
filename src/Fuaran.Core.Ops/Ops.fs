@@ -615,7 +615,7 @@ module Ops =
     /// FIRST REFUSAL WINS, and a script is **not** a `Batch`. `Batch` is all-or-nothing inside
     /// one op: it aborts and the original tree survives. A script stops at the first refusal and
     /// returns the tree built so far, so the accepted prefix is kept. On failure the payload is a
-    /// `ScriptRejection` (Phase 391; a positional triple before `1.0.0`): `Applied`, the number of
+    /// `ScriptRejection` (Phase 391; a positional triple before `0.37.0`): `Applied`, the number of
     /// ops applied before the refusal and so the 0-based position of the refused op in `ops`;
     /// `Rejection`, the envelope; and `Tree`, the tree the accepted prefix reached — the state the
     /// refused step was offered against.

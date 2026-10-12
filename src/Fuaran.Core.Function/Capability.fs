@@ -473,7 +473,7 @@ module Capability =
         typeArgs c args |> Result.bind (fun typed -> InvokeError.settle (body typed))
 
 /// A dispatch journalled in the keyed capture journal (Phase 391; a positional triple before
-/// `1.0.0`): what `CapabilityRegistry.dispatchCaptured` and the `QueryRegistry.dispatch…Captured`
+/// `0.37.0`): what `CapabilityRegistry.dispatchCaptured` and the `QueryRegistry.dispatch…Captured`
 /// verbs answer. `'e` is the seam's refusal — `InvokeError` for a capability, `QueryError` for a
 /// query.
 type CapturedDispatch<'v, 'e> =
@@ -488,7 +488,7 @@ type CapturedDispatch<'v, 'e> =
         Journal: KeyedCapture list
     }
 
-/// Why a replayed dispatch did not answer a value (Phase 391; a nested `Result` before `1.0.0`): the
+/// Why a replayed dispatch did not answer a value (Phase 391; a nested `Result` before `0.37.0`): the
 /// seam's own refusal, which a live dispatch would have answered too, or the journal's inability
 /// to answer the invocation.
 [<RequireQualifiedAccess>]
@@ -502,7 +502,7 @@ type ReplayFailure<'e> =
     | Unanswered of KeyedCaptureFault
 
 /// A dispatch replayed from the keyed capture journal (Phase 391; a nested `Result` and a pair
-/// before `1.0.0`): what `CapabilityRegistry.dispatchReplayed` and the
+/// before `0.37.0`): what `CapabilityRegistry.dispatchReplayed` and the
 /// `QueryRegistry.dispatchReplayed…` verbs answer.
 type ReplayedDispatch<'v, 'e> =
     {
@@ -519,7 +519,7 @@ type ReplayedDispatch<'v, 'e> =
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
 ///
-/// OPAQUE since `1.0.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
+/// OPAQUE since `0.37.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
 /// policy are reachable only through this module's verbs, so `register` — and its admission gate —
 /// is the only way a capability gets in. While the record was public, `{ r with Capabilities =
 /// Map.add id c r.Capabilities }` admitted a capability no gate had seen, which is the default-deny
@@ -536,7 +536,7 @@ type CapabilityRegistry =
         }
 
 /// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295; the
-/// obsolete alias left at `1.0.0`). `ModuleSuffix`, so the module and the type share a name, as
+/// obsolete alias left at `0.37.0`). `ModuleSuffix`, so the module and the type share a name, as
 /// `FunctionRegistry` does.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CapabilityRegistry =

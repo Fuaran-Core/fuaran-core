@@ -1,13 +1,13 @@
 /// The pre-Phase-296 snapshot matrix, kept as a TEST-LOCAL translation onto `OpStream.Snapshots`.
 ///
-/// Its shipped forwards (`OpStream.snapshotAt`, `compact`, `verifyAcross`, …) left at `1.0.0`
+/// Its shipped forwards (`OpStream.snapshotAt`, `compact`, `verifyAcross`, …) left at `0.37.0`
 /// (Phase 386). Two kinds of test still speak its shape: the snapshot suite, whose cases were
 /// written against these entry points and certify the family's behaviour through them, and the
 /// proof-oracle differentials, because the compaction model (`proofs/Chain.fst`, and the oracle
 /// extracted from it) pins its refusals as these exact strings. So each member here is the retired
 /// body in behaviour — the mode its name pins, the canonical config where it took none, and the
 /// typed `SnapshotFault` rendered as the string the model states — over the public family. Nothing
-/// ships from this file; a consumer's migration is `docs/migrations/1.0.0.md`.
+/// ships from this file; a consumer's migration is `docs/migrations/0.37.0.md`.
 module Fuaran.Core.Tests.SnapshotMatrix
 
 open Fuaran.Core
