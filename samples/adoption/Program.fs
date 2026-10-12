@@ -391,11 +391,27 @@ let main _ =
     printfn "  fill 95      -> %s" (call fillId [ celsiusAddr, "95" ])
     printfn "  fill by name -> %s" (call fillId [ "celsius", "20" ])
 
+    // a result column is read through its TYPED reader: the `Vector<string>` the resolver built,
+    // with no conversion to cells, and the validity consulted for each row (Phase 424)
+    let presentTexts (c: Column) =
+        match Column.tryStrs c with
+        | Some texts ->
+            texts
+            |> Vector.toList
+            |> List.indexed
+            |> List.choose (fun (i, t) -> if Column.isPresent i c then Some t else None)
+        | None -> []
+
     let notes section =
         let args = [ "section", Str section ]
 
         QueryRegistry.dispatch queries "outline.notes" args (notesResolver args)
-        |> Result.map (Deferred.map (fun r -> r.Rows.Columns |> List.collect Column.toCells))
+        |> Result.map (
+            Deferred.map (fun r ->
+                Table.tryColumn "text" r.Rows
+                |> Option.map presentTexts
+                |> Option.defaultValue [])
+        )
         |> Result.mapError QueryError.describe
         |> outcome
 
