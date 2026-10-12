@@ -441,7 +441,7 @@ module internal PropagationLaws =
     /// witness, and a domain that does not evaluate incrementally has nothing for this family to say.
     ///
     /// `family` is the roster id the guard is labelled with — `Conformance.propagationEvaluatorLawsAt`,
-    /// or the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    /// or the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let propagationEvaluatorLawsAt
         (family: string)
         (evw: EvaluatorWitness<'Model, 'V>)

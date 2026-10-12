@@ -127,7 +127,7 @@ type KeyedCapture =
         Hash: string
     }
 
-/// What capturing one invocation answered (Phase 391; a positional triple before `1.0.0`):
+/// What capturing one invocation answered (Phase 391; a positional triple before `0.37.0`):
 /// `OpStream.captureEffectKeyed`'s result.
 type CapturedEffect<'v> =
     {

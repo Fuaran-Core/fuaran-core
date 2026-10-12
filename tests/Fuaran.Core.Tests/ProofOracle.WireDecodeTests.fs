@@ -549,7 +549,7 @@ let private relatedByModel (a: JVal) (b: JVal) : bool =
 type private GetProp = string -> JVal -> Result<JVal, string>
 
 /// The production reading of a member, in the string-error shape the probes take: the typed
-/// `Decoder.field` described (the `Decode.getProp` this stood for left at `1.0.0`, Phase 386).
+/// `Decoder.field` described (the `Decode.getProp` this stood for left at `0.37.0`, Phase 386).
 let private getProp: GetProp =
     fun name el -> Decoder.describing (Decoder.field name Decoder.json) el
 

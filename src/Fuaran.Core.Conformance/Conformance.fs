@@ -647,7 +647,7 @@ module Conformance =
     /// run's agreement with `Apply`, under the DOMAIN'S own policy, its effects accessor and the
     /// registry its actors act through. `privileged` names the actors a host-writing op may be
     /// allowed for; every other actor drawn from `actors` is held to the law. The actors are the
-    /// stream's typed `Actor` (Phase 391; bare strings before `1.0.0`), and the surface's policy is
+    /// stream's typed `Actor` (Phase 391; bare strings before `0.37.0`), and the surface's policy is
     /// asked about each by its attribution id, `Actor.id`.
     let policyLawsAt
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
@@ -918,7 +918,7 @@ module Conformance =
     let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =
         SurfaceLaws.witnessDeclaredFieldsLaw record pinned declared
 
-    // `witnessFieldsLaw` and `witnessCoverageLaw` left this facade at `1.0.0` (Phase 386): they take a
+    // `witnessFieldsLaw` and `witnessCoverageLaw` left this facade at `0.37.0` (Phase 386): they take a
     // `System.Type`, a reflection handle no domain hands the kit, and `witnessSurfaceLaws ()` below
     // runs both over the records the kit was compiled against. They stay internal to the kit.
 

@@ -1,10 +1,9 @@
 # Fuaran.Core — API stability
 
-**Status:** the `1.x` line — semantic versioning from `1.0.0` (Phase 386); the `0.x` line ended at
-`0.36.0`. The released version is single-sourced from `<Version>` in `Directory.Build.props` — this
-document deliberately does not restate the number (restated versions drift; the props file cannot).
-Within a major the surface grows additively and the witness contracts are frozen; a breaking move
-waits for the next major (the `OneDotZero` family, below).
+**Status:** the `0.x` line; the slot opened as `1.0.0` (Phase 386) is released as the minor `0.37.0`
+(DECISIONS.md D147). The released version is single-sourced from `<Version>` in `Directory.Build.props`
+(restated versions drift; the props file cannot). Through the `0.x` line a breaking move rides a
+minor; from `1.0.0` it waits for the next major and the witness contracts are frozen (`OneDotZero`).
 
 ## Versioning policy
 
@@ -14,9 +13,10 @@ tag workflow [`RELEASING.md`](RELEASING.md) describes (its gates, the Trusted Pu
 post-push registry probe). The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
-**Semantic versioning from `1.0.0`; obsolete forwards leave at a major, and `1.0.0` is one (Phase
-386, DECISIONS.md D133).** Through the `0.x` line a breaking class (below) advanced the MINOR and an
-additive one rode the standing draft slot. From `1.0.0` the version is semver: a breaking class —
+**Semantic versioning from `1.0.0`; obsolete forwards leave at a major, and `1.0.0` will be one (Phase
+386, DECISIONS.md D133; still the `0.x` line at `0.37.0`, D147).** Through the `0.x` line a breaking
+class (below) advances the MINOR and an additive one rides the standing draft slot. From `1.0.0` the
+version is semver: a breaking class —
 `removal`, `retype` or any `*-widening` — advances the MAJOR, an additive one the minor, and a change
 that moves no public surface the patch. A member a minor retires stays as a `System.Obsolete` forward
 naming its replacement, and every forward leaves at the next major: a major freezes with none
@@ -25,8 +25,8 @@ and, from major 1, holds four laws — no public member of a shipped assembly ca
 `System.ObsoleteAttribute`; `Conformance.unfrozenWitnesses` is empty; `Conformance.frozenWitnessFields`
 is byte-equal to the list the major's `vN.0.0` tag carries (through the committed render
 `tests/Fuaran.Core.Tests/frozen-witness-fields.txt`); and no `api/` baseline has moved by a breaking
-class since the newest tag unless the major advanced past that tag's. At major 0 each law reported
-itself vacuous by name.
+class since the newest tag unless the major advanced past that tag's. At major 0 (`0.37.0` too) each
+law reports itself vacuous by name; its go-red plants run at major 1 at every version (D147).
 
 **Every version cut cites a green run of the Core Fable gate against the candidate (Phase 217,
 DECISIONS.md D55).** This repository runs no Fable compiler, so before the release gesture the
@@ -301,13 +301,13 @@ suffix says which question it answers:
 - **`Defect`** (and `…Defect`) — a finding reported in a list beside an answer, never a refusal: the
   validator's `Defect`, `VerifyDefect`, `ObserverDefect`, `ReferenceDefect`.
 
-`ResolveFault` was reviewed against this rule on the `1.0.0` slot (Phase 389, DECISIONS.md D136) and
+`ResolveFault` was reviewed against this rule on the `0.37.0` slot (Phase 389, DECISIONS.md D136) and
 keeps its name: it is the host's report that its fetch could not complete, which is a fault, and the
 caller-facing refusal it becomes is `QueryError`. A `ResolveError` would have put two `…Error` unions
 on one dispatch with no rule to tell them apart. `Idl.Sample.SampleRefusal` was the one type outside
 the seven suffixes: by this rule it is a fault (the sampler could not complete on the vocabulary it
 was given, and names the slot), and the same decision ruled its rename; it is `SampleFault` since the
-`1.0.0` slot (Phase 391). A replayed dispatch that does not answer a value is a `ReplayFailure` —
+`0.37.0` slot (Phase 391). A replayed dispatch that does not answer a value is a `ReplayFailure` —
 the seam's own refusal (`Refused`) or the journal's inability to answer (`Unanswered`, carrying the
 `KeyedCaptureFault`) — the `…Failure` of a composite flow, as the rule above says.
 
@@ -432,7 +432,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
 
 The columnar strand this repository produces (`Fuaran.Core.Column`, `Fuaran.Core.Query`) is
 a **first-class, stability-critical member of the substrate**, not an example or a reference sketch —
-its public surface carries the same 1.0 commitment as the witness spine, and its cross-host semantics
+its public surface carries the same stability commitment as the witness spine, and its cross-host semantics
 are **conformance-certified**, not asserted. Stable surfaces:
 
 - **The columnar model + wire codec** — the fixed Arrow scalar set (`int` / `float` / `bool` / `string`
@@ -441,7 +441,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
   ordering / **canonical-float** semantics — floats route through `Wire.Canon.canonicalFloat`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
   a coercion/widening rule is a **major** bump.
-- **The typed column storage (Phase 417, `1.0.0`)** — a `Column` is `{ Name; Data }`, its `Data` one
+- **The typed column storage (Phase 417, `0.37.0`)** — a `Column` is `{ Name; Data }`, its `Data` one
   case of `ColumnData` per column type, each an opaque immutable `Vector<'T>` of values beside a
   `Validity` (Phase 420: `AllValid`, holding no mask, for a column with no absent row, or a `Mask` of one
   `bool` per row), and its `Type` the case the storage carries, so a column cannot disagree with its own
@@ -460,18 +460,18 @@ are **conformance-certified**, not asserted. Stable surfaces:
   `Validity.ofArray`, `ofList`, `ofVector`, and through them `Column.ofCells` and decode — answer
   `AllValid` exactly when no row is absent, `Column.mask` / `Validity.toMask` materialise the mask on
   request, and the wire writes the same all-true validity array it always did; the typed builders
-  hold the `Validity` they are handed as given. The shape of `Validity` is stable from `1.0.0`:
+  hold the `Validity` they are handed as given. The shape of `Validity` is stable from `0.37.0`:
   adding a third case is **major**. **Temporal columns are integers (Phase 422, DECISIONS.md D143)**:
   `Dates` holds `int32` days since 1970-01-01, and `Timestamps` a `TimeUnit`, integer-valued `float64`
   epoch seconds and, for a sub-second unit, an `int32` fraction scaled to the unit (`None` reading as
   every fraction zero, compared materialised as a mask is); `ColumnType.TimestampType` carries the
   unit, `timestamp` is the seconds tag and `timestamp_ms` / `_us` / `_ns` the others, and a coarser unit
   widens into a finer one. The canonical instant text is the MINIMAL one — one text per instant
-  whatever unit holds it — and `Cell.compare` orders timestamps chronologically. Stable from `1.0.0`:
+  whatever unit holds it — and `Cell.compare` orders timestamps chronologically. Stable from `0.37.0`:
   the two cases' shapes, the unit's four cases and their tags, and the text and order rules; a fifth
   unit, or a change to the text or the order, is **major**. No .NET date type is storage: `DateOnly`
   and `DateTimeOffset` are edge accessors, absent under Fable.
-- **The schema field (Phase 427, `1.0.0`, DECISIONS.md D144)** — a schema entry is an opaque `Field`:
+- **The schema field (Phase 427, `0.37.0`, DECISIONS.md D144)** — a schema entry is an opaque `Field`:
   a name, a type and the metadata that says what the column means — an optional `UnitOfMeasure`, a
   label, a description and an extension map of namespaced keys to strings — built through
   `Field.create` and the `Field.with…` builders and read through its properties; `Schema` is
@@ -486,11 +486,11 @@ are **conformance-certified**, not asserted. Stable surfaces:
   reports a metadata change as `Amended` beside a retype and replays it; and `Schema.classify` reads a
   stated unit replaced or withdrawn on a depended-on column as `Breaking`, a label or description change
   as compatible, and an extension change as `Unknown`. Core never interprets an extension member.
-  Stable from `1.0.0`: the member names on the wire, the absent-when-unstated rule, the fingerprint's
+  Stable from `0.37.0`: the member names on the wire, the absent-when-unstated rule, the fingerprint's
   pre-image, and the `FieldChange` cases and their `amended` spellings; a new metadata member is
   **additive** (a new builder, property, wire member and `FieldChange` case), and a change to any of the
   above is **major**.
-- **The ownership contract of `Vector` (Phase 418, `1.0.0`)** — the type is the contract, not a
+- **The ownership contract of `Vector` (Phase 418, `0.37.0`)** — the type is the contract, not a
   convention over arrays. **Guaranteed:** no public member of `Vector<'T>`, of the `Vector` module or
   of the column layer writes into a vector's storage, so a vector's contents never change after
   construction except through an array its builder handed over with `Vector.adopt` or one lent by
@@ -519,7 +519,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
   by design: one NaN over another, because a NaN's payload is not portable across hosts. The contract
   is NOT an F* theorem — the models carry no mutation — and changing it (a public member that writes,
   a `slice` that copies, a second route to the backing array) is a **major** bump.
-- **A `Vector<bool>` under Fable, and what it lends (Phase 431, `1.0.0`, DECISIONS.md D145)** — .NET
+- **A `Vector<bool>` under Fable, and what it lends (Phase 431, `0.37.0`, DECISIONS.md D145)** — .NET
   is unchanged. **Guaranteed under Fable:** a non-empty vector of booleans (every bool column's values,
   every `Mask`) is PACKED in a `Uint8ClampedArray`, `1`/`0`, a byte a row; every constructor packs,
   `adopt` included (its one copy, unobservable to a caller keeping its promise); every read answers a
@@ -527,7 +527,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
   copy, seen by every holder when written. Its elements are `1`/`0` under a `bool[]` type: read one as a
   CONDITION (`if a[i] then`), never as a value. Held by `columnVectorLaws` law 3 over a bool vector and
   the ownership go-reds; changing the representation or what `borrow` lends is **major**.
-- **`Column.ofTimestamps` refuses what its text cannot spell (Phase 431, `1.0.0`, D145.6)** — it raises
+- **`Column.ofTimestamps` refuses what its text cannot spell (Phase 431, `0.37.0`, D145.6)** — it raises
   `System.ArgumentException`, naming column, row, second and fraction, wherever `Table.validate`'s
   timestamp clause would refuse (a fraction outside `[0, scale)`, a second not whole or not in
   `0000`..`9999`, a fraction vector of another length), because such a row renders ANOTHER instant's
@@ -567,14 +567,14 @@ stale* — the dependency structure, the cycle enumeration, and the dirty `Set` 
 the actual re-evaluation stays domain-side. The dependency relation is a per-call `readsOf` function, not
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
 / `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias of
-`dirtyFromChangedIds` left at `1.0.0`) is
+`dirtyFromChangedIds` left at `0.37.0`) is
 FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the
 rest of the substrate.
 
-### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `1.0.0`)
+### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `0.37.0`)
 
 `Fuaran.Core.Unit` is a unit as a runtime VALUE — the dimension algebra over a stated UCUM subset and
-ISO 4217 currencies, [docs/units.md](docs/units.md) — and from `1.0.0` it is a stability-critical
+ISO 4217 currencies, [docs/units.md](docs/units.md) — and from `0.37.0` it is a stability-critical
 member of the substrate: the schema field carries one (Phase 427), so the algebra's answers are part of
 the column wire's meaning. **Guaranteed:** `UnitOfMeasure` is held in one canonical form and
 `Unit.render` writes ONE text per unit, which `Unit.parse` reads back (`parse (render u) = u`); identity
@@ -883,7 +883,7 @@ attestation remain host-side behind the `IAttestationSink` seam, exactly as befo
 Integrity is also **opt-in on load**: `OpStream.fromJsonl` / `Dag.fromJsonl` decode *structurally*
 and do not verify — a tampered, dangling-parent, or cyclic input decodes to a clean `Ok`. Use
 `fromJsonlVerified` (Phase 13; `Dag.loadLanesVerified` for lanes) or verify before trusting. Every load
-answers a typed `StreamLoadFault` from `1.0.0`: a break first, then `Undecodable` ops (Phase 416, D146).
+answers a typed `StreamLoadFault` from `0.37.0`: a break first, then `Undecodable` ops (Phase 416, D146).
 
 **Compaction reads the boundary, it does not check it — verify, then compact (Phase 227).**
 `OpStream.Snapshots.compact`, in either mode and under any config, reads the boundary record's hash
@@ -900,7 +900,7 @@ is the genesis every chain walker starts from. `OpStream.Snapshots.take` and `co
 snapshot byte is unchanged. A stream appended under a config with any other genesis must be
 compacted under that config; a snapshot at zero taken under the canonical config does not verify
 across such a stream. (The pre-Phase-296 entry points this paragraph named — `snapshotAt`,
-`compactWith` and the rest — left at `1.0.0`.)
+`compactWith` and the rest — left at `0.37.0`.)
 
 ### Chain pre-image portability
 

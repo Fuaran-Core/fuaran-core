@@ -1734,7 +1734,7 @@ let vectorFamilyTests =
 // D78's rule as Phase 390 applies it (DECISIONS.md D127): a family that takes a witness capability
 // the base contract does not (`NeedsWitnessCapability`) is spelled `…At`, and its configured form is
 // `…With` — the `…At` family with one more parameter, last before the seed, never `…AtWith`. A bare
-// spelling survives only as an `[<Obsolete>]` forward until `1.0.0`. This is what keeps a family added
+// spelling survives only as an `[<Obsolete>]` forward until `0.37.0`. This is what keeps a family added
 // before or after `1.0` from reintroducing the exception the rule exists to remove.
 
 /// Whether the kit's public entry `Module.Entry` carries `[<Obsolete>]` — read by reflection, so a
@@ -1751,7 +1751,7 @@ let private isObsoleteIn (asm: System.Reflection.Assembly) (typeName: string) (e
 let private isObsoleteEntry (m: string) (entry: string) : bool =
     isObsoleteIn typeof<LawResult>.Assembly ("Fuaran.Core." + m) entry
 
-/// A planted obsolete forward beside a live `…At` form (Phase 386): the kit ships none from `1.0.0`
+/// A planted obsolete forward beside a live `…At` form (Phase 386): the kit ships none from `0.37.0`
 /// (the `OneDotZero` family holds that), so the exemption's reading is probed against this decoy.
 module ObsoleteDecoy =
     let decoyLawsAt (seed: int) = seed
@@ -1791,7 +1791,7 @@ let namingRuleTests =
 
           testCase "the obsolete reading sees the forwards it exempts"
           <| fun _ ->
-              // The kit ships no forward at 1.0.0, so the reading is probed against a planted one.
+              // The kit ships no forward at 0.37.0, so the reading is probed against a planted one.
               Expect.isNotNull
                   (typeof<LawResult>.Assembly.GetType "Fuaran.Core.Conformance")
                   "the reading resolves the kit's facade by name"

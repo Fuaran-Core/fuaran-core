@@ -13,9 +13,9 @@ module internal ObserverLaws =
     ///  - **a cyclic parent declaration terminates** — nodes declared under each other in a ring
     ///    are walked once each from every member, and the walk ends.
     ///
-    /// (Until `1.0.0` a first law held the witness functions equal to the `InMemoryObserver`
+    /// (Until `0.37.0` a first law held the witness functions equal to the `InMemoryObserver`
     /// adapter and a third held the adapter's subscribers isolated from re-entry; the adapter left
-    /// at `1.0.0` — Phase 386 — and subscription is host state.)
+    /// at `0.37.0` — Phase 386 — and subscription is host state.)
     ///
     /// Every arm is built on every iteration, so the family carries no guard.
     let observerLaws<'Input, 'Flag when 'Input: equality and 'Flag: equality>

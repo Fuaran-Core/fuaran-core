@@ -1,4 +1,4 @@
-// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 1.0.0. Do not edit by hand.
+// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.37.0. Do not edit by hand.
 module Fuaran.Core.Tests.DocGenerated
 
 open Fuaran.Core

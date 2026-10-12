@@ -397,7 +397,7 @@ let refusalTests =
               | Error m -> failtestf "a well-filed map was refused: %A" m
 
               // go-red: the same node filed under another key — the map a public record let a
-              // consumer build until 1.0.0, out of step with the id every walk looks parents up by.
+              // consumer build until 0.37.0, out of step with the id every walk looks parents up by.
               Expect.equal
                   (Dag.ofNodes (Map.ofList [ "elsewhere", node ]))
                   (Error { Key = "elsewhere"; NodeId = a })

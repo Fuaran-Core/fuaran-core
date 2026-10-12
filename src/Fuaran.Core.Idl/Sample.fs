@@ -49,7 +49,7 @@ module Sample =
     // which now holds the threading rather than a duplicated arithmetic.
     // -----------------------------------------------------------------------
 
-    /// Why a vocabulary could not be sampled (Phase 292; `SampleRefusal` before `1.0.0`, renamed
+    /// Why a vocabulary could not be sampled (Phase 292; `SampleRefusal` before `0.37.0`, renamed
     /// by Phase 391 under STABILITY.md's "Vocabulary": the sampler ran over the vocabulary it was
     /// given and could not complete, which is a fault) — the typed fault
     /// [[trySampleNodes]] returns where the sampler used to throw (a division by zero

@@ -19,7 +19,7 @@ let rec private encodeNode (n: RNode) : JVal =
           "children", JArr(n.Children |> List.map encodeNode) ]
 
 /// Every item of a JSON array through `d`, stopping at the first refusal — the string-error
-/// `Decode.mapList` this file used until it left at `1.0.0` (Phase 386), kept local to the test.
+/// `Decode.mapList` this file used until it left at `0.37.0` (Phase 386), kept local to the test.
 let private itemsThrough (d: JVal -> Result<'T, string>) (el: JVal) : Result<'T list, string> =
     let rec go acc xs =
         match xs with

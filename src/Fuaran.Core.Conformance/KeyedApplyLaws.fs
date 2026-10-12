@@ -42,7 +42,7 @@ module internal KeyedApplyLaws =
     /// declaration, is asserted all the same.
     ///
     /// `family` is the roster id the guards are labelled with — `Conformance.keyedApplyLawsAt`, or the
-    /// bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    /// bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let keyedApplyLawsAt
         (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
