@@ -2960,6 +2960,877 @@ let placement_lands_at_position ()
                                           TNode "b" "sec" [] ]))
 
 (* ======================================================================================
+   23. THE BUILD-ONCE INDEX AGREES WITH THE WALK (Phase 438) — F#: `Tree.NodeIndex` and the
+       `Tree.Index` module in Tree.fs.
+
+       `Index.build` takes one preorder and keeps two maps — every node by its id, and every
+       non-root node's id to its parent's id — and a staleness stamp; `tryFind`, `parentOf`, `path`,
+       `ancestors` and `depth` answer from the maps, and `isFreshFor` recomputes the stamp over a
+       tree and compares it with the one `build` kept. Modelled clause for clause: a map is its
+       association list in insertion order and `Map.tryFind` reads the LAST binding of a key
+       (`ix_assoc`, which is what `Map.ofList` keeps), and `path`'s walk up the links carries its
+       visited ids exactly as production's does. The model's `fuel` starts above the number of
+       entries: it is the termination measure, never what stops the walk.
+
+       THE STAMP IS MODELLED AS ITS PRE-IMAGE. Production's stamp is a sum, modulo 2^32, of one
+       FNV-1a term per preorder node over that node's RECORD — its id, kind, child count and ordered
+       child ids (`Index.fingerprintOf`, through `Hash.canonicalFields`, whose field encoding is
+       injective; the count is the length of the last field). A sum over nodes is a function of the
+       multiset of records, so the model keeps the records (`ix_records`) and compares them as a
+       multiset (`ix_is_fresh_for`). What that abstracts away is exactly the hash: two different
+       multisets whose sums collide read as one stamp in production, and the ladder carries that as
+       a premise (`index-stamp-separates`), not as a theorem.
+
+       WHAT IS PROVED.
+       Theorem 1, `index_agrees`: over a well-formed tree each of the five lookups of the index
+       `build` made IS the walk it caches — `Tree.tryFind`, `Tree.parentOf`, `Tree.path`,
+       `Tree.depth`, `Tree.ancestors`. The load-bearing facts: a node of a well-formed tree is its
+       id (`ix_unique`); every parent link is the parent relation and names a node strictly below
+       the top (`ix_link_is_parent`); and the walk UP the links from a node returns the walk DOWN to
+       it (`ix_up_walks`, over any links that chain a duplicate-free list back to an unlinked top).
+       Theorem 2, `freshness_tracks_change`: an index built from one well-formed tree is fresh for
+       another well-formed tree ONLY IF the two are the same tree — every skeleton edit, kind change
+       or id remap moves the pre-image — because a multiset of node records determines a well-formed
+       tree (`ix_records_determine`: each tree's every node is a node of the other, and a tree is the
+       only node of itself as large as itself). So over a fresh index every lookup is the walk over
+       the CURRENT tree (`fresh_index_agrees`).
+       Theorem 3, `fresh_on_build` and `try_build_exact`: `build`'s index is fresh for the tree it
+       was built from, and `tryBuild` builds exactly the well-formed trees and refuses the rest with
+       `Tree.wellFormed`'s first repeated id.
+
+       THEOREM 2 IS FALSE AS FIRST STATED ("`isFreshFor` is false after any op that changes a cached
+       answer"), on two counts, and both are stated rather than hidden. (a) The stamp is a 32-bit
+       sum: two trees whose records sum alike read as fresh, so production's claim is "fresh only if
+       unchanged, or the pre-images collide" — the premise above, which `Index.Fingerprint`'s own
+       documentation already calls a detector and not a guarantee. (b) A node is what the witness
+       shows, and the witness has no content accessor: an `UpdateNode` that keeps id, kind and child
+       ids changes what `Index.tryFind` hands back and moves no record, so `isFreshFor` reads it
+       fresh. That is Phase 305's documented boundary — `buildWith` / `isFreshForWith` are the check
+       that sees content — and the model's tree carries no content, so it is outside this model by
+       construction.
+
+       WHY WELL-FORMEDNESS. `Map.ofList` keeps the LAST node carrying an id and `Tree.tryFind` the
+       FIRST, so over a tree carrying an id twice the index and the walk genuinely disagree; and two
+       different trees carrying one id twice can share a record multiset
+       (`repeated_ids_alias_records`). `tryBuild` refuses exactly those trees.
+
+       THE GO-RED. The child ids in each record are necessary: a stamp over (id, kind, child count)
+       alone reads two well-formed trees one reparent apart as the same
+       (`a_childless_stamp_misses_a_reparent`), and with `ix_record_of` narrowed to that the module
+       does not verify — `ix_kids_eq`'s use in `ix_sub_in` is what fails.
+
+       NOT MODELLED: `Index.buildWith` / `isFreshForWith` (the content term) and `Index.rebind`
+       (maintenance through an edit, which `Ops.Index.afterOp` drives and the index tests compare
+       with a rebuild).
+   ====================================================================================== *)
+
+(* ---- 23.1 the preorder, as nodes (F#: `Tree.preorder w root`) ---- *)
+
+let rec ix_nodes (t:tree) : Tot (list tree) (decreases t) =
+  match t with
+  | TNode _ _ cs -> t :: ix_nodes_all cs
+and ix_nodes_all (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> app (ix_nodes t) (ix_nodes_all r)
+
+let rec ix_tids (ns:list tree) : Tot (list string) =
+  match ns with
+  | [] -> []
+  | n :: r -> tid_of n :: ix_tids r
+
+(* ---- 23.2 the index (F#: `NodeIndex`, `Index.build`) ---- *)
+
+(* One node's record: what its term in the staleness stamp hashes — id, kind and the ordered child
+   ids (`Index.fingerprintOf`; the child COUNT it also writes is the length of the last field). *)
+type ix_record = string & string & list string
+
+let ix_record_of (n:tree) : Tot ix_record = (tid_of n, kind_of n, kid_ids (kids_of n))
+
+let rec ix_records_of (ns:list tree) : Tot (list ix_record) =
+  match ns with
+  | [] -> []
+  | n :: r -> ix_record_of n :: ix_records_of r
+
+let ix_records (t:tree) : Tot (list ix_record) = ix_records_of (ix_nodes t)
+
+(* `ById`: each node keyed by its id, in preorder. *)
+let rec ix_keyed (ns:list tree) : Tot (list (string & tree)) =
+  match ns with
+  | [] -> []
+  | n :: r -> (tid_of n, n) :: ix_keyed r
+
+(* `ParentOf`: for each node in preorder, each child's id to the node's id. *)
+let rec ix_kid_links (p:string) (cs:list tree) : Tot (list (string & string)) =
+  match cs with
+  | [] -> []
+  | c :: r -> (tid_of c, p) :: ix_kid_links p r
+
+let rec ix_links (ns:list tree) : Tot (list (string & string)) =
+  match ns with
+  | [] -> []
+  | n :: r -> app (ix_kid_links (tid_of n) (kids_of n)) (ix_links r)
+
+(* F#: `Map.tryFind` on a map `Map.ofList` built — the LAST binding of a key wins. *)
+let rec ix_assoc (#a:eqtype) (x:string) (l:list (string & a)) : Tot (option a) =
+  match l with
+  | [] -> None
+  | (k, v) :: r -> (match ix_assoc x r with Some w -> Some w | None -> if k = x then Some v else None)
+
+(* The stamp is modelled as its PRE-IMAGE, the records themselves, and compared as a multiset. *)
+let rec ix_count (#a:eqtype) (x:a) (l:list a) : Tot nat =
+  match l with
+  | [] -> 0
+  | y :: r -> (if x = y then 1 else 0) + ix_count x r
+
+let rec ix_counts_agree (#a:eqtype) (keys l m:list a) : Tot bool =
+  match keys with
+  | [] -> true
+  | x :: r -> ix_count x l = ix_count x m && ix_counts_agree r l m
+
+let ix_same_multiset (#a:eqtype) (l m:list a) : Tot bool = ix_counts_agree (app l m) l m
+
+type ix_index = {
+  ix_by_id : list (string & tree);
+  ix_parent : list (string & string);
+  ix_root : string;
+  ix_stamp : list ix_record
+}
+
+(* F#: `Index.build` — one preorder, both maps and the stamp. *)
+let ix_build (t:tree) : Tot ix_index =
+  let ns = ix_nodes t in
+  { ix_by_id = ix_keyed ns; ix_parent = ix_links ns; ix_root = tid_of t; ix_stamp = ix_records_of ns }
+
+(* F#: `Index.tryBuild` — `Tree.wellFormed`'s first repeated id, or the index. *)
+let ix_try_build (t:tree) : Tot (outcome ix_index string) =
+  match scan_dup [] (ids t) with
+  | Some d -> Error d
+  | None -> Ok (ix_build t)
+
+(* F#: `Index.isFreshFor`. *)
+let ix_is_fresh_for (t:tree) (ix:ix_index) : Tot bool = ix_same_multiset (ix_records t) ix.ix_stamp
+
+(* ---- 23.3 the lookups (F#: `Index.tryFind` / `parentOf` / `path` / `ancestors` / `depth`) ---- *)
+
+let ix_try_find (x:string) (ix:ix_index) : Tot (option tree) = ix_assoc x ix.ix_by_id
+
+let ix_parent_of (x:string) (ix:ix_index) : Tot (option tree) =
+  match ix_assoc x ix.ix_parent with
+  | None -> None
+  | Some p -> ix_assoc p ix.ix_by_id
+
+(* `up`: the walk up the parent links, carrying the ids it has visited. `fuel` is the model's
+   termination measure and never the one that stops it: it starts above the number of entries. *)
+let rec ix_up (fuel:nat) (ix:ix_index) (acc visited:list string) (cur:string)
+  : Tot (option (list string)) (decreases fuel) =
+  if fuel = 0 then None
+  else
+    match ix_assoc cur ix.ix_parent with
+    | Some p -> if mem p visited then None else ix_up (fuel - 1) ix (p :: acc) (p :: visited) p
+    | None -> Some acc
+
+let ix_path (x:string) (ix:ix_index) : Tot (option (list string)) =
+  match ix_assoc x ix.ix_by_id with
+  | None -> None
+  | Some _ -> ix_up (len ix.ix_by_id + 1) ix [x] [x] x
+
+let ix_depth (x:string) (ix:ix_index) : Tot (option int) =
+  match ix_path x ix with
+  | Some l -> Some (len l - 1)
+  | None -> None
+
+(* `List.rev |> List.tail |> List.rev`: every id but the last. *)
+let rec ix_init (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | [_] -> []
+  | x :: r -> x :: ix_init r
+
+let rec ix_choose_ix (ix:ix_index) (l:list string) : Tot (list tree) =
+  match l with
+  | [] -> []
+  | i :: r -> (match ix_assoc i ix.ix_by_id with Some n -> n :: ix_choose_ix ix r | None -> ix_choose_ix ix r)
+
+let ix_ancestors (x:string) (ix:ix_index) : Tot (list tree) =
+  match ix_path x ix with
+  | Some l -> if Cons? l then ix_choose_ix ix (ix_init l) else []
+  | None -> []
+
+(* ---- 23.4 the walks they cache (F#: `Tree.tryFind` / `parentOf` / `path` / `ancestors` / `depth`) ---- *)
+
+let rec ix_parent_walk (x:string) (t:tree) : Tot (option tree) (decreases t) =
+  match t with
+  | TNode _ _ cs -> if has_kid x cs then Some t else ix_parent_walk_all x cs
+and ix_parent_walk_all (x:string) (ts:list tree) : Tot (option tree) (decreases ts) =
+  match ts with
+  | [] -> None
+  | t :: r -> (match ix_parent_walk x t with Some n -> Some n | None -> ix_parent_walk_all x r)
+
+let rec ix_path_walk (x:string) (t:tree) : Tot (option (list string)) (decreases t) =
+  match t with
+  | TNode i _ cs ->
+    if i = x then Some [i]
+    else (match ix_path_walk_all x cs with Some l -> Some (i :: l) | None -> None)
+and ix_path_walk_all (x:string) (ts:list tree) : Tot (option (list string)) (decreases ts) =
+  match ts with
+  | [] -> None
+  | t :: r -> (match ix_path_walk x t with Some l -> Some l | None -> ix_path_walk_all x r)
+
+let ix_depth_walk (x:string) (t:tree) : Tot (option int) =
+  match ix_path_walk x t with
+  | Some l -> Some (len l - 1)
+  | None -> None
+
+let rec ix_choose_walk (t:tree) (l:list string) : Tot (list tree) =
+  match l with
+  | [] -> []
+  | i :: r -> (match find_in i t with Some n -> n :: ix_choose_walk t r | None -> ix_choose_walk t r)
+
+let ix_ancestors_walk (x:string) (t:tree) : Tot (list tree) =
+  match ix_path_walk x t with
+  | Some l -> if Cons? l then ix_choose_walk t (ix_init l) else []
+  | None -> []
+
+(* ---- 23.5 nodes, ids and uniqueness ---- *)
+
+let rec ix_tids_app (a b:list tree)
+  : Lemma (ensures ix_tids (app a b) == app (ix_tids a) (ix_tids b)) (decreases a)
+  = match a with
+    | [] -> ()
+    | _ :: r -> ix_tids_app r b
+
+let rec ix_tids_nodes (t:tree) : Lemma (ensures ix_tids (ix_nodes t) == ids t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> ix_tids_nodes_all cs
+and ix_tids_nodes_all (ts:list tree) : Lemma (ensures ix_tids (ix_nodes_all ts) == ids_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ix_tids_app (ix_nodes t) (ix_nodes_all r); ix_tids_nodes t; ix_tids_nodes_all r
+
+let rec ix_mem_tids (n:tree) (ns:list tree)
+  : Lemma (requires mem n ns) (ensures mem (tid_of n) (ix_tids ns)) (decreases ns)
+  = match ns with
+    | m :: r -> if m = n then () else ix_mem_tids n r
+
+let rec ix_tids_unique (a b:tree) (ns:list tree)
+  : Lemma (requires no_dups (ix_tids ns) /\ mem a ns /\ mem b ns /\ tid_of a = tid_of b)
+          (ensures a == b) (decreases ns)
+  = match ns with
+    | m :: r ->
+      if m = a then (if m = b then () else ix_mem_tids b r)
+      else if m = b then ix_mem_tids a r
+      else ix_tids_unique a b r
+
+let ix_mem_ids (t n:tree)
+  : Lemma (requires mem n (ix_nodes t)) (ensures mem (tid_of n) (ids t))
+  = ix_tids_nodes t; ix_mem_tids n (ix_nodes t)
+
+(* In a well-formed tree a node is its id. *)
+let ix_unique (t a b:tree)
+  : Lemma (requires wf t /\ mem a (ix_nodes t) /\ mem b (ix_nodes t) /\ tid_of a = tid_of b)
+          (ensures a == b)
+  = wf_iff_no_dups t; ix_tids_nodes t; ix_tids_unique a b (ix_nodes t)
+
+let rec ix_find_mem (x:string) (t:tree)
+  : Lemma (ensures (match find_in x t with Some n -> mem n (ix_nodes t) /\ tid_of n = x | None -> True))
+          (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else ix_find_all_mem x cs
+and ix_find_all_mem (x:string) (ts:list tree)
+  : Lemma (ensures (match find_all x ts with Some n -> mem n (ix_nodes_all ts) /\ tid_of n = x | None -> True))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ix_find_mem x t; ix_find_all_mem x r
+
+let ix_find_node (t n:tree)
+  : Lemma (requires wf t /\ mem n (ix_nodes t)) (ensures find_in (tid_of n) t == Some n)
+  = ix_mem_ids t n;
+    find_in_some_iff (tid_of n) t;
+    ix_find_mem (tid_of n) t;
+    match find_in (tid_of n) t with
+    | Some m -> ix_unique t m n
+    | None -> ()
+
+(* ---- 23.6 the two association lists ---- *)
+
+let rec ix_assoc_mem (#a:eqtype) (x:string) (l:list (string & a))
+  : Lemma (ensures (match ix_assoc x l with
+                    | Some v -> mem (x, v) l
+                    | None -> (forall (v:a). not (mem (x, v) l)))) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_assoc_mem x r
+
+let rec ix_keyed_mem (x:string) (n:tree) (ns:list tree)
+  : Lemma (ensures mem (x, n) (ix_keyed ns) <==> (mem n ns /\ tid_of n = x)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | _ :: r -> ix_keyed_mem x n r
+
+let ix_find_agrees (x:string) (t:tree)
+  : Lemma (requires wf t) (ensures ix_assoc x (ix_keyed (ix_nodes t)) == find_in x t)
+  = ix_assoc_mem x (ix_keyed (ix_nodes t));
+    ix_find_mem x t;
+    match ix_assoc x (ix_keyed (ix_nodes t)) with
+    | Some n -> ix_keyed_mem x n (ix_nodes t); ix_find_node t n
+    | None -> (match find_in x t with Some m -> ix_keyed_mem x m (ix_nodes t) | None -> ())
+
+(* The parent links, in the shape of the tree. *)
+let rec ix_plinks (t:tree) : Tot (list (string & string)) (decreases t) =
+  match t with
+  | TNode i _ cs -> app (ix_kid_links i cs) (ix_plinks_all cs)
+and ix_plinks_all (ts:list tree) : Tot (list (string & string)) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> app (ix_plinks t) (ix_plinks_all r)
+
+let rec ix_links_app (a b:list tree)
+  : Lemma (ensures ix_links (app a b) == app (ix_links a) (ix_links b)) (decreases a)
+  = match a with
+    | [] -> ()
+    | _ :: r -> ix_links_app r b
+
+let rec ix_links_nodes (t:tree) : Lemma (ensures ix_links (ix_nodes t) == ix_plinks t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> ix_links_nodes_all cs
+and ix_links_nodes_all (ts:list tree) : Lemma (ensures ix_links (ix_nodes_all ts) == ix_plinks_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ix_links_app (ix_nodes t) (ix_nodes_all r); ix_links_nodes t; ix_links_nodes_all r
+
+let rec ix_kid_links_mem (x p i:string) (cs:list tree)
+  : Lemma (ensures mem (x, p) (ix_kid_links i cs) <==> (p = i /\ mem x (kid_ids cs))) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | _ :: r -> ix_kid_links_mem x p i r
+
+(* A link of a well-formed tree IS its parent relation, and names a node strictly below the top. *)
+let rec ix_link_is_parent (x p:string) (t:tree)
+  : Lemma (requires wf t /\ mem (x, p) (ix_plinks t))
+          (ensures parent_of x t == Some p /\ mem x (ids_all (kids_of t))) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ix_kid_links_mem x p i cs;
+      has_kid_is_mem x cs;
+      if mem (x, p) (ix_kid_links i cs) then kid_ids_sub x cs
+      else ix_link_is_parent_all x p cs
+and ix_link_is_parent_all (x p:string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ mem (x, p) (ix_plinks_all ts))
+          (ensures parent_all x ts == Some p /\ mem x (ids_all ts) /\ not (mem x (kid_ids ts)))
+          (decreases ts)
+  = match ts with
+    | t :: r ->
+      inter_nil_iff (ids t) (ids_all r);
+      if mem x (kid_ids r) then kid_ids_sub x r;
+      if mem (x, p) (ix_plinks t) then ix_link_is_parent x p t
+      else begin
+        ix_link_is_parent_all x p r;
+        match parent_of x t with
+        | Some q -> parent_of_ids x q t
+        | None -> ()
+      end
+
+let rec ix_parent_is_link (x p:string) (t:tree)
+  : Lemma (requires parent_of x t == Some p) (ensures mem (x, p) (ix_plinks t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ix_kid_links_mem x p i cs;
+      has_kid_is_mem x cs;
+      if has_kid x cs then () else ix_parent_is_link_all x p cs
+and ix_parent_is_link_all (x p:string) (ts:list tree)
+  : Lemma (requires parent_all x ts == Some p) (ensures mem (x, p) (ix_plinks_all ts)) (decreases ts)
+  = match ts with
+    | t :: r ->
+      (match parent_of x t with
+       | Some _ -> ix_parent_is_link x p t
+       | None -> ix_parent_is_link_all x p r)
+
+let ix_parent_link_agrees (x:string) (t:tree)
+  : Lemma (requires wf t) (ensures ix_assoc x (ix_plinks t) == parent_of x t)
+  = ix_assoc_mem x (ix_plinks t);
+    match ix_assoc x (ix_plinks t) with
+    | Some p -> ix_link_is_parent x p t
+    | None -> (match parent_of x t with Some p -> ix_parent_is_link x p t | None -> ())
+
+(* The top has no parent link. *)
+let ix_root_unlinked (t:tree)
+  : Lemma (requires wf t) (ensures ix_assoc (tid_of t) (ix_plinks t) == None)
+  = ix_parent_link_agrees (tid_of t) t;
+    match parent_of (tid_of t) t with
+    | Some p -> ix_parent_is_link (tid_of t) p t; ix_link_is_parent (tid_of t) p t
+    | None -> ()
+
+let rec ix_parent_walk_spec (x:string) (t:tree)
+  : Lemma (ensures (match ix_parent_walk x t with
+                    | Some n -> parent_of x t == Some (tid_of n) /\ mem n (ix_nodes t)
+                    | None -> parent_of x t == None)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> ix_parent_walk_spec_all x cs
+and ix_parent_walk_spec_all (x:string) (ts:list tree)
+  : Lemma (ensures (match ix_parent_walk_all x ts with
+                    | Some n -> parent_all x ts == Some (tid_of n) /\ mem n (ix_nodes_all ts)
+                    | None -> parent_all x ts == None)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ix_parent_walk_spec x t; ix_parent_walk_spec_all x r
+
+(* ---- 23.7 the path: the walk down is the chain of parent links back up ---- *)
+
+let ix_first (l:list string) : Tot (option string) = match l with [] -> None | y :: _ -> Some y
+
+let rec ix_final (l:list string) : Tot (option string) =
+  match l with
+  | [] -> None
+  | [y] -> Some y
+  | _ :: r -> ix_final r
+
+(* Each consecutive pair of a path is a link, child to parent. *)
+let rec ix_mem_chain (lk:list (string & string)) (l:list string) : Tot bool =
+  match l with
+  | a :: r -> (match r with b :: _ -> mem (b, a) lk && ix_mem_chain lk r | [] -> true)
+  | [] -> true
+
+let rec ix_chain (lk:list (string & string)) (l:list string) : Tot bool =
+  match l with
+  | a :: r -> (match r with b :: _ -> ix_assoc b lk = Some a && ix_chain lk r | [] -> true)
+  | [] -> true
+
+let rec ix_all_in (#a:eqtype) (xs ys:list a) : Tot bool =
+  match xs with
+  | [] -> true
+  | x :: r -> mem x ys && ix_all_in r ys
+
+let rec ix_all_in_mem (#a:eqtype) (xs ys:list a) (x:a)
+  : Lemma (requires ix_all_in xs ys /\ mem x xs) (ensures mem x ys) (decreases xs)
+  = match xs with
+    | y :: r -> if y = x then () else ix_all_in_mem r ys x
+
+let rec ix_all_in_app_l (#a:eqtype) (xs ys zs:list a)
+  : Lemma (requires ix_all_in xs ys) (ensures ix_all_in xs (app ys zs)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> ix_all_in_app_l r ys zs
+
+let rec ix_all_in_app_r (#a:eqtype) (xs ys zs:list a)
+  : Lemma (requires ix_all_in xs zs) (ensures ix_all_in xs (app ys zs)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> ix_all_in_app_r r ys zs
+
+let rec ix_all_in_cons (#a:eqtype) (xs ys:list a) (y:a)
+  : Lemma (requires ix_all_in xs ys) (ensures ix_all_in xs (y :: ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> ix_all_in_cons r ys y
+
+let rec ix_mem_chain_app_l (lk m:list (string & string)) (l:list string)
+  : Lemma (requires ix_mem_chain lk l) (ensures ix_mem_chain (app lk m) l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_mem_chain_app_l lk m r
+
+let rec ix_mem_chain_app_r (m lk:list (string & string)) (l:list string)
+  : Lemma (requires ix_mem_chain lk l) (ensures ix_mem_chain (app m lk) l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_mem_chain_app_r m lk r
+
+let rec ix_len_app (#a:Type) (l m:list a) : Lemma (ensures len (app l m) == len l + len m) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_len_app r m
+
+let rec ix_path_walk_spec (x:string) (t:tree)
+  : Lemma (ensures (match ix_path_walk x t with
+                    | Some l -> ix_first l == Some (tid_of t) /\ ix_final l == Some x /\ mem x (ids t)
+                               /\ ix_mem_chain (ix_plinks t) l /\ ix_all_in l (ids t)
+                               /\ len l <= len (ix_nodes t)
+                    | None -> not (mem x (ids t)))) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ix_path_walk_spec_all x cs;
+      if i = x then ()
+      else begin
+        match ix_path_walk_all x cs with
+        | Some l ->
+          (match l with
+           | b :: _ -> ix_kid_links_mem b i i cs
+           | [] -> ());
+          ix_mem_chain_app_r (ix_kid_links i cs) (ix_plinks_all cs) l;
+          ix_all_in_cons l (ids_all cs) i
+        | None -> ()
+      end
+and ix_path_walk_spec_all (x:string) (ts:list tree)
+  : Lemma (ensures (match ix_path_walk_all x ts with
+                    | Some l -> (match ix_first l with Some y -> mem y (kid_ids ts) | None -> False)
+                               /\ ix_final l == Some x /\ mem x (ids_all ts)
+                               /\ ix_mem_chain (ix_plinks_all ts) l /\ ix_all_in l (ids_all ts)
+                               /\ len l <= len (ix_nodes_all ts)
+                    | None -> not (mem x (ids_all ts)))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      ix_path_walk_spec x t;
+      ix_path_walk_spec_all x r;
+      ix_len_app (ix_nodes t) (ix_nodes_all r);
+      match ix_path_walk x t with
+      | Some l ->
+        ix_mem_chain_app_l (ix_plinks t) (ix_plinks_all r) l;
+        ix_all_in_app_l l (ids t) (ids_all r)
+      | None ->
+        (match ix_path_walk_all x r with
+         | Some l ->
+           ix_mem_chain_app_r (ix_plinks t) (ix_plinks_all r) l;
+           ix_all_in_app_r l (ids t) (ids_all r)
+         | None -> ())
+
+let rec ix_path_walk_no_dups (x:string) (t:tree)
+  : Lemma (requires wf t) (ensures (match ix_path_walk x t with Some l -> no_dups l | None -> True)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ix_path_walk_spec_all x cs;
+      ix_path_walk_no_dups_all x cs;
+      if i = x then ()
+      else (match ix_path_walk_all x cs with
+            | Some l -> if mem i l then ix_all_in_mem l (ids_all cs) i
+            | None -> ())
+and ix_path_walk_no_dups_all (x:string) (ts:list tree)
+  : Lemma (requires wf_all ts) (ensures (match ix_path_walk_all x ts with Some l -> no_dups l | None -> True))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ix_path_walk_no_dups x t; ix_path_walk_no_dups_all x r
+
+(* The links of a well-formed tree are a function. *)
+let ix_functional (lk:list (string & string)) : prop =
+  forall (b a:string). mem (b, a) lk ==> ix_assoc b lk == Some a
+
+let ix_plinks_functional (t:tree) : Lemma (requires wf t) (ensures ix_functional (ix_plinks t))
+  = let aux (b a:string) : Lemma (mem (b, a) (ix_plinks t) ==> ix_assoc b (ix_plinks t) == Some a)
+      = if mem (b, a) (ix_plinks t) then (ix_link_is_parent b a t; ix_parent_link_agrees b t)
+    in
+    Classical.forall_intro_2 aux
+
+let rec ix_mem_chain_chain (lk:list (string & string)) (l:list string)
+  : Lemma (requires ix_functional lk /\ ix_mem_chain lk l) (ensures ix_chain lk l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_mem_chain_chain lk r
+
+let rec ix_init_final (l:list string)
+  : Lemma (requires Cons? l)
+          (ensures (match ix_final l with Some y -> l == app (ix_init l) [y] | None -> False)) (decreases l)
+  = match l with
+    | [_] -> ()
+    | _ :: r -> ix_init_final r
+
+let rec ix_chain_suffix (lk:list (string & string)) (a m:list string)
+  : Lemma (requires ix_chain lk (app a m)) (ensures ix_chain lk m) (decreases a)
+  = match a with
+    | [] -> ()
+    | _ :: r -> ix_chain_suffix lk r m
+
+(* THE WALK UP: over links that chain a duplicate-free list back to an unlinked top, `up` from the
+   list's last id returns the list. *)
+let rec ix_up_walks (fuel:nat) (ix:ix_index) (pre acc:list string)
+  : Lemma (requires Cons? acc /\ ix_chain ix.ix_parent (app pre acc) /\ no_dups (app pre acc)
+                    /\ (match app pre acc with y :: _ -> ix_assoc y ix.ix_parent == None | [] -> False)
+                    /\ fuel > len pre)
+          (ensures (match acc with cur :: _ -> ix_up fuel ix acc acc cur == Some (app pre acc) | [] -> False))
+          (decreases len pre)
+  = match pre with
+    | [] -> ()
+    | _ :: _ ->
+      ix_init_final pre;
+      match ix_final pre with
+      | Some p ->
+        let pre' = ix_init pre in
+        app_assoc pre' [p] acc;
+        ix_len_app pre' [p];
+        ix_chain_suffix ix.ix_parent pre' (p :: acc);
+        no_dups_app pre' (p :: acc);
+        ix_up_walks (fuel - 1) ix pre' (p :: acc)
+      | None -> ()
+
+let rec ix_len_keyed (ns:list tree) : Lemma (ensures len (ix_keyed ns) == len ns) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | _ :: r -> ix_len_keyed r
+
+let rec ix_len_init (l:list string) : Lemma (requires Cons? l) (ensures len (ix_init l) + 1 == len l) (decreases l)
+  = match l with
+    | [_] -> ()
+    | _ :: r -> ix_len_init r
+
+let ix_path_agrees (x:string) (t:tree)
+  : Lemma (requires wf t) (ensures ix_path x (ix_build t) == ix_path_walk x t)
+  = let ix = ix_build t in
+    ix_links_nodes t;
+    ix_find_agrees x t;
+    find_in_some_iff x t;
+    ix_path_walk_spec x t;
+    match ix_path_walk x t with
+    | None -> ()
+    | Some l ->
+      ix_path_walk_no_dups x t;
+      ix_plinks_functional t;
+      ix_mem_chain_chain (ix_plinks t) l;
+      ix_init_final l;
+      ix_len_init l;
+      ix_root_unlinked t;
+      ix_len_keyed (ix_nodes t);
+      ix_up_walks (len ix.ix_by_id + 1) ix (ix_init l) [x]
+
+let rec ix_choose_agrees (t:tree) (l:list string)
+  : Lemma (requires wf t) (ensures ix_choose_ix (ix_build t) l == ix_choose_walk t l) (decreases l)
+  = match l with
+    | [] -> ()
+    | i :: r -> ix_find_agrees i t; ix_choose_agrees t r
+
+(* ======================================================================================
+   THEOREM 1 — AGREEMENT: over a well-formed tree, each lookup of the index `build` made answers
+   exactly what the walk it caches answers.
+   ====================================================================================== *)
+let index_agrees (t:tree) (x:string)
+  : Lemma (requires wf t)
+          (ensures ix_try_find x (ix_build t) == find_in x t
+                   /\ ix_parent_of x (ix_build t) == ix_parent_walk x t
+                   /\ ix_path x (ix_build t) == ix_path_walk x t
+                   /\ ix_depth x (ix_build t) == ix_depth_walk x t
+                   /\ ix_ancestors x (ix_build t) == ix_ancestors_walk x t)
+  = ix_find_agrees x t;
+    ix_links_nodes t;
+    ix_parent_link_agrees x t;
+    ix_parent_walk_spec x t;
+    (match ix_parent_walk x t with
+     | Some n -> ix_find_agrees (tid_of n) t; ix_find_node t n
+     | None -> ());
+    ix_path_agrees x t;
+    match ix_path_walk x t with
+    | Some l -> ix_choose_agrees t (ix_init l)
+    | None -> ()
+
+(* ---- 23.8 the stamp's pre-image determines a well-formed tree ---- *)
+
+let rec ix_count_pos (#a:eqtype) (x:a) (l:list a) : Lemma (ensures mem x l <==> ix_count x l > 0) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> ix_count_pos x r
+
+let rec ix_counts_agree_mem (#a:eqtype) (keys l m:list a) (x:a)
+  : Lemma (requires ix_counts_agree keys l m /\ mem x keys) (ensures ix_count x l == ix_count x m) (decreases keys)
+  = match keys with
+    | y :: r -> if y = x then () else ix_counts_agree_mem r l m x
+
+let rec ix_counts_refl (#a:eqtype) (keys l:list a) : Lemma (ensures ix_counts_agree keys l l) (decreases keys)
+  = match keys with
+    | [] -> ()
+    | _ :: r -> ix_counts_refl r l
+
+let rec ix_same_all_in_l (#a:eqtype) (xs l m:list a)
+  : Lemma (requires ix_same_multiset l m /\ ix_all_in xs l) (ensures ix_all_in xs m) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: r ->
+      ix_count_pos x l; ix_count_pos x m;
+      ix_counts_agree_mem (app l m) l m x;
+      ix_same_all_in_l r l m
+
+let rec ix_same_all_in_r (#a:eqtype) (xs l m:list a)
+  : Lemma (requires ix_same_multiset l m /\ ix_all_in xs m) (ensures ix_all_in xs l) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: r ->
+      ix_count_pos x l; ix_count_pos x m;
+      ix_counts_agree_mem (app l m) l m x;
+      ix_same_all_in_r r l m
+
+let rec ix_all_in_refl (#a:eqtype) (xs:list a) : Lemma (ensures ix_all_in xs xs) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: r -> ix_all_in_refl r; ix_all_in_cons r r x
+
+let rec ix_records_mem (n:tree) (ns:list tree)
+  : Lemma (requires mem n ns) (ensures mem (ix_record_of n) (ix_records_of ns)) (decreases ns)
+  = match ns with
+    | m :: r -> if m = n then () else ix_records_mem n r
+
+let rec ix_node_with (r:ix_record) (ns:list tree) : Tot (option tree) =
+  match ns with
+  | [] -> None
+  | n :: rest -> if ix_record_of n = r then Some n else ix_node_with r rest
+
+let rec ix_node_with_spec (r:ix_record) (ns:list tree)
+  : Lemma (ensures (match ix_node_with r ns with
+                    | Some n -> mem n ns /\ ix_record_of n == r
+                    | None -> not (mem r (ix_records_of ns)))) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | _ :: rest -> ix_node_with_spec r rest
+
+let rec ix_nodes_trans (s y t:tree)
+  : Lemma (requires mem s (ix_nodes t) /\ mem y (ix_nodes s)) (ensures mem y (ix_nodes t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> if s = t then () else ix_nodes_trans_all s y cs
+and ix_nodes_trans_all (s y:tree) (ts:list tree)
+  : Lemma (requires mem s (ix_nodes_all ts) /\ mem y (ix_nodes s)) (ensures mem y (ix_nodes_all ts)) (decreases ts)
+  = match ts with
+    | t :: r -> if mem s (ix_nodes t) then ix_nodes_trans s y t else ix_nodes_trans_all s y r
+
+let rec ix_kid_in_nodes_all (c:tree) (cs:list tree)
+  : Lemma (requires mem c cs) (ensures mem c (ix_nodes_all cs)) (decreases cs)
+  = match cs with
+    | d :: r -> if d = c then (match c with TNode _ _ _ -> ()) else ix_kid_in_nodes_all c r
+
+let rec ix_sub_kids (t s:tree) (l:list tree)
+  : Lemma (requires mem s (ix_nodes t) /\ ix_all_in l (kids_of s)) (ensures ix_all_in l (ix_nodes t)) (decreases l)
+  = match l with
+    | [] -> ()
+    | c :: r ->
+      ix_kid_in_nodes_all c (kids_of s);
+      (match s with TNode _ _ _ -> ());
+      ix_nodes_trans s c t;
+      ix_sub_kids t s r
+
+let rec ix_kids_eq (t:tree) (a b:list tree)
+  : Lemma (requires wf t /\ ix_all_in a (ix_nodes t) /\ ix_all_in b (ix_nodes t) /\ kid_ids a == kid_ids b)
+          (ensures a == b) (decreases a)
+  = match a, b with
+    | x :: ra, y :: rb -> ix_unique t x y; ix_kids_eq t ra rb
+    | _ -> ()
+
+let rec ix_sub_in (t1 t2 s:tree)
+  : Lemma (requires wf t2 /\ ix_all_in (ix_records t1) (ix_records t2) /\ mem s (ix_nodes t1))
+          (ensures mem s (ix_nodes t2)) (decreases s)
+  = match s with
+    | TNode i k cs ->
+      ix_all_in_refl cs;
+      ix_sub_kids t1 s cs;
+      ix_sub_in_all t1 t2 cs;
+      ix_records_mem s (ix_nodes t1);
+      ix_all_in_mem (ix_records t1) (ix_records t2) (ix_record_of s);
+      ix_node_with_spec (ix_record_of s) (ix_nodes t2);
+      match ix_node_with (ix_record_of s) (ix_nodes t2) with
+      | Some s2 ->
+        ix_all_in_refl (kids_of s2);
+        ix_sub_kids t2 s2 (kids_of s2);
+        ix_kids_eq t2 cs (kids_of s2);
+        (match s2 with TNode _ _ _ -> ())
+      | None -> ()
+and ix_sub_in_all (t1 t2:tree) (cs:list tree)
+  : Lemma (requires wf t2 /\ ix_all_in (ix_records t1) (ix_records t2) /\ ix_all_in cs (ix_nodes t1))
+          (ensures ix_all_in cs (ix_nodes t2)) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | c :: r -> ix_sub_in t1 t2 c; ix_sub_in_all t1 t2 r
+
+let rec ix_sub_len (s t:tree)
+  : Lemma (requires mem s (ix_nodes t)) (ensures len (ix_nodes s) <= len (ix_nodes t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> if s = t then () else ix_sub_len_all s cs
+and ix_sub_len_all (s:tree) (ts:list tree)
+  : Lemma (requires mem s (ix_nodes_all ts)) (ensures len (ix_nodes s) <= len (ix_nodes_all ts)) (decreases ts)
+  = match ts with
+    | t :: r ->
+      ix_len_app (ix_nodes t) (ix_nodes_all r);
+      if mem s (ix_nodes t) then ix_sub_len s t else ix_sub_len_all s r
+
+(* The stamp's pre-image determines a well-formed tree: two well-formed trees whose node records
+   agree as a multiset are the same tree. *)
+let ix_records_determine (t1 t2:tree)
+  : Lemma (requires wf t1 /\ wf t2 /\ ix_same_multiset (ix_records t1) (ix_records t2)) (ensures t1 == t2)
+  = ix_all_in_refl (ix_records t1);
+    ix_all_in_refl (ix_records t2);
+    ix_same_all_in_l (ix_records t1) (ix_records t1) (ix_records t2);
+    ix_same_all_in_r (ix_records t2) (ix_records t1) (ix_records t2);
+    (match t1 with TNode _ _ _ -> ());
+    (match t2 with TNode _ _ _ -> ());
+    ix_sub_in t1 t2 t1;
+    ix_sub_in t2 t1 t2;
+    ix_sub_len t1 t2;
+    ix_sub_len t2 t1;
+    if t1 = t2 then ()
+    else (match t2 with TNode _ _ cs -> ix_sub_len_all t1 cs)
+
+(* ======================================================================================
+   THEOREM 2 — FRESHNESS TRACKS CHANGE: an index `build` made from one well-formed tree is fresh
+   for another well-formed tree only if the two are the same tree; so over a fresh index every
+   lookup is the walk over the CURRENT tree.
+   ====================================================================================== *)
+let freshness_tracks_change (t0 t:tree)
+  : Lemma (requires wf t0 /\ wf t /\ ix_is_fresh_for t (ix_build t0)) (ensures t == t0)
+  = ix_records_determine t t0
+
+let fresh_index_agrees (t0 t:tree) (x:string)
+  : Lemma (requires wf t0 /\ wf t /\ ix_is_fresh_for t (ix_build t0))
+          (ensures ix_try_find x (ix_build t0) == find_in x t
+                   /\ ix_parent_of x (ix_build t0) == ix_parent_walk x t
+                   /\ ix_path x (ix_build t0) == ix_path_walk x t
+                   /\ ix_depth x (ix_build t0) == ix_depth_walk x t
+                   /\ ix_ancestors x (ix_build t0) == ix_ancestors_walk x t)
+  = freshness_tracks_change t0 t; index_agrees t x
+
+(* ======================================================================================
+   THEOREM 3 — FRESH ON BUILD.
+   ====================================================================================== *)
+let fresh_on_build (t:tree) : Lemma (ensures ix_is_fresh_for t (ix_build t))
+  = ix_counts_refl (app (ix_records t) (ix_records t)) (ix_records t)
+
+let try_build_exact (t:tree)
+  : Lemma (ensures (match ix_try_build t with
+                    | Ok ix -> wf t /\ ix == ix_build t /\ ix_is_fresh_for t ix
+                    | Error d -> not (wf t)))
+  = scan_dup_none_iff [] (ids t);
+    inter_nil_iff (ids t) [];
+    wf_iff_no_dups t;
+    fresh_on_build t
+
+(* ---- 23.9 THE GO-RED: a stamp that does not read the child ids misses a reparent ---- *)
+
+let ix_record_blind (n:tree) : Tot (string & string & nat) = (tid_of n, kind_of n, len (kids_of n))
+
+let rec ix_records_blind (ns:list tree) : Tot (list (string & string & nat)) =
+  match ns with
+  | [] -> []
+  | n :: r -> ix_record_blind n :: ix_records_blind r
+
+let reparent_before : tree =
+  TNode "r" "doc" [ TNode "p" "sec" [ TNode "x" "leaf" [] ]; TNode "q" "sec" [ TNode "y" "leaf" [] ] ]
+
+let reparent_after : tree =
+  TNode "r" "doc" [ TNode "p" "sec" [ TNode "y" "leaf" [] ]; TNode "q" "sec" [ TNode "x" "leaf" [] ] ]
+
+let a_childless_stamp_misses_a_reparent ()
+  : Lemma (ensures wf reparent_before /\ wf reparent_after
+                   /\ ix_same_multiset (ix_records_blind (ix_nodes reparent_before))
+                                       (ix_records_blind (ix_nodes reparent_after))
+                   /\ ix_parent_of "x" (ix_build reparent_before) <> ix_parent_walk "x" reparent_after
+                   /\ not (ix_is_fresh_for reparent_after (ix_build reparent_before)))
+  = assert_norm (wf reparent_before);
+    assert_norm (wf reparent_after);
+    assert_norm (ix_same_multiset (ix_records_blind (ix_nodes reparent_before))
+                                  (ix_records_blind (ix_nodes reparent_after)));
+    assert_norm (ix_parent_of "x" (ix_build reparent_before) <> ix_parent_walk "x" reparent_after);
+    assert_norm (not (ix_is_fresh_for reparent_after (ix_build reparent_before)))
+
+(* Why `wf`: two different trees carrying one id twice share a record multiset, and over either the
+   index's `tryFind` (the last node carrying the id) is not the walk's (the first). *)
+let repeated_twice_a : tree = TNode "r" "doc" [ TNode "a" "sec" [ TNode "b" "leaf" [] ]; TNode "a" "sec" [] ]
+let repeated_twice_b : tree = TNode "r" "doc" [ TNode "a" "sec" []; TNode "a" "sec" [ TNode "b" "leaf" [] ] ]
+
+let repeated_ids_alias_records ()
+  : Lemma (ensures not (wf repeated_twice_a) /\ not (wf repeated_twice_b) /\ repeated_twice_a <> repeated_twice_b
+                   /\ ix_is_fresh_for repeated_twice_b (ix_build repeated_twice_a)
+                   /\ ix_try_find "a" (ix_build repeated_twice_a) <> find_in "a" repeated_twice_a)
+  = assert_norm (not (wf repeated_twice_a));
+    assert_norm (not (wf repeated_twice_b));
+    assert_norm (repeated_twice_a <> repeated_twice_b);
+    assert_norm (ix_is_fresh_for repeated_twice_b (ix_build repeated_twice_a));
+    assert_norm (ix_try_find "a" (ix_build repeated_twice_a) <> find_in "a" repeated_twice_a)
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -2997,6 +3868,15 @@ let twins : list twin = [
     tholds = (fun () ->
       apply (UpdateNode (TNode "a" "aside" [])) twin_tree = Ok (TNode "root" "doc" [ TNode "a" "aside" [] ])) };
   { tname = "wf-sees-a-repeated-id";
-    tholds = (fun () -> wf (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = false) } ]
+    tholds = (fun () -> wf (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = false) };
+  { tname = "index-find-is-the-walk";
+    tholds = (fun () -> ix_try_find "a" (ix_build twin_tree) = find_in "a" twin_tree) };
+  { tname = "index-path-walks-up-the-links";
+    tholds = (fun () -> ix_path "a" (ix_build twin_tree) = Some [ "root"; "a" ]) };
+  { tname = "index-is-stale-after-an-insert";
+    tholds = (fun () ->
+      not (ix_is_fresh_for (TNode "root" "doc" [ TNode "a" "sec" [ TNode "n" "para" [] ] ]) (ix_build twin_tree))) };
+  { tname = "index-try-build-names-the-repeat";
+    tholds = (fun () -> ix_try_build (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = Error "a") } ]
 
 let _ = assert_norm (twins_hold twins == true)

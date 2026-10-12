@@ -220,6 +220,188 @@ let private modelDiamondBreaks
 
     breaks, met
 
+// ---- Phase 438: the build-once index (`proofs/TreeOps.fst` section 23) ----
+
+/// The reparent pair of the model's go-red (`TreeOps.reparent_before` / `reparent_after`), built
+/// as production trees: two well-formed trees one reparent apart whose nodes carry the same id,
+/// kind and child COUNT.
+let private reparentBefore =
+    RNode.node
+        "r"
+        "doc"
+        [ RNode.node "p" "sec" [ RNode.node "x" "leaf" [] ]
+          RNode.node "q" "sec" [ RNode.node "y" "leaf" [] ] ]
+
+let private reparentAfter =
+    RNode.node
+        "r"
+        "doc"
+        [ RNode.node "p" "sec" [ RNode.node "y" "leaf" [] ]
+          RNode.node "q" "sec" [ RNode.node "x" "leaf" [] ] ]
+
+/// The trees the index differential asks about: every state a generated lane pool reaches from the
+/// base tree, the reparent pair, and each state with its last preorder node copied under the root —
+/// a tree carrying an id twice, which `build` indexes and `tryBuild` refuses.
+let private indexStates (seed: int) (trials: int) : RNode list =
+    let mutable r = ConfRng.ofSeed seed
+
+    let reached =
+        [ for _ in 1..trials do
+              let lanes, r' = treeLaneGen.Lanes 3 r
+              r <- r'
+
+              yield!
+                  List.concat lanes
+                  |> List.fold
+                      (fun (acc, cur) op ->
+                          match Ops.apply nodew idw op cur with
+                          | Ok t -> (acc @ [ t ]), t
+                          | Error _ -> acc, cur)
+                      ([ treeBase ], treeBase)
+                  |> fst ]
+        @ [ reparentBefore; reparentAfter ]
+        |> List.distinct
+
+    let repeated =
+        reached
+        |> List.choose (fun t ->
+            match Tree.preorder nodew t with
+            | _ :: _ :: _ as ns ->
+                Some
+                    { t with
+                        Children = t.Children @ [ List.last ns ] }
+            | _ -> None)
+
+    reached @ repeated
+
+type private IndexTally =
+    {
+        Diffs: string list
+        /// Trees carrying an id twice that the comparison met.
+        Repeated: int
+        /// Lookups whose path was at least three ids long.
+        Deep: int
+        /// Ordered pairs production read as stale / as fresh.
+        Stale: int
+        Fresh: int
+        /// Stale pairs one reparent apart that keep every node's id, kind and child count.
+        Reparents: int
+    }
+
+/// The model's `ix_*` beside production's `Tree.Index` over every tree and every id (plus an absent
+/// one), and — over a well-formed tree — both beside the walks the index caches. `fresh` is the
+/// model freshness check under test: the faithful one is `TreeOps.ix_is_fresh_for`.
+let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) (states: RNode list) : IndexTally =
+    let diffs = ResizeArray<string>()
+    let mutable repeated, deep, stale, freshN, reparents = 0, 0, 0, 0, 0
+
+    let differs (what: string) (t: RNode) x p m =
+        diffs.Add(sprintf "%s differs at %s in %A:\n  production %A\n  model      %A" what x (toModelTree t) p m)
+
+    for t in states do
+        let m = toModelTree t
+        let pix = Tree.Index.build nodew idw t
+        let mix = TreeOps.ix_build m
+        let wf = Tree.isWellFormed nodew idw t
+
+        if not wf then
+            repeated <- repeated + 1
+
+        match Tree.Index.tryBuild nodew idw t, TreeOps.ix_try_build m with
+        | Ok _, DagFold.Ok _ -> ()
+        | Error(Tree.RepeatedId d), DagFold.Error d' when d = d' -> ()
+        | p, q -> differs "tryBuild" t "-" (Result.isOk p) q
+
+        for x in Tree.ids nodew t @ [ "absent-438" ] do
+            let prod =
+                (Tree.Index.tryFind idw x pix |> Option.map toModelTree,
+                 Tree.Index.parentOf idw x pix |> Option.map toModelTree,
+                 Tree.Index.path idw x pix,
+                 Tree.Index.depth idw x pix |> Option.map bigint,
+                 Tree.Index.ancestors idw x pix |> List.map toModelTree)
+
+            let model =
+                (ofMOpt (TreeOps.ix_try_find x mix),
+                 ofMOpt (TreeOps.ix_parent_of x mix),
+                 ofMOpt (TreeOps.ix_path x mix),
+                 ofMOpt (TreeOps.ix_depth x mix),
+                 TreeOps.ix_ancestors x mix)
+
+            if prod <> model then
+                differs "an index lookup" t x prod model
+
+            match Tree.Index.path idw x pix with
+            | Some p when List.length p >= 3 -> deep <- deep + 1
+            | _ -> ()
+
+            if wf then
+                // Theorem 1 at production and at the model: the index is the walk it caches.
+                let walk =
+                    (Tree.tryFind nodew idw x t |> Option.map toModelTree,
+                     Tree.parentOf nodew idw x t |> Option.map toModelTree,
+                     Tree.path nodew idw x t,
+                     Tree.depth nodew idw x t |> Option.map bigint,
+                     Tree.ancestors nodew idw x t |> List.map toModelTree)
+
+                let modelWalk =
+                    (ofMOpt (TreeOps.find_in x m),
+                     ofMOpt (TreeOps.ix_parent_walk x m),
+                     ofMOpt (TreeOps.ix_path_walk x m),
+                     ofMOpt (TreeOps.ix_depth_walk x m),
+                     TreeOps.ix_ancestors_walk x m)
+
+                if walk <> prod then
+                    differs "production's index against production's walk" t x prod walk
+
+                if modelWalk <> walk then
+                    differs "the model's walk against production's walk" t x walk modelWalk
+
+    // Theorems 2 and 3: every ordered pair, the tree an index was built from included.
+    for t0 in states do
+        let pix = Tree.Index.build nodew idw t0
+        let mix = TreeOps.ix_build (toModelTree t0)
+
+        for t in states do
+            let p = Tree.Index.isFreshFor nodew idw t pix
+            let q = fresh (toModelTree t) mix
+
+            if p <> q then
+                differs "isFreshFor" t (sprintf "an index of %A" (toModelTree t0)) p q
+
+            if p then
+                freshN <- freshN + 1
+
+                if
+                    toModelTree t <> toModelTree t0
+                    && Tree.isWellFormed nodew idw t
+                    && Tree.isWellFormed nodew idw t0
+                then
+                    diffs.Add(sprintf "production read a changed tree as fresh — a stamp collision: %A against %A" t t0)
+            else
+                stale <- stale + 1
+
+                let blind (u: RNode) =
+                    Tree.preorder nodew u
+                    |> List.map (fun n -> n.Id, n.Kind, List.length n.Children)
+                    |> List.sort
+
+                if blind t = blind t0 then
+                    reparents <- reparents + 1
+
+    { Diffs = List.ofSeq diffs
+      Repeated = repeated
+      Deep = deep
+      Stale = stale
+      Fresh = freshN
+      Reparents = reparents }
+
+/// The go-red's freshness: the index's records narrowed to (id, kind, child COUNT) — a stamp that
+/// does not read the child ids — compared with the tree's, as a multiset.
+let private blindFresh (t: TreeOps.tree) (ix: TreeOps.ix_index) : bool =
+    TreeOps.ix_same_multiset
+        (TreeOps.ix_records_blind (TreeOps.ix_nodes t))
+        (ix.ix_stamp |> List.map (fun (i, k, cs) -> i, k, bigint (List.length cs)))
+
 [<Tests>]
 let tests =
     testList
@@ -702,4 +884,43 @@ let tests =
                        | Error _ -> true
                        | Ok _ -> false
                    | Error _ -> false)
-                  "and it is genuinely dependent — the obstruction is the cycle check, not the addresses" ]
+                  "and it is genuinely dependent — the obstruction is the cycle check, not the addresses"
+
+          // ---- Phase 438: the build-once index — `proofs/TreeOps.fst` section 23 ----
+
+          testCase "the extracted Tree.Index model is production's index over the generated pool, and is the walk"
+          <| fun _ ->
+              // Theorem 1 (`index_agrees`), 2 (`freshness_tracks_change`) and 3 (`fresh_on_build`,
+              // `try_build_exact`) on the extracted model beside production: every lookup at every id
+              // of every tree, an absent id included; over a well-formed tree, production's index,
+              // production's walk and the model's walk all agree; `isFreshFor` over every ordered
+              // pair; and `tryBuild`'s verdict and its named id. A fresh pair whose trees differ
+              // would be a stamp collision (the `index-stamp-separates` premise), and is a failure.
+              let t = indexDifferential TreeOps.ix_is_fresh_for (indexStates 4380 10)
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the index model and production DISAGREE\n%s" d
+              | [] ->
+                  Expect.isGreaterThan t.Repeated 0 "the pool met trees carrying an id twice"
+                  Expect.isGreaterThan t.Deep 0 "the pool met paths at least three ids long"
+                  Expect.isGreaterThan t.Stale 0 "the pool met stale indexes"
+                  Expect.isGreaterThan t.Fresh 0 "the pool met fresh indexes"
+                  Expect.isGreaterThan t.Reparents 0 "the pool met a stale pair that only a child id tells apart"
+
+          testCase "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor"
+          <| fun _ ->
+              // The go-red (`a_childless_stamp_misses_a_reparent`): a stamp over (id, kind, child
+              // count) reads the reparent pair as one tree. Production's stamp reads the child ids,
+              // so the comparison above must lose on the freshness arm — it is a comparison that
+              // can fail.
+              Expect.isFalse
+                  (Tree.Index.isFreshFor nodew idw reparentAfter (Tree.Index.build nodew idw reparentBefore))
+                  "production's stamp sees the reparent"
+
+              let t = indexDifferential blindFresh (indexStates 4380 2)
+
+              Expect.isNonEmpty t.Diffs "a freshness check blind to the child ids must lose the comparison"
+
+              Expect.isTrue
+                  (t.Diffs |> List.forall (fun d -> d.StartsWith "isFreshFor"))
+                  (sprintf "only the freshness arm moved — got:\n%s" (List.head t.Diffs)) ]

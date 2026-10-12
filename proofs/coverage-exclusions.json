@@ -1902,34 +1902,12 @@
     },
     {
       "members": [
-        "Tree.Index.ancestors",
-        "Tree.Index.build",
-        "Tree.Index.depth",
-        "Tree.Index.isFreshFor",
-        "Tree.Index.parentOf",
-        "Tree.Index.path",
-        "Tree.Index.tryFind"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
-      "standIn": "tests/Fuaran.Core.Tests/TreeExtTests.fs"
-    },
-    {
-      "members": [
         "Tree.Index.buildWith",
         "Tree.Index.isFreshForWith"
       ],
       "class": "measured-elsewhere",
       "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
       "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
-    },
-    {
-      "members": [
-        "Tree.Index.tryBuild"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
-      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
     },
     {
       "members": [
