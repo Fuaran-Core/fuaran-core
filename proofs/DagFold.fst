@@ -4719,6 +4719,1751 @@ let whole_node_refuses_every_slot (n s:string)
   = ()
 
 (* ======================================================================================
+   18. `Dag.mergeBase` over ANY two heads — the criss-cross merge (Phase 437).
+
+   WHAT IS MODELLED. Nothing new: `merge_base` is section 14.6's, clause for clause with
+   production's `mergeBase` as Phase 158 cut it — the intersection of the two ancestor closures,
+   `None` when it is empty, otherwise `List.maxBy` over the key (closure size, id). Phase 388 made
+   production's `deepest` size only the MAXIMAL members of the intersection rather than all of
+   them; over an acyclic set only a maximal member can win (which is what this section proves),
+   so the answer is the same, and the `Proofs.Oracle` differential holds the two equal over
+   criss-cross DAGs.
+
+   WHAT IS PROVED. `merge_base_maximal`: over a head whose closure is acyclic (section 13's
+   witness), `mergeBase` either refuses (`Missing`) exactly when the heads share no ancestor, or
+   returns a COMMON ancestor that no other common ancestor descends from. Section 14 proved the
+   base is the divergence point when the heads hang off one merged node; this is the general
+   statement, and over a criss-cross — two merges of the same two lanes, two maximal common
+   ancestors — it is what is true: the base is a maximal common ancestor. Which of the maximal
+   ones is picked is the (size, id) tie-break, a policy (Phase 300), and deterministic because
+   it is a function of the two closures.
+
+   NO SMT PATTERNS, for section 11's reason.
+   ====================================================================================== *)
+
+(* ---- 18.1 `deeper` is a strict total order on ids ---- *)
+
+[@@ noextract_to "FSharp"]  (* proof-only: the model stays free of integers *)
+let rec len (#a:Type) (l:list a) : Tot nat =
+  match l with
+  | [] -> 0
+  | _ :: t -> 1 + len t
+
+let rec shorter_len (#a #b:Type) (l:list a) (m:list b)
+  : Lemma (ensures shorter l m == (len l < len m)) (decreases m)
+  = match m with
+    | [] -> ()
+    | _ :: mt -> (match l with | [] -> () | _ :: lt' -> shorter_len lt' mt)
+
+let deeper_len (#op:eqtype) (lt:string -> string -> bool) (d:dag op) (fuel:list (node op))
+  (x y:string)
+  : Lemma (ensures deeper lt d fuel x y ==
+                   (len (closure_set d fuel x) > len (closure_set d fuel y) ||
+                    (len (closure_set d fuel x) = len (closure_set d fuel y) && lt y x)))
+  = shorter_len (closure_set d fuel y) (closure_set d fuel x);
+    shorter_len (closure_set d fuel x) (closure_set d fuel y)
+
+let deeper_strict_total (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (fuel:list (node op))
+  : Lemma (requires total_order lt)
+          (ensures (forall (x:string). not (deeper lt d fuel x x)) /\
+                   (forall (x y z:string). deeper lt d fuel x y /\ deeper lt d fuel y z
+                                           ==> deeper lt d fuel x z) /\
+                   (forall (x y:string). x =!= y ==> (deeper lt d fuel x y \/ deeper lt d fuel y x)))
+  = let aux (x y:string) : Lemma (deeper lt d fuel x y ==
+                   (len (closure_set d fuel x) > len (closure_set d fuel y) ||
+                    (len (closure_set d fuel x) = len (closure_set d fuel y) && lt y x))) =
+      deeper_len lt d fuel x y in
+    FStar.Classical.forall_intro_2 aux
+
+(* `List.maxBy` under a strict total order returns a member nothing beats. *)
+let rec max_by_top (better:string -> string -> bool) (best:string) (l:list string)
+  : Lemma (requires (forall (x:string). not (better x x)) /\
+                    (forall (x y z:string). better x y /\ better y z ==> better x z) /\
+                    (forall (x y:string). x =!= y ==> (better x y \/ better y x)))
+          (ensures mem (max_by better best l) (best :: l) /\
+                   (forall (y:string). mem y (best :: l) ==> not (better y (max_by better best l))))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | x :: t -> if better x best then max_by_top better x t else max_by_top better best t
+
+(* ---- 18.2 every id in a witnessed closure is off every cycle ---- *)
+
+let rec anc_found (#op:eqtype) (d:dag op) (f:list (node op)) (id x:string)
+  : Lemma (requires mem x (ancestors_of d f id)) (ensures Found? (lookup d.nodes x))
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup d.nodes id with
+       | Missing -> ()
+       | Found n -> if x = id then () else anc_all_found d f' n.nparents x)
+
+and anc_all_found (#op:eqtype) (d:dag op) (f:list (node op)) (ids:list string) (x:string)
+  : Lemma (requires mem x (ancestors_all d f ids)) (ensures Found? (lookup d.nodes x))
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t -> if mem x (ancestors_of d f p) then anc_found d f p x else anc_all_found d f t x
+
+let off_cycle_in_witness (#op:eqtype) (d:dag op) (fuel:list (node op)) (q:string)
+  (wm:list string) (m:node op)
+  : Lemma (requires walk_ok d fuel q /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel q)) wm /\
+                    mem m.nid (ancestors_of d fuel q))
+          (ensures off_cycle d fuel m)
+  = let x = m.nid in
+    at_least_refl fuel;
+    walk_ok_anc d fuel fuel q x;
+    let aux (y:string)
+      : Lemma (mem y (ancestors_of d fuel x) /\ y =!= x ==> not (mem x (ancestors_of d fuel y))) =
+      if mem y (ancestors_of d fuel x) && y <> x && mem x (ancestors_of d fuel y) then begin
+        anc_before d fuel fuel q wm x y;
+        anc_trans d fuel fuel q x y;
+        walk_ok_anc d fuel fuel q y;
+        anc_before d fuel fuel q wm y x;
+        before_asym x y wm
+      end
+    in
+    FStar.Classical.forall_intro aux
+
+(* ---- 18.3 THEOREM 5: `mergeBase` over ANY two heads, a criss-cross included ---- *)
+
+let common_anc (#op:eqtype) (d:dag op) (fuel:list (node op)) (left right x:string) : Tot bool =
+  mem x (ancestors_of d fuel left) && mem x (ancestors_of d fuel right)
+
+#push-options "--z3rlimit 100"
+let merge_base_maximal (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (fuel:list (node op)) (left right:string) (wl:list string)
+  : Lemma (requires total_order lt /\ Cons? fuel /\ walk_ok d fuel left /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel left)) wl)
+          (ensures (match merge_base lt d fuel left right with
+                    | Missing -> forall (x:string). not (common_anc d fuel left right x)
+                    | Found b ->
+                      common_anc d fuel left right b /\
+                      (forall (c:string). common_anc d fuel left right c /\ c =!= b
+                                          ==> not (mem b (ancestors_of d fuel c)))))
+  = match inter (ancestors_of d fuel left) (ancestors_of d fuel right) with
+    | [] ->
+      let aux (x:string) : Lemma (not (common_anc d fuel left right x)) =
+        mem_inter x (ancestors_of d fuel left) (ancestors_of d fuel right) in
+      FStar.Classical.forall_intro aux
+    | c0 :: t ->
+      deeper_strict_total lt d fuel;
+      max_by_top (deeper lt d fuel) c0 t;
+      let b = max_by (deeper lt d fuel) c0 t in
+      at_least_refl fuel;
+      let aux (c:string)
+        : Lemma (common_anc d fuel left right c /\ c =!= b ==> not (mem b (ancestors_of d fuel c))) =
+        if common_anc d fuel left right c && c <> b && mem b (ancestors_of d fuel c) then begin
+          anc_found d fuel left c;
+          let Found m = lookup d.nodes c in
+          lookup_found d.nodes c m;
+          walk_ok_anc d fuel fuel left c;
+          off_cycle_in_witness d fuel left wl m;
+          strictly_deeper lt d fuel m b;
+          assert (mem c (c0 :: t))
+        end
+      in
+      FStar.Classical.forall_intro aux
+#pop-options
+
+(* ======================================================================================
+   19. `Dag.conflictsOfHeads` — the reconcile's interference, naming nodes (Phase 437).
+
+   WHAT IS MODELLED. `Dag.conflictsOfNodes` (`conflicts` at `fun n -> footprintOf n.Op`) and
+   `Dag.conflictsOfHeads`: the region above the base partitioned exactly as section 15's
+   `excl_lanes` partitions it, each exclusive delta mapped to its nodes, and every unordered pair
+   swept with `conflictsOfNodes`, in head order.
+
+   WHAT IS PROVED. `conflicts_of_heads_is_the_sweep`: renaming every reported node to its op
+   gives EXACTLY the report `reconcileMany` refuses with (`LanesInterfere`, the `all_conflicts`
+   sweep over the same exclusive deltas' ops), conflict for conflict and in order; so it is empty
+   exactly when that sweep is. The sweep itself is section 7/8's: empty exactly when the deltas
+   are pairwise independent, and arrival-order-invariant read canonically.
+   ====================================================================================== *)
+
+(* ---- 19.1 renaming the ops of a report ---- *)
+
+let rec map_list (#a #b:Type) (g:a -> b) (l:list a) : Tot (list b) =
+  match l with
+  | [] -> []
+  | x :: t -> g x :: map_list g t
+
+let map_conflict (#a #b:eqtype) (g:a -> b) (c:conflict a) : Tot (conflict b) =
+  { left = g c.left; right = g c.right; address = c.address; shape = c.shape }
+
+let rec map_list_app (#a #b:Type) (g:a -> b) (l m:list a)
+  : Lemma (ensures map_list g (app l m) == app (map_list g l) (map_list g m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> map_list_app g t m
+
+let rec map_tag (#a #b:eqtype) (g:a -> b) (x y:a) (s:shape) (addrs:list string)
+  : Lemma (ensures map_list (map_conflict g) (tag x y s addrs) == tag (g x) (g y) s addrs)
+  = match addrs with
+    | [] -> ()
+    | _ :: t -> map_tag g x y s t
+
+let rec map_tag_slots (#a #b:eqtype) (g:a -> b) (x y:a) (slots:list slot)
+  : Lemma (ensures map_list (map_conflict g) (tag_slots x y slots) == tag_slots (g x) (g y) slots)
+  = match slots with
+    | [] -> ()
+    | _ :: t -> map_tag_slots g x y t
+
+let map_pair_conflicts (#a #b:eqtype) (g:a -> b) (fp:b -> footprint) (fpa:a -> footprint) (x y:a)
+  : Lemma (requires forall (n:a). fpa n == fp (g n))
+          (ensures map_list (map_conflict g) (pair_conflicts fpa x y)
+                   == pair_conflicts fp (g x) (g y))
+  = let fa = fp (g x) in
+    let fb = fp (g y) in
+    let c1 = concurrent_or_slots fa fb in
+    let c2 = diff (insert_clash fa fb) c1 in
+    let c3 = diff (diff (move_remove fa fb) c1) c2 in
+    let c4 = slot_clash fa fb in
+    let mc = map_conflict g in
+    map_list_app mc (tag x y ConcurrentUpdate c1)
+      (app (tag x y InsertPositionClash c2) (app (tag x y MoveVsRemove c3) (tag_slots x y c4)));
+    map_list_app mc (tag x y InsertPositionClash c2) (app (tag x y MoveVsRemove c3) (tag_slots x y c4));
+    map_list_app mc (tag x y MoveVsRemove c3) (tag_slots x y c4);
+    map_tag g x y ConcurrentUpdate c1;
+    map_tag g x y InsertPositionClash c2;
+    map_tag g x y MoveVsRemove c3;
+    map_tag_slots g x y c4
+
+let rec map_conflicts_with (#a #b:eqtype) (g:a -> b) (fp:b -> footprint) (fpa:a -> footprint) (x:a) (db:list a)
+  : Lemma (requires forall (n:a). fpa n == fp (g n))
+          (ensures map_list (map_conflict g) (conflicts_with fpa x db)
+                   == conflicts_with fp (g x) (map_list g db))
+  = match db with
+    | [] -> ()
+    | y :: t ->
+      map_list_app (map_conflict g) (pair_conflicts fpa x y)
+        (conflicts_with fpa x t);
+      map_pair_conflicts g fp fpa x y;
+      map_conflicts_with g fp fpa x t
+
+let rec map_conflicts (#a #b:eqtype) (g:a -> b) (fp:b -> footprint) (fpa:a -> footprint) (da db:list a)
+  : Lemma (requires forall (n:a). fpa n == fp (g n))
+          (ensures map_list (map_conflict g) (conflicts fpa da db)
+                   == conflicts fp (map_list g da) (map_list g db))
+  = match da with
+    | [] -> ()
+    | x :: t ->
+      map_list_app (map_conflict g) (conflicts_with fpa x db)
+        (conflicts fpa t db);
+      map_conflicts_with g fp fpa x db;
+      map_conflicts g fp fpa t db
+
+let rec map_lane_conflicts (#a #b:eqtype) (g:a -> b) (fp:b -> footprint) (fpa:a -> footprint) (d:list a)
+  (rest:list (list a))
+  : Lemma (requires forall (n:a). fpa n == fp (g n))
+          (ensures map_list (map_conflict g) (lane_conflicts fpa d rest)
+                   == lane_conflicts fp (map_list g d) (map_list (map_list g) rest))
+  = match rest with
+    | [] -> ()
+    | e :: t ->
+      map_list_app (map_conflict g) (conflicts fpa d e)
+        (lane_conflicts fpa d t);
+      map_conflicts g fp fpa d e;
+      map_lane_conflicts g fp fpa d t
+
+let rec map_all_conflicts (#a #b:eqtype) (g:a -> b) (fp:b -> footprint) (fpa:a -> footprint) (ds:list (list a))
+  : Lemma (requires forall (n:a). fpa n == fp (g n))
+          (ensures map_list (map_conflict g) (all_conflicts fpa ds)
+                   == all_conflicts fp (map_list (map_list g) ds))
+  = match ds with
+    | [] -> ()
+    | d :: rest ->
+      map_list_app (map_conflict g) (lane_conflicts fpa d rest)
+        (all_conflicts fpa rest);
+      map_lane_conflicts g fp fpa d rest;
+      map_all_conflicts g fp fpa rest
+
+(* ---- 19.2 `Dag.conflictsOfNodes` and `Dag.conflictsOfHeads` ---- *)
+
+let node_op (#op:eqtype) (n:node op) : Tot op = n.nop
+
+let node_fp (#op:eqtype) (fp:op -> footprint) (n:node op) : Tot footprint = fp n.nop
+
+(* F#: `Dag.conflictsOfNodes` — `conflicts` at `fun n -> footprintOf n.Op`. *)
+let conflicts_of_nodes (#op:eqtype) (fp:op -> footprint) (da db:list (node op))
+  : Tot (list (conflict (node op))) =
+  conflicts (node_fp fp) da db
+
+(* F#: the `for (i, a) ... for (j, b) ... if i < j then yield! conflictsOfNodes footprintOf a b`
+   sweep of `Dag.conflictsOfHeads`. *)
+let rec heads_lane_sweep (#op:eqtype) (fp:op -> footprint) (d:list (node op))
+  (rest:list (list (node op))) : Tot (list (conflict (node op))) =
+  match rest with
+  | [] -> []
+  | e :: t -> app (conflicts_of_nodes fp d e) (heads_lane_sweep fp d t)
+
+let rec heads_sweep (#op:eqtype) (fp:op -> footprint) (ds:list (list (node op)))
+  : Tot (list (conflict (node op))) =
+  match ds with
+  | [] -> []
+  | d :: rest -> app (heads_lane_sweep fp d rest) (heads_sweep fp rest)
+
+(* F#: `Dag.conflictsOfHeads`. *)
+let conflicts_of_heads (#op:eqtype) (fp:op -> footprint) (d:dag op)
+  (order base_c:list string) (cs:list (list string)) : Tot (list (conflict (node op))) =
+  heads_sweep fp (map_list (nodes_for d) (excl_lanes order base_c cs cs))
+
+(* F#: the `deltas` `reconcileRegion` sweeps — `opsOf dag ids` of each exclusive delta. *)
+let excl_op_lanes (#op:eqtype) (d:dag op) (order base_c:list string) (cs:list (list string))
+  : Tot (list (list op)) =
+  map_list (fun ids -> ops_of (nodes_for d ids)) (excl_lanes order base_c cs cs)
+
+let rec heads_lane_sweep_is (#op:eqtype) (fp:op -> footprint) (d:list (node op))
+  (rest:list (list (node op)))
+  : Lemma (ensures heads_lane_sweep fp d rest == lane_conflicts (node_fp fp) d rest)
+  = match rest with
+    | [] -> ()
+    | _ :: t -> heads_lane_sweep_is fp d t
+
+let rec heads_sweep_is (#op:eqtype) (fp:op -> footprint) (ds:list (list (node op)))
+  : Lemma (ensures heads_sweep fp ds == all_conflicts (node_fp fp) ds)
+  = match ds with
+    | [] -> ()
+    | d :: rest -> heads_lane_sweep_is fp d rest; heads_sweep_is fp rest
+
+let rec ops_of_is_map (#op:eqtype) (ns:list (node op))
+  : Lemma (ensures ops_of ns == map_list node_op ns)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> ops_of_is_map t
+
+let rec map_map_nodes (#op:eqtype) (d:dag op) (ls:list (list string))
+  : Lemma (ensures map_list (map_list node_op) (map_list (nodes_for d) ls)
+                   == map_list (fun ids -> ops_of (nodes_for d ids)) ls)
+  = match ls with
+    | [] -> ()
+    | ids :: t -> ops_of_is_map (nodes_for d ids); map_map_nodes d t
+
+(* THEOREM 4. `conflictsOfHeads` is the pairwise sweep `reconcileMany` refuses with, node for op:
+   renaming each reported node to its op gives EXACTLY the `LanesInterfere` report, conflict for
+   conflict and in order — so it is empty exactly when that sweep is. *)
+let conflicts_of_heads_is_the_sweep (#op:eqtype) (fp:op -> footprint) (d:dag op)
+  (order base_c:list string) (cs:list (list string))
+  : Lemma (ensures map_list (map_conflict node_op) (conflicts_of_heads fp d order base_c cs)
+                   == all_conflicts fp (excl_op_lanes d order base_c cs) /\
+                   (Nil? (conflicts_of_heads fp d order base_c cs)
+                    <==> Nil? (all_conflicts fp (excl_op_lanes d order base_c cs))))
+  = let ls = map_list (nodes_for d) (excl_lanes order base_c cs cs) in
+    heads_sweep_is fp ls;
+    map_all_conflicts node_op fp (node_fp fp) ls;
+    map_map_nodes d (excl_lanes order base_c cs cs)
+
+(* ======================================================================================
+   20. The reachability index (Phase 289), lifted to proved (Phase 437).
+
+   WHAT IS MODELLED. `Reach` as its slots: an id and its ancestor bitset, the bitset read as the
+   ids whose bits it sets. `reach_step` is one iteration of `Reach.ofDag`'s drain loop and
+   `Reach.extend`'s leaf step at once: a node the DAG holds and no slot carries, whose held
+   parents all carry one, gets a slot whose set is its own id over the union of its parents'
+   (`closureBits`); `reach_of_dag` runs it over the whole DAG's drain. `reach_ancestors` and
+   `reach_reaches` are `Reach.ancestors` and `Reach.reaches`, fallback to the unindexed walk
+   included.
+
+   WHAT IS PROVED. `reach_of_dag_agrees` (via `reach_build_valid` and `reach_agrees`): for every
+   descendant the walk completes on, `Reach.reaches` answers exactly `Set.contains ancestor
+   (ancestorsOf dag descendant)` and `Reach.ancestors` is exactly `ancestorsOf`. The invariant is
+   per slot and is kept by EVERY step, so it holds over any order the steps run in — the drain,
+   or a later extension onto the same DAG.
+
+   WHAT IS NOT MODELLED. The word layout (`hasBit`, the 32-bit words, `popCount`), the order and
+   position arrays, `Reach.extend`'s copy-and-shift of them and its rebuild under a dangling id,
+   and the index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder`, which read those
+   arrays: those stay `tested` (`Conformance.reachLaws`, and the differential below).
+   ====================================================================================== *)
+
+(* ---- 20.1 the index ---- *)
+
+(* F#: one slot of `Reach` — `Ids[s]` and `Bits[s]`, the bitset read as the ids whose bits it
+   sets. The word layout (`hasBit`, `closureBits`' word loop, `popCount`) is below the model. *)
+type rslot = { rid : string; rbits : list string }
+
+(* F#: `Map.tryFind id reach.Slot` then `reach.Bits[s]`. The newest slot is at the head. *)
+let rec slot_of (r:list rslot) (id:string) : Tot (found (list string)) =
+  match r with
+  | [] -> Missing
+  | e :: t -> if e.rid = id then Found e.rbits else slot_of t id
+
+(* F#: `parentBits` — the bitsets of the parents that hold a slot, unioned (`closureBits`). *)
+let rec parent_bits (r:list rslot) (ps:list string) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | p :: t ->
+    (match slot_of r p with
+     | Found b -> app b (parent_bits r t)
+     | Missing -> parent_bits r t)
+
+(* F#: `extend`'s `parentSlots |> List.exists Option.isNone` read as its negation: every parent the
+   DAG holds has a slot. On `ofDag`'s drain it always holds — a node is drained after its held
+   parents — so there it is idle; at `extend` it is the refusal to index a node under an
+   unindexed parent. *)
+let rec held_slotted (#op:eqtype) (d:dag op) (r:list rslot) (ps:list string) : Tot bool =
+  match ps with
+  | [] -> true
+  | p :: t -> (Missing? (lookup d.nodes p) || Found? (slot_of r p)) && held_slotted d r t
+
+(* F#: one iteration of `ofDag`'s drain loop, and `Reach.extend`: a node the DAG holds, not yet
+   slotted, whose held parents are all slotted, gets the next slot with its own bit set over its
+   parents' bitsets. *)
+let reach_step (#op:eqtype) (d:dag op) (r:list rslot) (id:string) : Tot (list rslot) =
+  match lookup d.nodes id with
+  | Missing -> r
+  | Found n ->
+    if Found? (slot_of r id) then r
+    else if held_slotted d r n.nparents then { rid = id; rbits = id :: parent_bits r n.nparents } :: r
+    else r
+
+(* F#: `Reach.ofDag` — the steps over an order (production: the whole DAG's drain). *)
+let rec reach_build (#op:eqtype) (d:dag op) (r:list rslot) (ord:list string)
+  : Tot (list rslot) (decreases ord) =
+  match ord with
+  | [] -> r
+  | id :: t -> reach_build d (reach_step d r id) t
+
+let reach_of_dag (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op)) (d:dag op)
+  : Tot (list rslot) =
+  reach_build d [] (drain_order lt kfuel d.nodes)
+
+(* F#: `Reach.ancestors` — the slot's bitset, else `Dag.ancestorsOf` itself. *)
+let reach_ancestors (#op:eqtype) (d:dag op) (fuel:list (node op)) (r:list rslot) (id:string)
+  : Tot (list string) =
+  match slot_of r id with
+  | Found b -> b
+  | Missing -> ancestors_of d fuel id
+
+(* F#: `Reach.reaches` — one bit test where both hold a slot, `false` where only the descendant
+   does, the unindexed walk where the descendant has none. *)
+let reach_reaches (#op:eqtype) (d:dag op) (fuel:list (node op)) (r:list rslot)
+  (anc dsc:string) : Tot bool =
+  match slot_of r dsc with
+  | Found b -> (match slot_of r anc with | Found _ -> mem anc b | Missing -> false)
+  | Missing -> mem anc (ancestors_of d fuel dsc)
+
+(* ---- 20.2 the invariant every step keeps ---- *)
+
+let slot_sound (#op:eqtype) (d:dag op) (r:list rslot) (e:rslot) : prop =
+  (forall (f:list (node op)) (x:string).
+     walk_ok d f e.rid ==> (mem x e.rbits <==> mem x (ancestors_of d f e.rid))) /\
+  (forall (x:string). mem x e.rbits ==> Found? (slot_of r x))
+
+let slot_sound_at (#op:eqtype) (d:dag op) (r:list rslot) (e:rslot) (f:list (node op)) (x:string)
+  : Lemma (requires slot_sound d r e /\ walk_ok d f e.rid)
+          (ensures mem x e.rbits <==> mem x (ancestors_of d f e.rid))
+  = ()
+
+let reach_valid (#op:eqtype) (d:dag op) (r:list rslot) : prop =
+  forall (e:rslot). mem e r ==> slot_sound d r e
+
+let rec slot_of_mem (r:list rslot) (id:string) (b:list string)
+  : Lemma (requires slot_of r id == Found b) (ensures mem ({ rid = id; rbits = b }) r)
+  = match r with
+    | [] -> ()
+    | e :: t -> if e.rid = id then () else slot_of_mem t id b
+
+let rec mem_parent_bits (#op:eqtype) (d:dag op) (r:list rslot) (ps:list string) (x:string)
+  (f:list (node op))
+  : Lemma (requires reach_valid d r /\ held_slotted d r ps /\ walk_all_ok d f ps)
+          (ensures mem x (parent_bits r ps) <==> mem x (ancestors_all d f ps))
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      mem_parent_bits d r t x f;
+      (match slot_of r p with
+       | Found b ->
+         slot_of_mem r p b;
+         assert (slot_sound d r ({ rid = p; rbits = b }));
+         assert (walk_ok d f p);
+         slot_sound_at d r ({ rid = p; rbits = b }) f x;
+         mem_app x b (parent_bits r t);
+         mem_app x (ancestors_of d f p) (ancestors_all d f t)
+       | Missing ->
+         (match f with
+          | [] -> ()
+          | _ :: _ -> ()))
+
+let rec parent_bits_slotted (r:list rslot) (ps:list string) (x:string)
+  : Lemma (requires (forall (e:rslot). mem e r ==> (forall (y:string). mem y e.rbits ==> Found? (slot_of r y))) /\
+                    mem x (parent_bits r ps))
+          (ensures Found? (slot_of r x))
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      (match slot_of r p with
+       | Found b ->
+         slot_of_mem r p b;
+         mem_app x b (parent_bits r t);
+         if mem x b then () else parent_bits_slotted r t x
+       | Missing -> parent_bits_slotted r t x)
+
+#push-options "--z3rlimit 100"
+let reach_step_valid (#op:eqtype) (d:dag op) (r:list rslot) (id:string)
+  : Lemma (requires reach_valid d r) (ensures reach_valid d (reach_step d r id))
+  = match lookup d.nodes id with
+    | Missing -> ()
+    | Found n ->
+      if Found? (slot_of r id) then ()
+      else if held_slotted d r n.nparents then begin
+        let e = { rid = id; rbits = id :: parent_bits r n.nparents } in
+        let r' = e :: r in
+        let old_slotted (y:string) : Lemma (Found? (slot_of r y) ==> Found? (slot_of r' y)) = () in
+        FStar.Classical.forall_intro old_slotted;
+        let new_sound (f:list (node op)) (x:string)
+          : Lemma (walk_ok d f id ==> (mem x e.rbits <==> mem x (ancestors_of d f id))) =
+          match f with
+          | [] -> ()
+          | _ :: f' -> if walk_ok d f id then mem_parent_bits d r n.nparents x f'
+        in
+        FStar.Classical.forall_intro_2 new_sound;
+        let new_closed (x:string) : Lemma (mem x e.rbits ==> Found? (slot_of r' x)) =
+          if mem x e.rbits && x <> id then parent_bits_slotted r n.nparents x
+        in
+        FStar.Classical.forall_intro new_closed
+      end
+      else ()
+#pop-options
+
+let rec reach_build_valid (#op:eqtype) (d:dag op) (r:list rslot) (ord:list string)
+  : Lemma (requires reach_valid d r) (ensures reach_valid d (reach_build d r ord)) (decreases ord)
+  = match ord with
+    | [] -> ()
+    | id :: t -> reach_step_valid d r id; reach_build_valid d (reach_step d r id) t
+
+(* ---- 20.3 THEOREM 3: the index answers what the walk answers ---- *)
+
+let reach_agrees (#op:eqtype) (d:dag op) (r:list rslot) (fuel:list (node op)) (anc dsc:string)
+  : Lemma (requires reach_valid d r /\ walk_ok d fuel dsc)
+          (ensures reach_reaches d fuel r anc dsc == mem anc (ancestors_of d fuel dsc) /\
+                   (forall (x:string). mem x (reach_ancestors d fuel r dsc)
+                                       == mem x (ancestors_of d fuel dsc)))
+  = match slot_of r dsc with
+    | Found b ->
+      slot_of_mem r dsc b;
+      let e = { rid = dsc; rbits = b } in
+      assert (slot_sound d r e);
+      let aux (x:string) : Lemma (mem x b == mem x (ancestors_of d fuel dsc)) =
+        slot_sound_at d r e fuel x in
+      FStar.Classical.forall_intro aux;
+      aux anc
+    | Missing -> ()
+
+let reach_of_dag_agrees (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (anc dsc:string)
+  : Lemma (requires walk_ok d fuel dsc)
+          (ensures (let r = reach_of_dag lt kfuel d in
+                    reach_reaches d fuel r anc dsc == mem anc (ancestors_of d fuel dsc) /\
+                    (forall (x:string). mem x (reach_ancestors d fuel r dsc)
+                                        == mem x (ancestors_of d fuel dsc))))
+  = reach_build_valid d [] (drain_order lt kfuel d.nodes);
+    reach_agrees d (reach_of_dag lt kfuel d) fuel anc dsc
+
+(* ======================================================================================
+   21. Checkpoints on the lane DAG (Phase 288), lifted to proved (Phase 437).
+
+   WHAT IS MODELLED. `Checkpoint` (node, state, seal), `sealAt` (the seal a parameter: production's
+   is the strict snapshot hash), `checkpointAt`, `verifyCheckpoint`, `replayFrom` with its private
+   `above` check, refusal for refusal, `checkpointFrom`, and the DAG `cut` returns
+   (`Map.filter` to the kept set) together with the contract `cut` meets, `truncation_ok`, which
+   is computable and which the differential evaluates on every DAG production compacts.
+
+   WHAT IS PROVED.
+     - `drain_restrict` / `drain_restricts` — the drain of a head's closure, kept to the closure of
+       a node inside it, IS that node's own drain. Production's docstring has said this since
+       Phase 311; it is now a theorem about the id-ordered drain of section 13.
+     - THEOREM 1 `replay_from_is_replay_to` — replay from a checkpoint `checkpointAt` sealed equals
+       replay from genesis (`tryReplayTo`), state for state and rejection for rejection, on every
+       head `replayFrom` does not refuse as unreached or uncovered. `checkpoint_from_is_checkpoint_at`
+       is its corollary for `checkpointFrom`.
+     - THEOREM 2 `truncation_preserves_replay` — truncating behind the checkpoint's node to any
+       kept set meeting `cut`'s contract preserves every such replay at or after it, whatever
+       state the checkpoint carries.
+
+   WHAT IS NOT MODELLED. `cut`'s computation of the kept set (`forwardFrom`, the band) — the
+   theorem is over the contract and the differential checks production's kept set meets it;
+   the seal's hash; the JSONL sidecar; `firstBreakFrom` / `verifyDagFrom`.
+
+   THE GO-RED. A `checkpointAt` that seals a node other than the one whose closure it folded
+   fails theorem 1 at the leg (`cp.cnode == c` is unprovable): Phase 437 ran that perturbation.
+   ====================================================================================== *)
+
+(* ---- 21.1 the drain of a closure, restricted to a closure below it ---- *)
+
+let in_set (c:list string) (x:string) : Tot bool = mem x c
+
+(* The node set `cS` is DOWN-CLOSED in `cT` over the work list `rT`: a parent of a `cS` node that
+   the drain over `cT` sees is itself in `cS`. An ancestor closure is down-closed in any closure
+   holding it. *)
+let down_closed (#op:eqtype) (rT:list (node op)) (cT cS:list string) : prop =
+  forall (n:node op) (p:string).
+    mem n rT /\ mem n.nid cS /\ mem p n.nparents /\ mem p cT ==> mem p cS
+
+let rec parents_in_down (ps cT cS:list string)
+  : Lemma (requires (forall (p:string). mem p ps /\ mem p cT ==> mem p cS) /\
+                    (forall (x:string). mem x cS ==> mem x cT))
+          (ensures parents_in ps cS == parents_in ps cT)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> parents_in_down t cT cS
+
+let rec all_emitted_agree (l cS eS eT:list string)
+  : Lemma (requires (forall (p:string). mem p l ==> mem p cS) /\
+                    (forall (p:string). mem p cS ==> mem p eS == mem p eT))
+          (ensures all_emitted l eS == all_emitted l eT)
+  = match l with
+    | [] -> ()
+    | _ :: t -> all_emitted_agree t cS eS eT
+
+let ready_agree (#op:eqtype) (n:node op) (cT cS eT eS:list string)
+  : Lemma (requires (forall (p:string). mem p n.nparents /\ mem p cT ==> mem p cS) /\
+                    (forall (x:string). mem x cS ==> mem x cT) /\
+                    (forall (p:string). mem p cS ==> mem p eS == mem p eT))
+          (ensures all_emitted (parents_in n.nparents cS) eS
+                   == all_emitted (parents_in n.nparents cT) eT)
+  = parents_in_down n.nparents cT cS;
+    let aux (p:string) : Lemma (mem p (parents_in n.nparents cS) ==> mem p cS) =
+      mem_parents_in n.nparents cS p in
+    FStar.Classical.forall_intro aux;
+    all_emitted_agree (parents_in n.nparents cS) cS eS eT
+
+let rec frontier_restrict (#op:eqtype) (rT:list (node op)) (cT cS eT eS:list string)
+  : Lemma (requires down_closed rT cT cS /\ (forall (x:string). mem x cS ==> mem x cT) /\
+                    (forall (p:string). mem p cS ==> mem p eS == mem p eT))
+          (ensures frontier (closure_nodes rT cS) cS eS == keep (in_set cS) (frontier rT cT eT))
+          (decreases rT)
+  = match rT with
+    | [] -> ()
+    | n :: t ->
+      frontier_restrict t cT cS eT eS;
+      if mem n.nid cS then ready_agree n cT cS eT eS else ()
+
+let pick_min_keep (lt:string -> string -> bool) (f:list string) (cS:list string)
+  : Lemma (requires total_order lt /\ Cons? f /\ mem (pick_min lt f) cS)
+          (ensures Cons? (keep (in_set cS) f) /\ pick_min lt (keep (in_set cS) f) == pick_min lt f)
+  = let x = pick_min lt f in
+    pick_min_mem lt f;
+    mem_keep (in_set cS) f x;
+    let k = keep (in_set cS) f in
+    pick_min_mem lt k;
+    let m = pick_min lt k in
+    mem_keep (in_set cS) f m;
+    pick_min_least lt k x;
+    pick_min_least lt f m
+
+let rec closure_nodes_remove_in (#op:eqtype) (rT:list (node op)) (cS:list string) (x:string)
+  : Lemma (requires mem x cS)
+          (ensures closure_nodes (remove_id rT x) cS == remove_id (closure_nodes rT cS) x)
+  = match rT with
+    | [] -> ()
+    | n :: t -> if n.nid = x then () else closure_nodes_remove_in t cS x
+
+let rec closure_nodes_remove_out (#op:eqtype) (rT:list (node op)) (cS:list string) (x:string)
+  : Lemma (requires not (mem x cS))
+          (ensures closure_nodes (remove_id rT x) cS == closure_nodes rT cS)
+  = match rT with
+    | [] -> ()
+    | n :: t -> if n.nid = x then () else closure_nodes_remove_out t cS x
+
+let rec len_remove_id (#op:eqtype) (r:list (node op)) (x:string)
+  : Lemma (requires mem x (ids_of r)) (ensures len (remove_id r x) + 1 == len r)
+  = match r with
+    | [] -> ()
+    | n :: t -> if n.nid = x then () else len_remove_id t x
+
+let rec mem_remove_id_sub (#op:eqtype) (r:list (node op)) (x:string) (n:node op)
+  : Lemma (requires mem n (remove_id r x)) (ensures mem n r)
+  = match r with
+    | [] -> ()
+    | m :: t -> if m.nid = x then () else if m = n then () else mem_remove_id_sub t x n
+
+let rec len_closure_nodes (#op:eqtype) (r:list (node op)) (c:list string)
+  : Lemma (ensures len (closure_nodes r c) <= len r)
+  = match r with
+    | [] -> ()
+    | _ :: t -> len_closure_nodes t c
+
+#push-options "--z3rlimit 120"
+let rec drain_restrict (lt:string -> string -> bool) (#op:eqtype)
+  (fT:list (node op)) (rT:list (node op)) (cT eT:list string)
+  (fS:list (node op)) (rS:list (node op)) (cS eS:list string)
+  : Lemma (requires total_order lt /\ rS == closure_nodes rT cS /\
+                    (forall (x:string). mem x cS ==> mem x cT) /\
+                    down_closed rT cT cS /\
+                    (forall (p:string). mem p cS ==> mem p eS == mem p eT) /\
+                    len fT >= len rT /\ len fS >= len rS)
+          (ensures keep (in_set cS) (kahn (pick_min lt) fT rT cT eT)
+                   == kahn (pick_min lt) fS rS cS eS)
+          (decreases fT)
+  = frontier_restrict rT cT cS eT eS;
+    match fT with
+    | [] ->
+      assert (rT == []);
+      (match fS with | [] -> () | _ :: _ -> ())
+    | _ :: fT' ->
+      let ft = frontier rT cT eT in
+      (match ft with
+       | [] -> (match fS with | [] -> () | _ :: _ -> ())
+       | _ :: _ ->
+         let x = pick_min lt ft in
+         pick_min_mem lt ft;
+         frontier_sub rT cT eT x;
+         len_remove_id rT x;
+         let rT' = remove_id rT x in
+         let eT' = app eT [ x ] in
+         let dc (n:node op) : Lemma (mem n rT' ==> mem n rT) =
+           if mem n rT' then mem_remove_id_sub rT x n in
+         FStar.Classical.forall_intro dc;
+         assert (down_closed rT' cT cS);
+         if mem x cS then begin
+           pick_min_keep lt ft cS;
+           mem_ids_closure_nodes rT cS x;
+           len_remove_id rS x;
+           closure_nodes_remove_in rT cS x;
+           let eS' = app eS [ x ] in
+           let em (p:string) : Lemma (mem p cS ==> mem p eS' == mem p eT') =
+             mem_app p eS [ x ]; mem_app p eT [ x ] in
+           FStar.Classical.forall_intro em;
+           (match fS with
+            | [] -> ()
+            | _ :: fS' -> drain_restrict lt fT' rT' cT eT' fS' (remove_id rS x) cS eS')
+         end
+         else begin
+           closure_nodes_remove_out rT cS x;
+           let em (p:string) : Lemma (mem p cS ==> mem p eS == mem p eT') =
+             mem_app p eT [ x ] in
+           FStar.Classical.forall_intro em;
+           drain_restrict lt fT' rT' cT eT' fS rS cS eS
+         end)
+#pop-options
+
+(* ---- 21.2 one head's drain, restricted to a node of its closure ---- *)
+
+let rec covers_len (#a #b:Type) (fuel:list a) (l:list b)
+  : Lemma (requires covers fuel l) (ensures len fuel > len l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> (match fuel with | [] -> () | _ :: f -> covers_len f t)
+
+let rec len_ids_of (#op:eqtype) (ns:list (node op)) : Lemma (ensures len (ids_of ns) == len ns) =
+  match ns with
+  | [] -> ()
+  | _ :: t -> len_ids_of t
+
+let rec closure_nodes_twice (#op:eqtype) (ns:list (node op)) (a c:list string)
+  : Lemma (requires forall (n:node op). mem n ns /\ mem n.nid c ==> mem n.nid a)
+          (ensures closure_nodes (closure_nodes ns a) c == closure_nodes ns c)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> closure_nodes_twice t a c
+
+let rec closure_nodes_ext (#op:eqtype) (ns:list (node op)) (a c:list string)
+  : Lemma (requires forall (n:node op). mem n ns ==> mem n.nid a == mem n.nid c)
+          (ensures closure_nodes ns a == closure_nodes ns c)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> closure_nodes_ext t a c
+
+let closure_of (#op:eqtype) (d:dag op) (fuel:list (node op)) (x:string) : Tot (list (node op)) =
+  closure_nodes d.nodes (ancestors_of d fuel x)
+
+#push-options "--z3rlimit 150"
+let drain_restricts (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (c h:string)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ walk_ok d fuel h /\
+                    mem c (ancestors_of d fuel h) /\ covers kfuel (ids_of (closure_of d fuel h)))
+          (ensures keep (in_set (ids_of (closure_of d fuel c))) (drain_order lt kfuel (closure_of d fuel h))
+                   == drain_order lt kfuel (closure_of d fuel c))
+  = let ah = ancestors_of d fuel h in
+    let ac = ancestors_of d fuel c in
+    let cnh = closure_of d fuel h in
+    let cnc = closure_of d fuel c in
+    let cT = ids_of cnh in
+    let cS = ids_of cnc in
+    at_least_refl fuel;
+    walk_ok_anc d fuel fuel h c;
+    (* every id below c is below h *)
+    let sub (x:string) : Lemma (mem x ac ==> mem x ah) =
+      if mem x ac then anc_trans d fuel fuel h c x in
+    FStar.Classical.forall_intro sub;
+    let sub_ids (x:string) : Lemma (mem x cS ==> mem x cT) =
+      mem_ids_closure_nodes d.nodes ac x; mem_ids_closure_nodes d.nodes ah x in
+    FStar.Classical.forall_intro sub_ids;
+    (* the S work list is the T work list kept to S *)
+    let tw (n:node op) : Lemma (mem n d.nodes /\ mem n.nid cS ==> mem n.nid ah) =
+      mem_ids_closure_nodes d.nodes ac n.nid in
+    FStar.Classical.forall_intro tw;
+    closure_nodes_twice d.nodes ah cS;
+    let ex (n:node op) : Lemma (mem n d.nodes ==> mem n.nid cS == mem n.nid ac) =
+      if mem n d.nodes then begin mem_ids_of n d.nodes; mem_ids_closure_nodes d.nodes ac n.nid end in
+    FStar.Classical.forall_intro ex;
+    closure_nodes_ext d.nodes cS ac;
+    assert (cnc == closure_nodes cnh cS);
+    (* down-closure *)
+    let dc (n:node op) (p:string)
+      : Lemma (mem n cnh /\ mem n.nid cS /\ mem p n.nparents /\ mem p cT ==> mem p cS) =
+      if mem n cnh && mem n.nid cS && mem p n.nparents && mem p cT then begin
+        mem_closure_nodes d.nodes ah n;
+        lookup_mem_distinct d.nodes n;
+        mem_ids_closure_nodes d.nodes ac n.nid;
+        mem_ids_closure_nodes d.nodes ah p;
+        lookup_of_mem_ids d.nodes p;
+        let big = n :: n :: fuel in
+        at_least_cons n fuel fuel;
+        at_least_cons n (n :: fuel) fuel;
+        assert (mem p (ancestors_of d (n :: fuel) p));
+        anc_all_incl d (n :: fuel) n.nparents p p;
+        assert (mem p (ancestors_of d big n.nid));
+        anc_trans d fuel big c n.nid p;
+        mem_ids_closure_nodes d.nodes ac p
+      end
+    in
+    FStar.Classical.forall_intro_2 dc;
+    covers_len kfuel cT;
+    len_ids_of cnh;
+    len_closure_nodes cnh cS;
+    drain_restrict lt kfuel cnh cT [] kfuel cnc cS []
+#pop-options
+
+(* ---- 21.3 the checkpoint (F#: `Checkpoint`, `sealAt`, `checkpointAt`, `verifyCheckpoint`) ---- *)
+
+noeq type checkpoint (state:Type) = { cnode : string; cstate : state; cseal : string }
+
+(* F#: `CheckpointFault<'Rej>`. *)
+type ck_fault (rej:Type) =
+  | CUnknownNode : string -> ck_fault rej
+  | CReplay : replay_fault rej -> ck_fault rej
+  | CUnreached : string -> ck_fault rej
+  | CUncovered : string -> ck_fault rej
+
+(* F#: `sealAt` — the seal is `OpStream.Snapshots`' strict snapshot hash of the state at sequence
+   zero with the node as its boundary hash; the model takes that hash as a parameter. *)
+let seal_at (#state:Type) (seal:string -> state -> string) (c:string) (st:state)
+  : Tot (checkpoint state) =
+  { cnode = c; cstate = st; cseal = seal c st }
+
+let lift (#state #rej:Type) (r:outcome state (replay_fault rej)) : Tot (outcome state (ck_fault rej)) =
+  match r with
+  | Ok s -> Ok s
+  | Error f -> Error (CReplay f)
+
+(* F#: `checkpointAt`. *)
+let checkpoint_at (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (seal:string -> state -> string)
+  (s0:state) (c:string) : Tot (outcome (checkpoint state) (ck_fault rej)) =
+  match lookup d.nodes c with
+  | Missing -> Error (CUnknownNode c)
+  | Found _ ->
+    (match replay_to apply lt kfuel d fuel s0 c with
+     | Error f -> Error (CReplay f)
+     | Ok st -> Ok (seal_at seal c st))
+
+(* F#: `verifyCheckpoint` — the node is held and the seal recomputes. *)
+let verify_checkpoint (#op:eqtype) (#state:Type) (seal:string -> state -> string)
+  (cp:checkpoint state) (d:dag op) : Tot bool =
+  Found? (lookup d.nodes cp.cnode) && seal cp.cnode cp.cstate = cp.cseal
+
+(* F#: `List.exists (fun p -> p = node || Set.contains p desc)`. *)
+let rec exists_parent (ps:list string) (node:string) (desc:list string) : Tot bool =
+  match ps with
+  | [] -> false
+  | p :: t -> p = node || mem p desc || exists_parent t node desc
+
+(* F#: `above`'s `go` — the first id of the delta that does not descend from `node`, judging each
+   by whether a parent IS `node` or was already judged a descendant. A delta id is always held
+   (it came out of the head's closure); `Missing` is the model's total match. *)
+let rec above_go (#op:eqtype) (d:dag op) (node:string) (desc:list string) (ids:list string)
+  : Tot (found string) (decreases ids) =
+  match ids with
+  | [] -> Missing
+  | id :: rest ->
+    (match lookup d.nodes id with
+     | Missing -> Found id
+     | Found n -> if exists_parent n.nparents node desc then above_go d node (id :: desc) rest
+                  else Found id)
+
+(* F#: `replayFrom` (through `replayAbove`), clause for clause and refusal for refusal. *)
+let replay_from (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (cp:checkpoint state) (head:string)
+  : Tot (outcome state (ck_fault rej)) =
+  match lookup d.nodes cp.cnode with
+  | Missing -> Error (CUnknownNode cp.cnode)
+  | Found _ ->
+    (match lookup d.nodes head with
+     | Missing -> Error (CReplay (RUnknownHead head))
+     | Found _ ->
+       let cn = closure_nodes d.nodes (ancestors_of d fuel head) in
+       let order = drain_order lt kfuel cn in
+       if not (sub_ids (ids_of cn) order) then Error (CReplay (RCyclicHistory head))
+       else if not (mem cp.cnode order) then Error (CUnreached head)
+       else begin
+         let delta = diff order (ancestors_of d fuel cp.cnode) in
+         match above_go d cp.cnode [] delta with
+         | Found id -> Error (CUncovered id)
+         | Missing -> lift (replay_ids apply d.nodes delta cp.cstate)
+       end)
+
+(* ---- 21.4 the list algebra the theorem runs on ---- *)
+
+let out_of (a:list string) (x:string) : Tot bool = not (mem x a)
+
+let rec diff_is_keep (l a:list string) : Lemma (ensures diff l a == keep (out_of a) l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> diff_is_keep t a
+
+let rec keep_ext_on (f g:string -> bool) (l:list string)
+  : Lemma (requires forall (x:string). mem x l ==> f x == g x) (ensures keep f l == keep g l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_ext_on f g t
+
+let rec keep_none (f:string -> bool) (l:list string)
+  : Lemma (requires forall (x:string). mem x l ==> not (f x)) (ensures keep f l == [])
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_none f t
+
+let rec keep_all (f:string -> bool) (l:list string)
+  : Lemma (requires forall (x:string). mem x l ==> f x) (ensures keep f l == l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_all f t
+
+(* A list in which nothing outside `f` precedes anything inside it is its `f` part, then the rest. *)
+let rec partition_before (f g:string -> bool) (l:list string)
+  : Lemma (requires distinct l /\ (forall (x:string). mem x l ==> g x == not (f x)) /\
+                    (forall (y z:string). mem y l /\ mem z l /\ not (f y) /\ f z ==> before z y l))
+          (ensures l == app (keep f l) (keep g l))
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      if f h then begin
+        let aux (y z:string) : Lemma (mem y t /\ mem z t /\ not (f y) /\ f z ==> before z y t) =
+          if mem y t && mem z t && not (f y) && f z then begin
+            assert (before z y l);
+            assert (z =!= h)
+          end
+        in
+        FStar.Classical.forall_intro_2 aux;
+        partition_before f g t
+      end
+      else begin
+        let none (z:string) : Lemma (mem z t ==> not (f z)) =
+          if mem z t && f z then assert (before z h l) in
+        FStar.Classical.forall_intro none;
+        keep_none f t;
+        keep_all g t
+      end
+
+let rec replay_ids_app (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (ns:list (node op)) (a b:list string) (s:state)
+  : Lemma (ensures replay_ids apply ns (app a b) s
+                   == bind (replay_ids apply ns a s) (replay_ids apply ns b))
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | id :: t ->
+      (match lookup ns id with
+       | Missing -> replay_ids_app apply ns t b s
+       | Found n ->
+         (match apply n.nop s with
+          | Ok s' -> replay_ids_app apply ns t b s'
+          | Error _ -> ()))
+
+(* Every id the above-check passes descends from the checkpoint's node. *)
+let rec exists_parent_anc (#op:eqtype) (d:dag op) (fuel f':list (node op)) (ps:list string)
+  (c:string) (desc:list string)
+  : Lemma (requires exists_parent ps c desc /\ walk_all_ok d f' ps /\ at_least fuel f' /\
+                    Found? (lookup d.nodes c) /\
+                    (forall (p:string). mem p desc ==> mem c (ancestors_of d fuel p)))
+          (ensures mem c (ancestors_all d f' ps))
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      if p = c then begin
+        (match f' with
+         | [] -> ()
+         | _ :: _ -> assert (mem c (ancestors_of d f' c)))
+      end
+      else if mem p desc then begin
+        anc_stable d f' fuel p;
+        assert (mem c (ancestors_of d f' p))
+      end
+      else exists_parent_anc d fuel f' t c desc
+
+let rec above_descends (#op:eqtype) (d:dag op) (fuel:list (node op)) (c:string)
+  (desc ids:list string)
+  : Lemma (requires above_go d c desc ids == Missing /\ Found? (lookup d.nodes c) /\
+                    (forall (y:string). mem y ids ==> walk_ok d fuel y) /\
+                    (forall (p:string). mem p desc ==> mem c (ancestors_of d fuel p)))
+          (ensures forall (y:string). mem y ids ==> mem c (ancestors_of d fuel y))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | id :: rest ->
+      (match lookup d.nodes id with
+       | Missing -> ()
+       | Found n ->
+         (match fuel with
+          | [] -> ()
+          | x :: f' ->
+            at_least_refl f';
+            at_least_cons x f' f';
+            exists_parent_anc d fuel f' n.nparents c desc;
+            assert (mem c (ancestors_of d fuel id));
+            above_descends d fuel c (id :: desc) rest))
+
+(* THE SPLIT. When every id of the history above `c` descends from `c`, the head's drain is
+   `c`'s own drain, then that history: nothing above the checkpoint is drained before any of
+   its closure. *)
+#push-options "--z3rlimit 200"
+let drain_split (#op:eqtype) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (c h:string) (wh:list string)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ walk_ok d fuel h /\
+                    head_drains d fuel kfuel h wh /\
+                    mem c (ancestors_of d fuel h) /\
+                    (forall (y:string). mem y (diff (drain_order lt kfuel (closure_of d fuel h))
+                                                    (ancestors_of d fuel c))
+                                        ==> mem c (ancestors_of d fuel y)))
+          (ensures (let ordh = drain_order lt kfuel (closure_of d fuel h) in
+                    is_topo_enum (closure_of d fuel h) ordh /\
+                    (forall (x:string). mem x ordh == mem x (ids_of (closure_of d fuel h))) /\
+                    ordh == app (drain_order lt kfuel (closure_of d fuel c))
+                                (diff ordh (ancestors_of d fuel c))))
+  = let cnh = closure_of d fuel h in
+    let ah = ancestors_of d fuel h in
+    let ac = ancestors_of d fuel c in
+    let ordh = drain_order lt kfuel cnh in
+    distinct_closure_nodes d.nodes ah;
+    drain_total_on_acyclic lt kfuel cnh wh;
+    let delta = diff ordh ac in
+    at_least_refl fuel;
+    let cnc = closure_of d fuel c in
+    let cS = ids_of cnc in
+    drain_restricts lt kfuel d fuel c h;
+    let ordc = drain_order lt kfuel cnc in
+    let memb (x:string) : Lemma (mem x ordh ==> out_of ac x == not (in_set cS x)) =
+      if mem x ordh then begin
+        mem_ids_closure_nodes d.nodes ah x;
+        mem_ids_closure_nodes d.nodes ac x
+      end in
+    FStar.Classical.forall_intro memb;
+    let ord_ok (y z:string)
+      : Lemma (mem y ordh /\ mem z ordh /\ not (in_set cS y) /\ in_set cS z ==> before z y ordh) =
+      if mem y ordh && mem z ordh && not (in_set cS y) && in_set cS z then begin
+        mem_ids_closure_nodes d.nodes ah y;
+        mem_ids_closure_nodes d.nodes ac z;
+        mem_ids_closure_nodes d.nodes ac y;
+        assert (mem y delta);
+        walk_ok_anc d fuel fuel h y;
+        anc_trans d fuel fuel y c z;
+        anc_before d fuel fuel h ordh y z
+      end in
+    FStar.Classical.forall_intro_2 ord_ok;
+    partition_before (in_set cS) (out_of ac) ordh;
+    diff_is_keep ordh ac
+#pop-options
+
+(* THEOREM 1. Replay from a checkpoint `checkpointAt` sealed is replay from genesis: on every head
+   `replayFrom` does not refuse as unreached or uncovered, its answer is `tryReplayTo`'s, the
+   state on `Ok` and the rejecting node and reason on `Rejected`. *)
+#push-options "--z3rlimit 200"
+let replay_from_is_replay_to (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (seal:string -> state -> string)
+  (s0:state) (c h:string) (wc wh:list string) (cp:checkpoint state)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ walk_ok d fuel h /\
+                    Found? (lookup d.nodes h) /\
+                    head_drains d fuel kfuel h wh /\ head_drains d fuel kfuel c wc /\
+                    checkpoint_at apply lt kfuel d fuel seal s0 c == Ok cp)
+          (ensures (match replay_from apply lt kfuel d fuel cp h with
+                    | Error (CUnreached _) | Error (CUncovered _) -> True
+                    | r -> r == lift (replay_to apply lt kfuel d fuel s0 h)))
+  = let cnh = closure_of d fuel h in
+    let ah = ancestors_of d fuel h in
+    let ac = ancestors_of d fuel c in
+    let ordh = drain_order lt kfuel cnh in
+    replay_to_is_fold_over_drain apply lt kfuel d fuel s0 h wh;
+    distinct_closure_nodes d.nodes ah;
+    drain_total_on_acyclic lt kfuel cnh wh;
+    sub_ids_of_mem (ids_of cnh) ordh;
+    if not (mem c ordh) then ()
+    else begin
+      mem_ids_closure_nodes d.nodes ah c;
+      let delta = diff ordh ac in
+      match above_go d c [] delta with
+      | Found _ -> ()
+      | Missing ->
+        at_least_refl fuel;
+        let wk (y:string) : Lemma (mem y delta ==> walk_ok d fuel y) =
+          if mem y delta then begin
+            mem_ids_closure_nodes d.nodes ah y;
+            walk_ok_anc d fuel fuel h y
+          end in
+        FStar.Classical.forall_intro wk;
+        lookup_of_mem_ids d.nodes c;
+        above_descends d fuel c [] delta;
+        replay_to_is_fold_over_drain apply lt kfuel d fuel s0 c wc;
+        drain_split lt kfuel d fuel c h wh;
+        let ordc = drain_order lt kfuel (closure_of d fuel c) in
+        replay_ids_app apply d.nodes ordc delta s0
+    end
+#pop-options
+
+(* F#: `checkpointFrom` — an absent node named as `checkpointAt` names it (where the origin's node
+   is held), then `replayFrom` from the origin, sealed at the node. *)
+let checkpoint_from (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (seal:string -> state -> string)
+  (origin:checkpoint state) (n:string) : Tot (outcome (checkpoint state) (ck_fault rej)) =
+  if Found? (lookup d.nodes origin.cnode) && Missing? (lookup d.nodes n) then Error (CUnknownNode n)
+  else
+    match replay_from apply lt kfuel d fuel origin n with
+    | Ok st -> Ok (seal_at seal n st)
+    | Error f -> Error f
+
+(* COROLLARY. A checkpoint taken from an earlier one is the checkpoint taken from genesis: the
+   same node, the same state, the same seal. *)
+let checkpoint_from_is_checkpoint_at (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (seal:string -> state -> string)
+  (s0:state) (c n:string) (wc wn:list string) (cp:checkpoint state)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ walk_ok d fuel n /\
+                    Found? (lookup d.nodes n) /\
+                    head_drains d fuel kfuel n wn /\ head_drains d fuel kfuel c wc /\
+                    checkpoint_at apply lt kfuel d fuel seal s0 c == Ok cp)
+          (ensures (match replay_from apply lt kfuel d fuel cp n with
+                    | Error (CUnreached _) | Error (CUncovered _) -> True
+                    | _ ->
+                      (match checkpoint_from apply lt kfuel d fuel seal cp n,
+                             checkpoint_at apply lt kfuel d fuel seal s0 n with
+                       | Ok a, Ok b -> a.cnode == b.cnode /\ a.cstate == b.cstate /\ a.cseal == b.cseal
+                       | Error f, Error g -> f == g
+                       | _, _ -> False)))
+  = replay_from_is_replay_to apply lt kfuel d fuel seal s0 c n wc wn cp
+
+(* ---- 21.6 the drain after a prefix ---- *)
+
+(* F#: nothing — the ids a drain has emitted, taken out of its work list one at a time. *)
+let rec remove_all (#op:eqtype) (r:list (node op)) (p:list string) : Tot (list (node op)) (decreases p) =
+  match p with
+  | [] -> r
+  | x :: t -> remove_all (remove_id r x) t
+
+(* The work list with every id of `p` dropped. *)
+let rec drop_nodes (#op:eqtype) (r:list (node op)) (p:list string) : Tot (list (node op)) =
+  match r with
+  | [] -> []
+  | n :: t -> if mem n.nid p then drop_nodes t p else n :: drop_nodes t p
+
+let rec len_drop_by (#a #b:Type) (f:list a) (p:list b)
+  : Lemma (requires len f >= len p) (ensures len (drop_by f p) + len p == len f) (decreases p)
+  = match p with
+    | [] -> ()
+    | _ :: t -> (match f with | [] -> () | _ :: f' -> len_drop_by f' t)
+
+(* THE PREFIX LEMMA. Whatever a drain emitted first, the rest of its output is the drain resumed
+   from the state that prefix left: those ids emitted and gone from the work list. *)
+let rec kahn_after (#op:eqtype) (pick:list string -> string) (f:list (node op))
+  (r:list (node op)) (c e p q:list string)
+  : Lemma (requires picks_from_frontier pick /\ kahn pick f r c e == app p q)
+          (ensures q == kahn pick (drop_by f p) (remove_all r p) c (app e p) /\
+                   (len f >= len r ==> len (drop_by f p) >= len (remove_all r p)))
+          (decreases p)
+  = match p with
+    | [] -> app_nil_r e
+    | x :: p' ->
+      (match f with
+       | [] -> ()
+       | _ :: f' ->
+         let fr = frontier r c e in
+         (match fr with
+          | [] -> ()
+          | _ :: _ ->
+            let id = pick fr in
+            assert (id == x);
+            frontier_sub r c e x;
+            len_remove_id r x;
+            app_assoc e [ x ] p';
+            kahn_after pick f' (remove_id r x) c (app e [ x ]) p' q))
+
+let rec drop_nodes_ext (#op:eqtype) (r:list (node op)) (p p':list string)
+  : Lemma (requires forall (n:node op). mem n r ==> mem n.nid p == mem n.nid p')
+          (ensures drop_nodes r p == drop_nodes r p')
+  = match r with
+    | [] -> ()
+    | _ :: t -> drop_nodes_ext t p p'
+
+let rec drop_nodes_remove (#op:eqtype) (r:list (node op)) (x:string) (p:list string)
+  : Lemma (requires distinct (ids_of r))
+          (ensures drop_nodes (remove_id r x) p == drop_nodes r (x :: p))
+  = match r with
+    | [] -> ()
+    | n :: t ->
+      if n.nid = x then begin
+        let aux (m:node op) : Lemma (mem m t ==> mem m.nid p == mem m.nid (x :: p)) =
+          if mem m t then mem_ids_of m t in
+        FStar.Classical.forall_intro aux;
+        drop_nodes_ext t p (x :: p)
+      end
+      else drop_nodes_remove t x p
+
+let rec remove_all_is_drop (#op:eqtype) (r:list (node op)) (p:list string)
+  : Lemma (requires distinct (ids_of r)) (ensures remove_all r p == drop_nodes r p) (decreases p)
+  = match p with
+    | [] ->
+      let rec none (r:list (node op)) : Lemma (ensures drop_nodes r [] == r) =
+        match r with [] -> () | _ :: t -> none t in
+      none r
+    | x :: t ->
+      ids_of_remove_id r x;
+      distinct_remove_first (ids_of r) x;
+      remove_all_is_drop (remove_id r x) t;
+      drop_nodes_remove r x t
+
+(* ---- 21.7 the drain reads only what is still pending, and not its fuel ---- *)
+
+let pending (p:string) (c e:list string) : Tot bool = mem p c && not (mem p e)
+
+let rec ready_pending (ps c1 e1 c2 e2:list string)
+  : Lemma (requires forall (p:string). mem p ps ==> pending p c1 e1 == pending p c2 e2)
+          (ensures all_emitted (parents_in ps c1) e1 == all_emitted (parents_in ps c2) e2)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> ready_pending t c1 e1 c2 e2
+
+let rec frontier_pending (#op:eqtype) (r:list (node op)) (c1 e1 c2 e2:list string)
+  : Lemma (requires forall (n:node op) (p:string). mem n r /\ mem p n.nparents
+                                                   ==> pending p c1 e1 == pending p c2 e2)
+          (ensures frontier r c1 e1 == frontier r c2 e2)
+  = match r with
+    | [] -> ()
+    | n :: t -> ready_pending n.nparents c1 e1 c2 e2; frontier_pending t c1 e1 c2 e2
+
+let rec kahn_pending (#op:eqtype) (pick:list string -> string) (f:list (node op))
+  (r:list (node op)) (c1 e1 c2 e2:list string)
+  : Lemma (requires forall (n:node op) (p:string). mem n r /\ mem p n.nparents
+                                                   ==> pending p c1 e1 == pending p c2 e2)
+          (ensures kahn pick f r c1 e1 == kahn pick f r c2 e2)
+          (decreases f)
+  = frontier_pending r c1 e1 c2 e2;
+    match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match frontier r c1 e1 with
+       | [] -> ()
+       | fr ->
+         let x = pick fr in
+         let aux (n:node op) (p:string)
+           : Lemma (mem n (remove_id r x) /\ mem p n.nparents
+                    ==> pending p c1 (app e1 [ x ]) == pending p c2 (app e2 [ x ])) =
+           if mem n (remove_id r x) && mem p n.nparents then begin
+             mem_remove_id_sub r x n;
+             mem_app p e1 [ x ]; mem_app p e2 [ x ]
+           end in
+         FStar.Classical.forall_intro_2 aux;
+         kahn_pending pick f' (remove_id r x) c1 (app e1 [ x ]) c2 (app e2 [ x ]))
+
+let rec kahn_fuel (#op:eqtype) (pick:list string -> string) (f g:list (node op))
+  (r:list (node op)) (c e:list string)
+  : Lemma (requires picks_from_frontier pick /\ len f >= len r /\ len g >= len r)
+          (ensures kahn pick f r c e == kahn pick g r c e)
+          (decreases f)
+  = match f, g with
+    | [], _ -> assert (r == []); (match g with | [] -> () | _ :: _ -> ())
+    | _, [] -> assert (r == [])
+    | _ :: f', _ :: g' ->
+      (match frontier r c e with
+       | [] -> ()
+       | fr ->
+         let x = pick fr in
+         frontier_sub r c e x;
+         len_remove_id r x;
+         kahn_fuel pick f' g' (remove_id r x) c (app e [ x ]))
+
+(* ---- 21.8 the truncation (F#: `cut`, `compactAt`) ---- *)
+
+(* F#: the DAG `cut` returns — `dag.Nodes |> Map.filter (fun id _ -> Set.contains id keep)`. *)
+let truncate (#op:eqtype) (d:dag op) (keep:list string) : Tot (dag op) =
+  { nodes = closure_nodes d.nodes keep }
+
+(* What `cut` guarantees of the set it keeps, read node by node so it is computable: every node
+   NOT behind the checkpoint's node is kept (`cut` refuses a DAG holding a node neither behind nor
+   after, and keeps everything after), and every node behind it that is kept still reaches it in
+   the truncated DAG (the band: a side parent and the path from it to the node). *)
+let rec trunc_ok_nodes (#op:eqtype) (d:dag op) (fuel:list (node op)) (c:string)
+  (keep:list string) (ns:list (node op)) : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: t ->
+    (if mem n.nid (ancestors_of d fuel c)
+     then (not (mem n.nid keep) || mem n.nid (ancestors_of (truncate d keep) fuel c))
+     else mem n.nid keep)
+    && trunc_ok_nodes d fuel c keep t
+
+let truncation_ok (#op:eqtype) (d:dag op) (fuel:list (node op)) (c:string) (keep:list string)
+  : Tot bool =
+  mem c keep && trunc_ok_nodes d fuel c keep d.nodes
+
+let rec trunc_ok_at (#op:eqtype) (d:dag op) (fuel:list (node op)) (c:string)
+  (keep:list string) (ns:list (node op)) (n:node op)
+  : Lemma (requires trunc_ok_nodes d fuel c keep ns /\ mem n ns)
+          (ensures (if mem n.nid (ancestors_of d fuel c)
+                    then (not (mem n.nid keep) || mem n.nid (ancestors_of (truncate d keep) fuel c))
+                    else mem n.nid keep))
+  = match ns with
+    | [] -> ()
+    | m :: t -> if m = n then () else trunc_ok_at d fuel c keep t n
+
+let rec lookup_closure_nodes (#op:eqtype) (ns:list (node op)) (k:list string) (y:string)
+  : Lemma (ensures lookup (closure_nodes ns k) y == (if mem y k then lookup ns y else Missing))
+  = match ns with
+    | [] -> ()
+    | n :: t -> lookup_closure_nodes t k y
+
+let anc_head_found (#op:eqtype) (d:dag op) (f:list (node op)) (y x:string)
+  : Lemma (requires mem x (ancestors_of d f y)) (ensures Found? (lookup d.nodes y))
+  = match f with
+    | [] -> ()
+    | _ :: _ -> ()
+
+(* The walk only grows with its fuel. *)
+let rec anc_mono (#op:eqtype) (d:dag op) (f big:list (node op)) (y x:string)
+  : Lemma (requires at_least big f /\ mem x (ancestors_of d f y))
+          (ensures mem x (ancestors_of d big y))
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match big with
+       | [] -> ()
+       | _ :: big' ->
+         (match lookup d.nodes y with
+          | Missing -> ()
+          | Found n -> if x = y then () else anc_all_mono d f' big' n.nparents x))
+
+and anc_all_mono (#op:eqtype) (d:dag op) (f big:list (node op)) (ids:list string) (x:string)
+  : Lemma (requires at_least big f /\ mem x (ancestors_all d f ids))
+          (ensures mem x (ancestors_all d big ids))
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem x (ancestors_of d f p) then anc_mono d f big p x
+      else anc_all_mono d f big t x
+
+(* The truncated DAG's walk is inside the full one's. *)
+let rec anc_sub (#op:eqtype) (d:dag op) (keep:list string) (f:list (node op)) (y x:string)
+  : Lemma (requires mem x (ancestors_of (truncate d keep) f y))
+          (ensures mem x (ancestors_of d f y))
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = lookup_closure_nodes d.nodes keep y;
+    match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup (truncate d keep).nodes y with
+       | Missing -> ()
+       | Found n -> if x = y then () else anc_all_sub d keep f' n.nparents x)
+
+and anc_all_sub (#op:eqtype) (d:dag op) (keep:list string) (f:list (node op)) (ids:list string)
+  (x:string)
+  : Lemma (requires mem x (ancestors_all (truncate d keep) f ids))
+          (ensures mem x (ancestors_all d f ids))
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem x (ancestors_of (truncate d keep) f p) then anc_sub d keep f p x
+      else anc_all_sub d keep f t x
+
+let rec walk_ok_sub (#op:eqtype) (d:dag op) (keep:list string) (f:list (node op)) (y:string)
+  : Lemma (requires walk_ok d f y) (ensures walk_ok (truncate d keep) f y)
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = lookup_closure_nodes d.nodes keep y;
+    match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup (truncate d keep).nodes y with
+       | Missing -> ()
+       | Found n -> walk_all_ok_sub d keep f' n.nparents)
+
+and walk_all_ok_sub (#op:eqtype) (d:dag op) (keep:list string) (f:list (node op)) (ids:list string)
+  : Lemma (requires walk_all_ok d f ids) (ensures walk_all_ok (truncate d keep) f ids)
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t -> walk_ok_sub d keep f p; walk_all_ok_sub d keep f t
+
+(* A walk whose every step is kept survives the truncation. *)
+let kept_above (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string) (x:string) : prop =
+  forall (g:list (node op)) (z:string).
+    at_least fuel g /\ mem x (ancestors_of d g z) ==> mem z keep
+
+let rec anc_kept (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (f:list (node op)) (y x:string)
+  : Lemma (requires kept_above d fuel keep x /\ at_least fuel f /\ mem x (ancestors_of d f y))
+          (ensures mem x (ancestors_of (truncate d keep) f y))
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = lookup_closure_nodes d.nodes keep y;
+    match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup d.nodes y with
+       | Missing -> ()
+       | Found n ->
+         assert (mem y keep);
+         if x = y then ()
+         else begin
+           at_least_tail fuel f;
+           anc_all_kept d fuel keep f' n.nparents x
+         end)
+
+and anc_all_kept (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (f:list (node op)) (ids:list string) (x:string)
+  : Lemma (requires kept_above d fuel keep x /\ at_least fuel f /\ mem x (ancestors_all d f ids))
+          (ensures mem x (ancestors_all (truncate d keep) f ids))
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem x (ancestors_of d f p) then anc_kept d fuel keep f p x
+      else anc_all_kept d fuel keep f t x
+
+let rec above_go_keep (#op:eqtype) (d:dag op) (keep:list string) (c:string)
+  (desc ids:list string)
+  : Lemma (requires forall (y:string). mem y ids ==> mem y keep)
+          (ensures above_go (truncate d keep) c desc ids == above_go d c desc ids)
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | id :: rest ->
+      lookup_closure_nodes d.nodes keep id;
+      above_go_keep d keep c (id :: desc) rest
+
+let rec replay_ids_keep (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (d:dag op) (keep:list string) (ids:list string)
+  (s:state)
+  : Lemma (requires forall (y:string). mem y ids ==> mem y keep)
+          (ensures replay_ids apply (truncate d keep).nodes ids s == replay_ids apply d.nodes ids s)
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | id :: t ->
+      lookup_closure_nodes d.nodes keep id;
+      (match lookup d.nodes id with
+       | Missing -> replay_ids_keep apply d keep t s
+       | Found n ->
+         (match apply n.nop s with
+          | Ok s' -> replay_ids_keep apply d keep t s'
+          | Error _ -> ()))
+
+let rec drop_closure_ext (#op:eqtype) (ns:list (node op)) (a p k a' p':list string)
+  : Lemma (requires forall (n:node op). mem n ns ==>
+                      (mem n.nid a && not (mem n.nid p))
+                      == (mem n.nid k && mem n.nid a' && not (mem n.nid p')))
+          (ensures drop_nodes (closure_nodes ns a) p
+                   == drop_nodes (closure_nodes (closure_nodes ns k) a') p')
+  = match ns with
+    | [] -> ()
+    | _ :: t -> drop_closure_ext t a p k a' p'
+
+(* The region above the checkpoint is the same id set in the full DAG and the truncated one. *)
+#push-options "--z3rlimit 150"
+let region_same (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (c h:string) (x:string)
+  : Lemma (requires Cons? fuel /\ walk_ok d fuel h /\ mem c (ancestors_of d fuel h) /\
+                    truncation_ok d fuel c keep /\ Found? (lookup d.nodes x))
+          (ensures (mem x (ancestors_of d fuel h) && not (mem x (ancestors_of d fuel c)))
+                   == (mem x keep && mem x (ancestors_of (truncate d keep) fuel h) &&
+                       not (mem x (ancestors_of (truncate d keep) fuel c))))
+  = let d' = truncate d keep in
+    let ah = ancestors_of d fuel h in
+    let ac = ancestors_of d fuel c in
+    at_least_refl fuel;
+    walk_ok_anc d fuel fuel h c;
+    let Found nx = lookup d.nodes x in
+    lookup_found d.nodes x nx;
+    trunc_ok_at d fuel c keep d.nodes nx;
+    if mem x ah && not (mem x ac) then begin
+      let ka (g:list (node op)) (z:string)
+        : Lemma (at_least fuel g /\ mem x (ancestors_of d g z) ==> mem z keep) =
+        if at_least fuel g && mem x (ancestors_of d g z) then begin
+          anc_mono d g fuel z x;
+          anc_head_found d g z x;
+          let Found nz = lookup d.nodes z in
+          lookup_found d.nodes z nz;
+          trunc_ok_at d fuel c keep d.nodes nz;
+          if not (mem z keep) then anc_trans d fuel fuel c z x
+        end in
+      FStar.Classical.forall_intro_2 ka;
+      anc_kept d fuel keep fuel h x;
+      if mem x (ancestors_of d' fuel c) then anc_sub d keep fuel c x
+    end
+    else if mem x keep && mem x (ancestors_of d' fuel h) && not (mem x (ancestors_of d' fuel c))
+    then anc_sub d keep fuel h x
+#pop-options
+
+(* Every id that reaches `c` in the full DAG reaches it in the truncated one. *)
+let reach_c_kept (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (c h:string) (wh:list string) (y:string)
+  : Lemma (requires Cons? fuel /\ walk_ok d fuel h /\ mem c (ancestors_of d fuel h) /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel h)) wh /\
+                    truncation_ok d fuel c keep /\ mem c (ancestors_of d fuel y))
+          (ensures mem c (ancestors_of (truncate d keep) fuel y))
+  = at_least_refl fuel;
+    walk_ok_anc d fuel fuel h c;
+    anc_found d fuel h c;
+    let Found nc = lookup d.nodes c in
+    lookup_found d.nodes c nc;
+    off_cycle_in_witness d fuel h wh nc;
+    let ka (g:list (node op)) (z:string)
+      : Lemma (at_least fuel g /\ mem c (ancestors_of d g z) ==> mem z keep) =
+      if at_least fuel g && mem c (ancestors_of d g z) then begin
+        anc_mono d g fuel z c;
+        anc_head_found d g z c;
+        let Found nz = lookup d.nodes z in
+        lookup_found d.nodes z nz;
+        trunc_ok_at d fuel c keep d.nodes nz
+      end in
+    FStar.Classical.forall_intro_2 ka;
+    anc_kept d fuel keep fuel y c
+
+(* One DAG: the history above `c`, when all of it descends from `c`, is the drain resumed after
+   `c`'s own drain — work list and emitted set named. *)
+#push-options "--z3rlimit 150"
+let above_is_resumed (#op:eqtype) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (c h:string) (wh:list string)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ walk_ok d fuel h /\
+                    head_drains d fuel kfuel h wh /\ mem c (ancestors_of d fuel h) /\
+                    (forall (y:string). mem y (diff (drain_order lt kfuel (closure_of d fuel h))
+                                                    (ancestors_of d fuel c))
+                                        ==> mem c (ancestors_of d fuel y)))
+          (ensures (let cnh = closure_of d fuel h in
+                    let ordh = drain_order lt kfuel cnh in
+                    let ordc = drain_order lt kfuel (closure_of d fuel c) in
+                    diff ordh (ancestors_of d fuel c)
+                    == kahn (pick_min lt) (drop_by kfuel ordc) (drop_nodes cnh ordc) (ids_of cnh) ordc /\
+                    len (drop_by kfuel ordc) >= len (drop_nodes cnh ordc) /\
+                    (forall (x:string). mem x ordc == mem x (ids_of (closure_of d fuel c))) /\
+                    (forall (x:string). mem x ordh == mem x (ids_of cnh))))
+  = let cnh = closure_of d fuel h in
+    let cnc = closure_of d fuel c in
+    let ordh = drain_order lt kfuel cnh in
+    let ordc = drain_order lt kfuel cnc in
+    pick_min_is_a_tie_break lt;
+    drain_split lt kfuel d fuel c h wh;
+    drain_restricts lt kfuel d fuel c h;
+    distinct_closure_nodes d.nodes (ancestors_of d fuel h);
+    covers_len kfuel (ids_of cnh);
+    len_ids_of cnh;
+    kahn_after (pick_min lt) kfuel cnh (ids_of cnh) [] ordc (diff ordh (ancestors_of d fuel c));
+    remove_all_is_drop cnh ordc;
+    let memc (x:string) : Lemma (mem x ordc == mem x (ids_of cnc)) =
+      mem_keep (in_set (ids_of cnc)) ordh x;
+      at_least_refl fuel;
+      walk_ok_anc d fuel fuel h c;
+      mem_ids_closure_nodes d.nodes (ancestors_of d fuel c) x;
+      mem_ids_closure_nodes d.nodes (ancestors_of d fuel h) x;
+      if mem x (ancestors_of d fuel c) then anc_trans d fuel fuel h c x in
+    FStar.Classical.forall_intro memc
+#pop-options
+
+(* Two drains over one work list, pending the same parents, with fuel enough, emit the same. *)
+let kahn_same (#op:eqtype) (lt:string -> string -> bool) (f1 f2:list (node op))
+  (r:list (node op)) (c1 e1 c2 e2:list string)
+  : Lemma (requires len f1 >= len r /\ len f2 >= len r /\
+                    (forall (p:string). pending p c1 e1 == pending p c2 e2))
+          (ensures kahn (pick_min lt) f1 r c1 e1 == kahn (pick_min lt) f2 r c2 e2)
+  = pick_min_is_a_tie_break lt;
+    kahn_fuel (pick_min lt) f1 f2 r c1 e1;
+    kahn_pending (pick_min lt) f2 r c1 e1 c2 e2
+
+let ids_closure_trunc (#op:eqtype) (d:dag op) (keep a:list string) (x:string)
+  : Lemma (ensures mem x (ids_of (closure_nodes (truncate d keep).nodes a))
+                   == (mem x (ids_of d.nodes) && mem x keep && mem x a))
+  = mem_ids_closure_nodes (truncate d keep).nodes a x;
+    mem_ids_closure_nodes d.nodes keep x
+
+let held_ids (#op:eqtype) (d:dag op) (x:string)
+  : Lemma (ensures mem x (ids_of d.nodes) == Found? (lookup d.nodes x))
+  = match lookup d.nodes x with
+    | Missing -> if mem x (ids_of d.nodes) then lookup_of_mem_ids d.nodes x
+    | Found n -> lookup_found d.nodes x n
+
+let trunc_premises (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string) (c h:string)
+  : prop =
+  Cons? fuel /\ walk_ok d fuel h /\ mem c (ancestors_of d fuel h) /\ truncation_ok d fuel c keep /\
+  distinct_ids d
+
+#push-options "--z3rlimit 100"
+let work_list_same (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (c h:string) (ordc ordc':list string) (n:node op)
+  : Lemma (requires trunc_premises d fuel keep c h /\ mem n d.nodes /\
+                    (forall (x:string). mem x ordc == mem x (ids_of (closure_of d fuel c))) /\
+                    (forall (x:string). mem x ordc' == mem x (ids_of (closure_of (truncate d keep) fuel c))))
+          (ensures (mem n.nid (ancestors_of d fuel h) && not (mem n.nid ordc))
+                   == (mem n.nid keep && mem n.nid (ancestors_of (truncate d keep) fuel h) &&
+                       not (mem n.nid ordc')))
+  = mem_ids_of n d.nodes;
+    held_ids d n.nid;
+    mem_ids_closure_nodes d.nodes (ancestors_of d fuel c) n.nid;
+    ids_closure_trunc d keep (ancestors_of (truncate d keep) fuel c) n.nid;
+    region_same d fuel keep c h n.nid
+
+let pending_same (#op:eqtype) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (c h:string) (ordc ordc':list string) (p:string)
+  : Lemma (requires trunc_premises d fuel keep c h /\
+                    (forall (x:string). mem x ordc == mem x (ids_of (closure_of d fuel c))) /\
+                    (forall (x:string). mem x ordc' == mem x (ids_of (closure_of (truncate d keep) fuel c))))
+          (ensures pending p (ids_of (closure_of d fuel h)) ordc
+                   == pending p (ids_of (closure_of (truncate d keep) fuel h)) ordc')
+  = held_ids d p;
+    mem_ids_closure_nodes d.nodes (ancestors_of d fuel h) p;
+    mem_ids_closure_nodes d.nodes (ancestors_of d fuel c) p;
+    ids_closure_trunc d keep (ancestors_of (truncate d keep) fuel h) p;
+    ids_closure_trunc d keep (ancestors_of (truncate d keep) fuel c) p;
+    if Found? (lookup d.nodes p) then region_same d fuel keep c h p
+#pop-options
+
+(* The history above the checkpoint is the same list in both DAGs. *)
+#push-options "--z3rlimit 150"
+let above_same (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op)) (d:dag op)
+  (fuel:list (node op)) (keep:list string) (c h:string) (wh wh':list string)
+  : Lemma (requires total_order lt /\ trunc_premises d fuel keep c h /\
+                    head_drains d fuel kfuel h wh /\
+                    head_drains (truncate d keep) fuel kfuel h wh' /\
+                    (forall (y:string). mem y (diff (drain_order lt kfuel (closure_of d fuel h))
+                                                    (ancestors_of d fuel c))
+                                        ==> mem c (ancestors_of d fuel y)))
+          (ensures mem c (ancestors_of (truncate d keep) fuel h) /\
+                   diff (drain_order lt kfuel (closure_of (truncate d keep) fuel h))
+                        (ancestors_of (truncate d keep) fuel c)
+                   == diff (drain_order lt kfuel (closure_of d fuel h)) (ancestors_of d fuel c))
+  = let d' = truncate d keep in
+    let cnh = closure_of d fuel h in
+    let cnh' = closure_of d' fuel h in
+    let ordh = drain_order lt kfuel cnh in
+    let ordh' = drain_order lt kfuel cnh' in
+    let ordc = drain_order lt kfuel (closure_of d fuel c) in
+    let ordc' = drain_order lt kfuel (closure_of d' fuel c) in
+    let delta = diff ordh (ancestors_of d fuel c) in
+    let delta' = diff ordh' (ancestors_of d' fuel c) in
+    above_is_resumed lt kfuel d fuel c h wh;
+    distinct_closure_nodes d.nodes keep;
+    walk_ok_sub d keep fuel h;
+    reach_c_kept d fuel keep c h wh h;
+    let desc' (y:string) : Lemma (mem y delta' ==> mem c (ancestors_of d' fuel y)) =
+      if mem y delta' then begin
+        distinct_closure_nodes d'.nodes (ancestors_of d' fuel h);
+        drain_total_on_acyclic lt kfuel cnh' wh';
+        ids_closure_trunc d keep (ancestors_of d' fuel h) y;
+        held_ids d y;
+        region_same d fuel keep c h y;
+        distinct_closure_nodes d.nodes (ancestors_of d fuel h);
+        drain_total_on_acyclic lt kfuel cnh wh;
+        mem_ids_closure_nodes d.nodes (ancestors_of d fuel h) y;
+        assert (mem y delta);
+        reach_c_kept d fuel keep c h wh y
+      end in
+    FStar.Classical.forall_intro desc';
+    above_is_resumed lt kfuel d' fuel c h wh';
+    let wl (n:node op)
+      : Lemma (mem n d.nodes ==>
+               (mem n.nid (ancestors_of d fuel h) && not (mem n.nid ordc))
+               == (mem n.nid keep && mem n.nid (ancestors_of d' fuel h) && not (mem n.nid ordc'))) =
+      if mem n d.nodes then work_list_same d fuel keep c h ordc ordc' n in
+    FStar.Classical.forall_intro wl;
+    drop_closure_ext d.nodes (ancestors_of d fuel h) ordc keep (ancestors_of d' fuel h) ordc';
+    let pe (p:string)
+      : Lemma (pending p (ids_of cnh) ordc == pending p (ids_of cnh') ordc') =
+      pending_same d fuel keep c h ordc ordc' p in
+    FStar.Classical.forall_intro pe;
+    kahn_same lt (drop_by kfuel ordc) (drop_by kfuel ordc') (drop_nodes cnh ordc)
+      (ids_of cnh) ordc (ids_of cnh') ordc'
+#pop-options
+
+(* THEOREM 2. Truncating behind a checkpoint preserves every replay at or after it: `replayFrom` on
+   the truncated DAG answers what it answers on the full one, wherever the full one does not refuse
+   the head as unreached or uncovered. That the head is KEPT is not a premise: a head the full
+   replay resumes from the checkpoint is at or after its node, and the truncation keeps those. The checkpoint's
+   state is any state at all — the truncation is the subject here; the seal is theorem 1's. *)
+#push-options "--z3rlimit 150"
+let truncation_preserves_replay (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (keep:list string)
+  (cp:checkpoint state) (h:string) (wh wh':list string)
+  : Lemma (requires total_order lt /\ distinct_ids d /\ Cons? fuel /\ walk_ok d fuel h /\
+                    Found? (lookup d.nodes h) /\
+                    head_drains d fuel kfuel h wh /\
+                    head_drains (truncate d keep) fuel kfuel h wh' /\
+                    truncation_ok d fuel cp.cnode keep)
+          (ensures (match replay_from apply lt kfuel d fuel cp h with
+                    | Error (CUnreached _) | Error (CUncovered _) -> True
+                    | r -> replay_from apply lt kfuel (truncate d keep) fuel cp h == r))
+  = let c = cp.cnode in
+    let d' = truncate d keep in
+    lookup_closure_nodes d.nodes keep c;
+    lookup_closure_nodes d.nodes keep h;
+    match lookup d.nodes c with
+    | Missing -> ()
+    | Found _ ->
+      let ah = ancestors_of d fuel h in
+      let ac = ancestors_of d fuel c in
+      let cnh = closure_of d fuel h in
+      let ordh = drain_order lt kfuel cnh in
+      distinct_closure_nodes d.nodes ah;
+      drain_total_on_acyclic lt kfuel cnh wh;
+      sub_ids_of_mem (ids_of cnh) ordh;
+      if not (mem c ordh) then ()
+      else begin
+        mem_ids_closure_nodes d.nodes ah c;
+        let delta = diff ordh ac in
+        match above_go d c [] delta with
+        | Found _ -> ()
+        | Missing ->
+          at_least_refl fuel;
+          let wk (y:string) : Lemma (mem y delta ==> walk_ok d fuel y) =
+            if mem y delta then begin
+              mem_ids_closure_nodes d.nodes ah y;
+              walk_ok_anc d fuel fuel h y
+            end in
+          FStar.Classical.forall_intro wk;
+          lookup_of_mem_ids d.nodes c;
+          above_descends d fuel c [] delta;
+          above_same lt kfuel d fuel keep c h wh wh';
+          (* the truncated side reaches the same branch *)
+          let cnh' = closure_of d' fuel h in
+          let ordh' = drain_order lt kfuel cnh' in
+          distinct_closure_nodes d.nodes keep;
+          distinct_closure_nodes d'.nodes (ancestors_of d' fuel h);
+          drain_total_on_acyclic lt kfuel cnh' wh';
+          sub_ids_of_mem (ids_of cnh') ordh';
+          ids_closure_trunc d keep (ancestors_of d' fuel h) c;
+          held_ids d c;
+          assert (mem c ordh');
+          let inkeep (y:string) : Lemma (mem y delta ==> mem y keep) =
+            if mem y delta then begin
+              mem_ids_closure_nodes d.nodes ah y;
+              held_ids d y;
+              region_same d fuel keep c h y
+            end in
+          FStar.Classical.forall_intro inkeep;
+          above_go_keep d keep c [] delta;
+          replay_ids_keep apply d keep delta cp.cstate
+      end
+#pop-options
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -4762,6 +6507,44 @@ let twin_bool_lt (p q:bool) : Tot bool = not p && q
 
 let twin_apply (o:string) (s:string) : Tot (outcome string string) =
   if o = "x" then Error "refused" else Ok (s ^ o)
+
+(* Phase 437's fixtures: a criss-cross (two merges of the same two lanes), a chain to truncate,
+   a footprint under which two lanes collide, and a seal. *)
+let twin_cc : dag string =
+  { nodes = [ { nid = "y"; nparents = [ "b"; "c" ]; nop = "y" };
+              { nid = "x"; nparents = [ "b"; "c" ]; nop = "x" };
+              { nid = "c"; nparents = [ "a" ]; nop = "c" };
+              { nid = "b"; nparents = [ "a" ]; nop = "b" };
+              { nid = "a"; nparents = []; nop = "a" } ] }
+
+let twin_cc_fuel : list (node string) = app twin_cc.nodes twin_cc.nodes
+
+let twin_chain : dag string =
+  { nodes = [ { nid = "r"; nparents = [ "q" ]; nop = "r" };
+              { nid = "q"; nparents = [ "p" ]; nop = "q" };
+              { nid = "p"; nparents = []; nop = "p" } ] }
+
+let twin_chain_fuel : list (node string) = app twin_chain.nodes twin_chain.nodes
+
+let twin_fp (_:string) : Tot footprint = whole_node_write_fp "n"
+
+let twin_seal (n:string) (s:string) : Tot string = n ^ "|" ^ s
+
+(* A checkpoint was taken, at node `n`, carrying state `st` and the seal of the two. *)
+let twin_sealed_at (n st:string) (r:outcome (checkpoint string) (ck_fault string)) : Tot bool =
+  match r with
+  | Ok cp -> cp.cnode = n && cp.cstate = st && cp.cseal = twin_seal n st
+  | Error _ -> false
+
+let twin_excl : list (list string) =
+  excl_lanes (drain_order twin_lt twin_fuel twin_dag.nodes) (ancestors_of twin_dag twin_fuel "a")
+    [ ancestors_of twin_dag twin_fuel "b"; ancestors_of twin_dag twin_fuel "c" ]
+    [ ancestors_of twin_dag twin_fuel "b"; ancestors_of twin_dag twin_fuel "c" ]
+
+let twin_heads_report : list (conflict (node string)) =
+  conflicts_of_heads twin_fp twin_dag (drain_order twin_lt twin_fuel twin_dag.nodes)
+    (ancestors_of twin_dag twin_fuel "a")
+    [ ancestors_of twin_dag twin_fuel "b"; ancestors_of twin_dag twin_fuel "c" ]
 
 let twins : list twin = [
   { tname = "independent-disjoint-footprints";
@@ -4812,6 +6595,40 @@ let twins : list twin = [
   { tname = "total-order-by-takes-the-key-before-the-id";
     tholds = (fun () ->
       drain_order (by_key twin_dag.nodes (fun (n:node string) -> n.nid = "b") twin_bool_lt twin_lt) twin_fuel twin_dag.nodes
-      = [ "a"; "c"; "b"; "m" ]) } ]
+      = [ "a"; "c"; "b"; "m" ]) };
+  { tname = "merge-base-of-a-criss-cross-is-a-maximal-common-ancestor";
+    tholds = (fun () -> merge_base twin_lt twin_cc twin_cc_fuel "x" "y" = Found "c") };
+  { tname = "merge-base-of-disjoint-histories-refuses";
+    tholds = (fun () -> merge_base twin_lt twin_cc twin_cc_fuel "x" "zz" = Missing) };
+  { tname = "conflicts-of-heads-is-the-lane-sweep-node-for-op";
+    tholds = (fun () ->
+      not (twin_heads_report = []) &&
+      map_list (map_conflict node_op) twin_heads_report
+      = all_conflicts twin_fp (map_list (fun ids -> ops_of (nodes_for twin_dag ids)) twin_excl)) };
+  { tname = "reach-index-answers-the-walk";
+    tholds = (fun () ->
+      let r = reach_of_dag twin_lt twin_fuel twin_dag in
+      reach_reaches twin_dag twin_fuel r "a" "m" = true &&
+      reach_reaches twin_dag twin_fuel r "b" "c" = false &&
+      reach_reaches twin_dag twin_fuel r "zz" "m" = false &&
+      reach_ancestors twin_dag twin_fuel r "c" = [ "c"; "a" ]) };
+  { tname = "checkpoint-at-seals-the-node-it-folded";
+    tholds = (fun () ->
+      twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")) };
+  { tname = "replay-from-a-checkpoint-is-replay-from-genesis";
+    tholds = (fun () ->
+      replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m"
+      = Ok "abcm") };
+  { tname = "replay-from-refuses-a-branch-from-below-the-checkpoint";
+    tholds = (fun () ->
+      replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m"
+      = Error (CUncovered "c")) };
+  { tname = "truncation-keeps-the-replay";
+    tholds = (fun () ->
+      let cp = seal_at twin_seal "q" "pq" in
+      truncation_ok twin_chain twin_chain_fuel "q" [ "q"; "r" ] &&
+      replay_from twin_apply twin_lt twin_chain_fuel (truncate twin_chain [ "q"; "r" ]) twin_chain_fuel cp "r"
+      = Ok "pqr" &&
+      replay_from twin_apply twin_lt twin_chain_fuel twin_chain twin_chain_fuel cp "r" = Ok "pqr") } ]
 
 let _ = assert_norm (twins_hold twins == true)

@@ -914,6 +914,272 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
       "duplicate head", d1, g, [ ha; ha ]
       "criss-cross", d7, mb, [ h1; h2 ] ]
 
+// ---------------------------------------------------------------------------
+//  Phase 437 — the lane-DAG primitives beside the model's sections 18 to 21: `Dag.mergeBase` over a
+//  criss-cross, `Dag.conflictsOfHeads`, the reachability index, and checkpoints with the truncation.
+//
+//  The theorems are proved in `proofs/DagFold.fst`; what runs here is the other half, production's
+//  own functions beside the extracted ones over DAGs a clone actually holds. Each comparison renders
+//  both sides to one string, and each case carries a vacuity guard: the arm it exists to measure was
+//  reached.
+// ---------------------------------------------------------------------------
+
+/// A criss-cross: two lanes off a base, merged TWICE (under two actors, in both orders), and a lane
+/// off each merge. The two lane heads have two maximal common ancestors — the two lane heads below
+/// the merges — so `mergeBase` decides between them on its tie-break.
+let private crissCross
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (a: 'Op list)
+    (b: 'Op list)
+    (c: 'Op list)
+    (d: 'Op list)
+    : string * string * Dag.T<'Op> =
+    let h = OpStream.defaultHash
+
+    let chain (actor: string) (ops: 'Op list) (parent: string) (dag: Dag.T<'Op>) =
+        ops
+        |> List.fold (fun (p, dd) op -> Dag.append h w (Human actor) op p dd |> Reference.built) (parent, dag)
+
+    let g, d0 = Dag.append h w (Human "base") baseOp "" Dag.empty |> Reference.built
+    let ha, d1 = chain "lane-a" a g d0
+    let hb, d2 = chain "lane-b" b g d1
+
+    let m1, d3 = Dag.merge h w (Human "merge-1") baseOp ha hb d2 |> Reference.built
+    let m2, d4 = Dag.merge h w (Human "merge-2") baseOp hb ha d3 |> Reference.built
+    let h1, d5 = chain "lane-c" c m1 d4
+    let h2, d6 = chain "lane-d" d m2 d5
+    h1, h2, d6
+
+/// The model's `merge_base` at production's id order, with fuel for every node.
+let private modelMergeBaseOf (dag: Dag.T<'Op>) (left: string) (right: string) : string option =
+    let model = toModelDag dag
+
+    match DagFold.merge_base ordLt model model.nodes left right with
+    | DagFold.Found id -> Some id
+    | DagFold.Missing -> None
+
+/// A conflict rendered by node ids, address and shape — the canonical reading both sides share.
+let private renderNodeConflict (left: string, right: string, address: string, shape: MergeConflictShape) =
+    sprintf "%s|%s|%s|%A" left right address shape
+
+let private productionHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (baseId: string) (heads: string list) =
+    Dag.conflictsOfHeads fp dag baseId heads
+    |> List.map (fun c -> renderNodeConflict (c.Left.Id, c.Right.Id, c.Address, c.Shape))
+    |> List.distinct
+    |> List.sort
+
+/// The extracted `conflicts_of_heads` over the same partition `modelReconcileOps` computes.
+let private modelHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (baseId: string) (heads: string list) =
+    let model = toModelDag dag
+    let fuel = model.nodes
+    let cs = heads |> List.distinct |> List.map (DagFold.ancestors_of model fuel)
+    let baseC = DagFold.ancestors_of model fuel baseId
+    let union = DagFold.closure_nodes model.nodes (DagFold.concat cs)
+    let order = DagFold.drain_order ordLt (drainFuel union) union
+
+    DagFold.conflicts_of_heads (fp >> toModelFootprint) model order baseC cs
+    |> List.map (fun c -> renderNodeConflict (c.left.nid, c.right.nid, c.address, ofModelShape c.shape))
+    |> List.distinct
+    |> List.sort
+
+/// `Dag.CheckpointFault` and the model's `ck_fault`, rendered alike.
+let private renderProductionFrom (hashState: 'State -> string) (r: Result<'State, Dag.CheckpointFault<'Rej>>) =
+    match r with
+    | Ok s -> "ok " + hashState s
+    | Error(Dag.CheckpointFault.UnknownNode n) -> "unknown-node " + n
+    | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.UnknownHead h)) -> "unknown-head " + h
+    | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.CyclicHistory h)) -> "cyclic " + h
+    | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected(id, e))) -> sprintf "rejected %s %A" id e
+    | Error(Dag.CheckpointFault.Unreached h) -> "unreached " + h
+    | Error(Dag.CheckpointFault.Uncovered n) -> "uncovered " + n
+
+let private renderModelFrom (hashState: 'State -> string) (r: DagFold.outcome<'State, DagFold.ck_fault<'Rej>>) =
+    match r with
+    | DagFold.Ok s -> "ok " + hashState s
+    | DagFold.Error(DagFold.CUnknownNode n) -> "unknown-node " + n
+    | DagFold.Error(DagFold.CReplay(DagFold.RUnknownHead h)) -> "unknown-head " + h
+    | DagFold.Error(DagFold.CReplay(DagFold.RCyclicHistory h)) -> "cyclic " + h
+    | DagFold.Error(DagFold.CReplay(DagFold.RRejected(id, e))) -> sprintf "rejected %s %A" id e
+    | DagFold.Error(DagFold.CUnreached h) -> "unreached " + h
+    | DagFold.Error(DagFold.CUncovered n) -> "uncovered " + n
+
+let private toModelCheckpoint (cp: Dag.Checkpoint<'State>) : DagFold.checkpoint<'State> =
+    { DagFold.cnode = cp.Node
+      DagFold.cstate = cp.State
+      DagFold.cseal = cp.Hash }
+
+/// The extracted `replay_from` over a model DAG, at production's id order, with fuel for every node.
+let private modelReplayFrom
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (d: DagFold.dag<'Op>)
+    (cp: DagFold.checkpoint<'State>)
+    (head: string)
+    =
+    let fuel = drainFuel d.nodes
+    DagFold.replay_from (modelApply w) ordLt fuel d fuel cp head
+
+/// Fold, pull, fold — and then a SIDE MERGE: the first round-two head merged with the first round-one
+/// head, which names a parent behind the merged node, so a compaction at the merged node keeps a band.
+let private foldPullFoldSide
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (round1: 'Op list list)
+    (round2: 'Op list list)
+    : string * string * string list * string list * Dag.T<'Op> =
+    let baseId, merged, heads1, heads2, dag = foldPullFold w baseOp round1 round2
+
+    match heads1, heads2 with
+    | r1 :: _, r2 :: rest when r1 <> merged && r2 <> merged ->
+        let side, dag' =
+            Dag.merge OpStream.defaultHash w (Human "side") baseOp r2 r1 dag
+            |> Reference.built
+
+        baseId, merged, heads1, side :: rest, dag'
+    | _ -> baseId, merged, heads1, heads2, dag
+
+type private CheckpointTally =
+    { mutable Resumed: int
+      mutable Uncovered: int
+      mutable Unreached: int
+      mutable Compacted: int
+      mutable Banded: int
+      mutable CutRefused: int }
+
+/// Every node as a checkpoint, every head as a target: production's `checkpointAt` / `replayFrom` /
+/// `compactAt` beside the extracted `checkpoint_at` / `replay_from` / `truncate` + `truncation_ok`.
+let private checkpointDisagreements
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (hashState: 'State -> string)
+    (state0: 'State)
+    (tally: CheckpointTally)
+    (dag: Dag.T<'Op>)
+    (heads: string list)
+    : string list =
+    let h = OpStream.defaultHash
+    let model = toModelDag dag
+    let fuel = drainFuel model.nodes
+    let seal (n: string) (st: 'State) = (Dag.sealAt h hashState w n st).Hash
+    let targets = (dag.Nodes |> Map.toList |> List.map fst) @ heads @ [ "no-such-node" ]
+
+    [ for c in (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ] do
+          let p = Dag.checkpointAt h hashState w state0 dag c
+
+          let m = DagFold.checkpoint_at (modelApply w) ordLt fuel model fuel seal state0 c
+
+          match p, m with
+          | Ok pc, DagFold.Ok mc ->
+              if
+                  pc.Node <> mc.cnode
+                  || hashState pc.State <> hashState mc.cstate
+                  || pc.Hash <> mc.cseal
+              then
+                  yield
+                      sprintf "checkpointAt %s: production (%s, %s) model (%s, %s)" c pc.Node pc.Hash mc.cnode mc.cseal
+
+              for t in targets |> List.distinct do
+                  let pr = renderProductionFrom hashState (Dag.replayFrom w pc dag t)
+
+                  let mr =
+                      renderModelFrom hashState (modelReplayFrom w model (toModelCheckpoint pc) t)
+
+                  if pr <> mr then
+                      yield sprintf "replayFrom %s -> %s\n  production: %s\n  model:      %s" c t pr mr
+                  elif pr.StartsWith "ok " then
+                      tally.Resumed <- tally.Resumed + 1
+                  elif pr.StartsWith "uncovered " then
+                      tally.Uncovered <- tally.Uncovered + 1
+                  elif pr.StartsWith "unreached " then
+                      tally.Unreached <- tally.Unreached + 1
+
+              match Dag.compactAt h hashState w state0 dag c with
+              | Ok(cp, compacted) ->
+                  let keep = compacted.Nodes |> Map.toList |> List.map fst
+
+                  if not (DagFold.truncation_ok model fuel c keep) then
+                      yield sprintf "compactAt %s: the kept set does not meet the model's truncation contract" c
+
+                  let truncated = DagFold.truncate model keep
+
+                  if
+                      (truncated.nodes |> List.map (fun n -> n.nid) |> List.sort)
+                      <> (keep |> List.sort)
+                  then
+                      yield sprintf "compactAt %s: the model's truncation is not production's DAG" c
+
+                  tally.Compacted <- tally.Compacted + 1
+
+                  let behind = Dag.ancestorsOf dag c
+
+                  if keep |> List.exists (fun id -> id <> c && Set.contains id behind) then
+                      tally.Banded <- tally.Banded + 1
+
+                  for t in keep do
+                      let full = renderProductionFrom hashState (Dag.replayFrom w cp dag t)
+                      let cut = renderProductionFrom hashState (Dag.replayFrom w cp compacted t)
+
+                      let mcut =
+                          renderModelFrom hashState (modelReplayFrom w truncated (toModelCheckpoint cp) t)
+
+                      if cut <> mcut then
+                          yield sprintf "compacted at %s, head %s\n  production: %s\n  model:      %s" c t cut mcut
+
+                      if full.StartsWith "ok " || full.StartsWith "rejected " then
+                          if cut <> full then
+                              yield
+                                  sprintf
+                                      "compacted at %s, head %s: the truncation changed the replay\n  full: %s\n  cut:  %s"
+                                      c
+                                      t
+                                      full
+                                      cut
+              | Error(Dag.CheckpointFault.Uncovered _) -> tally.CutRefused <- tally.CutRefused + 1
+              | Error e -> yield sprintf "compactAt %s refused a checkpoint checkpointAt took: %A" c e
+          | Error pe, DagFold.Error me ->
+              let pr = renderProductionFrom hashState (Error pe)
+              let mr = renderModelFrom hashState (DagFold.Error me)
+
+              if pr <> mr then
+                  yield sprintf "checkpointAt %s refused differently\n  production: %s\n  model:      %s" c pr mr
+          | Ok _, DagFold.Error me ->
+              yield
+                  sprintf
+                      "checkpointAt %s: production took it, the model refused %s"
+                      c
+                      (renderModelFrom hashState (DagFold.Error me))
+          | Error pe, DagFold.Ok _ -> yield sprintf "checkpointAt %s: the model took it, production refused %A" c pe ]
+
+/// Every ordered pair of ids (and a missing one): production's index and walk beside the extracted
+/// index built over the model's drain.
+let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
+    let model = toModelDag dag
+    let fuel = drainFuel model.nodes
+    let idx = DagFold.reach_of_dag ordLt fuel model
+    let reach = Dag.Reach.ofDag dag
+    let ids = (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ]
+    let mutable positives = 0
+
+    let failures =
+        [ for d in ids do
+              let walk = Dag.ancestorsOf dag d
+              let mAnc = DagFold.reach_ancestors model fuel idx d |> Set.ofList
+
+              if mAnc <> walk || Dag.Reach.ancestors reach d <> walk then
+                  yield sprintf "ancestors %s: walk %A, model %A" d walk mAnc
+
+              for a in ids do
+                  let truth = Set.contains a walk
+                  let p = Dag.Reach.reaches reach a d
+                  let m = DagFold.reach_reaches model fuel idx a d
+
+                  if truth then
+                      positives <- positives + 1
+
+                  if p <> truth || m <> truth then
+                      yield sprintf "reaches %s %s: walk %b, production %b, model %b" a d truth p m ]
+
+    failures, positives
+
 [<Tests>]
 let tests =
     testList
@@ -1979,4 +2245,196 @@ let tests =
                   | [ LaneRejected report ] when report.Contains "T|missing|x" -> refused <- refused + 1
                   | _ -> ()
 
-              Expect.isGreaterThan refused 0 "the pool reached the refusal it exists to measure" ]
+              Expect.isGreaterThan refused 0 "the pool reached the refusal it exists to measure"
+
+          // ---- Phase 437: the lane-DAG primitives beside sections 18 to 21 ----
+
+          testCase "the extracted merge_base is production's over CRISS-CROSS merges, and is a maximal common ancestor"
+          <| fun _ ->
+              // `merge_base_maximal`, measured: production's `mergeBase` (and the index's) beside the
+              // extracted one over two merges of the same two lanes, and the answer checked to be a
+              // common ancestor no other common ancestor descends from. The guard: the pool reached
+              // pairs with SEVERAL maximal common ancestors, where the tie-break genuinely decides.
+              let mutable rng = ConfRng.ofSeed 4370
+              let mutable crissCrossed = 0
+
+              for i in 1..60 do
+                  let lanes, r = planLaneGen.Lanes 4 rng
+                  rng <- r
+
+                  let a, b, c, d =
+                      List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
+
+                  let h1, h2, dag = crissCross planW planLaneGen.BaseOp a b c d
+                  let production = Dag.mergeBase dag h1 h2
+                  let model = modelMergeBaseOf dag h1 h2
+
+                  Expect.equal model production (sprintf "iter %d: the extracted merge_base is production's" i)
+
+                  Expect.equal
+                      (Dag.Reach.mergeBase (Dag.Reach.ofDag dag) h1 h2)
+                      production
+                      (sprintf "iter %d: the index answers alike" i)
+
+                  let common = Set.intersect (Dag.ancestorsOf dag h1) (Dag.ancestorsOf dag h2)
+
+                  let maximal =
+                      common
+                      |> Set.filter (fun x ->
+                          common
+                          |> Set.forall (fun y -> y = x || not (Set.contains x (Dag.ancestorsOf dag y))))
+
+                  match production with
+                  | None -> Expect.isTrue (Set.isEmpty common) "a refusal only over disjoint histories"
+                  | Some mb ->
+                      Expect.isTrue (Set.contains mb maximal) (sprintf "iter %d: %s is a maximal common ancestor" i mb)
+
+                  if Set.count maximal >= 2 then
+                      crissCrossed <- crissCrossed + 1
+
+              Expect.isGreaterThan crissCrossed 0 "the pool reached a pair with two maximal common ancestors"
+
+          testCase "the extracted conflicts_of_heads is production's Dag.conflictsOfHeads over the four shapes"
+          <| fun _ ->
+              // `conflicts_of_heads_is_the_sweep`, measured over the shapes the partition exists for —
+              // disjoint, fast-forward, a duplicate head and a criss-cross — under the domain's real
+              // footprint, read canonically (the model's set algebra lists a member once per clause it
+              // fails). And the theorem's corollary on production: the report is empty exactly when
+              // `reconcileMany` does not refuse with `LanesInterfere`.
+              let mutable rng = ConfRng.ofSeed 4371
+              let mutable reported = 0
+              let mutable clean = 0
+
+              for i in 1..60 do
+                  let lanes, r = planLaneGen.Lanes 4 rng
+                  rng <- r
+
+                  let a, b, c, d =
+                      List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
+
+                  for name, dag, baseId, heads in reconcileShapes a b c d do
+                      let production = productionHeadsReport planFootprint dag baseId heads
+                      let model = modelHeadsReport planFootprint dag baseId heads
+
+                      Expect.equal model production (sprintf "iter %d, %s: the report is production's" i name)
+
+                      let interferes =
+                          match Dag.reconcileMany planW planFootprint dag baseId planLaneGen.State0 heads with
+                          | Error(ReconcileFault.LanesInterfere _) -> true
+                          | _ -> false
+
+                      Expect.equal
+                          (not (List.isEmpty production))
+                          interferes
+                          (sprintf "iter %d, %s: a report exactly when reconcileMany refuses with LanesInterfere" i name)
+
+                      if List.isEmpty production then
+                          clean <- clean + 1
+                      else
+                          reported <- reported + 1
+
+              Expect.isGreaterThan reported 0 "the pool reached interfering heads"
+              Expect.isGreaterThan clean 0 "the pool reached heads that do not interfere"
+
+          testCase "the extracted reachability index answers production's Reach and the walk over every pair"
+          <| fun _ ->
+              // `reach_of_dag_agrees`, measured: every ordered pair of ids, and an absent id, over
+              // fold-pull-fold DAGs with a side merge and over criss-crosses.
+              let mutable rng = ConfRng.ofSeed 4372
+              let mutable positives = 0
+
+              for i in 1..30 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  let cc, r3 = planLaneGen.Lanes 4 r2
+                  rng <- r3
+                  let _, _, _, _, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
+
+                  let _, _, ccDag =
+                      crissCross
+                          planW
+                          planLaneGen.BaseOp
+                          (List.item 0 cc)
+                          (List.item 1 cc)
+                          (List.item 2 cc)
+                          (List.item 3 cc)
+
+                  for label, d in [ "fold-pull-fold", dag; "criss-cross", ccDag ] do
+                      match reachDisagreements d with
+                      | [], n -> positives <- positives + n
+                      | f :: _, _ -> failtestf "iter %d, %s: %s" i label f
+
+              Expect.isGreaterThan positives 0 "some pairs were ancestors"
+
+          testCase "the extracted checkpoint, replay_from and truncation are production's over every node and head"
+          <| fun _ ->
+              // Theorems 1 and 2, measured: every node as a checkpoint and every node (and an absent
+              // id) as a head, on fold-pull-fold DAGs with a side merge — so the replay meets a covered
+              // head, a head below the checkpoint and a branch from below it — and `compactAt` at every
+              // node, its kept set held to the model's contract and its replays to the full DAG's.
+              let tally =
+                  { Resumed = 0
+                    Uncovered = 0
+                    Unreached = 0
+                    Compacted = 0
+                    Banded = 0
+                    CutRefused = 0 }
+
+              let mutable rng = ConfRng.ofSeed 4373
+
+              for i in 1..25 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 2 r1
+                  rng <- r2
+
+                  let _, _, _, heads2, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
+
+                  match checkpointDisagreements planW planHash planLaneGen.State0 tally dag heads2 with
+                  | [] -> ()
+                  | f :: _ ->
+                      failtestf
+                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                          i
+                          (renderLanes encPlanOp round1)
+                          (renderLanes encPlanOp round2)
+                          f
+
+              Expect.isGreaterThan tally.Resumed 0 "some replays resumed from a checkpoint"
+              Expect.isGreaterThan tally.Uncovered 0 "the branch-from-below refusal was reached"
+              Expect.isGreaterThan tally.Unreached 0 "the unreached refusal was reached"
+              Expect.isGreaterThan tally.Compacted 0 "some compactions succeeded"
+              Expect.isGreaterThan tally.Banded 0 "some compaction kept a band behind its node"
+              Expect.isGreaterThan tally.CutRefused 0 "some compaction was refused as uncovered"
+
+          testCase "a model checkpoint sealed at ANOTHER node loses — the measurement can fail"
+          <| fun _ ->
+              // The go-red of theorem 1, at the differential: the checkpoint production took, handed to
+              // the model with its node moved to the base — the state of one node sealed at another.
+              let mutable rng = ConfRng.ofSeed 4374
+              let mutable lost = 0
+
+              for _ in 1..20 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 2 r1
+                  rng <- r2
+
+                  let baseId, merged, _, heads2, dag =
+                      foldPullFold planW planLaneGen.BaseOp round1 round2
+
+                  let model = toModelDag dag
+
+                  match Dag.checkpointAt OpStream.defaultHash planHash planW planLaneGen.State0 dag merged with
+                  | Ok cp ->
+                      let moved =
+                          { toModelCheckpoint cp with
+                              DagFold.cnode = baseId }
+
+                      for t in heads2 do
+                          let p = renderProductionFrom planHash (Dag.replayFrom planW cp dag t)
+                          let m = renderModelFrom planHash (modelReplayFrom planW model moved t)
+
+                          if p <> m then
+                              lost <- lost + 1
+                  | Error _ -> () // the merged history does not replay in this domain: no checkpoint to move
+
+              Expect.isGreaterThan lost 0 "a checkpoint sealed at the wrong node disagrees with production" ]

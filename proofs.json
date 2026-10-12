@@ -301,12 +301,12 @@
     {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); what stays outside is `mergeBase` over heads with SEVERAL maximal common ancestors — a criss-cross merge — where the (closure size, id) tie-break decides and what it decides is a policy rather than a fact (since Phase 300 stated as 'a maximal common ancestor', and no longer load-bearing for the reconcile, whose partition applies the history the tie-break leaves out exactly once: `reconcile-sound`; its criss-cross determinism is a theorem for the reachability-indexed implementation Phase 289 lands), and the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
+      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); and since Phase 437 over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-maximal`) — WHICH maximal common ancestor it returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures. What stays outside is the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
       "phase": "fuaran-core#134",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "The hash function itself is correct; and Dag.mergeBase's tie-break among several maximal common ancestors (a criss-cross merge) is deterministic over the implementation Phase 289 lands, which no theorem here reaches yet"
+        "assumption": "The hash function itself is correct; and a delta holding a two-parent node is recovered in the drain's order, which no theorem here identifies with an append order"
       }
     },
     {
@@ -3179,8 +3179,41 @@
     },
     {
       "id": "dag-checkpoint-replay",
+      "level": "proved",
+      "claim": "Replay from a sealed checkpoint IS replay from genesis (`replay_from_is_replay_to`): over an id-distinct DAG whose head and checkpoint closures carry section 13's acyclicity witness, `Dag.replayFrom` from the checkpoint `Dag.checkpointAt` sealed answers `Dag.tryReplayTo`'s answer — the state on `Ok`, the rejecting node and reason on `Rejected` — on every head it does not refuse as unreached or uncovered. `checkpoint_at`, `seal_at`, `replay_from` and its `above` check are production's clause for clause and refusal for refusal; the seal is a parameter (production's is the strict snapshot hash). The load-bearing lemma is `drain_restricts`: the id-ordered drain of a head's closure, kept to the closure of a node inside it, IS that node's own drain — production's docstring sentence since Phase 311, now a theorem — and with every id above the checkpoint descending from it (what `above` checks) the head's drain is the checkpoint's drain followed by the history above it (`drain_split`), which `replay_ids_app` folds in two. `checkpoint_from_is_checkpoint_at`: a checkpoint `Dag.checkpointFrom` takes from an earlier one is the one `checkpointAt` takes from genesis, node, state and seal. GO-RED, run at the leg: a `checkpoint_at` that seals a node other than the one whose closure it folded makes the theorem unprovable (`cp.cnode == c` fails).",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "theorem": "replay_from_is_replay_to",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.checkpointAt",
+          "Dag.checkpointFrom",
+          "Dag.replayFrom",
+          "Dag.sealAt",
+          "Dag.tryReplayTo"
+        ]
+      }
+    },
+    {
+      "id": "dag-checkpoint-truncation",
+      "level": "proved",
+      "claim": "Truncating behind a checkpoint preserves every replay at or after it (`truncation_preserves_replay`): for ANY kept set meeting `cut`'s contract — the checkpoint's node kept, every node not behind it kept, and every kept node behind it still reaching it in the truncated DAG (the band) — `Dag.replayFrom` on the truncated DAG answers what it answers on the full one on every head the full replay does not refuse as unreached or uncovered, whatever state the checkpoint carries. The contract is `truncation_ok`, computable and extracted, and the `dag-primitives-differential` row evaluates it on every DAG production's `Dag.compactAt` returns. The proof resumes both drains after the checkpoint's closure (`kahn_after`) and shows the drain reads only which parents are still pending (`kahn_pending`) and not its fuel (`kahn_fuel`), so the history above the checkpoint is one list in both DAGs. NOT modelled: `cut`'s computation of the kept set (`forwardFrom`, the band), the seal's hash, `firstBreakFrom` / `verifyDagFrom` and the JSONL sidecar — `dag-checkpoint-truncation-sampled` samples those.",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "theorem": "truncation_preserves_replay",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.compactAt",
+          "Dag.replayFrom"
+        ]
+      }
+    },
+    {
+      "id": "dag-checkpoint-replay-sampled",
       "level": "tested",
-      "claim": "A checkpoint on the lane DAG is a checkpoint and not a cache: on generated DAGs with branch points, for every node and an absent id, `Dag.replayFrom` from a checkpoint `Dag.checkpointAt` took gives `Dag.tryReplayTo`'s answer from the initial state whenever the checkpoint covers the head, and otherwise the refusal an independent reading of the graph predicts — an unknown head, a head that does not reach the checkpoint's node, or the first node above the checkpoint that does not descend from it. That last refusal is load-bearing: the drain folds a branch that left below the checkpoint and merges above it BEFORE part of the checkpoint's own closure, so a replay that resumed from the checkpoint would fold it in an order the full replay never uses, and on a witness whose ops do not commute it reaches a state the full replay does not. `replayFromWith` answers as `replayFrom`. Sampled, not proved: whether `proofs/DagFold.fst`'s drain theorems extend to a history that begins at a checkpointed origin is OPEN and not claimed here.",
+      "claim": "A checkpoint on the lane DAG is a checkpoint and not a cache: on generated DAGs with branch points, for every node and an absent id, `Dag.replayFrom` from a checkpoint `Dag.checkpointAt` took gives `Dag.tryReplayTo`'s answer from the initial state whenever the checkpoint covers the head, and otherwise the refusal an independent reading of the graph predicts — an unknown head, a head that does not reach the checkpoint's node, or the first node above the checkpoint that does not descend from it. That last refusal is load-bearing: the drain folds a branch that left below the checkpoint and merges above it BEFORE part of the checkpoint's own closure, so a replay that resumed from the checkpoint would fold it in an order the full replay never uses, and on a witness whose ops do not commute it reaches a state the full replay does not. `replayFromWith` answers as `replayFrom`. Sampled at a domain's own witness; the statement is proved since Phase 437 (`dag-checkpoint-replay`), and this row is what still runs it at the witness a consumer certifies.",
       "phase": "fuaran-core#288",
       "evidence": {
         "family": "Conformance.checkpointLaws",
@@ -3197,9 +3230,9 @@
       }
     },
     {
-      "id": "dag-checkpoint-truncation",
+      "id": "dag-checkpoint-truncation-sampled",
       "level": "tested",
-      "claim": "The seal and the truncation, sampled: `Dag.verifyCheckpoint` accepts a sealed checkpoint and refuses it with its seal changed, its node moved to another node or to an absent id, or its state swapped for one that encodes differently; `Dag.compactAt` refuses exactly a DAG holding a node neither behind nor after the checkpoint's node, and otherwise keeps the node and everything after it, verifies from the checkpoint under `Dag.verifyDagFrom`, and replays every node it keeps as the full DAG does; a kept node with its op changed, or the checkpoint with its seal or state changed, fails `verifyDagFrom`; and the compacted DAG lives on — an append onto its checkpoint's node replays as on the full DAG, and `Dag.compactFrom` at a later node answers as `compactAt` of the full DAG there. The seal binds the state to the node and is exactly as trustworthy as the act that sealed it: it does not re-fold the discarded history, so verify, then compact. A sample that never branches reds the family's guard rather than reading green.",
+      "claim": "The seal and the truncation, sampled: `Dag.verifyCheckpoint` accepts a sealed checkpoint and refuses it with its seal changed, its node moved to another node or to an absent id, or its state swapped for one that encodes differently; `Dag.compactAt` refuses exactly a DAG holding a node neither behind nor after the checkpoint's node, and otherwise keeps the node and everything after it, verifies from the checkpoint under `Dag.verifyDagFrom`, and replays every node it keeps as the full DAG does; a kept node with its op changed, or the checkpoint with its seal or state changed, fails `verifyDagFrom`; and the compacted DAG lives on — an append onto its checkpoint's node replays as on the full DAG, and `Dag.compactFrom` at a later node answers as `compactAt` of the full DAG there. The seal binds the state to the node and is exactly as trustworthy as the act that sealed it: it does not re-fold the discarded history, so verify, then compact. A sample that never branches reds the family's guard rather than reading green. The replay half is proved since Phase 437 for any kept set meeting `cut`'s contract (`dag-checkpoint-truncation`); the seal, `verifyDagFrom` and the sidecar stay sampled here.",
       "phase": "fuaran-core#288",
       "evidence": {
         "family": "Conformance.checkpointLaws",
@@ -3213,6 +3246,74 @@
           "Dag.compactFrom",
           "Dag.verifyCheckpoint",
           "Dag.verifyDagFrom"
+        ]
+      }
+    },
+    {
+      "id": "merge-base-maximal",
+      "level": "proved",
+      "claim": "`Dag.mergeBase` over ANY two heads — a criss-cross merge, two merges of the same two lanes with two maximal common ancestors, included — either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_maximal`). The premise is section 13's acyclicity witness for one head's closure (every id in it is off every cycle: `off_cycle_in_witness`); the key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` returns a member nothing beats (`max_by_top`), and a strictly deeper node has a strictly larger closure (`strictly_deeper`, Phase 158). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures. The model is Phase 158's `merge_base`; Phase 388's `deepest` sizes only the maximal members, which over an acyclic set is the same answer, and the differential holds the two equal over criss-crosses.",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "theorem": "merge_base_maximal",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.mergeBase"
+        ]
+      }
+    },
+    {
+      "id": "conflicts-of-heads-is-the-sweep",
+      "level": "proved",
+      "claim": "`Dag.conflictsOfHeads` reports exactly the interfering pairs the proved pairwise sweep reports (`conflicts_of_heads_is_the_sweep`): over the region partitioned as section 15 partitions it, renaming each reported NODE to its op gives the `LanesInterfere` report `reconcileMany` refuses with, conflict for conflict and in order, so it is empty exactly when that sweep is. `Dag.conflictsOfNodes` is modelled as production defines it, `conflicts` at `fun n -> footprintOf n.Op`, and the renaming lemmas (`map_all_conflicts` and below) hold for any projection.",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "theorem": "conflicts_of_heads_is_the_sweep",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.conflictsOfHeads",
+          "Dag.conflictsOfNodes"
+        ]
+      }
+    },
+    {
+      "id": "reach-index-agrees",
+      "level": "proved",
+      "claim": "The reachability index answers exactly what the ancestor walk answers (`reach_of_dag_agrees`): `Reach.reaches` is `Set.contains ancestor (Dag.ancestorsOf dag descendant)` and `Reach.ancestors` is `Dag.ancestorsOf`, for every descendant the walk completes on, with production's fallback to the walk for an unslotted id included. The index is modelled as its slots, each an id and its ancestor set, built by `Reach.ofDag`'s drain loop and `Reach.extend`'s leaf step (one `reach_step`); the invariant is per slot and is kept by every step (`reach_step_valid`), so it holds whatever order the steps run in. NOT modelled: the bitset's word layout, the order and position arrays, and the index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder`, which read them — `Conformance.reachLaws` and `dag-primitives-differential` sample those.",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "theorem": "reach_of_dag_agrees",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.Reach.ancestors",
+          "Dag.Reach.ofDag",
+          "Dag.Reach.reaches"
+        ]
+      }
+    },
+    {
+      "id": "dag-primitives-differential",
+      "level": "tested",
+      "claim": "The extracted section 18 to 21 functions run beside production's over DAGs a clone holds: `merge_base` beside `Dag.mergeBase` and `Dag.Reach.mergeBase` over criss-crosses, the answer checked to be a maximal common ancestor (guard: pairs with two maximal common ancestors were reached); `conflicts_of_heads` beside `Dag.conflictsOfHeads` over the four reconcile shapes under the domain's footprint, read canonically, and the report empty exactly when `reconcileMany` does not refuse with `LanesInterfere` (guards: both arms); the extracted index beside `Dag.Reach` and the walk over every ordered pair; and `checkpoint_at` / `replay_from` beside `Dag.checkpointAt` / `Dag.replayFrom` at every node and head of fold-pull-fold DAGs carrying a side merge, with `Dag.compactAt` at every node — its kept set held to `truncation_ok`, its DAG to the model's `truncate`, and its replays to the full DAG's (guards: a resumed replay, an uncovered and an unreached refusal, a compaction, a compaction keeping a band, a refused compaction). GO-RED: the checkpoint production took, handed to the model sealed at another node, disagrees with production.",
+      "phase": "fuaran-core#437",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
+        "cases": [
+          "the extracted merge_base is production's over CRISS-CROSS merges, and is a maximal common ancestor",
+          "the extracted conflicts_of_heads is production's Dag.conflictsOfHeads over the four shapes",
+          "the extracted reachability index answers production's Reach and the walk over every pair",
+          "the extracted checkpoint, replay_from and truncation are production's over every node and head",
+          "a model checkpoint sealed at ANOTHER node loses — the measurement can fail"
+        ],
+        "operations": [
+          "Dag.compactAt",
+          "Dag.conflictsOfHeads",
+          "Dag.mergeBase",
+          "Dag.Reach.mergeBase"
         ]
       }
     },

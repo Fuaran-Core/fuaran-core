@@ -1550,6 +1550,451 @@ let slot_write_fp : slot  ->  footprint = (fun ( k  :  slot ) -> {reads = []; st
 
 let whole_node_write_fp : Prims.string  ->  footprint = (fun ( n  :  Prims.string ) -> {reads = (n)::[]; structure_writes = []; content_writes = (n)::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []})
 
+
+let common_anc = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) ( x  :  Prims.string ) -> ((mem x (ancestors_of d fuel left)) && (mem x (ancestors_of d fuel right))))
+
+
+let rec map_list = (fun ( g  :  'a  ->  'b ) ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     ((g x))::(map_list g t)
+     end))
+
+
+let map_conflict = (fun ( g  :  'a  ->  'b ) ( c  :  conflict<'a> ) -> {left = (g c.left); right = (g c.right); address = c.address; shape = c.shape})
+
+
+let node_op = (fun ( n  :  node<'op> ) -> n.nop)
+
+
+let node_fp = (fun ( fp  :  'op  ->  footprint ) ( n  :  node<'op> ) -> (fp n.nop))
+
+
+let conflicts_of_nodes = (fun ( fp  :  'op  ->  footprint ) ( da  :  Prims.list<node<'op>> ) ( db  :  Prims.list<node<'op>> ) -> (conflicts (node_fp fp) da db))
+
+
+let rec heads_lane_sweep = (fun ( fp  :  'op  ->  footprint ) ( d  :  Prims.list<node<'op>> ) ( rest  :  Prims.list<Prims.list<node<'op>>> ) -> (match (rest) with
+| [] -> begin
+     []
+     end
+| (e)::t -> begin
+     (app (conflicts_of_nodes fp d e) (heads_lane_sweep fp d t))
+     end))
+
+
+let rec heads_sweep = (fun ( fp  :  'op  ->  footprint ) ( ds  :  Prims.list<Prims.list<node<'op>>> ) -> (match (ds) with
+| [] -> begin
+     []
+     end
+| (d)::rest -> begin
+     (app (heads_lane_sweep fp d rest) (heads_sweep fp rest))
+     end))
+
+
+let conflicts_of_heads = (fun ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (heads_sweep fp (map_list (nodes_for d) (excl_lanes order base_c cs cs))))
+
+
+let excl_op_lanes = (fun ( d  :  dag<'op> ) ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (map_list (fun ( ids  :  Prims.list<Prims.string> ) -> (ops_of (nodes_for d ids))) (excl_lanes order base_c cs cs)))
+
+type rslot = {rid : Prims.string; rbits : Prims.list<Prims.string>}
+
+
+let __proj__Mkrslot__item__rid : rslot  ->  Prims.string = (fun ( projectee  :  rslot ) -> (match (projectee) with
+| {rid = rid; rbits = rbits} -> begin
+     rid
+     end))
+
+
+let __proj__Mkrslot__item__rbits : rslot  ->  Prims.list<Prims.string> = (fun ( projectee  :  rslot ) -> (match (projectee) with
+| {rid = rid; rbits = rbits} -> begin
+     rbits
+     end))
+
+
+let rec slot_of : Prims.list<rslot>  ->  Prims.string  ->  found<Prims.list<Prims.string>> = (fun ( r  :  Prims.list<rslot> ) ( id  :  Prims.string ) -> (match (r) with
+| [] -> begin
+     Missing
+     end
+| (e)::t -> begin
+      
+if (Prims.op_Equals e.rid id) then begin
+     Found (e.rbits)
+     end else begin
+     (slot_of t id)
+     end
+     end))
+
+
+let rec parent_bits : Prims.list<rslot>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( r  :  Prims.list<rslot> ) ( ps  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+     (match ((slot_of r p)) with
+| Found (b) -> begin
+     (app b (parent_bits r t))
+     end
+| Missing -> begin
+     (parent_bits r t)
+     end)
+     end))
+
+
+let rec held_slotted = (fun ( d  :  dag<'op> ) ( r  :  Prims.list<rslot> ) ( ps  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     (((match ((lookup d.nodes p)) with
+| Missing -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) || (match ((slot_of r p)) with
+| Found (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) && (held_slotted d r t))
+     end))
+
+
+let reach_step = (fun ( d  :  dag<'op> ) ( r  :  Prims.list<rslot> ) ( id  :  Prims.string ) -> (match ((lookup d.nodes id)) with
+| Missing -> begin
+     r
+     end
+| Found (n) -> begin
+      
+if (match ((slot_of r id)) with
+| Found (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) then begin
+     r
+     end else begin
+      
+if (held_slotted d r n.nparents) then begin
+     ({rid = id; rbits = (id)::(parent_bits r n.nparents)})::r
+     end else begin
+     r
+     end
+     end
+     end))
+
+
+let rec reach_build = (fun ( d  :  dag<'op> ) ( r  :  Prims.list<rslot> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ord) with
+| [] -> begin
+     r
+     end
+| (id)::t -> begin
+     (reach_build d (reach_step d r id) t)
+     end))
+
+
+let reach_of_dag = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) -> (reach_build d [] (drain_order lt kfuel d.nodes)))
+
+
+let reach_ancestors = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( r  :  Prims.list<rslot> ) ( id  :  Prims.string ) -> (match ((slot_of r id)) with
+| Found (b) -> begin
+     b
+     end
+| Missing -> begin
+     (ancestors_of d fuel id)
+     end))
+
+
+let reach_reaches = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( r  :  Prims.list<rslot> ) ( anc  :  Prims.string ) ( dsc  :  Prims.string ) -> (match ((slot_of r dsc)) with
+| Found (b) -> begin
+     (match ((slot_of r anc)) with
+| Found (uu___) -> begin
+     (mem anc b)
+     end
+| Missing -> begin
+     false
+     end)
+     end
+| Missing -> begin
+     (mem anc (ancestors_of d fuel dsc))
+     end))
+
+
+let in_set : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (mem x c))
+
+
+let closure_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( x  :  Prims.string ) -> (closure_nodes d.nodes (ancestors_of d fuel x)))
+
+type checkpoint<'state> = {cnode : Prims.string; cstate : 'state; cseal : Prims.string}
+
+
+let __proj__Mkcheckpoint__item__cnode = (fun ( projectee  :  checkpoint<'state> ) -> (match (projectee) with
+| {cnode = cnode; cstate = cstate; cseal = cseal} -> begin
+     cnode
+     end))
+
+
+let __proj__Mkcheckpoint__item__cstate = (fun ( projectee  :  checkpoint<'state> ) -> (match (projectee) with
+| {cnode = cnode; cstate = cstate; cseal = cseal} -> begin
+     cstate
+     end))
+
+
+let __proj__Mkcheckpoint__item__cseal = (fun ( projectee  :  checkpoint<'state> ) -> (match (projectee) with
+| {cnode = cnode; cstate = cstate; cseal = cseal} -> begin
+     cseal
+     end))
+
+type ck_fault<'rej> =
+| CUnknownNode of Prims.string
+| CReplay of replay_fault<'rej>
+| CUnreached of Prims.string
+| CUncovered of Prims.string
+
+
+let uu___is_CUnknownNode = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUnknownNode (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CUnknownNode__item___0 = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUnknownNode (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_CReplay = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CReplay (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CReplay__item___0 = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CReplay (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_CUnreached = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUnreached (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CUnreached__item___0 = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUnreached (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_CUncovered = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUncovered (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CUncovered__item___0 = (fun ( projectee  :  ck_fault<'rej> ) -> (match (projectee) with
+| CUncovered (_0) -> begin
+     _0
+     end))
+
+
+let seal_at = (fun ( seal  :  Prims.string  ->  'state  ->  Prims.string ) ( c  :  Prims.string ) ( st  :  'state ) -> {cnode = c; cstate = st; cseal = (seal c st)})
+
+
+let lift = (fun ( r  :  outcome<'state, replay_fault<'rej>> ) -> (match (r) with
+| Ok (s) -> begin
+     Ok (s)
+     end
+| Error (f) -> begin
+     Error (CReplay (f))
+     end))
+
+
+let checkpoint_at = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( seal  :  Prims.string  ->  'state  ->  Prims.string ) ( s0  :  'state ) ( c  :  Prims.string ) -> (match ((lookup d.nodes c)) with
+| Missing -> begin
+     Error (CUnknownNode (c))
+     end
+| Found (uu___) -> begin
+     (match ((replay_to apply lt kfuel d fuel s0 c)) with
+| Error (f) -> begin
+     Error (CReplay (f))
+     end
+| Ok (st) -> begin
+     Ok ((seal_at seal c st))
+     end)
+     end))
+
+
+let verify_checkpoint = (fun ( seal  :  Prims.string  ->  'state  ->  Prims.string ) ( cp  :  checkpoint<'state> ) ( d  :  dag<'op> ) -> ((match ((lookup d.nodes cp.cnode)) with
+| Found (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (Prims.op_Equals (seal cp.cnode cp.cstate) cp.cseal)))
+
+
+let rec exists_parent : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( ps  :  Prims.list<Prims.string> ) ( node1  :  Prims.string ) ( desc  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     false
+     end
+| (p)::t -> begin
+     (((Prims.op_Equals p node1) || (mem p desc)) || (exists_parent t node1 desc))
+     end))
+
+
+let rec above_go = (fun ( d  :  dag<'op> ) ( node1  :  Prims.string ) ( desc  :  Prims.list<Prims.string> ) ( ids  :  Prims.list<Prims.string> ) -> (match (ids) with
+| [] -> begin
+     Missing
+     end
+| (id)::rest -> begin
+     (match ((lookup d.nodes id)) with
+| Missing -> begin
+     Found (id)
+     end
+| Found (n) -> begin
+      
+if (exists_parent n.nparents node1 desc) then begin
+     (above_go d node1 ((id)::desc) rest)
+     end else begin
+     Found (id)
+     end
+     end)
+     end))
+
+
+let replay_from = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( cp  :  checkpoint<'state> ) ( head  :  Prims.string ) -> (match ((lookup d.nodes cp.cnode)) with
+| Missing -> begin
+     Error (CUnknownNode (cp.cnode))
+     end
+| Found (uu___) -> begin
+     (match ((lookup d.nodes head)) with
+| Missing -> begin
+     Error (CReplay (RUnknownHead (head)))
+     end
+| Found (uu___1) -> begin
+     (
+
+let cn = (closure_nodes d.nodes (ancestors_of d fuel head))
+in (
+
+let order = (drain_order lt kfuel cn)
+in  
+if (not ((sub_ids (ids_of cn) order))) then begin
+     Error (CReplay (RCyclicHistory (head)))
+     end else begin
+      
+if (not ((mem cp.cnode order))) then begin
+     Error (CUnreached (head))
+     end else begin
+     (
+
+let delta = (diff order (ancestors_of d fuel cp.cnode))
+in (match ((above_go d cp.cnode [] delta)) with
+| Found (id) -> begin
+     Error (CUncovered (id))
+     end
+| Missing -> begin
+     (lift (replay_ids apply d.nodes delta cp.cstate))
+     end))
+     end
+     end))
+     end)
+     end))
+
+
+let out_of : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (not ((mem x a))))
+
+
+let checkpoint_from = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( seal  :  Prims.string  ->  'state  ->  Prims.string ) ( origin  :  checkpoint<'state> ) ( n  :  Prims.string ) ->  
+if ((match ((lookup d.nodes origin.cnode)) with
+| Found (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (match ((lookup d.nodes n)) with
+| Missing -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) then begin
+     Error (CUnknownNode (n))
+     end else begin
+     (match ((replay_from apply lt kfuel d fuel origin n)) with
+| Ok (st) -> begin
+     Ok ((seal_at seal n st))
+     end
+| Error (f) -> begin
+     Error (f)
+     end)
+     end)
+
+
+let rec remove_all = (fun ( r  :  Prims.list<node<'op>> ) ( p  :  Prims.list<Prims.string> ) -> (match (p) with
+| [] -> begin
+     r
+     end
+| (x)::t -> begin
+     (remove_all (remove_id r x) t)
+     end))
+
+
+let rec drop_nodes = (fun ( r  :  Prims.list<node<'op>> ) ( p  :  Prims.list<Prims.string> ) -> (match (r) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+      
+if (mem n.nid p) then begin
+     (drop_nodes t p)
+     end else begin
+     (n)::(drop_nodes t p)
+     end
+     end))
+
+
+let pending : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( p  :  Prims.string ) ( c  :  Prims.list<Prims.string> ) ( e  :  Prims.list<Prims.string> ) -> ((mem p c) && (not ((mem p e)))))
+
+
+let truncate = (fun ( d  :  dag<'op> ) ( keep1  :  Prims.list<Prims.string> ) -> {nodes = (closure_nodes d.nodes keep1)})
+
+
+let rec trunc_ok_nodes = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( c  :  Prims.string ) ( keep1  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<node<'op>> ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::t -> begin
+     (( 
+if (mem n.nid (ancestors_of d fuel c)) then begin
+     ((not ((mem n.nid keep1))) || (mem n.nid (ancestors_of (truncate d keep1) fuel c)))
+     end else begin
+     (mem n.nid keep1)
+     end) && (trunc_ok_nodes d fuel c keep1 t))
+     end))
+
+
+let truncation_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( c  :  Prims.string ) ( keep1  :  Prims.list<Prims.string> ) -> ((mem c keep1) && (trunc_ok_nodes d fuel c keep1 d.nodes)))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -1603,13 +2048,52 @@ if (Prims.op_Equals o "x") then begin
      end)
 
 
+let twin_cc : dag<Prims.string> = {nodes = ({nid = "y"; nparents = ("b")::("c")::[]; nop = "y"})::({nid = "x"; nparents = ("b")::("c")::[]; nop = "x"})::({nid = "c"; nparents = ("a")::[]; nop = "c"})::({nid = "b"; nparents = ("a")::[]; nop = "b"})::({nid = "a"; nparents = []; nop = "a"})::[]}
+
+
+let twin_cc_fuel : Prims.list<node<Prims.string>> = (app twin_cc.nodes twin_cc.nodes)
+
+
+let twin_chain : dag<Prims.string> = {nodes = ({nid = "r"; nparents = ("q")::[]; nop = "r"})::({nid = "q"; nparents = ("p")::[]; nop = "q"})::({nid = "p"; nparents = []; nop = "p"})::[]}
+
+
+let twin_chain_fuel : Prims.list<node<Prims.string>> = (app twin_chain.nodes twin_chain.nodes)
+
+
+let twin_fp : Prims.string  ->  footprint = (fun ( uu___  :  Prims.string ) -> (whole_node_write_fp "n"))
+
+
+let twin_seal : Prims.string  ->  Prims.string  ->  Prims.string = (fun ( n  :  Prims.string ) ( s  :  Prims.string ) -> (Prims.strcat n (Prims.strcat "|" s)))
+
+
+let twin_sealed_at : Prims.string  ->  Prims.string  ->  outcome<checkpoint<Prims.string>, ck_fault<Prims.string>>  ->  Prims.bool = (fun ( n  :  Prims.string ) ( st  :  Prims.string ) ( r  :  outcome<checkpoint<Prims.string>, ck_fault<Prims.string>> ) -> (match (r) with
+| Ok (cp) -> begin
+     (((Prims.op_Equals cp.cnode n) && (Prims.op_Equals cp.cstate st)) && (Prims.op_Equals cp.cseal (twin_seal n st)))
+     end
+| Error (uu___) -> begin
+     false
+     end))
+
+
+let twin_excl : Prims.list<Prims.list<Prims.string>> = (excl_lanes (drain_order twin_lt twin_fuel twin_dag.nodes) (ancestors_of twin_dag twin_fuel "a") (((ancestors_of twin_dag twin_fuel "b"))::((ancestors_of twin_dag twin_fuel "c"))::[]) (((ancestors_of twin_dag twin_fuel "b"))::((ancestors_of twin_dag twin_fuel "c"))::[]))
+
+
+let twin_heads_report : Prims.list<conflict<node<Prims.string>>> = (conflicts_of_heads twin_fp twin_dag (drain_order twin_lt twin_fuel twin_dag.nodes) (ancestors_of twin_dag twin_fuel "a") (((ancestors_of twin_dag twin_fuel "b"))::((ancestors_of twin_dag twin_fuel "c"))::[]))
+
+
 let twins : Prims.list<twin> = ({tname = "independent-disjoint-footprints"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({tname = "dependent-shared-structure-write"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::({tname = "independent-different-slots"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("thinking")))) true))})::({tname = "dependent-same-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("tier")))) false))})::({tname = "whole-node-write-refuses-a-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (whole_node_write_fp "n") (slot_write_fp (("n"), ("tier")))) false))})::({tname = "slot-clash-is-tagged-at-the-slot"; tholds = (fun ( uu___  :  unit ) -> (
 
 let expected = {left = (("n"), ("tier")); right = (("n"), ("tier")); address = "n"; shape = SlotClash ("tier")}
 in (
 
 let cs = (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("tier")))
-in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({tname = "total-order-by-takes-the-key-before-the-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::[]
+in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({tname = "total-order-by-takes-the-key-before-the-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::({tname = "merge-base-of-a-criss-cross-is-a-maximal-common-ancestor"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "y") (Found ("c"))))})::({tname = "merge-base-of-disjoint-histories-refuses"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "zz") Missing))})::({tname = "conflicts-of-heads-is-the-lane-sweep-node-for-op"; tholds = (fun ( uu___  :  unit ) -> ((not ((Prims.op_Equals twin_heads_report []))) && (Prims.op_Equals (map_list (map_conflict node_op) twin_heads_report) (all_conflicts twin_fp (map_list (fun ( ids  :  Prims.list<Prims.string> ) -> (ops_of (nodes_for twin_dag ids))) twin_excl)))))})::({tname = "reach-index-answers-the-walk"; tholds = (fun ( uu___  :  unit ) -> (
+
+let r = (reach_of_dag twin_lt twin_fuel twin_dag)
+in ((((Prims.op_Equals (reach_reaches twin_dag twin_fuel r "a" "m") true) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "b" "c") false)) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "zz" "m") false)) && (Prims.op_Equals (reach_ancestors twin_dag twin_fuel r "c") (("c")::("a")::[])))))})::({tname = "checkpoint-at-seals-the-node-it-folded"; tholds = (fun ( uu___  :  unit ) -> (twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")))})::({tname = "replay-from-a-checkpoint-is-replay-from-genesis"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m") (Ok ("abcm"))))})::({tname = "replay-from-refuses-a-branch-from-below-the-checkpoint"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m") (Error (CUncovered ("c")))))})::({tname = "truncation-keeps-the-replay"; tholds = (fun ( uu___  :  unit ) -> (
+
+let cp = (seal_at twin_seal "q" "pq")
+in (((truncation_ok twin_chain twin_chain_fuel "q" (("q")::("r")::[])) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel (truncate twin_chain (("q")::("r")::[])) twin_chain_fuel cp "r") (Ok ("pqr")))) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel twin_chain twin_chain_fuel cp "r") (Ok ("pqr"))))))})::[]
 
 
 

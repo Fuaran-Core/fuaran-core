@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 330 claims — 237 proved across 32 models, 54 tested, 37 assumed (6 `domain-obligation`, 23 `model-bridge`, 8 `premise`), 2 policy.
+**The ladder, counted:** 336 claims — 242 proved across 32 models, 55 tested, 37 assumed (6 `domain-obligation`, 23 `model-bridge`, 8 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -326,10 +326,10 @@ whatsoever.
 
 **What is still NOT claimed.** A second-round lane that itself MERGES before the fold: its delta
 holds a two-parent node, is no spine, and has no append order to be identified with — its order is
-the drain's, which Phase 156 makes deterministic and no theorem here says more about.
-`Dag.mergeBase` over heads with SEVERAL maximal common ancestors — a criss-cross merge — where the
-(size, id) tie-break decides, and what it decides is a policy rather than a fact. And hashing,
-still: distinctness is the premise.
+the drain's, which Phase 156 makes deterministic and no theorem here says more about. And hashing,
+still: distinctness is the premise. (`Dag.mergeBase` over heads with SEVERAL maximal common
+ancestors — a criss-cross merge — was named here until Phase 437, which proves it returns a maximal
+common ancestor: "The lane-DAG primitives" below.)
 
 
 ### The total fold and the reconcile's partition (Phase 300)
@@ -393,6 +393,53 @@ say which part of a payload changed — so `Ops.footprint` and `Ops.footprintKey
 slot, a domain that declares no slot access gets the four-set verdict it always got, and the slot
 clauses are exercised by a DOMAIN's own lowering (`Conformance.footprintLawsAt` counts the pairs only
 the slot granularity frees, vacuous by declaration where none is declared).
+
+### The lane-DAG primitives — criss-cross, conflicts, the index, checkpoints (Phase 437)
+
+Sections 18 to 21 take the DAG's later primitives from `tested` to `proved`. Every theorem is over
+the functions as production computes them, clause for clause, and the `dag-primitives-differential`
+row runs the extracted functions beside production's.
+
+- **Criss-cross merges** (`merge-base-maximal`, section 18). `merge_base_maximal`: over ANY two heads
+  whose closure carries section 13's acyclicity witness, `Dag.mergeBase` refuses exactly when the
+  heads share no ancestor, and otherwise returns a common ancestor that no other common ancestor
+  descends from. Section 14 proved the base is the divergence point when the lanes hang off one
+  merged node; this is the general statement, and over a criss-cross it is what is true — the base
+  is a MAXIMAL common ancestor. WHICH of the maximal ones is the (closure size, id) tie-break, a
+  policy, and a function of the two closures. The proof is that the key is a strict total order on
+  ids (`deeper_strict_total`), `List.maxBy` under one returns a member nothing beats (`max_by_top`),
+  and a strictly deeper node has a strictly larger closure (Phase 158's `strictly_deeper`), with
+  every id of the witnessed closure off every cycle (`off_cycle_in_witness`).
+- **`conflictsOfHeads`** (`conflicts-of-heads-is-the-sweep`, section 19). Renaming each reported node
+  to its op gives EXACTLY the `LanesInterfere` report `reconcileMany` refuses with — conflict for
+  conflict, in order — so the node-level view is empty exactly when the proved sweep is.
+- **The reachability index** (`reach-index-agrees`, section 20). `Reach.reaches` and
+  `Reach.ancestors` answer what `Dag.ancestorsOf` answers, for every descendant the walk completes on.
+  The index is its slots, each an id and its ancestor set; the invariant is per slot and every
+  `reach_step` keeps it, so it holds over `ofDag`'s drain and over `extend`'s leaf step alike. The
+  word layout and the order arrays are below the model and stay sampled (`Conformance.reachLaws`).
+- **Checkpoints** (`dag-checkpoint-replay`, `dag-checkpoint-truncation`, section 21). THEOREM 1,
+  `replay_from_is_replay_to`: replay from the checkpoint `checkpointAt` sealed is replay from genesis,
+  state for state and rejection for rejection, on every head `replayFrom` does not refuse as
+  unreached or uncovered; `checkpoint_from_is_checkpoint_at` is its corollary for `checkpointFrom`.
+  The lemma it stands on is new and general: `drain_restricts` — the id-ordered drain of a head's
+  closure, kept to the closure of a node inside it, IS that node's own drain (a two-run simulation
+  of the drain, `drain_restrict`). With every id above the checkpoint descending from it, which is
+  what `above` checks, the head's drain is the checkpoint's drain followed by the history above it
+  (`drain_split`). THEOREM 2, `truncation_preserves_replay`: truncating behind the checkpoint to any
+  kept set meeting `cut`'s contract — `truncation_ok`, computable, and evaluated by the differential
+  on every DAG `compactAt` returns — preserves every such replay, whatever state the checkpoint
+  carries. Its proof resumes both drains after the checkpoint's closure (`kahn_after`) and shows a
+  drain reads only which parents are still pending (`kahn_pending`) and not its fuel (`kahn_fuel`).
+
+**The go-red, run at the leg.** A `checkpoint_at` that seals a node other than the one whose closure
+it folded fails theorem 1: Phase 437 perturbed it to seal the node's first parent and the prover
+refused `cp.cnode == c`. The differential carries the same go-red against production.
+
+**What is still not modelled.** `cut`'s computation of the kept set (`forwardFrom`, the band) — the
+theorem is over its contract; the seal's hash; `firstBreakFrom` / `verifyDagFrom` and the JSONL
+sidecar (`dag-checkpoint-truncation-sampled`); and `Dag.commonBase` over more than two heads.
+
 ## What the corpus covers
 
 The differential host draws lane sets from three pools and compares, per lane set and per sampled
@@ -574,14 +621,11 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      arbitrary acyclic set is proved deterministic, a linear extension and total, and the only
      parameters left — which total order on ids, and which dangling-parent policy — are universally
      quantified rather than assumed, with the differential tying the first to production's.)_
-   - **`Dag.mergeBase` over a criss-cross merge is outside the model.** Narrowed by Phase 158 from
-     "`Dag.mergeBase` is outside the model": the function is modelled clause for clause and proved
-     to locate the divergence point for heads whose lanes hang off one merged node
-     (`merge_base_is_divergence`, level 1). What is still assumed is its answer where two heads
-     share SEVERAL maximal common ancestors, where the (closure size, id) tie-break decides and
-     what it decides is a policy rather than a fact. _(The general topological ORDER over an
-     arbitrary acyclic set — merge DAGs included — is at level 1 since Phase 156, and the delta
-     RECOVERY over a merged head since Phase 158.)_
+   - _(**`Dag.mergeBase` over a criss-cross merge is outside the model** was an entry here from
+     Phase 158 — which had narrowed "`Dag.mergeBase` is outside the model" to heads sharing SEVERAL
+     maximal common ancestors — and is RETIRED by Phase 437: `merge_base_maximal` proves the answer
+     is a common ancestor no other common ancestor descends from, over any two heads. Which maximal
+     one is the tie-break, a policy, and that is said rather than assumed.)_
    - **The extractor and the F# compiler are trusted.** The proof leg holds the committed oracle
      to a fresh extraction byte for byte, which makes "the oracle is the model" a checked claim;
      it does not make the F# backend correct. The backend is second-class upstream (findings
@@ -618,20 +662,18 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      on Phase 134's id-distinctness premise and Phase 156's acyclicity witness and nothing more.
      Phase 156 had already taken the ORDER out of this entry. Its history is kept in "Delta
      recovery over a merged head" above.)_
-   - **A delta that itself MERGES, and a criss-cross merge base.** What Phase 158 did not take. A
-     second-round lane that merges before it is folded has a delta holding a two-parent node: no
-     spine, and no append order for a theorem to identify the drain's order with. And
-     `Dag.mergeBase` over heads with several maximal common ancestors is decided by the
-     (closure size, id) tie-break, which is a policy. Neither is produced by `foldOnce` or by the
-     fold-pull-fold rhythm; a consumer that builds either is outside every level here.
-   - **A history that begins at a checkpoint** (Phase 288). `Dag.replayFrom` resumes from a sealed
-     state at a node, and `Dag.compactAt` truncates the history behind it; whether the drain
-     theorems above extend to a closure whose origin is a checkpointed node rather than the empty
-     DAG is OPEN. What stands instead is level 2 — the `dag-checkpoint-replay` and
-     `dag-checkpoint-truncation` rows, sampled by `Conformance.checkpointLaws` — and the one
-     condition the sampling found load-bearing: the replay refuses a node above the checkpoint
-     that does not descend from it, because the drain folds such a branch before part of the
-     checkpoint's own closure.
+   - **A delta that itself MERGES.** What Phase 158 did not take. A second-round lane that merges
+     before it is folded has a delta holding a two-parent node: no spine, and no append order for a
+     theorem to identify the drain's order with. It is not produced by `foldOnce` or by the
+     fold-pull-fold rhythm; a consumer that builds one is outside every level here. (A criss-cross
+     merge BASE was named here beside it until Phase 437 proved it: "The lane-DAG primitives".)
+   - _(**A history that begins at a checkpoint** (Phase 288) was an entry here — whether the drain
+     theorems extend to a closure whose origin is a checkpointed node was OPEN, and level 2 stood
+     instead — and is RETIRED by Phase 437: `dag-checkpoint-replay` and `dag-checkpoint-truncation`
+     are level 1, and the law-sampled rows survive as `dag-checkpoint-replay-sampled` and
+     `dag-checkpoint-truncation-sampled`. The one condition the sampling found load-bearing — the
+     replay refuses a node above the checkpoint that does not descend from it — is exactly the
+     premise the proof consumes (`drain_split`).)_
 
    Also not claimed: anything about the linear `OpStream`, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
@@ -741,7 +783,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
 of what this document already says. `dag-outside-the-model` has been narrowed twice already — by
 Phase 134, from "all of it", and by Phase 158, which took `Dag.mergeBase` out of it for every shape
-but a criss-cross merge. A closed set of two values would have forced those into a claim of
+but a criss-cross merge — and Phase 437 took the criss-cross. A closed set of two values would have forced those into a claim of
 impossibility, which is a worse error than a third token.
 
 **And the token has now paid for itself: `parser-null-absorption` was `unscheduled` and is
@@ -980,7 +1022,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
 | `Fuaran.Core.OpStream` | 126 | 10 | 54 | 3 | 1 | 0 | 2 | 56 |
-| `Fuaran.Core.OpStream.Dag` | 88 | 23 | 37 | 0 | 0 | 0 | 0 | 28 |
+| `Fuaran.Core.OpStream.Dag` | 88 | 31 | 33 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
@@ -989,7 +1031,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1208 | 242 | 434 | 28 | 13 | 0 | 3 | 488 |
+| **Total** | 1208 | 250 | 430 | 28 | 13 | 0 | 3 | 484 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7236,8 +7278,8 @@ total, with the dangling-parent policy a parameter naming which production calle
 those two did NOT take, and what travelled with `Dag.mergeBase`, was the delta RECOVERY over a
 merge DAG — **DONE as well**, Phase 158, section 14: `between_merged`, `reconcile_many_merged_eq`
 and `merge_base_is_divergence`, over a lane hanging off any already-merged node. What is left of
-the DAG layer is a delta that itself merges, and a criss-cross merge base — both named in the
-ladder's "not claimed".)_
+the DAG layer is a delta that itself merges, named in the ladder's "not claimed"; the criss-cross
+merge base it was named beside is proved since Phase 437.)_
 
 **A `Footprint` record that can name a relocation's KIND** — the successor Phase 143 priced and
 deliberately did not take. Section 18 of `TreeOps.fst` proves that no clause over the four address

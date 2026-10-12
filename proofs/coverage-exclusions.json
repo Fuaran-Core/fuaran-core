@@ -1467,8 +1467,6 @@
         "Dag.appendIf",
         "Dag.attestHead",
         "Dag.between",
-        "Dag.conflictsOfHeads",
-        "Dag.conflictsOfNodes",
         "Dag.disjointRoots",
         "Dag.heads",
         "Dag.laneKey",
@@ -1480,19 +1478,17 @@
         "Dag.verifyAttestation"
       ],
       "class": "measured-elsewhere",
-      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/LaneTests.fs"
     },
     {
       "members": [
-        "Dag.checkpointFrom",
         "Dag.firstBreakFrom",
         "Dag.fromJsonlWithCheckpoints",
-        "Dag.sealAt",
         "Dag.tryToJsonlWithCheckpoints"
       ],
       "class": "measured-elsewhere",
-      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/CheckpointTests.fs"
     },
     {
@@ -1502,7 +1498,7 @@
         "Dag.mergeVerifiedWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/DagTests.fs"
     },
     {
@@ -1510,7 +1506,7 @@
         "Dag.tryToJsonl"
       ],
       "class": "measured-elsewhere",
-      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
     },
     {
