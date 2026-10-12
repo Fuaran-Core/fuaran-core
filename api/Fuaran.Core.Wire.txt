@@ -19,6 +19,7 @@ attribute Fuaran.Core.Json+ReadError RequireQualifiedAccess
 attribute Fuaran.Core.Json+Reader Sealed
 attribute Fuaran.Core.Json+ReaderModule RequireQualifiedAccess
 attribute Fuaran.Core.PathSegment RequireQualifiedAccess
+attribute Fuaran.Core.RootDecodeCode RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+Evolution RequireQualifiedAccess
 ctor Fuaran.Core.Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.CodecDeclarationFault>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal)
 ctor Fuaran.Core.Corpus+Case..ctor(System.String, Fuaran.Core.Corpus+CaseKind, System.String, System.String)
@@ -75,6 +76,13 @@ field Fuaran.Core.NullPolicy+Tags.EraseMemberNull : System.Int32 (literal)
 field Fuaran.Core.NullPolicy+Tags.RejectNull : System.Int32 (literal)
 field Fuaran.Core.PathSegment+Tags.Index : System.Int32 (literal)
 field Fuaran.Core.PathSegment+Tags.Key : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.LimitExceeded : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.NotAdmitted : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.OutOfRange : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.SchemaFault : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.UndeclaredMember : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.UnknownTag : System.Int32 (literal)
+field Fuaran.Core.RootDecodeCode+Tags.WrongKind : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Behind : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Current : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Foreign : System.Int32 (literal)
@@ -148,7 +156,7 @@ method Fuaran.Core.Decoder.bool(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharp
 method Fuaran.Core.Decoder.boundedList`1(System.Int32, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.closed`1(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>
 method Fuaran.Core.Decoder.describing`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>
-method Fuaran.Core.Decoder.fail`1(Fuaran.Core.DecodeCode, System.String, System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
+method Fuaran.Core.Decoder.fail`1(Fuaran.Core.RootDecodeCode, System.String, System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.fieldOr`1(System.String, !!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>
 method Fuaran.Core.Decoder.field`1(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.float(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Double, Fuaran.Core.DecodeError>
@@ -332,6 +340,8 @@ type Fuaran.Core.PathSegment (union)
 type Fuaran.Core.PathSegment+Index (type)
 type Fuaran.Core.PathSegment+Key (type)
 type Fuaran.Core.PathSegment+Tags (type)
+type Fuaran.Core.RootDecodeCode (union)
+type Fuaran.Core.RootDecodeCode+Tags (type)
 type Fuaran.Core.Versioning (module)
 type Fuaran.Core.Versioning+Compatibility (union)
 type Fuaran.Core.Versioning+Compatibility+Behind (type)
@@ -393,6 +403,13 @@ union-case Fuaran.Core.NullPolicy.EraseMemberNull #1()
 union-case Fuaran.Core.NullPolicy.RejectNull #0()
 union-case Fuaran.Core.PathSegment.NewIndex #1(Item: System.Int32)
 union-case Fuaran.Core.PathSegment.NewKey #0(Item: System.String)
+union-case Fuaran.Core.RootDecodeCode.LimitExceeded #4()
+union-case Fuaran.Core.RootDecodeCode.NotAdmitted #5()
+union-case Fuaran.Core.RootDecodeCode.OutOfRange #2()
+union-case Fuaran.Core.RootDecodeCode.SchemaFault #6()
+union-case Fuaran.Core.RootDecodeCode.UndeclaredMember #3()
+union-case Fuaran.Core.RootDecodeCode.UnknownTag #1()
+union-case Fuaran.Core.RootDecodeCode.WrongKind #0()
 union-case Fuaran.Core.Versioning+Compatibility.Current #0()
 union-case Fuaran.Core.Versioning+Compatibility.NewBehind #1(authored: Fuaran.Core.Versioning+Profile)
 union-case Fuaran.Core.Versioning+Compatibility.NewForeign #2(authored: Fuaran.Core.Versioning+Profile)

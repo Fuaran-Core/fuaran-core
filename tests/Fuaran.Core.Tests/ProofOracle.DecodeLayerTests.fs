@@ -62,6 +62,16 @@ let private mCodeOf (c: DecodeCode) : M.code =
     | DecodeCode.NotAdmitted -> M.NotAdmitted
     | DecodeCode.SchemaFault -> M.SchemaFault
 
+/// Every `RootDecodeCode` beside the model's `root_code` it is (Phase 443), in declaration order.
+let private rootCodes: (RootDecodeCode * M.root_code) list =
+    [ RootDecodeCode.WrongKind, M.RWrongKind
+      RootDecodeCode.UnknownTag, M.RUnknownTag
+      RootDecodeCode.OutOfRange, M.ROutOfRange
+      RootDecodeCode.UndeclaredMember, M.RUndeclaredMember
+      RootDecodeCode.LimitExceeded, M.RLimitExceeded
+      RootDecodeCode.NotAdmitted, M.RNotAdmitted
+      RootDecodeCode.SchemaFault, M.RSchemaFault ]
+
 /// A refusal as both sides are compared: its code and its path.
 let private pErr (e: DecodeError) : M.derr =
     { code = mCodeOf e.Code
@@ -260,12 +270,12 @@ let private decoderProbes
       mR s (M.bind (fun k -> M.field k M.str) (M.field "t" M.str) m)
       "andThen", pRes i (Decoder.andThen positive Decoder.int el), mR i (M.and_then mPositive M.int_d m)
       "succeed", pRes i (Decoder.succeed 3 el), mR i (M.succeed 3 m)
-      "fail", pRes i (Decoder.fail DecodeCode.NotAdmitted "" "" el), mR i (M.fail M.NotAdmitted m)
       "wrongKind", showErr (pErr (Decoder.wrongKind "x" el)), showErr (drop (M.wrong_kind m))
       "missing", showErr (pErr (Decoder.missing "a")), showErr (drop (M.missing "a"))
       "resolve",
       (DecodePath.resolve path el |> Option.map jr |> string),
       (M.resolve mp m |> mOpt |> Option.map mjr |> string) ]
+    @ [ for rc, mrc in rootCodes -> "fail " + string rc, pRes i (Decoder.fail rc "" "" el), mR i (M.fail mrc m) ]
 
 /// `DecodeError`'s path operations and `resolvesIn`, over a refusal of every code at the path.
 let private errorProbes

@@ -157,7 +157,7 @@ module DecodeRejectCorpus =
         | Some(JStr "intRange") ->
             match mem "min", mem "max" with
             | Some(JInt lo), Some(JInt hi) -> unitOf (Decoder.intRange lo hi)
-            | _ -> Decoder.fail DecodeCode.SchemaFault "an intRange with min and max" "malformed intRange shape"
+            | _ -> Decoder.fail RootDecodeCode.SchemaFault "an intRange with min and max" "malformed intRange shape"
         | Some(JStr "ref") ->
             let name =
                 match mem "name" with
@@ -167,8 +167,11 @@ module DecodeRejectCorpus =
             match defs |> List.tryFind (fun (n, _) -> n = name) with
             | Some(_, s) -> fun v -> shapeDecoder defs s v
             | None ->
-                Decoder.fail DecodeCode.SchemaFault ("a declared shape '" + name + "'") ("unknown shape '" + name + "'")
-        | _ -> Decoder.fail DecodeCode.SchemaFault "a known shape" "unknown shape"
+                Decoder.fail
+                    RootDecodeCode.SchemaFault
+                    ("a declared shape '" + name + "'")
+                    ("unknown shape '" + name + "'")
+        | _ -> Decoder.fail RootDecodeCode.SchemaFault "a known shape" "unknown shape"
 
     /// What an authored vector is FOR.
     type Intent =
@@ -610,6 +613,48 @@ let tests =
                          |> List.length)
                         (List.length DecodeError.codes)
                         "distinct names"
+
+                testCase
+                    "fail takes exactly the codes a refusal at the value can carry, and each resolves there (Phase 443)"
+                <| fun _ ->
+                    // The go-red is the type: `Decoder.fail DecodeCode.MissingField ...` no longer
+                    // compiles (FS0001), and this pins the case set, so restoring either case is red.
+                    let cases =
+                        Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<RootDecodeCode>
+                        |> Array.map (fun c ->
+                            Microsoft.FSharp.Reflection.FSharpValue.MakeUnion(c, [||]) :?> RootDecodeCode, c.Name)
+                        |> List.ofArray
+
+                    Expect.equal
+                        (cases |> List.map snd)
+                        (DecodeError.codes
+                         |> List.filter (fun c -> c <> DecodeCode.InvalidJson && c <> DecodeCode.MissingField)
+                         |> List.map DecodeError.codeName)
+                        "every code but InvalidJson and MissingField, in declaration order"
+
+                    let values =
+                        [ JBool true
+                          JInt 1
+                          JStr "s"
+                          JArr [ JInt 2 ]
+                          JObj [ "a", JObj [] ]
+                          JObj [] ]
+
+                    for rc, name in cases do
+                        for v in values do
+                            match (Decoder.fail rc "e" "m": Decoder<unit>) v with
+                            | Error e ->
+                                Expect.equal (DecodeError.codeName e.Code) name "fail raises the code it is handed"
+                                Expect.equal e.Path [] "at the value"
+                                Expect.isTrue (DecodeError.resolvesIn v e) (sprintf "%s resolves in %A" name v)
+
+                                match (Decoder.field "a" (Decoder.fail rc "e" "m"): Decoder<unit>) v with
+                                | Error e2 when e2.Path = [ key "a" ] ->
+                                    Expect.isTrue
+                                        (DecodeError.resolvesIn v e2)
+                                        (sprintf "%s resolves under a member" name)
+                                | _ -> ()
+                            | Ok() -> failtest "fail answered a value"
 
                 testCase "a path round-trips its wire form"
                 <| fun _ ->

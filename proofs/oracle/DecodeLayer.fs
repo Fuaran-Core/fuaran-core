@@ -125,6 +125,102 @@ let uu___is_SchemaFault : code  ->  Prims.bool = (fun ( projectee  :  code ) -> 
      false
      end))
 
+type root_code =
+| RWrongKind
+| RUnknownTag
+| ROutOfRange
+| RUndeclaredMember
+| RLimitExceeded
+| RNotAdmitted
+| RSchemaFault
+
+
+let uu___is_RWrongKind : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RWrongKind -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RUnknownTag : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RUnknownTag -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_ROutOfRange : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| ROutOfRange -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RUndeclaredMember : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RUndeclaredMember -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RLimitExceeded : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RLimitExceeded -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RNotAdmitted : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RNotAdmitted -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RSchemaFault : root_code  ->  Prims.bool = (fun ( projectee  :  root_code ) -> (match (projectee) with
+| RSchemaFault -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let root : root_code  ->  code = (fun ( c  :  root_code ) -> (match (c) with
+| RWrongKind -> begin
+     WrongKind
+     end
+| RUnknownTag -> begin
+     UnknownTag
+     end
+| ROutOfRange -> begin
+     OutOfRange
+     end
+| RUndeclaredMember -> begin
+     UndeclaredMember
+     end
+| RLimitExceeded -> begin
+     LimitExceeded
+     end
+| RNotAdmitted -> begin
+     NotAdmitted
+     end
+| RSchemaFault -> begin
+     SchemaFault
+     end))
+
 type derr = {code : code; path : Prims.list<seg>}
 
 
@@ -371,7 +467,7 @@ type dec<'num, 'flt, 'a> = WireDecode.jval<'num, 'flt>  ->  result<'a, derr>
 let succeed = (fun ( v  :  'a ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Ok (v))
 
 
-let fail = (fun ( c  :  code ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Error ((make c)))
+let fail = (fun ( c  :  root_code ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Error ((make (root c))))
 
 
 let map = (fun ( g  :  'a  ->  'b ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with

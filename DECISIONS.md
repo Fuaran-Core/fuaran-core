@@ -1,5 +1,56 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-12 — D149: `Decoder.fail` takes a `RootDecodeCode`, the seven codes a refusal at the value can carry; `MissingField` and `InvalidJson` become unrepresentable there rather than refused at run time, and stay producible by `Decoder.field` and the parse entry points
+
+**Recorded by Phase 443.** Phase 436 proved that every refusal Core's decode blocks answer resolves in
+the document it was raised over, and found the claim false of `Decoder.fail` as shipped: `fail` took
+every `DecodeCode`, its refusal sits at the empty path, and two codes cannot stand there. A
+`MissingField` names its absent member by its path's last step, so at the empty path it names nothing
+and resolves in no document; an `InvalidJson` is the parser's code, which resolves only at the root and
+stops resolving the moment a combinator carries it one member down. Core's own blocks never do this,
+and `Conformance.codecLaws` (D148) would refuse such a refusal at a domain's codec, but the public
+`fail` let any caller mint one. A survey of the workspace on 2026-10-12 found no caller passing either
+code; the only `Decoder.fail` callers were Core's own tests, with `SchemaFault`.
+
+**D149.1 — by construction, not at run time.** The two routes were a parameter type naming only the
+codes a root-level refusal can carry, or keeping `DecodeCode` and refusing the two at run time (a
+`SchemaFault` in their place, or an exception). The run-time route keeps the surface and moves the
+defect from the caller's compiler to the caller's tests: a `fail MissingField` would still compile, and
+would answer something other than what it says. An exception would break the decoder totality the
+layer is proved to have. So `fail` takes `RootDecodeCode`, a closed union of the seven other codes, in
+`DecodeCode`'s declaration order and spelled as its cases are. The old call no longer compiles
+(`FS0001`), which is the go-red, and the model's `fail_sound` holds for every code `fail` accepts with
+no premise.
+
+**D149.2 — the type earns its place on the surface.** The shard allowed the run-time route if the
+by-construction one cost a public type the surface should not carry. It costs one union of seven
+nullary cases, and that is the type the statement needs: F# has no refinement types, so "a code that
+can stand at the empty path" can only be said by naming the set. It is NOT a wire type. `DecodeCode`
+stays the closed wire contract every host mirrors (D99), a refusal still carries a `DecodeCode`, and
+nothing encodes or decodes a `RootDecodeCode`; the conversion is private to `Decoder`. The two sets
+cannot drift silently: the conversion is an exhaustive match, and `DecodeLayerTests` pins the case set
+to `DecodeError.codes` minus the two, so a code added to one and not the other is red.
+
+**D149.3 — scope.** Only `fail` loses the two codes. `Decoder.field` (through `Decoder.missing`)
+still raises `MissingField` with a path naming the member, and `Decoder.parse` / `parseWith` /
+`ofString` still raise `InvalidJson` at the root of the text they parse. `DecodeError.make` is
+untouched: it builds a refusal a combinator then places, and `andThen`'s function, which may return
+one, keeps its stated premise (`and_then_sound`; `decode-layer-refusal-premises`). Closing that one
+would mean typing a refusal's path against its code, which is a different and much larger change than
+this phase's.
+
+**D149.4 — the model and the ladder.** `DecodeLayer.fst` gains `root_code` and `root`, mirroring the
+F# union and the private conversion, and `fail` takes a `root_code`. Phase 436's two counter-examples
+are kept as statements about the refusals `fail` can no longer mint (`root_missing_never_resolves`,
+`root_invalid_json_stops_resolving`), and `root_excludes` is the step `fail_sound` spends.
+`decode-layer-refuted-premises` now names only `andThen`, and `fail`'s code leaves
+`decode-layer-refusal-premises`.
+
+**D149.5 — the class.** A breaking change to `Fuaran.Core.Wire`: `Decoder.fail`'s first parameter
+changes type. The migration is one line: pick the `RootDecodeCode` case of the code you passed, or, for
+an absent member, raise `MissingField` through `Decoder.field`. It lands on the draft after `0.37.0`,
+which is tagged.
+
 ## 2026-10-12 — D148: the codec premises are sampled by a new family, `Conformance.codecLaws`, at a domain's own `Codec<'T>`; it reuses the corpus harness's round trip, mutations and resolution predicate, and folds neither `EncodingProfileVectors.storedCodecLaws` nor `Corpus.refusalLaws` into itself — both stay beside it
 
 **Recorded by Phase 442.** Phase 436 proved the codec blocks' round trip and refusal soundness under

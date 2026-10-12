@@ -7134,14 +7134,22 @@ composition of these blocks, and the property follows by induction on how it was
   `Ok` only when nothing repeats (`repeats_nil`) and no case declares the discriminator
   (`union_faults_nil`).
 
-**Two premises the shard did not name were FALSE, and are refuted rather than assumed.** Read as
-"every refusal any block answers resolves", theorem 3 fails twice: `Decoder.fail MissingField`
-refuses at the empty path, which names no member, so it resolves in no document
-(`fail_missing_never_resolves`), and `Decoder.fail InvalidJson` resolves where it is raised and stops
-one member down (`fail_invalid_json_stops_resolving`); and `Decoder.andThen` raises its function's
-refusal untouched, so a function that refuses with a path of its own refuses wherever that path does
-not resolve (`and_then_needs_root_refusals`). The narrowed claim is the one proved: `fail` is sound
-for every other code, `andThen` when its function refuses only at the root with such a code.
+**A premise the shard did not name is FALSE, and is refuted rather than assumed.** Read as "every
+refusal any block answers resolves", theorem 3 fails at `Decoder.andThen`, which raises its
+function's refusal untouched, so a function that refuses with a path of its own refuses wherever that
+path does not resolve (`and_then_needs_root_refusals`). The narrowed claim is the one proved:
+`andThen` is sound when its function refuses only at the root with a code other than `MissingField`
+and `InvalidJson`.
+
+**`Decoder.fail` was the second refutation, and Phase 443 closed it in production.** Phase 436 found
+that `fail` took every code, and two of them mint a refusal that points nowhere: a `MissingField` at
+the empty path names no member, so it resolves in no document, and an `InvalidJson` resolves at the
+root and stops resolving one member down. `fail` now takes a `RootDecodeCode`, the codes a refusal at
+the value can carry, so the old call no longer compiles and `fail_sound` is proved for every code
+`fail` accepts, with no premise (`root_excludes`). The two counter-examples stay in the model as
+statements about the refusals `fail` can no longer mint (`root_missing_never_resolves`,
+`root_invalid_json_stops_resolving`); a `MissingField` is `Decoder.field`'s refusal, and an
+`InvalidJson` the parse entry points'.
 
 **The record invariants carry explicit triggers.** `fields_rt`, `reads_back`, `case_rt` and `rt` are
 quantified over a record's values and member lists, and stated without a pattern the solver could
@@ -7156,7 +7164,8 @@ record invariant in a later model should start there.
    per-block soundness lemmas and `ok_at_under` / `ok_at_within` under them; `strict_reader_total`
    and `decoder_total`; `build_round_trip`, `union_round_trip`, `case_round_trip`,
    `field_round_trip`, `opt_field_round_trip`, `list_round_trip`, `enum_round_trip`,
-   `map_round_trip`, `refine_round_trip` and the leaf round trips; and the three refutations. Rows
+   `map_round_trip`, `refine_round_trip` and the leaf round trips; the `andThen` refutation and the
+   two statements about the codes `fail` no longer takes. Rows
    **`decode-layer-refusals-resolve`**, **`decode-layer-totality`**, **`decode-layer-round-trip`**,
    **`decode-layer-refuted-premises`**. Checked by the leg at its flags (`--z3rlimit 40 --quake 3`,
    default fuel, no scoped option), `--report_assumes error` on, no `assume`, no `admit`. Measured
@@ -7170,8 +7179,8 @@ record invariant in a later model should start there.
 3. **Assumed, and stated as such.** **`decode-layer-round-trip-premises`** — `map`'s `there` inverts
    `back`, `refine`'s `check` admits every `back`-image, a record's constructor applied to its getters
    is the value, a case's `inject` inverts its `project`, and a `make` / `ofDecoder` reader reads back
-   its writer: the domain's to keep. **`decode-layer-refusal-premises`** — `andThen`'s function,
-   `fail`'s code and a `make` reader refuse within the narrowed claim. Both were filed as premises
+   its writer: the domain's to keep. **`decode-layer-refusal-premises`** — `andThen`'s function and
+   a `make` reader refuse within the narrowed claim (`fail`'s code left this row with Phase 443). Both were filed as premises
    because no family of the `Conformance` roster sampled them at a domain's codec; since Phase 442
    both are `domain-obligation` rows discharged by `Conformance.codecLaws`, which samples each at the
    domain's own `Codec<'T>` — round trip at the value and through the canonical text, and every

@@ -7,8 +7,8 @@
    numeric carriers, as there):
      - `src/Fuaran.Core.Wire/DecodePath.fs` — `PathSegment` and `DecodePath.resolve` with its
        first-member `step`.
-     - `src/Fuaran.Core.Wire/DecodeError.fs` — `DecodeCode`, `DecodeError.make` / `under` /
-       `within` / `resolvesIn`.
+     - `src/Fuaran.Core.Wire/DecodeError.fs` — `DecodeCode`, `RootDecodeCode` (Phase 443),
+       `DecodeError.make` / `under` / `within` / `resolvesIn`.
      - `src/Fuaran.Core.Wire/Decoder.fs` — every combinator but the four that start from TEXT
        (`parse`, `parseWith`, `ofString`, which are `Json.parse` and a bind, and `describing`,
        which answers the sentence): `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`,
@@ -65,16 +65,18 @@
         that resolves at the value a step reaches resolves, one step longer, at the value the
         step started from.
 
-   WHAT IS REFUTED (section 6). Theorem 3 is FALSE of two blocks as the shard first read it, and
+   WHAT IS REFUTED (section 9). Theorem 3 is FALSE of one block as the shard first read it, and
    the model says so rather than assuming it away:
-     - `Decoder.fail MissingField` refuses at the empty path, and a `MissingField` with an empty
-       path names no member, so it resolves in NO document (`fail_missing_never_resolves`); a
-       `fail InvalidJson` resolves where it is raised and stops resolving one step down
-       (`fail_invalid_json_stops_resolving`). `fail` preserves theorem 3 for every other code.
      - `Decoder.andThen`'s function and `Codec.make` / `ofDecoder`'s reader are the CALLER's,
        and their refusals are only as good as the caller makes them: the theorems carry "every
        refusal `andThen`'s function answers is a root refusal of another code" and "the reader
        handed to `make` is sound" as hypotheses, and those are the `decode-layer-premises` row.
+   Phase 436 refuted `Decoder.fail` too: it took every code, and at the empty path a `MissingField`
+   names no member and an `InvalidJson` stops resolving one step down. Phase 443 closed that in
+   production rather than in the model: `fail` takes a `RootDecodeCode`, which carries neither, so
+   `fail_sound` holds for every code it accepts with no premise, and the two counter-examples stand
+   in section 9 as statements about the refusals `fail` can no longer mint
+   (`root_missing_never_resolves`, `root_invalid_json_stops_resolving`).
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Helpers are
    defined here rather than taken from `FStar.List.Tot` so that the extracted oracle depends on
@@ -107,6 +109,29 @@ type code =
   | LimitExceeded
   | NotAdmitted
   | SchemaFault
+
+(* F#: `RootDecodeCode` (Phase 443), in declaration order: every `DecodeCode` but `InvalidJson`
+   and `MissingField`. F* constructors share one namespace per module, so each carries an `R`
+   prefix the F# cases do not. *)
+type root_code =
+  | RWrongKind
+  | RUnknownTag
+  | ROutOfRange
+  | RUndeclaredMember
+  | RLimitExceeded
+  | RNotAdmitted
+  | RSchemaFault
+
+(* F#: the match inside `Decoder.fail`, a root code as the `DecodeCode` it names. *)
+let root (c: root_code) : code =
+  match c with
+  | RWrongKind -> WrongKind
+  | RUnknownTag -> UnknownTag
+  | ROutOfRange -> OutOfRange
+  | RUndeclaredMember -> UndeclaredMember
+  | RLimitExceeded -> LimitExceeded
+  | RNotAdmitted -> NotAdmitted
+  | RSchemaFault -> SchemaFault
 
 (* F#: `DecodeError`, its `Expected` and `Message` dropped (see the header). *)
 type derr = { code: code; path: list seg }
@@ -245,8 +270,8 @@ let dec (num flt: eqtype) (a: Type0) = W.jval num flt -> Tot (result a derr)
 (* F#: `Decoder.succeed`. *)
 let succeed (#num #flt: eqtype) (#a: Type0) (v: a) : dec num flt a = fun _ -> Ok v
 
-(* F#: `Decoder.fail` (its two phrases dropped). *)
-let fail (#num #flt: eqtype) (#a: Type0) (c: code) : dec num flt a = fun _ -> Error (make c)
+(* F#: `Decoder.fail` (its two phrases dropped), its code a `RootDecodeCode` since Phase 443. *)
+let fail (#num #flt: eqtype) (#a: Type0) (c: root_code) : dec num flt a = fun _ -> Error (make (root c))
 
 (* F#: `Decoder.map`. *)
 let map (#num #flt: eqtype) (#a #b: Type0) (g: a -> b) (d: dec num flt a) : dec num flt b =
@@ -875,7 +900,7 @@ let c_union (#num #flt: eqtype) (#t: Type0) (key: string) (cases: list (ccase nu
 
       `ok_at x e`: the refusal `e`, raised over the value `x`, RESOLVES there
       (`DecodeError.resolvesIn`) and is not `InvalidJson` — the parser's code, which names only
-      a root and so cannot survive a step (`fail_invalid_json_stops_resolving`). A decoder is
+      a root and so cannot survive a step (`root_invalid_json_stops_resolving`). A decoder is
       `sound` when every refusal it answers over every value is `ok_at` that value; a collecting
       reader is `sound_all` when every refusal list it answers is NON-EMPTY and every member of
       it is `ok_at` the value (the non-emptiness is theorem 2's half, section 7). PROOF-ONLY.
@@ -1035,11 +1060,15 @@ let rec resolve_app (#num #flt: eqtype) (p q: list seg) (doc: W.jval num flt)
 
 let succeed_sound (#num #flt: eqtype) (#a: Type0) (v: a) : Lemma (sound (succeed #num #flt v)) = ()
 
-(* `fail` is sound for every code but the two `fail_missing_never_resolves` and
-   `fail_invalid_json_stops_resolving` refute. *)
-let fail_sound (#num #flt: eqtype) (#a: Type0) (c: code)
-  : Lemma (requires c <> InvalidJson /\ c <> MissingField) (ensures sound (fail #num #flt #a c)) =
-  sound_intro (fail #num #flt #a c) (fun x -> ok_make c x)
+(* A root code is never one of the two `ok_make` excludes, which is what `RootDecodeCode` is for. *)
+let root_excludes (c: root_code) : Lemma (root c <> InvalidJson /\ root c <> MissingField) = ()
+
+(* `fail` is sound for EVERY code it accepts (Phase 443): its code is a `root_code`, and no root
+   code is one of the two whose refusal at the empty path does not resolve (section 9). *)
+let fail_sound (#num #flt: eqtype) (#a: Type0) (c: root_code)
+  : Lemma (ensures sound (fail #num #flt #a c)) =
+  root_excludes c;
+  sound_intro (fail #num #flt #a c) (fun x -> ok_make (root c) x)
 
 let map_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> b) (d: dec num flt a)
   : Lemma (requires sound d) (ensures sound (map g d)) =
@@ -2140,21 +2169,29 @@ let refine_round_trip (#num #flt: eqtype) (#a #b: Type0) (expected: string) (che
   with (match c.write (back u) with Ok j -> rt_elim c (back u) j | Error _ -> ())
 
 (* ======================================================================================
-   9. WHAT THEOREM 3 IS NOT. The two premises the shard did not name, each refuted where it
-      fails — a stated counter-example in the model, and the narrowed claim beside it.
+   9. WHAT THEOREM 3 IS NOT. The premise the shard did not name, refuted where it fails (a
+      stated counter-example in the model, and the narrowed claim beside it), and the two
+      refusals `RootDecodeCode` keeps out of `fail` (Phase 443), stated about the codes it no
+      longer takes.
    ====================================================================================== *)
 
-(* `Decoder.fail MissingField` answers a `MissingField` at the EMPTY path, and that names no
-   member: it resolves in no document at all. So `fail` is sound only for the codes `fail_sound`
-   admits; a decoder that fails with `MissingField` raises a refusal no caller can resolve. *)
-let fail_missing_never_resolves (#num #flt: eqtype) (#a: Type0) (x: W.jval num flt)
-  : Lemma (fail #num #flt #a MissingField x == Error (make MissingField) /\ ~(resolves_in x (make MissingField))) = ()
+(* A `MissingField` at the EMPTY path names no member: it resolves in no document at all. Until
+   Phase 443 `Decoder.fail MissingField` answered exactly this refusal (Phase 436's
+   `fail_missing_never_resolves`); `fail` now takes a `RootDecodeCode`, which has no such case
+   (`root_excludes`), and a `MissingField` is raised by `Decoder.field`, whose path names the
+   member (`ok_missing`). *)
+let root_missing_never_resolves (#num #flt: eqtype) (x: W.jval num flt)
+  : Lemma (~(resolves_in x (make MissingField))) = ()
 
-(* `Decoder.fail InvalidJson` resolves where it is raised — the root — and stops resolving one
-   member down, which is why `ok_at` excludes the parser's code. *)
-let fail_invalid_json_stops_resolving (#num #flt: eqtype) (#a: Type0) (k: string) (x: W.jval num flt)
-  : Lemma (resolves_in x (make InvalidJson) /\
-           field k (fail #num #flt #a InvalidJson) (W.JObj [(k, x)]) == Error (under (Key k) (make InvalidJson)) /\
+(* An `InvalidJson` resolves at the root and stops resolving one member down, which is why
+   `ok_at` excludes the parser's code. Until Phase 443 `Decoder.fail InvalidJson` raised it at
+   any value a combinator reaches (Phase 436's `fail_invalid_json_stops_resolving`); now only the
+   parse entry points raise it, at the root of the text they parse. `raw` below is the decoder
+   `fail InvalidJson` used to be, written without `fail` because `fail` no longer takes the code. *)
+let root_invalid_json_stops_resolving (#num #flt: eqtype) (#a: Type0) (k: string) (x: W.jval num flt)
+  : Lemma (let raw : dec num flt a = fun _ -> Error (make InvalidJson) in
+           resolves_in x (make InvalidJson) /\
+           field k raw (W.JObj [(k, x)]) == Error (under (Key k) (make InvalidJson)) /\
            ~(resolves_in (W.JObj [(k, x)]) (under (Key k) (make InvalidJson)))) = ()
 
 (* `Decoder.andThen` raises its function's refusal untouched, so a function that refuses with a

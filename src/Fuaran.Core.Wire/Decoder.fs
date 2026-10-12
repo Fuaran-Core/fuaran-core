@@ -18,9 +18,23 @@ module Decoder =
     /// A decoder that answers `v` whatever it is handed.
     let succeed (v: 'T) : Decoder<'T> = fun _ -> Ok v
 
-    /// A decoder that refuses whatever it is handed, at the value itself.
-    let fail (code: DecodeCode) (expected: string) (message: string) : Decoder<'T> =
-        fun _ -> Error(DecodeError.make code expected message)
+    /// The `DecodeCode` a root code names (Phase 443).
+    let private rootCode (code: RootDecodeCode) : DecodeCode =
+        match code with
+        | RootDecodeCode.WrongKind -> DecodeCode.WrongKind
+        | RootDecodeCode.UnknownTag -> DecodeCode.UnknownTag
+        | RootDecodeCode.OutOfRange -> DecodeCode.OutOfRange
+        | RootDecodeCode.UndeclaredMember -> DecodeCode.UndeclaredMember
+        | RootDecodeCode.LimitExceeded -> DecodeCode.LimitExceeded
+        | RootDecodeCode.NotAdmitted -> DecodeCode.NotAdmitted
+        | RootDecodeCode.SchemaFault -> DecodeCode.SchemaFault
+
+    /// A decoder that refuses whatever it is handed, at the value itself. Its code is a
+    /// `RootDecodeCode` (Phase 443): a refusal at the value cannot be a `MissingField` (raise one
+    /// through `field`, which names the member) or an `InvalidJson` (the parse entry points' code), so
+    /// every refusal `fail` answers resolves in the value it was handed.
+    let fail (code: RootDecodeCode) (expected: string) (message: string) : Decoder<'T> =
+        fun _ -> Error(DecodeError.make (rootCode code) expected message)
 
     /// Convert the answer; a refusal passes through untouched, its path included.
     let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.map f

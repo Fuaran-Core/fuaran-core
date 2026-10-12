@@ -35,6 +35,30 @@ type DecodeCode =
     /// unsubstituted type variable. A defect of the vocabulary, not of the document.
     | SchemaFault
 
+/// The codes a refusal raised AT the value being decoded can carry (Phase 443): every `DecodeCode`
+/// but `InvalidJson` and `MissingField`, in declaration order. A refusal at the value has the empty
+/// path, and those two cannot stand there: a `MissingField` names its absent member by its path's
+/// last step, so at the empty path it names nothing and resolves in no document; an `InvalidJson` is
+/// the parser's code, which names only the root and stops resolving the moment a combinator carries
+/// it one step down. `Decoder.fail` takes this type, so a decoder cannot raise either: an absent
+/// member is `Decoder.field`'s refusal, and unparseable text the parse entry points'.
+[<RequireQualifiedAccess>]
+type RootDecodeCode =
+    /// `DecodeCode.WrongKind`.
+    | WrongKind
+    /// `DecodeCode.UnknownTag`.
+    | UnknownTag
+    /// `DecodeCode.OutOfRange`.
+    | OutOfRange
+    /// `DecodeCode.UndeclaredMember`.
+    | UndeclaredMember
+    /// `DecodeCode.LimitExceeded`.
+    | LimitExceeded
+    /// `DecodeCode.NotAdmitted`.
+    | NotAdmitted
+    /// `DecodeCode.SchemaFault`.
+    | SchemaFault
+
 /// A decode refusal (Phase 310): its code, the path to the value at fault (see `DecodeCode` for
 /// what a `MissingField` path names), what the position expected, and a sentence. `Message` is the
 /// sentence the string-error forms return, so the typed and the legacy reading of one refusal are
