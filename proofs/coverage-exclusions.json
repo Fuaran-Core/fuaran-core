@@ -2132,17 +2132,13 @@
     {
       "members": [
         "DecodeError.codeName",
-        "DecodeError.make",
-        "DecodeError.resolvesIn",
         "DecodeError.tryCodeOfName",
-        "DecodeError.under",
         "DecodePath.ofJson",
         "DecodePath.render",
-        "DecodePath.resolve",
         "DecodePath.toJson"
       ],
       "class": "measured-elsewhere",
-      "reason": "The typed decode error and its path (Phase 310): construction, rendering, codes and path resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
+      "reason": "The typed decode error's code names and its path's text and wire forms (Phase 310): spelling, not semantics, since Phase 436 modelled the path's resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
       "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
     },
     {
@@ -2188,75 +2184,13 @@
     },
     {
       "members": [
-        "DecodeError.within"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Prefixes a decode error's path; `Decoder.at` calls it.",
-      "through": "Decoder.at",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.all",
-        "Decoder.at",
-        "Decoder.bool",
-        "Decoder.boundedList",
-        "Decoder.closed",
-        "Decoder.fail",
-        "Decoder.fieldOr",
-        "Decoder.field",
-        "Decoder.float",
-        "Decoder.int",
-        "Decoder.intRange",
-        "Decoder.json",
-        "Decoder.kindDispatch",
-        "Decoder.listAll",
-        "Decoder.list",
-        "Decoder.map",
-        "Decoder.obj",
         "Decoder.ofString",
-        "Decoder.oneOf",
-        "Decoder.optField",
         "Decoder.parse",
-        "Decoder.parseWith",
-        "Decoder.sequence",
-        "Decoder.str",
-        "Decoder.succeed",
-        "Decoder.tagDispatch",
-        "Decoder.tagDispatchWith",
-        "Decoder.tryMember",
-        "Decoder.undeclared",
-        "Decoder.wrongKind"
+        "Decoder.parseWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "The typed decoder combinators (Phase 310); the decode-layer tests and the `conformance/decode/` vectors, which every host agrees on by code and path, stand in.",
+      "reason": "The typed decoder's TEXT entry points (Phase 310): `Json.parse` with its refusal lifted by `DecodeError.ofJsonError`, then a decoder. Phase 436 modelled every combinator that starts from a `JVal`; these start from text, which is the parser's, and the decode-layer tests and the `conformance/decode/` vectors stand in.",
       "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.missing"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The typed decoder combinators (Phase 310); the decode-layer tests and the `conformance/decode/` vectors, which every host agrees on by code and path, stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs"
-    },
-    {
-      "members": [
-        "Decoder.andThen"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Decoder sequencing; the capability codec's readers are written in it.",
-      "through": "CapabilityCodec.decode",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.bind"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Decoder bind; the capability codec's readers are written in it.",
-      "through": "CapabilityCodec.decode",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
       "members": [
@@ -2266,33 +2200,6 @@
       "reason": "Lowers a typed-error decoder to the string-error form; the capability codec's string readers are it.",
       "through": "CapabilityCodec.decode",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.items"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The element decoder under the list combinators; `boundedList` calls it.",
-      "through": "Decoder.boundedList",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.mapListIndexed"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Indexed list decoding; `Decoder.list` is it.",
-      "through": "Decoder.list",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
-        "Decoder.members"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The strict-member check (the decode layer's strict policy); the policy-parameterised readers call it.",
-      "through": "CapabilityCodec.decodeWith",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
       "members": [
@@ -2467,32 +2374,12 @@
     },
     {
       "members": [
-        "Codec.record",
-        "Codec.field",
-        "Codec.optField",
-        "Codec.build",
-        "Codec.case",
-        "Codec.union",
-        "Codec.enum",
-        "Codec.list",
-        "Codec.map",
-        "Codec.refine",
-        "Codec.decoder",
         "Codec.corpus",
-        "CodecDeclarationFault.describe",
-        "CodecDeclarationFault.under"
+        "CodecDeclarationFault.describe"
       ],
       "class": "measured-elsewhere",
-      "reason": "The Codec<'T> combinators (Phase 379): what a declaration writes, its collecting order and paths, its build-time refusals and its schema's agreement with an independent validator are pinned by example; the stored-codec family certifies a consumer's codec over its own store, not the combinators. Since Phase 384 the refusals are typed — every `CodecDeclarationFault` a builder answers, and the one writer `Write`'s `Unrecognised` at the path of the value no case recognises — and are pinned by example too.",
+      "reason": "The codec's bridge to the conformance corpus's `Corpus.Codec` (canonical text under a profile, the strict reader's sentence) and a declaration fault's sentence (Phase 384): text the combinators' model (Phase 436) drops, pinned by example.",
       "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
-    },
-    {
-      "members": [
-        "Codec.make",
-        "Codec.ofDecoder"
-      ],
-      "class": "trivial",
-      "reason": "Record builders: a codec from its three faces, or from a short-circuiting decoder whose one refusal becomes its one defect."
     },
     {
       "members": [

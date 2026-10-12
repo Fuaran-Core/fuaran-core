@@ -210,6 +210,12 @@ $ErrorActionPreference = 'Stop'
 #                column (`typed_decode_image_is_valid`, `typed_round_trip`, literal in schema
 #                order). Opens `WireCanon` and `WireColumn`, so it follows both.
 #
+#   DecodeLayer — Phase 436, the typed decode layer and the codec combinators (`DecodePath`,
+#                `DecodeError`, `Decoder`, `Codec`) clause for clause over WireDecode's `jval`, generic
+#                in what they build: every block proved to preserve the composed round trip, the
+#                collecting reader's non-empty refusals (decoder totality) and refusal paths that
+#                resolve. Opens WireDecode, so it follows it.
+#
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
 #                (DECISIONS.md D66); they are checked by the compute repository's own proof leg.
@@ -219,7 +225,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement', 'DecodeLayer')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

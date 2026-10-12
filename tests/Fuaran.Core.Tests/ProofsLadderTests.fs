@@ -747,6 +747,7 @@ let oracleTests: Test =
           ProofOracle.ColumnRefinementTests.tests
           ProofOracle.DagFoldTests.tests
           ProofOracle.DecimalTextTests.tests
+          ProofOracle.DecodeLayerTests.tests
           ProofOracle.JsonParseTests.tests
           ProofOracle.NormalizeTests.tests
           ProofOracle.PreservationTests.tests

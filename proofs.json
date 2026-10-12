@@ -4437,6 +4437,155 @@
           "ColumnCodec.fieldJson"
         ]
       }
+    },
+    {
+      "id": "decode-layer-round-trip",
+      "level": "proved",
+      "claim": "THE CODEC COMBINATORS COMPOSE ROUND TRIPS (Phase 436). `proofs/DecodeLayer.fst` models `Codec<'T>`'s `Write` and collecting `ReadAll` clause for clause over `WireDecode`'s `jval`, GENERIC in the type a codec decodes, with every block the operation census names and every private helper they reach (`both`, `repeats`, `traverse`, `strictObject`). `rt c` — whatever `write` answers `Ok j` for, `read_all j` reads back as the value written — holds of the five leaves (`string_round_trip` and its siblings) and is PRESERVED by every block: `list` (`list_round_trip`, through `traverse`'s accumulator loop proved equal to the direct recursion), `map` and `refine` under their premises, `enum` (`enum_round_trip`), a record built by `record` / `field` / `optField` / `build` (`field_round_trip`, `opt_field_round_trip`, `build_round_trip`) and a union by `case` / `union` (`case_round_trip`, `union_round_trip`). A record's invariant is stated over every member list that AGREES with the written one on the declared names, which is what lets the next member append and lets a union read a case past its discriminator. The build-time refusals are exactly what the proof uses: `build`, `enum` and `union` answer `Ok` only when no member, spelling or tag repeats (`repeats_nil`: `repeats l == []` gives `no_dups l`) and no case declares the discriminator (`union_faults_nil`). The premises a domain owes for the parts it supplies are `decode-layer-round-trip-premises`.",
+      "phase": "fuaran-core#436",
+      "evidence": {
+        "theorem": "build_round_trip",
+        "model": "proofs/DecodeLayer.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Codec.build",
+          "Codec.case",
+          "Codec.enum",
+          "Codec.field",
+          "Codec.list",
+          "Codec.make",
+          "Codec.map",
+          "Codec.ofDecoder",
+          "Codec.optField",
+          "Codec.record",
+          "Codec.refine",
+          "Codec.union",
+          "CodecDeclarationFault.under"
+        ]
+      }
+    },
+    {
+      "id": "decode-layer-totality",
+      "level": "proved",
+      "claim": "A DECODER BUILT FROM THE BLOCKS ANSWERS ON EVERY JVAL (Phase 436). Every `Decoder` combinator and every codec block is a `Tot` function of the `jval` in the model — no exception path and no divergence, `at` terminating on the path it walks and every list walker on its list (`decoder_total` states it) — and the half a typing cannot state is proved: the COLLECTING reader of every codec built from the blocks answers a value or a NON-EMPTY refusal list, so `Codec.decoder`'s third arm, the `SchemaFault` \"a collecting decoder answered no defect and no value\", is unreachable for any such codec, and the strict reader answers `Ok` exactly when the collecting one does and otherwise its first defect (`strict_reader_total`). The non-emptiness rides the same invariant as `decode-layer-refusals-resolve` (`sound_all`), so every block's lemma there is this theorem's too. That production raises nothing on the generated inputs is the differential's (`decode-layer-differential`).",
+      "phase": "fuaran-core#436",
+      "evidence": {
+        "theorem": "strict_reader_total",
+        "model": "proofs/DecodeLayer.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Codec.decoder"
+        ]
+      }
+    },
+    {
+      "id": "decode-layer-refusals-resolve",
+      "level": "proved",
+      "claim": "EVERY REFUSAL CARRIES A PATH THAT RESOLVES TO THE OFFENDING PART OF THE INPUT (Phase 436). `DecodePath.resolve` and `DecodeError.resolvesIn` are modelled clause for clause, `List.rev` and all; a decoder is `sound` when every refusal it answers over a value satisfies `resolvesIn` there and is not `InvalidJson` (the parser's code, which names only a root and so cannot survive a step). Every `Decoder` combinator that starts from a `JVal` is proved to PRESERVE soundness (`field_sound`, `at_sound`, `map_list_indexed_sound`, `list_all_sound`, `tag_dispatch_sound`, `closed_sound` and the rest), and so is every codec block's collecting reader (`list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`, `decoder_sound`, ...), so a decoder or a codec a domain composes from them refuses only at paths that resolve (`refusal_paths_resolve`). The content is the transport lemma `ok_at_under`: a refusal owed to the value one step reaches is owed, one step longer, to the value the step started from — for a `MissingField` because the absent member is the path's LAST step, so the step is prepended to the parent the law resolves (`rev_cons`, `rev_snoc`). Measured red with `Decoder.field`'s refusal not taken under its member (`| Some v -> d v`): `field_sound` fails. Two premises the shard did not name are refuted rather than assumed, at `decode-layer-refuted-premises`; what the caller supplies is `decode-layer-refusal-premises`.",
+      "phase": "fuaran-core#436",
+      "evidence": {
+        "theorem": "refusal_paths_resolve",
+        "model": "proofs/DecodeLayer.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "DecodeError.make",
+          "DecodeError.resolvesIn",
+          "DecodeError.under",
+          "DecodeError.within",
+          "DecodePath.resolve",
+          "Decoder.all",
+          "Decoder.andThen",
+          "Decoder.at",
+          "Decoder.bind",
+          "Decoder.bool",
+          "Decoder.boundedList",
+          "Decoder.closed",
+          "Decoder.fail",
+          "Decoder.field",
+          "Decoder.fieldOr",
+          "Decoder.float",
+          "Decoder.int",
+          "Decoder.intRange",
+          "Decoder.items",
+          "Decoder.json",
+          "Decoder.kindDispatch",
+          "Decoder.list",
+          "Decoder.listAll",
+          "Decoder.map",
+          "Decoder.mapListIndexed",
+          "Decoder.members",
+          "Decoder.missing",
+          "Decoder.obj",
+          "Decoder.oneOf",
+          "Decoder.optField",
+          "Decoder.sequence",
+          "Decoder.str",
+          "Decoder.succeed",
+          "Decoder.tagDispatch",
+          "Decoder.tagDispatchWith",
+          "Decoder.tryMember",
+          "Decoder.undeclared",
+          "Decoder.wrongKind"
+        ]
+      }
+    },
+    {
+      "id": "decode-layer-refuted-premises",
+      "level": "proved",
+      "claim": "WHAT THEOREM 3 IS NOT (Phase 436). Read as \"every refusal any block answers resolves\", the shard's third theorem is FALSE, and the model states each counter-example: `Decoder.fail MissingField` refuses at the EMPTY path, and a `MissingField` names its absent member by the path's last step, so it resolves in NO document (`fail_missing_never_resolves`); `Decoder.fail InvalidJson` resolves where it is raised and stops resolving one member down (`fail_invalid_json_stops_resolving`, through `Decoder.field`); and `Decoder.andThen` raises its function's refusal untouched, so a function that refuses with a path of its own refuses wherever that path does not resolve (`and_then_needs_root_refusals`, a `MissingField` naming a member the object carries). The narrowed claim proved at `decode-layer-refusals-resolve`: `fail` is sound for every other code (`fail_sound`), and `andThen` is sound when its function answers only root refusals of such a code (`and_then_sound`).",
+      "phase": "fuaran-core#436",
+      "evidence": {
+        "theorem": "fail_missing_never_resolves",
+        "model": "proofs/DecodeLayer.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-layer-differential",
+      "level": "tested",
+      "claim": "The extracted decode layer agrees with the shipped one (Phase 436), instantiated at `<int, float>` as `WireDecode`'s oracle is. Every `Decoder` combinator the model covers, `DecodeError.make` / `under` / `within` / `resolvesIn` over a refusal of every code, and `DecodePath.resolve`, over 1,500 generated `JVal`s (repeated keys included, so the first-member rule is exercised) and generated paths; and generated codec SHAPES — records of up to three required and optional members, unions under one of two discriminators, enumerations, lists, an even-int refinement and the five leaves, nested to depth three, member names drawn so that repeats and a discriminator-as-member occur — built by both sides (their build-time refusals compared fault for fault), writing generated values (an unrecognised enum value or union case among them) and reading back those writes and three MUTATIONS of each, compared value for value and refusal for refusal by code and path, through both the collecting reader and `Codec.decoder`. Over every production read the theorems' statements are held to PRODUCTION: every refusal list non-empty, the strict reader its first defect, every refusal resolving in its input and none `InvalidJson`. The go-red is the BLIND bridge that drops the first step of every model refusal's path — what a block that forgot its `under` would answer one level up — which loses on exactly the refusal lists holding a refusal below the root, and on no other.",
+      "phase": "fuaran-core#436",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DecodeLayer.fst",
+        "cases": [
+          "the decode-layer oracle agrees with every Decoder combinator, DecodeError's path operations and resolvesIn",
+          "the decode-layer oracle agrees with Codec's builds, writes and collecting and strict reads over generated shapes, valid and mutated",
+          "every refusal production's codecs answer is non-empty, first in the strict reader and resolves in its input",
+          "a model that drops a refusal's first step loses - on exactly the refusals below the root"
+        ]
+      }
+    },
+    {
+      "id": "decode-layer-round-trip-premises",
+      "level": "assumed",
+      "claim": "WHAT A DOMAIN OWES FOR THE PARTS IT HANDS THE CODEC BLOCKS (Phase 436). The composed round trip is proved under four hypotheses about functions only the domain writes, and they are its obligations: `Codec.map`'s `there` inverts its `back` (`there (back u) = u`); `Codec.refine`'s `check` admits every value `back` writes (`check (back u) = Ok u` — the refinement predicate holds on the representation of every refined value); a record's constructor applied to its getters is the value (`ctor (get1 r) ... (getN r) = r`); and a union case's `inject` inverts its `project` (`project v = Some p` implies `inject p = v`); plus, for `make` / `ofDecoder`, that the reader reads back what the writer writes. They are the domain's to keep and no family of the shipped `Conformance` kit samples them at a domain's codec: `EncodingProfileVectors.storedCodecLaws` reads every stored text through a domain's codec and re-writes it byte for byte — the reverse direction of the same agreement, over a store rather than a sample — and is outside the kit's `Conformance.<law>` roster, so this row is filed as a premise rather than as an obligation with a discharge it could not name.",
+      "phase": "fuaran-core#436",
+      "class": "premise",
+      "evidence": {
+        "assumption": "map's there inverts its back, refine's check admits every back-image, a record's constructor applied to its getters is the value, a case's inject inverts its project, and a make or ofDecoder reader reads back its writer"
+      }
+    },
+    {
+      "id": "decode-layer-refusal-premises",
+      "level": "assumed",
+      "claim": "WHAT THE CALLER SUPPLIES THAT THEOREM 3 CANNOT REACH (Phase 436). Three blocks raise a refusal the caller wrote and Core never sees: `Decoder.andThen`'s function (sound only when it answers root refusals of a code other than `MissingField` and `InvalidJson`), `Decoder.fail`'s code (the same two excluded), and the reader handed to `Codec.make` / `ofDecoder` (sound only when it is). `decode-layer-refuted-premises` proves each is needed. Core's own blocks never use them outside those terms; a domain that does is outside the theorem. `Corpus.refusalLaws` samples `resolvesIn` at a codec a domain hands it, and is not a family of the shipped law-family roster, so this row cannot name it as a discharge and is filed as a premise.",
+      "phase": "fuaran-core#436",
+      "class": "premise",
+      "evidence": {
+        "assumption": "andThen's function and fail's code refuse only at the root with a code other than MissingField and InvalidJson, and a make or ofDecoder reader is sound"
+      }
+    },
+    {
+      "id": "decode-layer-model-bridge",
+      "level": "assumed",
+      "claim": "WHAT THE DECODE-LAYER MODEL IS HANDED RATHER THAN DERIVES (Phase 436). A refusal keeps its `Code` and its `Path` and drops `Expected` and `Message`, as `WireColumn.fst` drops its refusals' prose, so `tagDispatchWith` — which rewrites only `Message` — is `tagDispatch` in the model; the codec's `Schema` (and a field's `Properties` / `Required`) is dropped as descriptive; `intRange lo hi`'s comparison is a host predicate over the opaque integer carrier and `float`'s widening a parameter, as in `WireDecode.fst`; production's filter-then-map (`undeclared`) and its `List.mapi` / `List.choose` / `List.collect` passes are written as the direct recursions they equal. The text layer (`Codec.write` / `read` / `corpus`, `Decoder.parse` / `parseWith` / `ofString`, `DecodeError.ofJsonError`) is `Canonical`'s and the parser's, and is not modelled here. Each is sampled by `decode-layer-differential` and none is proved.",
+      "phase": "fuaran-core#436",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the dropped refusal prose and codec schema, the host range predicate, and the fused list passes are as the model takes them"
+      }
     }
   ]
 }

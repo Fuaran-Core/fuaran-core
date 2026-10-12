@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 322 claims — 233 proved across 31 models, 53 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 330 claims — 237 proved across 32 models, 54 tested, 37 assumed (6 `domain-obligation`, 23 `model-bridge`, 8 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -33,6 +33,8 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `DecodeLayer.fst` | The typed DECODE LAYER and the CODEC COMBINATORS (Phase 436): `DecodePath.resolve`, `DecodeError`'s path operations and `resolvesIn`, every `Decoder` combinator that starts from a `JVal`, and `Codec`'s write and collecting read, clause for clause over `WireDecode`'s `jval` and generic in what they build, with the composed round trip, the collecting reader's totality and refusal paths that resolve proved as laws every block preserves (theorem 22). |
+| `oracle/DecodeLayer.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. Phase 162 added the preorder-position lemma (section 19) and the batch lift (section 20), which retired `covered` and made that diamond unconditional. |
 | `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. Since Phase 175 it is also the first INSTANCE of the kit's `kit/templates/Instance.fst.template`, reproduced from it byte for byte by the `Proofs.Kit` family — see the instantiation contract under Theorem 2. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -659,7 +661,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 34 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 37 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -675,11 +677,11 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 22 rows.
+  `unscheduled` where something could and nobody has. 23 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 6 rows.
+  on. 8 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -731,6 +733,9 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `propagation-evaluator-total` | `premise` | — |
 | `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
 | `column-vector-is-its-contents` | `model-bridge` | `permanent` |
+| `decode-layer-round-trip-premises` | `premise` | — |
+| `decode-layer-refusal-premises` | `premise` | — |
+| `decode-layer-model-bridge` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -983,8 +988,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1208 | 190 | 434 | 30 | 13 | 0 | 3 | 538 |
+| `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
+| **Total** | 1208 | 242 | 434 | 28 | 13 | 0 | 3 | 488 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7002,6 +7007,98 @@ every cell production builds satisfies and the oracle host computes at the edge)
    string order, which this alphabet cannot rank for a plain character; no column holds such a text);
    `civilOfDays` below day `-865565`, where production's truncating division and the model's Euclidean
    one part (every day the canonical form spells is 146,000 days above it); the .NET edge.
+
+## Theorem 22 — the decoder and codec building blocks: composed round trips, a total reader, and refusal paths that resolve (Phase 436)
+
+_(This directory's twenty-second. Every domain decodes untrusted wire input through `Decoder`
+(Phase 310) and builds its codecs from `Codec` (Phase 379); theorem 1 proved the wire decoder total
+and Phase 152 key-order invariant, but the blocks a domain actually composes with were checked by
+example only — about fifty census entries said `measured-elsewhere`. A proof over the blocks,
+generic in what they build, covers every domain's codec at once.)_
+
+`DecodeLayer.fst` models `DecodePath.resolve`, `DecodeError.make` / `under` / `within` /
+`resolvesIn`, every `Decoder` combinator that starts from a `JVal`, and `Codec<'T>`'s `Write` and
+collecting `ReadAll` through `make` / `ofDecoder` / `decoder`, the five leaves, `enum`, `list`, `map`,
+`refine`, `record` / `field` / `optField` / `build` and `case` / `union`, clause for clause over
+`WireDecode.fst`'s `jval`, which it opens. It is GENERIC in the decoded type: a codec is a record of
+two functions over any `Type0`, a partly-declared record carries its constructor's remaining type
+exactly as `CodecFields<'R, 'C>` does, and nothing in the model knows what a domain decodes. A
+refusal keeps its code and its path and drops its prose; the codec's schema is dropped; the four
+text entry points (`Decoder.parse` / `parseWith` / `ofString`, and the codec's `write` / `read` /
+`corpus`) are the parser's and `Canonical`'s.
+
+**Each theorem is a PRESERVATION law** — every block built from parts that have the property has it
+— which is what makes the proof cover a codec nobody has written yet: a domain's codec is a finite
+composition of these blocks, and the property follows by induction on how it was composed.
+
+- **Refusal paths resolve** (`refusal_paths_resolve`, over `sound`). A decoder is sound when every
+  refusal it answers over a value satisfies `DecodeError.resolvesIn` there and is not `InvalidJson`.
+  Every combinator preserves it (`field_sound`, `at_sound`, `map_list_indexed_sound`,
+  `list_all_sound`, `tag_dispatch_sound`, `closed_sound` and the rest), and so does every codec
+  block's collecting reader (`list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`).
+  The content is one lemma, `ok_at_under`: a refusal owed to the value a step reaches is owed, one
+  step longer, to the value the step started from. For every code but `MissingField` that is
+  `resolve`'s own recursion; a `MissingField` names its absent member by the path's LAST step, so the
+  law resolves the path's prefix, and a step prepended to the path is prepended to the prefix — two
+  facts about `List.rev` (`rev_cons`, `rev_snoc`). `InvalidJson` is excluded because it is the one
+  code whose law is "the path is the root", which no step preserves.
+- **Decoder totality** (`strict_reader_total`). Every block is a `Tot` function — `at` terminates on
+  its path, every list walker on its list — and the collecting reader of every codec built from them
+  answers a value or a NON-EMPTY refusal list, so `Codec.decoder`'s `SchemaFault` arm ("a collecting
+  decoder answered no defect and no value") is unreachable and the strict reader is the collecting
+  one's first defect. The non-emptiness rides the same invariant as the refusals (`sound_all`).
+- **Composed round trip** (`build_round_trip`, `union_round_trip`, with `list_round_trip`,
+  `enum_round_trip`, `map_round_trip`, `refine_round_trip` and the leaves). The record invariant
+  `fields_rt` is the design: a record is written in declaration order and read by NAME, so it is
+  stated over every member list that AGREES with the written one on the declared names — which lets
+  the next `field` append a member and lets a union read a case's members past its discriminator.
+  The build-time refusals are exactly the facts the proof spends: `build`, `enum` and `union` answer
+  `Ok` only when nothing repeats (`repeats_nil`) and no case declares the discriminator
+  (`union_faults_nil`).
+
+**Two premises the shard did not name were FALSE, and are refuted rather than assumed.** Read as
+"every refusal any block answers resolves", theorem 3 fails twice: `Decoder.fail MissingField`
+refuses at the empty path, which names no member, so it resolves in no document
+(`fail_missing_never_resolves`), and `Decoder.fail InvalidJson` resolves where it is raised and stops
+one member down (`fail_invalid_json_stops_resolving`); and `Decoder.andThen` raises its function's
+refusal untouched, so a function that refuses with a path of its own refuses wherever that path does
+not resolve (`and_then_needs_root_refusals`). The narrowed claim is the one proved: `fail` is sound
+for every other code, `andThen` when its function refuses only at the root with such a code.
+
+**The record invariants carry explicit triggers.** `fields_rt`, `reads_back`, `case_rt` and `rt` are
+quantified over a record's values and member lists, and stated without a pattern the solver could
+not instantiate them — it picked a trigger inside a recursive predicate's fuel-instrumented
+encoding, and even an `eliminate` restating the definition verbatim failed. Each is now stated as a
+`match` on the projector application with `{:pattern (fs.write_fields x)}` (and its siblings); a
+record invariant in a later model should start there.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** In `DecodeLayer.fst`: `refusal_paths_resolve` with the
+   per-block soundness lemmas and `ok_at_under` / `ok_at_within` under them; `strict_reader_total`
+   and `decoder_total`; `build_round_trip`, `union_round_trip`, `case_round_trip`,
+   `field_round_trip`, `opt_field_round_trip`, `list_round_trip`, `enum_round_trip`,
+   `map_round_trip`, `refine_round_trip` and the leaf round trips; and the three refutations. Rows
+   **`decode-layer-refusals-resolve`**, **`decode-layer-totality`**, **`decode-layer-round-trip`**,
+   **`decode-layer-refuted-premises`**. Checked by the leg at its flags (`--z3rlimit 40 --quake 3`,
+   default fuel, no scoped option), `--report_assumes error` on, no `assume`, no `admit`. Measured
+   red with `Decoder.field`'s refusal not taken under its member: `field_sound` fails.
+2. **Tested.** **`decode-layer-differential`** — four `Proofs.Oracle` cases: every combinator and
+   `DecodeError`'s path operations over 1,500 generated `JVal`s; generated codec shapes built, written
+   and read on both sides, writes and three mutations of each, refusal for refusal by code and path;
+   the theorems' statements held to production over every read; and the go-red, a bridge that drops
+   the first step of every model refusal, which loses on exactly the refusal lists holding a refusal
+   below the root.
+3. **Assumed, and stated as such.** **`decode-layer-round-trip-premises`** — `map`'s `there` inverts
+   `back`, `refine`'s `check` admits every `back`-image, a record's constructor applied to its getters
+   is the value, a case's `inject` inverts its `project`, and a `make` / `ofDecoder` reader reads back
+   its writer: the domain's to keep, and filed as a premise because no family of the `Conformance`
+   roster samples them at a domain's codec. **`decode-layer-refusal-premises`** — `andThen`'s
+   function, `fail`'s code and a `make` reader refuse within the narrowed claim.
+   **`decode-layer-model-bridge`** — the dropped prose and schema, the host range predicate, the
+   fused list passes.
+4. **Not claimed.** The text entry points (theorem 4 is the parser's; `WireCanon` the renderer's);
+   a refusal's `Expected` and `Message`; the schema's agreement with what the reader accepts.
 
 ## Next
 

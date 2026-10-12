@@ -21,6 +21,7 @@ module ModelUnit = Unit
 let twinRoster: (string * (string * (unit -> bool)) list) list =
     [ "DagFold", DagFold.twins |> List.map (fun t -> t.tname, t.tholds)
       "WireDecode", WireDecode.twins |> List.map (fun t -> t.tname, t.tholds)
+      "DecodeLayer", DecodeLayer.twins |> List.map (fun t -> t.tname, t.tholds)
       "TreeOps", TreeOps.twins |> List.map (fun t -> t.tname, t.tholds)
       "Skeleton", Skeleton.twins |> List.map (fun t -> t.tname, t.tholds)
       "Chain", Chain.twins |> List.map (fun t -> t.tname, t.tholds)

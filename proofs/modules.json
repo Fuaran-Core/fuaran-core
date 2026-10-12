@@ -348,6 +348,18 @@
       "fastestPhase": "fuaran-core#428",
       "phase": "fuaran-core#428",
       "note": "Phase 428 — the unit algebra: `src/Fuaran.Core.Unit/Unit.fs` clause for clause over an enumerated ASCII alphabet (the canonical factor product, the vocabulary tables generated from the source, `tryCombine` as a strictly sorted merge, `dimension` / `compatible`, `scale` / `conversionFactor` with Euclid's gcd, `render`, and the iterative `parse` over its frame stack with every refusal class); `combine_comm` / `combine_assoc` / `combine_unit` / `combine_inverse` / `div_is_mul_inverse` (the abelian group, through `ext` and `combine_exp`), `compatible_iff` / `dim_combine`, `scale_combine` / `factor_compose` / `factor_self` / `reduce_exact`, and `parse_render` for every canonical unit. Opens nothing but the library's arithmetic lemmas; default fuel, `--z3rlimit 80` scoped to the component lemma and the loop, `120` to the field reader it feeds in `WireColumn`. SEEDED BY PHASE 428 from one cold observation under the leg's flags: the cone `-Modules Limits,Utf8,JsonParse,WireCanon,Unit,WireColumn,ColumnRefinement` with the dependencies cached ahead of it, 87s, on a 16-processor Windows dev machine with nothing else on it (the contention factor was not computed: no untouched module in the cone carries a measuredSeconds of 5s or more). By the seeding rule the budget is 2 x 87 = 174, rounded up to 180. An earlier 220s observation was of a draft whose vocabulary tables were not yet opaque to the solver and is not a measurement of this module."
+    },
+    {
+      "module": "DecodeLayer",
+      "packages": [
+        "Fuaran.Core.Wire"
+      ],
+      "budgetSeconds": 170,
+      "measuredSeconds": 84,
+      "fastestSeconds": 44,
+      "fastestPhase": "fuaran-core#436",
+      "phase": "fuaran-core#436",
+      "note": "Phase 436 — the typed decode layer and the codec combinators, generic in what they build: `DecodePath.resolve`, `DecodeError.make` / `under` / `within` / `resolvesIn`, every `Decoder` combinator that starts from a `JVal`, and `Codec`'s write and collecting read through `record` / `field` / `optField` / `build`, `case` / `union`, `enum`, `list`, `map`, `refine`, `make` / `ofDecoder` / `decoder`, over `WireDecode`'s `jval`, which it opens. Theorem 3 as a preservation law per block through the transport lemma `ok_at_under`, theorem 2 as `strict_reader_total`, theorem 1 as `build_round_trip` / `union_round_trip` and the leaf, list, enum, map and refine round trips; three refutations (`fail_missing_never_resolves`, `fail_invalid_json_stops_resolving`, `and_then_needs_root_refusals`). Default fuel, no scoped option; the record invariants carry explicit `{:pattern}` triggers on the projector applications (`fs.write_fields x`, `fs.read_fields ms`, `c.write v`), without which the solver cannot instantiate them. SEEDED BY PHASE 436 from three cold observations under the leg's flags (`--z3rlimit 40 --quake 3 --report_assumes error`, WireDecode checked ahead of it in the same cone) on a 12-processor Windows dev machine: 45s by hand and 44s in the kit's `-Modules WireDecode,DecodeLayer -Extract` run on a quiet machine, and 84s in the `-Since origin/main` cone with 0.6 GB of physical memory free, where WireDecode beside it took 65s against its recorded 33s. By the seeding rule the budget is twice the slowest, 2 x 84 = 168, rounded up to 170; the fastest genuine cold check is 44s."
     }
   ]
 }

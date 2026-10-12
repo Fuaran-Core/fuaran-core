@@ -176,6 +176,7 @@
     <Compile Include="ProofOracle.ColumnRefinementTests.fs" />
     <Compile Include="ProofOracle.DagFoldTests.fs" />
     <Compile Include="ProofOracle.DecimalTextTests.fs" />
+    <Compile Include="ProofOracle.DecodeLayerTests.fs" />
     <Compile Include="ProofOracle.JsonParseTests.fs" />
     <Compile Include="ProofOracle.NormalizeTests.fs" />
     <Compile Include="ProofOracle.PreservationTests.fs" />
