@@ -4745,7 +4745,8 @@
         "model": "proofs/TreeOps.fst",
         "cases": [
           "the extracted Tree.Index model is production's index over the generated pool, and is the walk",
-          "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor"
+          "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor",
+          "the stamp is a 32-bit detector: a pinned collision reads a changed tree as fresh"
         ],
         "operations": [
           "Tree.Index.build",
@@ -4757,7 +4758,7 @@
     {
       "id": "index-stamp-separates",
       "level": "assumed",
-      "claim": "THE STAMP'S HASH, NAMED (Phase 438). `index-freshness-tracks-change` is proved over the stamp's pre-image, the multiset of node records; production compares a 32-bit sum of FNV-1a terms over it. Two different multisets whose sums agree read as fresh, so a stale index can pass `Index.isFreshFor` — which the `Fingerprint` field's own documentation states (a detector, not a guarantee). What is assumed is that the trees an index is checked against do not collide with the tree it was built from; the differential reports any collision it meets as a failure. The record encoding itself is not assumed: `Hash.canonicalFields` is injective over field lists (`proofs/Query.fst`).",
+      "claim": "THE STAMP'S HASH, NAMED (Phase 438). `index-freshness-tracks-change` is proved over the stamp's pre-image, the multiset of node records; production compares a 32-bit sum of FNV-1a terms over it. Two different multisets whose sums agree read as fresh, so a stale index can pass `Index.isFreshFor` — which the `Fingerprint` field's own documentation states (a detector, not a guarantee). What is assumed is that the trees an index is checked against do not collide with the tree it was built from; the differential reports any collision it meets as a failure, and pins one it did not draw: two leaf kinds whose terms collide, so an `UpdateNode` between them reads fresh while `Index.tryFind` hands back the old kind (`the stamp is a 32-bit detector`). The record encoding itself is not assumed: `Hash.canonicalFields` is injective over field lists (`proofs/Query.fst`).",
       "phase": "fuaran-core#438",
       "class": "premise",
       "evidence": {

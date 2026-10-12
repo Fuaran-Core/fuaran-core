@@ -923,4 +923,29 @@ let tests =
 
               Expect.isTrue
                   (t.Diffs |> List.forall (fun d -> d.StartsWith "isFreshFor"))
-                  (sprintf "only the freshness arm moved — got:\n%s" (List.head t.Diffs)) ]
+                  (sprintf "only the freshness arm moved — got:\n%s" (List.head t.Diffs))
+
+          testCase "the stamp is a 32-bit detector: a pinned collision reads a changed tree as fresh"
+          <| fun _ ->
+              // Why `index-stamp-separates` is a PREMISE and not a theorem. The two kinds below were
+              // found by a birthday search over `Hash.fnv1a32 (Hash.canonicalFields [ "x"; kind; "0" ])`
+              // — a leaf's term in the stamp — so an `UpdateNode` from one to the other leaves the sum
+              // where it was. Production reads the edited tree as fresh and its index hands back the
+              // OLD kind; the model, which keeps the stamp's pre-image, reads it as stale. If the
+              // stamp is ever strengthened this case goes red, and the premise row should go with it.
+              let before = RNode.node "root" "doc" [ RNode.node "x" "k79499" [] ]
+              let after = RNode.node "root" "doc" [ RNode.node "x" "k414100" [] ]
+              let ix = Tree.Index.build nodew idw before
+
+              Expect.isTrue (Tree.Index.isFreshFor nodew idw after ix) "production reads the kind change as fresh"
+
+              Expect.equal
+                  (Tree.Index.tryFind idw "x" ix |> Option.map _.Kind)
+                  (Some "k79499")
+                  "and its index hands back the node as it was"
+
+              Expect.equal (Tree.tryFind nodew idw "x" after |> Option.map _.Kind) (Some "k414100") "not as it is"
+
+              Expect.isFalse
+                  (TreeOps.ix_is_fresh_for (toModelTree after) (TreeOps.ix_build (toModelTree before)))
+                  "the model's pre-image sees the change" ]
