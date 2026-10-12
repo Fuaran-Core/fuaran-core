@@ -1652,9 +1652,9 @@ let proofCoverageTests =
                   (List.length inputs.Census)
                   "no two published operations share a spelling, so a name maps one operation"
 
-              // Phase 386: the obsolete class has no subject at a major boundary — the `OneDotZero`
-              // family holds that no shipped member carries `System.Obsolete` from 1.0.0 — so the
-              // attribute reader is probed by the fixture tests below (`Thing.old`), not by the tree.
+              // Phase 386: the obsolete class has no subject today — no shipped member carries
+              // `System.Obsolete` at 0.37.0, and the `OneDotZero` family asserts that from major 1 —
+              // so the attribute reader is probed by the fixture tests below (`Thing.old`), not by the tree.
               Expect.isEmpty
                   (Set.difference inputs.Obsolete (inputs.Census |> List.map _.Name |> Set.ofList))
                   "every operation the obsolete reading names is a published one"

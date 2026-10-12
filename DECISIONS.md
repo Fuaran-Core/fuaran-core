@@ -1,5 +1,70 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-12 — D147: the `1.0.0` draft is released as `0.37.0`, a minor of the `0.x` line; the `OneDotZero` family stays as it is, vacuous by name at major 0 and armed for the eventual `1.0.0`; D101's gate and the surface guard do not read the major and are unchanged
+
+**Recorded by Phase 444, before any other edit of it.** The operator ruled on 2026-10-12 that Core is
+not published as `1.0.0`, and that a new minor is published where a release is needed. One is needed:
+`fuaran-core-compute` pins the draft through the local feed (its Phase 423), so its public CI cannot
+restore Core until a version is on the registry, and the typed-column consumer wave (Phase 424) cannot
+move a public-path consumer onto a package nobody can fetch. The draft's contents, every phase since
+`v0.36.0` (the `1.0` work from Phase 386 and the columnar programme from Phase 417), are therefore
+released as `0.37.0`, the next minor after `v0.36.0`. Through the `0.x` line a breaking class rides a
+minor (STABILITY.md, "Versioning policy"), so nothing in the slot needs to move to fit the number.
+
+**D147.1 — where the slot's name is load-bearing, and what each place does at `0.37.0`.** Read at
+`9914c37` before the rename:
+
+- `<Version>` in `Directory.Build.props` is the single source. The kit's `kitVersion` stamp
+  (`conformance/laws/*.json`), the IDL generator's banner in the committed generated sources and the
+  `OneDotZero` family's major are all derived from it.
+- The release ledger (`docs/releases/1.0.0.md` and its index row) is held by the `Release record` and
+  `Package roster` families: the untagged standing `<Version>` must have a file headed `DRAFT` and an
+  index row word for word. The file becomes `docs/releases/0.37.0.md`, headed `0.37.0 — DRAFT`; the
+  migrations follow it (`docs/migrations/0.37.0.md`, `docs/migrations/0.37.0-typed-column.md`),
+  because a migration named for a version that is never published sends a consumer to the wrong
+  document.
+- The README's arrival stamps are held by `ReadmeClaims`: an unreleased stamp must name the standing
+  `<Version>` and its `DRAFT` heading, so `(since 1.0.0, unreleased)` becomes `(since 0.37.0, unreleased)`.
+- STABILITY.md's status line ("the `1.x` line … the `0.x` line ended at `0.36.0`") and SECURITY.md's
+  supported-versions sentence ("the `0.x` line [is] not maintained") were written for a `1.0.0` that is
+  not being published. Both are restated for the `0.x` line; the semver-from-`1.0.0` policy itself
+  stands as the policy of the eventual major.
+- The witness freeze's pre-`1.0` widening route (STABILITY.md, "Witness-record field freeze") is open
+  again at `0.37.x`, exactly as written: it was always conditioned on "until the `1.0` cut".
+
+**D147.2 — the `OneDotZero` family: unchanged, and what it asserts at `0.37.0`.** It reads the major of
+`<Version>` and was written to be vacuous by name at major 0 and live from major 1 (D133). At `1.0.0`
+laws 1 (no obsolete member), 2 (every witness frozen) and 4 (no breaking move within a major, held
+because the major had advanced past `v0.36.0`'s) HELD, and law 3 (frozen fields as tagged) was vacuous
+waiting for `v1.0.0`. At `0.37.0` all four are vacuous by name. That is the family's meaning, not a
+loss to repair: through the `0.x` line an obsolete forward and an unfrozen witness are permitted (the
+versioning policy says so), so a law asserting either at major 0 would refuse what the policy allows.
+What `0.37.0` keeps is that the tree is `1.0`-ready as released: no obsolete member stands and no
+witness is unfrozen today, and the vacuous lines print both counts, so a reader of any gate log sees
+the moment either becomes non-zero. **Armed for `1.0.0` by construction:** the day `<Version>` reads
+`1.x`, laws 1, 2 and 4 are live and law 3 waits for `v1.0.0` by name, with no edit to the family. The
+go-red plants hand each law major 1 explicitly, so the laws' logic is exercised at every version, and
+the companion test holding `frozen-witness-fields.txt` to the live list is held at every major. No
+check is deleted, weakened or re-pointed.
+
+**D147.3 — D101's gate and the surface guard.** The shadowing rule (`PublicSurface`, "no case name is
+carried unqualified by two public unions") reads no version and stays live at every version. The
+surface guard's since-tag report reads the newest tag (`v0.36.0`) and prints `ADVANCE <Version>` for a
+breaking class; `0.37.0` is that advance under the `0.x` policy. Neither changes. No public surface
+moves in Phase 444: every `api/` baseline is byte-identical across it.
+
+**D147.4 — the records written before this entry.** D133 to D146, `proofs.json`, the proof models'
+comments and `proofs/README.md` say "`1.0.0`" for this slot. They are dated records and verified-model
+text and are not rewritten: every "`1.0.0`" written before Phase 444 that names the draft slot names the
+slot released as `0.37.0`. Doc comments in the shipped sources that say a member "left at `1.0.0`" are
+consumer-facing and are re-pointed to `0.37.0`, because a consumer reads them against the version they
+restored.
+
+**D147.5 — the release is the operator's.** Phase 444 renames and gates; it runs no `version` verb and
+tags nothing. The freeze, the release (which tags `v0.37.0` and fires the publish workflow) and the
+registry probes follow STABILITY.md's release sequence, and the receiving Fable gate (D55) is run
+against the `0.37.0` candidate before the tag.
+
 ## 2026-10-10 — D146: a stream load answers `StreamLoadFault<'Break>`, a closed union over its unreadable lines, its integrity break and the ops its witness could not decode; a decode failure is reported, never fatal to the verification, because an undecodable op is hashed over its stored text; and `Dag.LaneLoadFault` folds into it
 
 **Context.** Core's stream loads answered strings: `OpStream.fromJsonl` / `fromJsonlVerified` /

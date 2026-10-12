@@ -24,7 +24,7 @@ namespace Fuaran.Core
 // non-IDL package outside it, an OO interface plus a class keyed by raw
 // strings. That OO surface (`Fuaran.Core.Observer.IObserver`,
 // `InMemoryObserver`) stayed one draft as an adapter over these functions and
-// left at `1.0.0` (Phase 386): subscription is host state, so a host keeps its
+// left at `0.37.0` (Phase 386): subscription is host state, so a host keeps its
 // subscriber list beside the `ObserverState` it threads.
 //
 // **FSharp.Core only + Fable-clean.** The state is immutable maps and

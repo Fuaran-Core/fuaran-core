@@ -1085,7 +1085,7 @@ module internal AlgebraTreeLaws =
     /// count depend on a witness it does not take.
     ///
     /// `family` is the roster id the guard is labelled with — `Conformance.keyedChildrenLawsAt`, or
-    /// the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    /// the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let keyedChildrenLawsAt
         (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)

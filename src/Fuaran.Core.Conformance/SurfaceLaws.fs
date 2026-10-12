@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 /// A witness record's field list, by name and in declaration order (Phase 391; a pair before
-/// `1.0.0`): an entry of `Conformance.frozenWitnessFields` (the freeze's pin) or of
+/// `0.37.0`): an entry of `Conformance.frozenWitnessFields` (the freeze's pin) or of
 /// `Conformance.declaredWitnessFields` (what the record declares).
 type WitnessFields =
     {
@@ -12,7 +12,7 @@ type WitnessFields =
     }
 
 /// A public witness record declared OUTSIDE the field freeze, with why (Phase 391; a pair before
-/// `1.0.0`): an entry of `Conformance.unfrozenWitnesses`.
+/// `0.37.0`): an entry of `Conformance.unfrozenWitnesses`.
 type FreezeExemption =
     {
         /// The record's name without its generic arity.
@@ -546,7 +546,7 @@ module internal SurfaceLaws =
     /// when the plumbing is the question, never instead of it.
     ///
     /// Phase 390: `aiSurfaceKitPolicyLawsAt` (the kit-policy family, at the domain's witness); `family`
-    /// labels the guards, or the obsolete `aiSurfaceLawsUnderKitPolicy` id until `1.0.0`.
+    /// labels the guards, or the obsolete `aiSurfaceLawsUnderKitPolicy` id until `0.37.0`.
     let aiSurfaceKitPolicyLawsAt
         (family: string)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
@@ -586,7 +586,7 @@ module internal SurfaceLaws =
           "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
           // Phase 298 — the observer seam's witness, frozen as it ships
           "ObserverWitness", [ "Derive"; "Options" ]
-          // Phase 391 — `Body` left at `1.0.0`: a frozen record carries data, not behaviour, and
+          // Phase 391 — `Body` left at `0.37.0`: a frozen record carries data, not behaviour, and
           // the host body is a per-call argument of the capability family (DECISIONS.md D138).
           "CapabilitySeamWitness", [ "Registry"; "Dispatch"; "GenCall" ]
           "QuerySeamWitness", [ "Queries"; "Dispatch"; "GenQuery" ]

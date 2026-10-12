@@ -1000,15 +1000,15 @@ let tests =
 
               Expect.equal (packageKey "api/Fuaran.Core.Unit.txt") (Some "package:Unit") "the key of a baseline"
               Expect.equal (packageKey "api/wire") None "a non-baseline path is no package"
-              Expect.equal (arrivalOf releases current "1.0.0" "Unit") (Some(Unreleased "1.0.0")) "the package"
+              Expect.equal (arrivalOf releases current "0.37.0" "Unit") (Some(Unreleased "0.37.0")) "the package"
 
               Expect.equal
-                  (arrivalOf releases (Set.remove "package:Unit" current) "1.0.0" "Unit")
+                  (arrivalOf releases (Set.remove "package:Unit" current) "0.37.0" "Unit")
                   (Some(Released "0.33.0"))
                   "without the package's baseline the member's arrival stands - the go-red"
 
               Expect.equal
-                  (arrivalOf releases current "1.0.0" "IllFormedUtf16.Unit")
+                  (arrivalOf releases current "0.37.0" "IllFormedUtf16.Unit")
                   (Some(Released "0.33.0"))
                   "the member"
           }

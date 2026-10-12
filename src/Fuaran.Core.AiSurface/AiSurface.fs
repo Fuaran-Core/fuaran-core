@@ -524,7 +524,7 @@ module Proposals =
 
     /// Reject a pending proposal with a reason. Recorded, never dropped — and
     /// the artifact is never touched (a denied proposal never mutates). The proposal id precedes the
-    /// reason, as it follows the instant in `approve` (Phase 391; `reason` came first before `1.0.0`).
+    /// reason, as it follows the instant in `approve` (Phase 391; `reason` came first before `0.37.0`).
     let reject
         (approver: string)
         (at: string)

@@ -15,7 +15,7 @@ module Decode =
     /// of a `Fault`. A codec with a typed error envelope (the columnar codec's `ColumnError`) reuses
     /// the same traversal and keeps its own codes, rather than carrying a private copy of each
     /// combinator — which is what it did until this phase. (Their `string`-error twins, `getProp`
-    /// to `mapList`, left at `1.0.0`: `Decoder` reads the same members with a coded refusal.)
+    /// to `mapList`, left at `0.37.0`: `Decoder` reads the same members with a coded refusal.)
     type Fault =
         /// An object had no member of this name.
         | MissingProperty of name: string

@@ -51,7 +51,7 @@ type ClosureSig =
     }
 
 /// A closed string FORMAT a hosted slot's declared wire form may name (Phase 252; a `string`
-/// over [[HostedFormat.known]] before `1.0.0`, a union since Phase 391). The names are JSON
+/// over [[HostedFormat.known]] before `0.37.0`, a union since Phase 391). The names are JSON
 /// Schema's spellings — [[HostedFormat.name]] — and [[HostedFormat.admits]] is the one
 /// definition of what each admits.
 [<RequireQualifiedAccess>]

@@ -81,7 +81,7 @@ type LaneGen<'Op, 'State> =
         Lanes: int -> ConfRng.T -> 'Op list list * ConfRng.T
     }
 
-/// The lane trial `FoldConfluence.laneDag` builds (Phase 391; a positional triple before `1.0.0`):
+/// The lane trial `FoldConfluence.laneDag` builds (Phase 391; a positional triple before `0.37.0`):
 /// the DAG, its base node, and the lane heads — exactly the three things `Dag.reconcileMany`
 /// takes beside the domain's witness and state.
 type LaneDag<'Op> =

@@ -506,7 +506,7 @@ module Families =
           // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
           //
           // Phase 297 — the op-forgery arm is demanded by the same guard.
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "attestationLawsAt"
@@ -515,7 +515,7 @@ module Families =
               []
               (Guarded [ "signing outcome and op tamper" ])
               (Built, "op and actor forgeries are built each iteration; its guard is on the signing outcome")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "compositionLawsAt"
@@ -524,7 +524,7 @@ module Families =
               []
               (Unconditional "each iteration composes a drawn pair and compares against the nested application")
               (NoRefusal, "a compose Error only fails a law or is compared opaquely")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "compositionPilotAt"
@@ -534,7 +534,7 @@ module Families =
               (Unconditional
                   "it runs `compositionLaws` (unconditional above) and BUILDS both applyMemo arms across the witness boundary each iteration — a closed inner sub-function memoised, and the composed outer compared against direct apply")
               (NoRefusal, "as compositionLaws; a memo Error only fails a law")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "memoLawsAt"
@@ -543,7 +543,7 @@ module Families =
               []
               (Unconditional "each iteration forces a miss then a hit, and an effecting bypass, by construction")
               (NoRefusal, "every Error arm only fails a law")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "memoSoundnessLawsAt"
@@ -552,7 +552,7 @@ module Families =
               []
               (Unconditional "each iteration applies the caller-supplied under-declared function twice")
               (NoRefusal, "an Error only fails a law; the cache bypass is not a refusal")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "functionVerifyLawsAt"
@@ -562,7 +562,7 @@ module Families =
               (Unconditional "each iteration verifies a SOUND and a BROKEN function, both caller-supplied")
               (DrawnMissIsRed,
                "the broken function is caught only when genParams reaches its bad sub-space, and a broken function that verifies clean is itself a red law")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "verifyHonestyLawsAt"
@@ -576,7 +576,7 @@ module Families =
           // trees" was false: each iteration hashes ONE tree against a seen-map, so a generator that
           // draws one tree every time compared nothing and passed green. The family now counts the
           // distinct trees it saw and the pairs it compared, as `codecInjectivityLaws` does.
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "encoderInjectivityLawsAt"
@@ -586,7 +586,7 @@ module Families =
               (Guarded [ "distinct tree (seen / compared)" ])
               (NoRefusal, "no refused outcome is read")
           // Phase 390 — the naming rule applied: `projectionLawsAt` is the domain-witness spelling; the
-          // bare forward left at `1.0.0` (Phase 386).
+          // bare forward left at `0.37.0` (Phase 386).
           c
               "projectionLawsAt"
               [ "ProjectionWitness" ]
@@ -596,7 +596,7 @@ module Families =
               (NoRefusal, "a re-import Error only fails a law")
           // Phase 298 — the observer seam's family: every arm is built each iteration (a drawn
           // registration script, a ring of parents). Phase 390 — `observerLawsAt` is its domain-witness
-          // spelling; the bare forward, and the adapter laws, left at `1.0.0` (Phase 386).
+          // spelling; the bare forward, and the adapter laws, left at `0.37.0` (Phase 386).
           c
               "observerLawsAt"
               [ "ObserverWitness" ]
@@ -620,7 +620,7 @@ module Families =
               (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
               (Drawn,
                "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one, and since Phase 246 the deny and park arms are reached only when the domain's own Decide chooses them; unknown tool and unknown id are built")
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "aiSurfaceKitPolicyLawsAt"
@@ -667,7 +667,7 @@ module Families =
           // domain's to answer. A witness that declares NO keyed position is the one case that is
           // not an unreached arm — it is a declaration that there is nothing to reach — and the
           // family reports that as its adequacy line rather than as a missed verdict. Phase 390 —
-          // `keyedChildrenLawsAt` is its domain-witness spelling; the bare forward left at `1.0.0`
+          // `keyedChildrenLawsAt` is its domain-witness spelling; the bare forward left at `0.37.0`
           // (Phase 386).
           c
               "keyedChildrenLawsAt"
@@ -727,7 +727,7 @@ module Families =
               (Drawn,
                "IllegalChild is reached by drawn ops and by a graft built from the drawn tree's first illegal pair; a grammar the generator never violates reaches neither, which the grammar-refusal guard reports")
           // Phase 390 — `referenceLawsAt` is the domain-witness spelling; the bare forward left at
-          // `1.0.0` (Phase 386).
+          // `0.37.0` (Phase 386).
           c
               "referenceLawsAt"
               [ "RefWitness"; "NodeWitness"; "IdWitness"; "OpGen" ]
@@ -756,7 +756,7 @@ module Families =
           // Phase 286 — the same declaration, handed to the engine: the collisions the unkeyed
           // engine is blind to are BUILT through `PlaceKeyedChild`, and the engine's refusal is
           // held to the domain's own walk over them.
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "keyedApplyLawsAt"
@@ -773,7 +773,7 @@ module Families =
           // Phase 247 — arbitration at a domain's own footprint and applicability, held to the keyed
           // engine the accepted scripts land with. The container-illegal proposal and the keyed-id
           // clash are BUILT; the rest of the rejected bucket is drawn, as in `arbitrationLaws`.
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           c
               "keyedArbitrationLawsAt"
@@ -797,7 +797,7 @@ module Families =
           // clean node reused from `prior`, and an edited evaluator that failed. A domain whose edits
           // all move the dependency map reaches none of them, and the guard says so. Phase 390 —
           // `propagationEvaluatorLawsAt` is its domain-witness spelling and takes the ladder row; the
-          // bare forward left at `1.0.0` (Phase 386).
+          // bare forward left at `0.37.0` (Phase 386).
           c
               "propagationEvaluatorLawsAt"
               [ "EvaluatorWitness" ]
@@ -1049,7 +1049,7 @@ module Families =
           // Phase 349 — the sanitisation floor, at a host's `SanitizeWitness` (`SanitizeWitness.core`
           // for Core's own). Every arm is built each iteration: the pinned vectors on the first, drawn
           // splices on every one. Phase 390 — `sanitizeLawsAt` is its witness spelling; the bare forward
-          // left at `1.0.0` (Phase 386).
+          // left at `0.37.0` (Phase 386).
           c
               "sanitizeLawsAt"
               [ "SanitizeWitness" ]
@@ -1198,7 +1198,7 @@ module Families =
                   "the handed rows, walked whole: every row is evaluated, and the corpus law reds a set with none")
               (NoRefusal, "every row is a computed value; no refused outcome is read")
 
-          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `1.0.0`
+          // Phase 390 — the `…At` row is the domain-witness spelling; its bare forward left at `0.37.0`
           // (Phase 386).
           f
               "FoldConfluence"

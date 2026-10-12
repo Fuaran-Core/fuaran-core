@@ -238,7 +238,7 @@ module Dag =
 
     /// The DAG: nodes keyed by content hash.
     ///
-    /// OPAQUE since `1.0.0` (Phase 386): the constructor is private, so a DAG is built through this
+    /// OPAQUE since `0.37.0` (Phase 386): the constructor is private, so a DAG is built through this
     /// module — `empty`, `append` and its kin, the readers, or `ofNodes`, which refuses a map whose
     /// key and node id disagree. While the record was public, `{ Nodes = … }` could file a node under
     /// a key that was not its id, and every walk that looks a parent up by id then read a different

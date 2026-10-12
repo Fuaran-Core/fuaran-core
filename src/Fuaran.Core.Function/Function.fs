@@ -265,7 +265,7 @@ type MemoCache<'Node> =
         Bypasses: int
     }
 
-/// One inner function of a memoised composition (Phase 391; a positional triple before `1.0.0`):
+/// One inner function of a memoised composition (Phase 391; a positional triple before `0.37.0`):
 /// what `Function.applyMemoComposed` applies through the memo and composes into the outer.
 type MemoStep<'Node> =
     {
