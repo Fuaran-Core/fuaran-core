@@ -102,31 +102,31 @@ let keyedFootprint (op: KOp) : Footprint =
 let private surfaceFootprint (op: KOp) : Footprint = Ops.footprint knodew idw [ op ]
 
 // ---------------------------------------------------------------------------
-//  The plan domain (`FoldConfluenceTests`) — a non-tree state, its own footprint
+//  The plan domain (`FoldFixtures`) — a non-tree state, its own footprint
 // ---------------------------------------------------------------------------
 
-let private genPlanOpBlind (rng: ConfRng.T) : FoldConfluenceTests.PlanOp * ConfRng.T =
+let private genPlanOpBlind (rng: ConfRng.T) : FoldFixtures.PlanOp * ConfRng.T =
     let items = [ for i in 1..8 -> "p" + string i ]
     let kind, r1 = ConfRng.intBelow 4 rng
 
     match kind with
     | 0 ->
         let v, r2 = ConfRng.intBelow 4 r1
-        FoldConfluenceTests.AddItem("n" + string v, "t"), r2
+        FoldFixtures.AddItem("n" + string v, "t"), r2
     | 1 ->
         let i, r2 = ConfRng.choose items r1
         let t, r3 = ConfRng.intBelow 3 r2
-        FoldConfluenceTests.Retitle(i, "title-" + string t), r3
+        FoldFixtures.Retitle(i, "title-" + string t), r3
     | 2 ->
         let i, r2 = ConfRng.choose items r1
-        FoldConfluenceTests.SetShipped i, r2
+        FoldFixtures.SetShipped i, r2
     | _ ->
         let i, r2 = ConfRng.choose items r1
         let d, r3 = ConfRng.choose (items @ [ "n0"; "n1" ]) r2
-        FoldConfluenceTests.AddDep(i, d), r3
+        FoldFixtures.AddDep(i, d), r3
 
-let private planGen: StreamGen<FoldConfluenceTests.PlanOp, FoldConfluenceTests.Plan> =
-    { State0 = FoldConfluenceTests.basePlan
+let private planGen: StreamGen<FoldFixtures.PlanOp, FoldFixtures.Plan> =
+    { State0 = FoldFixtures.basePlan
       Op = genPlanOpBlind }
 
 // ---------------------------------------------------------------------------
@@ -206,9 +206,9 @@ let tests =
                 <| fun _ ->
                     let results =
                         Conformance.footprintLawsAt
-                            FoldConfluenceTests.planW
-                            FoldConfluenceTests.planFootprint
-                            FoldConfluenceTests.planHash
+                            FoldFixtures.planW
+                            FoldFixtures.planFootprint
+                            FoldFixtures.planHash
                             planGen
                             2492
                             300
@@ -217,22 +217,16 @@ let tests =
 
                 testCase "a plan footprint that drops Retitle's content write is RED"
                 <| fun _ ->
-                    let dropped (op: FoldConfluenceTests.PlanOp) =
+                    let dropped (op: FoldFixtures.PlanOp) =
                         match op with
-                        | FoldConfluenceTests.Retitle(id, _) ->
-                            { FoldConfluenceTests.planFootprint op with
+                        | FoldFixtures.Retitle(id, _) ->
+                            { FoldFixtures.planFootprint op with
                                 ContentWrites = Set.empty
                                 Reads = Set.singleton id }
-                        | _ -> FoldConfluenceTests.planFootprint op
+                        | _ -> FoldFixtures.planFootprint op
 
                     let results =
-                        Conformance.footprintLawsAt
-                            FoldConfluenceTests.planW
-                            dropped
-                            FoldConfluenceTests.planHash
-                            planGen
-                            2492
-                            300
+                        Conformance.footprintLawsAt FoldFixtures.planW dropped FoldFixtures.planHash planGen 2492 300
 
                     Expect.isNonEmpty (failedNamed "footprint soundness" results) "two retitles of one item collide"
 
@@ -276,18 +270,18 @@ let tests =
                 <| fun _ ->
                     // every draw adds a freshly numbered plan item — under the plan's honest
                     // footprint no two scripts ever touch one address
-                    let fresh: StreamGen<FoldConfluenceTests.PlanOp, FoldConfluenceTests.Plan> =
-                        { State0 = FoldConfluenceTests.basePlan
+                    let fresh: StreamGen<FoldFixtures.PlanOp, FoldFixtures.Plan> =
+                        { State0 = FoldFixtures.basePlan
                           Op =
                             fun r ->
                                 let v, r' = ConfRng.next r
-                                FoldConfluenceTests.AddItem("u" + string v, "t"), r' }
+                                FoldFixtures.AddItem("u" + string v, "t"), r' }
 
                     let results =
                         Conformance.footprintLawsAt
-                            FoldConfluenceTests.planW
-                            FoldConfluenceTests.planFootprint
-                            FoldConfluenceTests.planHash
+                            FoldFixtures.planW
+                            FoldFixtures.planFootprint
+                            FoldFixtures.planHash
                             fresh
                             2495
                             50
@@ -302,12 +296,12 @@ let tests =
               "FoldConfluence.laneDag"
               [ testCase "is the construction foldOnce folds: a hand-built DAG of the same lanes has the same ids"
                 <| fun _ ->
-                    let w = FoldConfluenceTests.planW
-                    let baseOp = FoldConfluenceTests.SetShipped "p1"
+                    let w = FoldFixtures.planW
+                    let baseOp = FoldFixtures.SetShipped "p1"
 
                     let lanes =
-                        [ [ FoldConfluenceTests.Retitle("p2", "a") ]
-                          [ FoldConfluenceTests.SetShipped "p4"; FoldConfluenceTests.Retitle("p5", "b") ]
+                        [ [ FoldFixtures.Retitle("p2", "a") ]
+                          [ FoldFixtures.SetShipped "p4"; FoldFixtures.Retitle("p5", "b") ]
                           [] ]
 
                     let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
@@ -348,40 +342,32 @@ let tests =
 
                 testCase "identical lanes do not collapse: each lane has its own head"
                 <| fun _ ->
-                    let lane = [ FoldConfluenceTests.Retitle("p2", "same") ]
+                    let lane = [ FoldFixtures.Retitle("p2", "same") ]
 
                     let trial =
                         FoldConfluence.laneDag
                             OpStream.defaultHash
-                            FoldConfluenceTests.planW
-                            (FoldConfluenceTests.SetShipped "p1")
+                            FoldFixtures.planW
+                            (FoldFixtures.SetShipped "p1")
                             [ lane; lane; lane ]
 
                     Expect.equal (List.length (List.distinct trial.Heads)) 3 "three distinct heads"
 
                 testCase "the typed conflicts read off laneDag are the halt foldOnce reports"
                 <| fun _ ->
-                    let w = FoldConfluenceTests.planW
-                    let baseOp = FoldConfluenceTests.SetShipped "p1"
+                    let w = FoldFixtures.planW
+                    let baseOp = FoldFixtures.SetShipped "p1"
 
                     let lanes =
-                        [ [ FoldConfluenceTests.AddItem("n0", "left") ]
-                          [ FoldConfluenceTests.Retitle("p3", "middle") ]
-                          [ FoldConfluenceTests.AddItem("n0", "right") ] ]
+                        [ [ FoldFixtures.AddItem("n0", "left") ]
+                          [ FoldFixtures.Retitle("p3", "middle") ]
+                          [ FoldFixtures.AddItem("n0", "right") ] ]
 
                     let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
                     let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
                     let cs =
-                        match
-                            Dag.reconcileMany
-                                w
-                                FoldConfluenceTests.planFootprint
-                                dag
-                                baseId
-                                FoldConfluenceTests.basePlan
-                                heads
-                        with
+                        match Dag.reconcileMany w FoldFixtures.planFootprint dag baseId FoldFixtures.basePlan heads with
                         | Error(ReconcileFault.LanesInterfere cs) -> cs
                         | other -> failtestf "expected the lanes to interfere, got %A" other
 
@@ -392,10 +378,10 @@ let tests =
                     let outcome =
                         FoldConfluence.foldOnce
                             w
-                            FoldConfluenceTests.planFootprint
+                            FoldFixtures.planFootprint
                             OpStream.defaultHash
-                            FoldConfluenceTests.planHash
-                            FoldConfluenceTests.basePlan
+                            FoldFixtures.planHash
+                            FoldFixtures.basePlan
                             baseOp
                             lanes
 
@@ -406,44 +392,34 @@ let tests =
 
                 testCase "a folding lane set: the script reconciled off laneDag replays to the state foldOnce hashes"
                 <| fun _ ->
-                    let w = FoldConfluenceTests.planW
-                    let baseOp = FoldConfluenceTests.SetShipped "p1"
+                    let w = FoldFixtures.planW
+                    let baseOp = FoldFixtures.SetShipped "p1"
 
                     let lanes =
-                        [ [ FoldConfluenceTests.Retitle("p2", "a") ]
-                          [ FoldConfluenceTests.SetShipped "p4" ]
-                          [ FoldConfluenceTests.AddItem("n1", "c") ] ]
+                        [ [ FoldFixtures.Retitle("p2", "a") ]
+                          [ FoldFixtures.SetShipped "p4" ]
+                          [ FoldFixtures.AddItem("n1", "c") ] ]
 
                     let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
                     let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
                     let final =
-                        match
-                            Dag.reconcileMany
-                                w
-                                FoldConfluenceTests.planFootprint
-                                dag
-                                baseId
-                                FoldConfluenceTests.basePlan
-                                heads
-                        with
+                        match Dag.reconcileMany w FoldFixtures.planFootprint dag baseId FoldFixtures.basePlan heads with
                         | Ok script ->
                             script
-                            |> List.fold
-                                (fun acc op -> acc |> Result.bind (w.Apply op))
-                                (Ok FoldConfluenceTests.basePlan)
+                            |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok FoldFixtures.basePlan)
                         | Error e -> failtestf "expected a clean fold, got %A" e
 
                     let outcome =
                         FoldConfluence.foldOnce
                             w
-                            FoldConfluenceTests.planFootprint
+                            FoldFixtures.planFootprint
                             OpStream.defaultHash
-                            FoldConfluenceTests.planHash
-                            FoldConfluenceTests.basePlan
+                            FoldFixtures.planHash
+                            FoldFixtures.basePlan
                             baseOp
                             lanes
 
                     match final with
-                    | Ok p -> Expect.equal outcome (LaneFolded(FoldConfluenceTests.planHash p)) "one state"
+                    | Ok p -> Expect.equal outcome (LaneFolded(FoldFixtures.planHash p)) "one state"
                     | Error e -> failtestf "the reconciled script did not replay: %A" e ] ]

@@ -618,10 +618,10 @@ let private runs =
                "FoldConfluence.laneFoldLawsAt"
                120
                (FoldConfluence.laneFoldLawsAt
-                   FoldConfluenceTests.treeW
-                   FoldConfluenceTests.treeFootprint
-                   FoldConfluenceTests.treeHash
-                   FoldConfluenceTests.treeLaneGen
+                   FoldFixtures.treeW
+                   FoldFixtures.treeFootprint
+                   FoldFixtures.treeHash
+                   FoldFixtures.treeLaneGen
                    3
                    1000
                    120)
@@ -629,10 +629,10 @@ let private runs =
                "FoldConfluence.laneFoldLawsWith"
                120
                (FoldConfluence.laneFoldLawsWith
-                   FoldConfluenceTests.treeW
-                   FoldConfluenceTests.treeFootprint
-                   FoldConfluenceTests.treeHash
-                   FoldConfluenceTests.treeLaneGen
+                   FoldFixtures.treeW
+                   FoldFixtures.treeFootprint
+                   FoldFixtures.treeHash
+                   FoldFixtures.treeLaneGen
                    3
                    OpStream.defaultHash
                    1000

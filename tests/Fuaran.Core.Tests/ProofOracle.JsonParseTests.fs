@@ -1,0 +1,321 @@
+module Fuaran.Core.Tests.ProofOracle.JsonParseTests
+
+// The `Proofs.Oracle` differential for `proofs/JsonParse.fst`: the extracted model
+// (`proofs/oracle/JsonParse.fs`) run beside production.
+// The bridges more than one model reads are in `ProofOracle.Bridges.fs`.
+
+open System.IO
+open Expecto
+
+open Fuaran.Core
+open Fuaran.Core.Tests
+open Fuaran.Core.Tests.Reference
+open Fuaran.Core.Tests.ProofOracle.Bridges
+
+[<Tests>]
+let tests =
+    testList
+        "Proofs.Oracle"
+        [
+          // ---- the PARSER (Phase 146) — the boundary theorem 1 named ----
+
+          testCase "the parser oracle agrees with production over the near-miss table"
+          <| fun _ ->
+              JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
+              |> JsonParseDiff.expectAgreement "near misses, strict"
+
+          // Phase 299 — the integer reader is the invariant one, so the differential answers the
+          // same under a culture whose negative sign is not U+002D. Before, `-5` fell to the float
+          // path there, and every near miss carrying a negative integer disagreed with the model.
+          testCase "… and under fa-IR and he-IL, whose negative sign is not U+002D"
+          <| fun _ ->
+              for culture in [ "fa-IR"; "he-IL" ] do
+                  let saved = System.Globalization.CultureInfo.CurrentCulture
+                  System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo culture
+
+                  try
+                      JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
+                      |> JsonParseDiff.expectAgreement ("near misses, strict, under " + culture)
+                  finally
+                      System.Globalization.CultureInfo.CurrentCulture <- saved
+
+          testCase "… and under the tolerant read policy, where the member-null fork lives"
+          <| fun _ ->
+              JsonParseDiff.sweep EraseMemberNull 512 JsonParseDiff.nearMisses
+              |> JsonParseDiff.expectAgreement "near misses, tolerant"
+
+              // The fork is asserted to have FIRED, because two parsers that never met a member
+              // null agree about a policy neither exercised.
+              Expect.equal
+                  (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":1}")
+                  "ok {b=i:1}"
+                  "the tolerant policy erases a member null"
+
+              Expect.notEqual
+                  (JsonParseDiff.prodAnswer RejectNull 512 "{\"a\":null,\"b\":1}")
+                  (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":1}")
+                  "and the strict policy does not — the two policies were actually distinguished"
+
+          testCase "… and the absorption IS the erasure — Phase 190's bridge, erase-then-compare"
+          <| fun _ ->
+              // The theorem, put to production and to the extracted model rather than only to the
+              // prover: reading a document under the TOLERANT policy is reading the document with
+              // its member nulls DELETED under the STRICT one. Four answers per pair, so a model
+              // that erased the wrong thing and a production that erased the wrong thing are each
+              // caught, and a shared mistake is caught by the two of them disagreeing with each
+              // other in the probes above.
+              let bad =
+                  [ for (name, absorbed, erased) in JsonParseDiff.erasurePairs do
+                        let pa =
+                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 absorbed)
+
+                        let pe =
+                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 erased)
+
+                        let ma =
+                            JsonParseDiff.withoutPosition (
+                                JsonParseDiff.modelAnswer
+                                    JsonParseDiff.toChs
+                                    EraseMemberNull
+                                    512
+                                    (JsonParseDiff.budget 512)
+                                    absorbed
+                            )
+
+                        let me =
+                            JsonParseDiff.withoutPosition (
+                                JsonParseDiff.modelAnswer
+                                    JsonParseDiff.toChs
+                                    RejectNull
+                                    512
+                                    (JsonParseDiff.budget 512)
+                                    erased
+                            )
+
+                        if pa <> pe then
+                            yield
+                                sprintf
+                                    "%s: PRODUCTION does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
+                                    name
+                                    absorbed
+                                    pa
+                                    erased
+                                    pe
+
+                        if ma <> me then
+                            yield
+                                sprintf
+                                    "%s: the MODEL does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
+                                    name
+                                    absorbed
+                                    ma
+                                    erased
+                                    me
+
+                        if pa <> ma then
+                            yield sprintf "%s: the model and production disagree on %s: %s vs %s" name absorbed pa ma ]
+
+              if not bad.IsEmpty then
+                  failtestf
+                      "erase-then-compare: %d finding(s). First 5:\n%s"
+                      bad.Length
+                      (bad |> List.truncate 5 |> String.concat "\n")
+
+              // Both halves of the bridge were actually reached, so a green run above is not one
+              // that only ever accepted or only ever refused.
+              Expect.isTrue
+                  (JsonParseDiff.erasurePairs
+                   |> List.exists (fun (_, a, _) -> (JsonParseDiff.prodAnswer EraseMemberNull 512 a).StartsWith "ok "))
+                  "no pair was ACCEPTED — the value half of the bridge measured nothing"
+
+              Expect.isTrue
+                  (JsonParseDiff.erasurePairs
+                   |> List.exists (fun (_, a, _) ->
+                       not ((JsonParseDiff.prodAnswer EraseMemberNull 512 a).StartsWith "ok ")))
+                  "no pair was REFUSED — the classification half of the bridge measured nothing"
+
+              // THE TWO HYPOTHESES, each shown to be load-bearing on production rather than only
+              // needed by the prover. `members_follow`: a null member closed by a COMMA leaves a
+              // trailing comma behind, which is not the empty object the deletion would give.
+              Expect.notEqual
+                  (JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,}"))
+                  (JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 "{}"))
+                  "a trailing comma left by the absorption is NOT the empty object — the hypothesis the theorem carries"
+
+              // And the null carve-out: a null the tolerant policy declines to erase is refused
+              // with the SAME kind and a DIFFERENT message, which is why the refusal half of the
+              // theorem excludes `NullNotRepresentable` rather than covering it.
+              let arrA =
+                  JsonParseDiff.withoutPosition (
+                      JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":[null]}"
+                  )
+
+              let arrE =
+                  JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 "{\"b\":[null]}")
+
+              Expect.stringContains
+                  arrA
+                  "NullNotRepresentable"
+                  "the array null is still refused under the tolerant policy"
+
+              Expect.stringContains arrE "NullNotRepresentable" "and under the strict one"
+
+              Expect.notEqual
+                  arrA
+                  arrE
+                  "the two policies word that refusal differently — the carve-out the theorem's refusal half names"
+
+          testCase "the parser oracle agrees with production over every corpus nodes/ fixture"
+          <| fun _ ->
+              JsonParseDiff.corpusTexts "nodes"
+              |> JsonParseDiff.sweep RejectNull 512
+              |> fun (bad, accepted, _) ->
+                  if not bad.IsEmpty then
+                      failtestf
+                          "corpus nodes/: the model and production disagree on %d fixture(s). First 5:\n%s"
+                          bad.Length
+                          (bad |> List.truncate 5 |> String.concat "\n")
+
+                  // Every fixture is valid wire JSON, so this pool is the ACCEPT path and has no
+                  // refusals to assert — saying so here rather than letting the shared guard
+                  // demand a refusal that would mean the corpus was broken.
+                  Expect.isGreaterThan accepted 100 "the corpus nodes/ pool is far smaller than expected"
+
+          testCase "… and over every corpus ops/ fixture"
+          <| fun _ ->
+              JsonParseDiff.corpusTexts "ops"
+              |> JsonParseDiff.sweep RejectNull 512
+              |> fun (bad, accepted, _) ->
+                  if not bad.IsEmpty then
+                      failtestf
+                          "corpus ops/: the model and production disagree on %d fixture(s). First 5:\n%s"
+                          bad.Length
+                          (bad |> List.truncate 5 |> String.concat "\n")
+
+                  Expect.isGreaterThan accepted 10 "the corpus ops/ pool is far smaller than expected"
+
+          testCase "the parser oracle agrees with production over generated deep and wide inputs"
+          <| fun _ ->
+              // Both nesting families at every depth from 0 to 8, under caps that straddle each —
+              // so the boundary itself is compared, not merely the interior.
+              let deep =
+                  [ for cap in 0..8 do
+                        for k in 0..8 do
+                            yield sprintf "arr k=%d cap=%d" k cap, (cap, JsonParseDiff.nestArr k)
+                            yield sprintf "obj k=%d cap=%d" k cap, (cap, JsonParseDiff.nestObj k) ]
+
+              let bad =
+                  [ for (name, (cap, input)) in deep do
+                        let p = JsonParseDiff.prodAnswer RejectNull cap input
+
+                        let m =
+                            JsonParseDiff.modelAnswer
+                                JsonParseDiff.toChs
+                                RejectNull
+                                cap
+                                (JsonParseDiff.budget cap)
+                                input
+
+                        if p <> m then
+                            yield sprintf "%s:\n    production %s\n    model      %s" name p m ]
+
+              if not bad.IsEmpty then
+                  failtestf
+                      "deep/wide: %d disagreement(s). First 5:\n%s"
+                      bad.Length
+                      (bad |> List.truncate 5 |> String.concat "\n")
+
+              // The boundary was actually crossed in both directions.
+              Expect.stringStarts
+                  (JsonParseDiff.prodAnswer RejectNull 3 (JsonParseDiff.nestArr 3))
+                  "ok "
+                  "a document nested to the cap is accepted"
+
+              Expect.stringContains
+                  (JsonParseDiff.prodAnswer RejectNull 3 (JsonParseDiff.nestArr 4))
+                  "MaxDepthExceeded"
+                  "and one nested past it is refused by name"
+
+              let wide =
+                  [ for n in [ 0; 1; 2; 10; 64 ] do
+                        yield sprintf "wide array %d" n, "[" + String.concat "," [ for i in 1..n -> string i ] + "]"
+
+                        yield
+                            sprintf "wide object %d" n,
+                            "{" + String.concat "," [ for i in 1..n -> sprintf "\"k%d\":%d" i i ] + "}" ]
+
+              JsonParseDiff.sweep RejectNull 512 (wide @ [ "refusal", "[" ])
+              |> JsonParseDiff.expectAgreement "wide"
+
+          testCase "the parser oracle agrees with production over 4000 generated inputs"
+          <| fun _ ->
+              JsonParseDiff.sweep RejectNull 512 (JsonParseDiff.soup 20260914 2000)
+              |> JsonParseDiff.expectAgreement "soup, strict"
+
+              JsonParseDiff.sweep EraseMemberNull 512 (JsonParseDiff.soup 20260915 2000)
+              |> JsonParseDiff.expectAgreement "soup, tolerant"
+
+          // ---- the teeth: both comparisons can lose ----
+
+          testCase "a model whose DEPTH CHECK is out of step DISAGREES with production"
+          <| fun _ ->
+              // The go-red the phase asks for: the model keeps a cap production has already spent.
+              // Production refuses the input by name; the model, still holding budget, accepts it —
+              // so a green run above is known to be a comparison that can fail on exactly the
+              // guard this phase is about.
+              let input = JsonParseDiff.nestArr 4
+              let p = JsonParseDiff.prodAnswer RejectNull 3 input
+
+              let m =
+                  JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) input
+
+              Expect.stringContains p "MaxDepthExceeded" "production refuses at the cap it was given"
+              Expect.stringStarts m "ok " "and an over-budgeted model does not"
+              Expect.notEqual p m "so the depth comparison can lose"
+
+              // … and it loses on the generated pool too, not only on one hand-made input.
+              let disagreements =
+                  [ for k in 0..8 do
+                        let i = JsonParseDiff.nestArr k
+
+                        if
+                            JsonParseDiff.prodAnswer RejectNull 3 i
+                            <> JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) i
+                        then
+                            yield k ]
+
+              Expect.isNonEmpty disagreements "the over-budgeted model must disagree somewhere in the family"
+
+          testCase "a model handed a BLIND bridge DISAGREES with production"
+          <| fun _ ->
+              // The comparison's own go-red, and the parser family's counterpart to the decode
+              // family's blind integer bridge: the two container characters are hidden, so every
+              // structured document reaches the model as something production never saw.
+              let structured = [ "{}"; "[]"; "{\"a\":1}"; "[1,2,3]"; "{\"a\":[1,{\"b\":2}]}" ]
+
+              let disagreements =
+                  [ for input in structured do
+                        let p = JsonParseDiff.prodAnswer RejectNull 512 input
+
+                        let m =
+                            JsonParseDiff.modelAnswer
+                                JsonParseDiff.toChsBlind
+                                RejectNull
+                                512
+                                (JsonParseDiff.budget 512)
+                                input
+
+                        if p <> m then
+                            yield input ]
+
+              Expect.equal
+                  (List.length disagreements)
+                  (List.length structured)
+                  "every structured document must disagree under the blind bridge"
+
+              // And it stays narrow: a scalar is untouched by the blinding, so a green run
+              // elsewhere is not green merely because this instrument is crude.
+              Expect.equal
+                  (JsonParseDiff.prodAnswer RejectNull 512 "42")
+                  (JsonParseDiff.modelAnswer JsonParseDiff.toChsBlind RejectNull 512 (JsonParseDiff.budget 512) "42")
+                  "a scalar still agrees under the blind bridge" ]

@@ -3,7 +3,7 @@ module Fuaran.Core.Tests.ProofOracleCompactedTests
 // Phase 301 — the bridge for `proofs/Chain.fst` sections 7b and 7c: the extracted model of the
 // compacted stream (`append_to`, `compact_from`, `index_onto`) and of the capture journal
 // (`record_session`, `first_capture_break_from`, `replay_session`) run beside production. A file of
-// its own rather than more cases in `ProofOracleTests.fs`, which holds the other models' bridges; the
+// its own rather than more cases in `ProofOracle.ChainTests.fs`, beside the other models' `ProofOracle.*Tests.fs`; the
 // ladder reads its case names beside that suite's (`ProofsLadderTests.realCases`).
 
 open Expecto

@@ -147,22 +147,50 @@
     <!-- Phase 100 - the fold-confluence pack: N-lane arrival-order invariance over the
          reference witness, a second non-tree domain, and the order-sensitive go-red case.
          Depends on nothing here either, so it simply follows. -->
+    <!-- The two lane-set domains (the reference witness and the work plan) the pack below certifies
+         production against; the F*-oracle differential further down and FootprintLawsAtTests read
+         them too, so they are a fixture rather than the pack's internals. -->
+    <Compile Include="FoldFixtures.fs" />
     <Compile Include="FoldConfluenceTests.fs" />
     <Compile Include="ReconcileShapeTests.fs" />
     <!-- Phase 249 — footprintLawsAt at a domain's own ops (the keyed reference and the plan domain)
-         and FoldConfluence.laneDag. Reads ConformanceTests' keyed reference and FoldConfluenceTests'
+         and FoldConfluence.laneDag. Reads ConformanceTests' keyed reference and FoldFixtures'
          plan domain, so it follows both. -->
     <Compile Include="FootprintLawsAtTests.fs" />
     <!-- Phase 139 — the `apply/` corpus family: the host-neutral skeleton envelope, its codec,
          and the emitter behind the `emit-apply` flag. It sits HERE rather than beside the other
-         corpus exporters further down because ProofOracleTests.fs below reads its decoder, to run the
+         corpus exporters further down because ProofOracle.PreservationTests.fs below reads its decoder, to run the
          Phase 138 preservation differential over the committed fixtures as a second host beside
          the generator. Reads Reference.fs and the kit, and nothing else here. -->
     <Compile Include="ApplyVectorExport.fs" />
-    <!-- Phase 131 — the F* oracle as a corpus host: the extracted model of the DAG fold run
-         beside the production Dag.reconcileMany over the Phase 100 lane generators (which it
-         reads from FoldConfluenceTests.fs above) and over the wire corpus's ops/ fixtures. -->
-    <Compile Include="ProofOracleTests.fs" />
+    <!-- Phase 131 — the F* oracle as a corpus host: each extracted model (proofs/oracle/*.fs) run
+         beside the production code it models, one file per model over the bridges more than one of
+         them reads (ProofOracle.Bridges.fs). The DAG-fold differential reads the Phase 100 lane
+         generators from FoldFixtures.fs above, and the wire models read the corpus's fixtures. The
+         per-model files read only the bridge module, so their order among themselves is free; the
+         twin roster (ProofOracle.TwinTests.fs) reads every extracted model and nothing here. -->
+    <Compile Include="ProofOracle.Bridges.fs" />
+    <Compile Include="ProofOracle.ArbitrateTests.fs" />
+    <Compile Include="ProofOracle.CapabilityTests.fs" />
+    <Compile Include="ProofOracle.ChainTests.fs" />
+    <Compile Include="ProofOracle.ColumnRefinementTests.fs" />
+    <Compile Include="ProofOracle.DagFoldTests.fs" />
+    <Compile Include="ProofOracle.DecimalTextTests.fs" />
+    <Compile Include="ProofOracle.JsonParseTests.fs" />
+    <Compile Include="ProofOracle.NormalizeTests.fs" />
+    <Compile Include="ProofOracle.PreservationTests.fs" />
+    <Compile Include="ProofOracle.PropagationTests.fs" />
+    <Compile Include="ProofOracle.QueryTests.fs" />
+    <Compile Include="ProofOracle.TemporalTests.fs" />
+    <Compile Include="ProofOracle.TreeDiffTests.fs" />
+    <Compile Include="ProofOracle.TreeOpsTests.fs" />
+    <Compile Include="ProofOracle.UnitTests.fs" />
+    <Compile Include="ProofOracle.Utf8Tests.fs" />
+    <Compile Include="ProofOracle.WireCanonTests.fs" />
+    <Compile Include="ProofOracle.WireColumnTests.fs" />
+    <Compile Include="ProofOracle.WireDecodeTests.fs" />
+    <Compile Include="ProofOracle.WireVersioningTests.fs" />
+    <Compile Include="ProofOracle.TwinTests.fs" />
     <!-- Phase 301 — the bridge for Chain.fst sections 7b/7c (the compacted stream, the capture journal);
          ProofsLadderTests.fs below reads its case names. -->
     <Compile Include="ProofOracleCompactedTests.fs" />
@@ -243,7 +271,7 @@
          names is a top-level declaration of the model it names, that model is one the proof leg
          checks, a tested row's cases are in the test tree, every checked module has a row, and the
          phase citations and levels are the closed forms. Reads the Proofs.Oracle test TREE for the
-         case names, so it compiles after ProofOracleTests.fs, and Snapshots.fs for the repository
+         case names, so it compiles after the ProofOracle.*Tests.fs files, and Snapshots.fs for the repository
          root. Appended here (append-only registration) — nothing else in this list reads it. -->
     <Compile Include="ProofsLadderTests.fs" />
     <!-- Phase 150 - the F* proof-model target's refusals, its expressibility partition over

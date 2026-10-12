@@ -51,7 +51,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // moment a sibling appended a model to `$modules`, and one measured against the REAL case names
 // would go red on a renamed case. A go-red family has to stay green while the subject it is about
 // changes, or it is not a go-red family for long. For the same reason the case names are read from
-// the TEST TREE (`ProofOracleTests.proofOracleTests`) rather than by parsing that file's source,
+// the TEST TREE (`oracleTests`, the `ProofOracle.*Tests` files' lists) rather than by parsing their source,
 // and the module list is read from `check.ps1`'s own text rather than restated here — a second
 // copy of that list is precisely the drift this family exists to catch.
 
@@ -736,6 +736,33 @@ let parseScriptList (name: string) (checkScript: string) : string list =
 /// `proofs/check.ps1`'s `$modules` list, parsed from the script's own text.
 let parseModules (checkScript: string) : string list = parseScriptList "modules" checkScript
 
+/// The `Proofs.Oracle` family's test tree: one list per `ProofOracle.<Model>Tests.fs` file, in the
+/// compile order the project file gives them.
+let oracleTests: Test =
+    testList
+        "Proofs.Oracle"
+        [ ProofOracle.ArbitrateTests.tests
+          ProofOracle.CapabilityTests.tests
+          ProofOracle.ChainTests.tests
+          ProofOracle.ColumnRefinementTests.tests
+          ProofOracle.DagFoldTests.tests
+          ProofOracle.DecimalTextTests.tests
+          ProofOracle.JsonParseTests.tests
+          ProofOracle.NormalizeTests.tests
+          ProofOracle.PreservationTests.tests
+          ProofOracle.PropagationTests.tests
+          ProofOracle.QueryTests.tests
+          ProofOracle.TemporalTests.tests
+          ProofOracle.TreeDiffTests.tests
+          ProofOracle.TreeOpsTests.tests
+          ProofOracle.UnitTests.tests
+          ProofOracle.Utf8Tests.tests
+          ProofOracle.WireCanonTests.tests
+          ProofOracle.WireColumnTests.tests
+          ProofOracle.WireDecodeTests.tests
+          ProofOracle.WireVersioningTests.tests
+          ProofOracle.TwinTests.tests ]
+
 /// The leaf case names of an Expecto test tree — the labels a `tested` row may cite.
 let rec caseNames (t: Test) : string list =
     match t with
@@ -773,9 +800,7 @@ let private realModules () =
 /// whole tree. Phase 288 adds the second conformance suite on the same footing: the checkpoint rows
 /// are evidenced by `Conformance.checkpointLaws`, whose cases live in `CheckpointTests`.
 let private realCases () =
-    Set.union
-        (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
-        (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
+    Set.union (caseNames oracleTests |> Set.ofList) (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
     |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
@@ -877,7 +902,7 @@ let proofsLadderTests =
                   |> List.filter (fun m -> not (Set.contains m proofOnly))
                   |> Set.ofList
 
-              let rostered = ProofOracleTests.twinRoster |> List.map fst |> Set.ofList
+              let rostered = ProofOracle.TwinTests.twinRoster |> List.map fst |> Set.ofList
 
               Expect.isNonEmpty extracted "check.ps1's extracted set parses"
 
@@ -901,9 +926,7 @@ let proofsLadderTests =
 
               // and BOTH suites are in it — a union that silently degenerated to one of its
               // members would leave the other's rows uncheckable while reporting nothing.
-              Expect.isNonEmpty
-                  (caseNames ProofOracleTests.proofOracleTests)
-                  "the Proofs.Oracle differential host contributes cases"
+              Expect.isNonEmpty (caseNames oracleTests) "the Proofs.Oracle differential host contributes cases"
 
               Expect.isNonEmpty
                   (caseNames ContainedOpsTests.containerLawTests)

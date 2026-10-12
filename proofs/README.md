@@ -56,7 +56,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
 | `check.ps1` | The proof leg: check with the pin, re-extract and diff against the committed oracle, run the host. |
 | `modules.json` | What the leg COSTS: one entry per checked module — its `budgetSeconds`, the measurement that budget was seeded from, and the phase that set it. `check.ps1` reads it and prints measured-against-budget on every green line. See "What the leg costs" below. |
-| `../tests/Fuaran.Core.Tests/ProofOracleTests.fs` | The differential host (`Proofs.Oracle`), and the family that measures the theorem's hypothesis on the reference witness. |
+| `../tests/Fuaran.Core.Tests/ProofOracle.*Tests.fs` | The differential host (`Proofs.Oracle`), one file per model over the shared bridges in `ProofOracle.Bridges.fs`; `ProofOracle.DagFoldTests.fs` holds the family that measures the theorem's hypothesis on the reference witness. |
 
 ## The theorem
 
@@ -2461,7 +2461,7 @@ extraction diff says so. No file under `src/` moved, no host does anything.
 
 ### What the corpus covers
 
-The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs
+The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracle.WireDecodeTests.fs`) runs
 the extracted model beside `Wire.Decode`. Each probe renders both answers into one string, so the
 outcome **class**, the decoded **value** and the error **message** are compared at once — a model
 agreeing on accept-vs-refuse alone would not notice a decoder that named the wrong expectation.
@@ -3547,7 +3547,7 @@ carrying it to the chains the theorem is stated over. `payload_splice_breaks_cha
 tamper theorem positively on the named premises alone — no composite parameter — which is the
 sentence the phase was chartered with.
 
-**What the differential measures**, in `ProofOracleTests`, beside Phase 145's cases:
+**What the differential measures**, in `ProofOracle.ChainTests`, beside Phase 145's cases:
 
 - that `rec_payload` IS `OpStream.canonicalConfig.Payload`, byte for byte, over the adversarial
   actors, seven envelope-hostile op encodings (the closing brace, `,"op":`, a whole envelope) and
@@ -3757,7 +3757,7 @@ the rest of this theorem leaves it.
 
 ### What the corpus covers
 
-The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs the
+The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracle.JsonParseTests.fs`) runs the
 extracted model beside `Json.parseDetailedWithPolicy` over the same TEXT. Every probe renders both
 answers into one string carrying the outcome class, the decoded value and — on a failure — the
 KIND, the POSITION and the MESSAGE. The position is the half most likely to drift silently, which is

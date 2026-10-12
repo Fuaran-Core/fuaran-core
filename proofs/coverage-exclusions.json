@@ -410,7 +410,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "The fold-confluence harness around `foldOnce` (on the ladder) and the lane-fold families (rostered): arrival orders, canonical reports, shrinking and the lane DAG; the fold-confluence tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.Bridges.fs"
     },
     {
       "members": [
@@ -1039,7 +1039,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireVersioningTests.fs"
     },
     {
       "members": [
@@ -1561,7 +1561,7 @@
       "class": "measured-elsewhere",
       "reason": "The content-aware grammar diff; `toOpsGrammar` (rostered under `containmentLaws`) is it with no content projection.",
       "through": "Diff.toOpsGrammar",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.TreeDiffTests.fs"
     },
     {
       "members": [
@@ -1686,7 +1686,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.PropagationTests.fs"
     },
     {
       "members": [
@@ -1704,7 +1704,7 @@
       "class": "measured-elsewhere",
       "reason": "Incremental evaluation from a precomputed plan; `evalFromWith` (rostered) plans and calls it.",
       "through": "Propagation.evalFromWith",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.PropagationTests.fs"
     },
     {
       "members": [
@@ -1730,7 +1730,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Query invocation and its argument-typed and all-errors forms, and schema export, beside the rostered key / tag / validate; example-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.QueryTests.fs"
     },
     {
       "members": [
@@ -1832,7 +1832,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Hash primitives beside the modelled UTF-8 and canonical-field encodings: the FNV-1a and SHA-256 digests over bytes the models fix. Collision behaviour is a claim about the hash, which the ladder declines to make.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.QueryTests.fs"
     },
     {
       "members": [
@@ -2349,7 +2349,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireDecodeTests.fs"
     },
     {
       "members": [
@@ -2445,7 +2445,7 @@
       "class": "measured-elsewhere",
       "reason": "Reads a versioning envelope from a JSON value; `parse` parses the text and calls it.",
       "through": "Versioning.parse",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireVersioningTests.fs"
     },
     {
       "members": [
