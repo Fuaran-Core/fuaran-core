@@ -11,15 +11,15 @@ namespace Fuaran.Core
 //
 //  ---- The facade (Phase 297) ------------------------------------------------
 //  This module is the kit's PUBLIC surface and is compiled LAST. The families
-//  themselves live in the twenty-one topic modules ahead of it — the tree
+//  themselves live in the twenty-two topic modules ahead of it — the tree
 //  families (`AlgebraTreeLaws`, `PlacementTreeLaws`, `ValidityTreeLaws`,
 //  `KeyedApplyLaws`), the stream families (`ChainStreamLaws`, `DagStreamLaws`,
 //  `CaptureStreamLaws`), `IntegrityLaws`, `ConcurrencyLaws`,
 //  `KeyedArbitrationLaws`, the seam families (`CapabilitySeamLaws`,
 //  `QuerySeamLaws`, `RegistrySeamLaws`, `ColumnarSeamLaws`, `PipelineSeamLaws`,
 //  `PolicySeamLaws`), `FunctionLaws`, `PropagationLaws`, `SurfaceLaws`,
-//  `ObserverLaws` and `SanitizeLaws` (Phase 388 split the tree, stream and
-//  seam files along their banners) — every one of them internal, written over
+//  `ObserverLaws`, `SanitizeLaws` and `CodecLaws` (Phase 388 split the tree,
+//  stream and seam files along their banners) — every one of them internal, written over
 //  the `LawKit` runner, and reachable by a domain only through the forwards
 //  here. A forward is one line with the family's full signature, so this file
 //  IS the contract a reader can read top to bottom, and the roster ids
@@ -882,6 +882,11 @@ module Conformance =
     /// vectors, at a host's `SanitizeWitness` — `SanitizeWitness.core` for Core's own floor.
     let sanitizeLawsAt (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
         SanitizeLaws.sanitizeLaws w seed iterations
+
+    /// Forward — see `CodecLaws.codecLaws` (Phase 442): the premises a domain owes for the parts it
+    /// hands the `Codec` blocks, sampled at its own codec over the values its generator draws.
+    let codecLaws (codec: Codec<'T>) (gen: ConfRng.T -> 'T * ConfRng.T) (seed: int) (iterations: int) : LawResult list =
+        CodecLaws.codecLaws codec gen seed iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.

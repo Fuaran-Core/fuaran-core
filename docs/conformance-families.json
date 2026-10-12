@@ -238,6 +238,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.codecLaws",
+      "module": "Conformance",
+      "entry": "codecLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": ["decode-layer-refusal-premises", "decode-layer-round-trip-premises"],
+      "cases": "1000",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.columnOwnershipLaws",
       "module": "Conformance",
       "entry": "columnOwnershipLaws",

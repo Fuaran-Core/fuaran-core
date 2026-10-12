@@ -21,7 +21,7 @@
     <Compile Include="SampleAdequacy.fs" />
     <!-- Phase 297 — the kit is split by topic behind a facade. `ConfRng` (the generator) and the
          witness records come first because every family reads them; `LawKit` (the runner —
-         internal) next; then the twenty-one topic modules, each internal, in an order that is free
+         internal) next; then the twenty-two topic modules, each internal, in an order that is free
          except where one family runs another (the suite holds this count to the list below); and
          `Conformance.fs` LAST — the public facade of one-line forwards plus `certify` /
          `certifyStream`, whose bodies the suite reads to derive which families are base-run. -->
@@ -50,6 +50,8 @@
     <Compile Include="ObserverLaws.fs" />
     <!-- Phase 349 — the sanitisation floor's family, over a `SanitizeWitness`. -->
     <Compile Include="SanitizeLaws.fs" />
+    <!-- Phase 442 — the codec family, over a domain's `Codec<'T>` and a generator. -->
+    <Compile Include="CodecLaws.fs" />
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->

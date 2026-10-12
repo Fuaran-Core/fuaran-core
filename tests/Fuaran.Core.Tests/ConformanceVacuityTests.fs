@@ -643,6 +643,11 @@ let private runs =
            run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
            run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
            run "Conformance.sanitizeLawsAt" 200 (Conformance.sanitizeLawsAt SanitizeWitness.core 349 200)
+           // Phase 442 — the codec family at the reference declaration (CodecLawsTests).
+           run
+               "Conformance.codecLaws"
+               200
+               (Conformance.codecLaws CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
            // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
            // each at a store the ordinary append wrote: the store, walked whole, is the sample.
            run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())

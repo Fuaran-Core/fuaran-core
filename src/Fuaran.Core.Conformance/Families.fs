@@ -1060,6 +1060,21 @@ module Families =
               (Built,
                "the refused URLs, the rejected attribute keys and values and the dangerous markdown are fixed vectors the first iteration always runs")
 
+          // Phase 442 — the codec family: the premises Phase 436 proved the codec blocks under,
+          // sampled at a domain's own `Codec<'T>`. Its witness is a codec and a generator function,
+          // neither of which the roster's suffix rule reads as a witness, so it is a seam not every
+          // domain has rather than a witness capability. The mutations are built from each drawn
+          // value, but whether the codec REFUSES any of them is the codec's: a codec that accepts
+          // every mutation holds the refusal law over nothing, so the outcome is guarded.
+          c
+              "codecLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              [ "decode-layer-refusal-premises"; "decode-layer-round-trip-premises" ]
+              (Guarded [ "mutation outcome"; "distinct written values" ])
+              (Drawn,
+               "the refusal law reads the codec's refusals of mutations built from each drawn value, and a codec that refuses none holds it over nothing; guarded on mutation outcome")
+
           // Phase 349 — the string-escape vectors (Phase 287) rostered as laws, on the
           // `WireNullTolerance.laws` precedent, so `lines`' format is a mapped operation.
           f

@@ -1,5 +1,48 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-12 — D148: the codec premises are sampled by a new family, `Conformance.codecLaws`, at a domain's own `Codec<'T>`; it reuses the corpus harness's round trip, mutations and resolution predicate, and folds neither `EncodingProfileVectors.storedCodecLaws` nor `Corpus.refusalLaws` into itself — both stay beside it
+
+**Recorded by Phase 442.** Phase 436 proved the codec blocks' round trip and refusal soundness under
+hypotheses only a domain can keep — `map`'s `there` inverts its `back`, `refine`'s `check` admits every
+value `back` writes, a record's constructor rebuilds the value from its getters, a union case's `inject`
+inverts its `project`, a `make` / `ofDecoder` reader reads its writer, and a refusal the domain raises
+itself (`andThen`, `fail`, a `make` reader) is sound — and filed them as two `premise` rows, because the
+ladder admits a `domain-obligation` only when a family of the shipped roster samples it and none did.
+
+**D148.1 — the family states each premise by its consequence at the COMPOSED codec.** A `Codec<'T>` is
+opaque once built: `map`'s two functions, a record's constructor and a case's `inject` are closed over,
+and no law can reach them separately. So the family samples what each hypothesis buys, in the cell whose
+failure that hypothesis produces: every drawn value is written; every written value reads with no
+defect (a `refine` that refuses a value its `back` writes is red here, naming `OutOfRange`); every
+written value reads back equal (a `map`, a constructor or an `inject` that does not invert is red here);
+the canonical text under every encoding profile reads back as the value; and every refusal the
+collecting reader answers over every structural mutation of a written document resolves in that document
+and is not `InvalidJson` — theorem 22's soundness. Each premise has a go-red that is red in exactly the
+cell named (`CodecLawsTests`). It is sampled, never proved, and blind to a hypothesis broken only on
+values the generator never draws — which is what a `domain-obligation` row says.
+
+**D148.2 — reused, not restated.** The text leg is `Corpus.roundTrip` over the `Codec.corpus` bridge,
+per profile; the refusal leg walks `Corpus.mutations` and judges with `DecodeError.resolvesIn`, the
+predicate `Corpus.refusalLaws` judges with. Neither existing runner is folded in:
+
+- **`Corpus.refusalLaws` stays beside it.** It is a `Result<unit, string>` runner over a short-circuiting
+  `Decoder<'T>` and an encoder to `JVal`, it reads only the strict reader's FIRST refusal, and it is
+  the harness the decode-layer and corpus suites drive Core's own decoders through. Making it a
+  `LawResult` family would change a published signature for no consumer, and the family needs more
+  than it answers (every refusal of a collecting reader, the empty refusal list, the code).
+- **`EncodingProfileVectors.storedCodecLaws` stays beside it.** It reads a consumer's STORE of texts
+  through the codec and re-writes them byte for byte — the reverse direction of the same agreement, over
+  data that exists rather than a sample — and its laws (the declared profile, the positive control) are
+  about the store's identity, not the codec's premises. A domain with a persisted corpus runs both.
+
+**D148.3 — opt-in, guarded.** The family takes a codec and a generator function, neither of which the
+roster's witness rule (a parameter type ending in `Witness`, `Gen` or `Sink`) reads as a witness, so its
+reason is `SeamNotEveryDomainHas` and its name carries no `…At`. Its refusal population is built from
+each drawn value, but whether the codec refuses any mutation is the codec's — `Codec.json` refuses none —
+so it is `Drawn` and `Guarded` on the mutation outcome, with a span guard on distinct written values so
+a generator that draws one value cannot certify the round trip. The two Phase 436 rows are
+`domain-obligation` rows discharged by it.
+
 ## 2026-10-12 — D147: the `1.0.0` draft is released as `0.37.0`, a minor of the `0.x` line; the `OneDotZero` family stays as it is, vacuous by name at major 0 and armed for the eventual `1.0.0`; D101's gate and the surface guard do not read the major and are unchanged
 
 **Recorded by Phase 444, before any other edit of it.** The operator ruled on 2026-10-12 that Core is

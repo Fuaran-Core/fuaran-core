@@ -311,6 +311,8 @@
     <!-- Phase 313 — the structural-integrity strand and its reference grammar / reference
          witnesses, which the census below runs the two families over. -->
     <Compile Include="StructuralIntegrityTests.fs" />
+    <!-- Phase 442 — the codec family and its reference declaration, which the census below runs. -->
+    <Compile Include="CodecLawsTests.fs" />
     <Compile Include="ConformanceVacuityTests.fs" />
     <Compile Include="ConformanceFamiliesTests.fs" />
     <!-- Phase 185, retargeted by Phase 217 — the Fable surface's membership derived rather than

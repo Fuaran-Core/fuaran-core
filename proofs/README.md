@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 342 claims — 245 proved across 32 models, 56 tested, 39 assumed (6 `domain-obligation`, 24 `model-bridge`, 9 `premise`), 2 policy.
+**The ladder, counted:** 342 claims — 245 proved across 32 models, 56 tested, 39 assumed (8 `domain-obligation`, 24 `model-bridge`, 7 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -712,7 +712,7 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 6 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 8 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
@@ -723,7 +723,7 @@ place together with the contract it implies.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 9 rows.
+  on. 7 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -775,8 +775,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `propagation-evaluator-total` | `premise` | — |
 | `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
 | `column-vector-is-its-contents` | `model-bridge` | `permanent` |
-| `decode-layer-round-trip-premises` | `premise` | — |
-| `decode-layer-refusal-premises` | `premise` | — |
+| `decode-layer-round-trip-premises` | `domain-obligation` | `Conformance.codecLaws` |
+| `decode-layer-refusal-premises` | `domain-obligation` | `Conformance.codecLaws` |
 | `decode-layer-model-bridge` | `model-bridge` | `permanent` |
 | `index-stamp-separates` | `premise` | — |
 | `index-node-is-its-record` | `model-bridge` | `permanent` |
@@ -1016,7 +1016,7 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
-| `Fuaran.Core.Conformance` | 151 | 1 | 104 | 2 | 6 | 0 | 0 | 38 |
+| `Fuaran.Core.Conformance` | 152 | 1 | 105 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
@@ -1033,7 +1033,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1208 | 258 | 430 | 28 | 13 | 0 | 3 | 476 |
+| **Total** | 1209 | 258 | 431 | 28 | 13 | 0 | 3 | 476 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7170,9 +7170,12 @@ record invariant in a later model should start there.
 3. **Assumed, and stated as such.** **`decode-layer-round-trip-premises`** — `map`'s `there` inverts
    `back`, `refine`'s `check` admits every `back`-image, a record's constructor applied to its getters
    is the value, a case's `inject` inverts its `project`, and a `make` / `ofDecoder` reader reads back
-   its writer: the domain's to keep, and filed as a premise because no family of the `Conformance`
-   roster samples them at a domain's codec. **`decode-layer-refusal-premises`** — `andThen`'s
-   function, `fail`'s code and a `make` reader refuse within the narrowed claim.
+   its writer: the domain's to keep. **`decode-layer-refusal-premises`** — `andThen`'s function,
+   `fail`'s code and a `make` reader refuse within the narrowed claim. Both were filed as premises
+   because no family of the `Conformance` roster sampled them at a domain's codec; since Phase 442
+   both are `domain-obligation` rows discharged by `Conformance.codecLaws`, which samples each at the
+   domain's own `Codec<'T>` — round trip at the value and through the canonical text, and every
+   refusal of a mutated written document resolving with a sound code.
    **`decode-layer-model-bridge`** — the dropped prose and schema, the host range predicate, the
    fused list passes.
 4. **Not claimed.** The text entry points (theorem 4 is the parser's; `WireCanon` the renderer's);
