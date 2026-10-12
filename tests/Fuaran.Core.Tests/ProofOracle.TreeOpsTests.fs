@@ -288,6 +288,11 @@ type private IndexTally =
         Reparents: int
     }
 
+/// The model's node carries no content (`index-node-is-its-record`), so production's freshness is
+/// compared through the same view: an encoder that reads nothing. Phase 447's content conjunct is
+/// sampled where content exists, in `ContentDiffTests` and `TreeExtTests`.
+let private noContent (_: RNode) = ""
+
 /// The model's `ix_*` beside production's `Tree.Index` over every tree and every id (plus an absent
 /// one), and — over a well-formed tree — both beside the walks the index caches. `fresh` is the
 /// model freshness check under test: the faithful one is `TreeOps.ix_is_fresh_for`.
@@ -362,7 +367,7 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
         let mix = TreeOps.ix_build (toModelTree t0)
 
         for t in states do
-            let p = Tree.Index.isFreshFor nodew idw t pix
+            let p = Tree.Index.isFreshFor nodew idw noContent t pix
             let q = fresh (toModelTree t) mix
 
             if p <> q then
@@ -376,7 +381,7 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
                     && Tree.isWellFormed nodew idw t
                     && Tree.isWellFormed nodew idw t0
                 then
-                    diffs.Add(sprintf "production read a changed tree as fresh — a stamp collision: %A against %A" t t0)
+                    diffs.Add(sprintf "production read a changed tree as fresh: %A against %A" t t0)
             else
                 stale <- stale + 1
 
@@ -395,12 +400,9 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
       Fresh = freshN
       Reparents = reparents }
 
-/// The go-red's freshness: the index's records narrowed to (id, kind, child COUNT) — a stamp that
-/// does not read the child ids — compared with the tree's, as a multiset.
-let private blindFresh (t: TreeOps.tree) (ix: TreeOps.ix_index) : bool =
-    TreeOps.ix_same_multiset
-        (TreeOps.ix_records_blind (TreeOps.ix_nodes t))
-        (ix.ix_stamp |> List.map (fun (i, k, cs) -> i, k, bigint (List.length cs)))
+/// The go-red's freshness: the model's check with each record narrowed to (id, kind, child COUNT)
+/// and the parent links unread — a check that does not read the child ids.
+let private blindFresh (t: TreeOps.tree) (ix: TreeOps.ix_index) : bool = TreeOps.ix_is_fresh_blind t ix
 
 [<Tests>]
 let tests =
@@ -894,8 +896,8 @@ let tests =
               // `try_build_exact`) on the extracted model beside production: every lookup at every id
               // of every tree, an absent id included; over a well-formed tree, production's index,
               // production's walk and the model's walk all agree; `isFreshFor` over every ordered
-              // pair; and `tryBuild`'s verdict and its named id. A fresh pair whose trees differ
-              // would be a stamp collision (the `index-stamp-separates` premise), and is a failure.
+              // pair; and `tryBuild`'s verdict and its named id. A fresh pair whose trees differ is
+              // a failure: since Phase 447 the check is exact, and no premise allows one.
               let t = indexDifferential TreeOps.ix_is_fresh_for (indexStates 4380 10)
 
               match t.Diffs with
@@ -909,13 +911,13 @@ let tests =
 
           testCase "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor"
           <| fun _ ->
-              // The go-red (`a_childless_stamp_misses_a_reparent`): a stamp over (id, kind, child
-              // count) reads the reparent pair as one tree. Production's stamp reads the child ids,
-              // so the comparison above must lose on the freshness arm — it is a comparison that
-              // can fail.
+              // The go-red (`a_childless_check_misses_a_reparent`): a check over (id, kind, child
+              // count) reads the reparent pair as one tree. Production's check reads the child ids
+              // and the parent links, so the comparison above must lose on the freshness arm — it
+              // is a comparison that can fail.
               Expect.isFalse
-                  (Tree.Index.isFreshFor nodew idw reparentAfter (Tree.Index.build nodew idw reparentBefore))
-                  "production's stamp sees the reparent"
+                  (Tree.Index.isFreshFor nodew idw noContent reparentAfter (Tree.Index.build nodew idw reparentBefore))
+                  "production's check sees the reparent"
 
               let t = indexDifferential blindFresh (indexStates 4380 2)
 
@@ -925,27 +927,34 @@ let tests =
                   (t.Diffs |> List.forall (fun d -> d.StartsWith "isFreshFor"))
                   (sprintf "only the freshness arm moved — got:\n%s" (List.head t.Diffs))
 
-          testCase "the stamp is a 32-bit detector: a pinned collision reads a changed tree as fresh"
+          testCase "the retired stamp's collision pair reads as stale: freshness is exact"
           <| fun _ ->
-              // Why `index-stamp-separates` is a PREMISE and not a theorem. The two kinds below were
-              // found by a birthday search over `Hash.fnv1a32 (Hash.canonicalFields [ "x"; kind; "0" ])`
-              // — a leaf's term in the stamp — so an `UpdateNode` from one to the other leaves the sum
-              // where it was. Production reads the edited tree as fresh and its index hands back the
-              // OLD kind; the model, which keeps the stamp's pre-image, reads it as stale. If the
-              // stamp is ever strengthened this case goes red, and the premise row should go with it.
+              // Phase 438 refuted `index-stamp-separates` with this pair: the two kinds were found by
+              // a birthday search over `Hash.fnv1a32 (Hash.canonicalFields [ "x"; kind; "0" ])` — a
+              // leaf's term in the retired 32-bit stamp — so an `UpdateNode` from one to the other
+              // left the sum where it was, the old check read the edited tree as fresh, and the index
+              // handed back the OLD kind. Phase 447 made the check exact (D150), so the pair is now
+              // stale in production and in the model (`the_stamp_collision_pair_is_stale`). The
+              // collision itself is still asserted, so this case keeps naming a pair the hash
+              // cannot tell apart, and goes red if freshness ever leans on a hash again.
+              let term (kind: string) =
+                  Hash.fnv1a32 (Hash.canonicalFields [ "x"; kind; "0" ])
+
+              Expect.equal (term "k79499") (term "k414100") "the two kinds still collide under the retired term"
+
               let before = RNode.node "root" "doc" [ RNode.node "x" "k79499" [] ]
               let after = RNode.node "root" "doc" [ RNode.node "x" "k414100" [] ]
               let ix = Tree.Index.build nodew idw before
 
-              Expect.isTrue (Tree.Index.isFreshFor nodew idw after ix) "production reads the kind change as fresh"
+              Expect.isFalse
+                  (Tree.Index.isFreshFor nodew idw noContent after ix)
+                  "production reads the kind change as stale"
 
-              Expect.equal
+              Expect.notEqual
                   (Tree.Index.tryFind idw "x" ix |> Option.map _.Kind)
-                  (Some "k79499")
-                  "and its index hands back the node as it was"
-
-              Expect.equal (Tree.tryFind nodew idw "x" after |> Option.map _.Kind) (Some "k414100") "not as it is"
+                  (Tree.tryFind nodew idw "x" after |> Option.map _.Kind)
+                  "and it is right to: the index would hand back the node as it was"
 
               Expect.isFalse
                   (TreeOps.ix_is_fresh_for (toModelTree after) (TreeOps.ix_build (toModelTree before)))
-                  "the model's pre-image sees the change" ]
+                  "the model reads it as stale too" ]

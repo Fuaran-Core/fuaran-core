@@ -1,5 +1,78 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-12 — D150: `Tree.Index.isFreshFor` is exact — one walk compares the index with the tree node by node, with no hash; it takes the caller's content encoder, so a content-only edit reads as stale; the `Fingerprint` stamp, `buildWith` and `isFreshForWith` are removed
+
+**Recorded by Phase 447.** Phase 438 proved the build-once index agrees with the walks it caches, and
+proved `isFreshFor` tracks change only over the stamp's pre-image: production compared a 32-bit sum of
+per-node FNV-1a terms, two leaf kinds (`k79499`, `k414100`) were found whose terms collide, and an
+`UpdateNode` between them left `isFreshFor` true while `Index.tryFind` handed back the old kind. A
+freshness check exists to tell a caller when cached answers may be trusted, so it must not be able to
+say yes when they are wrong. The operator ruled on 2026-10-12 that freshness is made exact, and that a
+behavioural change in a published package is not a reason to keep the inexact check.
+
+**D150.1 — how the exact check works.** One walk of the tree, depth-first over an explicit stack, and
+no hash: the tree's root id is the index's `Root`; no id is carried twice (a seen set); every node's
+key is in `ById`, at a node with the same kind, the same ordered child ids and the same `encode`
+reading (D150.2); every child's key is in `ParentOf`, linked to that node; and `ById` holds exactly as
+many keys as the walk met, `ParentOf` one fewer — which, with every met key present, leaves room for no
+other key in either map. O(n log n): a map lookup a node, the order of cost the stamp recomputation
+already paid. The parent-link and key-count conjuncts are not needed for the theorem over `build`'s
+index (`ById` determines `ParentOf` there); they are kept because a `NodeIndex` is a public record, and
+an index assembled by hand, or carried through `rebind` outside its contract, should read as stale when
+its maps disagree with the tree rather than only when its nodes do. Over a tree carrying an id twice
+the check is false for every index, `build`'s own included: there the index keeps the last node
+carrying the id and the walk finds the first, so "fresh" could not mean "agrees".
+
+**D150.2 — what it covers for content: content too, through the caller's encoder.** The index caches
+whole nodes, so a check blind to content answers fresh while `tryFind` returns a node whose content has
+since changed — Phase 305 documented that and added `buildWith` / `isFreshForWith` beside the blind
+check. Two routes were open: keep `isFreshFor` structural, with a stated contract and the encoder pair
+as the content-exact check; or make `isFreshFor` itself exact over content. Chosen on correctness, the
+second. A structural `isFreshFor` keeps a check that can say yes over a stale answer — the defect class
+the operator ruled out — and keeps the footgun Phase 305's pair carried (an index built one way and
+checked the other read as stale, and `afterOp` maintained only the plain stamp). The witness has no
+content accessor and Core takes no equality seam over nodes (GP2: `encodeHash` takes the encoder as a
+per-call parameter for the same reason), so content is read the one way Core reads it anywhere: the
+caller's `encode`, compared reading for reading. The check is exact over content when `encode` is
+injective over a node's own content (a node is then determined by its id, kind, reading and children)
+— the precondition `encodeHash` and `Diff.toOpsWith` already state and `Conformance.encoderInjectivityLaws`
+certifies. A caller that wants only the structural answers passes a constant encoder, and that weaker
+check is then written at the call site rather than being the default. Requiring `'Node : equality` was
+rejected: it is a new constraint on every generic caller, admits no node type carrying a function, and
+is the equality seam GP2 keeps out. Reference identity was rejected: it is unsound for a value-type
+node and reads an equal, re-decoded tree as stale.
+
+**D150.3 — what happens to `Fingerprint`: removed.** With the check exact, the stamp decides nothing:
+the only reads of `NodeIndex.Fingerprint` were `isFreshFor`, `isFreshForWith` and `rebind`'s
+maintenance of it for them. Kept as a pre-filter it could only say "stale" early, at the same O(n) it
+costs to compute, and it would keep a 32-bit term every edit must maintain; kept for `Ops.Index.afterOp`
+/ `rebind` bookkeeping it would be bookkeeping for nothing, since neither compares it. So the field,
+`fingerprintOf`, `fingerprintOfWith`, `treeStampOf`, `treeStampOfWith` and the modular-arithmetic
+helpers go, and `rebind` maintains the two maps alone. `buildWith` would now equal `build` and
+`isFreshForWith` would equal `isFreshFor`, so both are removed rather than kept as aliases; the two
+`Hash.canonicalFields` roster entries for the stamp's terms leave with them. `Ops.Index.afterOp` keeps
+its law minus the field: the carried index is `build`'s index of the edited tree, so it is fresh under
+any encoder, a content-only `UpdateNode` included (the updated node is re-indexed).
+
+**D150.4 — the model and the ladder.** `TreeOps.fst` section 23 drops the stamp from `ix_index` and
+models the check conjunct for conjunct, the content conjunct excepted (the model's node has no
+content). `freshness_tracks_change` now needs no premise and no well-formedness of the current tree:
+an index `build` made from a well-formed tree is fresh for a tree only if they are one tree. The
+premise row `index-stamp-separates` is retired; `index-node-is-its-record` is restated as the encoder's
+injectivity; the collision pair is pinned as stale (`the_stamp_collision_pair_is_stale`, and the
+differential's case asserting the pair still collides under the retired term and now reads stale). The
+go-red is unchanged in kind: with each record narrowed to (id, kind, child count) the module does not
+verify.
+
+**D150.5 — the class, and who it reaches.** Breaking, in `Fuaran.Core.Tree`: `NodeIndex` loses a
+field (its constructor narrows), `isFreshFor` gains its `encode` parameter, `buildWith` and
+`isFreshForWith` are removed; and behavioural, since an index the stamp called fresh may now be stale
+(a stamp collision, a content-only edit, a tree carrying an id twice). It rides the `0.38.0` draft. A
+survey of the workspace on 2026-10-12 found no caller of `Tree.Index.isFreshFor`, `buildWith`,
+`isFreshForWith` or `NodeIndex.Fingerprint` outside Core: the shard named four downstream call sites,
+and none of them calls it — the `Fingerprint`s they read are their own records' — so the release entry
+names them as suites to re-run when the slot is adopted, not as call sites to migrate.
+
 ## 2026-10-12 — D149: `Decoder.fail` takes a `RootDecodeCode`, the seven codes a refusal at the value can carry; `MissingField` and `InvalidJson` become unrepresentable there rather than refused at run time, and stay producible by `Decoder.field` and the parse entry points
 
 **Recorded by Phase 443.** Phase 436 proved that every refusal Core's decode blocks answer resolves in

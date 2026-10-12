@@ -1133,63 +1133,31 @@ if (Prims.op_Equals k x) then begin
      end)
      end))
 
-
-let rec ix_count = (fun ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (y)::r -> begin
-     (( 
-if (Prims.op_Equals x y) then begin
-     (Prims.parse_int "1")
-     end else begin
-     (Prims.parse_int "0")
-     end) + (ix_count x r))
-     end))
-
-
-let rec ix_counts_agree = (fun ( keys  :  Prims.list<'a> ) ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (keys) with
-| [] -> begin
-     true
-     end
-| (x)::r -> begin
-     ((Prims.op_Equals (ix_count x l) (ix_count x m)) && (ix_counts_agree r l m))
-     end))
-
-
-let ix_same_multiset = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (ix_counts_agree (DagFold.app l m) l m))
-
-type ix_index = {ix_by_id : Prims.list<(Prims.string * tree)>; ix_parent : Prims.list<(Prims.string * Prims.string)>; ix_root : Prims.string; ix_stamp : Prims.list<ix_record>}
+type ix_index = {ix_by_id : Prims.list<(Prims.string * tree)>; ix_parent : Prims.list<(Prims.string * Prims.string)>; ix_root : Prims.string}
 
 
 let __proj__Mkix_index__item__ix_by_id : ix_index  ->  Prims.list<(Prims.string * tree)> = (fun ( projectee  :  ix_index ) -> (match (projectee) with
-| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root; ix_stamp = ix_stamp} -> begin
+| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root} -> begin
      ix_by_id
      end))
 
 
 let __proj__Mkix_index__item__ix_parent : ix_index  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( projectee  :  ix_index ) -> (match (projectee) with
-| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root; ix_stamp = ix_stamp} -> begin
+| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root} -> begin
      ix_parent
      end))
 
 
 let __proj__Mkix_index__item__ix_root : ix_index  ->  Prims.string = (fun ( projectee  :  ix_index ) -> (match (projectee) with
-| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root; ix_stamp = ix_stamp} -> begin
+| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root} -> begin
      ix_root
-     end))
-
-
-let __proj__Mkix_index__item__ix_stamp : ix_index  ->  Prims.list<ix_record> = (fun ( projectee  :  ix_index ) -> (match (projectee) with
-| {ix_by_id = ix_by_id; ix_parent = ix_parent; ix_root = ix_root; ix_stamp = ix_stamp} -> begin
-     ix_stamp
      end))
 
 
 let ix_build : tree  ->  ix_index = (fun ( t  :  tree ) -> (
 
 let ns = (ix_nodes t)
-in {ix_by_id = (ix_keyed ns); ix_parent = (ix_links ns); ix_root = (tid_of t); ix_stamp = (ix_records_of ns)}))
+in {ix_by_id = (ix_keyed ns); ix_parent = (ix_links ns); ix_root = (tid_of t)}))
 
 
 let ix_try_build : tree  ->  DagFold.outcome<ix_index, Prims.string> = (fun ( t  :  tree ) -> (match ((scan_dup [] (ids t))) with
@@ -1201,7 +1169,49 @@ let ix_try_build : tree  ->  DagFold.outcome<ix_index, Prims.string> = (fun ( t 
      end))
 
 
-let ix_is_fresh_for : tree  ->  ix_index  ->  Prims.bool = (fun ( t  :  tree ) ( ix  :  ix_index ) -> (ix_same_multiset (ix_records t) ix.ix_stamp))
+let rec ix_kids_linked : Prims.list<(Prims.string * Prims.string)>  ->  Prims.string  ->  Prims.list<tree>  ->  Prims.bool = (fun ( lk  :  Prims.list<(Prims.string * Prims.string)> ) ( p  :  Prims.string ) ( cs  :  Prims.list<tree> ) -> (match (cs) with
+| [] -> begin
+     true
+     end
+| (c)::r -> begin
+     ((Prims.op_Equals (ix_assoc (tid_of c) lk) (FStar_Pervasives_Native.Some (p))) && (ix_kids_linked lk p r))
+     end))
+
+
+let ix_node_agrees : ix_index  ->  tree  ->  Prims.bool = (fun ( ix  :  ix_index ) ( n  :  tree ) -> ((match ((ix_assoc (tid_of n) ix.ix_by_id)) with
+| FStar_Pervasives_Native.Some (m) -> begin
+     (Prims.op_Equals (ix_record_of m) (ix_record_of n))
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end) && (ix_kids_linked ix.ix_parent (tid_of n) (kids_of n))))
+
+
+let rec ix_all_agree : ix_index  ->  Prims.list<tree>  ->  Prims.bool = (fun ( ix  :  ix_index ) ( ns  :  Prims.list<tree> ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::r -> begin
+     ((ix_node_agrees ix n) && (ix_all_agree ix r))
+     end))
+
+
+let rec ix_keys_within = (fun ( l  :  Prims.list<(Prims.string * 'a)> ) ( ks  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| ((k, uu___))::r -> begin
+     ((DagFold.mem k ks) && (ix_keys_within r ks))
+     end))
+
+
+let ix_is_fresh_for : tree  ->  ix_index  ->  Prims.bool = (fun ( t  :  tree ) ( ix  :  ix_index ) -> (((((Prims.op_Equals ix.ix_root (tid_of t)) && (match ((scan_dup [] (ids t))) with
+| FStar_Pervasives_Native.None -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) && (ix_all_agree ix (ix_nodes t))) && (ix_keys_within ix.ix_by_id (ids t))) && (ix_keys_within ix.ix_parent (ids_all (kids_of t)))))
 
 
 let ix_try_find : Prims.string  ->  ix_index  ->  FStar_Pervasives_Native.option<tree> = (fun ( x  :  Prims.string ) ( ix  :  ix_index ) -> (ix_assoc x ix.ix_by_id))
@@ -1488,13 +1498,31 @@ if (Prims.op_Equals (ix_record_of n) r) then begin
 let ix_record_blind : tree  ->  (Prims.string * Prims.string * Prims.nat) = (fun ( n  :  tree ) -> (((tid_of n)), ((kind_of n)), ((len (kids_of n)))))
 
 
-let rec ix_records_blind : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)> = (fun ( ns  :  Prims.list<tree> ) -> (match (ns) with
+let ix_node_agrees_blind : ix_index  ->  tree  ->  Prims.bool = (fun ( ix  :  ix_index ) ( n  :  tree ) -> (match ((ix_assoc (tid_of n) ix.ix_by_id)) with
+| FStar_Pervasives_Native.Some (m) -> begin
+     (Prims.op_Equals (ix_record_blind m) (ix_record_blind n))
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end))
+
+
+let rec ix_all_agree_blind : ix_index  ->  Prims.list<tree>  ->  Prims.bool = (fun ( ix  :  ix_index ) ( ns  :  Prims.list<tree> ) -> (match (ns) with
 | [] -> begin
-     []
+     true
      end
 | (n)::r -> begin
-     ((ix_record_blind n))::(ix_records_blind r)
+     ((ix_node_agrees_blind ix n) && (ix_all_agree_blind ix r))
      end))
+
+
+let ix_is_fresh_blind : tree  ->  ix_index  ->  Prims.bool = (fun ( t  :  tree ) ( ix  :  ix_index ) -> ((((Prims.op_Equals ix.ix_root (tid_of t)) && (match ((scan_dup [] (ids t))) with
+| FStar_Pervasives_Native.None -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) && (ix_all_agree_blind ix (ix_nodes t))) && (ix_keys_within ix.ix_by_id (ids t))))
 
 
 let reparent_before : tree = TNode ("r", "doc", (TNode ("p", "sec", (TNode ("x", "leaf", []))::[]))::(TNode ("q", "sec", (TNode ("y", "leaf", []))::[]))::[])
@@ -1503,10 +1531,13 @@ let reparent_before : tree = TNode ("r", "doc", (TNode ("p", "sec", (TNode ("x",
 let reparent_after : tree = TNode ("r", "doc", (TNode ("p", "sec", (TNode ("y", "leaf", []))::[]))::(TNode ("q", "sec", (TNode ("x", "leaf", []))::[]))::[])
 
 
-let repeated_twice_a : tree = TNode ("r", "doc", (TNode ("a", "sec", (TNode ("b", "leaf", []))::[]))::(TNode ("a", "sec", []))::[])
+let collision_before : tree = TNode ("root", "doc", (TNode ("x", "k79499", []))::[])
 
 
-let repeated_twice_b : tree = TNode ("r", "doc", (TNode ("a", "sec", []))::(TNode ("a", "sec", (TNode ("b", "leaf", []))::[]))::[])
+let collision_after : tree = TNode ("root", "doc", (TNode ("x", "k414100", []))::[])
+
+
+let repeated_twice : tree = TNode ("r", "doc", (TNode ("a", "sec", (TNode ("b", "leaf", []))::[]))::(TNode ("a", "sec", []))::[])
 
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 

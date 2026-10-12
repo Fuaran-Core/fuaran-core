@@ -2960,26 +2960,27 @@ let placement_lands_at_position ()
                                           TNode "b" "sec" [] ]))
 
 (* ======================================================================================
-   23. THE BUILD-ONCE INDEX AGREES WITH THE WALK (Phase 438) — F#: `Tree.NodeIndex` and the
-       `Tree.Index` module in Tree.fs.
+   23. THE BUILD-ONCE INDEX AGREES WITH THE WALK (Phase 438), AND ITS FRESHNESS IS EXACT
+       (Phase 447) — F#: `Tree.NodeIndex` and the `Tree.Index` module in Tree.fs.
 
        `Index.build` takes one preorder and keeps two maps — every node by its id, and every
-       non-root node's id to its parent's id — and a staleness stamp; `tryFind`, `parentOf`, `path`,
-       `ancestors` and `depth` answer from the maps, and `isFreshFor` recomputes the stamp over a
-       tree and compares it with the one `build` kept. Modelled clause for clause: a map is its
-       association list in insertion order and `Map.tryFind` reads the LAST binding of a key
-       (`ix_assoc`, which is what `Map.ofList` keeps), and `path`'s walk up the links carries its
-       visited ids exactly as production's does. The model's `fuel` starts above the number of
-       entries: it is the termination measure, never what stops the walk.
+       non-root node's id to its parent's id; `tryFind`, `parentOf`, `path`, `ancestors` and `depth`
+       answer from the maps, and `isFreshFor` compares the index with a tree node by node. Modelled
+       clause for clause: a map is its association list in insertion order and `Map.tryFind` reads
+       the LAST binding of a key (`ix_assoc`, which is what `Map.ofList` keeps), and `path`'s walk up
+       the links carries its visited ids exactly as production's does. The model's `fuel` starts
+       above the number of entries: it is the termination measure, never what stops the walk.
 
-       THE STAMP IS MODELLED AS ITS PRE-IMAGE. Production's stamp is a sum, modulo 2^32, of one
-       FNV-1a term per preorder node over that node's RECORD — its id, kind, child count and ordered
-       child ids (`Index.fingerprintOf`, through `Hash.canonicalFields`, whose field encoding is
-       injective; the count is the length of the last field). A sum over nodes is a function of the
-       multiset of records, so the model keeps the records (`ix_records`) and compares them as a
-       multiset (`ix_is_fresh_for`). What that abstracts away is exactly the hash: two different
-       multisets whose sums collide read as one stamp in production, and the ladder carries that as
-       a premise (`index-stamp-separates`), not as a theorem.
+       THE FRESHNESS CHECK IS EXACT, WITH NO HASH IN IT (Phase 447, D150). Until Phase 447
+       production compared a 32-bit sum of per-node FNV-1a terms, which this model kept as its
+       pre-image (the multiset of node records) and which Phase 438 found two leaf kinds sharing.
+       `isFreshFor` now compares the index with the tree: the root's id; no id carried twice; every
+       node's key in `ById` at a node with the same RECORD — id, kind and ordered child ids — and
+       each of its children's keys in `ParentOf`, linked to it; and no key in either map beyond the
+       tree's (production counts, `Map.count`; the model asks that every key be one of the tree's,
+       `ix_keys_within`, which is the same condition once every key of the tree is in the map).
+       Production also compares each node's `encode` reading; the model's node carries no content,
+       so that conjunct has nothing to read here (`index-node-is-its-record`).
 
        WHAT IS PROVED.
        Theorem 1, `index_agrees`: over a well-formed tree each of the five lookups of the index
@@ -2988,40 +2989,40 @@ let placement_lands_at_position ()
        id (`ix_unique`); every parent link is the parent relation and names a node strictly below
        the top (`ix_link_is_parent`); and the walk UP the links from a node returns the walk DOWN to
        it (`ix_up_walks`, over any links that chain a duplicate-free list back to an unlinked top).
-       Theorem 2, `freshness_tracks_change`: an index built from one well-formed tree is fresh for
-       another well-formed tree ONLY IF the two are the same tree — every skeleton edit, kind change
-       or id remap moves the pre-image — because a multiset of node records determines a well-formed
-       tree (`ix_records_determine`: each tree's every node is a node of the other, and a tree is the
-       only node of itself as large as itself). So over a fresh index every lookup is the walk over
-       the CURRENT tree (`fresh_index_agrees`).
-       Theorem 3, `fresh_on_build` and `try_build_exact`: `build`'s index is fresh for the tree it
-       was built from, and `tryBuild` builds exactly the well-formed trees and refuses the rest with
-       `Tree.wellFormed`'s first repeated id.
+       Theorem 2, `freshness_tracks_change`: an index built from a well-formed tree is fresh for a
+       tree ONLY IF the two are the same tree — every skeleton edit, kind change or id remap reads as
+       stale, with no premise about any hash. A fresh tree is well-formed (`ix_fresh_wf`); its every
+       node record is a record of the indexed tree (`ix_agree_records`), and every node of the
+       indexed tree has a record of the fresh one, because its key is the fresh tree's and the node
+       found there agrees with it (`ix_covered_records`); and two well-formed trees whose records
+       each include the other's are one tree (`ix_records_determine`: each tree is a node of the
+       other, and a tree is the only node of itself as large as itself). So over a fresh index every
+       lookup is the walk over the CURRENT tree (`fresh_index_agrees`).
+       Theorem 3, `fresh_on_build` and `try_build_exact`: `build`'s index is fresh for a well-formed
+       tree it was built from, and `tryBuild` builds exactly the well-formed trees and refuses the
+       rest with `Tree.wellFormed`'s first repeated id. Over a tree carrying an id twice no index is
+       fresh (`ix_fresh_wf`), `build`'s own included (`repeated_ids_never_fresh`).
 
-       THEOREM 2 IS FALSE AS FIRST STATED ("`isFreshFor` is false after any op that changes a cached
-       answer"), on two counts, and both are stated rather than hidden. (a) The stamp is a 32-bit
-       sum: two trees whose records sum alike read as fresh, so production's claim is "fresh only if
-       unchanged, or the pre-images collide" — the premise above, which `Index.Fingerprint`'s own
-       documentation already calls a detector and not a guarantee. (b) A node is what the witness
-       shows, and the witness has no content accessor: an `UpdateNode` that keeps id, kind and child
-       ids changes what `Index.tryFind` hands back and moves no record, so `isFreshFor` reads it
-       fresh. That is Phase 305's documented boundary — `buildWith` / `isFreshForWith` are the check
-       that sees content — and the model's tree carries no content, so it is outside this model by
-       construction.
+       WHAT THIS DOES NOT CLAIM. A node is what the witness shows, and the witness has no content
+       accessor: production's content conjunct is the caller's `encode`, exact when `encode` is
+       injective over a node's own content — a precondition the caller certifies
+       (`Conformance.encoderInjectivityLaws`), stated on `index-node-is-its-record`, and outside this
+       model by construction. Theorem 2 quantifies over the index `build` made; an index carried
+       through `Index.rebind` / `Ops.Index.afterOp` is `build`'s index of the edited tree by their
+       law, which the index tests compare with a rebuild and this model does not state.
 
        WHY WELL-FORMEDNESS. `Map.ofList` keeps the LAST node carrying an id and `Tree.tryFind` the
-       FIRST, so over a tree carrying an id twice the index and the walk genuinely disagree; and two
-       different trees carrying one id twice can share a record multiset
-       (`repeated_ids_alias_records`). `tryBuild` refuses exactly those trees.
+       FIRST, so over a tree carrying an id twice the index and the walk genuinely disagree, and the
+       check reads every such tree as stale. `tryBuild` refuses exactly those trees.
 
-       THE GO-RED. The child ids in each record are necessary: a stamp over (id, kind, child count)
-       alone reads two well-formed trees one reparent apart as the same
-       (`a_childless_stamp_misses_a_reparent`), and with `ix_record_of` narrowed to that the module
-       does not verify — `ix_kids_eq`'s use in `ix_sub_in` is what fails.
+       THE GO-RED. The child ids in each record are necessary: a check over (id, kind, child count)
+       alone, without the parent links, reads two well-formed trees one reparent apart as the same
+       (`a_childless_check_misses_a_reparent`), and with `ix_record_of` narrowed to that the module
+       does not verify — `ix_kids_eq`'s use in `ix_sub_in` is what fails. The pinned pair Phase 438
+       found a stamp collision for reads as stale (`the_stamp_collision_pair_is_stale`).
 
-       NOT MODELLED: `Index.buildWith` / `isFreshForWith` (the content term) and `Index.rebind`
-       (maintenance through an edit, which `Ops.Index.afterOp` drives and the index tests compare
-       with a rebuild).
+       NOT MODELLED: the content conjunct (above) and `Index.rebind` (maintenance through an edit,
+       which `Ops.Index.afterOp` drives and the index tests compare with a rebuild).
    ====================================================================================== *)
 
 (* ---- 23.1 the preorder, as nodes (F#: `Tree.preorder w root`) ---- *)
@@ -3041,8 +3042,8 @@ let rec ix_tids (ns:list tree) : Tot (list string) =
 
 (* ---- 23.2 the index (F#: `NodeIndex`, `Index.build`) ---- *)
 
-(* One node's record: what its term in the staleness stamp hashes — id, kind and the ordered child
-   ids (`Index.fingerprintOf`; the child COUNT it also writes is the length of the last field). *)
+(* One node's record: what `Index.isFreshFor` compares — id, kind and the ordered child ids (the
+   child COUNT is the length of the last field). *)
 type ix_record = string & string & list string
 
 let ix_record_of (n:tree) : Tot ix_record = (tid_of n, kind_of n, kid_ids (kids_of n))
@@ -3077,30 +3078,16 @@ let rec ix_assoc (#a:eqtype) (x:string) (l:list (string & a)) : Tot (option a) =
   | [] -> None
   | (k, v) :: r -> (match ix_assoc x r with Some w -> Some w | None -> if k = x then Some v else None)
 
-(* The stamp is modelled as its PRE-IMAGE, the records themselves, and compared as a multiset. *)
-let rec ix_count (#a:eqtype) (x:a) (l:list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | y :: r -> (if x = y then 1 else 0) + ix_count x r
-
-let rec ix_counts_agree (#a:eqtype) (keys l m:list a) : Tot bool =
-  match keys with
-  | [] -> true
-  | x :: r -> ix_count x l = ix_count x m && ix_counts_agree r l m
-
-let ix_same_multiset (#a:eqtype) (l m:list a) : Tot bool = ix_counts_agree (app l m) l m
-
 type ix_index = {
   ix_by_id : list (string & tree);
   ix_parent : list (string & string);
-  ix_root : string;
-  ix_stamp : list ix_record
+  ix_root : string
 }
 
-(* F#: `Index.build` — one preorder, both maps and the stamp. *)
+(* F#: `Index.build` — one preorder, both maps. *)
 let ix_build (t:tree) : Tot ix_index =
   let ns = ix_nodes t in
-  { ix_by_id = ix_keyed ns; ix_parent = ix_links ns; ix_root = tid_of t; ix_stamp = ix_records_of ns }
+  { ix_by_id = ix_keyed ns; ix_parent = ix_links ns; ix_root = tid_of t }
 
 (* F#: `Index.tryBuild` — `Tree.wellFormed`'s first repeated id, or the index. *)
 let ix_try_build (t:tree) : Tot (outcome ix_index string) =
@@ -3108,8 +3095,40 @@ let ix_try_build (t:tree) : Tot (outcome ix_index string) =
   | Some d -> Error d
   | None -> Ok (ix_build t)
 
-(* F#: `Index.isFreshFor`. *)
-let ix_is_fresh_for (t:tree) (ix:ix_index) : Tot bool = ix_same_multiset (ix_records t) ix.ix_stamp
+(* F#: `Index.isFreshFor`'s `linked` — each child's key in `ParentOf`, at its parent. *)
+let rec ix_kids_linked (lk:list (string & string)) (p:string) (cs:list tree) : Tot bool =
+  match cs with
+  | [] -> true
+  | c :: r -> ix_assoc (tid_of c) lk = Some p && ix_kids_linked lk p r
+
+(* F#: `Index.isFreshFor`'s `agrees` — the node's key in `ById` at a node with the same record, and
+   its children linked to it. Production also compares the two nodes' `encode` readings; the model's
+   node carries no content. *)
+let ix_node_agrees (ix:ix_index) (n:tree) : Tot bool =
+  (match ix_assoc (tid_of n) ix.ix_by_id with
+   | Some m -> ix_record_of m = ix_record_of n
+   | None -> false)
+  && ix_kids_linked ix.ix_parent (tid_of n) (kids_of n)
+
+let rec ix_all_agree (ix:ix_index) (ns:list tree) : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: r -> ix_node_agrees ix n && ix_all_agree ix r
+
+(* Every key of a map is one of `ks` — production's `Map.count` comparison, once every key the walk
+   met is known to be in the map. *)
+let rec ix_keys_within (#a:eqtype) (l:list (string & a)) (ks:list string) : Tot bool =
+  match l with
+  | [] -> true
+  | (k, _) :: r -> mem k ks && ix_keys_within r ks
+
+(* F#: `Index.isFreshFor` (Phase 447): exact, node by node, no hash. *)
+let ix_is_fresh_for (t:tree) (ix:ix_index) : Tot bool =
+  ix.ix_root = tid_of t
+  && None? (scan_dup [] (ids t))
+  && ix_all_agree ix (ix_nodes t)
+  && ix_keys_within ix.ix_by_id (ids t)
+  && ix_keys_within ix.ix_parent (ids_all (kids_of t))
 
 (* ---- 23.3 the lookups (F#: `Index.tryFind` / `parentOf` / `path` / `ancestors` / `depth`) ---- *)
 
@@ -3612,40 +3631,7 @@ let index_agrees (t:tree) (x:string)
     | Some l -> ix_choose_agrees t (ix_init l)
     | None -> ()
 
-(* ---- 23.8 the stamp's pre-image determines a well-formed tree ---- *)
-
-let rec ix_count_pos (#a:eqtype) (x:a) (l:list a) : Lemma (ensures mem x l <==> ix_count x l > 0) (decreases l)
-  = match l with
-    | [] -> ()
-    | _ :: r -> ix_count_pos x r
-
-let rec ix_counts_agree_mem (#a:eqtype) (keys l m:list a) (x:a)
-  : Lemma (requires ix_counts_agree keys l m /\ mem x keys) (ensures ix_count x l == ix_count x m) (decreases keys)
-  = match keys with
-    | y :: r -> if y = x then () else ix_counts_agree_mem r l m x
-
-let rec ix_counts_refl (#a:eqtype) (keys l:list a) : Lemma (ensures ix_counts_agree keys l l) (decreases keys)
-  = match keys with
-    | [] -> ()
-    | _ :: r -> ix_counts_refl r l
-
-let rec ix_same_all_in_l (#a:eqtype) (xs l m:list a)
-  : Lemma (requires ix_same_multiset l m /\ ix_all_in xs l) (ensures ix_all_in xs m) (decreases xs)
-  = match xs with
-    | [] -> ()
-    | x :: r ->
-      ix_count_pos x l; ix_count_pos x m;
-      ix_counts_agree_mem (app l m) l m x;
-      ix_same_all_in_l r l m
-
-let rec ix_same_all_in_r (#a:eqtype) (xs l m:list a)
-  : Lemma (requires ix_same_multiset l m /\ ix_all_in xs m) (ensures ix_all_in xs l) (decreases xs)
-  = match xs with
-    | [] -> ()
-    | x :: r ->
-      ix_count_pos x l; ix_count_pos x m;
-      ix_counts_agree_mem (app l m) l m x;
-      ix_same_all_in_r r l m
+(* ---- 23.8 a tree's node records determine it, when it is well-formed ---- *)
 
 let rec ix_all_in_refl (#a:eqtype) (xs:list a) : Lemma (ensures ix_all_in xs xs) (decreases xs)
   = match xs with
@@ -3737,15 +3723,12 @@ and ix_sub_len_all (s:tree) (ts:list tree)
       ix_len_app (ix_nodes t) (ix_nodes_all r);
       if mem s (ix_nodes t) then ix_sub_len s t else ix_sub_len_all s r
 
-(* The stamp's pre-image determines a well-formed tree: two well-formed trees whose node records
-   agree as a multiset are the same tree. *)
+(* Two well-formed trees whose node records each include the other's are the same tree. *)
 let ix_records_determine (t1 t2:tree)
-  : Lemma (requires wf t1 /\ wf t2 /\ ix_same_multiset (ix_records t1) (ix_records t2)) (ensures t1 == t2)
-  = ix_all_in_refl (ix_records t1);
-    ix_all_in_refl (ix_records t2);
-    ix_same_all_in_l (ix_records t1) (ix_records t1) (ix_records t2);
-    ix_same_all_in_r (ix_records t2) (ix_records t1) (ix_records t2);
-    (match t1 with TNode _ _ _ -> ());
+  : Lemma (requires wf t1 /\ wf t2 /\ ix_all_in (ix_records t1) (ix_records t2)
+                    /\ ix_all_in (ix_records t2) (ix_records t1))
+          (ensures t1 == t2)
+  = (match t1 with TNode _ _ _ -> ());
     (match t2 with TNode _ _ _ -> ());
     ix_sub_in t1 t2 t1;
     ix_sub_in t2 t1 t2;
@@ -3754,17 +3737,77 @@ let ix_records_determine (t1 t2:tree)
     if t1 = t2 then ()
     else (match t2 with TNode _ _ cs -> ix_sub_len_all t1 cs)
 
+(* ---- 23.9 what a fresh check establishes about the tree in front of it ---- *)
+
+(* A fresh tree carries no id twice. *)
+let ix_fresh_wf (t:tree) (ix:ix_index) : Lemma (requires ix_is_fresh_for t ix) (ensures wf t)
+  = scan_dup_none_iff [] (ids t); wf_iff_no_dups t
+
+let rec ix_all_agree_mem (ix:ix_index) (ns:list tree) (n:tree)
+  : Lemma (requires ix_all_agree ix ns /\ mem n ns) (ensures ix_node_agrees ix n) (decreases ns)
+  = match ns with
+    | m :: r -> if m = n then () else ix_all_agree_mem ix r n
+
+let rec ix_keys_within_mem (#a:eqtype) (l:list (string & a)) (ks:list string) (k:string) (v:a)
+  : Lemma (requires ix_keys_within l ks /\ mem (k, v) l) (ensures mem k ks) (decreases l)
+  = match l with
+    | (k', v') :: r -> if k' = k && v' = v then () else ix_keys_within_mem r ks k v
+
+(* Every node record of a tree that agrees with `build`'s index is a record of the indexed tree. *)
+let rec ix_agree_records (t0:tree) (ns:list tree)
+  : Lemma (requires wf t0 /\ ix_all_agree (ix_build t0) ns)
+          (ensures ix_all_in (ix_records_of ns) (ix_records t0)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r ->
+      ix_agree_records t0 r;
+      ix_find_agrees (tid_of n) t0;
+      ix_find_mem (tid_of n) t0;
+      match find_in (tid_of n) t0 with
+      | Some m -> ix_records_mem m (ix_nodes t0)
+      | None -> ()
+
+(* And every node of the indexed tree has a record of the fresh one: its key is the fresh tree's,
+   and the node found there agrees with it. *)
+let ix_covered_record (t0 t m:tree)
+  : Lemma (requires wf t0 /\ mem m (ix_nodes t0) /\ ix_all_agree (ix_build t0) (ix_nodes t)
+                    /\ ix_keys_within (ix_keyed (ix_nodes t0)) (ids t))
+          (ensures mem (ix_record_of m) (ix_records t))
+  = ix_keyed_mem (tid_of m) m (ix_nodes t0);
+    ix_keys_within_mem (ix_keyed (ix_nodes t0)) (ids t) (tid_of m) m;
+    find_in_some_iff (tid_of m) t;
+    ix_find_mem (tid_of m) t;
+    match find_in (tid_of m) t with
+    | Some n ->
+      ix_all_agree_mem (ix_build t0) (ix_nodes t) n;
+      ix_find_agrees (tid_of m) t0;
+      ix_find_node t0 m;
+      ix_records_mem n (ix_nodes t)
+    | None -> ()
+
+let rec ix_covered_records (t0 t:tree) (ms:list tree)
+  : Lemma (requires wf t0 /\ ix_all_in ms (ix_nodes t0) /\ ix_all_agree (ix_build t0) (ix_nodes t)
+                    /\ ix_keys_within (ix_keyed (ix_nodes t0)) (ids t))
+          (ensures ix_all_in (ix_records_of ms) (ix_records t)) (decreases ms)
+  = match ms with
+    | [] -> ()
+    | m :: r -> ix_covered_record t0 t m; ix_covered_records t0 t r
+
 (* ======================================================================================
-   THEOREM 2 — FRESHNESS TRACKS CHANGE: an index `build` made from one well-formed tree is fresh
-   for another well-formed tree only if the two are the same tree; so over a fresh index every
-   lookup is the walk over the CURRENT tree.
+   THEOREM 2 — FRESHNESS TRACKS CHANGE: an index `build` made from a well-formed tree is fresh for
+   a tree only if the two are the same tree; so over a fresh index every lookup is the walk over
+   the CURRENT tree. No premise about a hash: the check compares the index with the tree.
    ====================================================================================== *)
 let freshness_tracks_change (t0 t:tree)
-  : Lemma (requires wf t0 /\ wf t /\ ix_is_fresh_for t (ix_build t0)) (ensures t == t0)
-  = ix_records_determine t t0
+  : Lemma (requires wf t0 /\ ix_is_fresh_for t (ix_build t0)) (ensures t == t0)
+  = ix_fresh_wf t (ix_build t0);
+    ix_agree_records t0 (ix_nodes t);
+    ix_all_in_refl (ix_nodes t0);
+    ix_covered_records t0 t (ix_nodes t0);
+    ix_records_determine t t0
 
 let fresh_index_agrees (t0 t:tree) (x:string)
-  : Lemma (requires wf t0 /\ wf t /\ ix_is_fresh_for t (ix_build t0))
+  : Lemma (requires wf t0 /\ ix_is_fresh_for t (ix_build t0))
           (ensures ix_try_find x (ix_build t0) == find_in x t
                    /\ ix_parent_of x (ix_build t0) == ix_parent_walk x t
                    /\ ix_path x (ix_build t0) == ix_path_walk x t
@@ -3772,11 +3815,68 @@ let fresh_index_agrees (t0 t:tree) (x:string)
                    /\ ix_ancestors x (ix_build t0) == ix_ancestors_walk x t)
   = freshness_tracks_change t0 t; index_agrees t x
 
+(* ---- 23.10 `build`'s index is fresh for its well-formed tree ---- *)
+
+let rec ix_links_has (n c:tree) (ns:list tree)
+  : Lemma (requires mem n ns /\ mem c (kids_of n)) (ensures mem (tid_of c, tid_of n) (ix_links ns))
+          (decreases ns)
+  = match ns with
+    | m :: r ->
+      if m = n then begin
+        ix_kid_links_mem (tid_of c) (tid_of n) (tid_of n) (kids_of n);
+        kid_ids_of_mem c (kids_of n)
+      end
+      else ix_links_has n c r
+
+let rec ix_kids_linked_build (t n:tree) (cs:list tree)
+  : Lemma (requires wf t /\ mem n (ix_nodes t) /\ ix_all_in cs (kids_of n))
+          (ensures ix_kids_linked (ix_links (ix_nodes t)) (tid_of n) cs) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | c :: r ->
+      ix_links_has n c (ix_nodes t);
+      ix_links_nodes t;
+      ix_link_is_parent (tid_of c) (tid_of n) t;
+      ix_parent_link_agrees (tid_of c) t;
+      ix_kids_linked_build t n r
+
+let rec ix_build_agrees (t:tree) (ns:list tree)
+  : Lemma (requires wf t /\ ix_all_in ns (ix_nodes t)) (ensures ix_all_agree (ix_build t) ns) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r ->
+      ix_find_agrees (tid_of n) t;
+      ix_find_node t n;
+      ix_all_in_refl (kids_of n);
+      ix_kids_linked_build t n (kids_of n);
+      ix_build_agrees t r
+
+let rec ix_keyed_within (t:tree) (ns:list tree)
+  : Lemma (requires ix_all_in ns (ix_nodes t)) (ensures ix_keys_within (ix_keyed ns) (ids t)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r -> ix_mem_ids t n; ix_keyed_within t r
+
+let rec ix_links_within (t:tree) (l:list (string & string))
+  : Lemma (requires wf t /\ ix_all_in l (ix_plinks t)) (ensures ix_keys_within l (ids_all (kids_of t)))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | (x, p) :: r -> ix_link_is_parent x p t; ix_links_within t r
+
 (* ======================================================================================
    THEOREM 3 — FRESH ON BUILD.
    ====================================================================================== *)
-let fresh_on_build (t:tree) : Lemma (ensures ix_is_fresh_for t (ix_build t))
-  = ix_counts_refl (app (ix_records t) (ix_records t)) (ix_records t)
+let fresh_on_build (t:tree) : Lemma (requires wf t) (ensures ix_is_fresh_for t (ix_build t))
+  = wf_iff_no_dups t;
+    inter_nil_iff (ids t) [];
+    scan_dup_none_iff [] (ids t);
+    ix_all_in_refl (ix_nodes t);
+    ix_build_agrees t (ix_nodes t);
+    ix_keyed_within t (ix_nodes t);
+    ix_links_nodes t;
+    ix_all_in_refl (ix_plinks t);
+    ix_links_within t (ix_plinks t)
 
 let try_build_exact (t:tree)
   : Lemma (ensures (match ix_try_build t with
@@ -3785,16 +3885,29 @@ let try_build_exact (t:tree)
   = scan_dup_none_iff [] (ids t);
     inter_nil_iff (ids t) [];
     wf_iff_no_dups t;
-    fresh_on_build t
+    if wf t then fresh_on_build t else ()
 
-(* ---- 23.9 THE GO-RED: a stamp that does not read the child ids misses a reparent ---- *)
+(* ---- 23.11 THE GO-RED: a check that does not read the child ids misses a reparent ---- *)
 
 let ix_record_blind (n:tree) : Tot (string & string & nat) = (tid_of n, kind_of n, len (kids_of n))
 
-let rec ix_records_blind (ns:list tree) : Tot (list (string & string & nat)) =
+let ix_node_agrees_blind (ix:ix_index) (n:tree) : Tot bool =
+  match ix_assoc (tid_of n) ix.ix_by_id with
+  | Some m -> ix_record_blind m = ix_record_blind n
+  | None -> false
+
+let rec ix_all_agree_blind (ix:ix_index) (ns:list tree) : Tot bool =
   match ns with
-  | [] -> []
-  | n :: r -> ix_record_blind n :: ix_records_blind r
+  | [] -> true
+  | n :: r -> ix_node_agrees_blind ix n && ix_all_agree_blind ix r
+
+(* `ix_is_fresh_for` with each record narrowed to (id, kind, child count) and the parent links
+   unread: what the go-red compares production against. *)
+let ix_is_fresh_blind (t:tree) (ix:ix_index) : Tot bool =
+  ix.ix_root = tid_of t
+  && None? (scan_dup [] (ids t))
+  && ix_all_agree_blind ix (ix_nodes t)
+  && ix_keys_within ix.ix_by_id (ids t)
 
 let reparent_before : tree =
   TNode "r" "doc" [ TNode "p" "sec" [ TNode "x" "leaf" [] ]; TNode "q" "sec" [ TNode "y" "leaf" [] ] ]
@@ -3802,33 +3915,42 @@ let reparent_before : tree =
 let reparent_after : tree =
   TNode "r" "doc" [ TNode "p" "sec" [ TNode "y" "leaf" [] ]; TNode "q" "sec" [ TNode "x" "leaf" [] ] ]
 
-let a_childless_stamp_misses_a_reparent ()
+let a_childless_check_misses_a_reparent ()
   : Lemma (ensures wf reparent_before /\ wf reparent_after
-                   /\ ix_same_multiset (ix_records_blind (ix_nodes reparent_before))
-                                       (ix_records_blind (ix_nodes reparent_after))
+                   /\ ix_is_fresh_blind reparent_after (ix_build reparent_before)
                    /\ ix_parent_of "x" (ix_build reparent_before) <> ix_parent_walk "x" reparent_after
                    /\ not (ix_is_fresh_for reparent_after (ix_build reparent_before)))
   = assert_norm (wf reparent_before);
     assert_norm (wf reparent_after);
-    assert_norm (ix_same_multiset (ix_records_blind (ix_nodes reparent_before))
-                                  (ix_records_blind (ix_nodes reparent_after)));
+    assert_norm (ix_is_fresh_blind reparent_after (ix_build reparent_before));
     assert_norm (ix_parent_of "x" (ix_build reparent_before) <> ix_parent_walk "x" reparent_after);
     assert_norm (not (ix_is_fresh_for reparent_after (ix_build reparent_before)))
 
-(* Why `wf`: two different trees carrying one id twice share a record multiset, and over either the
-   index's `tryFind` (the last node carrying the id) is not the walk's (the first). *)
-let repeated_twice_a : tree = TNode "r" "doc" [ TNode "a" "sec" [ TNode "b" "leaf" [] ]; TNode "a" "sec" [] ]
-let repeated_twice_b : tree = TNode "r" "doc" [ TNode "a" "sec" []; TNode "a" "sec" [ TNode "b" "leaf" [] ] ]
+(* The pair Phase 438 pinned: two leaf kinds whose 32-bit stamp terms collided, so the retired
+   stamp read an `UpdateNode` between them as fresh. The exact check reads the record. *)
+let collision_before : tree = TNode "root" "doc" [ TNode "x" "k79499" [] ]
+let collision_after : tree = TNode "root" "doc" [ TNode "x" "k414100" [] ]
 
-let repeated_ids_alias_records ()
-  : Lemma (ensures not (wf repeated_twice_a) /\ not (wf repeated_twice_b) /\ repeated_twice_a <> repeated_twice_b
-                   /\ ix_is_fresh_for repeated_twice_b (ix_build repeated_twice_a)
-                   /\ ix_try_find "a" (ix_build repeated_twice_a) <> find_in "a" repeated_twice_a)
-  = assert_norm (not (wf repeated_twice_a));
-    assert_norm (not (wf repeated_twice_b));
-    assert_norm (repeated_twice_a <> repeated_twice_b);
-    assert_norm (ix_is_fresh_for repeated_twice_b (ix_build repeated_twice_a));
-    assert_norm (ix_try_find "a" (ix_build repeated_twice_a) <> find_in "a" repeated_twice_a)
+let the_stamp_collision_pair_is_stale ()
+  : Lemma (ensures wf collision_before /\ wf collision_after
+                   /\ not (ix_is_fresh_for collision_after (ix_build collision_before))
+                   /\ ix_try_find "x" (ix_build collision_before) <> find_in "x" collision_after)
+  = assert_norm (wf collision_before);
+    assert_norm (wf collision_after);
+    assert_norm (not (ix_is_fresh_for collision_after (ix_build collision_before)));
+    assert_norm (ix_try_find "x" (ix_build collision_before) <> find_in "x" collision_after)
+
+(* Why `wf`: over a tree carrying an id twice the index's `tryFind` (the last node carrying the id)
+   is not the walk's (the first), and no index is fresh for such a tree — `build`'s own included. *)
+let repeated_twice : tree = TNode "r" "doc" [ TNode "a" "sec" [ TNode "b" "leaf" [] ]; TNode "a" "sec" [] ]
+
+let repeated_ids_never_fresh ()
+  : Lemma (ensures not (wf repeated_twice)
+                   /\ not (ix_is_fresh_for repeated_twice (ix_build repeated_twice))
+                   /\ ix_try_find "a" (ix_build repeated_twice) <> find_in "a" repeated_twice)
+  = assert_norm (not (wf repeated_twice));
+    assert_norm (not (ix_is_fresh_for repeated_twice (ix_build repeated_twice)));
+    assert_norm (ix_try_find "a" (ix_build repeated_twice) <> find_in "a" repeated_twice)
 
 (* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.

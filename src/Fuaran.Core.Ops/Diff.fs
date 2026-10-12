@@ -367,7 +367,7 @@ module Diff =
     /// `UpdateNode` for every survivor whose own content differs, as the caller's `encode` sees it
     /// over the two nodes' SHELLS (`ReplaceChildren n []`, so a change in the children alone is
     /// never an update). The witness has no content accessor, so the encoder is the one way the
-    /// diff can see content — the same per-call parameter `Tree.encodeHash` and `Tree.Index.buildWith`
+    /// diff can see content — the same per-call parameter `Tree.encodeHash` and `Tree.Index.isFreshFor`
     /// take, and like theirs it should be injective over a node's own content: a lossy encoder
     /// makes two different nodes read as unchanged and the script lands on a tree that is not
     /// `after`.

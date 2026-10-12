@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 342 claims — 245 proved across 32 models, 56 tested, 39 assumed (8 `domain-obligation`, 24 `model-bridge`, 7 `premise`), 2 policy.
+**The ladder, counted:** 341 claims — 245 proved across 32 models, 56 tested, 38 assumed (8 `domain-obligation`, 24 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -703,7 +703,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 39 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 38 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -723,7 +723,7 @@ place together with the contract it implies.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 7 rows.
+  on. 6 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -778,7 +778,6 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `decode-layer-round-trip-premises` | `domain-obligation` | `Conformance.codecLaws` |
 | `decode-layer-refusal-premises` | `domain-obligation` | `Conformance.codecLaws` |
 | `decode-layer-model-bridge` | `model-bridge` | `permanent` |
-| `index-stamp-separates` | `premise` | — |
 | `index-node-is-its-record` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
@@ -1029,11 +1028,11 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Tree` | 67 | 17 | 8 | 1 | 2 | 0 | 0 | 39 |
+| `Fuaran.Core.Tree` | 65 | 17 | 8 | 1 | 2 | 0 | 0 | 37 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1209 | 258 | 431 | 28 | 13 | 0 | 3 | 476 |
+| **Total** | 1207 | 258 | 431 | 28 | 13 | 0 | 3 | 474 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -2884,34 +2883,39 @@ Not modelled: resolving an `Anchor` to `k` (the sibling lookup and the range che
 that precedes it, which the theorem takes as given; `canHold`; and `TreePlacement.move` / `clone`.
 Row `tree-placement-lowers-to-insert-and-reorder`.
 
-### The build-once index agrees with the walk (Phase 438)
+### The build-once index agrees with the walk (Phase 438), and its freshness is exact (Phase 447)
 
-`Tree.Index.build` takes one preorder and keeps two maps — node by id, child id to parent id — and a
-staleness stamp; five lookups read the maps and `isFreshFor` recomputes the stamp. Section 23 of
+`Tree.Index.build` takes one preorder and keeps two maps — node by id, child id to parent id; five
+lookups read the maps and `isFreshFor` compares the index with a tree node by node. Section 23 of
 `TreeOps.fst` models all of it clause for clause (a map is its association list, `Map.tryFind` the
-last binding `Map.ofList` kept), with the stamp kept as its PRE-IMAGE: the multiset of node records
-(id, kind, ordered child ids) whose hashed terms production sums.
+last binding `Map.ofList` kept). The freshness check has no hash in it since Phase 447 (D150): the
+root's id; no id carried twice; every node's key in `ById` at a node with the same record (id, kind,
+ordered child ids) and each child's key in `ParentOf` linked to it; and no key in either map beyond
+the tree's. Production also compares each node's `encode` reading, which the model's content-free
+node has nothing for.
 
 - **`index_agrees`** — over a well-formed tree, `Index.tryFind` / `parentOf` / `path` / `depth` /
   `ancestors` are `Tree.tryFind` / `parentOf` / `path` / `depth` / `ancestors` at every id. The
   walk UP the parent links returns the walk DOWN (`ix_up_walks`).
-- **`freshness_tracks_change`** — an index built from one well-formed tree is fresh for another
-  only if they are the same tree, because a record multiset determines a well-formed tree
-  (`ix_records_determine`); so over a fresh index every lookup is the walk over the current tree
-  (`fresh_index_agrees`).
-- **`fresh_on_build`**, **`try_build_exact`** — `build` is fresh for its tree; `tryBuild` builds
-  exactly the well-formed trees.
+- **`freshness_tracks_change`** — an index built from a well-formed tree is fresh for a tree only
+  if they are the same tree: a fresh tree is well-formed (`ix_fresh_wf`), each tree's node records
+  include the other's (`ix_agree_records`, `ix_covered_records`), and two well-formed trees in that
+  relation are one tree (`ix_records_determine`); so over a fresh index every lookup is the walk
+  over the current tree (`fresh_index_agrees`).
+- **`fresh_on_build`**, **`try_build_exact`** — `build` is fresh for its well-formed tree; `tryBuild`
+  builds exactly the well-formed trees. Over a tree carrying an id twice no index is fresh
+  (`repeated_ids_never_fresh`): the index keeps the last node and the walk finds the first.
 
-The phase's second statement — "`isFreshFor` is false after any op that changes a cached answer" —
-is FALSE as written, twice, and the ladder says so rather than proving around it: a 32-bit sum can
-collide (`index-stamp-separates`, a premise), and a content-only `UpdateNode` changes what
-`Index.tryFind` returns without moving any record (`index-node-is-its-record`; Phase 305's
-`buildWith` is the check that sees content). Well-formedness is necessary: over a tree carrying an
-id twice the index keeps the last node and the walk finds the first (`repeated_ids_alias_records`).
-GO-RED: narrow each record to (id, kind, child count) — a stamp that ignores a reparent — and the
-module does not verify; `a_childless_stamp_misses_a_reparent` evaluates the alias. Rows
-`index-agrees-with-the-walk`, `index-freshness-tracks-change`, `index-fresh-on-build`,
-`index-differential`. Not modelled: `buildWith` / `isFreshForWith` and `rebind`.
+Phase 438 found the phase's second statement — "`isFreshFor` is false after any op that changes a
+cached answer" — FALSE of the check then shipped, twice: its 32-bit stamp could collide (a premise
+row, `index-stamp-separates`, with a pinned pair of leaf kinds that collided), and a content-only
+`UpdateNode` moved no record. Phase 447 removed both: the stamp is gone and the premise row with it,
+the pinned pair reads as stale (`the_stamp_collision_pair_is_stale`), and the content half is the
+caller's encoder, exact under its injectivity (`index-node-is-its-record`, restated). GO-RED: narrow
+each record to (id, kind, child count) and the module does not verify;
+`a_childless_check_misses_a_reparent` evaluates the narrowed check, parent links unread, reading a
+reparent as fresh. Rows `index-agrees-with-the-walk`, `index-freshness-tracks-change`,
+`index-fresh-on-build`, `index-differential`. Not modelled: the content conjunct and `rebind`.
 
 ### Two things this model cost that the first two did not
 
@@ -2957,8 +2961,9 @@ before the fourth model is written.
    one insert plus at most one reorder and reaches exactly the positional insert
    (`placed_insert_is_insert_plus_reorder`, with `place_at_end_is_bare_insert` and
    `reorder_leg_is_not_identity` beside it); and, since Phase 438, that the build-once index's five
-   lookups are the walks they cache over a well-formed tree, and that its stamp's pre-image moves
-   with every change to one (`index_agrees`, `freshness_tracks_change`, `try_build_exact`). F\* 2026.09.06,
+   lookups are the walks they cache over a well-formed tree, and (Phase 447) that its exact freshness
+   check reads every change to one as stale (`index_agrees`, `freshness_tracks_change`,
+   `try_build_exact`). F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply` and `Ops.footprint` over
@@ -2969,9 +2974,11 @@ before the fourth model is written.
      that is the closest the code comes to enforcing it.
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
      the other two theorems.
-   - **The index stamp's 32-bit sum separates the trees it is checked against** (Phase 438,
-     `index-stamp-separates`), and a node's content beyond its id, kind and children is outside the
-     index model (`index-node-is-its-record`).
+   - **A node's content beyond its id, kind and children is outside the index model**, and the
+     freshness check's content conjunct is exact when the caller's encoder is injective over a
+     node's own content (`index-node-is-its-record`). _(**The index stamp's 32-bit sum separates the
+     trees it is checked against** — Phase 438's `index-stamp-separates` — is RETIRED: Phase 447
+     made the check exact, so there is no hash left to assume about.)_
    - _(**The op alphabet excludes a nested `Batch`** was the third assumption here and is RETIRED —
      Phase 162 lifted the diamond along a batch's script, so there is no shape hypothesis left to
      assume. The section above keeps what the assumption was and how it closed.)_

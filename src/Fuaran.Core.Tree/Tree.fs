@@ -8,7 +8,7 @@ namespace Fuaran.Core
 /// FSharp.Core only, Fable-clean.
 type IdWitness<'Id> =
     {
-        /// The id's string key — what every map, set and stamp here keys by (`Tree.wellFormed`,
+        /// The id's string key — what every map and set here keys by (`Tree.wellFormed`,
         /// `Tree.Index`, `FreshIds`). Must be injective: two ids that render alike are one id to
         /// every uniqueness check.
         ToString: 'Id -> string
@@ -35,7 +35,7 @@ type NodeWitness<'Node, 'Id> =
         /// The node's identity. The engine never changes it; only `Tree.remapIds` rewrites one,
         /// through a setter the caller passes.
         Id: 'Node -> 'Id
-        /// The node's kind as a string — read by every shape hash and staleness stamp, and the key
+        /// The node's kind as a string — read by every shape hash and the index freshness check, and the key
         /// the op layer's container rules look a parent up by.
         KindTag: 'Node -> string
         /// The ordered structural children: the only nodes the unkeyed walks reach, and the list
@@ -659,16 +659,17 @@ module Tree =
     // run an independent `preorder`; across a batch of lookups that is O(n^2) (`ancestors`
     // alone is O(n*depth)). `NodeIndex` is a one-pass snapshot — `id -> node` and `id -> parent`
     // maps keyed by the `IdWitness` string form — over which the same navigators are
-    // O(log n)/O(depth). It is a READ-ONLY cache: any structural edit invalidates it, so
-    // rebuild after `Ops.apply`. Each `Index.*` lookup returns exactly what the matching
-    // `Tree.*` combinator returns — the index is a cache, not a new semantics. The build-once /
-    // read-per-call hazard (Phase 17): reusing an index after an edit silently returns stale
-    // answers, so `build` stamps a `Fingerprint` over the (id, child-ids) preorder and
-    // `Index.isFreshFor` lets a caller detect a stale index instead of trusting it blindly.
+    // O(log n)/O(depth). It is a READ-ONLY cache: any edit invalidates it, so rebuild after
+    // `Ops.apply` or carry it through `Ops.Index.afterOp`. Each `Index.*` lookup returns exactly
+    // what the matching `Tree.*` combinator returns — the index is a cache, not a new semantics.
+    // The build-once / read-per-call hazard (Phase 17): reusing an index after an edit silently
+    // returns stale answers, so `Index.isFreshFor` says whether an index still describes a tree —
+    // EXACTLY since Phase 447, by comparing the index with the tree node by node (D150), where it
+    // used to compare a 32-bit stamp that two different trees could share.
 
     /// A one-pass, read-only snapshot of a tree for O(log n) lookups (see above). Stale after any
-    /// edit unless carried through `Index.rebind` / `Ops.Index.afterOp`; `Index.isFreshFor` detects
-    /// a stale one.
+    /// edit unless carried through `Index.rebind` / `Ops.Index.afterOp`; `Index.isFreshFor` says
+    /// whether it still describes a tree.
     type NodeIndex<'Node, 'Id> =
         {
             /// Every node the preorder reaches, keyed by `IdWitness.ToString` of its id. For an id
@@ -680,14 +681,6 @@ module Tree =
             /// The root's id at `build`; `Index.rebind` keeps it, since no skeleton op replaces the
             /// root.
             Root: 'Id
-            /// Staleness stamp captured at `build` — the sum, modulo 2^32, of one FNV-1a term per
-            /// node over its id, kind, child count and ordered child-ids (Phase 317; until then one
-            /// digest over the whole preorder), so any `InsertChild` / `RemoveNode` / `MoveNode` /
-            /// `ReorderChildren` (or id-remap or kind change) since `build` changes it. A sum over
-            /// nodes rather than a digest over a sequence so an edit RE-STAMPS in the nodes it
-            /// touched (`Index.rebind`) instead of in the tree. A *detector*, not a guarantee: a
-            /// collision is possible but vanishingly unlikely. Compare with `Index.isFreshFor`.
-            Fingerprint: string
         }
 
     /// Building, checking and maintaining a `NodeIndex`. Each lookup answers exactly what the
@@ -695,64 +688,11 @@ module Tree =
     /// new semantics.
     module Index =
 
-        // Arithmetic modulo 2^32, masked as `Hash.fnv1a` masks, so every host wraps alike.
-        let private add32 (a: uint32) (b: uint32) : uint32 = (a + b) &&& 0xFFFFFFFFu
-
-        let private sub32 (a: uint32) (b: uint32) : uint32 =
-            (a + (0xFFFFFFFFu - b) + 1u) &&& 0xFFFFFFFFu
-
-        let private stampOf (h: uint32) : string = h.ToString("x8")
-
-        // A stamp (and an `fnv1a` digest) is x8: lowercase hex, eight digits. Read back digit by
-        // digit — portable to every host, where a platform hex parser is not.
-        let private unstamp (s: string) : uint32 =
-            let mutable h = 0u
-
-            for ch in s do
-                let d =
-                    if ch >= '0' && ch <= '9' then
-                        uint32 ch - uint32 '0'
-                    else
-                        uint32 ch - uint32 'a' + 10u
-
-                h <- ((h * 16u) + d) &&& 0xFFFFFFFFu
-
-            h
-
-        /// One node's fingerprint — its term in the staleness stamp (Phase 317; until then this name
-        /// was the whole tree's digest, and the `canonicalFields` roster in `Hash.fs` lists it by
-        /// it): the fields `id`, `kind`, its child COUNT and then
-        /// each child id in order (capturing identity, kind, parent-child structure, and child
-        /// order), through `Hash.canonicalFields` and the portable FNV-1a, read back as a 32-bit
-        /// value. The record of every node, given unique ids, determines the tree — each node names
-        /// its children — so a sum over those records sees every skeleton edit plus a kind change or
-        /// id-remap, but NOT an opaque per-node payload mutation the witness has no accessor for
-        /// (the index would still hand back a payload-stale node; rebuild after a domain value-edit
-        /// too). The count keeps the fields unambiguous whatever an id contains (Phase 290).
-        let private fingerprintOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (n: 'Node) : uint32 =
-            let kids = w.Children n
-
-            let digest =
-                idw.ToString(w.Id n)
-                :: w.KindTag n
-                :: string (List.length kids)
-                :: (kids |> List.map (fun c -> idw.ToString(w.Id c)))
-                |> Hash.canonicalFields
-                |> Hash.fnv1a
-
-            unstamp digest
-
-        /// The staleness stamp of a whole tree: the sum of every preorder node's term. Recomputed by
-        /// `isFreshFor` and compared against the stamp `build` stored.
-        let private treeStampOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : string =
-            preorder w root
-            |> List.fold (fun acc n -> add32 acc (fingerprintOf w idw n)) 0u
-            |> stampOf
-
-        /// Build both maps + the staleness stamp in a single preorder pass. Over a tree that is not
-        /// well-formed (an id carried twice) `ById` and `ParentOf` keep the LAST occurrence, and
-        /// the parent links can form a cycle; every read below terminates on such an index
-        /// regardless (Phase 298), and `tryBuild` refuses the tree instead.
+        /// Build both maps in a single preorder pass. Over a tree that is not well-formed (an id
+        /// carried twice) `ById` and `ParentOf` keep the LAST occurrence, and the parent links can
+        /// form a cycle; every read below terminates on such an index regardless (Phase 298),
+        /// `isFreshFor` reads it as stale for every tree (Phase 447), and `tryBuild` refuses the
+        /// tree instead.
         let build (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : NodeIndex<'Node, 'Id> =
             let nodes = preorder w root
 
@@ -761,8 +701,7 @@ module Tree =
                 [ for p in nodes do
                       for c in w.Children p -> idw.ToString(w.Id c), w.Id p ]
                 |> Map.ofList
-              Root = w.Id root
-              Fingerprint = treeStampOf w idw root }
+              Root = w.Id root }
 
         /// `build`, refusing a tree that is not well-formed (Phase 298): `Error (RepeatedId d)`
         /// naming the first id the preorder carries twice (`Tree.wellFormed`'s verdict), where
@@ -818,97 +757,81 @@ module Tree =
         let depth (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : int option =
             path idw target ix |> Option.map (fun ids -> List.length ids - 1)
 
-        /// Is `ix` still valid for `root` (Phase 17)? Recomputes the staleness stamp over the
-        /// current tree and compares it to the one captured at `build`. Returns `false` after any
-        /// structural edit since the index was built (so a caller can `build` again instead of
-        /// reading stale answers), `true` for an unedited tree. O(n) — an opt-in check, not on the
-        /// per-lookup hot path. **A content-only `UpdateNode` is invisible to it** (Phase 305): the
-        /// stamp reads id, kind and child ids, so a rewrite that keeps all three — the common
-        /// content edit — leaves it `true` while `ById` holds the node as it was. `isFreshForWith
-        /// encode`, over an index from `buildWith encode`, is the check that sees it.
+
+        /// Does `ix` still describe `root` — does every answer it caches equal the walk it caches
+        /// (Phase 17; EXACT since Phase 447, D150)? One walk of `root` compares the index with it
+        /// node by node, with no hash in between: `root`'s id is the index's `Root`; no id is
+        /// carried twice; every node's key is in `ById`, at a node of the same kind, the same
+        /// ordered child ids and the same `encode` reading; every child's key is in `ParentOf`,
+        /// linked to its parent; and neither map holds a key beyond those. So `false` after any
+        /// skeleton edit, kind change, id remap or content edit since the index was built, and over
+        /// a tree carrying an id twice; `true` for the tree `build` was handed, when that tree is
+        /// well-formed.
+        ///
+        /// **`encode` is the content half (Phase 305's, folded in here).** The witness has no
+        /// content accessor, so a node's content is what the caller's `encode` reads — the same
+        /// per-call parameter `encodeHash` and `Diff.toOpsWith` take. The check is exact over
+        /// content when `encode` is injective over a node's own content (a node is then determined
+        /// by its id, kind, `encode` reading and children), the precondition `encodeHash` states
+        /// and `Conformance.encoderInjectivityLaws` certifies. A caller that wants only the
+        /// structural answers — `parentOf`'s, `path`'s, `depth`'s — may pass a constant, and then
+        /// `tryFind` can hand back a node whose content has since changed: the weaker check is
+        /// one the call site spells out.
+        ///
+        /// Over an index `build`, `tryBuild`, `rebind` (inside its contract) or `Ops.Index.afterOp`
+        /// made, `true` means every lookup answers what the walk over `root` answers; the claim is
+        /// `index-freshness-tracks-change` in `proofs.json`. O(n log n) — the walk with a map
+        /// lookup a node, the order of cost the stamp recomputation it replaces paid; an opt-in
+        /// check, not on the per-lookup hot path.
         let isFreshFor
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
-            (root: 'Node)
-            (ix: NodeIndex<'Node, 'Id>)
-            : bool =
-            treeStampOf w idw root = ix.Fingerprint
-
-        // ---- the content-aware stamp (Phase 305) ----
-        // `fingerprintOf` sees a node's id, kind and child ids and nothing else, so `isFreshFor`
-        // reports an index fresh across an `UpdateNode` that changed only the node's content: the
-        // index then hands back the node as it was before the rewrite. The witness has no content
-        // accessor, so the one way to stamp content is the caller's encoder — the same per-call
-        // parameter `Tree.encodeHash` takes, folded into each node's term beside its kind.
-
-        /// One node's term in the content-aware stamp: `fingerprintOf`'s fields plus `encode n`,
-        /// between the kind and the child count, so the stamp moves whenever the encoder's reading
-        /// of the node moves.
-        let private fingerprintOfWith
-            (w: NodeWitness<'Node, 'Id>)
-            (idw: IdWitness<'Id>)
-            (encode: 'Node -> string)
-            (n: 'Node)
-            : uint32 =
-            let kids = w.Children n
-
-            let digest =
-                idw.ToString(w.Id n)
-                :: w.KindTag n
-                :: encode n
-                :: string (List.length kids)
-                :: (kids |> List.map (fun c -> idw.ToString(w.Id c)))
-                |> Hash.canonicalFields
-                |> Hash.fnv1a
-
-            unstamp digest
-
-        let private treeStampOfWith
-            (w: NodeWitness<'Node, 'Id>)
-            (idw: IdWitness<'Id>)
-            (encode: 'Node -> string)
-            (root: 'Node)
-            : string =
-            preorder w root
-            |> List.fold (fun acc n -> add32 acc (fingerprintOfWith w idw encode n)) 0u
-            |> stampOf
-
-        /// `build`, stamped with the caller's content encoder as well (Phase 305): the same two maps
-        /// and root, and a `Fingerprint` that `isFreshForWith encode` moves for a content-only
-        /// `UpdateNode` as well as for every skeleton edit. The pair is a pair: an index built here
-        /// is checked with `isFreshForWith` under the SAME encoder (`isFreshFor` reads it as stale,
-        /// since the plain stamp omits the content term), and `Ops.Index.afterOp` maintains the
-        /// PLAIN stamp, so an index carried through it is a plain one — rebuild here after an edit
-        /// instead. The encoder should be injective over a node's own content, as `encodeHash`'s
-        /// must be: a reading two different contents share is a rewrite the stamp cannot see.
-        let buildWith
-            (w: NodeWitness<'Node, 'Id>)
-            (idw: IdWitness<'Id>)
-            (encode: 'Node -> string)
-            (root: 'Node)
-            : NodeIndex<'Node, 'Id> =
-            { build w idw root with
-                Fingerprint = treeStampOfWith w idw encode root }
-
-        /// `isFreshFor` under the content encoder `buildWith` stamped with (Phase 305): `false` after
-        /// any skeleton edit OR any `UpdateNode` whose new content the encoder reads differently,
-        /// `true` for an unedited tree. O(n), like `isFreshFor`.
-        let isFreshForWith
-            (w: NodeWitness<'Node, 'Id>)
-            (idw: IdWitness<'Id>)
             (encode: 'Node -> string)
             (root: 'Node)
             (ix: NodeIndex<'Node, 'Id>)
             : bool =
-            treeStampOfWith w idw encode root = ix.Fingerprint
+            let key (n: 'Node) = idw.ToString(w.Id n)
+            let kidKeys (n: 'Node) = w.Children n |> List.map key
+
+            let linked (parent: string) (c: 'Node) =
+                match Map.tryFind (key c) ix.ParentOf with
+                | Some p -> idw.ToString p = parent
+                | None -> false
+
+            let agrees (k: string) (n: 'Node) =
+                match Map.tryFind k ix.ById with
+                | Some cached ->
+                    w.KindTag cached = w.KindTag n
+                    && kidKeys cached = kidKeys n
+                    && encode cached = encode n
+                    && List.forall (linked k) (w.Children n)
+                | None -> false
+
+            // The walk, depth-first over an explicit stack; `seen` refuses an id carried twice.
+            let rec walk (seen: Set<string>) (count: int) (stack: 'Node list) : int option =
+                match stack with
+                | [] -> Some count
+                | n :: rest ->
+                    let k = key n
+
+                    if seen.Contains k || not (agrees k n) then
+                        None
+                    else
+                        walk (Set.add k seen) (count + 1) (w.Children n @ rest)
+
+            idw.ToString ix.Root = key root
+            && (match walk Set.empty 0 [ root ] with
+                // Every key the walk met is in both maps, so equal counts leave room for no other.
+                | Some count -> Map.count ix.ById = count && Map.count ix.ParentOf = count - 1
+                | None -> false)
 
         /// Re-index through an edit confined to known nodes (Phase 317) — the primitive an index is
         /// MAINTAINED through rather than rebuilt (`Ops.Index.afterOp` is its caller for the
-        /// skeleton ops). `leaving` are nodes of the INDEXED tree: each one's stamp term, its `ById`
-        /// entry and the `ParentOf` entry of each of its children are withdrawn. `arriving` are
-        /// nodes of the EDITED tree: each one's term, entry and child links are installed.
-        /// Withdrawals first, then installs, so a node on both sides is replaced. The root id is
-        /// kept (no skeleton op changes it). O(the two lists and their children), never O(tree).
+        /// skeleton ops). `leaving` are nodes of the INDEXED tree: each one's `ById` entry and the
+        /// `ParentOf` entry of each of its children are withdrawn. `arriving` are nodes of the
+        /// EDITED tree: each one's entry and child links are installed. Withdrawals first, then
+        /// installs, so a node on both sides is replaced. The root id is kept (no skeleton op
+        /// changes it). O(the two lists and their children), never O(tree).
         ///
         /// **The contract.** The result is `build w idw edited` when every node whose own record
         /// (id, kind, ordered child ids) or value differs between the two trees, or which is in only
@@ -916,7 +839,7 @@ module Tree =
         /// the edited one — each id at most once per side, ids unique in both trees. A node in
         /// neither keeps the value the index holds. The function cannot check the contract (that
         /// would cost the walk it exists to avoid); `afterOp` derives both lists from the op and
-        /// verifies what it can.
+        /// verifies what it can, and `isFreshFor` answers whether the result describes a tree.
         let rebind
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
@@ -929,25 +852,22 @@ module Tree =
             let withdrawn =
                 leaving
                 |> List.fold
-                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>, stamp: uint32) n ->
+                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>) n ->
                         Map.remove (key n) byId,
-                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.remove (key c) m),
-                        sub32 stamp (fingerprintOf w idw n))
-                    (ix.ById, ix.ParentOf, unstamp ix.Fingerprint)
+                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.remove (key c) m))
+                    (ix.ById, ix.ParentOf)
 
-            let byId, parentOf, stamp =
+            let byId, parentOf =
                 arriving
                 |> List.fold
-                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>, stamp: uint32) n ->
+                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>) n ->
                         Map.add (key n) n byId,
-                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.add (key c) (w.Id n) m),
-                        add32 stamp (fingerprintOf w idw n))
+                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.add (key c) (w.Id n) m))
                     withdrawn
 
             { ById = byId
               ParentOf = parentOf
-              Root = ix.Root
-              Fingerprint = stampOf stamp }
+              Root = ix.Root }
 
     // ---- content-aware hash (Phase 06) ----
 

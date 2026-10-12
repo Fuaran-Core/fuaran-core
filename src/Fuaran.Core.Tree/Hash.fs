@@ -139,9 +139,6 @@ module Hash =
     ///   - `Validator.canonicalCodes`
     ///   - `Tree.preimageWith` (the one pre-image `Tree.contentHash`, `Tree.encodePreimage` and
     ///     `Tree.encodeHash` share)
-    ///   - `Tree.Index.fingerprintOf`
-    ///   - `Tree.Index.fingerprintOfWith` (Phase 305: the same term with the caller's content encoder
-    ///     between the kind and the child count — the stamp `buildWith` / `isFreshForWith` read)
     ///   - `Tree.ownDigest` (Phase 314: a node's own content — id key, kind, encoded shell — under
     ///     SHA-256; the `Own` map of `Tree.digests`)
     ///   - `Tree.frameDigest` (Phase 314: the own fields, then the child count and child id keys,

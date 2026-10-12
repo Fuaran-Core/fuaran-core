@@ -541,16 +541,13 @@ let tests =
 
           testList
               "Tree.Index"
-              [ testCase "isFreshFor is blind to a content-only UpdateNode; isFreshForWith sees it"
+              [ testCase "isFreshFor sees a content-only UpdateNode through its encoder"
                 <| fun () ->
+                    // Phase 305 found the check blind to content and added a content-aware pair beside
+                    // it; Phase 447 (D150) made the one check exact and folded the encoder into it.
                     let tree = sample ()
-                    let plain = Tree.Index.build nodew idw tree
-                    let aware = Tree.Index.buildWith nodew idw encode tree
-                    Expect.isTrue (Tree.Index.isFreshFor nodew idw tree plain) "fresh on the unedited tree"
-
-                    Expect.isTrue
-                        (Tree.Index.isFreshForWith nodew idw encode tree aware)
-                        "fresh on the unedited tree (aware)"
+                    let ix = Tree.Index.build nodew idw tree
+                    Expect.isTrue (Tree.Index.isFreshFor nodew idw encode tree ix) "fresh on the unedited tree"
 
                     let a1 = Tree.tryFind nodew idw "a1" tree |> Option.get
 
@@ -558,20 +555,21 @@ let tests =
                         Ops.apply nodew idw (UpdateNode(a1 |> withValue "rewritten")) tree
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
-                    Expect.isTrue
-                        (Tree.Index.isFreshFor nodew idw edited plain)
-                        "the plain stamp does not move: id, kind and children are unchanged"
-
                     Expect.isFalse
-                        (Tree.Index.isFreshForWith nodew idw encode edited aware)
-                        "the content-aware stamp moves"
+                        (Tree.Index.isFreshFor nodew idw encode edited ix)
+                        "stale: id, kind and children are unchanged, and the encoder reads the new value"
+
+                    Expect.isTrue
+                        (Tree.Index.isFreshFor
+                            nodew
+                            idw
+                            encode
+                            edited
+                            (Ops.Index.afterOp nodew idw (UpdateNode(a1 |> withValue "rewritten")) edited ix))
+                        "and the index carried through the edit is fresh"
 
                     let moved =
                         Ops.apply nodew idw (RemoveNode "a1") tree
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
-                    Expect.isFalse
-                        (Tree.Index.isFreshFor nodew idw moved plain)
-                        "a structural edit moves the plain stamp"
-
-                    Expect.isFalse (Tree.Index.isFreshForWith nodew idw encode moved aware) "and the aware one" ] ]
+                    Expect.isFalse (Tree.Index.isFreshFor nodew idw encode moved ix) "a structural edit is stale too" ] ]

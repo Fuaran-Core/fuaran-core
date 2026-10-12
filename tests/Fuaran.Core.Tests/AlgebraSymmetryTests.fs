@@ -631,12 +631,9 @@ let private kindOf (op: SkeletonOp<'N, 'I>) =
     | Batch _ -> "batch"
     | UpdateNode _ -> "update"
 
-/// `≡`: the same root, parent links and stamp, the same keys, and equal nodes at every key.
+/// `≡`: the same root and parent links, the same keys, and equal nodes at every key.
 let private sameIndex (a: Tree.NodeIndex<RNode, string>) (b: Tree.NodeIndex<RNode, string>) : bool =
-    a.Root = b.Root
-    && a.ParentOf = b.ParentOf
-    && a.Fingerprint = b.Fingerprint
-    && a.ById = b.ById
+    a.Root = b.Root && a.ParentOf = b.ParentOf && a.ById = b.ById
 
 /// A witness that counts how often the index machinery reads a node's children — the measure of
 /// work the cost leg reads, deterministic where a clock is not.
@@ -656,7 +653,7 @@ let private counting () =
 let indexAfterOpTests =
     testList
         "Phase 317 — Ops.Index.afterOp"
-        [ testCase "afterOp op post (build pre) ≡ build post over every op kind, and the stamp stays fresh"
+        [ testCase "afterOp op post (build pre) ≡ build post over every op kind, and it is fresh"
           <| fun () ->
               let rng = Rng 3174
               let mutable kinds: Map<string, int> = Map.empty
@@ -678,7 +675,7 @@ let indexAfterOpTests =
                           (sameIndex carried rebuilt)
                           (sprintf "iter %d: op=%A\npre=%A\ncarried=%A\nrebuilt=%A" i op pre carried rebuilt)
 
-                      Expect.isTrue (Tree.Index.isFreshFor nodew idw post carried) (sprintf "iter %d: fresh" i)
+                      Expect.isTrue (Tree.Index.isFreshFor nodew idw encNode post carried) (sprintf "iter %d: fresh" i)
                   | Error _ -> ()
 
               for k in [ "insert"; "remove"; "move"; "reorder"; "batch"; "update" ] do
@@ -721,7 +718,7 @@ let indexAfterOpTests =
               let carried2 = Ops.Index.afterOp nodew idw (RemoveNode "no-such-id") pre ix
               Expect.isTrue (sameIndex carried2 ix) "an unknown id"
 
-          testCase "the stamp is order-free over nodes yet still sees a reorder, a kind change and a removal"
+          testCase "isFreshFor sees a reorder, a kind change, a removal and a value edit"
           <| fun () ->
               let t =
                   RNode.node "r" "box" [ RNode.leaf "a" "leaf" "1"; RNode.leaf "b" "leaf" "2" ]
@@ -735,10 +732,15 @@ let indexAfterOpTests =
                   RNode.node "r" "box" [ RNode.leaf "a" "other" "1"; RNode.leaf "b" "leaf" "2" ]
 
               let removed = RNode.node "r" "box" [ RNode.leaf "a" "leaf" "1" ]
-              Expect.isTrue (Tree.Index.isFreshFor nodew idw t ix) "fresh for itself"
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw swapped ix) "a reorder"
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw rekinded ix) "a kind change"
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw removed ix) "a removal"
+
+              let revalued =
+                  RNode.node "r" "box" [ RNode.leaf "a" "leaf" "9"; RNode.leaf "b" "leaf" "2" ]
+
+              Expect.isTrue (Tree.Index.isFreshFor nodew idw encNode t ix) "fresh for itself"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode swapped ix) "a reorder"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode rekinded ix) "a kind change"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode removed ix) "a removal"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode revalued ix) "a value edit"
 
           testCase "an edit session's index cost is linear in the ops and does not grow with the tree"
           <| fun () ->

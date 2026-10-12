@@ -988,10 +988,10 @@ domains must not make. This is a contract/scope clarification, not a behaviour c
   actually-impure function even when the root under-declares. `Conformance.memoSoundnessLawsAt` proves it.
 - **Encoder injectivity (Phase 56, caller precondition + certifiable).** The cache key is
   `Tree.encodeHash w.Tree encode node`; the caller-supplied `encode` MUST be injective over the node
-  space, or two distinct trees collide and the cache serves the wrong one. Core cannot enforce this for
-  an arbitrary host encoder, so it is a documented precondition (`applyMemo` / `Tree.encodeHash`
-  doc-comments) that a domain certifies with `Conformance.encoderInjectivityLawsAt` (the
-  "certify-your-codec" posture, like `Corpus.codecLaws`).
+  space, or two distinct trees collide and the cache serves the wrong one. Core cannot enforce this for an
+  arbitrary host encoder, so it is a documented precondition (`applyMemo` / `Tree.encodeHash` doc-comments)
+  that a domain certifies with `Conformance.encoderInjectivityLawsAt` (the "certify-your-codec" posture, like
+  `Corpus.codecLaws`). It also makes `Tree.Index.isFreshFor` exact over content (Phase 447, D150).
 
 ## Op-script footprint + independence (Phase 78)
 

@@ -179,13 +179,15 @@ let indexTests =
               Expect.isEmpty (Tree.Index.ancestors idw "ghost" ix) "absent ancestors"
               Expect.isNone (Tree.Index.depth idw "ghost" ix) "absent depth"
 
-          // Phase 17 — staleness fingerprint: an index built from a tree is fresh for that tree
-          // and stale after any structural edit, so a caller can detect (not silently trust) reuse.
+          // Phase 17 — freshness: an index built from a tree is fresh for that tree and stale after
+          // any edit, so a caller can detect (not silently trust) reuse. Exact since Phase 447
+          // (D150): the check compares the index with the tree node by node, `encNode` reading each
+          // node's content.
           testCase "isFreshFor is true for the tree the index was built from"
           <| fun _ ->
               let t = sample ()
               let ix = Tree.Index.build nodew idw t
-              Expect.isTrue (Tree.Index.isFreshFor nodew idw t ix) "fresh for its own tree"
+              Expect.isTrue (Tree.Index.isFreshFor nodew idw encNode t ix) "fresh for its own tree"
 
           testCase "isFreshFor detects a removed node"
           <| fun _ ->
@@ -198,7 +200,7 @@ let indexTests =
                       [ RNode.node "a" "section" [ RNode.leaf "a1" "para" "x" ]
                         RNode.node "b" "section" [ RNode.leaf "b1" "para" "z" ] ]
 
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw edited ix) "stale after a remove"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode edited ix) "stale after a remove"
 
           testCase "isFreshFor detects a child reorder"
           <| fun _ ->
@@ -211,4 +213,78 @@ let indexTests =
                       [ RNode.node "a" "section" [ RNode.leaf "a2" "para" "y"; RNode.leaf "a1" "para" "x" ]
                         RNode.node "b" "section" [ RNode.leaf "b1" "para" "z" ] ]
 
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw reordered ix) "stale after a reorder" ]
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode reordered ix) "stale after a reorder"
+
+          // Phase 447 — a go-red per case the retired 32-bit stamp could miss or was documented to.
+          testCase "isFreshFor detects a reparent that keeps every id, kind and child count"
+          <| fun _ ->
+              let ix = Tree.Index.build nodew idw (sample ())
+              // a1 and b1 trade parents: every node keeps its id, its kind and its child count
+              let swapped =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "b1" "para" "z"; RNode.leaf "a2" "para" "y" ]
+                        RNode.node "b" "section" [ RNode.leaf "a1" "para" "x" ] ]
+
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode swapped ix) "stale after a reparent"
+
+              Expect.notEqual
+                  (Tree.Index.parentOf idw "a1" ix |> Option.map _.Id)
+                  (Tree.parentOf nodew idw "a1" swapped |> Option.map _.Id)
+                  "and the index's answer is the one that went stale"
+
+          testCase "isFreshFor detects a content-only edit, through the encoder"
+          <| fun _ ->
+              let t = sample ()
+              let ix = Tree.Index.build nodew idw t
+
+              let edited =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "a1" "para" "rewritten"; RNode.leaf "a2" "para" "y" ]
+                        RNode.node "b" "section" [ RNode.leaf "b1" "para" "z" ] ]
+
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode edited ix) "stale after a content edit"
+
+              // The structural-only check is the one a caller spells out: a constant encoder.
+              Expect.isTrue
+                  (Tree.Index.isFreshFor nodew idw (fun _ -> "") edited ix)
+                  "a constant encoder reads only the structure"
+
+              Expect.notEqual
+                  (Tree.Index.tryFind idw "a1" ix |> Option.map _.Value)
+                  (Tree.tryFind nodew idw "a1" edited |> Option.map _.Value)
+                  "which is why it is not the default: tryFind's node went stale"
+
+          testCase "isFreshFor reads no tree carrying an id twice as fresh, build's own included"
+          <| fun _ ->
+              let twice =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "b" "para" "x" ]
+                        RNode.node "a" "section" [] ]
+
+              Expect.isFalse
+                  (Tree.Index.isFreshFor nodew idw encNode twice (Tree.Index.build nodew idw twice))
+                  "the index keeps the last a, the walk finds the first"
+
+          testCase "isFreshFor refuses an index holding a key the tree does not"
+          <| fun _ ->
+              let t = sample ()
+              let ix = Tree.Index.build nodew idw t
+
+              let extra =
+                  { ix with
+                      ById = Map.add "ghost" (RNode.leaf "ghost" "para" "") ix.ById }
+
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode t extra) "an extra ById key"
+
+              let relinked =
+                  { ix with
+                      ParentOf = Map.add "a1" "b" ix.ParentOf }
+
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode t relinked) "a parent link the tree does not have"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode t { ix with Root = "a" }) "another root" ]

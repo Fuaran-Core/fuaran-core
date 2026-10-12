@@ -4712,8 +4712,8 @@
     {
       "id": "index-freshness-tracks-change",
       "level": "proved",
-      "claim": "A FRESH INDEX DESCRIBES THE TREE IN FRONT OF IT, UP TO THE STAMP'S HASH (Phase 438). `Index.isFreshFor`'s stamp is a sum over the preorder of one term per node, each a hash of that node's record — id, kind, child count and ordered child ids — so it is a function of the MULTISET of records, and the model keeps that multiset in the hash's place. Proved: an index built from one well-formed tree is fresh for another well-formed tree only if the two are the same tree (`freshness_tracks_change`), because a multiset of node records determines a well-formed tree (`ix_records_determine`) — so every skeleton edit, kind change or id remap since `build` reads as stale, and over a fresh index every lookup is the walk over the CURRENT tree (`fresh_index_agrees`). THE PHASE'S STATEMENT IS FALSE AS FIRST WRITTEN ('isFreshFor is false after any op that changes a cached answer'), on two counts recorded here rather than proved around: two different record multisets whose 32-bit sums collide read as fresh (`index-stamp-separates`), and an `UpdateNode` that keeps id, kind and child ids changes the node `Index.tryFind` hands back while moving no record (`index-node-is-its-record`). GO-RED, run at the leg: with each record narrowed to (id, kind, child count), so that the stamp ignores a reparent, the module does not verify — `ix_sub_in` cannot discharge `ix_kids_eq` — and `a_childless_stamp_misses_a_reparent` proves the narrowed stamp aliases two trees one reparent apart.",
-      "phase": "fuaran-core#438",
+      "claim": "A FRESH INDEX DESCRIBES THE TREE IN FRONT OF IT, EXACTLY (Phase 438; made exact by Phase 447, D150). `Index.isFreshFor` compares the index with the tree node by node, with no hash in between: the root's id; no id carried twice; every node's key in `ById` at a node with the same record — id, kind and ordered child ids — and the same `encode` reading, and each child's key in `ParentOf` linked to it; and no key in either map beyond the tree's. Proved over the model, which keeps every conjunct but the content one: an index built from a well-formed tree is fresh for a tree only if the two are the same tree (`freshness_tracks_change`) — a fresh tree is well-formed (`ix_fresh_wf`), each tree's node records include the other's (`ix_agree_records`, `ix_covered_records`), and two well-formed trees in that relation are one tree (`ix_records_determine`) — so every skeleton edit, kind change or id remap since `build` reads as stale, and over a fresh index every lookup is the walk over the CURRENT tree (`fresh_index_agrees`). NO HASH PREMISE: until Phase 447 production compared a 32-bit sum of per-node FNV-1a terms and this row was proved over that sum's pre-image under the premise `index-stamp-separates`, which Phase 438 refuted with a pinned collision; the stamp is gone, the premise row is retired, and the pinned pair now reads as stale (`the_stamp_collision_pair_is_stale`). The content conjunct is the caller's `encode`, exact under its injectivity (`index-node-is-its-record`). GO-RED, run at the leg: with each record narrowed to (id, kind, child count) the module does not verify — `ix_sub_in` cannot discharge `ix_kids_eq` — and `a_childless_check_misses_a_reparent` proves the narrowed check, parent links unread, reads two trees one reparent apart as fresh.",
+      "phase": "fuaran-core#447",
       "evidence": {
         "theorem": "freshness_tracks_change",
         "model": "proofs/TreeOps.fst",
@@ -4726,8 +4726,8 @@
     {
       "id": "index-fresh-on-build",
       "level": "proved",
-      "claim": "BUILD IS FRESH, AND TRYBUILD BUILDS EXACTLY THE WELL-FORMED TREES (Phase 438). The index `Tree.Index.build` makes is fresh for the tree it was built from, whatever that tree (`fresh_on_build`); `Tree.Index.tryBuild` answers `Ok` exactly on a well-formed tree, with `build`'s index, fresh, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`).",
-      "phase": "fuaran-core#438",
+      "claim": "BUILD IS FRESH FOR A WELL-FORMED TREE, AND TRYBUILD BUILDS EXACTLY THE WELL-FORMED TREES (Phase 438; restated by Phase 447). The index `Tree.Index.build` makes is fresh for the well-formed tree it was built from (`fresh_on_build`); over a tree carrying an id twice NO index is fresh, `build`'s own included (`ix_fresh_wf`, `repeated_ids_never_fresh`), because there the index keeps the last node carrying the id and the walk finds the first. `Tree.Index.tryBuild` answers `Ok` exactly on a well-formed tree, with `build`'s index, fresh, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`). Until Phase 447 the stamp read `build`'s index as fresh for any tree it was built from, a tree carrying an id twice included.",
+      "phase": "fuaran-core#447",
       "evidence": {
         "theorem": "try_build_exact",
         "model": "proofs/TreeOps.fst",
@@ -4740,15 +4740,15 @@
     {
       "id": "index-differential",
       "level": "tested",
-      "claim": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): all five lookups at every id and an absent one, `tryBuild`'s verdict and named id, and `isFreshFor` over every ordered pair of trees; over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ would be a stamp collision and fails the case (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). GO-RED: the model's freshness narrowed to (id, kind, child count) disagrees with production, on the freshness arm alone.",
-      "phase": "fuaran-core#438",
+      "claim": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): all five lookups at every id and an absent one, `tryBuild`'s verdict and named id, and `isFreshFor` over every ordered pair of trees, through the model's view of a node (an encoder that reads nothing, `index-node-is-its-record`); over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ fails the case — since Phase 447 no premise allows one (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). The pair Phase 438 pinned as a collision of the retired 32-bit stamp is asserted still to collide under that term and to read as stale in production and in the model. GO-RED: the model's freshness narrowed to (id, kind, child count), parent links unread, disagrees with production, on the freshness arm alone.",
+      "phase": "fuaran-core#447",
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/TreeOps.fst",
         "cases": [
           "the extracted Tree.Index model is production's index over the generated pool, and is the walk",
           "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor",
-          "the stamp is a 32-bit detector: a pinned collision reads a changed tree as fresh"
+          "the retired stamp's collision pair reads as stale: freshness is exact"
         ],
         "operations": [
           "Tree.Index.build",
@@ -4758,24 +4758,14 @@
       }
     },
     {
-      "id": "index-stamp-separates",
-      "level": "assumed",
-      "claim": "THE STAMP'S HASH, NAMED (Phase 438). `index-freshness-tracks-change` is proved over the stamp's pre-image, the multiset of node records; production compares a 32-bit sum of FNV-1a terms over it. Two different multisets whose sums agree read as fresh, so a stale index can pass `Index.isFreshFor` — which the `Fingerprint` field's own documentation states (a detector, not a guarantee). What is assumed is that the trees an index is checked against do not collide with the tree it was built from; the differential reports any collision it meets as a failure, and pins one it did not draw: two leaf kinds whose terms collide, so an `UpdateNode` between them reads fresh while `Index.tryFind` hands back the old kind (`the stamp is a 32-bit detector`). The record encoding itself is not assumed: `Hash.canonicalFields` is injective over field lists (`proofs/Query.fst`).",
-      "phase": "fuaran-core#438",
-      "class": "premise",
-      "evidence": {
-        "assumption": "the 32-bit sum of FNV-1a record terms separates the record multisets of the trees an index is checked against"
-      }
-    },
-    {
       "id": "index-node-is-its-record",
       "level": "assumed",
-      "claim": "WHAT THE INDEX MODEL'S NODE IS (Phase 438). The model's node is what the witness shows — id, kind, children — and nothing else, so its `Index.tryFind` hands back a node that is its record and subtree. Production's node also carries content the witness cannot read, and an `UpdateNode` that keeps id, kind and child ids changes the node `Index.tryFind` returns while `Index.isFreshFor` reads the index fresh: Phase 305's documented boundary, for which `Index.buildWith` / `Index.isFreshForWith` (not modelled) are the content-aware check. The differential compares nodes through the same view.",
-      "phase": "fuaran-core#438",
+      "claim": "WHAT THE INDEX MODEL'S NODE IS, AND WHAT THE CONTENT CONJUNCT RESTS ON (Phase 438; restated by Phase 447, D150). The model's node is what the witness shows — id, kind, children — and nothing else, so its `Index.tryFind` hands back a node that is its record and subtree. Production's node also carries content the witness cannot read. Since Phase 447 `Index.isFreshFor` takes the caller's content encoder and compares each cached node's `encode` reading with the tree's, so a content-only `UpdateNode` reads as stale (Phase 305's `buildWith` / `isFreshForWith` pair is folded into it and removed). That conjunct is exact when `encode` is injective over a node's own content — a node is then determined by its id, kind, reading and children — the precondition `Tree.encodeHash` already states and `Conformance.encoderInjectivityLaws` certifies at a domain's encoder; a caller passing a constant encoder has asked for the structural check alone. The model carries no content, so the conjunct is outside it by construction; the differential compares production through the same view, and the content conjunct is tested beside it (`TreeExtTests`, `ContentDiffTests`, `AlgebraSymmetryTests`).",
+      "phase": "fuaran-core#447",
       "class": "model-bridge",
       "closes": "permanent",
       "evidence": {
-        "assumption": "a node's content beyond its id, kind and children is invisible to isFreshFor, and the model's node carries none"
+        "assumption": "the caller's encoder is injective over a node's own content, and the model's node carries none"
       }
     }
   ]

@@ -745,9 +745,10 @@ module Ops =
         /// are re-indexed, through `Tree.Index.rebind`.
         ///
         /// **The law:** `afterOp w idw op post (Tree.Index.build w idw pre) ≡ Tree.Index.build w
-        /// idw post` — the same `Root`, `ParentOf` and `Fingerprint`, the same `ById` keys, and at
-        /// each key a node equal to `post`'s (a node outside the edit keeps the value the index
-        /// held, which `apply` rebuilt from the same content). So `isFreshFor post` holds of it.
+        /// idw post` — the same `Root` and `ParentOf`, the same `ById` keys, and at each key a node
+        /// equal to `post`'s (a node outside the edit keeps the value the index held, which `apply`
+        /// rebuilt from the same content). So `isFreshFor w idw encode post` holds of it under any
+        /// `encode`, a content-only `UpdateNode` included (the updated node is re-indexed).
         ///
         /// **The cost** is the op's, not the tree's: per step, the depth times the fanout along each
         /// rewritten container's path, plus the size of each grafted, removed or rewritten subtree's
