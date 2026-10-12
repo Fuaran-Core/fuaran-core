@@ -1,4 +1,4 @@
-// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.37.0. Do not edit by hand.
+// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.38.0. Do not edit by hand.
 module Fuaran.Core.Tests.DecodeVectorsGenerated
 
 open Fuaran.Core
