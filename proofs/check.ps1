@@ -227,6 +227,13 @@ $ErrorActionPreference = 'Stop'
 #                write-then-load round trip, verified or not. Opens JsonParse and Chain, so it
 #                follows both.
 #
+#   DagPrimitives — Phase 457, the lane DAG's remaining boundaries: `Dag.mergeBase` as Phase 388
+#                computes it (`deepest`, maximal members only) proved equal to DagFold's model on a
+#                witnessed closure, `Dag.commonBase` over N heads proved maximal, the reachability
+#                index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder` proved to answer
+#                what the DAG-level functions answer, and `cut`'s kept set (`forwardFrom`, the
+#                band) proved to meet `truncation_ok`. Opens DagFold, so it follows it.
+#
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
 #                (DECISIONS.md D66); they are checked by the compute repository's own proof leg.
@@ -236,7 +243,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement', 'DecodeLayer', 'OpStreamLoad')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement', 'DecodeLayer', 'OpStreamLoad', 'DagPrimitives')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

@@ -1,5 +1,43 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D155: the lane DAG's remaining boundaries are modelled in a sibling module; the index is proved under a stated slot-agreement reading, and `cut`'s band is kept though the replay contract does not need it
+
+**Recorded by Phase 457. `proofs/DagPrimitives.fst` (new, opens `DagFold`), `proofs/oracle/DagPrimitives.fs`,
+`proofs.json`, `proofs/coverage-exclusions.json`, `proofs/check.ps1`, `proofs/modules.json`. No production
+code changed: no defect was found, so `DagOpStream.fs` and its API baseline are untouched and nothing rides the
+`0.38.0` draft.**
+
+**D155.1 — a sibling module rather than a fifth section of `DagFold.fst`.** The new sections are about 1,300
+lines. `DagFold` was already one of the leg's slowest modules (117s cold under `--quake 3`, against a 360s
+budget), and the new proofs only use its lemmas, so nothing in it had to change. `DagPrimitives` opens it, checks in about 25s,
+and is registered, extracted and twinned like every other model. DagFold's own budget did not move.
+
+**D155.2 — the index is proved under a slot-agreement reading, and that reading is named rather than
+proved.** Each of `Reach.mergeBase`, `commonBase`, `between` and `tryTopoOrder` is modelled over section 20's
+slots and proved to answer what the DAG-level function answers. The model reads a slot's bitset as the set of
+ids whose bits it sets, `Count[s]` as that set's size, and a scan over slot positions as a pass over the set.
+It reads the order array as the whole DAG's drain, which is what `Reach.ofDag` builds. The word layout below
+that reading, and `Reach.extend`'s splice of a new leaf into the order, stay on `dag-outside-the-model` and are
+sampled by `Conformance.reachLaws` and the new `dag-boundaries-differential`. Modelling the words would prove
+bit arithmetic that the reach laws already sample on every DAG they build, and modelling the splice would
+re-prove the drain's step at an insertion point. Neither changes what a caller can rely on, so both are left
+for a phase that needs them.
+
+**D155.3 — `cut`'s band is kept, although `truncation_ok` does not need it.** The proof shows that the
+checkpoint's node and everything after it already meet the contract the replay theorem stands on. A cut
+without the band would therefore preserve every replay too. It would not preserve `firstBreakFrom`'s guarantee
+that no node after the checkpoint names a parent the compacted DAG does not hold, and that guarantee is why the
+band exists (Phase 288). The band stays, and the differential holds the extracted kept set equal to
+production's, band included. Dropping it was considered and declined: it would trade a sampled integrity check
+for a few nodes of storage, which is the wrong direction.
+
+**D155.4 — `Dag.mergeBase`'s two implementations are one answer, proved.** Phase 388 made `deepest` size only
+the maximal members of a common set that drains completely. Until now the proof was about Phase 158's version,
+which sizes every member, and a differential held the two equal. `merge_base_now_is_merge_base` makes that a
+theorem over any witnessed closure, and the proof does not depend on which branch the drain test takes. The
+Phase 158 model stays the statement's subject, because `merge_base_maximal` and the divergence theorems are
+phrased over it.
+
 ## 2026-10-14 — D154: `dirtyFromOp` closes over the diff's seeds, so the dirty set an op induces is complete; the composition with incremental evaluation is proved for the structural evaluator class in the one-map shape, and the cross-map prior stays the domain's
 
 **Recorded by Phase 456. `src/Fuaran.Core.Propagation/Propagation.fs` (`seedsForOp`, `dirtyFromOp`,

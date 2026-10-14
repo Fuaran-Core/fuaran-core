@@ -4726,8 +4726,7 @@ let whole_node_refuses_every_slot (n s:string)
    `None` when it is empty, otherwise `List.maxBy` over the key (closure size, id). Phase 388 made
    production's `deepest` size only the MAXIMAL members of the intersection rather than all of
    them; over an acyclic set only a maximal member can win (which is what this section proves),
-   so the answer is the same, and the `Proofs.Oracle` differential holds the two equal over
-   criss-cross DAGs.
+   so the answer is the same — a theorem since Phase 457 (`DagPrimitives.merge_base_now_is_merge_base`).
 
    WHAT IS PROVED. `merge_base_maximal`: over a head whose closure is acyclic (section 13's
    witness), `mergeBase` either refuses (`Missing`) exactly when the heads share no ancestor, or
@@ -5073,10 +5072,10 @@ let conflicts_of_heads_is_the_sweep (#op:eqtype) (fp:op -> footprint) (d:dag op)
    per slot and is kept by EVERY step, so it holds over any order the steps run in — the drain,
    or a later extension onto the same DAG.
 
-   WHAT IS NOT MODELLED. The word layout (`hasBit`, the 32-bit words, `popCount`), the order and
-   position arrays, `Reach.extend`'s copy-and-shift of them and its rebuild under a dangling id,
-   and the index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder`, which read those
-   arrays: those stay `tested` (`Conformance.reachLaws`, and the differential below).
+   WHAT IS NOT MODELLED HERE. The word layout (`hasBit`, the 32-bit words, `popCount`), the
+   position arrays, and `Reach.extend`'s copy-and-shift of them and its rebuild under a dangling
+   id stay `tested` (`Conformance.reachLaws`). The index's `mergeBase` / `commonBase` / `between` /
+   `tryTopoOrder` are modelled over these slots in `DagPrimitives.fst` (Phase 457).
    ====================================================================================== *)
 
 (* ---- 20.1 the index ---- *)
@@ -5286,9 +5285,9 @@ let reach_of_dag_agrees (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (
        kept set meeting `cut`'s contract preserves every such replay at or after it, whatever
        state the checkpoint carries.
 
-   WHAT IS NOT MODELLED. `cut`'s computation of the kept set (`forwardFrom`, the band) — the
-   theorem is over the contract and the differential checks production's kept set meets it;
-   the seal's hash; the JSONL sidecar; `firstBreakFrom` / `verifyDagFrom`.
+   WHAT IS NOT MODELLED. The seal's hash; the JSONL sidecar; `firstBreakFrom` / `verifyDagFrom`.
+   `cut`'s computation of the kept set (`forwardFrom`, the band) is modelled in `DagPrimitives.fst`
+   (Phase 457) and proved to meet the contract, so truncation is proved end to end there.
 
    THE GO-RED. A `checkpointAt` that seals a node other than the one whose closure it folded
    fails theorem 1 at the leg (`cp.cnode == c` is unprovable): Phase 437 ran that perturbation.

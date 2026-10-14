@@ -301,12 +301,12 @@
     {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); and since Phase 437 over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-maximal`) — WHICH maximal common ancestor it returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures. What stays outside is the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
+      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); and since Phase 437 over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-maximal`) — WHICH maximal common ancestor it returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures. Since Phase 457 production's current `deepest` is modelled too (`merge-base-as-it-runs`), and so are `commonBase` over N heads, the index's own four queries and `cut`'s kept set. The index's queries are modelled over its slots under the SLOT-AGREEMENT abstraction: a slot's bitset is read as the set of ids whose bits it sets, `Count[s]` as that set's size, a scan over slot positions as a pass over the set, and the index's order array as the whole DAG's drain, the order `Reach.ofDag` builds. What stays outside is the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with; the word layout under the slot-agreement reading; and `Reach.extend`'s splice of a new leaf into the order, which `Conformance.reachLaws` samples. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
       "phase": "fuaran-core#134",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "The hash function itself is correct; and a delta holding a two-parent node is recovered in the drain's order, which no theorem here identifies with an append order"
+        "assumption": "The hash function itself is correct; a delta holding a two-parent node is recovered in the drain's order, which no theorem here identifies with an append order; a slot's words set exactly the bits of the ids its set holds; and an extended index's order is the extended DAG's drain"
       }
     },
     {
@@ -3198,7 +3198,7 @@
     {
       "id": "dag-checkpoint-truncation",
       "level": "proved",
-      "claim": "Truncating behind a checkpoint preserves every replay at or after it (`truncation_preserves_replay`): for ANY kept set meeting `cut`'s contract — the checkpoint's node kept, every node not behind it kept, and every kept node behind it still reaching it in the truncated DAG (the band) — `Dag.replayFrom` on the truncated DAG answers what it answers on the full one on every head the full replay does not refuse as unreached or uncovered, whatever state the checkpoint carries. The contract is `truncation_ok`, computable and extracted, and the `dag-primitives-differential` row evaluates it on every DAG production's `Dag.compactAt` returns. The proof resumes both drains after the checkpoint's closure (`kahn_after`) and shows the drain reads only which parents are still pending (`kahn_pending`) and not its fuel (`kahn_fuel`), so the history above the checkpoint is one list in both DAGs. NOT modelled: `cut`'s computation of the kept set (`forwardFrom`, the band), the seal's hash, `firstBreakFrom` / `verifyDagFrom` and the JSONL sidecar — `dag-checkpoint-truncation-sampled` samples those.",
+      "claim": "Truncating behind a checkpoint preserves every replay at or after it (`truncation_preserves_replay`): for ANY kept set meeting `cut`'s contract — the checkpoint's node kept, every node not behind it kept, and every kept node behind it still reaching it in the truncated DAG (the band) — `Dag.replayFrom` on the truncated DAG answers what it answers on the full one on every head the full replay does not refuse as unreached or uncovered, whatever state the checkpoint carries. The contract is `truncation_ok`, computable and extracted, and the `dag-primitives-differential` row evaluates it on every DAG production's `Dag.compactAt` returns. The proof resumes both drains after the checkpoint's closure (`kahn_after`) and shows the drain reads only which parents are still pending (`kahn_pending`) and not its fuel (`kahn_fuel`), so the history above the checkpoint is one list in both DAGs. `cut`'s computation of the kept set is modelled since Phase 457 and proved to meet the contract (`dag-compaction-truncation`). NOT modelled: the seal's hash, `firstBreakFrom` / `verifyDagFrom` and the JSONL sidecar — `dag-checkpoint-truncation-sampled` samples those.",
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "truncation_preserves_replay",
@@ -3252,7 +3252,7 @@
     {
       "id": "merge-base-maximal",
       "level": "proved",
-      "claim": "`Dag.mergeBase` over ANY two heads — a criss-cross merge, two merges of the same two lanes with two maximal common ancestors, included — either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_maximal`). The premise is section 13's acyclicity witness for one head's closure (every id in it is off every cycle: `off_cycle_in_witness`); the key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` returns a member nothing beats (`max_by_top`), and a strictly deeper node has a strictly larger closure (`strictly_deeper`, Phase 158). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures. The model is Phase 158's `merge_base`; Phase 388's `deepest` sizes only the maximal members, which over an acyclic set is the same answer, and the differential holds the two equal over criss-crosses.",
+      "claim": "`Dag.mergeBase` over ANY two heads — a criss-cross merge, two merges of the same two lanes with two maximal common ancestors, included — either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_maximal`). The premise is section 13's acyclicity witness for one head's closure (every id in it is off every cycle: `off_cycle_in_witness`); the key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` returns a member nothing beats (`max_by_top`), and a strictly deeper node has a strictly larger closure (`strictly_deeper`, Phase 158). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures. The model is Phase 158's `merge_base`; since Phase 457 production's own `deepest`, which sizes only the maximal members, is modelled beside it and proved to give the same answer over a witnessed closure (`merge-base-as-it-runs`).",
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "merge_base_maximal",
@@ -3281,7 +3281,7 @@
     {
       "id": "reach-index-agrees",
       "level": "proved",
-      "claim": "The reachability index answers exactly what the ancestor walk answers (`reach_of_dag_agrees`): `Reach.reaches` is `Set.contains ancestor (Dag.ancestorsOf dag descendant)` and `Reach.ancestors` is `Dag.ancestorsOf`, for every descendant the walk completes on, with production's fallback to the walk for an unslotted id included. The index is modelled as its slots, each an id and its ancestor set, built by `Reach.ofDag`'s drain loop and `Reach.extend`'s leaf step (one `reach_step`); the invariant is per slot and is kept by every step (`reach_step_valid`), so it holds whatever order the steps run in. NOT modelled: the bitset's word layout, the order and position arrays, and the index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder`, which read them — `Conformance.reachLaws` and `dag-primitives-differential` sample those.",
+      "claim": "The reachability index answers exactly what the ancestor walk answers (`reach_of_dag_agrees`): `Reach.reaches` is `Set.contains ancestor (Dag.ancestorsOf dag descendant)` and `Reach.ancestors` is `Dag.ancestorsOf`, for every descendant the walk completes on, with production's fallback to the walk for an unslotted id included. The index is modelled as its slots, each an id and its ancestor set, built by `Reach.ofDag`'s drain loop and `Reach.extend`'s leaf step (one `reach_step`); the invariant is per slot and is kept by every step (`reach_step_valid`), so it holds whatever order the steps run in. NOT modelled: the bitset's word layout and the position arrays, read as sets under the slot-agreement abstraction `dag-outside-the-model` states. The index's `mergeBase` / `commonBase` / `between` / `tryTopoOrder` are modelled over the slots since Phase 457 (`reach-merge-base-agrees` and its three siblings).",
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "reach_of_dag_agrees",
@@ -3314,6 +3314,129 @@
           "Dag.conflictsOfHeads",
           "Dag.mergeBase",
           "Dag.Reach.mergeBase"
+        ]
+      }
+    },
+    {
+      "id": "merge-base-as-it-runs",
+      "level": "proved",
+      "claim": "`Dag.mergeBase` as production computes it since Phase 388 — the private `deepest`, which sizes only the MAXIMAL members of the common set when that set drains completely and every member when it does not — answers what the Phase 158 model answers over every left head whose closure carries section 13's acyclicity witness (`merge_base_now_is_merge_base`), so THEOREM 5 is about the code that runs (`merge_base_now_maximal`): a common ancestor no other common ancestor descends from, or a refusal exactly over disjoint histories. The member `List.maxBy` picks over the whole set is below no member — not below another one by maximality, and not below itself, which the witness forbids (`top_not_below`) — so it survives the filter and still beats every member left (`deepest_is_max_by`). Either branch of the drain test gives that answer, so the test needs no lemma of its own.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "merge_base_now_maximal",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.mergeBase"
+        ]
+      }
+    },
+    {
+      "id": "common-base-maximal",
+      "level": "proved",
+      "claim": "`Dag.commonBase` over N heads (`common_base_maximal`): with any one head's closure witnessed acyclic, it refuses exactly when no node is in every head's closure — no heads, an absent head, or histories with nothing common to all — and otherwise returns a node in every head's closure that no other such node descends from. `List.distinct`, the fold of intersections and Phase 388's `deepest` are modelled clause for clause; the answer is a function of the head SET, so the order the heads are named in cannot reach it.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "common_base_maximal",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.commonBase"
+        ]
+      }
+    },
+    {
+      "id": "reach-merge-base-agrees",
+      "level": "proved",
+      "claim": "The reachability index's `Reach.mergeBase` answers what `Dag.mergeBase` answers (`reach_merge_base_agrees`): an absent id refuses on both, an unslotted one falls back to the walk, and two slotted ones rank the slots set in both bitsets by `Count` and the id, which is `deeper`'s key read off the index (`reach_deeper_is_deeper`: a slot's count is its closure's size). Over the index built by section 20's steps (`reach_valid`) and a left head witnessed acyclic. The bitset is read as a set under the slot-agreement abstraction `dag-outside-the-model` states.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "reach_merge_base_agrees",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.Reach.mergeBase"
+        ]
+      }
+    },
+    {
+      "id": "reach-common-base-agrees",
+      "level": "proved",
+      "claim": "The index's `Reach.commonBase` answers what `Dag.commonBase` answers (`reach_common_base_agrees`): no heads or an absent head refuse on both, an unslotted head falls back to the walk, and otherwise the slots set in every head's bitset, ranked by the index's key, give the node `deepest` gives. The scan over slot positions `0 .. top` is read as a pass over the first head's set, which holds every slot set in all of them.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "reach_common_base_agrees",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.Reach.commonBase"
+        ]
+      }
+    },
+    {
+      "id": "reach-try-topo-order-agrees",
+      "level": "proved",
+      "claim": "The index's `Reach.tryTopoOrder` answers what `Dag.tryTopoOrder` answers (`reach_try_topo_agrees`): over the index `Reach.ofDag` builds, whose order is the whole DAG's drain, a slotted head's set kept from that order IS its closure's drain (`order_restricts`, section 21's `drain_restrict` at the whole DAG), and every id of a slotted head's closure is slotted and so placed, which makes the DAG-level answer `Ok` too (`slot_order_is_drain`). An unslotted head falls back to the walk, cyclic refusal included.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "reach_try_topo_agrees",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.Reach.tryTopoOrder",
+          "Dag.tryTopoOrder"
+        ]
+      }
+    },
+    {
+      "id": "reach-between-agrees",
+      "level": "proved",
+      "claim": "The index's `Reach.between` answers what `Dag.between` answers (`reach_between_agrees`): a slotted head's set minus a slotted base's, kept from the index's order, is the head's drain with the base's closure removed; an absent base removes nothing on both; any other base falls back to the walk. GO-RED, run at the leg by Phase 457: a model `Reach.between` that drops the first node of its delta makes the theorem unprovable, and the differential carries the same go-red against production.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "reach_between_agrees",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.Reach.between",
+          "Dag.between"
+        ]
+      }
+    },
+    {
+      "id": "dag-compaction-truncation",
+      "level": "proved",
+      "claim": "Truncation is proved end to end (`compaction_preserves_replay`): the set `cut` keeps — `forwardFrom` (a depth-first walk along child edges, modelled under fuel), `after`, the smallest-id uncovered refusal, the side parents and the band — meets `truncation_ok` (`cut_keep_meets_contract`), so `DagFold.truncation_preserves_replay` applies to every DAG `Dag.compactAt` returns. Both walks are proved CLOSED under the child edges they keep to (`fwd_closed`), and closure is all the contract needs: a node whose walk reaches a kept node is kept (`closed_up`). The refusal names a node that is neither behind the checkpoint's node nor reachable from it, and the walk's fuel never runs out (`fwd_enough`). The contract does not need the band; production keeps it for `firstBreakFrom`, which stays sampled (`dag-checkpoint-truncation-sampled`).",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "theorem": "compaction_preserves_replay",
+        "model": "proofs/DagPrimitives.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.compactAt",
+          "Dag.compactFrom"
+        ]
+      }
+    },
+    {
+      "id": "dag-boundaries-differential",
+      "level": "tested",
+      "claim": "The extracted Phase 457 functions run beside production's over DAGs a clone holds: `merge_base_now`, `reach_merge_base`, `try_topo_order`, `reach_try_topo_order`, `reach_between` (with DagFold's `between_drained`) beside `Dag.mergeBase`, `Dag.tryTopoOrder`, `Dag.between` and the index's four queries over every ordered pair of ids and an absent id, on fold-pull-fold DAGs with a side merge and on criss-crosses; `common_base` and `reach_common_base` beside `Dag.commonBase` and `Dag.Reach.commonBase` over head sets of three or more, a repeated head, an absent head and none; and `cut_keep` beside `Dag.compactAt` at every node, the kept set equal and the uncovered refusal naming the same node (guards: shared and disjoint pairs, non-empty deltas, an N-head base, a compaction keeping a band, a refused compaction). GO-RED: an index delta with one node dropped disagrees with production.",
+      "phase": "fuaran-core#457",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DagPrimitives.fst",
+        "cases": [
+          "the extracted mergeBase, commonBase and index queries are production's over every pair and head set",
+          "the extracted cut keeps production's set at every node, and refuses where production refuses",
+          "an index between that drops one node loses — the measurement can fail"
+        ],
+        "operations": [
+          "Dag.Reach.between",
+          "Dag.Reach.commonBase",
+          "Dag.Reach.tryTopoOrder",
+          "Dag.commonBase",
+          "Dag.compactAt"
         ]
       }
     },

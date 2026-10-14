@@ -372,6 +372,18 @@
       "fastestPhase": "fuaran-core#454",
       "phase": "fuaran-core#454",
       "note": "Phase 454 - the op-stream readers: the one JSONL line scanner (`OpStream.Jsonl`, the string token as one pass, `skipValue` with its container walk, `checkRaw`, `membersOf`, `parseLine` and the field readers up to `actorField`, `scanRecords`) and the loads over it (`recordOf`, the snapshot scan, Phase 416's carrying witness, `settle`, the four `fromJsonl*` loads, `fromJsonlVerified` composing Chain's walk) with the writers they read back (`recordLine` / `tryToJsonl`, `Actor.encode`), clause for clause over JsonParse's alphabet and Chain's records; totality by typing (`loads_total`), `scan_fault_locates` / `parse_fault_in_line` / `site_names_its_op`, and `round_trip` / `verified_round_trip` / `verify_preserved`. Opens JsonParse and Chain. Default fuel for the model; the per-character lemmas unfold `app` once per character and a surrogate escape pair is twelve, so `string_tail_quoted` and `string_tail_ext` run at `--fuel 16`, the five-member line and the actor object at `--fuel 8` / `--fuel 10`, `actor_field_reads` at `--z3rlimit 160` (the one scoped rlimit); the concrete key spellings are decided once by `assert_norm`. SEEDED BY PHASE 454 from one cold observation under the leg's flags (`--z3rlimit 40 --quake 3 --report_assumes error`): 456s in the kit's `-Modules Chain,JsonParse,OpStreamLoad -Extract` run on a 12-processor Windows dev machine with 1.7 GB of physical memory free and other sessions on it (Chain beside it took 33s against its recorded 42s, JsonParse 98s against 189s, so the machine was not slower than the records); by hand without `--quake` the same check takes 130-180s, so most of the cost is the three quake seeds over the fuel-heavy lemmas. By the seeding rule the budget is twice the slowest observed, 2 x 456 = 912, rounded up to 920."
+    },
+    {
+      "module": "DagPrimitives",
+      "packages": [
+        "Fuaran.Core.OpStream.Dag"
+      ],
+      "budgetSeconds": 50,
+      "measuredSeconds": 24,
+      "fastestSeconds": 24,
+      "fastestPhase": "fuaran-core#457",
+      "phase": "fuaran-core#457",
+      "note": "Phase 457 - the lane DAG's remaining boundaries, in a sibling of DagFold so that DagFold's own cost does not move: `deepest` and `Dag.mergeBase` as Phase 388 computes them, `Dag.commonBase` over N heads, the reachability index's own `mergeBase` / `commonBase` / `between` / `tryTopoOrder` over section 20's slots, and `cut` with `forwardFrom` under fuel. Opens DagFold and adds no file-wide option; the heaviest proofs carry a SCOPED `--z3rlimit` of 100 to 200 and no lemma carries an `SMTPat`. SEEDED BY PHASE 457 from one cold observation under the leg's flags (`--z3rlimit 40 --quake 3 --report_assumes error`): 24s in the kit's `-Modules DagFold,DagPrimitives -Extract` run on a 12-processor Windows dev machine with 1.0 GB of physical memory free (DagFold beside it took 117s against its recorded 178s, so the machine was not slower than the records). By the seeding rule the budget is twice the slowest observed, 2 x 24 = 48, rounded up to 50."
     }
   ]
 }

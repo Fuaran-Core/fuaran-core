@@ -1386,7 +1386,6 @@
       "members": [
         "Dag.appendIf",
         "Dag.attestHead",
-        "Dag.between",
         "Dag.disjointRoots",
         "Dag.heads",
         "Dag.laneKey",

@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 361 claims — 259 proved across 33 models, 59 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 369 claims — 266 proved across 34 models, 60 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -436,9 +436,10 @@ row runs the extracted functions beside production's.
 it folded fails theorem 1: Phase 437 perturbed it to seal the node's first parent and the prover
 refused `cp.cnode == c`. The differential carries the same go-red against production.
 
-**What is still not modelled.** `cut`'s computation of the kept set (`forwardFrom`, the band) — the
-theorem is over its contract; the seal's hash; `firstBreakFrom` / `verifyDagFrom` and the JSONL
-sidecar (`dag-checkpoint-truncation-sampled`); and `Dag.commonBase` over more than two heads.
+**What is still not modelled.** The seal's hash; `firstBreakFrom` / `verifyDagFrom` and the JSONL
+sidecar (`dag-checkpoint-truncation-sampled`). `cut`'s computation of the kept set, `Dag.commonBase`
+over more than two heads, the index's own queries and `mergeBase` as Phase 388 computes it were
+here until Phase 457 modelled them (theorem 26).
 
 ## What the corpus covers
 
@@ -787,7 +788,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
 of what this document already says. `dag-outside-the-model` has been narrowed twice already — by
 Phase 134, from "all of it", and by Phase 158, which took `Dag.mergeBase` out of it for every shape
-but a criss-cross merge — and Phase 437 took the criss-cross. A closed set of two values would have forced those into a claim of
+but a criss-cross merge — Phase 437 took the criss-cross, and Phase 457 the merge base as
+production computes it, `commonBase`, the index's queries and `cut`. A closed set of two values would have forced those into a claim of
 impossibility, which is a worse error than a third token.
 
 **And the token has now paid for itself: `parser-null-absorption` was `unscheduled` and is
@@ -1026,7 +1028,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
 | `Fuaran.Core.OpStream` | 126 | 28 | 54 | 3 | 1 | 0 | 2 | 38 |
-| `Fuaran.Core.OpStream.Dag` | 88 | 31 | 33 | 0 | 0 | 0 | 0 | 24 |
+| `Fuaran.Core.OpStream.Dag` | 88 | 36 | 29 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 25 | 7 | 6 | 0 | 0 | 0 | 0 | 12 |
@@ -1035,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1207 | 298 | 424 | 28 | 13 | 0 | 3 | 441 |
+| **Total** | 1207 | 303 | 420 | 28 | 13 | 0 | 3 | 440 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7474,6 +7476,71 @@ removed id and every pre-edit reader of one; and asserts it REACHED a survivor w
 moved with no container of it touched. The go-red case is the two-level leaf insert under a `sum`
 node, with the refused-op arm (a root moved under its own descendant) pinned to the `touchedBy`
 closure. Both red with the seeds cut back to `touchedBy`.
+
+## Theorem 26 — the lane DAG's remaining boundaries: the merge base that runs, N heads, the index's own queries, and the cut (Phase 457)
+
+_(This directory's twenty-sixth. Phase 437 proved its five lane-DAG theorems as stated and recorded
+what its model left out, each held to production by a differential: `mergeBase` was modelled as
+Phase 158 cut it, not as Phase 388's `deepest` computes it; the reachability index's own
+`mergeBase`, `commonBase`, `between` and `tryTopoOrder` were tested; the truncation theorem was over
+`cut`'s contract, not its computation; and `commonBase` over more than two heads was not modelled.)_
+
+**Where it lives.** A sibling module, `DagPrimitives.fst`, which opens `DagFold` and adds no premise
+of its own: every theorem rests on DagFold's definitions and its section 13 acyclicity witness.
+DagFold is one of the leg's slower modules, and none of this needed to re-verify with it.
+
+**What is proved** (`proofs/DagPrimitives.fst`):
+
+- **The merge base that runs** (`merge-base-as-it-runs`, section 1). `deepest` is modelled clause for
+  clause: when the common set drains completely, only the members outside the closure of every
+  member's parents are sized; otherwise every member is. `merge_base_now_is_merge_base`: over a left
+  head whose closure is witnessed acyclic, it answers what Phase 158's model answers, so
+  `merge_base_maximal` is about the code that runs (`merge_base_now_maximal`). The member `List.maxBy`
+  picks over the whole set is below no member. It is not below another member, by maximality. It is
+  not below itself, because the witness puts a node's own id after its parents (`top_not_below`). So it
+  survives the filter and still wins (`deepest_is_max_by`). Either branch of the drain test gives
+  that answer, so the drain's completeness needs no lemma.
+- **N heads** (`common-base-maximal`, section 2). `common_base_maximal`: with any one head's closure
+  witnessed, `commonBase` refuses exactly when no node is in every head's closure, and otherwise
+  returns a node in every head's closure that no other such node descends from.
+- **The index's own queries** (`reach-merge-base-agrees`, `reach-common-base-agrees`,
+  `reach-try-topo-order-agrees`, `reach-between-agrees`, section 3). Each is modelled over section
+  20's slots and proved to answer what the DAG-level function answers, fallbacks included. The
+  ranking key is `deeper`'s, read off the index: a slot's count is its closure's size
+  (`reach_deeper_is_deeper`). The order is the whole DAG's drain, and kept to a slotted head's set it
+  IS that head's closure drain (`order_restricts`, which is section 21's `drain_restrict` with the
+  whole DAG as the outer set).
+- **The cut** (`dag-compaction-truncation`, section 4). `forwardFrom` is a depth-first walk along
+  child edges, modelled under fuel. `cut_keep_meets_contract`: the kept set meets `truncation_ok`; the
+  refusal names a node neither behind the checkpoint's node nor reachable from it; and the fuel never
+  runs out (`fwd_enough`, a counting argument over distinct held ids). With
+  `DagFold.truncation_preserves_replay`, truncation is proved end to end
+  (`compaction_preserves_replay`). The walk is proved CLOSED under the child edges it keeps to
+  (`fwd_closed`), and closure is all the contract needs: a node whose walk reaches a kept node is
+  kept (`closed_up`).
+
+**A finding the proof read off.** The contract does not need the band. A kept set of the checkpoint's
+node and everything after it already meets `truncation_ok`, and the replay theorem stands on it.
+Production keeps the band so that no node after the checkpoint names a parent the compacted DAG does
+not hold. That is what lets `firstBreakFrom` refuse every missing parent above the checkpoint, and it
+stays sampled (`dag-checkpoint-truncation-sampled`). The differential holds the extracted kept set
+equal to production's, band included, so the band is measured even though no theorem needs it.
+
+**The slot-agreement abstraction, stated.** A slot's bitset is read as the set of ids whose bits it
+sets. `Count[s]` is read as that set's size, and a scan over slot positions as a pass over the set.
+The index's order array is read as the whole DAG's drain, which is the order `Reach.ofDag` builds.
+Below that reading sit the word layout (`hasBit`, the 32-bit words, `popCount`), the position bounds
+of the scans, and `Reach.extend`'s splice of a new leaf into the order. They are named on
+`dag-outside-the-model` and sampled by `Conformance.reachLaws` and `dag-boundaries-differential`.
+
+**The go-red, run at the leg.** A model `Reach.between` that drops the first node of its delta makes
+`reach_between_agrees` unprovable. Phase 457 ran that perturbation, and the prover refused the
+theorem. The differential carries the same go-red against production. So does a `cut_keep` that
+keeps the band and the checkpoint's node but drops what follows it: `cut_keep_meets_contract` is
+refused.
+
+**What is still not modelled.** The word layout and `Reach.extend`'s order splice, as above; the
+seal's hash, `firstBreakFrom` / `verifyDagFrom` and the JSONL sidecar; and a delta that itself merges.
 
 ## Next
 

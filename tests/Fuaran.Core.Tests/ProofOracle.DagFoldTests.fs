@@ -1180,6 +1180,139 @@ let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
 
     failures, positives
 
+// ---------------------------------------------------------------------------
+//  Phase 457 — the lane DAG's remaining boundaries (`proofs/DagPrimitives.fst`).
+//
+//  The model now computes `Dag.mergeBase` as Phase 388 does (`deepest`, maximal members only),
+//  `Dag.commonBase` over N heads, the index's own `mergeBase` / `commonBase` / `between` /
+//  `tryTopoOrder` over its slots and the whole DAG's drain, and `cut`'s kept set. Each runs here
+//  beside production's over every pair, every node and several head sets of the DAGs a clone holds.
+// ---------------------------------------------------------------------------
+
+let private ofFound (f: DagFold.found<string>) : string option =
+    match f with
+    | DagFold.Found x -> Some x
+    | DagFold.Missing -> None
+
+let private renderTopo (r: Result<string list, string>) : string =
+    match r with
+    | Ok l -> "ok " + String.concat "," l
+    | Error _ -> "cyclic"
+
+let private renderModelTopo (r: DagPrimitives.topo_result) : string =
+    match r with
+    | DagPrimitives.TopoOk l -> "ok " + String.concat "," l
+    | DagPrimitives.TopoCyclic _ -> "cyclic"
+
+type private BoundaryTally =
+    { mutable Based: int
+      mutable Disjoint: int
+      mutable Deltas: int
+      mutable NHead: int
+      mutable Kept: int
+      mutable Banded: int
+      mutable Refused: int }
+
+let private newBoundaryTally () =
+    { Based = 0
+      Disjoint = 0
+      Deltas = 0
+      NHead = 0
+      Kept = 0
+      Banded = 0
+      Refused = 0 }
+
+/// Every ordered pair of ids (and an absent one), several head sets, and every node as a cut point:
+/// production's DAG-level and index-level answers beside the extracted ones.
+let private boundaryDisagreements
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (hashState: 'State -> string)
+    (state0: 'State)
+    (tally: BoundaryTally)
+    (dag: Dag.T<'Op>)
+    (heads: string list)
+    : string list =
+    let model = toModelDag dag
+    let fuel = drainFuel model.nodes
+    let idx = DagFold.reach_of_dag ordLt fuel model
+    let ord = DagFold.drain_order ordLt fuel model.nodes
+    let reach = Dag.Reach.ofDag dag
+    let held = dag.Nodes |> Map.toList |> List.map fst
+    let ids = held @ [ "no-such-node" ]
+    let nids (ns: DagFold.node<'Op> list) = ns |> List.map (fun n -> n.nid)
+
+    [ for a in ids do
+          let pt = renderTopo (Dag.tryTopoOrder dag a)
+          let mt = renderModelTopo (DagPrimitives.try_topo_order ordLt fuel model fuel a)
+
+          let rt =
+              renderModelTopo (DagPrimitives.reach_try_topo_order ordLt fuel model fuel idx ord a)
+
+          if mt <> pt || rt <> pt || renderTopo (Dag.Reach.tryTopoOrder reach a) <> pt then
+              yield sprintf "tryTopoOrder %s: production %s, model %s, model index %s" a pt mt rt
+
+          for b in ids do
+              let pm = Dag.mergeBase dag a b
+              let mm = ofFound (DagPrimitives.merge_base_now ordLt fuel model fuel a b)
+              let rm = ofFound (DagPrimitives.reach_merge_base ordLt fuel model fuel idx a b)
+
+              if mm <> pm || rm <> pm || Dag.Reach.mergeBase reach a b <> pm then
+                  yield sprintf "mergeBase %s %s: production %A, model %A, model index %A" a b pm mm rm
+
+              if pm.IsSome then
+                  tally.Based <- tally.Based + 1
+              else
+                  tally.Disjoint <- tally.Disjoint + 1
+
+              let pb = Dag.between dag a b |> List.map _.Id
+              let mb = DagFold.between_drained ordLt fuel model fuel a b |> nids
+              let rb = DagPrimitives.reach_between ordLt fuel model fuel idx ord a b |> nids
+
+              if mb <> pb || rb <> pb || (Dag.Reach.between reach a b |> List.map _.Id) <> pb then
+                  yield sprintf "between %s %s: production %A, model %A, model index %A" a b pb mb rb
+
+              if not (List.isEmpty pb) then
+                  tally.Deltas <- tally.Deltas + 1
+
+      for hs in [ heads; held; List.rev heads @ heads; heads @ [ "no-such-node" ]; [] ] do
+          let pc = Dag.commonBase dag hs
+          let mc = ofFound (DagPrimitives.common_base ordLt fuel model fuel hs)
+          let rc = ofFound (DagPrimitives.reach_common_base ordLt fuel model fuel idx hs)
+
+          if mc <> pc || rc <> pc || Dag.Reach.commonBase reach hs <> pc then
+              yield sprintf "commonBase %A: production %A, model %A, model index %A" hs pc mc rc
+
+          if List.length (List.distinct hs) >= 3 && pc.IsSome then
+              tally.NHead <- tally.NHead + 1
+
+      for c in held do
+          let m = DagPrimitives.cut_keep ordLt model fuel c
+
+          match Dag.compactAt OpStream.defaultHash hashState w state0 dag c, m with
+          | Ok(_, compacted), DagPrimitives.CutKeep k ->
+              let kept = compacted.Nodes |> Map.toList |> List.map fst |> Set.ofList
+
+              if Set.ofList k <> kept then
+                  yield sprintf "cut %s: production keeps %A, the model %A" c kept (Set.ofList k)
+
+              if not (DagFold.truncation_ok model fuel c k) then
+                  yield sprintf "cut %s: the model's kept set misses its own contract" c
+
+              tally.Kept <- tally.Kept + 1
+
+              let behind = Dag.ancestorsOf dag c
+
+              if kept |> Set.exists (fun id -> id <> c && Set.contains id behind) then
+                  tally.Banded <- tally.Banded + 1
+          | Error(Dag.CheckpointFault.Uncovered u), DagPrimitives.CutUncovered v ->
+              if u <> v then
+                  yield sprintf "cut %s: production refuses %s uncovered, the model %s" c u v
+
+              tally.Refused <- tally.Refused + 1
+          | Error(Dag.CheckpointFault.Uncovered _), _
+          | Ok _, _ -> yield sprintf "cut %s: production and the model disagree on whether it is refused" c
+          | Error _, _ -> () ] // checkpointAt refused: the domain rejects the history, so there is no cut
+
 [<Tests>]
 let tests =
     testList
@@ -2437,4 +2570,98 @@ let tests =
                               lost <- lost + 1
                   | Error _ -> () // the merged history does not replay in this domain: no checkpoint to move
 
-              Expect.isGreaterThan lost 0 "a checkpoint sealed at the wrong node disagrees with production" ]
+              Expect.isGreaterThan lost 0 "a checkpoint sealed at the wrong node disagrees with production"
+
+          testCase "the extracted mergeBase, commonBase and index queries are production's over every pair and head set"
+          <| fun _ ->
+              // Phase 457's theorems, measured: `merge_base_now_is_merge_base`, `common_base_maximal`
+              // and the four `reach_*_agrees`, over fold-pull-fold DAGs with a side merge and over
+              // criss-crosses — every ordered pair of ids, an absent id, and head sets of three or
+              // more, a repeated head and an absent head included. The guards: some pairs share a
+              // base and some do not, some deltas are non-empty, and some N-head base was found.
+              let tally = newBoundaryTally ()
+              let mutable rng = ConfRng.ofSeed 4570
+
+              for i in 1..12 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 2 r1
+                  let cc, r3 = planLaneGen.Lanes 4 r2
+                  rng <- r3
+
+                  let _, _, heads1, heads2, dag =
+                      foldPullFoldSide planW planLaneGen.BaseOp round1 round2
+
+                  let h1, h2, ccDag =
+                      crissCross
+                          planW
+                          planLaneGen.BaseOp
+                          (List.item 0 cc)
+                          (List.item 1 cc)
+                          (List.item 2 cc)
+                          (List.item 3 cc)
+
+                  for label, d, hs in [ "fold-pull-fold", dag, heads1 @ heads2; "criss-cross", ccDag, [ h1; h2 ] ] do
+                      match boundaryDisagreements planW planHash planLaneGen.State0 tally d hs with
+                      | [] -> ()
+                      | f :: _ -> failtestf "iter %d, %s: %s" i label f
+
+              Expect.isGreaterThan tally.Based 0 "some pairs share a base"
+              Expect.isGreaterThan tally.Disjoint 0 "some pairs refuse"
+              Expect.isGreaterThan tally.Deltas 0 "some deltas are non-empty"
+              Expect.isGreaterThan tally.NHead 0 "some head set of three or more has a common base"
+
+          testCase "the extracted cut keeps production's set at every node, and refuses where production refuses"
+          <| fun _ ->
+              // `cut_keep_meets_contract`, measured: `Dag.compactAt` at every node of fold-pull-fold
+              // DAGs with a side merge, its kept set equal to the extracted `cut_keep`'s and its
+              // refusal naming the same node. The guards: a compaction kept a band behind its node,
+              // and a compaction was refused as uncovered.
+              let tally = newBoundaryTally ()
+              let mutable rng = ConfRng.ofSeed 4571
+
+              for i in 1..12 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 2 r1
+                  rng <- r2
+                  let _, _, _, heads2, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
+
+                  match boundaryDisagreements planW planHash planLaneGen.State0 tally dag heads2 with
+                  | [] -> ()
+                  | f :: _ -> failtestf "iter %d: %s" i f
+
+              Expect.isGreaterThan tally.Kept 0 "some compactions succeeded"
+              Expect.isGreaterThan tally.Banded 0 "some compaction kept a band behind its node"
+              Expect.isGreaterThan tally.Refused 0 "some compaction was refused as uncovered"
+
+          testCase "an index between that drops one node loses — the measurement can fail"
+          <| fun _ ->
+              // The go-red of `reach_between_agrees`, at the differential: the extracted index's
+              // delta with its first node dropped disagrees with production wherever the delta is
+              // non-empty. The proof leg carries the same go-red, run by Phase 457 against the model.
+              let mutable rng = ConfRng.ofSeed 4572
+              let mutable lost = 0
+
+              for _ in 1..10 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 2 r1
+                  rng <- r2
+                  let _, _, _, _, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
+                  let model = toModelDag dag
+                  let fuel = drainFuel model.nodes
+                  let idx = DagFold.reach_of_dag ordLt fuel model
+                  let ord = DagFold.drain_order ordLt fuel model.nodes
+                  let reach = Dag.Reach.ofDag dag
+                  let held = dag.Nodes |> Map.toList |> List.map fst
+
+                  for a in held do
+                      for b in held do
+                          let dropped =
+                              match DagPrimitives.reach_between ordLt fuel model fuel idx ord a b with
+                              | [] -> []
+                              | _ :: rest -> rest
+                              |> List.map (fun n -> n.nid)
+
+                          if dropped <> (Dag.Reach.between reach a b |> List.map _.Id) then
+                              lost <- lost + 1
+
+              Expect.isGreaterThan lost 0 "an index between that drops a node disagrees with production" ]
