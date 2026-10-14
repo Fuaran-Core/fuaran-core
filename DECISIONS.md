@@ -26,6 +26,43 @@ directly on the file, its dependencies already in the cache, with no other prove
   lemmas only reach through lemma calls: `olit` over the concrete keys, `string_tail`, `skip_value`,
   `quote_body` and `app` over symbolic strings.
 
+**D156.2 — the lever is the query's context, applied lemma by lemma, one change per measured run.** Each
+lever below was first measured on its own declaration (`--admit_except`, three or six quake seeds), then on
+the whole module.
+
+- `year_ends_ok_at`: at `--fuel 1 --ifuel 0` alone the goal still took 12s to 224s over six seeds, so that
+  lever **did not pay** and was reverted. What paid was a split. `year_ends_ok_head` and `year_ends_ok_tail`
+  each unfold `year_ends_ok` once, the walk calls them at `--fuel 0`, and every query is under a second.
+- `days_of_civil_mono`: the one-year case moved to `doy_mono`. That alone left the ensures goal at 5-68s
+  per seed. `--fuel 0 --ifuel 0` brought it to 6-49s. A `--using_facts_from` that drops `days_of_civil`,
+  `year_start`, `year_base`, `era_of`, `yoe_of`, `month_start`, `mp_of_month`, `year_len`, `shifted_leap`,
+  `g`, `days_in` and `is_leap` brought every goal under a second, because every fact the lemma uses
+  already arrives through a lemma call. `yoe_recovered` follows the same pattern: it now states its two
+  division steps (`lemma_div_le`) and runs without `g`'s body. `doe_in_year` and `cmp_prefix` only needed
+  `--fuel 0 --ifuel 0`.
+- `actor_field_reads` and `line_members`: lowering the fuel to the member lists' length (`--fuel 5` /
+  `--fuel 6`) took 156s of solver time to 109s. A `--using_facts_from` without `olit`, `string_tail`,
+  `skip_value`, `skip_container`, `quote_body` and `JsonParse.app` took it to 29s, and `line_members` to 18s.
+  The scoped `--z3rlimit 160` came out, because neither lemma uses more than 11 units of the leg's 40.
+  `string_tail_quoted` and `clean_quote` lost a third of their time at `--ifuel 1`.
+
+**D156.3 — the levers that did not pay, measured.** `--ext context_pruning` on `OpStreamLoad`:
+`actor_field_reads` spent 146s in the solver against 156s, inside the noise, so it was not adopted.
+`--fuel 4` on `actor_field_reads` refuted two goals and spent 372s. `--ifuel 1` on `string_tail_ext`
+refuted a goal. `instant_text_parts` (31s) refuted three goals at `--fuel 0 --ifuel 0`, and at
+`--fuel 1 --ifuel 1` it ran past 600s and was killed. All four were reverted. **No module was split.** Once
+the context was right, neither module had a section left whose cost would justify a separately checked
+module and the oracle, ladder and test renames a split carries.
+
+**D156.4 — the result, from cold observations interleaved before and after on one machine.** All runs used
+the same direct invocation as D156.1, with no other prover on the machine. `OpStreamLoad`: 413s, 426s and
+411s before; 203s, 195s and 194s after. `Temporal`: 1,928s and 1,924s before; 164s, 163s and 169s after.
+The proof leg's own `-Extract` run over both cones measured 182s and 295s on a machine that other work held
+at 60-70% CPU. Its fresh extraction matched every committed oracle byte for byte, because each new lemma is
+`noextract`. `modules.json` re-seeds both budgets from the slowest of those observations by its own rule
+(`Temporal` 370s, `OpStreamLoad` 590s). Every theorem's statement is unchanged. Each module's header and
+`proofs/README.md` say how to keep a new lemma cheap: name the facts it uses.
+
 ## 2026-10-14 — D155: the lane DAG's remaining boundaries are modelled in a sibling module; the index is proved under a stated slot-agreement reading, and `cut`'s band is kept though the replay contract does not need it
 
 **Recorded by Phase 457. `proofs/DagPrimitives.fst` (new, opens `DagFold`), `proofs/oracle/DagPrimitives.fs`,

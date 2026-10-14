@@ -66,6 +66,16 @@
    normalisation (`year_ends_ok`): a theorem about 146,097 day counts that the solver never has to
    search.
 
+   PROOF COST (Phase 458). The normalisation is not where the time goes: it takes under a second.
+   Two queries were: the walk down the table (`year_ends_ok_at`) and the calendar's order
+   (`days_of_civil_mono`) each asked the solver one LINEAR goal with the calendar's integer
+   divisions in its context, and a seed took anywhere from 2s to 785s over it. So the walk meets
+   `year_ends_ok`'s body only through `year_ends_ok_head` / `year_ends_ok_tail`, and the order lemma
+   splits its one-shifted-year case into `doy_mono` and runs with the division-bearing definitions
+   out of its context (`--using_facts_from`); every fact it needs arrives through a lemma call.
+   Several lemmas over the era run at `--fuel 0 --ifuel 0`. Keep a new calendar lemma the same
+   way: name the facts it uses, do not let the solver rediscover them.
+
    THE TWINS (the last section) are the extractor premise sampled at this model — see
    `WireColumn.fst`'s twins section for what they are and why.
 
@@ -512,18 +522,35 @@ let rec year_ends_ok (k: nat) : Tot bool (decreases k) =
      && g (year_base yoe + year_len yoe - 1) / 365 = yoe
      && year_ends_ok yoe)
 
+(* One unfolding of the table, in each direction it is read: its newest year's two ends, and the
+   rest of the table. These are the only places the walk below meets `year_ends_ok`'s body. *)
+[@@ noextract_to "FSharp"]
+let year_ends_ok_head (k: pos)
+  : Lemma (requires year_ends_ok k)
+          (ensures g (year_base (k - 1)) / 365 == k - 1 /\
+                   g (year_base (k - 1) + year_len (k - 1) - 1) / 365 == k - 1) = ()
+
+[@@ noextract_to "FSharp"]
+let year_ends_ok_tail (k: pos)
+  : Lemma (requires year_ends_ok k) (ensures year_ends_ok (k - 1)) = ()
+
+#push-options "--fuel 0 --ifuel 0"
 [@@ noextract_to "FSharp"]
 let rec year_ends_ok_at (k: nat) (yoe: int)
   : Lemma (requires year_ends_ok k /\ 0 <= yoe /\ yoe < k)
           (ensures g (year_base yoe) / 365 == yoe /\
                    g (year_base yoe + year_len yoe - 1) / 365 == yoe)
           (decreases k) =
-  if yoe = k - 1 then () else year_ends_ok_at (k - 1) yoe
+  if yoe = k - 1 then year_ends_ok_head k
+  else (year_ends_ok_tail k; year_ends_ok_at (k - 1) yoe)
+#pop-options
 
 [@@ noextract_to "FSharp"]
 let year_ends_computed () : Lemma (ensures year_ends_ok 400) =
   assert_norm (year_ends_ok 400 == true)
 
+#push-options "--fuel 0 --ifuel 0"
+#push-options "--using_facts_from '* -Temporal.g -Temporal.year_len -Temporal.shifted_leap'"
 (* THE YEAR OF THE ERA IS RECOVERED: for a day of the era inside year `yoe`'s span. *)
 [@@ noextract_to "FSharp"]
 let yoe_recovered (yoe doy: int)
@@ -532,7 +559,10 @@ let yoe_recovered (yoe doy: int)
   year_ends_computed ();
   year_ends_ok_at 400 yoe;
   g_mono (year_base yoe) (year_base yoe + doy);
-  g_mono (year_base yoe + doy) (year_base yoe + year_len yoe - 1)
+  g_mono (year_base yoe + doy) (year_base yoe + year_len yoe - 1);
+  FStar.Math.Lemmas.lemma_div_le (g (year_base yoe)) (g (year_base yoe + doy)) 365;
+  FStar.Math.Lemmas.lemma_div_le (g (year_base yoe + doy)) (g (year_base yoe + year_len yoe - 1)) 365
+#pop-options
 
 (* The last year of the era ends where the era does: the 400-year leap day is the era's, not the
    year formula's, which is why `year_base_succ` stops at 398. *)
@@ -561,6 +591,8 @@ let doe_in_year (doe: int)
   (if doe >= year_base yoe + year_len yoe then
      (if yoe < 399 then (year_base_succ yoe; year_ends_ok_at 400 (yoe + 1); g_mono (year_base (yoe + 1)) doe) else ())
    else ())
+
+#pop-options
 
 (* The day of the shifted year a month starts on (F#: `(153 * mp + 2) / 5`), and the twelve values. *)
 let month_start (mp: int) : Tot int = (153 * mp + 2) / 5
@@ -708,8 +740,17 @@ let lex_lt (a b: civil) : Tot bool =
   a.year < b.year
   || (a.year = b.year && (a.month < b.month || (a.month = b.month && a.day < b.day)))
 
+(* Inside one shifted year, the later date is the later day of that year. *)
+[@@ noextract_to "FSharp"]
+let doy_mono (a b: civil)
+  : Lemma (requires civil_valid a /\ civil_valid b /\ lex_lt a b /\
+                    shifted_year a.year a.month == shifted_year b.year b.month)
+          (ensures month_start (mp_of_month a.month) + a.day
+                   < month_start (mp_of_month b.month) + b.day) =
+  month_start_table ()
+
 (* THEOREM — a later civil date is a larger day count. *)
-#push-options "--z3rlimit 80"
+#push-options "--z3rlimit 80 --fuel 0 --ifuel 0 --using_facts_from '* -Temporal.days_of_civil -Temporal.year_start -Temporal.year_base -Temporal.era_of -Temporal.yoe_of -Temporal.month_start -Temporal.mp_of_month -Temporal.year_len -Temporal.shifted_leap -Temporal.g -Temporal.days_in -Temporal.is_leap'"
 [@@ noextract_to "FSharp"]
 let days_of_civil_mono (a b: civil)
   : Lemma (requires civil_valid a /\ civil_valid b /\ lex_lt a b)
@@ -718,10 +759,9 @@ let days_of_civil_mono (a b: civil)
   days_of_civil_decomp b.year b.month b.day;
   doy_in_year a.year a.month a.day;
   doy_in_year b.year b.month b.day;
-  month_start_table ();
   let ya = shifted_year a.year a.month in
   let yb = shifted_year b.year b.month in
-  if ya < yb then year_start_mono ya yb else ()
+  if ya < yb then year_start_mono ya yb else doy_mono a b
 #pop-options
 
 (* THEOREM — `civil_of_days` inverts `days_of_civil` on every civil date that exists. By the two
@@ -1702,6 +1742,7 @@ let cmp_clock (sod1 sod2: int)
                (CColon :: pad 2 (sod1 % 60)) (CColon :: pad 2 (sod2 % 60))
 
 (* The prefixes of two in-range instants compare as their seconds. *)
+#push-options "--fuel 0 --ifuel 0"
 [@@ noextract_to "FSharp"]
 let cmp_prefix (second1 second2: int)
   : Lemma (requires min_second <= second1 /\ second1 <= max_second /\
@@ -1728,6 +1769,7 @@ let cmp_prefix (second1 second2: int)
   (if lex_lt c1 c2 then days_of_civil_mono c1 c2
    else if lex_lt c2 c1 then days_of_civil_mono c2 c1
    else ())
+#pop-options
 
 (* THEOREM — `compare_instants` on two canonical texts read at one unit is the order of the pairs:
    the second, then the fraction. *)

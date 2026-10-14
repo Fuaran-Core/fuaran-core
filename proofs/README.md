@@ -7026,7 +7026,13 @@ as a shifted integer division that is that floor from `0000-01-01` on.
   of each of the 400 years of an era, those 800 values computed by normalisation (`year_ends_ok`):
   a theorem about 146,097 day counts the solver never searches. The era's own leap day is where a
   first draft was wrong (`year_base_succ` stops at 398; the 400-year day is the era's, not the year
-  formula's), and the falsifier found it.
+  formula's), and the falsifier found it. The normalisation takes under a second. Before Phase 458
+  (D156) the check's time went into two linear goals: one in the walk down the table
+  (`year_ends_ok_at`) and the order lemma's (`days_of_civil_mono`). Each carried the calendar's integer
+  divisions in its context, and the three quake seeds of one of them took 135s, 153s and 785s. The walk
+  now meets the table's body only through `year_ends_ok_head` and `year_ends_ok_tail`, at `--fuel 0`.
+  The order lemma's one-year case is `doy_mono`, and the lemma runs under a `--using_facts_from` that
+  leaves the division-bearing definitions out.
 - **A date has one text** (`try_days_date_text`, `date_text_try_days`, `date_text_canonical`): every
   day in range reads back from `dateText`, whatever `tryDays` reads is `dateText` of that day, and
   `dateText` is canonical exactly on the range — a negative year pads to a `-` inside the width, a
@@ -7271,9 +7277,15 @@ the spelling model, not a defect in either side).
 
 **Fuel is the lever this module spends.** The per-member lemmas unfold `app` once per character of a
 key and a `\uXXXX` pair is twelve characters, so `string_tail_quoted` and `string_tail_ext` run at
-`--fuel 16`; the five-member line and the actor object at `--fuel 8` / `--fuel 10`; `actor_field_reads`
-at `--z3rlimit 160`, the one scoped rlimit. The concrete key spellings (`"seq"`, `"human"`, …) are
-decided by `assert_norm` once (`keys_plain`, `record_keys_distinct`) and spent everywhere.
+`--fuel 16`. The concrete key spellings (`"seq"`, `"human"`, …) are decided by `assert_norm` once
+(`keys_plain`, `record_keys_distinct`) and spent everywhere. Phase 458 (D156) made the two lemmas that
+took two thirds of the check, `actor_field_reads` and `line_members`, name what they use. They run at
+`--fuel 5` / `--fuel 6`, which is enough for the member lists and no more, under a `--using_facts_from`
+that leaves out the character-level recursions (`olit`, `string_tail`, `skip_value`, `skip_container`,
+`quote_body`, `app`). Every fact they need about those arrives through a lemma call. The scoped
+`--z3rlimit 160` is gone, because neither lemma now uses more than 11 units of the leg's 40.
+`string_tail_quoted` and `clean_quote` run at `--ifuel 1`. `string_tail_ext` keeps `--ifuel 2`, which
+it needs.
 
 ### The claims ladder, for this theorem
 

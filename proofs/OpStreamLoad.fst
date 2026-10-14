@@ -79,6 +79,12 @@
    is `len line - len at` — recovered where production's `at` adds its offset (`pos_in`). An
    unterminated string or container is refused at its OPENING character, which production spells
    `fail start`; the model carries that suffix as `start`.
+
+   PROOF COST (Phase 458). The actor object and the written line (`actor_field_reads`,
+   `line_members`) are proved from lemma calls, so they run with the character-level recursions
+   left out of their context (`--using_facts_from`) and with only the fuel their member lists need.
+   With those recursions in context they took two thirds of the module's check. Keep a new lemma
+   over a written line the same way.
 *)
 module OpStreamLoad
 
@@ -1340,7 +1346,7 @@ let rec wf_str (s: list och) : Tot bool (decreases s) =
           is_hex a2 && is_hex b2 && is_hex c2 && is_hex d2 && uni_class a2 b2 = SLow && wf_str t2
         | _ -> false))
 
-#push-options "--fuel 16 --ifuel 2"
+#push-options "--fuel 16 --ifuel 1"
 [@@ noextract_to "FSharp"]
 let rec string_tail_quoted (start: list ch) (acc: list och) (s: list och) (rest: list ch)
   : Lemma (requires wf_str s)
@@ -1720,7 +1726,7 @@ let obj5 (a b c d e: list ch)
   app_assoc d (CComma :: e) [CRBrace]
 #pop-options
 
-#push-options "--fuel 10 --ifuel 2 --z3rlimit 160"
+#push-options "--fuel 5 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_container -OpStreamLoad.quote_body -JsonParse.app'"
 (* The actor object parses to its members, and `actor_field` reads the actor back. *)
 [@@ noextract_to "FSharp"]
 let actor_field_reads (a: actor) (l: jline) (p: nat)
@@ -1787,6 +1793,8 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     assert (actor_str k_actor k_version inner == Ok version);
     assert (actor_str k_actor k_id inner == Ok id)
 
+#pop-options
+#push-options "--fuel 6 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_container -OpStreamLoad.quote_body -JsonParse.app'"
 (* The line the writer spelled parses to exactly its five members. *)
 [@@ noextract_to "FSharp"]
 let line_members (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
@@ -1881,7 +1889,7 @@ let rec split_join (ls: list (list ch))
   | l :: rest -> split_join rest; split_lines_clean [] l (CNewline :: join_sep CNewline rest); rev_rev_app l []
 #pop-options
 
-#push-options "--fuel 16 --ifuel 2"
+#push-options "--fuel 16 --ifuel 1"
 [@@ noextract_to "FSharp"]
 let rec clean_quote (s: list och) : Lemma (requires wf_str s) (ensures clean (quote_body s)) (decreases s) =
   match s with
