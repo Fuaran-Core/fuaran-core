@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 346 claims — 247 proved across 33 models, 57 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 358 claims — 256 proved across 33 models, 59 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -703,7 +703,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 40 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 41 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -719,7 +719,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 25 rows.
+  `unscheduled` where something could and nobody has. 26 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -771,6 +771,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `capability-body-total` | `premise` | — |
 | `capability-sections-parameters-abstract` | `model-bridge` | `permanent` |
 | `capability-pipeline-body-total` | `premise` | — |
+| `query-codec-column-premises` | `model-bridge` | `permanent` |
 | `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
 | `propagation-evaluator-total` | `premise` | — |
 | `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
@@ -1019,7 +1020,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
 | `Fuaran.Core.Conformance` | 152 | 1 | 105 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
-| `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
+| `Fuaran.Core.Function` | 142 | 41 | 64 | 5 | 0 | 0 | 0 | 32 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
@@ -1029,12 +1030,12 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
-| `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
+| `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Tree` | 65 | 17 | 8 | 1 | 2 | 0 | 0 | 37 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1207 | 276 | 431 | 28 | 13 | 0 | 3 | 456 |
+| **Total** | 1207 | 294 | 425 | 28 | 13 | 0 | 3 | 444 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7295,6 +7296,94 @@ decided by `assert_norm` once (`keys_plain`, `record_keys_distinct`) and spent e
    the DAG's readers (`Dag.loadLanes`, the checkpoint sidecar), which read through the same scanner
    and are measured by the lane and DAG tests; the snapshot sidecar's own reader (`Snapshots.ofJsonl`);
    which Unicode characters `String.Trim` strips.
+
+## Theorem 24 — the seam codecs round-trip, and their refusals resolve (Phase 455)
+
+_(This directory's twenty-fourth. `CapabilityCodec` and `QueryCodec` carry every capability call and
+every query across a process boundary; Phase 354 proved the capability declaration's round trip, and
+the rest — the invocation, the async envelope, both seams' typed refusals, and the whole query codec
+— was sampled by example: twenty-nine census entries said `measured-elsewhere`.)_
+
+**The premise, checked first, was FALSE.** The shard hoped both codecs were built from Phase 436's
+`Codec` blocks (`record`, `field`, `union`, …), which would have made theorem 22's composed round trip
+cover them as a corollary. Neither is: neither codec calls a `Codec` block itself (the two
+`ColumnCodec` calls the shard's count found in `QueryCodec` are the column strand's own codec, which
+this model takes as a parameter). Both are written over `JVal`
+with the typed decode layer's COMBINATORS (`Decoder.field`, `optField`, `list`, `bind`, `map`, `at`,
+`fail`, `tagDispatchWith`). So each pair is modelled clause for clause and both properties are proved
+directly; rebuilding either codec on the blocks was considered and not done (DECISIONS.md, Phase 455's
+entry).
+
+`Capability.fst` section 18 models the invocation (`encodeInvocationJson` / `invocationOf`, the
+repeated-address refusal raised through `at` at `args[i]`), the async envelope (`deferredJson` and the
+typed `deferredDecoder` under `deferredOf`, the payload codec a parameter) and the twelve-case
+refusal (`invokeErrorJson` / `invokeErrorOf` over `gated_error`, `faultJson` / `faultOf` inside). It
+restates `DecodeError.resolvesIn` over the module's `jval` (`resolves_in`), with the transport lemma
+`ok_at_under` and one soundness lemma per combinator — theorem 22's section 6 at this module's types,
+because the module is self-contained. `Query.fst` section 19 reads that layer by name (module `C`)
+and models the declaration (`queryJson` / `queryOf`, with parameters, effect, filter predicates,
+order keys and THE admission gate the registry runs, raised at the member at fault), the result page,
+the async result and the twenty-case `QueryError` codec; the column codec it hands four members to is
+a parameter whose round trips are assumed.
+
+- **Round trip.** Decode after encode, EXACTLY: an invocation binding an address twice is refused
+  `OutOfRange` at `args[i]`, every other reads back as itself (`invocation_roundtrip`, the identity
+  exactly where `validateArgs` refuses no `DuplicateArg`); every envelope, over a payload codec that
+  reads back (`deferred_roundtrip`); every invoke error (`invoke_error_roundtrip`); a declaration
+  whose literals are carried, refused at `params`, `where[i]` or `orderBy[i]` exactly where `register`
+  would refuse it and itself otherwise (`query_roundtrip`, `admission_fault_at_agrees`); every result
+  page, async result and query error (`result_roundtrip`, `deferred_result_roundtrip`,
+  `query_error_roundtrip`).
+- **Refusals resolve.** Every refusal any of these readers answers over a document resolves in it and
+  is not `InvalidJson` (`invocation_refusals_resolve`, `deferred_refusals_resolve`,
+  `invoke_error_refusals_resolve`, `capability_refusals_resolve` for Phase 354's declaration reader,
+  `query_refusals_resolve`, `result_refusals_resolve`, `deferred_result_refusals_resolve`,
+  `query_error_refusals_resolve`) — including the refusals the readers raise themselves, after the
+  combinators: the admission refusals, which name members and items the reader has just read.
+
+**A defect, found and fixed in production.** `QueryCodec.deferredResultOf` read the async result
+through the STRING envelope reader and re-raised its sentence as `OutOfRange` at the root, so
+`decodeDeferredResultDetailedWith` answered a missing `$type`, a `pageNum` that is not an integer and
+a bad tag all alike — the path and the code both lost. The root resolves, so the refusal law alone
+would have admitted it; the differential did not, and it was caught there first. Since 455 the reader
+is `CapabilityCodec.deferredDecoder resultOf`, the envelope's typed reader, and a refusal keeps its
+code and its path under `value`. A probe that restores the old reader reds the differential
+(`seed 1: the async result readers disagree …`).
+
+**The go-red, in the model.** Making `inv_args_json` drop the last argument fails the leg at
+`inv_args_roundtrip` (one error, `Error 19`), and the differential's go-reds hand the model a writer
+that drops an argument (the capability seam) or a parameter (the query seam) and must disagree.
+
+**Fuel is the cost this section spends.** The dispatch tables are walked by the solver once per case,
+so the two lemmas over the twelve-case refusal table run at a scoped `--fuel 13` and the two over the
+twenty-case one at `--fuel 21`; the declaration round trip at `--fuel 8 --z3rlimit 80`. `Query` now
+checks in about 136s cold (its budget is re-seeded in `modules.json`); `Capability` in about 135s.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** In `Capability.fst`: `invocation_roundtrip` (with
+   `invocation_roundtrip_identity`, `first_repeat_none`), `deferred_roundtrip`,
+   `invoke_error_roundtrip`, and the four refusal lemmas above. In `Query.fst`: `query_roundtrip`
+   (with `query_roundtrip_identity`, `admission_fault_at_agrees`, `predicate_roundtrip`),
+   `result_roundtrip`, `deferred_result_roundtrip`, `query_error_roundtrip`, and the four refusal
+   lemmas. Rows **`capability-codec-invocation-roundtrip`**, **`capability-codec-deferred-roundtrip`**,
+   **`capability-codec-invoke-error-roundtrip`**, **`capability-codec-refusals-resolve`**,
+   **`query-codec-declaration-roundtrip`**, **`query-codec-result-roundtrip`**,
+   **`query-codec-deferred-result-roundtrip`**, **`query-codec-error-roundtrip`**,
+   **`query-codec-refusals-resolve`**. Checked by the leg at its flags, `--report_assumes error` on, no
+   `assume`, no `admit`.
+2. **Tested.** **`capability-seam-codec-differential`** and **`query-codec-differential`** — two
+   `Proofs.Oracle` cases each: every pair over generated values and four mutations of each encoding,
+   the canonical text, acceptance, the value read back and every typed refusal's code and path, with
+   `DecodeError.resolvesIn` held on production for every typed refusal; and the go-red writers that
+   drop an argument or a parameter. The query side instantiates the column-codec parameter at
+   production's `ColumnCodec`.
+3. **Assumed, and stated as such.** **`query-codec-column-premises`** — the column codec reads back
+   what it writes at each of the four members (proved in the column strand's own model), a refusal's
+   prose is dropped, and the strict members check is not modelled.
+4. **Not claimed.** The strict read policy (`…With` under `Strict`), for either seam: the members check
+   in front of the lenient reader, sampled by the decode layer's tests. `QueryCodec.decodeArgs`, which
+   reads a model's argument object no writer of this codec produces. The refusal SENTENCES.
 
 ## Next
 

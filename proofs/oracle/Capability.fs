@@ -4952,6 +4952,427 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
 
 let twins : Prims.list<twin> = ({tname = "determinism-tag-of-clock-and-network"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({tname = "det-of-tag-reads-its-canonical-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({tname = "det-of-tag-refuses-another-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({tname = "a-bounded-repeat-is-required"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3")))}).s_required true))})::({tname = "an-unbounded-repeat-is-not-required"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString)}).s_required false))})::({tname = "a-repeat-over-no-count-is-not-total"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "r"; s_name = "r"; s_kind = RepeatHole (AnyString); s_required = false}) false))})::({tname = "a-repeat-over-a-float-range-is-not-required"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange ("0", "1"))}).s_required false))})::({tname = "a-repeat-past-the-cap-is-not-a-count"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000001")))) false) && (Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000000")))) true)))})::({tname = "repeated-names-each-repeat-in-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (repeated [] (("a")::("b")::("a")::("b")::("a")::[])) (("a")::("b")::("a")::[])))})::({tname = "a-second-address-is-the-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} [] (({s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleAddr ("a")))))})::({tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (map_of_list (fun ( a  :  Prims.string ) ( b  :  Prims.string ) -> ((Prims.op_Equals a "a") || (Prims.op_Equals b "b"))) (((("b"), ((Prims.parse_int "1"))))::((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])) (((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])))})::({tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("stop"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (UnknownActionAddr ("stop", ("go")::[])))))})::({tname = "a-handler-on-a-data-hole-is-not-an-action-hole"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("title"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (NotAnActionHole ("title")))))})::({tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_effects (((("go"), ({hb_handler = (Prims.parse_int "0"); hb_effect = {host = WritesHost; determinism = deterministic}})))::[]) (((("go"), (pure_deterministic)))::[])) (Error (HandlerEffectExceedsCeiling ("go", pure_deterministic, {host = WritesHost; determinism = deterministic})))))})::({tname = "first-dup-is-the-first-id-seen-again"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_dup (("a")::("b")::("c")::("b")::("a")::[])) (FStar_Pervasives_Native.Some ("a"))))})::({tname = "an-edge-that-closes-a-cycle-is-named-from-the-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineCycle ("a", ("a")::("b")::[])))))})::({tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Source ("b", "ref", AnyString))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineForwardEdge ("a", "x", "b")))))})::({tname = "the-dirty-set-is-the-change-and-everything-downstream"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_set (("s")::[]) {p_nodes = (Source ("s", "ref", AnyString))::(Invoke ("a", "c", AnyString, ((("x"), (FromNode ("s"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::(Source ("t", "ref", AnyString))::[]}) (("s")::("a")::("b")::[])))})::({tname = "an-entry-kind-outside-the-tags-is-refused-at-kind"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("x"))))::((("name"), (JStr ("x"))))::((("kind"), (JStr ("int"))))::((("required"), (JBool (true))))::((("space"), ((space_json AnyString))))::[]))) (Error ({d_code = UnknownTag; d_path = (Key ("kind"))::[]}))))})::({tname = "a-value-entry-without-a-space-is-refused-at-space"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("v"))))::((("name"), (JStr ("v"))))::((("kind"), (JStr ("value"))))::((("required"), (JBool (true))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("space"))::[]}))))})::({tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("a"))))::((("name"), (JStr ("a"))))::((("kind"), (JStr ("action"))))::((("required"), (JBool (false))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("actionEffect"))::[]}))))})::({tname = "a-slot-entry-reads-back-as-its-constraint"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (entry_json {s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true})) (Ok ({s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true}))))})::({tname = "the-descriptor-spelling-of-a-space-is-refused-at-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (space_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("kind"), (JStr ("stringLen"))))::((("minLength"), (JInt ((Prims.parse_int "1")))))::((("maxLength"), (JInt ((Prims.parse_int "3")))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("$type"))::[]}))))})::({tname = "a-node-with-an-empty-output-space-is-refused-at-outputType"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (node_of_j {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (node_json (Source ("s", "ref", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))) (Error ({d_code = OutOfRange; d_path = (Key ("outputType"))::[]}))))})::[]
 
+type gated_error =
+| GRefused of invoke_error
+| GPolicyRefused of Prims.string * Prims.string * Prims.list<Prims.string>
+| GApprovalRequired of Prims.string
+
+
+let uu___is_GRefused : gated_error  ->  Prims.bool = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GRefused (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__GRefused__item___0 : gated_error  ->  invoke_error = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GRefused (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_GPolicyRefused : gated_error  ->  Prims.bool = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GPolicyRefused (policy, msg, alts) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__GPolicyRefused__item__policy : gated_error  ->  Prims.string = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GPolicyRefused (policy, msg, alts) -> begin
+     policy
+     end))
+
+
+let __proj__GPolicyRefused__item__msg : gated_error  ->  Prims.string = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GPolicyRefused (policy, msg, alts) -> begin
+     msg
+     end))
+
+
+let __proj__GPolicyRefused__item__alts : gated_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GPolicyRefused (policy, msg, alts) -> begin
+     alts
+     end))
+
+
+let uu___is_GApprovalRequired : gated_error  ->  Prims.bool = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GApprovalRequired (policy) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__GApprovalRequired__item__policy : gated_error  ->  Prims.string = (fun ( projectee  :  gated_error ) -> (match (projectee) with
+| GApprovalRequired (policy) -> begin
+     policy
+     end))
+
+
+let rec nth_j : Prims.nat  ->  Prims.list<jval>  ->  FStar_Pervasives_Native.option<jval> = (fun ( i  :  Prims.nat ) ( xs  :  Prims.list<jval> ) -> (match (xs) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (x)::t -> begin
+      
+if (Prims.op_Equals i (Prims.parse_int "0")) then begin
+     FStar_Pervasives_Native.Some (x)
+     end else begin
+     (nth_j (i - (Prims.parse_int "1")) t)
+     end
+     end))
+
+
+let step_j : path_seg  ->  jval  ->  FStar_Pervasives_Native.option<jval> = (fun ( s  :  path_seg ) ( v  :  jval ) -> (match (((s), (v))) with
+| (Key (k), JObj (fs)) -> begin
+     (assoc k fs)
+     end
+| (Index (i), JArr (xs)) -> begin
+     (nth_j i xs)
+     end
+| (uu___, uu___1) -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let rec resolve_j : Prims.list<path_seg>  ->  jval  ->  FStar_Pervasives_Native.option<jval> = (fun ( p  :  Prims.list<path_seg> ) ( v  :  jval ) -> (match (p) with
+| [] -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| (s)::rest -> begin
+     (match ((step_j s v)) with
+| FStar_Pervasives_Native.Some (w) -> begin
+     (resolve_j rest w)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end))
+
+
+let rec missing_at : Prims.list<path_seg>  ->  jval  ->  Prims.bool = (fun ( p  :  Prims.list<path_seg> ) ( v  :  jval ) -> (match (p) with
+| [] -> begin
+     false
+     end
+| (Key (k))::[] -> begin
+     (match (v) with
+| JObj (fs) -> begin
+     (not ((has_key k fs)))
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| (s)::rest -> begin
+     (match (rest) with
+| [] -> begin
+     false
+     end
+| uu___ -> begin
+     (match ((step_j s v)) with
+| FStar_Pervasives_Native.Some (w) -> begin
+     (missing_at rest w)
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end)
+     end)
+     end))
+
+
+let resolves_in : jval  ->  decode_error  ->  Prims.bool = (fun ( doc  :  jval ) ( e  :  decode_error ) -> (match (e.d_code) with
+| InvalidJson -> begin
+     (match (e.d_path) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| MissingField -> begin
+     (missing_at e.d_path doc)
+     end
+| uu___ -> begin
+     (match ((resolve_j e.d_path doc)) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___1 -> begin
+     false
+     end)
+     end))
+
+
+let within : Prims.list<path_seg>  ->  decode_error  ->  decode_error = (fun ( p  :  Prims.list<path_seg> ) ( e  :  decode_error ) -> {d_code = e.d_code; d_path = (app p e.d_path)})
+
+
+let d_succeed = (fun ( v  :  'a ) ( uu___  :  jval ) -> Ok (v))
+
+
+let d_map = (fun ( g  :  'a  ->  'b ) ( d  :  decoder<'a> ) ( el  :  jval ) -> (match ((d el)) with
+| Ok (v) -> begin
+     Ok ((g v))
+     end
+| Error (e) -> begin
+     Error (e)
+     end))
+
+
+let both = (fun ( da  :  decoder<'a> ) ( db  :  decoder<'b> ) ( f  :  'a  ->  'b  ->  'c ) ( el  :  jval ) -> (match ((da el)) with
+| Error (e) -> begin
+     Error (e)
+     end
+| Ok (x) -> begin
+     (match ((db el)) with
+| Error (e) -> begin
+     Error (e)
+     end
+| Ok (y) -> begin
+     Ok ((f x y))
+     end)
+     end))
+
+
+let d_fail = (fun ( c  :  decode_code ) ( uu___  :  jval ) -> Error ((refuse c)))
+
+
+let rec at_go = (fun ( d  :  decoder<'a> ) ( here  :  Prims.list<path_seg> ) ( rest  :  Prims.list<path_seg> ) ( v  :  jval ) -> (match (rest) with
+| [] -> begin
+     (match ((d v)) with
+| Ok (x) -> begin
+     Ok (x)
+     end
+| Error (e) -> begin
+     Error ((within here e))
+     end)
+     end
+| (Key (k))::tail -> begin
+     (match (v) with
+| JObj (fs) -> begin
+     (match ((assoc k fs)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     (at_go d (app here ((Key (k))::[])) tail x)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (missing k)))
+     end)
+     end
+| uu___ -> begin
+     Error ((within here (refuse WrongKind)))
+     end)
+     end
+| (Index (i))::tail -> begin
+     (match (v) with
+| JArr (xs) -> begin
+     (match ((nth_j i xs)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     (at_go d (app here ((Index (i))::[])) tail x)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (refuse OutOfRange)))
+     end)
+     end
+| uu___ -> begin
+     Error ((within here (refuse WrongKind)))
+     end)
+     end))
+
+
+let d_at = (fun ( p  :  Prims.list<path_seg> ) ( d  :  decoder<'a> ) ( el  :  jval ) -> (at_go d [] p el))
+
+
+let rec find_dec = (fun ( s  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * decoder<'a>)> ) -> (match (cases) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k, d))::t -> begin
+      
+if (Prims.op_Equals k s) then begin
+     FStar_Pervasives_Native.Some (d)
+     end else begin
+     (find_dec s t)
+     end
+     end))
+
+
+let tag_dispatch = (fun ( cases  :  Prims.list<(Prims.string * decoder<'a>)> ) ( el  :  jval ) -> (match ((field "$type" d_str el)) with
+| Error (e) -> begin
+     Error (e)
+     end
+| Ok (t) -> begin
+     (match ((find_dec t cases)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     (d el)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((under (Key ("$type")) (refuse UnknownTag)))
+     end)
+     end))
+
+
+let inv_arg_json : (Prims.string * Prims.string)  ->  jval = (fun ( b  :  (Prims.string * Prims.string) ) -> JObj (((("addr"), (JStr ((FStar_Pervasives_Native.fst b)))))::((("value"), (JStr ((FStar_Pervasives_Native.snd b)))))::[]))
+
+
+let rec inv_args_json : invocation  ->  Prims.list<jval> = (fun ( a  :  invocation ) -> (match (a) with
+| [] -> begin
+     []
+     end
+| (b)::t -> begin
+     ((inv_arg_json b))::(inv_args_json t)
+     end))
+
+
+let invocation_json : Prims.string  ->  invocation  ->  jval = (fun ( cid  :  Prims.string ) ( a  :  invocation ) -> JObj (((("$type"), (JStr ("invocation"))))::((("capabilityId"), (JStr (cid))))::((("args"), (JArr ((inv_args_json a)))))::[]))
+
+
+let inv_arg_of_j : decoder<(Prims.string * Prims.string)> = (both (field "addr" d_str) (field "value" d_str) (fun ( a  :  Prims.string ) ( v  :  Prims.string ) -> ((a), (v))))
+
+
+let rec distinct_go : Prims.string  ->  invocation  ->  Prims.list<Prims.string>  ->  Prims.nat  ->  invocation  ->  decoder<(Prims.string * invocation)> = (fun ( cid  :  Prims.string ) ( whole  :  invocation ) ( seen  :  Prims.list<Prims.string> ) ( i  :  Prims.nat ) ( rest  :  invocation ) -> (match (rest) with
+| [] -> begin
+     (d_succeed ((cid), (whole)))
+     end
+| ((addr, uu___))::t -> begin
+      
+if (mem addr seen) then begin
+     (d_at ((Key ("args"))::(Index (i))::[]) (d_fail OutOfRange))
+     end else begin
+     (distinct_go cid whole ((addr)::seen) (i + (Prims.parse_int "1")) t)
+     end
+     end))
+
+
+let invocation_of_j : decoder<(Prims.string * invocation)> = (fun ( el  :  jval ) -> (match ((both (field "capabilityId" d_str) (field "args" (d_list inv_arg_of_j)) (fun ( c  :  Prims.string ) ( a  :  Prims.list<(Prims.string * Prims.string)> ) -> ((c), (a))) el)) with
+| Error (e) -> begin
+     Error (e)
+     end
+| Ok (cid, args1) -> begin
+     (distinct_go cid args1 [] (Prims.parse_int "0") args1 el)
+     end))
+
+
+let rec first_repeat : Prims.list<Prims.string>  ->  Prims.nat  ->  invocation  ->  FStar_Pervasives_Native.option<Prims.nat> = (fun ( seen  :  Prims.list<Prims.string> ) ( i  :  Prims.nat ) ( a  :  invocation ) -> (match (a) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((addr, uu___))::t -> begin
+      
+if (mem addr seen) then begin
+     FStar_Pervasives_Native.Some (i)
+     end else begin
+     (first_repeat ((addr)::seen) (i + (Prims.parse_int "1")) t)
+     end
+     end))
+
+
+let deferred_json = (fun ( enc  :  'a  ->  jval ) ( d  :  deferred<'a> ) -> (match (d) with
+| Pending -> begin
+     JObj (((("$type"), (JStr ("pending"))))::[])
+     end
+| Ready (v) -> begin
+     JObj (((("$type"), (JStr ("ready"))))::((("value"), ((enc v))))::[])
+     end
+| Failed (m) -> begin
+     JObj (((("$type"), (JStr ("failed"))))::((("message"), (JStr (m))))::[])
+     end))
+
+
+let deferred_dec = (fun ( p  :  decoder<'a> ) -> (tag_dispatch (((("pending"), ((d_succeed Pending))))::((("ready"), ((d_map (fun ( uu___  :  'a ) -> Ready (uu___)) (field "value" p)))))::((("failed"), ((d_map (fun ( uu___  :  Prims.string ) -> Failed (uu___)) (field "message" d_str)))))::[])))
+
+
+let payload_of = (fun ( dec  :  jval  ->  outcome<'a, Prims.string> ) ( v  :  jval ) -> (match ((dec v)) with
+| Ok (x) -> begin
+     Ok (x)
+     end
+| Error (uu___) -> begin
+     Error ((refuse OutOfRange))
+     end))
+
+
+let deferred_of_j = (fun ( dec  :  jval  ->  outcome<'a, Prims.string> ) -> (deferred_dec (payload_of dec)))
+
+
+let fault_json : decl_fault  ->  jval = (fun ( f  :  decl_fault ) -> (match (f) with
+| EmptySpace (addr, sp) -> begin
+     JObj (((("$type"), (JStr ("emptySpace"))))::((("addr"), (JStr (addr))))::((("space"), ((space_json sp))))::[])
+     end
+| NonFiniteBound (addr) -> begin
+     JObj (((("$type"), (JStr ("nonFiniteBound"))))::((("addr"), (JStr (addr))))::[])
+     end
+| DuplicateHoleAddr (addr) -> begin
+     JObj (((("$type"), (JStr ("duplicateHoleAddr"))))::((("addr"), (JStr (addr))))::[])
+     end
+| HoleUnderSlot (node) -> begin
+     JObj (((("$type"), (JStr ("holeUnderSlot"))))::((("node"), (JStr (node))))::[])
+     end))
+
+
+let str_f : Prims.string  ->  decoder<Prims.string> = (fun ( name  :  Prims.string ) -> (field name d_str))
+
+
+let str_list_f : Prims.string  ->  decoder<Prims.list<Prims.string>> = (fun ( name  :  Prims.string ) -> (field name (d_list d_str)))
+
+
+let fault_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<decl_fault>)> = (fun ( cr  :  codec_readers ) -> ((("emptySpace"), ((both (str_f "addr") (field "space" (space_of_j cr)) (fun ( a  :  Prims.string ) ( sp  :  value_space ) -> EmptySpace (a, sp))))))::((("nonFiniteBound"), ((d_map (fun ( uu___  :  Prims.string ) -> NonFiniteBound (uu___)) (str_f "addr")))))::((("duplicateHoleAddr"), ((d_map (fun ( uu___  :  Prims.string ) -> DuplicateHoleAddr (uu___)) (str_f "addr")))))::((("holeUnderSlot"), ((d_map (fun ( uu___  :  Prims.string ) -> HoleUnderSlot (uu___)) (str_f "node")))))::[])
+
+
+let fault_of_j : codec_readers  ->  decoder<decl_fault> = (fun ( cr  :  codec_readers ) -> (tag_dispatch (fault_cases cr)))
+
+
+let invoke_error_json : gated_error  ->  jval = (fun ( e  :  gated_error ) -> (match (e) with
+| GRefused (NoSuchCapability (id, known)) -> begin
+     JObj (((("$type"), (JStr ("noSuchCapability"))))::((("id"), (JStr (id))))::((("known"), (JArr ((strs known)))))::[])
+     end
+| GRefused (DuplicateCapability (id)) -> begin
+     JObj (((("$type"), (JStr ("duplicateCapability"))))::((("id"), (JStr (id))))::[])
+     end
+| GRefused (UnknownArg (addr, declared)) -> begin
+     JObj (((("$type"), (JStr ("unknownArg"))))::((("addr"), (JStr (addr))))::((("declared"), (JArr ((strs declared)))))::[])
+     end
+| GRefused (ArgOutOfSpace (addr, sp, got)) -> begin
+     JObj (((("$type"), (JStr ("argOutOfSpace"))))::((("addr"), (JStr (addr))))::((("space"), ((space_json sp))))::((("got"), (JStr (got))))::[])
+     end
+| GRefused (RequiredArgsUnbound (addrs)) -> begin
+     JObj (((("$type"), (JStr ("requiredArgsUnbound"))))::((("addrs"), (JArr ((strs addrs)))))::[])
+     end
+| GRefused (UninvocableArg (addr)) -> begin
+     JObj (((("$type"), (JStr ("uninvocableArg"))))::((("addr"), (JStr (addr))))::[])
+     end
+| GRefused (BodyFailed (reason)) -> begin
+     JObj (((("$type"), (JStr ("bodyFailed"))))::((("reason"), (JStr (reason))))::[])
+     end
+| GRefused (NonTotalCapability (id, addrs)) -> begin
+     JObj (((("$type"), (JStr ("nonTotalCapability"))))::((("id"), (JStr (id))))::((("addrs"), (JArr ((strs addrs)))))::[])
+     end
+| GRefused (IllFormedCapability (id, f)) -> begin
+     JObj (((("$type"), (JStr ("illFormedCapability"))))::((("id"), (JStr (id))))::((("fault"), ((fault_json f))))::[])
+     end
+| GRefused (DuplicateArg (addr)) -> begin
+     JObj (((("$type"), (JStr ("duplicateArg"))))::((("addr"), (JStr (addr))))::[])
+     end
+| GPolicyRefused (policy, reason, allowed) -> begin
+     JObj (((("$type"), (JStr ("policyRefused"))))::((("policy"), (JStr (policy))))::((("reason"), (JStr (reason))))::((("allowed"), (JArr ((strs allowed)))))::[])
+     end
+| GApprovalRequired (policy) -> begin
+     JObj (((("$type"), (JStr ("approvalRequired"))))::((("policy"), (JStr (policy))))::[])
+     end))
+
+
+let refused = (fun ( f  :  'a  ->  invoke_error ) ( x  :  'a ) -> GRefused ((f x)))
+
+
+let invoke_error_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<gated_error>)> = (fun ( cr  :  codec_readers ) -> ((("noSuchCapability"), ((both (str_f "id") (str_list_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> GRefused (NoSuchCapability (id, known)))))))::((("duplicateCapability"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateCapability (uu___))) (str_f "id")))))::((("unknownArg"), ((both (str_f "addr") (str_list_f "declared") (fun ( addr  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> GRefused (UnknownArg (addr, d)))))))::((("argOutOfSpace"), ((both (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun ( sp  :  value_space ) ( got  :  Prims.string ) -> ((sp), (got)))) (fun ( addr  :  Prims.string ) ( sg  :  (value_space * Prims.string) ) -> GRefused (ArgOutOfSpace (addr, (FStar_Pervasives_Native.fst sg), (FStar_Pervasives_Native.snd sg))))))))::((("requiredArgsUnbound"), ((d_map (refused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredArgsUnbound (uu___))) (str_list_f "addrs")))))::((("uninvocableArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> UninvocableArg (uu___))) (str_f "addr")))))::((("bodyFailed"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> BodyFailed (uu___))) (str_f "reason")))))::((("nonTotalCapability"), ((both (str_f "id") (str_list_f "addrs") (fun ( id  :  Prims.string ) ( addrs  :  Prims.list<Prims.string> ) -> GRefused (NonTotalCapability (id, addrs)))))))::((("illFormedCapability"), ((both (str_f "id") (field "fault" (fault_of_j cr)) (fun ( id  :  Prims.string ) ( f  :  decl_fault ) -> GRefused (IllFormedCapability (id, f)))))))::((("duplicateArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateArg (uu___))) (str_f "addr")))))::((("policyRefused"), ((both (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun ( r  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((r), (a)))) (fun ( policy  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> GPolicyRefused (policy, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("approvalRequired"), ((d_map (fun ( uu___  :  Prims.string ) -> GApprovalRequired (uu___)) (str_f "policy")))))::[])
+
+
+let invoke_error_of_j : codec_readers  ->  decoder<gated_error> = (fun ( cr  :  codec_readers ) -> (tag_dispatch (invoke_error_cases cr)))
+
 
 
 

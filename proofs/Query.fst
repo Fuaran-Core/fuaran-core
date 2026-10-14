@@ -116,15 +116,29 @@
    carried literals only. The resolver's two Phase 398 refusals (`PredicateNotHonoured` /
    `OrderNotHonoured`) belong to the typed resolver, which this model does not carry, as it
    carries neither the policy gate's refusals nor `UnreadableArgs`. The ORDER `enumerate` returns — production's `Map` sorts by id,
-   the model holds the map as a list, and the theorem is about membership. `QueryCodec`.
+   the model holds the map as a list, and the theorem is about membership. `QueryCodec` until Phase 455; since then section 19 models it, and
+   what it leaves out is its strict read policy and the column codec it is handed (a parameter).
 
-   HOW TO READ IT. Every definition names its F# counterpart. The module is SELF-CONTAINED like
-   `Capability.fst` — it opens nothing, restates `outcome`, `deferred` and the list helpers it
-   needs, and extracts beside the other models sharing only `Prims.fs` and the `option` shim.
+   (Phase 455) THE CODEC, section 19: `QueryCodec`'s declaration, result-page, async-result and
+   query-error pairs round trip EXACTLY (`query_roundtrip`, `result_roundtrip`,
+   `deferred_result_roundtrip`, `query_error_roundtrip`) over a column-codec parameter, and every
+   refusal their readers answer RESOLVES in the document read (`query_refusals_resolve` and its
+   siblings).
+
+   HOW TO READ IT. Every definition names its F# counterpart. Sections 1 to 18 are SELF-CONTAINED
+   like `Capability.fst` — they open nothing, restating `outcome`, `deferred` and the list helpers
+   they need. Section 19 (Phase 455) reads `Capability.fst` by name (module `C`): the `JVal`, the
+   decode layer's combinators and the refusal law the two seams' codecs share, rather than a third
+   restatement of them. The extracted oracle shares `Prims.fs`, the `option` shim and, since 455,
+   `Capability.fs`, which compiles ahead of it.
 
    Apache-2.0, like everything beside it.
 *)
 module Query
+
+(* Phase 455: the codec section (19) reads the capability seam's codec layer by name — its `JVal`,
+   its decoders and the refusal law — rather than restating it a third time. *)
+module C = Capability
 
 (* ======================================================================================
    0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
@@ -1915,3 +1929,867 @@ let twins : list twin = [
       = Error (DuplicateSortColumn "n")) } ]
 
 let _ = assert_norm (twins_hold twins == true)
+
+(* ======================================================================================
+   19. THE QUERY CODEC (Phase 455) — `QueryCodec` and the `QueryErrorWire` / `QueryShape` codecs it
+       composes, clause for clause at the `JVal`: the DECLARATION (`queryJson` / `queryOf`, with
+       its parameters, effect, filter predicates and order keys, and THE admission gate the registry
+       runs, raised at the member at fault), the RESULT PAGE (`resultJson` / `resultOf`), the async
+       RESULT (`deferredResultJson` / `deferredResultOf`, the capability seam's envelope) and the
+       typed REFUSAL (all twenty `QueryError` cases as `wire_query_error`, a decode refusal and a
+       predicate inside them). For every pair: decode after encode, EXACTLY (`query_roundtrip`,
+       `result_roundtrip`, `deferred_result_roundtrip`, `query_error_roundtrip`), and every refusal
+       a reader answers RESOLVES in the document it read (`…_refusals_resolve`).
+
+       PREMISE CHECKED FIRST: like the capability codec, this one is written over `JVal` with the
+       typed decode layer's combinators, not built from the `Codec` blocks, so it is proved
+       directly, over `Capability.fst` section 18's refusal law (module `C`).
+
+       THE COLUMN CODEC IS A PARAMETER (`column_codec`): a result column's schema entry, the
+       `Source`, a page's rows and a predicate literal are `ColumnCodec`'s to write and read, and
+       production maps every column-codec refusal to one `OutOfRange` at the member it was reading.
+       Its round trips are `column_codec_laws`, assumed here and proved in the column strand's model
+       (`query-codec-column-premises`). A schema entry is the model's `(name, type)` pair: the
+       field metadata `ColumnCodec.fieldJson` also carries is the column codec's.
+   ====================================================================================== *)
+
+(* ---- the wire vocabulary the codec reads beyond this model's types ---- *)
+
+(* F#: `ColumnType.tag`. *)
+let column_tag (t:column_type) : Tot string =
+  match t with
+  | IntType -> "int"
+  | FloatType -> "float"
+  | BoolType -> "bool"
+  | StringType -> "string"
+  | DateType -> "date"
+  | TimestampType Seconds -> "timestamp"
+  | TimestampType Milliseconds -> "timestamp_ms"
+  | TimestampType Microseconds -> "timestamp_us"
+  | TimestampType Nanoseconds -> "timestamp_ns"
+  | DecimalType -> "decimal"
+
+(* F#: `ColumnType.all |> List.map (fun t -> ColumnType.tag t, t)` looked up — `QueryShape.colTypeOf`'s
+   table. *)
+let column_of_tag (s:string) : Tot (option column_type) =
+  if s = "int" then Some IntType
+  else if s = "float" then Some FloatType
+  else if s = "bool" then Some BoolType
+  else if s = "string" then Some StringType
+  else if s = "date" then Some DateType
+  else if s = "timestamp" then Some (TimestampType Seconds)
+  else if s = "decimal" then Some DecimalType
+  else if s = "timestamp_ms" then Some (TimestampType Milliseconds)
+  else if s = "timestamp_us" then Some (TimestampType Microseconds)
+  else if s = "timestamp_ns" then Some (TimestampType Nanoseconds)
+  else None
+
+let column_tag_roundtrip (t:column_type) : Lemma (column_of_tag (column_tag t) == Some t) = ()
+
+(* F#: `QueryShape.tagged` — a string from a closed set; a miss is `UnknownTag`, raised at the value
+   by `andThen` (Phase 453). *)
+let tagged_of (#a:Type) (look:string -> option a) : C.decoder a =
+  fun el ->
+    match C.d_str el with
+    | C.Error e -> C.Error e
+    | C.Ok s -> (match look s with Some v -> C.Ok v | None -> C.Error (C.refuse C.UnknownTag))
+
+let tagged_sound (#a:Type) (look:string -> option a) : Lemma (C.sound (tagged_of look)) =
+  C.sound_intro (tagged_of look) (fun x -> ())
+
+(* F#: `QueryShape.colTypeOf`. *)
+let col_type_of_j : C.decoder column_type = tagged_of column_of_tag
+
+(* F#: `EffectCodec.hostTag` / `hostDecoder`, over this model's effect class. *)
+let host_tag (h:host_effect) : Tot string =
+  match h with
+  | Pure -> "pure"
+  | ReadsHost -> "readsHost"
+  | WritesHost -> "writesHost"
+
+let host_of_tag (s:string) : Tot (option host_effect) =
+  if s = "pure" then Some Pure
+  else if s = "readsHost" then Some ReadsHost
+  else if s = "writesHost" then Some WritesHost
+  else None
+
+(* F#: `EffectCodec.determinismDecoder` — the canonical label only, read back by the label table. *)
+let det_of_tag (s:string) : Tot (option determinism_source) =
+  if s = "deterministic" then Some ({ has_clock = false; has_random = false; has_network = false })
+  else if s = "network" then Some ({ has_clock = false; has_random = false; has_network = true })
+  else if s = "random" then Some ({ has_clock = false; has_random = true; has_network = false })
+  else if s = "random+network" then Some ({ has_clock = false; has_random = true; has_network = true })
+  else if s = "clock" then Some ({ has_clock = true; has_random = false; has_network = false })
+  else if s = "clock+network" then Some ({ has_clock = true; has_random = false; has_network = true })
+  else if s = "clock+random" then Some ({ has_clock = true; has_random = true; has_network = false })
+  else if s = "clock+random+network" then Some ({ has_clock = true; has_random = true; has_network = true })
+  else None
+
+let det_tag_roundtrip (d:determinism_source) : Lemma (det_of_tag (determinism_tag d) == Some d) = ()
+
+(* F#: `EffectCodec.toJson` / `decoder`. *)
+let effect_json (e:effect_class) : Tot C.jval =
+  C.JObj [("host", C.JStr (host_tag e.host)); ("determinism", C.JStr (determinism_tag e.determinism))]
+
+let effect_of_j : C.decoder effect_class =
+  C.both (C.field "host" (tagged_of host_of_tag)) (C.field "determinism" (tagged_of det_of_tag))
+         (fun h d -> { host = h; determinism = d })
+
+let effect_roundtrip (e:effect_class) : Lemma (effect_of_j (effect_json e) == C.Ok e) =
+  det_tag_roundtrip e.determinism
+
+let effect_sound () : Lemma (C.sound effect_of_j) =
+  tagged_sound host_of_tag; tagged_sound det_of_tag;
+  C.field_sound "host" (tagged_of host_of_tag); C.field_sound "determinism" (tagged_of det_of_tag);
+  C.both_sound (C.field "host" (tagged_of host_of_tag)) (C.field "determinism" (tagged_of det_of_tag))
+               (fun h d -> { host = h; determinism = d })
+
+(* ---- the column codec, as the parameter it is here ---- *)
+
+(* The four places the query codec hands a value to `ColumnCodec`, the column strand's codec (proved
+   in its own model, `WireColumn.fst`): a result column's schema entry, the declaration's `Source`, a
+   result page's rows, and a predicate literal carried as a one-cell column. Each is a writer and a
+   reader that answers a value or nothing — production maps every column-codec refusal to one
+   `OutOfRange` at the member it was reading, so nothing the column codec says reaches the refusal
+   beyond THAT it refused. *)
+noeq type column_codec (r:Type) = {
+  field_json:  (string & column_type) -> C.jval;
+  field_of:    C.jval -> option (string & column_type);
+  source_json: string -> C.jval;
+  source_of:   C.jval -> option string;
+  rows_json:   r -> C.jval;
+  rows_of:     C.jval -> option r;
+  lit_json:    column_type -> cell -> C.jval;
+  lit_of:      string -> column_type -> C.jval -> option cell
+}
+
+(* What the query codec owes the column codec: each reader takes back what its writer wrote, and a
+   literal of a type reads back at that type — the column strand's round trips, which `WireColumn.fst`
+   proves and this model assumes (`query-codec-column-premises`). *)
+let column_codec_laws (#r:Type) (cc:column_codec r) : prop =
+  (forall (f:(string & column_type)). cc.field_of (cc.field_json f) == Some f) /\
+  (forall (s:string). cc.source_of (cc.source_json s) == Some s) /\
+  (forall (x:r). cc.rows_of (cc.rows_json x) == Some x) /\
+  (forall (c:string) (v:cell) (ty:column_type). cell_type v == Some ty ==> cc.lit_of c ty (cc.lit_json ty v) == Some v)
+
+(* A column-codec refusal, as the query codec raises it: `OutOfRange` at the value read. *)
+let column_read (#a:Type) (rd:C.jval -> option a) : C.decoder a =
+  fun el -> match rd el with Some x -> C.Ok x | None -> C.Error (C.refuse C.OutOfRange)
+
+let column_read_sound (#a:Type) (rd:C.jval -> option a) : Lemma (C.sound (column_read rd)) =
+  C.sound_intro (column_read rd) (fun x -> ())
+
+(* ---- a parameter: `paramJson` / `paramOf` ---- *)
+
+let param_json (p:query_param) : Tot C.jval =
+  C.JObj [("name", C.JStr p.p_name); ("type", C.JStr (column_tag p.p_type)); ("required", C.JBool p.p_required)]
+
+(* F#: `QueryCodec.paramOf` — its reworded `required` sentence is prose, and dropped. *)
+let param_of_j : C.decoder query_param =
+  C.both (C.field "name" C.d_str)
+         (C.both (C.field "type" col_type_of_j) (C.field "required" C.d_bool) (fun t r -> (t, r)))
+         (fun n (tr:(column_type & bool)) -> { p_name = n; p_type = fst tr; p_required = snd tr })
+
+(* ---- a predicate and an order key: `QueryShape.predicateJson` / `predicateDecoder`,
+        `sortKeyJson` / `sortKeyDecoder` ---- *)
+
+let predicate_tag (p:predicate) : Tot string =
+  match p with
+  | EqualTo _ _ -> "equalTo"
+  | GreaterThan _ _ -> "greaterThan"
+  | AtLeast _ _ -> "atLeast"
+  | LessThan _ _ -> "lessThan"
+  | AtMost _ _ -> "atMost"
+  | Contains _ _ -> "contains"
+  | IsNull _ -> "isNull"
+  | IsNotNull _ -> "isNotNull"
+
+(* F#: `QueryShape.predicateJson` — a comparison's literal written at its own type
+   (`Cell.typeOf v |> Option.defaultValue StringType`) by the column codec. *)
+let predicate_json (#r:Type) (cc:column_codec r) (p:predicate) : Tot C.jval =
+  let col = predicate_column p in
+  match p with
+  | Contains _ text -> C.JObj [("$type", C.JStr "contains"); ("column", C.JStr col); ("text", C.JStr text)]
+  | IsNull _ -> C.JObj [("$type", C.JStr "isNull"); ("column", C.JStr col)]
+  | IsNotNull _ -> C.JObj [("$type", C.JStr "isNotNull"); ("column", C.JStr col)]
+  | _ ->
+    (match predicate_literal p with
+     | Some v ->
+       let ty = (match cell_type v with Some t -> t | None -> StringType) in
+       C.JObj [("$type", C.JStr (predicate_tag p)); ("column", C.JStr col);
+               ("type", C.JStr (column_tag ty)); ("value", cc.lit_json ty v)]
+     | None -> C.JObj [("$type", C.JStr (predicate_tag p)); ("column", C.JStr col)])
+
+(* F#: `predicateDecoder`'s `compared` — the column, the stated type, then the literal read at that
+   type; a value no column of the type carries is `OutOfRange` at `value`. *)
+let compared (#r:Type) (cc:column_codec r) (make:string -> cell -> predicate) : C.decoder predicate =
+  fun el ->
+    match C.field "column" C.d_str el with
+    | C.Error e -> C.Error e
+    | C.Ok c ->
+      match C.field "type" col_type_of_j el with
+      | C.Error e -> C.Error e
+      | C.Ok ty -> C.field "value" (column_read (cc.lit_of c ty)) el |> (fun res ->
+          match res with C.Ok v -> C.Ok (make c v) | C.Error e -> C.Error e)
+
+let predicate_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder predicate) =
+  [("equalTo", compared cc EqualTo);
+   ("greaterThan", compared cc GreaterThan);
+   ("atLeast", compared cc AtLeast);
+   ("lessThan", compared cc LessThan);
+   ("atMost", compared cc AtMost);
+   ("contains", C.both (C.field "column" C.d_str) (C.field "text" C.d_str) (fun c t -> Contains c t));
+   ("isNull", C.d_map IsNull (C.field "column" C.d_str));
+   ("isNotNull", C.d_map IsNotNull (C.field "column" C.d_str))]
+
+(* F#: `QueryShape.predicateDecoder`. *)
+let predicate_of_j (#r:Type) (cc:column_codec r) : C.decoder predicate = C.tag_dispatch (predicate_cases cc)
+
+let direction_tag (d:sort_direction) : Tot string =
+  match d with Ascending -> "ascending" | Descending -> "descending"
+
+let direction_of_tag (s:string) : Tot (option sort_direction) =
+  if s = "ascending" then Some Ascending else if s = "descending" then Some Descending else None
+
+let sort_key_json (k:sort_key) : Tot C.jval =
+  C.JObj [("column", C.JStr k.k_column); ("direction", C.JStr (direction_tag k.k_direction))]
+
+let sort_key_of_j : C.decoder sort_key =
+  C.both (C.field "column" C.d_str) (C.field "direction" (tagged_of direction_of_tag))
+         (fun c d -> { k_column = c; k_direction = d })
+
+(* A predicate the codec carries: its literal, if it has one, is not `Null` — the literal admission
+   admits (`IllFormedLiteral` refuses a `Null`). *)
+let literal_carried (p:predicate) : Tot bool =
+  match predicate_literal p with
+  | Some Null -> false
+  | _ -> true
+
+#push-options "--fuel 9 --ifuel 1"
+let predicate_roundtrip (#r:Type) (cc:column_codec r) (p:predicate)
+  : Lemma (requires column_codec_laws cc /\ literal_carried p)
+          (ensures predicate_of_j cc (predicate_json cc p) == C.Ok p)
+  = match predicate_literal p with
+    | Some v -> (match cell_type v with Some t -> column_tag_roundtrip t | None -> ())
+    | None -> ()
+#pop-options
+
+let sort_key_roundtrip (k:sort_key) : Lemma (sort_key_of_j (sort_key_json k) == C.Ok k) = ()
+
+(* ---- the declaration: `queryJson` / `queryOf` ---- *)
+
+let rec params_json (ps:list query_param) : Tot (list C.jval) =
+  match ps with [] -> [] | p :: t -> param_json p :: params_json t
+
+let rec fields_json (#r:Type) (cc:column_codec r) (s:list (string & column_type)) : Tot (list C.jval) =
+  match s with [] -> [] | f :: t -> cc.field_json f :: fields_json cc t
+
+let rec preds_json (#r:Type) (cc:column_codec r) (w:list predicate) : Tot (list C.jval) =
+  match w with [] -> [] | p :: t -> predicate_json cc p :: preds_json cc t
+
+let rec keys_json (o:list sort_key) : Tot (list C.jval) =
+  match o with [] -> [] | k :: t -> sort_key_json k :: keys_json t
+
+(* F#: `optIntJson`. *)
+let opt_int_json (name:string) (v:option int) : Tot (list (string & C.jval)) =
+  match v with Some n -> [(name, C.JInt n)] | None -> []
+
+(* The members `queryJson` writes after the six it always writes. *)
+let query_tail (#r:Type) (cc:column_codec r) (q:query) : Tot (list (string & C.jval)) =
+  C.app (opt_int_json "timeoutMs" q.q_timeout_ms)
+      (C.app (opt_int_json "pageSize" q.q_page_size)
+           (C.app (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))])
+                (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))])))
+
+(* F#: `QueryCodec.queryJson`. *)
+let query_json (#r:Type) (cc:column_codec r) (q:query) : Tot C.jval =
+  C.JObj (("$type", C.JStr "query") :: ("id", C.JStr q.q_id) :: ("params", C.JArr (params_json q.q_params)) ::
+          ("resultSchema", C.JArr (fields_json cc q.q_schema)) :: ("effect", effect_json q.q_effect) ::
+          ("source", cc.source_json q.q_source) :: query_tail cc q)
+
+(* F#: `QueryShape.whereFault` — the first predicate's fault WITH its index (the model's
+   `where_fault` is it without). *)
+let rec where_fault_at (s:list (string & column_type)) (i:nat) (w:list predicate)
+  : Tot (option (nat & query_error)) (decreases w) =
+  match w with
+  | [] -> None
+  | p :: t -> (match predicate_fault s p with Some e -> Some (i, e) | None -> where_fault_at s (i + 1) t)
+
+(* F#: `QueryShape.orderFault`, with its index. *)
+let rec order_fault_at (s:list (string & column_type)) (seen:list string) (i:nat) (o:list sort_key)
+  : Tot (option (nat & query_error)) (decreases o) =
+  match o with
+  | [] -> None
+  | k :: t ->
+    if not (mem k.k_column (keys s)) then Some (i, UnknownColumn k.k_column (keys s))
+    else if mem k.k_column seen then Some (i, DuplicateSortColumn k.k_column)
+    else order_fault_at s (k.k_column :: seen) (i + 1) t
+
+(* F#: `QueryRegistry.admissionFaultAt` — `admissionFault`'s refusal with the path to the member at
+   fault, which the declaration reader reports it at. *)
+let admission_fault_at (q:query) : Tot (option (list C.path_seg & query_error)) =
+  match repeated [] (param_names q.q_params) with
+  | d :: _ -> Some ([C.Key "params"], DuplicateParam d)
+  | [] ->
+    match where_fault_at q.q_schema 0 q.q_where with
+    | Some (i, e) -> Some ([C.Key "where"; C.Index i], e)
+    | None ->
+      match order_fault_at q.q_schema [] 0 q.q_order_by with
+      | Some (i, e) -> Some ([C.Key "orderBy"; C.Index i], e)
+      | None -> None
+
+let rec where_fault_at_agrees (s:list (string & column_type)) (i:nat) (w:list predicate)
+  : Lemma (ensures (match where_fault_at s i w with
+                    | Some (j, e) -> where_fault s w == Some e /\ j < i + C.len w
+                    | None -> where_fault s w == None)) (decreases w)
+  = match w with [] -> () | _ :: t -> where_fault_at_agrees s (i + 1) t
+
+let rec order_fault_at_agrees (s:list (string & column_type)) (seen:list string) (i:nat) (o:list sort_key)
+  : Lemma (ensures (match order_fault_at s seen i o with
+                    | Some (j, e) -> order_fault s seen o == Some e /\ j < i + C.len o
+                    | None -> order_fault s seen o == None)) (decreases o)
+  = match o with [] -> () | k :: t -> order_fault_at_agrees s (k.k_column :: seen) (i + 1) t
+
+(* The reader's refusal is the registry's: `admission_fault_at` refuses exactly what
+   `admission_fault` — `register`'s gate — refuses, with the same error. *)
+let admission_fault_at_agrees (q:query)
+  : Lemma (match admission_fault_at q with
+           | Some (_, e) -> admission_fault q == Some e
+           | None -> admission_fault q == None)
+  = where_fault_at_agrees q.q_schema 0 q.q_where;
+    order_fault_at_agrees q.q_schema [] 0 q.q_order_by
+
+let query_tag_of : C.decoder unit = tagged_of (fun s -> if s = "query" then Some () else None)
+
+(* F#: `QueryCodec.queryOf`, member by member in production's order, the column codec's refusal of
+   `source` at `source`, and THE admission gate the registry runs. *)
+let query_of_j (#r:Type) (cc:column_codec r) : C.decoder query =
+  fun el ->
+    match C.field "$type" query_tag_of el with
+    | C.Error e -> C.Error e
+    | C.Ok () ->
+    match C.field "id" C.d_str el with
+    | C.Error e -> C.Error e
+    | C.Ok id ->
+    match C.field "params" (C.d_list param_of_j) el with
+    | C.Error e -> C.Error e
+    | C.Ok ps ->
+    match C.field "resultSchema" (C.d_list (column_read cc.field_of)) el with
+    | C.Error e -> C.Error e
+    | C.Ok sch ->
+    match C.field "effect" effect_of_j el with
+    | C.Error e -> C.Error e
+    | C.Ok eff ->
+    match C.opt_field "timeoutMs" C.d_int el with
+    | C.Error e -> C.Error e
+    | C.Ok tmo ->
+    match C.opt_field "pageSize" C.d_int el with
+    | C.Error e -> C.Error e
+    | C.Ok pg ->
+    match C.opt_field "where" (C.d_list (predicate_of_j cc)) el with
+    | C.Error e -> C.Error e
+    | C.Ok wh ->
+    match C.opt_field "orderBy" (C.d_list sort_key_of_j) el with
+    | C.Error e -> C.Error e
+    | C.Ok ob ->
+    match C.field "source" (column_read cc.source_of) el with
+    | C.Error e -> C.Error e
+    | C.Ok src ->
+      let q = { q_id = id; q_params = ps; q_schema = sch; q_effect = eff; q_source = src;
+                q_timeout_ms = tmo; q_page_size = pg;
+                q_where = (match wh with Some w -> w | None -> []);
+                q_order_by = (match ob with Some o -> o | None -> []) } in
+      match admission_fault_at q with
+      | Some (p, _) -> C.Error ({ C.d_code = C.OutOfRange; C.d_path = p })
+      | None -> C.Ok q
+
+let rec params_roundtrip (i:nat) (ps:list query_param)
+  : Lemma (ensures C.list_from param_of_j i (params_json ps) == C.Ok ps) (decreases ps)
+  = match ps with [] -> () | p :: t -> column_tag_roundtrip p.p_type; params_roundtrip (i + 1) t
+
+let rec fields_roundtrip (#r:Type) (cc:column_codec r) (i:nat) (s:list (string & column_type))
+  : Lemma (requires column_codec_laws cc)
+          (ensures C.list_from (column_read cc.field_of) i (fields_json cc s) == C.Ok s) (decreases s)
+  = match s with [] -> () | _ :: t -> fields_roundtrip cc (i + 1) t
+
+let rec all_carried (w:list predicate) : Tot bool =
+  match w with [] -> true | p :: t -> literal_carried p && all_carried t
+
+let rec preds_roundtrip (#r:Type) (cc:column_codec r) (i:nat) (w:list predicate)
+  : Lemma (requires column_codec_laws cc /\ all_carried w)
+          (ensures C.list_from (predicate_of_j cc) i (preds_json cc w) == C.Ok w) (decreases w)
+  = match w with [] -> () | p :: t -> predicate_roundtrip cc p; preds_roundtrip cc (i + 1) t
+
+let rec keys_roundtrip (i:nat) (o:list sort_key)
+  : Lemma (ensures C.list_from sort_key_of_j i (keys_json o) == C.Ok o) (decreases o)
+  = match o with [] -> () | k :: t -> sort_key_roundtrip k; keys_roundtrip (i + 1) t
+
+(* The optional members, looked up in what `queryJson` writes after its fixed six. *)
+let query_tail_members (#r:Type) (cc:column_codec r) (q:query)
+  : Lemma (C.assoc "timeoutMs" (query_tail cc q) == (match q.q_timeout_ms with Some n -> Some (C.JInt n) | None -> None) /\
+           C.assoc "pageSize" (query_tail cc q) == (match q.q_page_size with Some n -> Some (C.JInt n) | None -> None) /\
+           C.assoc "where" (query_tail cc q) ==
+             (match q.q_where with [] -> None | _ -> Some (C.JArr (preds_json cc q.q_where))) /\
+           C.assoc "orderBy" (query_tail cc q) ==
+             (match q.q_order_by with [] -> None | _ -> Some (C.JArr (keys_json q.q_order_by))))
+  = let w = (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))]) in
+    let o = (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))]) in
+    let pg = opt_int_json "pageSize" q.q_page_size in
+    let tm = opt_int_json "timeoutMs" q.q_timeout_ms in
+    C.assoc_app "timeoutMs" tm (C.app pg (C.app w o)); C.assoc_app "timeoutMs" pg (C.app w o); C.assoc_app "timeoutMs" w o;
+    C.assoc_app "pageSize" tm (C.app pg (C.app w o)); C.assoc_app "pageSize" pg (C.app w o); C.assoc_app "pageSize" w o;
+    C.assoc_app "where" tm (C.app pg (C.app w o)); C.assoc_app "where" pg (C.app w o); C.assoc_app "where" w o;
+    C.assoc_app "orderBy" tm (C.app pg (C.app w o)); C.assoc_app "orderBy" pg (C.app w o); C.assoc_app "orderBy" w o
+
+(* THE DECLARATION ROUND TRIP (Phase 455), `query_roundtrip`. F#: `QueryCodec.queryOf` after
+   `queryJson`, EXACTLY, for every declaration whose filter literals are carried, over any column
+   codec that reads back what it writes: the registry's admission refusal, `OutOfRange` at the member
+   at fault (`params`, `where[i]`, `orderBy[i]`), where `admissionFault` refuses the declaration; the
+   declaration itself otherwise. *)
+#push-options "--fuel 8 --ifuel 2 --z3rlimit 80"
+let query_roundtrip (#r:Type) (cc:column_codec r) (q:query)
+  : Lemma (requires column_codec_laws cc /\ all_carried q.q_where)
+          (ensures query_of_j cc (query_json cc q) ==
+                   (match admission_fault_at q with
+                    | Some (p, _) -> C.Error ({ C.d_code = C.OutOfRange; C.d_path = p })
+                    | None -> C.Ok q))
+  = params_roundtrip 0 q.q_params;
+    fields_roundtrip cc 0 q.q_schema;
+    effect_roundtrip q.q_effect;
+    preds_roundtrip cc 0 q.q_where;
+    keys_roundtrip 0 q.q_order_by;
+    query_tail_members cc q
+#pop-options
+
+(* ... the identity exactly on the declarations `register`'s admission admits. *)
+let query_roundtrip_identity (#r:Type) (cc:column_codec r) (q:query)
+  : Lemma (requires column_codec_laws cc /\ all_carried q.q_where /\ admission_fault q == None)
+          (ensures query_of_j cc (query_json cc q) == C.Ok q)
+  = admission_fault_at_agrees q;
+    query_roundtrip cc q
+
+(* ---- the declaration reader's refusals resolve ---- *)
+
+let rec list_from_len (#a:Type) (d:C.decoder a) (i:nat) (xs:list C.jval)
+  : Lemma (ensures (match C.list_from d i xs with C.Ok ys -> C.len ys == C.len xs | C.Error _ -> True)) (decreases xs)
+  = match xs with [] -> () | _ :: t -> list_from_len d (i + 1) t
+
+(* An optional list member read as present: its value is an array of as many items as were read. *)
+let opt_list_read (#a:Type) (name:string) (d:C.decoder a) (fs:list (string & C.jval))
+  : Lemma (match C.opt_field name (C.d_list d) (C.JObj fs) with
+           | C.Ok (Some ys) -> (match C.assoc name fs with
+                                | Some (C.JArr xs) -> C.len xs == C.len ys
+                                | _ -> False)
+           | _ -> True)
+  = match C.assoc name fs with
+    | Some (C.JArr xs) -> list_from_len d 0 xs
+    | _ -> ()
+
+let param_sound () : Lemma (C.sound param_of_j) =
+  C.str_sound (); C.bool_sound (); tagged_sound column_of_tag;
+  C.field_sound "name" C.d_str; C.field_sound "type" col_type_of_j; C.field_sound "required" C.d_bool;
+  C.both_sound (C.field "type" col_type_of_j) (C.field "required" C.d_bool) (fun t r -> (t, r));
+  C.both_sound (C.field "name" C.d_str)
+               (C.both (C.field "type" col_type_of_j) (C.field "required" C.d_bool) (fun t r -> (t, r)))
+               (fun n (tr:(column_type & bool)) -> { p_name = n; p_type = fst tr; p_required = snd tr })
+
+let compared_sound (#r:Type) (cc:column_codec r) (make:string -> cell -> predicate) : Lemma (C.sound (compared cc make)) =
+  C.str_sound (); tagged_sound column_of_tag;
+  C.sound_intro (compared cc make) (fun x ->
+    C.field_good "column" C.d_str x; C.field_good "type" col_type_of_j x;
+    match C.field "column" C.d_str x, C.field "type" col_type_of_j x with
+    | C.Ok c, C.Ok ty -> column_read_sound (cc.lit_of c ty); C.field_good "value" (column_read (cc.lit_of c ty)) x
+    | _, _ -> ())
+
+#push-options "--fuel 9 --ifuel 1"
+let predicate_sound (#r:Type) (cc:column_codec r) : Lemma (C.sound (predicate_of_j cc)) =
+  C.str_sound ();
+  compared_sound cc EqualTo; compared_sound cc GreaterThan; compared_sound cc AtLeast;
+  compared_sound cc LessThan; compared_sound cc AtMost;
+  C.field_sound "column" C.d_str; C.field_sound "text" C.d_str;
+  C.both_sound (C.field "column" C.d_str) (C.field "text" C.d_str) (fun c t -> Contains c t);
+  C.map_sound IsNull (C.field "column" C.d_str); C.map_sound IsNotNull (C.field "column" C.d_str);
+  C.tag_dispatch_sound (predicate_cases cc)
+#pop-options
+
+let sort_key_sound () : Lemma (C.sound sort_key_of_j) =
+  C.str_sound (); tagged_sound direction_of_tag;
+  C.field_sound "column" C.d_str; C.field_sound "direction" (tagged_of direction_of_tag);
+  C.both_sound (C.field "column" C.d_str) (C.field "direction" (tagged_of direction_of_tag))
+               (fun c d -> { k_column = c; k_direction = d })
+
+(* The admission refusal's index names an item the document holds. *)
+let where_index_resolves (#r:Type) (cc:column_codec r) (sch:list (string & column_type)) (fs:list (string & C.jval))
+  (wh:option (list predicate))
+  : Lemma (requires C.opt_field "where" (C.d_list (predicate_of_j cc)) (C.JObj fs) == C.Ok wh)
+          (ensures (match where_fault_at sch 0 (match wh with Some w -> w | None -> []) with
+                    | Some (i, _) -> Some? (C.resolve_j [C.Key "where"; C.Index i] (C.JObj fs))
+                    | None -> True))
+  = opt_list_read "where" (predicate_of_j cc) fs;
+    let w = (match wh with Some w -> w | None -> []) in
+    where_fault_at_agrees sch 0 w;
+    match where_fault_at sch 0 w, C.assoc "where" fs with
+    | Some (i, _), Some (C.JArr xs) -> C.nth_some i xs
+    | _, _ -> ()
+
+let order_index_resolves (sch:list (string & column_type)) (fs:list (string & C.jval)) (ob:option (list sort_key))
+  : Lemma (requires C.opt_field "orderBy" (C.d_list sort_key_of_j) (C.JObj fs) == C.Ok ob)
+          (ensures (match order_fault_at sch [] 0 (match ob with Some o -> o | None -> []) with
+                    | Some (i, _) -> Some? (C.resolve_j [C.Key "orderBy"; C.Index i] (C.JObj fs))
+                    | None -> True))
+  = opt_list_read "orderBy" sort_key_of_j fs;
+    let o = (match ob with Some o -> o | None -> []) in
+    order_fault_at_agrees sch [] 0 o;
+    match order_fault_at sch [] 0 o, C.assoc "orderBy" fs with
+    | Some (i, _), Some (C.JArr xs) -> C.nth_some i xs
+    | _, _ -> ()
+
+#push-options "--z3rlimit 120 --fuel 2 --ifuel 2"
+let query_good (#r:Type) (cc:column_codec r) (x:C.jval) : Lemma (C.good_res x (query_of_j cc x)) =
+  C.str_sound (); C.int_sound (); tagged_sound (fun s -> if s = "query" then Some () else None);
+  param_sound (); C.list_sound param_of_j; column_read_sound cc.field_of; C.list_sound (column_read cc.field_of);
+  effect_sound (); predicate_sound cc; C.list_sound (predicate_of_j cc); sort_key_sound (); C.list_sound sort_key_of_j;
+  column_read_sound cc.source_of;
+  C.field_good "$type" query_tag_of x; C.field_good "id" C.d_str x; C.field_good "params" (C.d_list param_of_j) x;
+  C.field_good "resultSchema" (C.d_list (column_read cc.field_of)) x; C.field_good "effect" effect_of_j x;
+  C.opt_field_good "timeoutMs" C.d_int x; C.opt_field_good "pageSize" C.d_int x;
+  C.opt_field_good "where" (C.d_list (predicate_of_j cc)) x; C.opt_field_good "orderBy" (C.d_list sort_key_of_j) x;
+  C.field_good "source" (column_read cc.source_of) x;
+  match x with
+  | C.JObj fs ->
+    (match C.field "resultSchema" (C.d_list (column_read cc.field_of)) x,
+           C.opt_field "where" (C.d_list (predicate_of_j cc)) x,
+           C.opt_field "orderBy" (C.d_list sort_key_of_j) x with
+     | C.Ok sch, C.Ok wh, C.Ok ob -> where_index_resolves cc sch fs wh; order_index_resolves sch fs ob
+     | _, _, _ -> ())
+  | _ -> ()
+#pop-options
+
+let query_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (query_of_j cc)) =
+  C.sound_intro (query_of_j cc) (fun x -> query_good cc x)
+
+(* ---- a result page: `resultJson` / `resultOf` ---- *)
+
+(* F#: `QueryResult`, its rows the column codec's embedded table, a carrier here. *)
+type query_result (r:Type) = { qr_rows: r; qr_page_num: int; qr_total: option int; qr_next: option string }
+
+(* The members `resultJson` writes after its fixed three. *)
+let result_tail (#r:Type) (qr:query_result r) : Tot (list (string & C.jval)) =
+  C.app (opt_int_json "totalRowCount" qr.qr_total)
+      (match qr.qr_next with Some t -> [("nextPageToken", C.JStr t)] | None -> [])
+
+(* F#: `QueryCodec.resultJson`. *)
+let result_json (#r:Type) (cc:column_codec r) (qr:query_result r) : Tot C.jval =
+  C.JObj (("$type", C.JStr "queryResult") :: ("rows", cc.rows_json qr.qr_rows) :: ("pageNum", C.JInt qr.qr_page_num) ::
+          result_tail qr)
+
+let result_tag_of : C.decoder unit = tagged_of (fun s -> if s = "queryResult" then Some () else None)
+
+(* F#: `QueryCodec.resultOf` — a `rows` the column codec refuses, or reads as a `Ref`, is
+   `OutOfRange` at `rows` (the reader answers no embedded table: `rows_of` is `None`). *)
+let result_of_j (#r:Type) (cc:column_codec r) : C.decoder (query_result r) =
+  fun el ->
+    match C.field "$type" result_tag_of el with
+    | C.Error e -> C.Error e
+    | C.Ok () ->
+    match C.field "rows" (column_read cc.rows_of) el with
+    | C.Error e -> C.Error e
+    | C.Ok rows ->
+    match C.field "pageNum" C.d_int el with
+    | C.Error e -> C.Error e
+    | C.Ok pn ->
+    match C.opt_field "totalRowCount" C.d_int el with
+    | C.Error e -> C.Error e
+    | C.Ok trc ->
+    match C.opt_field "nextPageToken" C.d_str el with
+    | C.Error e -> C.Error e
+    | C.Ok tok -> C.Ok ({ qr_rows = rows; qr_page_num = pn; qr_total = trc; qr_next = tok })
+
+(* THE RESULT ROUND TRIP (Phase 455), `result_roundtrip`: every result page reads back as itself. *)
+let result_roundtrip (#r:Type) (cc:column_codec r) (qr:query_result r)
+  : Lemma (requires column_codec_laws cc) (ensures result_of_j cc (result_json cc qr) == C.Ok qr)
+  = let tl = (match qr.qr_next with Some t -> [("nextPageToken", C.JStr t)] | None -> []) in
+    C.assoc_app "totalRowCount" (opt_int_json "totalRowCount" qr.qr_total) tl;
+    C.assoc_app "nextPageToken" (opt_int_json "totalRowCount" qr.qr_total) tl
+
+let result_good (#r:Type) (cc:column_codec r) (x:C.jval) : Lemma (C.good_res x (result_of_j cc x)) =
+  C.str_sound (); C.int_sound (); tagged_sound (fun s -> if s = "queryResult" then Some () else None);
+  column_read_sound cc.rows_of;
+  C.field_good "$type" result_tag_of x; C.field_good "rows" (column_read cc.rows_of) x;
+  C.field_good "pageNum" C.d_int x; C.opt_field_good "totalRowCount" C.d_int x;
+  C.opt_field_good "nextPageToken" C.d_str x
+
+let result_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (result_of_j cc)) =
+  C.sound_intro (result_of_j cc) (fun x -> result_good cc x)
+
+(* ---- the async result: `deferredResultJson` / `deferredResultOf` ---- *)
+
+(* F#: `QueryCodec.deferredResultJson` — the capability seam's envelope over `resultJson`. *)
+let deferred_result_json (#r:Type) (cc:column_codec r) (d:C.deferred (query_result r)) : Tot C.jval =
+  C.deferred_json (result_json cc) d
+
+(* F#: `QueryCodec.deferredResultOf` (Phase 455) — the capability seam's TYPED envelope reader over
+   `resultOf`, so a refusal inside the payload keeps its code and its path under `value`. *)
+let deferred_result_of_j (#r:Type) (cc:column_codec r) : C.decoder (C.deferred (query_result r)) =
+  C.deferred_dec (result_of_j cc)
+
+let deferred_result_roundtrip (#r:Type) (cc:column_codec r) (d:C.deferred (query_result r))
+  : Lemma (requires column_codec_laws cc) (ensures deferred_result_of_j cc (deferred_result_json cc d) == C.Ok d)
+  = (match d with C.Ready v -> result_roundtrip cc v | _ -> ());
+    C.deferred_roundtrip (result_json cc) (result_of_j cc) d
+
+let deferred_result_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (deferred_result_of_j cc)) =
+  result_refusals_resolve cc;
+  C.deferred_dec_sound (result_of_j cc)
+
+(* ---- the typed refusal: `QueryErrorWire.toJson` / `decoder` ---- *)
+
+(* F#: `PathSegment` as `DecodePath.toJson` writes it — an index is any integer the wire carries. *)
+type wire_seg =
+  | WKey   : string -> wire_seg
+  | WIndex : int -> wire_seg
+
+(* F#: `DecodeError`, its prose kept — the refusal an `UnreadableArgs` carries crosses whole. *)
+type wire_decode_error = { we_code: C.decode_code; we_path: list wire_seg; we_expected: string; we_message: string }
+
+(* F#: `QueryError`, all twenty cases: the fifteen this model's `query_error` carries, under
+   `QRefused`, and the five it leaves to the parts it does not model (the policy gate, the argument
+   reader, the typed resolver). *)
+type wire_query_error =
+  | QRefused              : query_error -> wire_query_error
+  | QPolicyRefused        : policy:string -> reason:string -> allowed:list string -> wire_query_error
+  | QApprovalRequired     : policy:string -> wire_query_error
+  | QUnreadableArgs       : error:wire_decode_error -> wire_query_error
+  | QPredicateNotHonoured : predicate:predicate -> wire_query_error
+  | QOrderNotHonoured     : column:string -> wire_query_error
+
+(* F#: `DecodeError.codeName`. *)
+let code_name (c:C.decode_code) : Tot string =
+  match c with
+  | C.InvalidJson -> "InvalidJson" | C.MissingField -> "MissingField" | C.WrongKind -> "WrongKind"
+  | C.UnknownTag -> "UnknownTag" | C.OutOfRange -> "OutOfRange" | C.UndeclaredMember -> "UndeclaredMember"
+  | C.LimitExceeded -> "LimitExceeded" | C.NotAdmitted -> "NotAdmitted" | C.SchemaFault -> "SchemaFault"
+
+(* F#: `DecodeError.codes |> List.map (fun c -> codeName c, c)`, looked up. *)
+let code_of_name (s:string) : Tot (option C.decode_code) =
+  if s = "InvalidJson" then Some C.InvalidJson else if s = "MissingField" then Some C.MissingField
+  else if s = "WrongKind" then Some C.WrongKind else if s = "UnknownTag" then Some C.UnknownTag
+  else if s = "OutOfRange" then Some C.OutOfRange else if s = "UndeclaredMember" then Some C.UndeclaredMember
+  else if s = "LimitExceeded" then Some C.LimitExceeded else if s = "NotAdmitted" then Some C.NotAdmitted
+  else if s = "SchemaFault" then Some C.SchemaFault else None
+
+(* F#: `DecodePath.toJson`. *)
+let rec path_json (p:list wire_seg) : Tot (list C.jval) =
+  match p with
+  | [] -> []
+  | WKey k :: t -> C.JStr k :: path_json t
+  | WIndex i :: t -> C.JInt i :: path_json t
+
+(* F#: `DecodePath.ofJson`'s items — `None` at the first item that is neither a string nor an
+   integer. *)
+let rec path_items (xs:list C.jval) : Tot (option (list wire_seg)) =
+  match xs with
+  | [] -> Some []
+  | C.JStr k :: t -> (match path_items t with Some p -> Some (WKey k :: p) | None -> None)
+  | C.JInt i :: t -> (match path_items t with Some p -> Some (WIndex i :: p) | None -> None)
+  | _ -> None
+
+(* F#: `decodeErrorOf`'s `path` reader — a value that is not a path is `WrongKind` at the value. *)
+let path_of_j : C.decoder (list wire_seg) =
+  fun el ->
+    match el with
+    | C.JArr xs -> (match path_items xs with Some p -> C.Ok p | None -> C.Error (C.refuse C.WrongKind))
+    | _ -> C.Error (C.refuse C.WrongKind)
+
+(* F#: `DecodeError.toJson`. *)
+let decode_error_json (e:wire_decode_error) : Tot C.jval =
+  C.JObj [("code", C.JStr (code_name e.we_code)); ("path", C.JArr (path_json e.we_path));
+          ("expected", C.JStr e.we_expected); ("message", C.JStr e.we_message)]
+
+(* F#: `QueryErrorWire.decodeErrorOf`. *)
+let decode_error_of_j : C.decoder wire_decode_error =
+  C.both (C.field "code" (tagged_of code_of_name))
+         (C.both (C.field "path" path_of_j)
+                 (C.both (C.field "expected" C.d_str) (C.field "message" C.d_str) (fun x m -> (x, m)))
+                 (fun p xm -> (p, xm)))
+         (fun c (pxm:(list wire_seg & (string & string))) ->
+            { we_code = c; we_path = fst pxm; we_expected = fst (snd pxm); we_message = snd (snd pxm) })
+
+let strs_j (xs:list string) : Tot C.jval = C.JArr (C.strs xs)
+
+(* F#: `QueryErrorWire.toJson`. *)
+let query_error_json (#r:Type) (cc:column_codec r) (e:wire_query_error) : Tot C.jval =
+  match e with
+  | QRefused (NoSuchQuery id known) -> C.JObj [("$type", C.JStr "noSuchQuery"); ("id", C.JStr id); ("known", strs_j known)]
+  | QRefused (DuplicateQuery id) -> C.JObj [("$type", C.JStr "duplicateQuery"); ("id", C.JStr id)]
+  | QRefused (UnknownParam name declared) ->
+    C.JObj [("$type", C.JStr "unknownParam"); ("name", C.JStr name); ("declared", strs_j declared)]
+  | QRefused (ParamTypeMismatch name expected got) ->
+    C.JObj [("$type", C.JStr "paramTypeMismatch"); ("name", C.JStr name);
+            ("expected", C.JStr (column_tag expected)); ("got", C.JStr (column_tag got))]
+  | QRefused (RequiredParamsUnbound names) -> C.JObj [("$type", C.JStr "requiredParamsUnbound"); ("names", strs_j names)]
+  | QRefused (SourceNotResolved s) -> C.JObj [("$type", C.JStr "sourceNotResolved"); ("ref", C.JStr s)]
+  | QRefused (ExecutionFailed detail recoverable) ->
+    C.JObj [("$type", C.JStr "executionFailed"); ("detail", C.JStr detail); ("recoverable", strs_j recoverable)]
+  | QRefused Timeout -> C.JObj [("$type", C.JStr "timeout")]
+  | QRefused (RequiredParamsNull names) -> C.JObj [("$type", C.JStr "requiredParamsNull"); ("names", strs_j names)]
+  | QRefused (DuplicateParam name) -> C.JObj [("$type", C.JStr "duplicateParam"); ("name", C.JStr name)]
+  | QPolicyRefused policy reason allowed ->
+    C.JObj [("$type", C.JStr "policyRefused"); ("policy", C.JStr policy); ("reason", C.JStr reason); ("allowed", strs_j allowed)]
+  | QApprovalRequired policy -> C.JObj [("$type", C.JStr "approvalRequired"); ("policy", C.JStr policy)]
+  | QUnreadableArgs err -> C.JObj [("$type", C.JStr "unreadableArgs"); ("error", decode_error_json err)]
+  | QRefused (UnknownColumn name declared) ->
+    C.JObj [("$type", C.JStr "unknownColumn"); ("name", C.JStr name); ("declared", strs_j declared)]
+  | QRefused (PredicateTypeMismatch column expected got) ->
+    C.JObj [("$type", C.JStr "predicateTypeMismatch"); ("column", C.JStr column);
+            ("expected", C.JStr (column_tag expected)); ("got", C.JStr (column_tag got))]
+  | QRefused (PredicateNotApplicable predicate column ty) ->
+    C.JObj [("$type", C.JStr "predicateNotApplicable"); ("predicate", C.JStr predicate); ("column", C.JStr column);
+            ("columnType", C.JStr (column_tag ty))]
+  | QRefused (IllFormedLiteral column reason) ->
+    C.JObj [("$type", C.JStr "illFormedLiteral"); ("column", C.JStr column); ("reason", C.JStr reason)]
+  | QRefused (DuplicateSortColumn column) -> C.JObj [("$type", C.JStr "duplicateSortColumn"); ("column", C.JStr column)]
+  | QPredicateNotHonoured p -> C.JObj [("$type", C.JStr "predicateNotHonoured"); ("predicate", predicate_json cc p)]
+  | QOrderNotHonoured column -> C.JObj [("$type", C.JStr "orderNotHonoured"); ("column", C.JStr column)]
+
+let s_f (name:string) : C.decoder string = C.field name C.d_str
+let sl_f (name:string) : C.decoder (list string) = C.field name (C.d_list C.d_str)
+let ty_f (name:string) : C.decoder column_type = C.field name col_type_of_j
+
+(* F#: `QueryShape.tags` looked up — `predicateNotApplicable`'s `predicate` member. *)
+let predicate_tag_of (s:string) : Tot (option string) =
+  if s = "equalTo" || s = "greaterThan" || s = "atLeast" || s = "lessThan" || s = "atMost" ||
+     s = "contains" || s = "isNull" || s = "isNotNull" then Some s else None
+
+let qrefused (#a:Type) (f:a -> query_error) : a -> wire_query_error = fun x -> QRefused (f x)
+
+let query_error_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder wire_query_error) =
+  [("noSuchQuery", C.both (s_f "id") (sl_f "known") (fun id known -> QRefused (NoSuchQuery id known)));
+   ("duplicateQuery", C.d_map (qrefused DuplicateQuery) (s_f "id"));
+   ("unknownParam", C.both (s_f "name") (sl_f "declared") (fun n d -> QRefused (UnknownParam n d)));
+   ("paramTypeMismatch",
+    C.both (s_f "name") (C.both (ty_f "expected") (ty_f "got") (fun x g -> (x, g)))
+           (fun n (xg:(column_type & column_type)) -> QRefused (ParamTypeMismatch n (fst xg) (snd xg))));
+   ("requiredParamsUnbound", C.d_map (qrefused RequiredParamsUnbound) (sl_f "names"));
+   ("sourceNotResolved", C.d_map (qrefused SourceNotResolved) (s_f "ref"));
+   ("executionFailed", C.both (s_f "detail") (sl_f "recoverable") (fun d rc -> QRefused (ExecutionFailed d rc)));
+   ("timeout", C.d_succeed (QRefused Timeout));
+   ("requiredParamsNull", C.d_map (qrefused RequiredParamsNull) (sl_f "names"));
+   ("duplicateParam", C.d_map (qrefused DuplicateParam) (s_f "name"));
+   ("policyRefused",
+    C.both (s_f "policy") (C.both (s_f "reason") (sl_f "allowed") (fun rs a -> (rs, a)))
+           (fun p (ra:(string & list string)) -> QPolicyRefused p (fst ra) (snd ra)));
+   ("approvalRequired", C.d_map QApprovalRequired (s_f "policy"));
+   ("unreadableArgs", C.d_map QUnreadableArgs (C.field "error" decode_error_of_j));
+   ("unknownColumn", C.both (s_f "name") (sl_f "declared") (fun n d -> QRefused (UnknownColumn n d)));
+   ("predicateTypeMismatch",
+    C.both (s_f "column") (C.both (ty_f "expected") (ty_f "got") (fun x g -> (x, g)))
+           (fun c (xg:(column_type & column_type)) -> QRefused (PredicateTypeMismatch c (fst xg) (snd xg))));
+   ("predicateNotApplicable",
+    C.both (C.field "predicate" (tagged_of predicate_tag_of)) (C.both (s_f "column") (ty_f "columnType") (fun c t -> (c, t)))
+           (fun p (ct:(string & column_type)) -> QRefused (PredicateNotApplicable p (fst ct) (snd ct))));
+   ("illFormedLiteral", C.both (s_f "column") (s_f "reason") (fun c rs -> QRefused (IllFormedLiteral c rs)));
+   ("duplicateSortColumn", C.d_map (qrefused DuplicateSortColumn) (s_f "column"));
+   ("predicateNotHonoured", C.d_map QPredicateNotHonoured (C.field "predicate" (predicate_of_j cc)));
+   ("orderNotHonoured", C.d_map QOrderNotHonoured (s_f "column"))]
+
+(* F#: `QueryErrorWire.decoder`. *)
+let query_error_of_j (#r:Type) (cc:column_codec r) : C.decoder wire_query_error = C.tag_dispatch (query_error_cases cc)
+
+(* A refusal the codec carries: a `predicateNotApplicable` names a predicate tag, an
+   `unreadableArgs` refusal carries a code, and a `predicateNotHonoured` predicate's literal is
+   carried. *)
+let query_error_carried (e:wire_query_error) : Tot bool =
+  match e with
+  | QRefused (PredicateNotApplicable p _ _) -> Some? (predicate_tag_of p)
+  | QPredicateNotHonoured p -> literal_carried p
+  | _ -> true
+
+let rec path_roundtrip (p:list wire_seg) : Lemma (path_items (path_json p) == Some p) =
+  match p with [] -> () | _ :: t -> path_roundtrip t
+
+let decode_error_roundtrip (e:wire_decode_error) : Lemma (decode_error_of_j (decode_error_json e) == C.Ok e) =
+  path_roundtrip e.we_path
+
+(* THE REFUSAL ROUND TRIP (Phase 455), `query_error_roundtrip`: every `QueryError` the codec
+   carries — the twenty cases, a decode refusal and a predicate inside them — reads back as itself. *)
+#push-options "--fuel 21 --ifuel 1 --z3rlimit 80"
+let query_error_roundtrip (#r:Type) (cc:column_codec r) (e:wire_query_error)
+  : Lemma (requires column_codec_laws cc /\ query_error_carried e)
+          (ensures query_error_of_j cc (query_error_json cc e) == C.Ok e)
+  = match e with
+    | QRefused (NoSuchQuery _ xs) -> C.strs_roundtrip 0 xs
+    | QRefused (UnknownParam _ xs) -> C.strs_roundtrip 0 xs
+    | QRefused (ParamTypeMismatch _ a b) -> column_tag_roundtrip a; column_tag_roundtrip b
+    | QRefused (RequiredParamsUnbound xs) -> C.strs_roundtrip 0 xs
+    | QRefused (ExecutionFailed _ xs) -> C.strs_roundtrip 0 xs
+    | QRefused (RequiredParamsNull xs) -> C.strs_roundtrip 0 xs
+    | QPolicyRefused _ _ xs -> C.strs_roundtrip 0 xs
+    | QUnreadableArgs err -> decode_error_roundtrip err
+    | QRefused (UnknownColumn _ xs) -> C.strs_roundtrip 0 xs
+    | QRefused (PredicateTypeMismatch _ a b) -> column_tag_roundtrip a; column_tag_roundtrip b
+    | QRefused (PredicateNotApplicable _ _ t) -> column_tag_roundtrip t
+    | QPredicateNotHonoured p -> predicate_roundtrip cc p
+    | _ -> ()
+#pop-options
+
+let path_sound () : Lemma (C.sound path_of_j) = C.sound_intro path_of_j (fun x -> ())
+
+let decode_error_sound () : Lemma (C.sound decode_error_of_j) =
+  C.str_sound (); tagged_sound code_of_name; path_sound ();
+  C.field_sound "code" (tagged_of code_of_name); C.field_sound "path" path_of_j;
+  C.field_sound "expected" C.d_str; C.field_sound "message" C.d_str;
+  C.both_sound (C.field "expected" C.d_str) (C.field "message" C.d_str) (fun x m -> (x, m));
+  C.both_sound (C.field "path" path_of_j)
+               (C.both (C.field "expected" C.d_str) (C.field "message" C.d_str) (fun x m -> (x, m)))
+               (fun p xm -> (p, xm));
+  C.both_sound (C.field "code" (tagged_of code_of_name))
+               (C.both (C.field "path" path_of_j)
+                       (C.both (C.field "expected" C.d_str) (C.field "message" C.d_str) (fun x m -> (x, m)))
+                       (fun p xm -> (p, xm)))
+               (fun c (pxm:(list wire_seg & (string & string))) ->
+                  { we_code = c; we_path = fst pxm; we_expected = fst (snd pxm); we_message = snd (snd pxm) })
+
+let s_f_sound (n:string) : Lemma (C.sound (s_f n)) = C.str_sound (); C.field_sound n C.d_str
+let sl_f_sound (n:string) : Lemma (C.sound (sl_f n)) = C.str_sound (); C.list_sound C.d_str; C.field_sound n (C.d_list C.d_str)
+let ty_f_sound (n:string) : Lemma (C.sound (ty_f n)) = tagged_sound column_of_tag; C.field_sound n col_type_of_j
+
+(* Every refusal the query-error reader answers resolves in the document it read. *)
+#push-options "--fuel 21 --ifuel 1 --z3rlimit 80"
+let query_error_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (query_error_of_j cc)) =
+  s_f_sound "id"; s_f_sound "name"; s_f_sound "ref"; s_f_sound "detail"; s_f_sound "policy"; s_f_sound "reason";
+  s_f_sound "column";
+  sl_f_sound "known"; sl_f_sound "declared"; sl_f_sound "names"; sl_f_sound "recoverable"; sl_f_sound "allowed";
+  ty_f_sound "expected"; ty_f_sound "got"; ty_f_sound "columnType";
+  decode_error_sound (); C.field_sound "error" decode_error_of_j;
+  predicate_sound cc; C.field_sound "predicate" (predicate_of_j cc);
+  tagged_sound predicate_tag_of; C.field_sound "predicate" (tagged_of predicate_tag_of);
+  C.both_sound (s_f "id") (sl_f "known") (fun id known -> QRefused (NoSuchQuery id known));
+  C.map_sound (qrefused DuplicateQuery) (s_f "id");
+  C.both_sound (s_f "name") (sl_f "declared") (fun n d -> QRefused (UnknownParam n d));
+  C.both_sound (ty_f "expected") (ty_f "got") (fun x g -> (x, g));
+  C.both_sound (s_f "name") (C.both (ty_f "expected") (ty_f "got") (fun x g -> (x, g)))
+               (fun n (xg:(column_type & column_type)) -> QRefused (ParamTypeMismatch n (fst xg) (snd xg)));
+  C.map_sound (qrefused RequiredParamsUnbound) (sl_f "names");
+  C.map_sound (qrefused SourceNotResolved) (s_f "ref");
+  C.both_sound (s_f "detail") (sl_f "recoverable") (fun d rc -> QRefused (ExecutionFailed d rc));
+  C.succeed_sound (QRefused Timeout);
+  C.map_sound (qrefused RequiredParamsNull) (sl_f "names");
+  C.map_sound (qrefused DuplicateParam) (s_f "name");
+  C.both_sound (s_f "reason") (sl_f "allowed") (fun rs a -> (rs, a));
+  C.both_sound (s_f "policy") (C.both (s_f "reason") (sl_f "allowed") (fun rs a -> (rs, a)))
+               (fun p (ra:(string & list string)) -> QPolicyRefused p (fst ra) (snd ra));
+  C.map_sound QApprovalRequired (s_f "policy");
+  C.map_sound QUnreadableArgs (C.field "error" decode_error_of_j);
+  C.both_sound (s_f "name") (sl_f "declared") (fun n d -> QRefused (UnknownColumn n d));
+  C.both_sound (s_f "column") (C.both (ty_f "expected") (ty_f "got") (fun x g -> (x, g)))
+               (fun c (xg:(column_type & column_type)) -> QRefused (PredicateTypeMismatch c (fst xg) (snd xg)));
+  C.both_sound (s_f "column") (ty_f "columnType") (fun c t -> (c, t));
+  C.both_sound (C.field "predicate" (tagged_of predicate_tag_of)) (C.both (s_f "column") (ty_f "columnType") (fun c t -> (c, t)))
+               (fun p (ct:(string & column_type)) -> QRefused (PredicateNotApplicable p (fst ct) (snd ct)));
+  C.both_sound (s_f "column") (s_f "reason") (fun c rs -> QRefused (IllFormedLiteral c rs));
+  C.map_sound (qrefused DuplicateSortColumn) (s_f "column");
+  C.map_sound QPredicateNotHonoured (C.field "predicate" (predicate_of_j cc));
+  C.map_sound QOrderNotHonoured (s_f "column");
+  C.tag_dispatch_sound (query_error_cases cc)
+#pop-options

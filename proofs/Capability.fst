@@ -110,6 +110,13 @@
        (`…_roundtrip_identity`), a named refusal or a normal form on the others; and every
        document a reader accepts is a well-formed value that reads back as itself
        (`…_decoded_wf`).
+     - (Phase 455, section 18) the codec's other three pairs — the typed invocation, the async
+       envelope and the twelve-case refusal — round trip EXACTLY (`invocation_roundtrip`,
+       `deferred_roundtrip`, `invoke_error_roundtrip`), and every refusal any `CapabilityCodec`
+       reader answers RESOLVES in the document it read (`invocation_refusals_resolve`,
+       `deferred_refusals_resolve`, `invoke_error_refusals_resolve`,
+       `capability_refusals_resolve`). The codec is not built from the `Codec` blocks, so these
+       are proved directly, over this module's restatement of `DecodeError.resolvesIn`.
 
    WHAT IS NOT CLAIMED. Anything about a domain's `Bind` — that a bound hole is cleared, that a
    slot's inner tree is where `compose` put it — which is the witness contract
@@ -4921,7 +4928,8 @@ let _ = assert_norm (twins_hold twins == true)
    The gated outcome wraps the ungated seam's refusals (`GRefused`) rather than widening
    `invoke_error`: production adds the two cases to `InvokeError` itself, and the wrapper is
    the same three-way split stated without touching the extracted type. Everything in this
-   section is `noextract_to "FSharp"`, so the extracted oracle is unchanged; the bridge to
+   section but `gated_error` (which section 18's codec carries, Phase 455) is
+   `noextract_to "FSharp"`; the bridge to
    production is the `Conformance.policyLaws` family, which samples the same two properties
    against the shipped registries. ====================================================== *)
 
@@ -5005,7 +5013,8 @@ let rec decide_from_rises (gs:list gate) (c:capability) (a:invocation) (acc:(str
       if policy_rank d > policy_rank (snd acc) then decide_from_rises t c a (g.gname, d)
       else decide_from_rises t c a acc
 
-[@@ noextract_to "FSharp"]
+(* Extracted since Phase 455: section 18's invoke-error codec reads and writes it, and the oracle
+   runs that codec beside production's. The functions of this section stay unextracted. *)
 type gated_error =
   | GRefused : invoke_error -> gated_error
   | GPolicyRefused : policy:string -> msg:string -> alts:list string -> gated_error
@@ -5063,3 +5072,723 @@ let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invoc
                     | Ok x -> dispatch_gated rd r [] id a body == Ok x
                     | Error e -> dispatch_gated rd r [] id a body == Error (GRefused e)))
   = ()
+
+(* ======================================================================================
+   18. THE SEAM CODEC, WHOLE (Phase 455) — `CapabilityCodec`'s three remaining pairs, clause for
+       clause at the `JVal` as section 16 models the first: the typed INVOCATION
+       (`encodeInvocationJson` / `invocationOf`, the repeated-address refusal raised through `at`),
+       the async ENVELOPE (`deferredJson` / `deferredOf`, the payload codec a parameter) and the
+       typed REFUSAL (`invokeErrorJson` / `invokeErrorOf`, all twelve `InvokeError` cases as
+       `gated_error`, with `faultJson` / `faultOf` inside). Then the two properties for every pair:
+       decode after encode, EXACTLY (`invocation_roundtrip`, `deferred_roundtrip`,
+       `invoke_error_roundtrip`), and every refusal a reader answers RESOLVES in the document it read
+       (`invocation_refusals_resolve`, `deferred_refusals_resolve`,
+       `invoke_error_refusals_resolve`, and `capability_refusals_resolve` for section 16's
+       declaration reader).
+
+       PREMISE CHECKED FIRST. The codec is NOT built from the `Codec` blocks Phase 436 proved
+       (`record`, `field`, `union`, …): every reader is written over `JVal` with the typed decode
+       layer's combinators (`Decoder.field`, `optField`, `list`, `bind`, `map`, `at`, `fail`,
+       `tagDispatchWith`). So 436's composed round trip does not apply as a corollary, and both
+       properties are proved here directly. The refusal law is `DecodeError.resolvesIn`, restated
+       over this module's `jval` as `resolves_in` — the module is self-contained (header) — with the
+       transport lemma `ok_at_under` and one soundness lemma per combinator, `DecodeLayer.fst`'s
+       section 6 at this module's types.
+
+       The policy-parameterised readers (`…With`, `…DetailedWith`) are the same readers behind the
+       strict members check, which is not modelled; their census entries say so.
+   ====================================================================================== *)
+
+(* ---- what a refusal owes the document it read: `DecodeError.resolvesIn` ---- *)
+
+(* F#: `List.tryItem`, at a non-negative index. *)
+let rec nth_j (i:nat) (xs:list jval) : Tot (option jval) (decreases xs) =
+  match xs with
+  | [] -> None
+  | x :: t -> if i = 0 then Some x else nth_j (i - 1) t
+
+(* F#: `DecodePath.step` — the FIRST member of a key, an item of an array. *)
+let step_j (s:path_seg) (v:jval) : Tot (option jval) =
+  match s, v with
+  | Key k, JObj fs -> assoc k fs
+  | Index i, JArr xs -> nth_j i xs
+  | _, _ -> None
+
+(* F#: `DecodePath.resolve`. *)
+let rec resolve_j (p:list path_seg) (v:jval) : Tot (option jval) (decreases p) =
+  match p with
+  | [] -> Some v
+  | s :: rest ->
+    (match step_j s v with
+     | Some w -> resolve_j rest w
+     | None -> None)
+
+(* The `MissingField` arm of `resolvesIn`: the path's LAST step is a member name, the steps before
+   it resolve to an object, and the object does not carry the member. Production reads the last
+   step off `List.rev`; this is the same test as a direct recursion. *)
+let rec missing_at (p:list path_seg) (v:jval) : Tot bool (decreases p) =
+  match p with
+  | [] -> false
+  | [Key k] -> (match v with JObj fs -> not (has_key k fs) | _ -> false)
+  | s :: rest ->
+    (match rest with
+     | [] -> false
+     | _ -> (match step_j s v with Some w -> missing_at rest w | None -> false))
+
+(* F#: `DecodeError.resolvesIn` — an `InvalidJson` names the root; a `MissingField` names a member
+   of a resolving object that does not carry it; every other code names a value the document holds. *)
+let resolves_in (doc:jval) (e:decode_error) : Tot bool =
+  match e.d_code with
+  | InvalidJson -> Nil? e.d_path
+  | MissingField -> missing_at e.d_path doc
+  | _ -> Some? (resolve_j e.d_path doc)
+
+(* A refusal RESOLVES in the document it was raised over, and is not the parser's code. *)
+[@@ noextract_to "FSharp"]
+let ok_at (doc:jval) (e:decode_error) : Tot bool = e.d_code <> InvalidJson && resolves_in doc e
+
+[@@ noextract_to "FSharp"]
+let good_res (#a:Type) (doc:jval) (r:outcome a decode_error) : Tot bool =
+  match r with
+  | Ok _ -> true
+  | Error e -> ok_at doc e
+
+(* A reader is SOUND when every refusal it answers over every document resolves there. *)
+[@@ noextract_to "FSharp"]
+let sound (#a:Type) (d:decoder a) : prop = forall (x:jval). good_res x (d x)
+
+[@@ noextract_to "FSharp"]
+let sound_intro (#a:Type) (d:decoder a) (pf:(x:jval -> Lemma (good_res x (d x)))) : Lemma (sound d) =
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let sound_elim (#a:Type) (d:decoder a) (x:jval) : Lemma (requires sound d) (ensures good_res x (d x)) = ()
+
+(* THE TRANSPORT LEMMA: a refusal owed to the value one step reaches is owed, under that step, to
+   the value the step started from. *)
+let ok_at_under (s:path_seg) (doc v:jval) (e:decode_error)
+  : Lemma (requires step_j s doc == Some v /\ ok_at v e) (ensures ok_at doc (under s e))
+  = ()
+
+(* F#: `DecodeError.within`. *)
+let within (p:list path_seg) (e:decode_error) : Tot decode_error = { e with d_path = app p e.d_path }
+
+let rec ok_at_within (p:list path_seg) (doc v:jval) (e:decode_error)
+  : Lemma (requires resolve_j p doc == Some v /\ ok_at v e) (ensures ok_at doc (within p e)) (decreases p)
+  = match p with
+    | [] -> ()
+    | s :: q ->
+      (match step_j s doc with
+       | Some w -> ok_at_within q w v e; ok_at_under s doc w (within q e)
+       | None -> ())
+
+let rec resolve_app (p q:list path_seg) (doc:jval)
+  : Lemma (ensures resolve_j (app p q) doc ==
+                   (match resolve_j p doc with Some v -> resolve_j q v | None -> None)) (decreases p)
+  = match p with
+    | [] -> ()
+    | s :: t -> (match step_j s doc with Some v -> resolve_app t q v | None -> ())
+
+let rec assoc_none_has_key (#a:Type) (k:string) (l:list (string & a))
+  : Lemma (None? (assoc k l) <==> not (has_key k l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> assoc_none_has_key k t
+
+(* ---- the readers this section composes, each sound ---- *)
+
+let str_sound () : Lemma (sound d_str) = sound_intro d_str (fun x -> ())
+let int_sound () : Lemma (sound d_int) = sound_intro d_int (fun x -> ())
+let bool_sound () : Lemma (sound d_bool) = sound_intro d_bool (fun x -> ())
+let float_sound (cr:codec_readers) : Lemma (sound (d_float cr)) = sound_intro (d_float cr) (fun x -> ())
+
+let field_good (#a:Type) (name:string) (d:decoder a) (x:jval)
+  : Lemma (requires sound d) (ensures good_res x (field name d x))
+  = match x with
+    | JObj fs ->
+      (match assoc name fs with
+       | Some v -> sound_elim d v; (match d v with Error e -> ok_at_under (Key name) x v e | Ok _ -> ())
+       | None -> assoc_none_has_key name fs)
+    | _ -> ()
+
+let field_sound (#a:Type) (name:string) (d:decoder a)
+  : Lemma (requires sound d) (ensures sound (field name d))
+  = sound_intro (field name d) (fun x -> field_good name d x)
+
+let opt_field_good (#a:Type) (name:string) (d:decoder a) (x:jval)
+  : Lemma (requires sound d) (ensures good_res x (opt_field name d x))
+  = match x with
+    | JObj fs ->
+      (match assoc name fs with
+       | Some v -> sound_elim d v; (match d v with Error e -> ok_at_under (Key name) x v e | Ok _ -> ())
+       | None -> ())
+    | _ -> ()
+
+let opt_field_sound (#a:Type) (name:string) (d:decoder a)
+  : Lemma (requires sound d) (ensures sound (opt_field name d))
+  = sound_intro (opt_field name d) (fun x -> opt_field_good name d x)
+
+let rec nth_app (pre:list jval) (x:jval) (t:list jval)
+  : Lemma (ensures nth_j (len pre) (app pre (x :: t)) == Some x) (decreases pre)
+  = match pre with
+    | [] -> ()
+    | _ :: r -> nth_app r x t
+
+let rec len_snoc (l:list jval) (x:jval) : Lemma (ensures len (app l [x]) == len l + 1) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> len_snoc t x
+
+(* `Decoder.list`: an item's refusal is owed to the array, under its index. *)
+let rec list_from_good (#a:Type) (d:decoder a) (pre xs:list jval)
+  : Lemma (requires sound d)
+          (ensures good_res (JArr (app pre xs)) (list_from d (len pre) xs)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: t ->
+      nth_app pre x t;
+      sound_elim d x;
+      (match d x with
+       | Error e -> ok_at_under (Index (len pre)) (JArr (app pre xs)) x e
+       | Ok _ ->
+         list_from_good d (app pre [x]) t;
+         app_assoc pre [x] t;
+         len_snoc pre x)
+
+let list_sound (#a:Type) (d:decoder a)
+  : Lemma (requires sound d) (ensures sound (d_list d))
+  = sound_intro (d_list d) (fun x -> match x with JArr xs -> list_from_good d [] xs | _ -> ())
+
+(* F#: `Decoder.succeed`. *)
+let d_succeed (#a:Type) (v:a) : decoder a = fun _ -> Ok v
+
+(* F#: `Decoder.map`. *)
+let d_map (#a #b:Type) (g:a -> b) (d:decoder a) : decoder b =
+  fun el -> match d el with Ok v -> Ok (g v) | Error e -> Error e
+
+(* F#: the codecs' private `both` — `a |> Decoder.bind (fun x -> b |> Decoder.map (f x))`: two
+   readers over ONE value, the first refusal first. *)
+let both (#a #b #c:Type) (da:decoder a) (db:decoder b) (f:a -> b -> c) : decoder c =
+  fun el ->
+    match da el with
+    | Error e -> Error e
+    | Ok x -> (match db el with Error e -> Error e | Ok y -> Ok (f x y))
+
+(* F#: `Decoder.fail` at a root code — every code but the parser's and `MissingField`. *)
+let d_fail (#a:Type) (c:decode_code{c <> InvalidJson /\ c <> MissingField}) : decoder a =
+  fun _ -> Error (refuse c)
+
+(* F#: `Decoder.at`'s walk — each step taken in the document, a step that does not resolve refused
+   at the prefix that did. *)
+let rec at_go (#a:Type) (d:decoder a) (here rest:list path_seg) (v:jval)
+  : Tot (outcome a decode_error) (decreases rest) =
+  match rest with
+  | [] -> (match d v with Ok x -> Ok x | Error e -> Error (within here e))
+  | Key k :: tail ->
+    (match v with
+     | JObj fs ->
+       (match assoc k fs with
+        | Some x -> at_go d (app here [Key k]) tail x
+        | None -> Error (within here (missing k)))
+     | _ -> Error (within here (refuse WrongKind)))
+  | Index i :: tail ->
+    (match v with
+     | JArr xs ->
+       (match nth_j i xs with
+        | Some x -> at_go d (app here [Index i]) tail x
+        | None -> Error (within here (refuse OutOfRange)))
+     | _ -> Error (within here (refuse WrongKind)))
+
+(* F#: `Decoder.at`. *)
+let d_at (#a:Type) (p:list path_seg) (d:decoder a) : decoder a = fun el -> at_go d [] p el
+
+(* F#: `Decoder.tagDispatchWith "<what>" "$type"` — the case table looked up by the tag. *)
+let rec find_dec (#a:Type) (s:string) (cases:list (string & decoder a)) : Tot (option (decoder a)) =
+  match cases with
+  | [] -> None
+  | (k, d) :: t -> if k = s then Some d else find_dec s t
+
+let tag_dispatch (#a:Type) (cases:list (string & decoder a)) : decoder a =
+  fun el ->
+    match field "$type" d_str el with
+    | Error e -> Error e
+    | Ok t ->
+      (match find_dec t cases with
+       | Some d -> d el
+       | None -> Error (under (Key "$type") (refuse UnknownTag)))
+
+let succeed_sound (#a:Type) (v:a) : Lemma (sound (d_succeed v)) = sound_intro (d_succeed v) (fun x -> ())
+
+let fail_sound (#a:Type) (c:decode_code{c <> InvalidJson /\ c <> MissingField}) : Lemma (sound (d_fail #a c)) =
+  sound_intro (d_fail #a c) (fun x -> ())
+
+let map_sound (#a #b:Type) (g:a -> b) (d:decoder a) : Lemma (requires sound d) (ensures sound (d_map g d)) =
+  sound_intro (d_map g d) (fun x -> sound_elim d x)
+
+let both_sound (#a #b #c:Type) (da:decoder a) (db:decoder b) (f:a -> b -> c)
+  : Lemma (requires sound da /\ sound db) (ensures sound (both da db f))
+  = sound_intro (both da db f) (fun x -> sound_elim da x; sound_elim db x)
+
+let rec at_go_good (#a:Type) (d:decoder a) (doc:jval) (here rest:list path_seg) (v:jval)
+  : Lemma (requires sound d /\ resolve_j here doc == Some v)
+          (ensures good_res doc (at_go d here rest v)) (decreases rest)
+  = match rest with
+    | [] -> sound_elim d v; (match d v with Error e -> ok_at_within here doc v e | Ok _ -> ())
+    | Key k :: tail ->
+      (match v with
+       | JObj fs ->
+         (match assoc k fs with
+          | Some x -> resolve_app here [Key k] doc; at_go_good d doc (app here [Key k]) tail x
+          | None -> assoc_none_has_key k fs; ok_at_within here doc v (missing k))
+       | _ -> ok_at_within here doc v (refuse WrongKind))
+    | Index i :: tail ->
+      (match v with
+       | JArr xs ->
+         (match nth_j i xs with
+          | Some x -> resolve_app here [Index i] doc; at_go_good d doc (app here [Index i]) tail x
+          | None -> ok_at_within here doc v (refuse OutOfRange))
+       | _ -> ok_at_within here doc v (refuse WrongKind))
+
+let at_sound (#a:Type) (p:list path_seg) (d:decoder a) : Lemma (requires sound d) (ensures sound (d_at p d)) =
+  sound_intro (d_at p d) (fun x -> at_go_good d x [] p x)
+
+[@@ noextract_to "FSharp"]
+let rec table_sound (#a:Type) (cases:list (string & decoder a)) : prop =
+  match cases with
+  | [] -> True
+  | (_, d) :: t -> sound d /\ table_sound t
+
+let rec find_dec_sound (#a:Type) (s:string) (cases:list (string & decoder a))
+  : Lemma (requires table_sound cases)
+          (ensures (match find_dec s cases with Some d -> sound d | None -> True))
+  = match cases with
+    | [] -> ()
+    | (k, _) :: t -> if k = s then () else find_dec_sound s t
+
+let tag_dispatch_sound (#a:Type) (cases:list (string & decoder a))
+  : Lemma (requires table_sound cases) (ensures sound (tag_dispatch cases))
+  = str_sound ();
+    sound_intro (tag_dispatch cases) (fun x ->
+      field_good "$type" d_str x;
+      match field "$type" d_str x with
+      | Error _ -> ()
+      | Ok t ->
+        find_dec_sound t cases;
+        (match find_dec t cases with
+         | Some d -> sound_elim d x
+         | None ->
+           (match x with
+            | JObj fs ->
+              (match assoc "$type" fs with
+               | Some v -> ok_at_under (Key "$type") x v (refuse UnknownTag)
+               | None -> ())
+            | _ -> ())))
+
+(* ---- the declaration reader's refusals resolve (Phase 354's codec, its third property) ---- *)
+
+let space_good (cr:codec_readers) (x:jval) : Lemma (good_res x (space_of_j cr x)) =
+  str_sound (); int_sound (); float_sound cr; list_sound d_str;
+  field_good "$type" d_str x;
+  field_good "min" d_int x; field_good "max" d_int x;
+  field_good "min" (d_float cr) x; field_good "max" (d_float cr) x;
+  field_good "values" (d_list d_str) x;
+  opt_field_good "slotKind" d_str x;
+  match x with
+  | JObj fs ->
+    (match assoc "$type" fs with
+     | Some v -> ok_at_under (Key "$type") x v (refuse UnknownTag)
+     | None -> ())
+  | _ -> ()
+
+let space_sound (cr:codec_readers) : Lemma (sound (space_of_j cr)) =
+  sound_intro (space_of_j cr) (fun x -> space_good cr x)
+
+let host_sound () : Lemma (sound host_of_j) = sound_intro host_of_j (fun x -> ())
+let det_sound () : Lemma (sound det_of_j) = sound_intro det_of_j (fun x -> ())
+
+let effect_sound () : Lemma (sound effect_of_j) =
+  host_sound (); det_sound ();
+  sound_intro effect_of_j (fun x -> field_good "host" host_of_j x; field_good "determinism" det_of_j x)
+
+let kind_sound () : Lemma (sound kind_of_j) = sound_intro kind_of_j (fun x -> ())
+let island_sound () : Lemma (sound island_of_j) = sound_intro island_of_j (fun x -> ())
+let doc_tag_sound () : Lemma (sound doc_tag_of_j) = sound_intro doc_tag_of_j (fun x -> ())
+let det_agrees_sound (s:string) : Lemma (sound (det_agrees_j s)) = sound_intro (det_agrees_j s) (fun x -> ())
+
+let placement_good (x:jval) : Lemma (good_res x (placement_of_j x)) =
+  str_sound (); island_sound ();
+  field_good "$type" d_str x; field_good "island" island_of_j x;
+  match x with
+  | JObj fs ->
+    (match assoc "$type" fs with
+     | Some v -> ok_at_under (Key "$type") x v (refuse UnknownTag)
+     | None -> ())
+  | _ -> ()
+
+let placement_sound () : Lemma (sound placement_of_j) = sound_intro placement_of_j (fun x -> placement_good x)
+
+(* A kind `kind_of_j` read is one of the four. *)
+let kind_of_j_tags (x:jval) : Lemma (match kind_of_j x with Ok s -> mem s hole_tags | Error _ -> True) = ()
+
+(* An entry's `hole_kind_of` refusal names a member the entry does not carry: `opt_field` read it as
+   ABSENT, which on an object is exactly `not has_key`. *)
+let entry_good (cr:codec_readers) (x:jval) : Lemma (good_res x (entry_of_j cr x)) =
+  str_sound (); bool_sound (); kind_sound (); space_sound cr; effect_sound ();
+  field_good "addr" d_str x; field_good "name" d_str x; field_good "kind" kind_of_j x;
+  field_good "required" d_bool x;
+  opt_field_good "space" (space_of_j cr) x; opt_field_good "actionEffect" effect_of_j x;
+  opt_field_good "slotKind" d_str x;
+  match x with
+  | JObj fs ->
+    assoc_none_has_key "space" fs; assoc_none_has_key "actionEffect" fs;
+    (match assoc "kind" fs with Some v -> kind_of_j_tags v | None -> ())
+  | _ -> ()
+
+let entry_sound (cr:codec_readers) : Lemma (sound (entry_of_j cr)) =
+  sound_intro (entry_of_j cr) (fun x -> entry_good cr x)
+
+let signature_good (rd:readers) (cr:codec_readers) (x:jval) : Lemma (good_res x (signature_of_j rd cr x)) =
+  str_sound (); effect_sound (); entry_sound cr; list_sound (entry_of_j cr);
+  field_good "name" d_str x; field_good "effect" effect_of_j x; field_good "holes" (d_list (entry_of_j cr)) x
+
+let signature_sound (rd:readers) (cr:codec_readers) : Lemma (sound (signature_of_j rd cr)) =
+  sound_intro (signature_of_j rd cr) (fun x -> signature_good rd cr x)
+
+(* A signature the reader accepted was read from an object carrying `holes`. *)
+let signature_has_holes (rd:readers) (cr:codec_readers) (x:jval)
+  : Lemma (match signature_of_j rd cr x with
+           | Ok _ -> (match x with JObj fs -> Some? (assoc "holes" fs) | _ -> False)
+           | Error _ -> True)
+  = ()
+
+(* `capability_refusals_resolve`: every refusal the declaration reader answers over a document
+   resolves in it — including the admission refusals the reader raises itself, at `signature.holes`
+   and at `determinism`, which name members it has just read. *)
+let capability_good (rd:readers) (cr:codec_readers) (x:jval) : Lemma (good_res x (capability_of_j rd cr x)) =
+  str_sound (); doc_tag_sound (); signature_sound rd cr; placement_sound ();
+  field_good "$type" doc_tag_of_j x; field_good "id" d_str x;
+  field_good "signature" (signature_of_j rd cr) x; field_good "placement" placement_of_j x;
+  match x with
+  | JObj fs ->
+    (match assoc "signature" fs with
+     | Some sj ->
+       signature_has_holes rd cr sj;
+       (match signature_of_j rd cr sj with
+        | Ok sg -> det_agrees_sound (determinism_tag sg.sg_effect.determinism);
+                   field_good "determinism" (det_agrees_j (determinism_tag sg.sg_effect.determinism)) x
+        | Error _ -> ())
+     | None -> ())
+  | _ -> ()
+
+let capability_refusals_resolve (rd:readers) (cr:codec_readers) : Lemma (sound (capability_of_j rd cr)) =
+  sound_intro (capability_of_j rd cr) (fun x -> capability_good rd cr x)
+
+(* ---- the typed invocation: `encodeInvocationJson` / `invocationOf` ---- *)
+
+(* F#: `fun (a, v) -> JObj [ "addr", JStr a; "value", JStr v ]`. *)
+let inv_arg_json (b:(string & string)) : Tot jval = JObj [("addr", JStr (fst b)); ("value", JStr (snd b))]
+
+let rec inv_args_json (a:invocation) : Tot (list jval) =
+  match a with
+  | [] -> []
+  | b :: t -> inv_arg_json b :: inv_args_json t
+
+(* F#: `CapabilityCodec.encodeInvocationJson`. *)
+let invocation_json (cid:string) (a:invocation) : Tot jval =
+  JObj [("$type", JStr "invocation"); ("capabilityId", JStr cid); ("args", JArr (inv_args_json a))]
+
+(* F#: `invocationOf`'s `arg`. *)
+let inv_arg_of_j : decoder (string & string) = both (field "addr" d_str) (field "value" d_str) (fun a v -> (a, v))
+
+(* F#: `invocationOf`'s `distinctArgs` `go` — the addresses seen so far as a list (production's
+   `Set<string>`, read by `Contains` alone), the FIRST repeat refused `OutOfRange` through `at` at
+   `args[i]`, walked in the document (Phase 453). *)
+let rec distinct_go (cid:string) (whole:invocation) (seen:list string) (i:nat) (rest:invocation)
+  : Tot (decoder (string & invocation)) (decreases rest) =
+  match rest with
+  | [] -> d_succeed (cid, whole)
+  | (addr, _) :: t ->
+    if mem addr seen then d_at [Key "args"; Index i] (d_fail OutOfRange)
+    else distinct_go cid whole (addr :: seen) (i + 1) t
+
+(* F#: `CapabilityCodec.invocationOf` — both members, then `Decoder.bind distinctArgs` over the
+   same document. No `$type` is read: the lenient reader checks no tag. *)
+let invocation_of_j : decoder (string & invocation) =
+  fun el ->
+    match both (field "capabilityId" d_str) (field "args" (d_list inv_arg_of_j)) (fun c a -> (c, a)) el with
+    | Error e -> Error e
+    | Ok (cid, args) -> distinct_go cid args [] 0 args el
+
+(* The index of the first address the list binds again, counted from `i`, with `seen` read first —
+   `validateArgs`' `repeated` as a position. *)
+let rec first_repeat (seen:list string) (i:nat) (a:invocation) : Tot (option nat) (decreases a) =
+  match a with
+  | [] -> None
+  | (addr, _) :: t -> if mem addr seen then Some i else first_repeat (addr :: seen) (i + 1) t
+
+let rec first_repeat_none (seen:list string) (i:nat) (a:invocation)
+  : Lemma (ensures None? (first_repeat seen i a) <==> repeated seen (keys a) == []) (decreases a)
+  = match a with
+    | [] -> ()
+    | (addr, _) :: t -> first_repeat_none (addr :: seen) (i + 1) t
+
+let rec inv_args_roundtrip (i:nat) (a:invocation)
+  : Lemma (ensures list_from inv_arg_of_j i (inv_args_json a) == Ok a) (decreases a)
+  = match a with
+    | [] -> ()
+    | _ :: t -> inv_args_roundtrip (i + 1) t
+
+let rec len_inv_args (a:invocation) : Lemma (len (inv_args_json a) == len a) =
+  match a with [] -> () | _ :: t -> len_inv_args t
+
+let rec nth_some (i:nat) (xs:list jval) : Lemma (requires i < len xs) (ensures Some? (nth_j i xs)) (decreases xs) =
+  match xs with
+  | _ :: t -> if i = 0 then () else nth_some (i - 1) t
+
+let rec distinct_go_roundtrip (cid:string) (whole:invocation) (seen:list string) (i:nat) (rest:invocation)
+  : Lemma (requires i + len rest == len whole)
+          (ensures distinct_go cid whole seen i rest (invocation_json cid whole) ==
+                   (match first_repeat seen i rest with
+                    | None -> Ok (cid, whole)
+                    | Some j -> Error ({ d_code = OutOfRange; d_path = [Key "args"; Index j] })))
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | (addr, _) :: t ->
+      if mem addr seen then begin
+        len_inv_args whole;
+        nth_some i (inv_args_json whole);
+        app_nil [Key "args"; Index i]
+      end
+      else distinct_go_roundtrip cid whole (addr :: seen) (i + 1) t
+
+(* THE INVOCATION ROUND TRIP (Phase 455), `invocation_roundtrip`. F#: `invocationOf` after
+   `encodeInvocationJson`, EXACTLY, for every capability id and argument list: an argument list that
+   binds an address twice is refused `OutOfRange` at `args[i]`, `i` the second binding's position —
+   the binding `validateArgs` refuses `DuplicateArg` — and every other reads back as itself, its
+   arguments in wire order. *)
+let invocation_roundtrip (cid:string) (a:invocation)
+  : Lemma (invocation_of_j (invocation_json cid a) ==
+           (match first_repeat [] 0 a with
+            | None -> Ok (cid, a)
+            | Some j -> Error ({ d_code = OutOfRange; d_path = [Key "args"; Index j] })))
+  = inv_args_roundtrip 0 a;
+    distinct_go_roundtrip cid a [] 0 a
+
+(* ... the identity exactly on the argument lists with no repeated address: the lists
+   `validateArgs` does not refuse `DuplicateArg`. *)
+let invocation_roundtrip_identity (cid:string) (a:invocation)
+  : Lemma (requires repeated [] (keys a) == [])
+          (ensures invocation_of_j (invocation_json cid a) == Ok (cid, a))
+  = first_repeat_none [] 0 a;
+    invocation_roundtrip cid a
+
+let rec distinct_go_sound (cid:string) (whole:invocation) (seen:list string) (i:nat) (rest:invocation)
+  : Lemma (ensures sound (distinct_go cid whole seen i rest)) (decreases rest)
+  = match rest with
+    | [] -> succeed_sound (cid, whole)
+    | (addr, _) :: t ->
+      if mem addr seen then begin
+        fail_sound #(string & invocation) OutOfRange;
+        at_sound [Key "args"; Index i] (d_fail #(string & invocation) OutOfRange)
+      end
+      else distinct_go_sound cid whole (addr :: seen) (i + 1) t
+
+let inv_arg_sound () : Lemma (sound inv_arg_of_j) =
+  str_sound (); field_sound "addr" d_str; field_sound "value" d_str;
+  both_sound (field "addr" d_str) (field "value" d_str) (fun a v -> (a, v))
+
+(* Every refusal the invocation reader answers resolves in the document it read. *)
+let invocation_refusals_resolve () : Lemma (sound invocation_of_j) =
+  str_sound (); inv_arg_sound (); list_sound inv_arg_of_j;
+  field_sound "capabilityId" d_str; field_sound "args" (d_list inv_arg_of_j);
+  both_sound (field "capabilityId" d_str) (field "args" (d_list inv_arg_of_j)) (fun c a -> (c, a));
+  sound_intro invocation_of_j (fun x ->
+    sound_elim (both (field "capabilityId" d_str) (field "args" (d_list inv_arg_of_j)) (fun c a -> (c, a))) x;
+    match both (field "capabilityId" d_str) (field "args" (d_list inv_arg_of_j)) (fun c a -> (c, a)) x with
+    | Error _ -> ()
+    | Ok (cid, args) -> distinct_go_sound cid args [] 0 args; sound_elim (distinct_go cid args [] 0 args) x)
+
+(* ---- the async envelope: `deferredJson` / `deferredOf` ---- *)
+
+(* F#: `CapabilityCodec.deferredJson`, the payload writer a parameter. *)
+let deferred_json (#a:Type) (enc:a -> jval) (d:deferred a) : Tot jval =
+  match d with
+  | Pending -> JObj [("$type", JStr "pending")]
+  | Ready v -> JObj [("$type", JStr "ready"); ("value", enc v)]
+  | Failed m -> JObj [("$type", JStr "failed"); ("message", JStr m)]
+
+(* F#: the typed envelope reader under `deferredOf`, the payload reader a parameter. *)
+let deferred_dec (#a:Type) (p:decoder a) : decoder (deferred a) =
+  tag_dispatch [("pending", d_succeed Pending);
+            ("ready", d_map Ready (field "value" p));
+            ("failed", d_map Failed (field "message" d_str))]
+
+(* F#: `deferredOf`'s `payload` — the caller's sentence-answering reader, its refusal raised
+   `OutOfRange` at the payload. *)
+let payload_of (#a:Type) (dec:jval -> outcome a string) : decoder a =
+  fun v -> match dec v with Ok x -> Ok x | Error _ -> Error (refuse OutOfRange)
+
+(* F#: `CapabilityCodec.deferredOf` (its sentence dropped). *)
+let deferred_of_j (#a:Type) (dec:jval -> outcome a string) : decoder (deferred a) = deferred_dec (payload_of dec)
+
+(* THE ENVELOPE ROUND TRIP (Phase 455), `deferred_roundtrip`: for any payload codec that reads back
+   what it wrote, the envelope reads back as itself — all three cases. *)
+let deferred_roundtrip (#a:Type) (enc:a -> jval) (p:decoder a) (d:deferred a)
+  : Lemma (requires (match d with Ready v -> p (enc v) == Ok v | _ -> True))
+          (ensures deferred_dec p (deferred_json enc d) == Ok d)
+  = ()
+
+let deferred_of_roundtrip (#a:Type) (enc:a -> jval) (dec:jval -> outcome a string) (d:deferred a)
+  : Lemma (requires (match d with Ready v -> dec (enc v) == Ok v | _ -> True))
+          (ensures deferred_of_j dec (deferred_json enc d) == Ok d)
+  = deferred_roundtrip enc (payload_of dec) d
+
+let deferred_dec_sound (#a:Type) (p:decoder a) : Lemma (requires sound p) (ensures sound (deferred_dec p)) =
+  str_sound ();
+  succeed_sound #(deferred a) Pending;
+  field_sound "value" p; map_sound Ready (field "value" p);
+  field_sound "message" d_str; map_sound (Failed #a) (field "message" d_str);
+  tag_dispatch_sound [("pending", d_succeed #(deferred a) Pending);
+                  ("ready", d_map Ready (field "value" p));
+                  ("failed", d_map (Failed #a) (field "message" d_str))]
+
+(* The envelope's refusals resolve for EVERY payload reader the caller hands it: the caller's
+   refusal is raised at the payload, which the envelope has just read. *)
+let deferred_refusals_resolve (#a:Type) (dec:jval -> outcome a string) : Lemma (sound (deferred_of_j dec)) =
+  sound_intro (payload_of dec) (fun x -> ());
+  deferred_dec_sound (payload_of dec)
+
+(* ---- the typed refusal: `invokeErrorJson` / `invokeErrorOf` ---- *)
+
+(* F#: `CapabilityCodec.faultJson`. *)
+let fault_json (f:decl_fault) : Tot jval =
+  match f with
+  | EmptySpace addr sp -> JObj [("$type", JStr "emptySpace"); ("addr", JStr addr); ("space", space_json sp)]
+  | NonFiniteBound addr -> JObj [("$type", JStr "nonFiniteBound"); ("addr", JStr addr)]
+  | DuplicateHoleAddr addr -> JObj [("$type", JStr "duplicateHoleAddr"); ("addr", JStr addr)]
+  | HoleUnderSlot node -> JObj [("$type", JStr "holeUnderSlot"); ("node", JStr node)]
+
+(* F#: the codec's `str name` — `Decoder.field name Decoder.str`. *)
+let str_f (name:string) : decoder string = field name d_str
+
+(* F#: the codec's `strList name` — `Decoder.field name (Decoder.list Decoder.str)`. *)
+let str_list_f (name:string) : decoder (list string) = field name (d_list d_str)
+
+let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
+  [("emptySpace", both (str_f "addr") (field "space" (space_of_j cr)) (fun a sp -> EmptySpace a sp));
+   ("nonFiniteBound", d_map NonFiniteBound (str_f "addr"));
+   ("duplicateHoleAddr", d_map DuplicateHoleAddr (str_f "addr"));
+   ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"))]
+
+(* F#: `CapabilityCodec.faultOf`. *)
+let fault_of_j (cr:codec_readers) : decoder decl_fault = tag_dispatch (fault_cases cr)
+
+(* F#: `InvokeError`, all twelve cases: the ten this model's `invoke_error` carries, under
+   `GRefused`, and the policy gate's two (Phase 318), which production adds to `InvokeError` itself
+   and section 17's `gated_error` states beside it. *)
+let invoke_error_json (e:gated_error) : Tot jval =
+  match e with
+  | GRefused (NoSuchCapability id known) ->
+    JObj [("$type", JStr "noSuchCapability"); ("id", JStr id); ("known", JArr (strs known))]
+  | GRefused (DuplicateCapability id) -> JObj [("$type", JStr "duplicateCapability"); ("id", JStr id)]
+  | GRefused (UnknownArg addr declared) ->
+    JObj [("$type", JStr "unknownArg"); ("addr", JStr addr); ("declared", JArr (strs declared))]
+  | GRefused (ArgOutOfSpace addr sp got) ->
+    JObj [("$type", JStr "argOutOfSpace"); ("addr", JStr addr); ("space", space_json sp); ("got", JStr got)]
+  | GRefused (RequiredArgsUnbound addrs) -> JObj [("$type", JStr "requiredArgsUnbound"); ("addrs", JArr (strs addrs))]
+  | GRefused (UninvocableArg addr) -> JObj [("$type", JStr "uninvocableArg"); ("addr", JStr addr)]
+  | GRefused (BodyFailed reason) -> JObj [("$type", JStr "bodyFailed"); ("reason", JStr reason)]
+  | GRefused (NonTotalCapability id addrs) ->
+    JObj [("$type", JStr "nonTotalCapability"); ("id", JStr id); ("addrs", JArr (strs addrs))]
+  | GRefused (IllFormedCapability id f) ->
+    JObj [("$type", JStr "illFormedCapability"); ("id", JStr id); ("fault", fault_json f)]
+  | GRefused (DuplicateArg addr) -> JObj [("$type", JStr "duplicateArg"); ("addr", JStr addr)]
+  | GPolicyRefused policy reason allowed ->
+    JObj [("$type", JStr "policyRefused"); ("policy", JStr policy); ("reason", JStr reason);
+          ("allowed", JArr (strs allowed))]
+  | GApprovalRequired policy -> JObj [("$type", JStr "approvalRequired"); ("policy", JStr policy)]
+
+let refused (#a:Type) (f:a -> invoke_error) : a -> gated_error = fun x -> GRefused (f x)
+
+let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) =
+  [("noSuchCapability", both (str_f "id") (str_list_f "known") (fun id known -> GRefused (NoSuchCapability id known)));
+   ("duplicateCapability", d_map (refused DuplicateCapability) (str_f "id"));
+   ("unknownArg", both (str_f "addr") (str_list_f "declared") (fun addr d -> GRefused (UnknownArg addr d)));
+   ("argOutOfSpace",
+    both (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
+         (fun addr (sg:(value_space & string)) -> GRefused (ArgOutOfSpace addr (fst sg) (snd sg))));
+   ("requiredArgsUnbound", d_map (refused RequiredArgsUnbound) (str_list_f "addrs"));
+   ("uninvocableArg", d_map (refused UninvocableArg) (str_f "addr"));
+   ("bodyFailed", d_map (refused BodyFailed) (str_f "reason"));
+   ("nonTotalCapability", both (str_f "id") (str_list_f "addrs") (fun id addrs -> GRefused (NonTotalCapability id addrs)));
+   ("illFormedCapability", both (str_f "id") (field "fault" (fault_of_j cr)) (fun id f -> GRefused (IllFormedCapability id f)));
+   ("duplicateArg", d_map (refused DuplicateArg) (str_f "addr"));
+   ("policyRefused",
+    both (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a)))
+         (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra)));
+   ("approvalRequired", d_map GApprovalRequired (str_f "policy"))]
+
+(* F#: `CapabilityCodec.invokeErrorOf` (its sentence dropped). `str "addr" |> Decoder.bind (fun
+   addr -> both …)` reads its three members in the order the nested `both` does. *)
+let invoke_error_of_j (cr:codec_readers) : decoder gated_error = tag_dispatch (invoke_error_cases cr)
+
+let fault_roundtrip (cr:codec_readers) (f:decl_fault) : Lemma (fault_of_j cr (fault_json f) == Ok f) =
+  match f with
+  | EmptySpace _ sp -> space_roundtrip cr sp
+  | _ -> ()
+
+(* THE REFUSAL ROUND TRIP (Phase 455), `invoke_error_roundtrip`: every `InvokeError` — the twelve
+   cases, a declaration fault and a value space inside them — reads back as itself. *)
+#push-options "--fuel 13 --ifuel 1"
+let invoke_error_roundtrip (cr:codec_readers) (e:gated_error)
+  : Lemma (invoke_error_of_j cr (invoke_error_json e) == Ok e)
+  = match e with
+    | GRefused (NoSuchCapability _ known) -> strs_roundtrip 0 known
+    | GRefused (UnknownArg _ declared) -> strs_roundtrip 0 declared
+    | GRefused (ArgOutOfSpace _ sp _) -> space_roundtrip cr sp
+    | GRefused (RequiredArgsUnbound addrs) -> strs_roundtrip 0 addrs
+    | GRefused (NonTotalCapability _ addrs) -> strs_roundtrip 0 addrs
+    | GRefused (IllFormedCapability _ f) -> fault_roundtrip cr f
+    | GPolicyRefused _ _ allowed -> strs_roundtrip 0 allowed
+    | _ -> ()
+#pop-options
+
+let str_f_sound (name:string) : Lemma (sound (str_f name)) = str_sound (); field_sound name d_str
+
+let str_list_f_sound (name:string) : Lemma (sound (str_list_f name)) =
+  str_sound (); list_sound d_str; field_sound name (d_list d_str)
+
+let fault_refusals_resolve (cr:codec_readers) : Lemma (sound (fault_of_j cr)) =
+  str_f_sound "addr"; str_f_sound "node"; space_sound cr; field_sound "space" (space_of_j cr);
+  both_sound (str_f "addr") (field "space" (space_of_j cr)) (fun a sp -> EmptySpace a sp);
+  map_sound NonFiniteBound (str_f "addr");
+  map_sound DuplicateHoleAddr (str_f "addr");
+  map_sound HoleUnderSlot (str_f "node");
+  tag_dispatch_sound (fault_cases cr)
+
+(* Every refusal the invoke-error reader answers resolves in the document it read. *)
+#push-options "--fuel 13 --ifuel 1"
+let invoke_error_refusals_resolve (cr:codec_readers) : Lemma (sound (invoke_error_of_j cr)) =
+  str_f_sound "id"; str_f_sound "addr"; str_f_sound "got"; str_f_sound "reason"; str_f_sound "policy";
+  str_list_f_sound "known"; str_list_f_sound "declared"; str_list_f_sound "addrs"; str_list_f_sound "allowed";
+  space_sound cr; field_sound "space" (space_of_j cr);
+  fault_refusals_resolve cr; field_sound "fault" (fault_of_j cr);
+  both_sound (str_f "id") (str_list_f "known") (fun id known -> GRefused (NoSuchCapability id known));
+  map_sound (refused DuplicateCapability) (str_f "id");
+  both_sound (str_f "addr") (str_list_f "declared") (fun addr d -> GRefused (UnknownArg addr d));
+  both_sound (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got));
+  both_sound (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
+             (fun addr (sg:(value_space & string)) -> GRefused (ArgOutOfSpace addr (fst sg) (snd sg)));
+  map_sound (refused RequiredArgsUnbound) (str_list_f "addrs");
+  map_sound (refused UninvocableArg) (str_f "addr");
+  map_sound (refused BodyFailed) (str_f "reason");
+  both_sound (str_f "id") (str_list_f "addrs") (fun id addrs -> GRefused (NonTotalCapability id addrs));
+  both_sound (str_f "id") (field "fault" (fault_of_j cr)) (fun id f -> GRefused (IllFormedCapability id f));
+  map_sound (refused DuplicateArg) (str_f "addr");
+  both_sound (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a));
+  both_sound (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a)))
+             (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra));
+  map_sound GApprovalRequired (str_f "policy");
+  tag_dispatch_sound (invoke_error_cases cr)
+#pop-options

@@ -1264,6 +1264,106 @@ let effToModel (e: EffectClass) : ModelCap.effect_class =
 
 /// A float range's bounds cross as opaque carriers (the readers premise): the round-trip `R`
 /// format, which parses back to the same double.
+/// A production `JVal` as the capability model's `jval` (Phase 354; shared with the query codec's
+/// differential since Phase 455), and back. A float crosses as its round-trip `R` text.
+let rec jvalToModel (v: JVal) : ModelCap.jval =
+    match v with
+    | JStr s -> ModelCap.JStr s
+    | JInt i -> ModelCap.JInt(bigint i)
+    | JBool b -> ModelCap.JBool b
+    | JFloat f -> ModelCap.JFloat(f.ToString("R", inv))
+    | JArr xs -> ModelCap.JArr(List.map jvalToModel xs)
+    | JObj fs -> ModelCap.JObj(fs |> List.map (fun (k, x) -> k, jvalToModel x))
+
+let rec jvalOfModel (v: ModelCap.jval) : JVal =
+    match v with
+    | ModelCap.JStr s -> JStr s
+    | ModelCap.JInt i -> JInt(int i)
+    | ModelCap.JBool b -> JBool b
+    | ModelCap.JFloat f -> JFloat(System.Double.Parse(f, inv))
+    | ModelCap.JArr xs -> JArr(List.map jvalOfModel xs)
+    | ModelCap.JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, jvalOfModel x))
+
+// The document mutations the codec differentials read (Phase 354; shared with the query codec's since
+// Phase 455).
+
+/// Every path to a member or an item below a document, as child indexes.
+let rec jsites (v: JVal) : int list list =
+    let kids =
+        match v with
+        | JArr xs -> xs
+        | JObj fs -> List.map snd fs
+        | _ -> []
+
+    kids
+    |> List.mapi (fun i k -> [ i ] :: (jsites k |> List.map (fun p -> i :: p)))
+    |> List.concat
+
+/// Rewrite the child at `path`: `f` is handed its key (for a member) and value, and answers the
+/// replacement, or `None` to drop it.
+let rec jedit (path: int list) (f: string option * JVal -> (string option * JVal) option) (v: JVal) : JVal =
+    match path, v with
+    | [ i ], JArr xs ->
+        JArr(
+            xs
+            |> List.indexed
+            |> List.choose (fun (k, x) -> if k = i then f (None, x) |> Option.map snd else Some x)
+        )
+    | [ i ], JObj fs ->
+        JObj(
+            fs
+            |> List.indexed
+            |> List.choose (fun (k, (n, x)) ->
+                if k = i then
+                    f (Some n, x) |> Option.map (fun (n', x') -> defaultArg n' n, x')
+                else
+                    Some(n, x))
+        )
+    | i :: rest, JArr xs -> JArr(xs |> List.mapi (fun k x -> if k = i then jedit rest f x else x))
+    | i :: rest, JObj fs -> JObj(fs |> List.mapi (fun k (n, x) -> if k = i then n, jedit rest f x else n, x))
+    | _ -> v
+
+let mutantStrings =
+    [ "capability"
+      "value"
+      "slot"
+      "clock"
+      "random+clock"
+      "intRange"
+      "stringLen"
+      "pure"
+      "fromNode"
+      "source" ]
+
+/// One mutation of a document: a member or item dropped, replaced by a value of another kind or by
+/// another string of the codec's vocabulary, a `"$type"` re-keyed `"kind"` (the descriptor
+/// spelling's discriminator), the root's members reversed, or a member the reader does not read
+/// added. The last two the lenient readers must read THROUGH.
+let jmutate (v: JVal) (r: ConfRng.T) : JVal * ConfRng.T =
+    let sites = jsites v
+    let op, r1 = ConfRng.intBelow 9 r
+
+    match op, v with
+    | 7, JObj fs -> JObj(List.rev fs), r1
+    | 8, JObj fs -> JObj(fs @ [ "unread", JInt 1 ]), r1
+    | _ when List.isEmpty sites -> v, r1
+    | _ ->
+        let path, r2 = ConfRng.choose sites r1
+        let s, r3 = ConfRng.choose mutantStrings r2
+
+        let f (key: string option, x: JVal) : (string option * JVal) option =
+            match op with
+            | 0 -> None
+            | 1 -> Some(key, JInt 7)
+            | 2 -> Some(key, JStr "zz")
+            | 3 -> Some(key, JObj [])
+            | 4 -> Some((if key = Some "$type" then Some "kind" else key), x)
+            | 5 -> Some(key, JStr s)
+            | 6 -> Some(key, JBool true)
+            | _ -> Some(key, JArr [])
+
+        jedit path f v, r3
+
 let spaceToModel (s: ValueSpace) : ModelCap.value_space =
     match s with
     | IntRange(lo, hi) -> ModelCap.IntRange(bigint lo, bigint hi)

@@ -1952,5 +1952,1099 @@ let twin_shaped : query = {q_id = twin_query.q_id; q_params = twin_query.q_param
 let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "validate-params-widens-a-seconds-timestamp-into-a-nanoseconds-param"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = TimestampType (Nanoseconds); p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Timestamp (Seconds, "2026-01-01T00:00:00Z"))))::[])) (Ok (()))) && (Prims.op_Equals (widens (TimestampType (Milliseconds)) (TimestampType (Seconds))) false)))})::({tname = "register-admits-a-coarser-timestamp-literal-and-refuses-a-finer"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Ok ({queries = ({q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by})::[]}))) && (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Microseconds, "2026-01-01T00:00:00.000001Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("t", TimestampType (Milliseconds), TimestampType (Microseconds)))))))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({tname = "an-order-alone-adds-only-its-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({tname = "register-admits-a-well-formed-filter-and-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({tname = "register-refuses-an-undeclared-filter-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({tname = "register-refuses-a-null-literal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({tname = "register-refuses-a-literal-of-another-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({tname = "register-refuses-an-order-naming-a-column-twice"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
 
 
+let column_tag : column_type  ->  Prims.string = (fun ( t  :  column_type ) -> (match (t) with
+| IntType -> begin
+     "int"
+     end
+| FloatType -> begin
+     "float"
+     end
+| BoolType -> begin
+     "bool"
+     end
+| StringType -> begin
+     "string"
+     end
+| DateType -> begin
+     "date"
+     end
+| TimestampType (Seconds) -> begin
+     "timestamp"
+     end
+| TimestampType (Milliseconds) -> begin
+     "timestamp_ms"
+     end
+| TimestampType (Microseconds) -> begin
+     "timestamp_us"
+     end
+| TimestampType (Nanoseconds) -> begin
+     "timestamp_ns"
+     end
+| DecimalType -> begin
+     "decimal"
+     end))
+
+
+let column_of_tag : Prims.string  ->  FStar_Pervasives_Native.option<column_type> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "int") then begin
+     FStar_Pervasives_Native.Some (IntType)
+     end else begin
+      
+if (Prims.op_Equals s "float") then begin
+     FStar_Pervasives_Native.Some (FloatType)
+     end else begin
+      
+if (Prims.op_Equals s "bool") then begin
+     FStar_Pervasives_Native.Some (BoolType)
+     end else begin
+      
+if (Prims.op_Equals s "string") then begin
+     FStar_Pervasives_Native.Some (StringType)
+     end else begin
+      
+if (Prims.op_Equals s "date") then begin
+     FStar_Pervasives_Native.Some (DateType)
+     end else begin
+      
+if (Prims.op_Equals s "timestamp") then begin
+     FStar_Pervasives_Native.Some (TimestampType (Seconds))
+     end else begin
+      
+if (Prims.op_Equals s "decimal") then begin
+     FStar_Pervasives_Native.Some (DecimalType)
+     end else begin
+      
+if (Prims.op_Equals s "timestamp_ms") then begin
+     FStar_Pervasives_Native.Some (TimestampType (Milliseconds))
+     end else begin
+      
+if (Prims.op_Equals s "timestamp_us") then begin
+     FStar_Pervasives_Native.Some (TimestampType (Microseconds))
+     end else begin
+      
+if (Prims.op_Equals s "timestamp_ns") then begin
+     FStar_Pervasives_Native.Some (TimestampType (Nanoseconds))
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end)
+
+
+let tagged_of = (fun ( look  :  Prims.string  ->  FStar_Pervasives_Native.option<'a> ) ( el  :  Capability.jval ) -> (match ((Capability.d_str el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (s) -> begin
+     (match ((look s)) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     Capability.Ok (v)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Capability.Error ((Capability.refuse Capability.UnknownTag))
+     end)
+     end))
+
+
+let col_type_of_j : Capability.decoder<column_type> = (tagged_of column_of_tag)
+
+
+let host_tag : host_effect  ->  Prims.string = (fun ( h  :  host_effect ) -> (match (h) with
+| Pure -> begin
+     "pure"
+     end
+| ReadsHost -> begin
+     "readsHost"
+     end
+| WritesHost -> begin
+     "writesHost"
+     end))
+
+
+let host_of_tag : Prims.string  ->  FStar_Pervasives_Native.option<host_effect> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "pure") then begin
+     FStar_Pervasives_Native.Some (Pure)
+     end else begin
+      
+if (Prims.op_Equals s "readsHost") then begin
+     FStar_Pervasives_Native.Some (ReadsHost)
+     end else begin
+      
+if (Prims.op_Equals s "writesHost") then begin
+     FStar_Pervasives_Native.Some (WritesHost)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+     end)
+
+
+let det_of_tag : Prims.string  ->  FStar_Pervasives_Native.option<determinism_source> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "deterministic") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = false; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = false; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "random") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "random+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "clock") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = false; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "clock+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = false; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "clock+random") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = true; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "clock+random+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = true; has_network = true})
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end)
+
+
+let effect_json : effect_class  ->  Capability.jval = (fun ( e  :  effect_class ) -> Capability.JObj (((("host"), (Capability.JStr ((host_tag e.host)))))::((("determinism"), (Capability.JStr ((determinism_tag e.determinism)))))::[]))
+
+
+let effect_of_j : Capability.decoder<effect_class> = (Capability.both (Capability.field "host" (tagged_of host_of_tag)) (Capability.field "determinism" (tagged_of det_of_tag)) (fun ( h  :  host_effect ) ( d  :  determinism_source ) -> {host = h; determinism = d}))
+
+type column_codec<'r> = {field_json : (Prims.string * column_type)  ->  Capability.jval; field_of : Capability.jval  ->  FStar_Pervasives_Native.option<(Prims.string * column_type)>; source_json : Prims.string  ->  Capability.jval; source_of : Capability.jval  ->  FStar_Pervasives_Native.option<Prims.string>; rows_json : 'r  ->  Capability.jval; rows_of : Capability.jval  ->  FStar_Pervasives_Native.option<'r>; lit_json : column_type  ->  cell  ->  Capability.jval; lit_of : Prims.string  ->  column_type  ->  Capability.jval  ->  FStar_Pervasives_Native.option<cell>}
+
+
+let __proj__Mkcolumn_codec__item__field_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     field_json
+     end))
+
+
+let __proj__Mkcolumn_codec__item__field_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     field_of
+     end))
+
+
+let __proj__Mkcolumn_codec__item__source_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     source_json
+     end))
+
+
+let __proj__Mkcolumn_codec__item__source_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     source_of
+     end))
+
+
+let __proj__Mkcolumn_codec__item__rows_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     rows_json
+     end))
+
+
+let __proj__Mkcolumn_codec__item__rows_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     rows_of
+     end))
+
+
+let __proj__Mkcolumn_codec__item__lit_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     lit_json
+     end))
+
+
+let __proj__Mkcolumn_codec__item__lit_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+     lit_of
+     end))
+
+
+let column_read = (fun ( rd  :  Capability.jval  ->  FStar_Pervasives_Native.option<'a> ) ( el  :  Capability.jval ) -> (match ((rd el)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     Capability.Ok (x)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Capability.Error ((Capability.refuse Capability.OutOfRange))
+     end))
+
+
+let param_json : query_param  ->  Capability.jval = (fun ( p  :  query_param ) -> Capability.JObj (((("name"), (Capability.JStr (p.p_name))))::((("type"), (Capability.JStr ((column_tag p.p_type)))))::((("required"), (Capability.JBool (p.p_required))))::[]))
+
+
+let param_of_j : Capability.decoder<query_param> = (Capability.both (Capability.field "name" Capability.d_str) (Capability.both (Capability.field "type" col_type_of_j) (Capability.field "required" Capability.d_bool) (fun ( t  :  column_type ) ( r  :  Prims.bool ) -> ((t), (r)))) (fun ( n  :  Prims.string ) ( tr  :  (column_type * Prims.bool) ) -> {p_name = n; p_type = (FStar_Pervasives_Native.fst tr); p_required = (FStar_Pervasives_Native.snd tr)}))
+
+
+let predicate_tag : predicate  ->  Prims.string = (fun ( p  :  predicate ) -> (match (p) with
+| EqualTo (uu___, uu___1) -> begin
+     "equalTo"
+     end
+| GreaterThan (uu___, uu___1) -> begin
+     "greaterThan"
+     end
+| AtLeast (uu___, uu___1) -> begin
+     "atLeast"
+     end
+| LessThan (uu___, uu___1) -> begin
+     "lessThan"
+     end
+| AtMost (uu___, uu___1) -> begin
+     "atMost"
+     end
+| Contains (uu___, uu___1) -> begin
+     "contains"
+     end
+| IsNull (uu___) -> begin
+     "isNull"
+     end
+| IsNotNull (uu___) -> begin
+     "isNotNull"
+     end))
+
+
+let predicate_json = (fun ( cc  :  column_codec<'r> ) ( p  :  predicate ) -> (
+
+let col = (predicate_column p)
+in (match (p) with
+| Contains (uu___, text) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("contains"))))::((("column"), (Capability.JStr (col))))::((("text"), (Capability.JStr (text))))::[])
+     end
+| IsNull (uu___) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("isNull"))))::((("column"), (Capability.JStr (col))))::[])
+     end
+| IsNotNull (uu___) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("isNotNull"))))::((("column"), (Capability.JStr (col))))::[])
+     end
+| uu___ -> begin
+     (match ((predicate_literal p)) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     (
+
+let ty = (match ((cell_type v)) with
+| FStar_Pervasives_Native.Some (t) -> begin
+     t
+     end
+| FStar_Pervasives_Native.None -> begin
+     StringType
+     end)
+in Capability.JObj (((("$type"), (Capability.JStr ((predicate_tag p)))))::((("column"), (Capability.JStr (col))))::((("type"), (Capability.JStr ((column_tag ty)))))::((("value"), ((cc.lit_json ty v))))::[]))
+     end
+| FStar_Pervasives_Native.None -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ((predicate_tag p)))))::((("column"), (Capability.JStr (col))))::[])
+     end)
+     end)))
+
+
+let compared = (fun ( cc  :  column_codec<'r> ) ( make  :  Prims.string  ->  cell  ->  predicate ) ( el  :  Capability.jval ) -> (match ((Capability.field "column" Capability.d_str el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (c) -> begin
+     (match ((Capability.field "type" col_type_of_j el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (ty) -> begin
+     (match ((Capability.field "value" (column_read (cc.lit_of c ty)) el)) with
+| Capability.Ok (v) -> begin
+     Capability.Ok ((make c v))
+     end
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end)
+     end)
+     end))
+
+
+let predicate_cases = (fun ( cc  :  column_codec<'r> ) -> ((("equalTo"), ((compared cc (fun ( uu___  :  Prims.string ) ( uu___1  :  cell ) -> EqualTo (uu___, uu___1))))))::((("greaterThan"), ((compared cc (fun ( uu___  :  Prims.string ) ( uu___1  :  cell ) -> GreaterThan (uu___, uu___1))))))::((("atLeast"), ((compared cc (fun ( uu___  :  Prims.string ) ( uu___1  :  cell ) -> AtLeast (uu___, uu___1))))))::((("lessThan"), ((compared cc (fun ( uu___  :  Prims.string ) ( uu___1  :  cell ) -> LessThan (uu___, uu___1))))))::((("atMost"), ((compared cc (fun ( uu___  :  Prims.string ) ( uu___1  :  cell ) -> AtMost (uu___, uu___1))))))::((("contains"), ((Capability.both (Capability.field "column" Capability.d_str) (Capability.field "text" Capability.d_str) (fun ( c  :  Prims.string ) ( t  :  Prims.string ) -> Contains (c, t))))))::((("isNull"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> IsNull (uu___)) (Capability.field "column" Capability.d_str)))))::((("isNotNull"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> IsNotNull (uu___)) (Capability.field "column" Capability.d_str)))))::[])
+
+
+let predicate_of_j = (fun ( cc  :  column_codec<'r> ) -> (Capability.tag_dispatch (predicate_cases cc)))
+
+
+let direction_tag : sort_direction  ->  Prims.string = (fun ( d  :  sort_direction ) -> (match (d) with
+| Ascending -> begin
+     "ascending"
+     end
+| Descending -> begin
+     "descending"
+     end))
+
+
+let direction_of_tag : Prims.string  ->  FStar_Pervasives_Native.option<sort_direction> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "ascending") then begin
+     FStar_Pervasives_Native.Some (Ascending)
+     end else begin
+      
+if (Prims.op_Equals s "descending") then begin
+     FStar_Pervasives_Native.Some (Descending)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end)
+
+
+let sort_key_json : sort_key  ->  Capability.jval = (fun ( k  :  sort_key ) -> Capability.JObj (((("column"), (Capability.JStr (k.k_column))))::((("direction"), (Capability.JStr ((direction_tag k.k_direction)))))::[]))
+
+
+let sort_key_of_j : Capability.decoder<sort_key> = (Capability.both (Capability.field "column" Capability.d_str) (Capability.field "direction" (tagged_of direction_of_tag)) (fun ( c  :  Prims.string ) ( d  :  sort_direction ) -> {k_column = c; k_direction = d}))
+
+
+let literal_carried : predicate  ->  Prims.bool = (fun ( p  :  predicate ) -> (match ((predicate_literal p)) with
+| FStar_Pervasives_Native.Some (Null) -> begin
+     false
+     end
+| uu___ -> begin
+     true
+     end))
+
+
+let rec params_json : Prims.list<query_param>  ->  Prims.list<Capability.jval> = (fun ( ps  :  Prims.list<query_param> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+     ((param_json p))::(params_json t)
+     end))
+
+
+let rec fields_json = (fun ( cc  :  column_codec<'r> ) ( s  :  Prims.list<(Prims.string * column_type)> ) -> (match (s) with
+| [] -> begin
+     []
+     end
+| (f)::t -> begin
+     ((cc.field_json f))::(fields_json cc t)
+     end))
+
+
+let rec preds_json = (fun ( cc  :  column_codec<'r> ) ( w  :  Prims.list<predicate> ) -> (match (w) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+     ((predicate_json cc p))::(preds_json cc t)
+     end))
+
+
+let rec keys_json : Prims.list<sort_key>  ->  Prims.list<Capability.jval> = (fun ( o  :  Prims.list<sort_key> ) -> (match (o) with
+| [] -> begin
+     []
+     end
+| (k)::t -> begin
+     ((sort_key_json k))::(keys_json t)
+     end))
+
+
+let opt_int_json : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>  ->  Prims.list<(Prims.string * Capability.jval)> = (fun ( name  :  Prims.string ) ( v  :  FStar_Pervasives_Native.option<Prims.int> ) -> (match (v) with
+| FStar_Pervasives_Native.Some (n) -> begin
+     (((name), (Capability.JInt (n))))::[]
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let query_tail = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> (Capability.app (opt_int_json "timeoutMs" q.q_timeout_ms) (Capability.app (opt_int_json "pageSize" q.q_page_size) (Capability.app (match (q.q_where) with
+| [] -> begin
+     []
+     end
+| uu___ -> begin
+     ((("where"), (Capability.JArr ((preds_json cc q.q_where)))))::[]
+     end) (match (q.q_order_by) with
+| [] -> begin
+     []
+     end
+| uu___ -> begin
+     ((("orderBy"), (Capability.JArr ((keys_json q.q_order_by)))))::[]
+     end)))))
+
+
+let query_json = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> Capability.JObj (((("$type"), (Capability.JStr ("query"))))::((("id"), (Capability.JStr (q.q_id))))::((("params"), (Capability.JArr ((params_json q.q_params)))))::((("resultSchema"), (Capability.JArr ((fields_json cc q.q_schema)))))::((("effect"), ((effect_json q.q_effect))))::((("source"), ((cc.source_json q.q_source))))::(query_tail cc q)))
+
+
+let rec where_fault_at : Prims.list<(Prims.string * column_type)>  ->  Prims.nat  ->  Prims.list<predicate>  ->  FStar_Pervasives_Native.option<(Prims.nat * query_error)> = (fun ( s  :  Prims.list<(Prims.string * column_type)> ) ( i  :  Prims.nat ) ( w  :  Prims.list<predicate> ) -> (match (w) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (p)::t -> begin
+     (match ((predicate_fault s p)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     FStar_Pervasives_Native.Some (((i), (e)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     (where_fault_at s (i + (Prims.parse_int "1")) t)
+     end)
+     end))
+
+
+let rec order_fault_at : Prims.list<(Prims.string * column_type)>  ->  Prims.list<Prims.string>  ->  Prims.nat  ->  Prims.list<sort_key>  ->  FStar_Pervasives_Native.option<(Prims.nat * query_error)> = (fun ( s  :  Prims.list<(Prims.string * column_type)> ) ( seen  :  Prims.list<Prims.string> ) ( i  :  Prims.nat ) ( o  :  Prims.list<sort_key> ) -> (match (o) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (k)::t -> begin
+      
+if (not ((mem k.k_column (keys s)))) then begin
+     FStar_Pervasives_Native.Some (((i), (UnknownColumn (k.k_column, (keys s)))))
+     end else begin
+      
+if (mem k.k_column seen) then begin
+     FStar_Pervasives_Native.Some (((i), (DuplicateSortColumn (k.k_column))))
+     end else begin
+     (order_fault_at s ((k.k_column)::seen) (i + (Prims.parse_int "1")) t)
+     end
+     end
+     end))
+
+
+let admission_fault_at : query  ->  FStar_Pervasives_Native.option<(Prims.list<Capability.path_seg> * query_error)> = (fun ( q  :  query ) -> (match ((repeated [] (param_names q.q_params))) with
+| (d)::uu___ -> begin
+     FStar_Pervasives_Native.Some ((((Capability.Key ("params"))::[]), (DuplicateParam (d))))
+     end
+| [] -> begin
+     (match ((where_fault_at q.q_schema (Prims.parse_int "0") q.q_where)) with
+| FStar_Pervasives_Native.Some (i, e) -> begin
+     FStar_Pervasives_Native.Some ((((Capability.Key ("where"))::(Capability.Index (i))::[]), (e)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     (match ((order_fault_at q.q_schema [] (Prims.parse_int "0") q.q_order_by)) with
+| FStar_Pervasives_Native.Some (i, e) -> begin
+     FStar_Pervasives_Native.Some ((((Capability.Key ("orderBy"))::(Capability.Index (i))::[]), (e)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end)
+     end))
+
+
+let query_tag_of : Capability.decoder<unit> = (tagged_of (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "query") then begin
+     FStar_Pervasives_Native.Some (())
+     end else begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let query_of_j = (fun ( cc  :  column_codec<'r> ) ( el  :  Capability.jval ) -> (match ((Capability.field "$type" query_tag_of el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (()) -> begin
+     (match ((Capability.field "id" Capability.d_str el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (id) -> begin
+     (match ((Capability.field "params" (Capability.d_list param_of_j) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (ps) -> begin
+     (match ((Capability.field "resultSchema" (Capability.d_list (column_read cc.field_of)) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (sch) -> begin
+     (match ((Capability.field "effect" effect_of_j el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (eff) -> begin
+     (match ((Capability.opt_field "timeoutMs" Capability.d_int el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (tmo) -> begin
+     (match ((Capability.opt_field "pageSize" Capability.d_int el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (pg) -> begin
+     (match ((Capability.opt_field "where" (Capability.d_list (predicate_of_j cc)) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (wh) -> begin
+     (match ((Capability.opt_field "orderBy" (Capability.d_list sort_key_of_j) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (ob) -> begin
+     (match ((Capability.field "source" (column_read cc.source_of) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (src) -> begin
+     (
+
+let q = {q_id = id; q_params = ps; q_schema = sch; q_effect = eff; q_source = src; q_timeout_ms = tmo; q_page_size = pg; q_where = (match (wh) with
+| FStar_Pervasives_Native.Some (w) -> begin
+     w
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end); q_order_by = (match (ob) with
+| FStar_Pervasives_Native.Some (o) -> begin
+     o
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end)}
+in (match ((admission_fault_at q)) with
+| FStar_Pervasives_Native.Some (p, uu___) -> begin
+     Capability.Error ({Capability.d_code = Capability.OutOfRange; Capability.d_path = p})
+     end
+| FStar_Pervasives_Native.None -> begin
+     Capability.Ok (q)
+     end))
+     end)
+     end)
+     end)
+     end)
+     end)
+     end)
+     end)
+     end)
+     end)
+     end))
+
+
+let rec all_carried : Prims.list<predicate>  ->  Prims.bool = (fun ( w  :  Prims.list<predicate> ) -> (match (w) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     ((literal_carried p) && (all_carried t))
+     end))
+
+type query_result<'r> = {qr_rows : 'r; qr_page_num : Prims.int; qr_total : FStar_Pervasives_Native.option<Prims.int>; qr_next : FStar_Pervasives_Native.option<Prims.string>}
+
+
+let __proj__Mkquery_result__item__qr_rows = (fun ( projectee  :  query_result<'r> ) -> (match (projectee) with
+| {qr_rows = qr_rows; qr_page_num = qr_page_num; qr_total = qr_total; qr_next = qr_next} -> begin
+     qr_rows
+     end))
+
+
+let __proj__Mkquery_result__item__qr_page_num = (fun ( projectee  :  query_result<'r> ) -> (match (projectee) with
+| {qr_rows = qr_rows; qr_page_num = qr_page_num; qr_total = qr_total; qr_next = qr_next} -> begin
+     qr_page_num
+     end))
+
+
+let __proj__Mkquery_result__item__qr_total = (fun ( projectee  :  query_result<'r> ) -> (match (projectee) with
+| {qr_rows = qr_rows; qr_page_num = qr_page_num; qr_total = qr_total; qr_next = qr_next} -> begin
+     qr_total
+     end))
+
+
+let __proj__Mkquery_result__item__qr_next = (fun ( projectee  :  query_result<'r> ) -> (match (projectee) with
+| {qr_rows = qr_rows; qr_page_num = qr_page_num; qr_total = qr_total; qr_next = qr_next} -> begin
+     qr_next
+     end))
+
+
+let result_tail = (fun ( qr  :  query_result<'r> ) -> (Capability.app (opt_int_json "totalRowCount" qr.qr_total) (match (qr.qr_next) with
+| FStar_Pervasives_Native.Some (t) -> begin
+     ((("nextPageToken"), (Capability.JStr (t))))::[]
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end)))
+
+
+let result_json = (fun ( cc  :  column_codec<'r> ) ( qr  :  query_result<'r> ) -> Capability.JObj (((("$type"), (Capability.JStr ("queryResult"))))::((("rows"), ((cc.rows_json qr.qr_rows))))::((("pageNum"), (Capability.JInt (qr.qr_page_num))))::(result_tail qr)))
+
+
+let result_tag_of : Capability.decoder<unit> = (tagged_of (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "queryResult") then begin
+     FStar_Pervasives_Native.Some (())
+     end else begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let result_of_j = (fun ( cc  :  column_codec<'r> ) ( el  :  Capability.jval ) -> (match ((Capability.field "$type" result_tag_of el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (()) -> begin
+     (match ((Capability.field "rows" (column_read cc.rows_of) el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (rows) -> begin
+     (match ((Capability.field "pageNum" Capability.d_int el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (pn) -> begin
+     (match ((Capability.opt_field "totalRowCount" Capability.d_int el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (trc) -> begin
+     (match ((Capability.opt_field "nextPageToken" Capability.d_str el)) with
+| Capability.Error (e) -> begin
+     Capability.Error (e)
+     end
+| Capability.Ok (tok) -> begin
+     Capability.Ok ({qr_rows = rows; qr_page_num = pn; qr_total = trc; qr_next = tok})
+     end)
+     end)
+     end)
+     end)
+     end))
+
+
+let deferred_result_json = (fun ( cc  :  column_codec<'r> ) ( d  :  Capability.deferred<query_result<'r>> ) -> (Capability.deferred_json (result_json cc) d))
+
+
+let deferred_result_of_j = (fun ( cc  :  column_codec<'r> ) -> (Capability.deferred_dec (result_of_j cc)))
+
+type wire_seg =
+| WKey of Prims.string
+| WIndex of Prims.int
+
+
+let uu___is_WKey : wire_seg  ->  Prims.bool = (fun ( projectee  :  wire_seg ) -> (match (projectee) with
+| WKey (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__WKey__item___0 : wire_seg  ->  Prims.string = (fun ( projectee  :  wire_seg ) -> (match (projectee) with
+| WKey (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_WIndex : wire_seg  ->  Prims.bool = (fun ( projectee  :  wire_seg ) -> (match (projectee) with
+| WIndex (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__WIndex__item___0 : wire_seg  ->  Prims.int = (fun ( projectee  :  wire_seg ) -> (match (projectee) with
+| WIndex (_0) -> begin
+     _0
+     end))
+
+type wire_decode_error = {we_code : Capability.decode_code; we_path : Prims.list<wire_seg>; we_expected : Prims.string; we_message : Prims.string}
+
+
+let __proj__Mkwire_decode_error__item__we_code : wire_decode_error  ->  Capability.decode_code = (fun ( projectee  :  wire_decode_error ) -> (match (projectee) with
+| {we_code = we_code; we_path = we_path; we_expected = we_expected; we_message = we_message} -> begin
+     we_code
+     end))
+
+
+let __proj__Mkwire_decode_error__item__we_path : wire_decode_error  ->  Prims.list<wire_seg> = (fun ( projectee  :  wire_decode_error ) -> (match (projectee) with
+| {we_code = we_code; we_path = we_path; we_expected = we_expected; we_message = we_message} -> begin
+     we_path
+     end))
+
+
+let __proj__Mkwire_decode_error__item__we_expected : wire_decode_error  ->  Prims.string = (fun ( projectee  :  wire_decode_error ) -> (match (projectee) with
+| {we_code = we_code; we_path = we_path; we_expected = we_expected; we_message = we_message} -> begin
+     we_expected
+     end))
+
+
+let __proj__Mkwire_decode_error__item__we_message : wire_decode_error  ->  Prims.string = (fun ( projectee  :  wire_decode_error ) -> (match (projectee) with
+| {we_code = we_code; we_path = we_path; we_expected = we_expected; we_message = we_message} -> begin
+     we_message
+     end))
+
+type wire_query_error =
+| QRefused of query_error
+| QPolicyRefused of Prims.string * Prims.string * Prims.list<Prims.string>
+| QApprovalRequired of Prims.string
+| QUnreadableArgs of wire_decode_error
+| QPredicateNotHonoured of predicate
+| QOrderNotHonoured of Prims.string
+
+
+let uu___is_QRefused : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QRefused (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QRefused__item___0 : wire_query_error  ->  query_error = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QRefused (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_QPolicyRefused : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPolicyRefused (policy, reason, allowed) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QPolicyRefused__item__policy : wire_query_error  ->  Prims.string = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPolicyRefused (policy, reason, allowed) -> begin
+     policy
+     end))
+
+
+let __proj__QPolicyRefused__item__reason : wire_query_error  ->  Prims.string = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPolicyRefused (policy, reason, allowed) -> begin
+     reason
+     end))
+
+
+let __proj__QPolicyRefused__item__allowed : wire_query_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPolicyRefused (policy, reason, allowed) -> begin
+     allowed
+     end))
+
+
+let uu___is_QApprovalRequired : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QApprovalRequired (policy) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QApprovalRequired__item__policy : wire_query_error  ->  Prims.string = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QApprovalRequired (policy) -> begin
+     policy
+     end))
+
+
+let uu___is_QUnreadableArgs : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QUnreadableArgs (error) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QUnreadableArgs__item__error : wire_query_error  ->  wire_decode_error = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QUnreadableArgs (error) -> begin
+     error
+     end))
+
+
+let uu___is_QPredicateNotHonoured : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPredicateNotHonoured (predicate1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QPredicateNotHonoured__item__predicate : wire_query_error  ->  predicate = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QPredicateNotHonoured (predicate1) -> begin
+     predicate1
+     end))
+
+
+let uu___is_QOrderNotHonoured : wire_query_error  ->  Prims.bool = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QOrderNotHonoured (column) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__QOrderNotHonoured__item__column : wire_query_error  ->  Prims.string = (fun ( projectee  :  wire_query_error ) -> (match (projectee) with
+| QOrderNotHonoured (column) -> begin
+     column
+     end))
+
+
+let code_name : Capability.decode_code  ->  Prims.string = (fun ( c  :  Capability.decode_code ) -> (match (c) with
+| Capability.InvalidJson -> begin
+     "InvalidJson"
+     end
+| Capability.MissingField -> begin
+     "MissingField"
+     end
+| Capability.WrongKind -> begin
+     "WrongKind"
+     end
+| Capability.UnknownTag -> begin
+     "UnknownTag"
+     end
+| Capability.OutOfRange -> begin
+     "OutOfRange"
+     end
+| Capability.UndeclaredMember -> begin
+     "UndeclaredMember"
+     end
+| Capability.LimitExceeded -> begin
+     "LimitExceeded"
+     end
+| Capability.NotAdmitted -> begin
+     "NotAdmitted"
+     end
+| Capability.SchemaFault -> begin
+     "SchemaFault"
+     end))
+
+
+let code_of_name : Prims.string  ->  FStar_Pervasives_Native.option<Capability.decode_code> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "InvalidJson") then begin
+     FStar_Pervasives_Native.Some (Capability.InvalidJson)
+     end else begin
+      
+if (Prims.op_Equals s "MissingField") then begin
+     FStar_Pervasives_Native.Some (Capability.MissingField)
+     end else begin
+      
+if (Prims.op_Equals s "WrongKind") then begin
+     FStar_Pervasives_Native.Some (Capability.WrongKind)
+     end else begin
+      
+if (Prims.op_Equals s "UnknownTag") then begin
+     FStar_Pervasives_Native.Some (Capability.UnknownTag)
+     end else begin
+      
+if (Prims.op_Equals s "OutOfRange") then begin
+     FStar_Pervasives_Native.Some (Capability.OutOfRange)
+     end else begin
+      
+if (Prims.op_Equals s "UndeclaredMember") then begin
+     FStar_Pervasives_Native.Some (Capability.UndeclaredMember)
+     end else begin
+      
+if (Prims.op_Equals s "LimitExceeded") then begin
+     FStar_Pervasives_Native.Some (Capability.LimitExceeded)
+     end else begin
+      
+if (Prims.op_Equals s "NotAdmitted") then begin
+     FStar_Pervasives_Native.Some (Capability.NotAdmitted)
+     end else begin
+      
+if (Prims.op_Equals s "SchemaFault") then begin
+     FStar_Pervasives_Native.Some (Capability.SchemaFault)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end)
+
+
+let rec path_json : Prims.list<wire_seg>  ->  Prims.list<Capability.jval> = (fun ( p  :  Prims.list<wire_seg> ) -> (match (p) with
+| [] -> begin
+     []
+     end
+| (WKey (k))::t -> begin
+     (Capability.JStr (k))::(path_json t)
+     end
+| (WIndex (i))::t -> begin
+     (Capability.JInt (i))::(path_json t)
+     end))
+
+
+let rec path_items : Prims.list<Capability.jval>  ->  FStar_Pervasives_Native.option<Prims.list<wire_seg>> = (fun ( xs  :  Prims.list<Capability.jval> ) -> (match (xs) with
+| [] -> begin
+     FStar_Pervasives_Native.Some ([])
+     end
+| (Capability.JStr (k))::t -> begin
+     (match ((path_items t)) with
+| FStar_Pervasives_Native.Some (p) -> begin
+     FStar_Pervasives_Native.Some ((WKey (k))::p)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end
+| (Capability.JInt (i))::t -> begin
+     (match ((path_items t)) with
+| FStar_Pervasives_Native.Some (p) -> begin
+     FStar_Pervasives_Native.Some ((WIndex (i))::p)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let path_of_j : Capability.decoder<Prims.list<wire_seg>> = (fun ( el  :  Capability.jval ) -> (match (el) with
+| Capability.JArr (xs) -> begin
+     (match ((path_items xs)) with
+| FStar_Pervasives_Native.Some (p) -> begin
+     Capability.Ok (p)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Capability.Error ((Capability.refuse Capability.WrongKind))
+     end)
+     end
+| uu___ -> begin
+     Capability.Error ((Capability.refuse Capability.WrongKind))
+     end))
+
+
+let decode_error_json : wire_decode_error  ->  Capability.jval = (fun ( e  :  wire_decode_error ) -> Capability.JObj (((("code"), (Capability.JStr ((code_name e.we_code)))))::((("path"), (Capability.JArr ((path_json e.we_path)))))::((("expected"), (Capability.JStr (e.we_expected))))::((("message"), (Capability.JStr (e.we_message))))::[]))
+
+
+let decode_error_of_j : Capability.decoder<wire_decode_error> = (Capability.both (Capability.field "code" (tagged_of code_of_name)) (Capability.both (Capability.field "path" path_of_j) (Capability.both (Capability.field "expected" Capability.d_str) (Capability.field "message" Capability.d_str) (fun ( x  :  Prims.string ) ( m  :  Prims.string ) -> ((x), (m)))) (fun ( p  :  Prims.list<wire_seg> ) ( xm  :  (Prims.string * Prims.string) ) -> ((p), (xm)))) (fun ( c  :  Capability.decode_code ) ( pxm  :  (Prims.list<wire_seg> * (Prims.string * Prims.string)) ) -> {we_code = c; we_path = (FStar_Pervasives_Native.fst pxm); we_expected = (FStar_Pervasives_Native.fst (FStar_Pervasives_Native.snd pxm)); we_message = (FStar_Pervasives_Native.snd (FStar_Pervasives_Native.snd pxm))}))
+
+
+let strs_j : Prims.list<Prims.string>  ->  Capability.jval = (fun ( xs  :  Prims.list<Prims.string> ) -> Capability.JArr ((Capability.strs xs)))
+
+
+let query_error_json = (fun ( cc  :  column_codec<'r> ) ( e  :  wire_query_error ) -> (match (e) with
+| QRefused (NoSuchQuery (id, known)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("noSuchQuery"))))::((("id"), (Capability.JStr (id))))::((("known"), ((strs_j known))))::[])
+     end
+| QRefused (DuplicateQuery (id)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("duplicateQuery"))))::((("id"), (Capability.JStr (id))))::[])
+     end
+| QRefused (UnknownParam (name, declared)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("unknownParam"))))::((("name"), (Capability.JStr (name))))::((("declared"), ((strs_j declared))))::[])
+     end
+| QRefused (ParamTypeMismatch (name, expected, got)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("paramTypeMismatch"))))::((("name"), (Capability.JStr (name))))::((("expected"), (Capability.JStr ((column_tag expected)))))::((("got"), (Capability.JStr ((column_tag got)))))::[])
+     end
+| QRefused (RequiredParamsUnbound (names)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("requiredParamsUnbound"))))::((("names"), ((strs_j names))))::[])
+     end
+| QRefused (SourceNotResolved (s)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("sourceNotResolved"))))::((("ref"), (Capability.JStr (s))))::[])
+     end
+| QRefused (ExecutionFailed (detail, recoverable)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("executionFailed"))))::((("detail"), (Capability.JStr (detail))))::((("recoverable"), ((strs_j recoverable))))::[])
+     end
+| QRefused (Timeout) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("timeout"))))::[])
+     end
+| QRefused (RequiredParamsNull (names)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("requiredParamsNull"))))::((("names"), ((strs_j names))))::[])
+     end
+| QRefused (DuplicateParam (name)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("duplicateParam"))))::((("name"), (Capability.JStr (name))))::[])
+     end
+| QPolicyRefused (policy, reason, allowed) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("policyRefused"))))::((("policy"), (Capability.JStr (policy))))::((("reason"), (Capability.JStr (reason))))::((("allowed"), ((strs_j allowed))))::[])
+     end
+| QApprovalRequired (policy) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("approvalRequired"))))::((("policy"), (Capability.JStr (policy))))::[])
+     end
+| QUnreadableArgs (err) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("unreadableArgs"))))::((("error"), ((decode_error_json err))))::[])
+     end
+| QRefused (UnknownColumn (name, declared)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("unknownColumn"))))::((("name"), (Capability.JStr (name))))::((("declared"), ((strs_j declared))))::[])
+     end
+| QRefused (PredicateTypeMismatch (column, expected, got)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("predicateTypeMismatch"))))::((("column"), (Capability.JStr (column))))::((("expected"), (Capability.JStr ((column_tag expected)))))::((("got"), (Capability.JStr ((column_tag got)))))::[])
+     end
+| QRefused (PredicateNotApplicable (predicate1, column, ty)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("predicateNotApplicable"))))::((("predicate"), (Capability.JStr (predicate1))))::((("column"), (Capability.JStr (column))))::((("columnType"), (Capability.JStr ((column_tag ty)))))::[])
+     end
+| QRefused (IllFormedLiteral (column, reason)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("illFormedLiteral"))))::((("column"), (Capability.JStr (column))))::((("reason"), (Capability.JStr (reason))))::[])
+     end
+| QRefused (DuplicateSortColumn (column)) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("duplicateSortColumn"))))::((("column"), (Capability.JStr (column))))::[])
+     end
+| QPredicateNotHonoured (p) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("predicateNotHonoured"))))::((("predicate"), ((predicate_json cc p))))::[])
+     end
+| QOrderNotHonoured (column) -> begin
+     Capability.JObj (((("$type"), (Capability.JStr ("orderNotHonoured"))))::((("column"), (Capability.JStr (column))))::[])
+     end))
+
+
+let s_f : Prims.string  ->  Capability.decoder<Prims.string> = (fun ( name  :  Prims.string ) -> (Capability.field name Capability.d_str))
+
+
+let sl_f : Prims.string  ->  Capability.decoder<Prims.list<Prims.string>> = (fun ( name  :  Prims.string ) -> (Capability.field name (Capability.d_list Capability.d_str)))
+
+
+let ty_f : Prims.string  ->  Capability.decoder<column_type> = (fun ( name  :  Prims.string ) -> (Capability.field name col_type_of_j))
+
+
+let predicate_tag_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( s  :  Prims.string ) ->  
+if ((((((((Prims.op_Equals s "equalTo") || (Prims.op_Equals s "greaterThan")) || (Prims.op_Equals s "atLeast")) || (Prims.op_Equals s "lessThan")) || (Prims.op_Equals s "atMost")) || (Prims.op_Equals s "contains")) || (Prims.op_Equals s "isNull")) || (Prims.op_Equals s "isNotNull")) then begin
+     FStar_Pervasives_Native.Some (s)
+     end else begin
+     FStar_Pervasives_Native.None
+     end)
+
+
+let qrefused = (fun ( f  :  'a  ->  query_error ) ( x  :  'a ) -> QRefused ((f x)))
+
+
+let query_error_cases = (fun ( cc  :  column_codec<'r> ) -> ((("noSuchQuery"), ((Capability.both (s_f "id") (sl_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> QRefused (NoSuchQuery (id, known)))))))::((("duplicateQuery"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateQuery (uu___))) (s_f "id")))))::((("unknownParam"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownParam (n, d)))))))::((("paramTypeMismatch"), ((Capability.both (s_f "name") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( n  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (ParamTypeMismatch (n, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("requiredParamsUnbound"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsUnbound (uu___))) (sl_f "names")))))::((("sourceNotResolved"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> SourceNotResolved (uu___))) (s_f "ref")))))::((("executionFailed"), ((Capability.both (s_f "detail") (sl_f "recoverable") (fun ( d  :  Prims.string ) ( rc  :  Prims.list<Prims.string> ) -> QRefused (ExecutionFailed (d, rc)))))))::((("timeout"), ((Capability.d_succeed (QRefused (Timeout))))))::((("requiredParamsNull"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsNull (uu___))) (sl_f "names")))))::((("duplicateParam"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateParam (uu___))) (s_f "name")))))::((("policyRefused"), ((Capability.both (s_f "policy") (Capability.both (s_f "reason") (sl_f "allowed") (fun ( rs  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((rs), (a)))) (fun ( p  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> QPolicyRefused (p, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("approvalRequired"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QApprovalRequired (uu___)) (s_f "policy")))))::((("unreadableArgs"), ((Capability.d_map (fun ( uu___  :  wire_decode_error ) -> QUnreadableArgs (uu___)) (Capability.field "error" decode_error_of_j)))))::((("unknownColumn"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownColumn (n, d)))))))::((("predicateTypeMismatch"), ((Capability.both (s_f "column") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( c  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (PredicateTypeMismatch (c, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("predicateNotApplicable"), ((Capability.both (Capability.field "predicate" (tagged_of predicate_tag_of)) (Capability.both (s_f "column") (ty_f "columnType") (fun ( c  :  Prims.string ) ( t  :  column_type ) -> ((c), (t)))) (fun ( p  :  Prims.string ) ( ct  :  (Prims.string * column_type) ) -> QRefused (PredicateNotApplicable (p, (FStar_Pervasives_Native.fst ct), (FStar_Pervasives_Native.snd ct))))))))::((("illFormedLiteral"), ((Capability.both (s_f "column") (s_f "reason") (fun ( c  :  Prims.string ) ( rs  :  Prims.string ) -> QRefused (IllFormedLiteral (c, rs)))))))::((("duplicateSortColumn"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateSortColumn (uu___))) (s_f "column")))))::((("predicateNotHonoured"), ((Capability.d_map (fun ( uu___  :  predicate ) -> QPredicateNotHonoured (uu___)) (Capability.field "predicate" (predicate_of_j cc))))))::((("orderNotHonoured"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QOrderNotHonoured (uu___)) (s_f "column")))))::[])
+
+
+let query_error_of_j = (fun ( cc  :  column_codec<'r> ) -> (Capability.tag_dispatch (query_error_cases cc)))
+
+
+let query_error_carried : wire_query_error  ->  Prims.bool = (fun ( e  :  wire_query_error ) -> (match (e) with
+| QRefused (PredicateNotApplicable (p, uu___, uu___1)) -> begin
+     (match ((predicate_tag_of p)) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___2 -> begin
+     false
+     end)
+     end
+| QPredicateNotHonoured (p) -> begin
+     (literal_carried p)
+     end
+| uu___ -> begin
+     true
+     end))
+
+
 
 

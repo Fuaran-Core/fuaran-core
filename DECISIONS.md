@@ -1,5 +1,40 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D153: the seam codecs are proved over the decode layer's combinators, not rebuilt on the `Codec` blocks; the query seam's typed async-result reader reads through the envelope's typed reader, so its refusals keep their code and path
+
+**Recorded by Phase 455.** The phase set out to prove that `CapabilityCodec` and `QueryCodec` round
+trip and that every refusal they answer resolves in the document read, and named its premise: if the
+codecs were built from Phase 436's `Codec` blocks, theorem 22 would cover them as a corollary.
+
+**The premise was false, and the codecs are NOT rebuilt on the blocks.** Neither codec calls a `Codec`
+block; both are written over `JVal` with the typed decode layer's combinators (`Decoder.field`,
+`optField`, `list`, `bind`, `map`, `at`, `fail`, `tagDispatchWith`). Rebuilding them on `Codec.record`
+/ `union` was considered and declined: the wire shapes are published and pinned by the conformance
+corpus, several readers do work no block expresses (the invocation's repeated-address refusal through
+`at`, the declaration reader's admission gate raised at the member at fault, the determinism
+cross-check), and the blocks' strict-by-default collecting reader would change which refusal a
+document earns first. A rebuild would be a wire-behaviour change bought to shorten a proof. **Decided:
+model each reader clause for clause and prove both properties directly** — `Capability.fst` section 18
+and `Query.fst` section 19 (the latter reading the former by name, module `C`, rather than restating
+the decode layer a third time), with the column codec the query codec hands four members to taken as
+a parameter whose round trips the column strand proves (`query-codec-column-premises`).
+
+**`QueryCodec.deferredResultOf` lost its refusals' code and path; fixed in production.** It read the
+async result through `CapabilityCodec.deferredOf`, the STRING envelope reader, and re-raised the
+sentence as `OutOfRange` at the root. `decodeDeferredResultDetailedWith` — a typed reader whose
+contract (Phase 310) is "its code, the path to the value at fault" — therefore answered a missing
+`$type`, a bad tag and a `pageNum` that is not an integer all as `OutOfRange` at `[]`. The root
+resolves, so the refusal law alone would not have caught it; the differential did. **Decided: the
+envelope gains a typed reader, `CapabilityCodec.deferredDecoder` (internal), which `deferredOf` is over
+a sentence-answering payload reader and the query seam's typed reader is over `resultOf`.** The wire
+is unchanged and every document that decoded still decodes to the same value; what changes is the
+code and path of a refused one, which now names the fault. Recorded under the 0.38.0 draft's
+Breaking, because a caller may have matched on the old `OutOfRange`.
+
+**Not modelled, deliberately: the strict read policy.** Both codecs' `…With` readers run a members
+check in front of the lenient reader under `Strict`; the theorems are about the lenient reader, and the
+policy-parameterised members stay in the operation census with that reason.
+
 ## 2026-10-14 — D152: the op-stream readers are proved total over the spelling model, and a decoded character is its spelling — so an escaped key is the model's boundary, not a defect in either side, and the scanner ships unchanged
 
 **Recorded by Phase 454.** `proofs/OpStreamLoad.fst` models the one JSONL line scanner

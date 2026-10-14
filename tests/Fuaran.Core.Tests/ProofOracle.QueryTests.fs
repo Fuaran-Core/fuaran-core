@@ -1012,6 +1012,396 @@ let private queryDifferential
 
     tally
 
+// ---- Phase 455 — the query codec, whole: the declaration, the result page, the async result and
+//      the typed refusal, beside `QueryCodec` over its own column codec ----
+
+let private segRender (s: PathSegment) =
+    match s with
+    | PathSegment.Key k -> "k:" + k
+    | PathSegment.Index n -> "i:" + string n
+
+let private pErrRender (e: DecodeError) : string =
+    sprintf "%A@%s" e.Code (e.Path |> List.map segRender |> String.concat "/")
+
+let private mErrRender (e: ModelCap.decode_error) : string =
+    sprintf
+        "%A@%s"
+        e.d_code
+        (e.d_path
+         |> List.map (function
+             | ModelCap.Key k -> "k:" + k
+             | ModelCap.Index n -> "i:" + string n)
+         |> String.concat "/")
+
+let private qColOfModel (t: ModelQuery.column_type) : ColumnType =
+    match t with
+    | ModelQuery.IntType -> IntType
+    | ModelQuery.FloatType -> FloatType
+    | ModelQuery.BoolType -> BoolType
+    | ModelQuery.StringType -> StringType
+    | ModelQuery.DateType -> DateType
+    | ModelQuery.TimestampType u -> TimestampType(qUnitOfModel u)
+    | ModelQuery.DecimalType -> DecimalType
+
+/// A predicate literal's value as `QueryCodec` writes it — read off the PUBLIC encoder, over a
+/// declaration whose only filter compares with that literal, so the writer is production's own call.
+let private literalValueJson (v: Cell) : JVal =
+    let q =
+        { shapeCarrier with
+            ResultSchema = [ Field.create "v" (Cell.typeOf v |> Option.defaultValue StringType) ]
+            Where = [ ColumnPredicate.EqualTo("v", v) ] }
+
+    match Json.parse (QueryCodec.encode q) with
+    | Ok(JObj ms) ->
+        match ms |> List.tryFind (fun (k, _) -> k = "where") with
+        | Some(_, JArr [ JObj p ]) ->
+            match p |> List.tryFind (fun (k, _) -> k = "value") with
+            | Some(_, v) -> v
+            | None -> JObj []
+        | _ -> JObj []
+    | _ -> JObj []
+
+/// A literal read at a stated type as `QueryShape.literalOf` reads it: the one cell of a one-row
+/// column of that type, through the column codec's public reader.
+let private literalOfJson (column: string) (ty: ColumnType) (v: JVal) : Cell option =
+    let doc =
+        JObj
+            [ "schema", JArr [ JObj [ "name", JStr column; "type", JStr(ColumnType.tag ty) ] ]
+              "columns", JObj [ column, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
+
+    match ColumnCodec.decodeJson doc with
+    | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Some(Column.cell 0 c)
+    | _ -> None
+
+/// The model's column-codec parameter, instantiated at production's column codec: the schema entry,
+/// a `Ref` source, an embedded table of rows, and a predicate literal.
+let private columnCodec: ModelQuery.column_codec<Table> =
+    { ModelQuery.column_codec.field_json =
+        fun (n, t) -> jvalToModel (ColumnCodec.fieldJson (Field.create n (qColOfModel t)))
+      ModelQuery.column_codec.field_of =
+        fun j ->
+            match ColumnCodec.decodeField (jvalOfModel j) with
+            | Ok f -> FStar_Pervasives_Native.Some(f.Name, qColToModel f.Type)
+            | Error _ -> FStar_Pervasives_Native.None
+      ModelQuery.column_codec.source_json = fun s -> jvalToModel (ColumnCodec.encodeJson (Ref s))
+      ModelQuery.column_codec.source_of =
+        fun j ->
+            match ColumnCodec.decodeJson (jvalOfModel j) with
+            | Ok(Ref s) -> FStar_Pervasives_Native.Some s
+            | _ -> FStar_Pervasives_Native.None
+      ModelQuery.column_codec.rows_json = fun t -> jvalToModel (ColumnCodec.encodeJson (Embedded t))
+      ModelQuery.column_codec.rows_of =
+        fun j ->
+            match ColumnCodec.decodeJson (jvalOfModel j) with
+            | Ok(Embedded t) -> FStar_Pervasives_Native.Some t
+            | _ -> FStar_Pervasives_Native.None
+      ModelQuery.column_codec.lit_json = fun _ c -> jvalToModel (literalValueJson (qCellOfModel c))
+      ModelQuery.column_codec.lit_of =
+        fun c t j ->
+            match literalOfJson c (qColOfModel t) (jvalOfModel j) with
+            | Some cell -> FStar_Pervasives_Native.Some(qCellToModel cell)
+            | None -> FStar_Pervasives_Native.None }
+
+/// A declaration as the codec model reads it: the bridge `queryToModel` is, its source the `Ref`
+/// the codec writes.
+let private codecQueryToModel (q: Query) : ModelQuery.query =
+    { queryToModel q with
+        q_source =
+            match q.Source with
+            | Ref s -> s
+            | other -> sprintf "%A" other }
+
+let private rowsText (t: Table) =
+    Canon.render (ColumnCodec.encodeJson (Embedded t))
+
+let private resultToModel (qr: QueryResult) : ModelQuery.query_result<Table> =
+    { ModelQuery.query_result.qr_rows = qr.Rows
+      ModelQuery.query_result.qr_page_num = bigint qr.PageNum
+      ModelQuery.query_result.qr_total = toMOpt (Option.map (fun (n: int) -> bigint n) qr.TotalRowCount)
+      ModelQuery.query_result.qr_next = toMOpt qr.NextPageToken }
+
+let private sameResult (p: QueryResult) (m: ModelQuery.query_result<Table>) =
+    rowsText p.Rows = rowsText m.qr_rows
+    && bigint p.PageNum = m.qr_page_num
+    && toMOpt (Option.map (fun (n: int) -> bigint n) p.TotalRowCount) = m.qr_total
+    && toMOpt p.NextPageToken = m.qr_next
+
+let private codeToModel (c: DecodeCode) : ModelCap.decode_code =
+    match c with
+    | DecodeCode.InvalidJson -> ModelCap.InvalidJson
+    | DecodeCode.MissingField -> ModelCap.MissingField
+    | DecodeCode.WrongKind -> ModelCap.WrongKind
+    | DecodeCode.UnknownTag -> ModelCap.UnknownTag
+    | DecodeCode.OutOfRange -> ModelCap.OutOfRange
+    | DecodeCode.UndeclaredMember -> ModelCap.UndeclaredMember
+    | DecodeCode.LimitExceeded -> ModelCap.LimitExceeded
+    | DecodeCode.NotAdmitted -> ModelCap.NotAdmitted
+    | DecodeCode.SchemaFault -> ModelCap.SchemaFault
+
+/// Production's twenty-case `QueryError` as the codec model's `wire_query_error`; `None` for a case
+/// the generator does not draw.
+let private wireErrorToModel (e: QueryError) : ModelQuery.wire_query_error =
+    let ty = qColToModel
+
+    match e with
+    | NoSuchQuery(id, k) -> ModelQuery.QRefused(ModelQuery.NoSuchQuery(id, k))
+    | DuplicateQuery id -> ModelQuery.QRefused(ModelQuery.DuplicateQuery id)
+    | UnknownParam(n, d) -> ModelQuery.QRefused(ModelQuery.UnknownParam(n, d))
+    | ParamTypeMismatch(n, x, g) -> ModelQuery.QRefused(ModelQuery.ParamTypeMismatch(n, ty x, ty g))
+    | RequiredParamsUnbound xs -> ModelQuery.QRefused(ModelQuery.RequiredParamsUnbound xs)
+    | SourceNotResolved s -> ModelQuery.QRefused(ModelQuery.SourceNotResolved s)
+    | ExecutionFailed(d, r) -> ModelQuery.QRefused(ModelQuery.ExecutionFailed(d, r))
+    | Timeout -> ModelQuery.QRefused ModelQuery.Timeout
+    | RequiredParamsNull xs -> ModelQuery.QRefused(ModelQuery.RequiredParamsNull xs)
+    | DuplicateParam n -> ModelQuery.QRefused(ModelQuery.DuplicateParam n)
+    | QueryPolicyRefused(p, r, a) -> ModelQuery.QPolicyRefused(p, r, a)
+    | QueryApprovalRequired p -> ModelQuery.QApprovalRequired p
+    | UnreadableArgs de ->
+        ModelQuery.QUnreadableArgs
+            { ModelQuery.wire_decode_error.we_code = codeToModel de.Code
+              ModelQuery.wire_decode_error.we_path =
+                de.Path
+                |> List.map (function
+                    | PathSegment.Key k -> ModelQuery.WKey k
+                    | PathSegment.Index i -> ModelQuery.WIndex(bigint i))
+              ModelQuery.wire_decode_error.we_expected = de.Expected
+              ModelQuery.wire_decode_error.we_message = de.Message }
+    | UnknownColumn(n, d) -> ModelQuery.QRefused(ModelQuery.UnknownColumn(n, d))
+    | PredicateTypeMismatch(c, x, g) -> ModelQuery.QRefused(ModelQuery.PredicateTypeMismatch(c, ty x, ty g))
+    | PredicateNotApplicable(p, c, t) -> ModelQuery.QRefused(ModelQuery.PredicateNotApplicable(p, c, ty t))
+    | IllFormedLiteral(c, r) -> ModelQuery.QRefused(ModelQuery.IllFormedLiteral(c, r))
+    | DuplicateSortColumn c -> ModelQuery.QRefused(ModelQuery.DuplicateSortColumn c)
+    | PredicateNotHonoured p -> ModelQuery.QPredicateNotHonoured(qPredToModel p)
+    | OrderNotHonoured c -> ModelQuery.QOrderNotHonoured c
+
+let private genWireError (r: ConfRng.T) : QueryError * ConfRng.T =
+    let k, r1 = ConfRng.intBelow 20 r
+    let s, r2 = ConfRng.choose [ "a"; "b"; "when" ] r1
+    let n, r3 = ConfRng.intBelow 3 r2
+    let xs = List.init n (fun i -> sprintf "x%d" i)
+    let t, r4 = ConfRng.choose queryTypePool r3
+
+    let e =
+        match k with
+        | 0 -> NoSuchQuery(s, xs)
+        | 1 -> DuplicateQuery s
+        | 2 -> UnknownParam(s, xs)
+        | 3 -> ParamTypeMismatch(s, t, IntType)
+        | 4 -> RequiredParamsUnbound xs
+        | 5 -> SourceNotResolved s
+        | 6 -> ExecutionFailed("boom", xs)
+        | 7 -> Timeout
+        | 8 -> RequiredParamsNull xs
+        | 9 -> DuplicateParam s
+        | 10 -> QueryPolicyRefused(s, "no", xs)
+        | 11 -> QueryApprovalRequired s
+        | 12 ->
+            UnreadableArgs
+                { Code = DecodeCode.WrongKind
+                  Path = [ PathSegment.Key s; PathSegment.Index n ]
+                  Expected = "a value"
+                  Message = "not one" }
+        | 13 -> UnknownColumn(s, xs)
+        | 14 -> PredicateTypeMismatch(s, t, StringType)
+        | 15 -> PredicateNotApplicable("contains", s, t)
+        | 16 -> IllFormedLiteral(s, "why")
+        | 17 -> DuplicateSortColumn s
+        | 18 -> PredicateNotHonoured(ColumnPredicate.EqualTo(s, Cell.Int n))
+        | _ -> OrderNotHonoured s
+
+    e, r4
+
+type private QueryCodecTally =
+    { QcDiffs: string list
+      QcDocuments: int
+      QcAdmissionRefused: int
+      QcRefused: int
+      QcCodes: Set<string> }
+
+/// Runs the model's query codec beside `QueryCodec` over its own column codec: each encoding, and
+/// the reading of each encoding and of mutations of it — acceptance, the value, and every typed
+/// refusal's code and path — and, on production, that every typed refusal RESOLVES in the document
+/// it read. `queryJson` is the model's declaration writer, a parameter for the go-red.
+let private queryCodecDifferential
+    (queryJson: ModelQuery.query -> ModelCap.jval)
+    (seed: int)
+    (trials: int)
+    : QueryCodecTally =
+    let rng = ref (ConfRng.ofSeed seed)
+    let diffs = System.Collections.Generic.List<string>()
+    let documents = ref (0)
+    let admission = ref (0)
+    let refused = ref (0)
+    let codes = ref (Set.empty)
+
+    let mutations (j: JVal) =
+        let mutable out = [ j ]
+
+        for _ in 1..4 do
+            let m, r = jmutate j rng.Value
+            rng.Value <- r
+            out <- m :: out
+
+        // The document production reads is the text the mutation renders to.
+        out
+        |> List.map (fun m ->
+            match Json.parse (Canon.render m) with
+            | Ok v -> m = j, v
+            | Error _ -> m = j, m)
+
+    let typed
+        (what: string)
+        (i: int)
+        (j: JVal)
+        (p: Result<'P, DecodeError>)
+        (m: ModelCap.outcome<'M, ModelCap.decode_error>)
+        (same: 'P -> 'M -> bool)
+        (unmutated: bool)
+        =
+        documents.Value <- documents.Value + 1
+
+        match p, m with
+        | Ok a, ModelCap.Ok b when same a b -> ()
+        | Error pe, ModelCap.Error me when pErrRender pe = mErrRender me ->
+            refused.Value <- refused.Value + 1
+            codes.Value <- codes.Value.Add(string pe.Code)
+
+            if unmutated then
+                admission.Value <- admission.Value + 1
+
+            if not (DecodeError.resolvesIn j pe) then
+                diffs.Add(
+                    sprintf "seed %d: a %s refusal does not resolve: %s in %s" i what (pErrRender pe) (Canon.render j)
+                )
+        | _ -> diffs.Add(sprintf "seed %d: the %s readers disagree on %s: %A vs %A" i what (Canon.render j) p m)
+
+    for i in 1..trials do
+        // ---- the declaration, drawn by the seam differential's own generator ----
+        let q, r1 = genQueryDecl (sprintf "q-%d" i) rng.Value
+        rng.Value <- r1
+        let text = QueryCodec.encode q
+
+        match Json.parse text with
+        | Error e -> diffs.Add(sprintf "seed %d: the declaration did not parse: %A" i e)
+        | Ok j0 ->
+            // The encoding is compared as the canonical TEXT both write.
+            if Canon.render (jvalOfModel (queryJson (codecQueryToModel q))) <> text then
+                diffs.Add(sprintf "seed %d: the declaration encodes differently: %s" i text)
+
+            for unmutated, j in mutations j0 do
+                typed
+                    "declaration"
+                    i
+                    j
+                    (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (ModelQuery.query_of_j columnCodec (jvalToModel j))
+                    (fun a b -> codecQueryToModel a = b)
+                    unmutated
+
+        // ---- a result page, and the async envelope around it ----
+        let k, r2 = ConfRng.intBelow 4 rng.Value
+        rng.Value <- r2
+
+        let qr =
+            { queryResultOf i with
+                TotalRowCount = (if k % 2 = 0 then Some(i * 3) else None)
+                NextPageToken = (if k < 2 then Some(sprintf "t%d" i) else None) }
+
+        let rtext = QueryCodec.encodeResult qr
+
+        match Json.parse rtext with
+        | Error e -> diffs.Add(sprintf "seed %d: the result did not parse: %A" i e)
+        | Ok rj ->
+            if
+                Canon.render (jvalOfModel (ModelQuery.result_json columnCodec (resultToModel qr)))
+                <> rtext
+            then
+                diffs.Add(sprintf "seed %d: the result encodes differently" i)
+
+            for _, j in mutations rj do
+                typed
+                    "result"
+                    i
+                    j
+                    (QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (ModelQuery.result_of_j columnCodec (jvalToModel j))
+                    sameResult
+                    false
+
+        let d =
+            match k with
+            | 0 -> Pending
+            | 1 -> Failed "late"
+            | _ -> Ready qr
+
+        let md =
+            match d with
+            | Pending -> ModelCap.Pending
+            | Failed m -> ModelCap.Failed m
+            | Ready v -> ModelCap.Ready(resultToModel v)
+
+        let dtext = QueryCodec.encodeDeferredResult d
+
+        match Json.parse dtext with
+        | Error e -> diffs.Add(sprintf "seed %d: the envelope did not parse: %A" i e)
+        | Ok dj ->
+            if
+                Canon.render (jvalOfModel (ModelQuery.deferred_result_json columnCodec md))
+                <> dtext
+            then
+                diffs.Add(sprintf "seed %d: the async result encodes differently" i)
+
+            for _, j in mutations dj do
+                typed
+                    "async result"
+                    i
+                    j
+                    (QueryCodec.decodeDeferredResultDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (ModelQuery.deferred_result_of_j columnCodec (jvalToModel j))
+                    (fun a b ->
+                        match a, b with
+                        | Pending, ModelCap.Pending -> true
+                        | Failed x, ModelCap.Failed y -> x = y
+                        | Ready x, ModelCap.Ready y -> sameResult x y
+                        | _ -> false)
+                    false
+
+        // ---- the typed refusal ----
+        let e, r3 = genWireError rng.Value
+        rng.Value <- r3
+        let ej = QueryCodec.queryErrorJson e
+
+        if jvalToModel ej <> ModelQuery.query_error_json columnCodec (wireErrorToModel e) then
+            diffs.Add(sprintf "seed %d: the query error encodes differently: %A" i e)
+
+        for _, j in mutations ej do
+            documents.Value <- documents.Value + 1
+
+            match QueryCodec.queryErrorOf j, ModelQuery.query_error_of_j columnCodec (jvalToModel j) with
+            | Ok pe, ModelCap.Ok me when wireErrorToModel pe = me -> ()
+            | Error _, ModelCap.Error me ->
+                refused.Value <- refused.Value + 1
+                codes.Value <- codes.Value.Add(sprintf "%A" me.d_code)
+            | p, m ->
+                diffs.Add(sprintf "seed %d: the query-error readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+
+    { QcDiffs = List.ofSeq diffs
+      QcDocuments = documents.Value
+      QcAdmissionRefused = admission.Value
+      QcRefused = refused.Value
+      QcCodes = codes.Value }
+
+/// The go-red's writer: the model's declaration writer handed the declaration with its last
+/// parameter DROPPED.
+let private droppingQueryJson (q: ModelQuery.query) : ModelCap.jval =
+    let kept =
+        match List.rev q.q_params with
+        | _ :: rest -> List.rev rest
+        | [] -> []
+
+    ModelQuery.query_json columnCodec { q with q_params = kept }
+
+
 [<Tests>]
 let tests =
     testList
@@ -1636,4 +2026,38 @@ let tests =
                       (Query.invocationKey qa args)
                       (sprintf "the query model's key is production's on %A" args)
 
-              Expect.equal qCompared 500 "every drawn argument set was compared" ]
+              Expect.equal qCompared 500 "every drawn argument set was compared"
+
+          // ---- Phase 455 — the query codec, whole ----
+
+          testCase
+              "the query-codec oracle agrees with QueryCodec's declaration, result, async-result and query-error codecs over generated values and mutated documents, and every typed refusal resolves"
+          <| fun _ ->
+              let t = queryCodecDifferential (ModelQuery.query_json columnCodec) 4552 200
+
+              match t.QcDiffs with
+              | d :: _ -> failtestf "the query-codec oracle and production DISAGREE\n%s" d
+              | [] ->
+                  Expect.isGreaterThan t.QcDocuments 3000 (sprintf "documents were read (%d)" t.QcDocuments)
+
+                  Expect.isGreaterThan
+                      t.QcAdmissionRefused
+                      10
+                      (sprintf
+                          "an UNMUTATED declaration was refused by the admission gate on read (%d)"
+                          t.QcAdmissionRefused)
+
+                  Expect.isGreaterThan t.QcRefused 300 (sprintf "documents were refused (%d)" t.QcRefused)
+
+                  for c in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange" ] do
+                      Expect.isTrue (t.QcCodes.Contains c) (sprintf "a %s refusal was compared (%A)" c t.QcCodes)
+
+          testCase
+              "a query-codec oracle whose declaration writer DROPS a parameter DISAGREES with QueryCodec — the measurement can fail"
+          <| fun _ ->
+              let t = queryCodecDifferential droppingQueryJson 4553 60
+              Expect.isNonEmpty t.QcDiffs "a writer that drops a parameter MUST disagree with production's"
+
+              Expect.isTrue
+                  (t.QcDiffs |> List.exists (fun d -> d.Contains "encodes differently"))
+                  "and the disagreement is about the encoding, which is what the writer dropped" ]

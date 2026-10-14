@@ -493,15 +493,11 @@
     {
       "members": [
         "CapabilityCodec.decodeDeferredWith",
-        "CapabilityCodec.decodeInvocation",
         "CapabilityCodec.decodeInvocationWith",
-        "CapabilityCodec.decodeInvokeError",
-        "CapabilityCodec.decodeWith",
-        "CapabilityCodec.encodeInvocation",
-        "CapabilityCodec.encodeInvokeError"
+        "CapabilityCodec.decodeWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "Capability codec arms beside the rostered `encode` / `decode` / deferred pair: invocation, invoke-error and policy-parameterised forms; the decode layer's refusal corpus and round-trip tests stand in.",
+      "reason": "The policy-parameterised capability readers. Their lenient reading is the reader Phase 455 proves (`capability-codec-invocation-roundtrip`, `capability-codec-deferred-roundtrip`, `capability-codec-refusals-resolve`); the strict members check in front of it is not modelled, and the decode layer's refusal corpus and round-trip tests stand in for it.",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
@@ -533,47 +529,11 @@
     },
     {
       "members": [
-        "CapabilityCodec.deferredJson"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "A deferred envelope as a JSON value; `encodeDeferred` (rostered) is its canonical text.",
-      "through": "CapabilityCodec.encodeDeferred",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
         "CapabilityCodec.deferredOfWith"
       ],
       "class": "measured-elsewhere",
       "reason": "The policy-parameterised deferred reader; `decodeDeferredWith` parses the text and calls it.",
       "through": "CapabilityCodec.decodeDeferredWith",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityCodec.deferredOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Reads a deferred envelope from a JSON value; `decodeDeferred` (rostered) parses the text and calls it.",
-      "through": "CapabilityCodec.decodeDeferred",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityCodec.invokeErrorJson"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The invoke error as a JSON value; `encodeInvokeError` is its canonical text, which the tests read.",
-      "through": "CapabilityCodec.encodeInvokeError",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityCodec.invokeErrorOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Reads an invoke error from its JSON value; `decodeInvokeError` is the text entry point the tests call.",
-      "through": "CapabilityCodec.decodeInvokeError",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
@@ -1693,13 +1653,11 @@
         "QueryCodec.decodeArgs",
         "QueryCodec.decodeArgsJson",
         "QueryCodec.decodeDeferredResultWith",
-        "QueryCodec.decodeQueryError",
         "QueryCodec.decodeResultWith",
-        "QueryCodec.decodeWith",
-        "QueryCodec.encodeQueryError"
+        "QueryCodec.decodeWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "Query codec arms beside the rostered encode/decode pairs: argument decoding, typed-error and policy-parameterised forms, query-error codec; the decode layer's refusal corpus and round-trip tests stand in.",
+      "reason": "Argument decoding and the policy-parameterised query readers. `decodeArgs` reads a model's argument object, which no writer of this codec produces, so there is no round trip to prove; the readers' lenient reading is the one Phase 455 proves (`query-codec-declaration-roundtrip` and its siblings), the strict members check in front of it is not modelled, and the decode layer's refusal corpus and round-trip tests stand in for it.",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
@@ -1707,7 +1665,7 @@
         "QueryCodec.decodeDetailedWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "Query codec arms beside the rostered encode/decode pairs: argument decoding, typed-error and policy-parameterised forms, query-error codec; the decode layer's refusal corpus and round-trip tests stand in.",
+      "reason": "The typed, policy-parameterised declaration reader. Its lenient reading is the reader Phase 455 proves (`query-codec-declaration-roundtrip`, `query-codec-refusals-resolve`); the strict members check in front of it is not modelled.",
       "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
     },
     {
@@ -1727,24 +1685,6 @@
       "reason": "The typed-error, policy-parameterised result reader; `decodeResult` (rostered) is it, lenient, plus the sentence.",
       "through": "QueryCodec.decodeResult",
       "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
-    },
-    {
-      "members": [
-        "QueryCodec.queryErrorJson"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "A query error as a JSON value; `encodeQueryError` is its canonical text.",
-      "through": "QueryCodec.encodeQueryError",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
-    },
-    {
-      "members": [
-        "QueryCodec.queryErrorOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Reads a query error from its JSON value; `decodeQueryError` parses the text and calls it.",
-      "through": "QueryCodec.decodeQueryError",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
       "members": [

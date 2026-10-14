@@ -1108,6 +1108,16 @@ module CapabilityCodec =
     /// `deferredJson` rendered canonically.
     let encodeDeferred (encodeT: 'T -> JVal) (d: Deferred<'T>) : string = Canon.render (deferredJson encodeT d)
 
+    /// The envelope's TYPED reader (Phase 455): `payload` reads a `ready` value, and its refusal
+    /// keeps its code and its path, under `value`. `deferredOf` is this over a sentence-answering
+    /// reader; the query seam's typed result reader is this over `resultOf`.
+    let internal deferredDecoder (payload: Decoder<'T>) : Decoder<Deferred<'T>> =
+        dispatch
+            "unknown deferred kind: "
+            [ "pending", Decoder.succeed Pending
+              "ready", Decoder.field "value" payload |> Decoder.map Ready
+              "failed", Decoder.field "message" Decoder.str |> Decoder.map Failed ]
+
     /// Decode a `Deferred<'T>` from a `JVal`, using `decodeT` for a `ready` payload — `Result`-typed with
     /// a named error (the codec envelope discipline).
     let deferredOf (decodeT: JVal -> Result<'T, string>) (el: JVal) : Result<Deferred<'T>, string> =
@@ -1118,13 +1128,7 @@ module CapabilityCodec =
                 decodeT v
                 |> Result.mapError (fun m -> DecodeError.make DecodeCode.OutOfRange "a payload its reader accepts" m)
 
-        Decoder.describing
-            (dispatch
-                "unknown deferred kind: "
-                [ "pending", Decoder.succeed Pending
-                  "ready", Decoder.field "value" payload |> Decoder.map Ready
-                  "failed", Decoder.field "message" Decoder.str |> Decoder.map Failed ])
-            el
+        Decoder.describing (deferredDecoder payload) el
 
     /// Parse, then `deferredOf`; a refusal from `decodeT` is passed through as its own sentence.
     let decodeDeferred (decodeT: JVal -> Result<'T, string>) (s: string) : Result<Deferred<'T>, string> =

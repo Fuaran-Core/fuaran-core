@@ -1531,24 +1531,6 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
 // ---- the codecs ----
 
-let rec private jvalToModel (v: JVal) : ModelCap.jval =
-    match v with
-    | JStr s -> ModelCap.JStr s
-    | JInt i -> ModelCap.JInt(bigint i)
-    | JBool b -> ModelCap.JBool b
-    | JFloat f -> ModelCap.JFloat(f.ToString("R", inv))
-    | JArr xs -> ModelCap.JArr(List.map jvalToModel xs)
-    | JObj fs -> ModelCap.JObj(fs |> List.map (fun (k, x) -> k, jvalToModel x))
-
-let rec private jvalOfModel (v: ModelCap.jval) : JVal =
-    match v with
-    | ModelCap.JStr s -> JStr s
-    | ModelCap.JInt i -> JInt(int i)
-    | ModelCap.JBool b -> JBool b
-    | ModelCap.JFloat f -> JFloat(System.Double.Parse(f, inv))
-    | ModelCap.JArr xs -> JArr(List.map jvalOfModel xs)
-    | ModelCap.JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, jvalOfModel x))
-
 /// The one float read the codecs make — `float i`, as `Decoder.float` reads a `JInt`.
 let private codecReaders: ModelCap.codec_readers =
     { ModelCap.codec_readers.float_of_int = fun i -> (float (int i)).ToString("R", inv) }
@@ -1578,83 +1560,6 @@ let private modelDecodeErrRender (e: ModelCap.decode_error) : string =
              | ModelCap.Key k -> "k:" + k
              | ModelCap.Index n -> "i:" + string n)
          |> String.concat "/")
-
-/// Every path to a member or an item below a document, as child indexes.
-let rec private jsites (v: JVal) : int list list =
-    let kids =
-        match v with
-        | JArr xs -> xs
-        | JObj fs -> List.map snd fs
-        | _ -> []
-
-    kids
-    |> List.mapi (fun i k -> [ i ] :: (jsites k |> List.map (fun p -> i :: p)))
-    |> List.concat
-
-/// Rewrite the child at `path`: `f` is handed its key (for a member) and value, and answers the
-/// replacement, or `None` to drop it.
-let rec private jedit (path: int list) (f: string option * JVal -> (string option * JVal) option) (v: JVal) : JVal =
-    match path, v with
-    | [ i ], JArr xs ->
-        JArr(
-            xs
-            |> List.indexed
-            |> List.choose (fun (k, x) -> if k = i then f (None, x) |> Option.map snd else Some x)
-        )
-    | [ i ], JObj fs ->
-        JObj(
-            fs
-            |> List.indexed
-            |> List.choose (fun (k, (n, x)) ->
-                if k = i then
-                    f (Some n, x) |> Option.map (fun (n', x') -> defaultArg n' n, x')
-                else
-                    Some(n, x))
-        )
-    | i :: rest, JArr xs -> JArr(xs |> List.mapi (fun k x -> if k = i then jedit rest f x else x))
-    | i :: rest, JObj fs -> JObj(fs |> List.mapi (fun k (n, x) -> if k = i then n, jedit rest f x else n, x))
-    | _ -> v
-
-let private mutantStrings =
-    [ "capability"
-      "value"
-      "slot"
-      "clock"
-      "random+clock"
-      "intRange"
-      "stringLen"
-      "pure"
-      "fromNode"
-      "source" ]
-
-/// One mutation of a document: a member or item dropped, replaced by a value of another kind or by
-/// another string of the codec's vocabulary, a `"$type"` re-keyed `"kind"` (the descriptor
-/// spelling's discriminator), the root's members reversed, or a member the reader does not read
-/// added. The last two the lenient readers must read THROUGH.
-let private jmutate (v: JVal) (r: ConfRng.T) : JVal * ConfRng.T =
-    let sites = jsites v
-    let op, r1 = ConfRng.intBelow 9 r
-
-    match op, v with
-    | 7, JObj fs -> JObj(List.rev fs), r1
-    | 8, JObj fs -> JObj(fs @ [ "unread", JInt 1 ]), r1
-    | _ when List.isEmpty sites -> v, r1
-    | _ ->
-        let path, r2 = ConfRng.choose sites r1
-        let s, r3 = ConfRng.choose mutantStrings r2
-
-        let f (key: string option, x: JVal) : (string option * JVal) option =
-            match op with
-            | 0 -> None
-            | 1 -> Some(key, JInt 7)
-            | 2 -> Some(key, JStr "zz")
-            | 3 -> Some(key, JObj [])
-            | 4 -> Some((if key = Some "$type" then Some "kind" else key), x)
-            | 5 -> Some(key, JStr s)
-            | 6 -> Some(key, JBool true)
-            | _ -> Some(key, JArr [])
-
-        jedit path f v, r3
 
 type private CodecTally =
     { CoDiffs: string list
@@ -1930,6 +1835,267 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
       CoNodes = nodesCompared
       CoNodeDocuments = nodeDocuments
       CoCodes = codes }
+
+// ---- Phase 455 — the seam codec, whole: the invocation, the async envelope and the typed refusal ----
+
+let private modelCodeOf (c: ModelCap.decode_code) : DecodeCode =
+    match c with
+    | ModelCap.InvalidJson -> DecodeCode.InvalidJson
+    | ModelCap.MissingField -> DecodeCode.MissingField
+    | ModelCap.WrongKind -> DecodeCode.WrongKind
+    | ModelCap.UnknownTag -> DecodeCode.UnknownTag
+    | ModelCap.OutOfRange -> DecodeCode.OutOfRange
+    | ModelCap.UndeclaredMember -> DecodeCode.UndeclaredMember
+    | ModelCap.LimitExceeded -> DecodeCode.LimitExceeded
+    | ModelCap.NotAdmitted -> DecodeCode.NotAdmitted
+    | ModelCap.SchemaFault -> DecodeCode.SchemaFault
+
+let private faultToModel (f: DeclarationFault) : ModelCap.decl_fault =
+    match f with
+    | EmptySpace(a, s) -> ModelCap.EmptySpace(a, spaceToModel s)
+    | NonFiniteBound a -> ModelCap.NonFiniteBound a
+    | DuplicateHoleAddr a -> ModelCap.DuplicateHoleAddr a
+    | HoleUnderSlot n -> ModelCap.HoleUnderSlot n
+
+/// Production's twelve-case `InvokeError` as the model's `gated_error`.
+let private invokeErrorToModel (e: InvokeError) : ModelCap.gated_error =
+    match e with
+    | NoSuchCapability(id, known) -> ModelCap.GRefused(ModelCap.NoSuchCapability(id, known))
+    | DuplicateCapability id -> ModelCap.GRefused(ModelCap.DuplicateCapability id)
+    | UnknownArg(a, d) -> ModelCap.GRefused(ModelCap.UnknownArg(a, d))
+    | ArgOutOfSpace(a, s, g) -> ModelCap.GRefused(ModelCap.ArgOutOfSpace(a, spaceToModel s, g))
+    | RequiredArgsUnbound xs -> ModelCap.GRefused(ModelCap.RequiredArgsUnbound xs)
+    | UninvocableArg a -> ModelCap.GRefused(ModelCap.UninvocableArg a)
+    | BodyFailed r -> ModelCap.GRefused(ModelCap.BodyFailed r)
+    | NonTotalCapability(id, xs) -> ModelCap.GRefused(ModelCap.NonTotalCapability(id, xs))
+    | IllFormedCapability(id, f) -> ModelCap.GRefused(ModelCap.IllFormedCapability(id, faultToModel f))
+    | DuplicateArg a -> ModelCap.GRefused(ModelCap.DuplicateArg a)
+    | PolicyRefused(p, r, a) -> ModelCap.GPolicyRefused(p, r, a)
+    | ApprovalRequired p -> ModelCap.GApprovalRequired p
+
+let private seamNames = [ "a"; "b"; "c"; "p" ]
+
+let private genNames (r: ConfRng.T) : string list * ConfRng.T =
+    let n, r1 = ConfRng.intBelow 3 r
+    let mutable rr = r1
+
+    let xs =
+        [ for _ in 1..n do
+              let x, r2 = ConfRng.choose seamNames rr
+              rr <- r2
+              x ]
+
+    xs, rr
+
+let private genInvokeError (r: ConfRng.T) : InvokeError * ConfRng.T =
+    let k, r1 = ConfRng.intBelow 16 r
+    let s, r2 = ConfRng.choose seamNames r1
+    let xs, r3 = genNames r2
+    let sp, r4 = genSpace r3
+
+    let e =
+        match k with
+        | 0 -> NoSuchCapability(s, xs)
+        | 1 -> DuplicateCapability s
+        | 2 -> UnknownArg(s, xs)
+        | 3 -> ArgOutOfSpace(s, sp, "got")
+        | 4 -> RequiredArgsUnbound xs
+        | 5 -> UninvocableArg s
+        | 6 -> BodyFailed "boom"
+        | 7 -> NonTotalCapability(s, xs)
+        | 8 -> IllFormedCapability(s, EmptySpace(s, sp))
+        | 9 -> IllFormedCapability(s, NonFiniteBound s)
+        | 10 -> IllFormedCapability(s, DuplicateHoleAddr s)
+        | 11 -> IllFormedCapability(s, HoleUnderSlot s)
+        | 12 -> DuplicateArg s
+        | 13 -> PolicyRefused(s, "no", xs)
+        | _ -> ApprovalRequired s
+
+    e, r4
+
+type private SeamCodecTally =
+    { ScDiffs: string list
+      ScDocuments: int
+      ScInvocationRefused: int
+      ScRepeatRefused: int
+      ScErrorsEncoded: int
+      ScErrorsRefused: int
+      ScDeferred: int
+      ScDeferredRefused: int
+      ScCodes: Set<string> }
+
+/// Runs the model's invocation, envelope and refusal codecs beside production's: the encoding, the
+/// reading of each encoding and of mutations of it (acceptance, the value, and — where production
+/// answers a typed refusal — its code and path), and, on production, that every typed refusal
+/// RESOLVES in the document it read (`DecodeError.resolvesIn`, the theorem's statement). The model's
+/// invocation writer is a parameter so a go-red can hand it a writer that drops an argument.
+let private seamCodecDifferential
+    (invocationJson: string -> (string * string) list -> ModelCap.jval)
+    (seed: int)
+    (trials: int)
+    : SeamCodecTally =
+    let rng = ref (ConfRng.ofSeed seed)
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable documents = 0
+    let mutable invRefused = 0
+    let mutable repeatRefused = 0
+    let mutable errorsEncoded = 0
+    let mutable errorsRefused = 0
+    let mutable deferred = 0
+    let mutable deferredRefused = 0
+    let mutable codes = Set.empty
+
+    let mutations (j: JVal) =
+        let mutable out = [ j ]
+
+        for _ in 1..4 do
+            let m, r = jmutate j rng.Value
+            rng.Value <- r
+            out <- m :: out
+
+        out
+
+    for i in 1..trials do
+        // ---- the invocation: addresses drawn WITH replacement, so a repeat arises ----
+        let cid, r1 = ConfRng.choose [ "cap-a"; "cap-b" ] rng.Value
+        let n, r2 = ConfRng.intBelow 4 r1
+        rng.Value <- r2
+
+        let args =
+            [ for k in 1..n do
+                  let a, r = ConfRng.choose seamNames rng.Value
+                  rng.Value <- r
+                  a, sprintf "v%d" k ]
+
+        let text = CapabilityCodec.encodeInvocation cid args
+
+        match Json.parse text with
+        | Error e -> diffs.Add(sprintf "seed %d: the invocation did not parse: %A" i e)
+        | Ok j0 ->
+            // The encoding is compared as the canonical TEXT both write: `encodeInvocation` renders it.
+            if Canon.render (jvalOfModel (invocationJson cid args)) <> text then
+                diffs.Add(sprintf "seed %d: the invocation encodes differently: %s" i text)
+
+            for jm in mutations j0 do
+                documents <- documents + 1
+                // The document production reads is the text the mutation renders to, so the model
+                // reads exactly that document too.
+                let j =
+                    match Json.parse (Canon.render jm) with
+                    | Ok v -> v
+                    | Error _ -> jm
+
+                let p =
+                    CapabilityCodec.decodeInvocationDetailedWith ReadPolicy.Lenient (Canon.render j)
+
+                let m = ModelCap.invocation_of_j (jvalToModel j)
+
+                match p, m with
+                | Ok(pc, pa), ModelCap.Ok(mc, ma) when pc = mc && pa = ma -> ()
+                | Error pe, ModelCap.Error me when prodDecodeErrRender pe = modelDecodeErrRender me ->
+                    invRefused <- invRefused + 1
+                    codes <- codes.Add(string pe.Code)
+
+                    if jm = j0 then
+                        repeatRefused <- repeatRefused + 1
+
+                    if not (DecodeError.resolvesIn j pe) then
+                        diffs.Add(
+                            sprintf
+                                "seed %d: an invocation refusal does not resolve: %s in %s"
+                                i
+                                (prodDecodeErrRender pe)
+                                (Canon.render j)
+                        )
+                | _ ->
+                    diffs.Add(sprintf "seed %d: the invocation readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+
+        // ---- the typed refusal: every case, a value space and a declaration fault inside ----
+        let e, r3 = genInvokeError rng.Value
+        rng.Value <- r3
+        let ej = CapabilityCodec.invokeErrorJson e
+        errorsEncoded <- errorsEncoded + 1
+
+        if jvalToModel ej <> ModelCap.invoke_error_json (invokeErrorToModel e) then
+            diffs.Add(sprintf "seed %d: the invoke error encodes differently: %A" i e)
+
+        for j in mutations ej do
+            documents <- documents + 1
+
+            match CapabilityCodec.invokeErrorOf j, ModelCap.invoke_error_of_j codecReaders (jvalToModel j) with
+            | Ok pe, ModelCap.Ok me when invokeErrorToModel pe = me -> ()
+            | Error _, ModelCap.Error me ->
+                errorsRefused <- errorsRefused + 1
+                codes <- codes.Add(string (modelCodeOf me.d_code))
+            | p, m ->
+                diffs.Add(sprintf "seed %d: the invoke-error readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+
+        // ---- the async envelope, over a string payload ----
+        let k, r4 = ConfRng.intBelow 3 rng.Value
+        rng.Value <- r4
+
+        let d =
+            match k with
+            | 0 -> Pending
+            | 1 -> Ready(sprintf "x%d" i)
+            | _ -> Failed "late"
+
+        let md =
+            match d with
+            | Pending -> ModelCap.Pending
+            | Ready v -> ModelCap.Ready v
+            | Failed m -> ModelCap.Failed m
+
+        let dj = CapabilityCodec.deferredJson JStr d
+        deferred <- deferred + 1
+
+        let mEnc (s: string) = ModelCap.JStr s
+
+        if jvalToModel dj <> ModelCap.deferred_json mEnc md then
+            diffs.Add(sprintf "seed %d: the envelope encodes differently: %A" i d)
+
+        let pDec (v: JVal) : Result<string, string> =
+            match v with
+            | JStr s -> Ok s
+            | _ -> Error "not a string"
+
+        let mDec (v: ModelCap.jval) : ModelCap.outcome<string, string> =
+            match v with
+            | ModelCap.JStr s -> ModelCap.Ok s
+            | _ -> ModelCap.Error "not a string"
+
+        for j in mutations dj do
+            documents <- documents + 1
+
+            match CapabilityCodec.deferredOf pDec j, ModelCap.deferred_of_j mDec (jvalToModel j) with
+            | Ok Pending, ModelCap.Ok ModelCap.Pending -> ()
+            | Ok(Ready a), ModelCap.Ok(ModelCap.Ready b) when a = b -> ()
+            | Ok(Failed a), ModelCap.Ok(ModelCap.Failed b) when a = b -> ()
+            | Error _, ModelCap.Error me ->
+                deferredRefused <- deferredRefused + 1
+                codes <- codes.Add(string (modelCodeOf me.d_code))
+            | p, m -> diffs.Add(sprintf "seed %d: the envelope readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+
+    { ScDiffs = List.ofSeq diffs
+      ScDocuments = documents
+      ScInvocationRefused = invRefused
+      ScRepeatRefused = repeatRefused
+      ScErrorsEncoded = errorsEncoded
+      ScErrorsRefused = errorsRefused
+      ScDeferred = deferred
+      ScDeferredRefused = deferredRefused
+      ScCodes = codes }
+
+/// The go-red's writer: the model's invocation writer handed an argument list with its last
+/// argument DROPPED.
+let private droppingInvocationJson (cid: string) (args: (string * string) list) : ModelCap.jval =
+    let kept =
+        match List.rev args with
+        | _ :: rest -> List.rev rest
+        | [] -> []
+
+    ModelCap.invocation_json cid kept
+
 
 [<Tests>]
 let tests =
@@ -2531,4 +2697,50 @@ let tests =
 
               Expect.isTrue
                   (t.CoDiffs |> List.exists (fun d -> d.Contains "OutOfRange"))
-                  "and the disagreement is about the admission check on read, which is what the reader blinded" ]
+                  "and the disagreement is about the admission check on read, which is what the reader blinded"
+
+          // ---- Phase 455 — the seam codec, whole ----
+
+          testCase
+              "the seam-codec oracle agrees with CapabilityCodec's invocation, envelope and invoke-error codecs over generated values and mutated documents, and every typed refusal resolves"
+          <| fun _ ->
+              let t =
+                  underCulture "he-IL" (fun () -> seamCodecDifferential ModelCap.invocation_json 4550 300)
+
+              match t.ScDiffs with
+              | d :: _ -> failtestf "the seam-codec oracle and production DISAGREE\n%s" d
+              | [] ->
+                  Expect.isGreaterThan t.ScDocuments 3000 (sprintf "documents were read (%d)" t.ScDocuments)
+
+                  Expect.isGreaterThan
+                      t.ScRepeatRefused
+                      20
+                      (sprintf "a repeated address was refused on an UNMUTATED encoding (%d)" t.ScRepeatRefused)
+
+                  Expect.isGreaterThan
+                      t.ScInvocationRefused
+                      100
+                      (sprintf "invocations were refused (%d)" t.ScInvocationRefused)
+
+                  Expect.isGreaterThan
+                      t.ScErrorsRefused
+                      100
+                      (sprintf "invoke errors were refused (%d)" t.ScErrorsRefused)
+
+                  Expect.isGreaterThan
+                      t.ScDeferredRefused
+                      100
+                      (sprintf "envelopes were refused (%d)" t.ScDeferredRefused)
+
+                  for c in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange" ] do
+                      Expect.isTrue (t.ScCodes.Contains c) (sprintf "a %s refusal was compared (%A)" c t.ScCodes)
+
+          testCase
+              "a seam-codec oracle whose invocation writer DROPS an argument DISAGREES with CapabilityCodec — the measurement can fail"
+          <| fun _ ->
+              let t = seamCodecDifferential droppingInvocationJson 4551 100
+              Expect.isNonEmpty t.ScDiffs "a writer that drops an argument MUST disagree with production's"
+
+              Expect.isTrue
+                  (t.ScDiffs |> List.exists (fun d -> d.Contains "encodes differently"))
+                  "and the disagreement is about the encoding, which is what the writer dropped" ]

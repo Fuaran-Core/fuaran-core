@@ -227,9 +227,12 @@ module QueryCodec =
     /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it.
     let encodeDeferredResult (d: Deferred<QueryResult>) : string = Canon.render (deferredResultJson d)
 
-    let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, DecodeError> =
-        CapabilityCodec.deferredOf (fun e -> resultOf e |> Result.mapError DecodeError.describe) el
-        |> Result.mapError (fun m -> DecodeError.make DecodeCode.OutOfRange "a deferred query result" m)
+    // Phase 455: the envelope's TYPED reader over `resultOf`, so a refusal keeps its code and its
+    // path — a page's `pageNum` that is not an integer is `WrongKind` at `value.pageNum`, and a
+    // missing `$type` is `MissingField` at `$type`. Until 455 this went through the string reader
+    // and answered every refusal `OutOfRange` at the root, the path and the code both lost.
+    let internal deferredResultOf: Decoder<Deferred<QueryResult>> =
+        CapabilityCodec.deferredDecoder resultOf
 
     // ---- typed refusal (Phase 251) ----
     // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
