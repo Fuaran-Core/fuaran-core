@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D154: `dirtyFromOp` closes over the diff's seeds, so the dirty set an op induces is complete; the composition with incremental evaluation is proved for the structural evaluator class in the one-map shape, and the cross-map prior stays the domain's
+
+**Recorded by Phase 456. `src/Fuaran.Core.Propagation/Propagation.fs` (`seedsForOp`, `dirtyFromOp`,
+`changedForOp`), `proofs/PropagationOps.fst` sections 5–6, `proofs/Propagation.fst` (`agree_on`,
+`checks_on`, `evalfrom_agrees_on`), `proofs.json`, `proofs/coverage-exclusions.json`; rides the
+`0.38.0` draft (`docs/releases/0.38.0.md`, Breaking).**
+
+**D154.1 — the premise, checked, was half true.** The phase set out from "the proved engine stands
+on a dirty set nobody has proved is complete". The set `evalFrom` replays after a structural edit is
+`changedForOp`, and Phase 308 had modelled it and proved it complete (`changed_for_op_complete`). What
+was unproved and unmodelled was `dirtyFromOp`, the older convenience that computed a dirty set from an
+op by closing over `touchedBy` alone — and it was incomplete exactly as the shard predicted: a node the
+op touches no container of but whose DECLARED READS the edit moves (a node reading every leaf below
+it, a leaf inserted two levels down) reads nothing the op touched, is no dependent of anything
+touched, and was left clean while its value could differ. The differential now draws that class and
+was red on the old function both ways.
+
+**D154.2 — the fix is one function reusing another, and the set only grows.** `dirtyFromOp` closes
+over the seeds `changedForOp` has closed over since Phase 308 (D108's diff of the two trees, with
+`touchedBy`), computing the post-edit tree with `Ops.apply`; the seeds are one private `seedsForOp`,
+and `changedForOp` is `dirtyFromOp` restricted to the survivors (`changed_for_op_is_dirty_from_op`).
+An op `Ops.apply` refuses has no post-edit tree to diff, and the closure is over `touchedBy` there,
+as before. Every old member is still a seed, so no caller sees a smaller set; a caller pinning the
+exact set sees a larger one, which is the Breaking entry. Removing `dirtyFromOp` instead was
+considered and declined: it is the one dirty set that names the REMOVED ids too, which a domain
+reporting staleness wants and `changedForOp` deliberately drops. Operator ruling 2026-10-12 applied:
+the correct option over the avoidance of a behaviour change in a published package.
+
+**D154.3 — minimality is over the seeds, and says so.** `dirty_from_op_least` / `changed_for_op_least`
+bound the set by any closed superset of the seeds (`dirty_least` at the op). The seeds
+over-approximate the moved set by design — `touchedBy` and the content writes name a moved node's
+target whether or not its kind, children or reads differ (D108: never missing a reader) — so the
+theorem is not "every dirty node moved", and the row does not say it is.
+
+**D154.4 — the composition is proved in the one-map shape, and the cross-map step is named, not
+claimed.** `evalfrom_agrees_for_op` discharges both premises `evalfrom_agrees` took of a change set
+for the STRUCTURAL class (an evaluator that is a function of the node's kind, its child ids and the
+resolver, asking only its declared reads): `agree_on` from `changed_for_op_names_moved` read
+backwards, `checks_on` from the declaration being its own witness. Two things were decided on the
+way. First, `agree_off` / `touches_off` are NARROWED to the ids a walk visits (`agree_on`,
+`checks_on`; `evalfrom_agrees` is restated as `evalfrom_agrees_on` with the original a corollary),
+because `agree_off` quantifies over every id and no evaluator read off a tree the edit removed a node
+from can meet it at the removed id — the narrowing is what the induction ever used. Second, the
+theorem INHERITS `evalfrom_agrees`'s one-map shape: the prior is the old evaluator's values over the
+post-edit map and order. So it speaks for an edit after which every node's declared reads are where
+they were, and for an edit that MOVES the map the domain still owes a prior from `eval` over the new
+map — `propagation-change-set-and-prior`'s remaining clause, which the row now states as exactly that.
+Proving the cross-map case needs a theorem the model does not have, that a full evaluation's values do
+not depend on which certified order produced them (plus the evaluator's extensionality in its
+resolver, which the model's opaque evaluator does not carry); it is a phase of its own, not a clause
+to admit here.
+
+**D154.5 — the model stays checked, not extracted.** `propagation-ops-model-bridge` keeps its class
+and `unscheduled`; the differential samples `dirtyFromOp` beside `changedForOp`. Extracting
+`PropagationOps.fst` means an oracle file, its project registration and the `$proofOnly` roster —
+outside this phase's files — and the bridge row has stood on the differential since Phase 308.
+
 ## 2026-10-14 — D153: the seam codecs are proved over the decode layer's combinators, not rebuilt on the `Codec` blocks; the query seam's typed async-result reader reads through the envelope's typed reader, so its refusals keep their code and path
 
 **Recorded by Phase 455.** The phase set out to prove that `CapabilityCodec` and `QueryCodec` round

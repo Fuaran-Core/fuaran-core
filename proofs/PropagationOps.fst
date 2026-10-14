@@ -35,8 +35,24 @@
    or whose read now resolves differently — a removed read (named here), or a read whose value moved
    (reached by `evalFrom`'s own closure over the post-edit graph, `dirty_sound`).
 
+     - `dirty_from_op_complete` (Phase 456) — `Propagation.dirtyFromOp`, the unrestricted closure
+       over the same seeds (the post-edit tree computed by `apply`; `touchedBy` alone where `apply`
+       refuses), names every survivor the edit moved, every removed id and every pre-edit reader
+       of one; `changed_for_op_is_dirty_from_op`, the change set is its restriction to the
+       survivors; `dirty_from_op_least` / `changed_for_op_least`, both are the least closed set
+       over the seeds.
+     - `evalfrom_agrees_for_op` (Phase 456) — the composition with `Propagation.fst`'s
+       `evalfrom_agrees`: for the STRUCTURAL class of evaluator (section 6), both premises are
+       discharged and incremental evaluation from `changedForOp` over the post-edit map equals full
+       evaluation of the post-edit tree, in the one-map shape that theorem has.
+
    WHAT IS NOT CLAIMED. That an evaluator a domain runs is in that class: one that reads a node's
    whole subtree without declaring the reads is not, and is what declared reads are for. That the
+   seeds are exactly the moved set: `touched_by` and the content writes over-approximate it by
+   design, and minimality is stated over the seeds. That a prior from a walk over the PRE-edit map
+   carries across an edit that moves the map: the composition inherits `evalfrom_agrees`'s one-map
+   shape, and the step it would need — a full evaluation's values do not depend on which certified
+   order produced them — is stated nowhere here (section 6's header). That the
    content the domain's encoder distinguishes is the kind tag — the witness shows the core nothing
    else, and `Ops.apply` rewrites content nowhere but at an `UpdateNode` target or an inserted
    subtree, which the footprint names. That `post` is `apply`'s result for an op some OTHER engine
@@ -453,3 +469,216 @@ let changed_for_op_complete (rd:tree -> list string) (o:op) (pre post:tree) (x r
           (ensures P.mem x (changed_for_op rd pre post o)) =
   if moved rd pre post x then changed_for_op_names_moved rd o pre post x
   else changed_for_op_names_readers rd o pre post x r
+
+(* ======================================================================================
+   5. The dirty set of an op, unrestricted — `Propagation.dirtyFromOp` (Phase 456).
+
+      Until Phase 456 `dirtyFromOp` closed over `touchedBy` alone, and so left clean a node whose
+      declared reads the edit moved below it with no container of it touched (a node reading every
+      leaf under it, with a leaf inserted two levels down). It now closes over the same seeds as
+      `changedForOp`, computing the post-edit tree with `apply`, and `changedForOp` is its
+      restriction to the survivors. An op `apply` refuses has no post-edit tree to diff, and the
+      closure is over `touchedBy` there, as it was.
+   ====================================================================================== *)
+
+(* F#: `Propagation.dirtyFromOp`. *)
+let dirty_from_op (rd:tree -> list string) (pre:tree) (o:op) : Tot (list string) =
+  match apply o pre with
+  | Ok post -> P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post)
+  | Error _ -> P.dirty_from_changed_ids (deps_of rd pre) (touched_by pre o)
+
+(* THEOREM — changed_for_op_is_dirty_from_op. The change set is the dirty set restricted to the
+   ids the edit left standing. *)
+let changed_for_op_is_dirty_from_op (rd:tree -> list string) (o:op) (pre post:tree)
+  : Lemma (requires apply o pre == Ok post)
+          (ensures changed_for_op rd pre post o == filt (survives post) (dirty_from_op rd pre o)) = ()
+
+(* THEOREM — dirty_from_op_complete. For an op `apply` accepts on a well-formed tree, the dirty set
+   names every survivor the edit moved (new, or its content, child ids or declared reads differ),
+   every id the edit removed, and every pre-edit node that declared a read of a removed id —
+   survivor or not. *)
+let dirty_from_op_complete (rd:tree -> list string) (o:op) (pre post:tree) (x r:string)
+  : Lemma (requires wf pre /\ apply o pre == Ok post /\
+                    ((has_id x post /\ moved rd pre post x) \/
+                     (has_id x pre /\ not (has_id x post)) \/
+                     (has_id r pre /\ not (has_id r post) /\ P.edge (deps_of rd pre) x r)))
+          (ensures P.mem x (dirty_from_op rd pre o)) =
+  let s = seeds rd o pre post in
+  let d = P.dirty_from_changed_ids (deps_of rd pre) s in
+  if has_id x post && moved rd pre post x then begin
+    changed_for_op_names_moved rd o pre post x;
+    mem_bridge x (changed_for_op rd pre post o);
+    mem_filt (survives post) d x;
+    mem_bridge x d
+  end
+  else if has_id x pre && not (has_id x post) then begin
+    mem_filt (gone post) (ids pre) x;
+    mem_app x (removed pre post) (touched_by pre o);
+    mem_app x (local rd o pre post) (app (removed pre post) (touched_by pre o));
+    mem_bridge x s;
+    P.dirty_sound (deps_of rd pre) s x []
+  end
+  else begin
+    mem_filt (gone post) (ids pre) r;
+    mem_app r (removed pre post) (touched_by pre o);
+    mem_app r (local rd o pre post) (app (removed pre post) (touched_by pre o));
+    mem_bridge r s;
+    P.dirty_sound (deps_of rd pre) s r [x]
+  end
+
+(* THEOREM — dirty_from_op_least. The dirty set is the LEAST set closed under "reads" over the
+   pre-edit graph that holds the seeds: nothing is dirty that the seeds and the declared reads do
+   not reach. The seeds themselves over-approximate what moved — `touchedBy` and the content
+   writes name a moved node's target whether or not its content, children or reads differ — so
+   this is minimality over the seeds, not over the moved set, and is stated so. *)
+let dirty_from_op_least (rd:tree -> list string) (o:op) (pre post:tree) (s:list string)
+  : Lemma (requires apply o pre == Ok post /\ P.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
+          (ensures P.subset (dirty_from_op rd pre o) s) =
+  P.dirty_least (deps_of rd pre) (seeds rd o pre post) s
+
+(* THEOREM — changed_for_op_least. The same bound for the change set. *)
+let changed_for_op_least (rd:tree -> list string) (o:op) (pre post:tree) (s:list string)
+  : Lemma (requires apply o pre == Ok post /\ P.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
+          (ensures P.subset (changed_for_op rd pre post o) s) =
+  let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
+  P.dirty_least (deps_of rd pre) (seeds rd o pre post) s;
+  let aux (y:string) : Lemma (P.mem y (changed_for_op rd pre post o) ==> P.mem y s) =
+    mem_bridge y (changed_for_op rd pre post o);
+    mem_filt (survives post) d y;
+    mem_bridge y d;
+    if P.mem y d then P.subset_mem d s y else ()
+  in
+  FStar.Classical.forall_intro aux;
+  P.subset_intro (changed_for_op rd pre post o) s
+
+(* ======================================================================================
+   6. The composition with incremental evaluation (Phase 456).
+
+      `Propagation.fst`'s `evalfrom_agrees` takes the change set as a PREMISE: off it the old and
+      new evaluators agree (`agree_off`) and read alike (`touches_off`). For the class of evaluator
+      the change set is complete for — a function of a node's own content, its child ids and the
+      resolver it is handed, asking only its declared reads — both are DISCHARGED here, so the
+      theorem composes with `changed_for_op_complete` and no change-set premise remains.
+
+      The class is `structural g t`: `g` sees the node's kind, its child ids and the resolver; the
+      node is read off the tree `t`; an id `t` does not hold answers `Error`. Its read witness is the
+      map's own declaration, `declared rd t`.
+
+      What the composed theorem inherits from `evalfrom_agrees` is its ONE-MAP shape: the old
+      evaluation whose values the prior holds is over the SAME dependency map and order as the new
+      one, so the theorem speaks for an edit after which every node's declared reads are where they
+      were — a content rewrite, a reorder, a move that reads nothing new — and for the prior
+      `propagation-change-set-and-prior`'s second clause names. An edit that MOVES the map (a node
+      inserted or removed, a declared read added) has its change set proved complete and its
+      agreement premise discharged all the same, but the prior a domain actually holds came from a
+      walk over the OLD map in the OLD order, and carrying that prior across needs what no theorem
+      here states: that a full evaluation's values do not depend on which certified order produced
+      them. That is the open step, and it is named in `proofs.json`.
+   ====================================================================================== *)
+
+(* An evaluator in the class: a function of the kind, the child ids and the resolver. *)
+type node_eval (v:Type) = string -> list string -> (string -> option v) -> P.outcome v string
+
+(* The class's evaluator, read off a tree. *)
+let structural (#v:Type) (g:node_eval v) (t:tree) (f:string -> option v) (x:string) : Tot (P.outcome v string) =
+  match find_in x t with
+  | Some n -> g (kind_of n) (kid_ids (kids_of n)) f
+  | None -> P.Error "absent"
+
+(* The class's read witness: exactly the reads the map declares at the node. *)
+let declared (rd:tree -> list string) (t:tree) (x:string) : Tot (list string) = P.reads_of (deps_of rd t) x
+
+(* ---- the map holds every id of the tree ---- *)
+
+let rec has_key_app (#a:Type) (x:string) (l m:list (string & a))
+  : Lemma (ensures P.has_key x (app l m) == (P.has_key x l || P.has_key x m)) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> has_key_app x t m
+
+let rec deps_of_list_app (rd:tree -> list string) (l m:list tree)
+  : Lemma (ensures deps_of_list rd (app l m) == app (deps_of_list rd l) (deps_of_list rd m)) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> deps_of_list_app rd t m
+
+let rec deps_of_key (rd:tree -> list string) (t:tree) (x:string)
+  : Lemma (requires has_id x t) (ensures P.has_key x (deps_of rd t)) (decreases t) =
+  match t with
+  | TNode i _ cs -> if i = x then () else deps_of_key_all rd cs x
+and deps_of_key_all (rd:tree -> list string) (ts:list tree) (x:string)
+  : Lemma (requires mem x (ids_all ts)) (ensures P.has_key x (deps_of_list rd (nodes_all ts))) (decreases ts) =
+  match ts with
+  | [] -> ()
+  | t :: r ->
+    mem_app x (ids t) (ids_all r);
+    deps_of_list_app rd (nodes t) (nodes_all r);
+    has_key_app x (deps_of_list rd (nodes t)) (deps_of_list rd (nodes_all r));
+    if mem x (ids t) then deps_of_key rd t x else deps_of_key_all rd r x
+
+(* ---- the two premises, discharged for the class ---- *)
+
+(* Off the change set, at a survivor, the class's evaluator is the same function before and after
+   the edit: the node's kind and child ids did not move (`changed_for_op_names_moved`, read
+   backwards), and the evaluator sees nothing else of the tree. *)
+let structural_off (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
+                   (x:string) (f:string -> option v)
+  : Lemma (requires wf pre /\ apply o pre == Ok post /\ has_id x post /\
+                    not (P.mem x (changed_for_op rd pre post o)))
+          (ensures structural g post f x == structural g pre f x) =
+  find_in_some_iff x post;
+  if moved rd pre post x then changed_for_op_names_moved rd o pre post x else ()
+
+let structural_agree_on (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
+                        (ids:list string)
+  : Lemma (requires wf pre /\ apply o pre == Ok post /\ (forall (x:string). P.mem x ids ==> has_id x post))
+          (ensures P.agree_on (structural g pre) (structural g post) (changed_for_op rd pre post o) ids) =
+  let c = changed_for_op rd pre post o in
+  let aux (f:string -> option v) (x:string)
+    : Lemma (P.mem x ids /\ not (P.mem x c) ==> structural g post f x == structural g pre f x) =
+    if P.mem x ids && not (P.mem x c) then structural_off g rd o pre post x f else ()
+  in
+  FStar.Classical.forall_intro_2 aux
+
+(* The declared witness lists only declared reads, so its check passes everywhere. *)
+let declared_checks_on (rd:tree -> list string) (pre post:tree) (changed ids:list string)
+  : Lemma (ensures P.checks_on (deps_of rd post) (declared rd pre) (declared rd post) changed ids) =
+  let aux (x:string) : Lemma (None? (P.first_undeclared (deps_of rd post) x (declared rd post x))) =
+    P.subset_intro (declared rd post x) (P.reads_of (deps_of rd post) x);
+    P.first_undeclared_of_declared (deps_of rd post) x (declared rd post x)
+  in
+  FStar.Classical.forall_intro aux
+
+(* The change set holds only ids the post-edit map holds, so `evalFrom` refuses none of it. *)
+let changed_for_op_known (rd:tree -> list string) (o:op) (pre post:tree)
+  : Lemma (requires apply o pre == Ok post)
+          (ensures Nil? (P.unknown_of (deps_of rd post) (changed_for_op rd pre post o))) =
+  let c = changed_for_op rd pre post o in
+  let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
+  let aux (y:string) : Lemma (P.mem y c ==> P.has_key y (deps_of rd post)) =
+    mem_bridge y c;
+    mem_filt (survives post) d y;
+    if mem y c then deps_of_key rd post y else ()
+  in
+  FStar.Classical.forall_intro aux;
+  P.unknown_of_nil (deps_of rd post) c
+
+(* THEOREM — evalfrom_agrees_for_op. For an evaluator in the class, incremental evaluation from
+   `changedForOp` over the post-edit map equals full evaluation of the post-edit tree, with no
+   premise about the change set: the prior is the old evaluator's values over that map and order,
+   or fewer of them (the one-map shape the section header names). *)
+let evalfrom_agrees_for_op (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
+                           (topo:P.topo_result) (out0:P.eval_outcome v) (prior:list (string & v))
+  : Lemma (requires wf pre /\ apply o pre == Ok post /\
+                    (forall (x:string). P.mem x topo.order ==> has_id x post) /\ P.distinct topo.order /\
+                    P.eval (structural g pre) (declared rd pre) (deps_of rd post) topo == P.Ok out0 /\
+                    P.prior_of prior out0.values)
+          (ensures P.eval_from (structural g post) (declared rd post) prior (changed_for_op rd pre post o)
+                               (deps_of rd post) topo
+                   == P.eval (structural g post) (declared rd post) (deps_of rd post) topo) =
+  let c = changed_for_op rd pre post o in
+  structural_agree_on g rd o pre post topo.order;
+  declared_checks_on rd pre post c topo.order;
+  changed_for_op_known rd o pre post;
+  P.evalfrom_agrees_on (structural g pre) (structural g post) (declared rd pre) (declared rd post)
+                       (deps_of rd post) c topo out0 prior

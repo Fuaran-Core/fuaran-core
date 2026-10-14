@@ -754,6 +754,58 @@ let agree_off_elim (#v:Type) (ev0 ev1:evaluator v) (changed:list string) (f:stri
 let touches_off_elim (t0 t1:read_witness) (changed:list string) (id:string)
   : Lemma (requires touches_off t0 t1 changed /\ not (mem id changed)) (ensures t1 id == t0 id) = ()
 
+(* The same two premises NARROWED to the ids a walk visits (Phase 456). `agree_off` quantifies over
+   every id, and so cannot be met by an evaluator read off a tree the edit REMOVED a node from: at
+   the removed id the old evaluator answers and the new one does not. The walk only ever asks at the
+   ids of its order, so that is all the induction needs — `agree_on … order`. And the read premise is
+   needed only for what the walk DOES with the witness: at a clean node the old walk's declared-reads
+   check passed, and the new walk's must too. `checks_on` says exactly that, and a witness that is the
+   map's own declaration meets it outright (`first_undeclared_of_declared`), whatever order the old
+   witness listed the same reads in. `touches_off` implies it. *)
+let agree_on (#v:Type) (ev0 ev1:evaluator v) (changed ids:list string) : Tot prop =
+  forall (f:string -> option v) (id:string). mem id ids /\ not (mem id changed) ==> ev1 f id == ev0 f id
+
+let checks_on (deps:dmap) (t0 t1:read_witness) (changed ids:list string) : Tot prop =
+  forall (id:string). mem id ids /\ not (mem id changed) /\ None? (first_undeclared deps id (t0 id))
+                      ==> None? (first_undeclared deps id (t1 id))
+
+let agree_off_on (#v:Type) (ev0 ev1:evaluator v) (changed ids:list string)
+  : Lemma (requires agree_off ev0 ev1 changed) (ensures agree_on ev0 ev1 changed ids) = ()
+
+let touches_off_checks (deps:dmap) (t0 t1:read_witness) (changed ids:list string)
+  : Lemma (requires touches_off t0 t1 changed) (ensures checks_on deps t0 t1 changed ids) = ()
+
+let agree_on_elim (#v:Type) (ev0 ev1:evaluator v) (changed ids:list string) (f:string -> option v) (id:string)
+  : Lemma (requires agree_on ev0 ev1 changed ids /\ mem id ids /\ not (mem id changed))
+          (ensures ev1 f id == ev0 f id) = ()
+
+let checks_on_elim (deps:dmap) (t0 t1:read_witness) (changed ids:list string) (id:string)
+  : Lemma (requires checks_on deps t0 t1 changed ids /\ mem id ids /\ not (mem id changed) /\
+                    None? (first_undeclared deps id (t0 id)))
+          (ensures None? (first_undeclared deps id (t1 id))) = ()
+
+let agree_on_tail (#v:Type) (ev0 ev1:evaluator v) (changed:list string) (id:string) (ids:list string)
+  : Lemma (requires agree_on ev0 ev1 changed (id :: ids)) (ensures agree_on ev0 ev1 changed ids) = ()
+
+let checks_on_tail (deps:dmap) (t0 t1:read_witness) (changed:list string) (id:string) (ids:list string)
+  : Lemma (requires checks_on deps t0 t1 changed (id :: ids)) (ensures checks_on deps t0 t1 changed ids) = ()
+
+(* A witness that lists only declared reads passes the check, in whatever order it lists them. *)
+let rec first_undeclared_of_declared (deps:dmap) (id:string) (touched:list string)
+  : Lemma (requires subset touched (reads_of deps id)) (ensures None? (first_undeclared deps id touched))
+          (decreases touched) =
+  match touched with
+  | [] -> ()
+  | k :: t -> first_undeclared_of_declared deps id t
+
+(* A change set every member of which the map holds is refused nowhere. *)
+let rec unknown_of_nil (deps:dmap) (changed:list string)
+  : Lemma (requires (forall (c:string). mem c changed ==> has_key c deps)) (ensures Nil? (unknown_of deps changed))
+          (decreases changed) =
+  match changed with
+  | [] -> ()
+  | _ :: t -> unknown_of_nil deps t
+
 (* ======================================================================================
    5. The agreement theorem.
    ====================================================================================== *)
@@ -801,7 +853,8 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
                  (changed dirty:list string)
                  (cycles:list (list string)) (out0:eval_outcome v) (prior:list (string & v))
                  (r0 r1:list (string & v)) (rest:list string)
-  : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\ prior_of prior out0.values /\
+  : Lemma (requires agree_on ev0 ev1 changed rest /\ checks_on deps t0 t1 changed rest /\
+                    prior_of prior out0.values /\
                     subset changed dirty /\ closed deps dirty /\ distinct rest /\
                     (forall (k:string). not (mem k dirty) ==> assoc k r0 == assoc k r1) /\
                     go ev0 t0 deps always [] cycles r0 rest == Ok out0)
@@ -811,6 +864,8 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
   match rest with
   | [] -> ()
   | id :: t ->
+    agree_on_tail ev0 ev1 changed id t;
+    checks_on_tail deps t0 t1 changed id t;
     (* The OLD full walk recomputed `id` and returned `Ok`, so its own declared-reads check passed
        there; a `Some` here contradicts the hypothesis. *)
     (match first_undeclared deps id (t0 id) with
@@ -824,7 +879,7 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
             ()
           else begin
             (if mem id changed then subset_mem changed dirty id else ());
-            touches_off_elim t0 t1 changed id
+            checks_on_elim deps t0 t1 changed (id :: t) id
           end
         | None ->
           (match ev0 (resolve_in (lookups (reads_of deps id) r0)) id with
@@ -841,7 +896,7 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
                clean_reads deps dirty id r0 r1;
                resolver_eq ev1 deps id r1 r0;
                (if mem id changed then subset_mem changed dirty id else ());
-               agree_off_elim ev0 ev1 changed (resolve_in (lookups (reads_of deps id) r0)) id;
+               agree_on_elim ev0 ev1 changed (id :: t) (resolve_in (lookups (reads_of deps id) r0)) id;
                go_agree ev0 ev1 t0 t1 deps changed dirty cycles out0 prior
                         ((id, v0) :: r0) ((id, v0) :: r1) t
              end)))
@@ -851,6 +906,18 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
    failing evaluator the same `EvalNodeFailed` at the same node. `out0` is what the OLD full
    evaluation returned over the same order, `prior` its values or fewer (`prior_of`), and `ev1`
    the evaluator after the change. `evalfrom_agrees_exact` is the reading with no hole. *)
+let evalfrom_agrees_on (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
+                       (changed:list string)
+                       (topo:topo_result) (out0:eval_outcome v) (prior:list (string & v))
+  : Lemma (requires agree_on ev0 ev1 changed topo.order /\ checks_on deps t0 t1 changed topo.order /\
+                    distinct topo.order /\
+                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
+                    prior_of prior out0.values)
+          (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
+  dirty_closed deps changed;
+  go_agree ev0 ev1 t0 t1 deps changed (dirty_from_changed_ids deps changed) topo.cycles out0 prior
+           [] [] topo.order
+
 let evalfrom_agrees (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
                     (changed:list string)
                     (topo:topo_result) (out0:eval_outcome v) (prior:list (string & v))
@@ -858,9 +925,9 @@ let evalfrom_agrees (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:d
                     Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
                     prior_of prior out0.values)
           (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
-  dirty_closed deps changed;
-  go_agree ev0 ev1 t0 t1 deps changed (dirty_from_changed_ids deps changed) topo.cycles out0 prior
-           [] [] topo.order
+  agree_off_on ev0 ev1 changed topo.order;
+  touches_off_checks deps t0 t1 changed topo.order;
+  evalfrom_agrees_on ev0 ev1 t0 t1 deps changed topo out0 prior
 
 let evalfrom_agrees_exact (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
                           (changed:list string) (topo:topo_result) (out0:eval_outcome v)

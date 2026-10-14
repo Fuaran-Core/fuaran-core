@@ -296,40 +296,9 @@ module Propagation =
         // which touched the parent as well and moved the node to the end of its siblings.
         | UpdateNode node -> Set.singleton (s (w.Id node))
 
-    /// The dirty set induced by a structural `SkeletonOp`: `touchedBy` ∪ their transitive dependents. The
-    /// dependency map is computed over the **pre-edit** `root` so a removed node's now-dangling dependents are
-    /// captured (they still reference the removed id in the pre-edit graph). Convenience over the two
-    /// primitives.
-    let dirtyFromOp
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (root: 'Node)
-        (readsOf: 'Node -> 'Id seq)
-        (op: SkeletonOp<'Node, 'Id>)
-        : Set<string> =
-        let deps = dependencyMap w idw readsOf root
-        dirtyFromChangedIds deps (touchedBy w idw root op)
-
-    /// The change set to hand `evalFrom` over the POST-edit graph after a structural `SkeletonOp`
-    /// (Phase 250): a dirty closure over the PRE-edit tree's dependency graph, restricted to the ids
-    /// the post-edit tree still holds — seeded since Phase 308 from the diff of the two trees (below),
-    /// where it was seeded from `touchedBy` alone.
-    ///
-    /// Both halves are load-bearing, and each is the obvious thing to get wrong. The dirty set must
-    /// be computed over `pre`, because a removed node's dependents are reachable from it only in the
-    /// graph that still holds it — over `post` they no longer read anything that exists, and a change
-    /// set built there leaves them stale. And the removed ids must then be dropped, because `evalFrom`
-    /// over the post-edit dependency map refuses an id that map does not hold (`EvalUnknownChange`,
-    /// the proved `evalfrom_unknown_refused`) — which is the refusal that catches a domain's
-    /// mistyped change set, and so is kept rather than relaxed. Restricting `touchedBy` to the
-    /// surviving ids instead is accepted by `evalFrom` and is WRONG: it loses exactly the dependents
-    /// of a removed node.
-    ///
-    /// The result names every surviving node whose value the edit can move, so it is an honest
-    /// `changed` for `evalFrom`: over-approximating (a closure handed in as a change set closes to
-    /// itself), never missing a reader. `post` must be the tree `op` produced from `pre`.
-    ///
-    /// **Derived from the DIFF of `pre` and `post` (Phase 308, DECISIONS D108).** The seeds are
+    /// The seeds of a structural edit's dirty closure — what `dirtyFromOp` and `changedForOp` both close
+    /// over the PRE-edit graph. **Derived from the DIFF of `pre` and `post` (Phase 308, DECISIONS
+    /// D108); shared by both since Phase 456.** The seeds are
     ///
     ///   - every id of `post` that `pre` does not hold (inserted);
     ///   - every id of `post` whose CHILD LIST (the ids `w.Children` reports, in order) differs from its
@@ -341,20 +310,13 @@ module Propagation =
     ///     `UpdateNode` target, a removed or moved target), which is how a node's own content can
     ///     differ — the witness has no content accessor, and `Ops.apply` rewrites content nowhere else;
     ///   - every id `pre` holds and `post` does not (removed), so that the closure reaches its readers;
-    ///   - and `touchedBy` over `pre`, so the set never shrinks below what it was;
+    ///   - and `touchedBy` over `pre`, so the set never shrinks below what it was.
     ///
-    /// closed over the PRE-edit dependency graph and restricted to the survivors. A `Batch` needs no
-    /// special case: the diff compares the two ends, so every intermediate tree is accounted for by
-    /// what it left behind — a node a batch moves under a parent it then removes is simply absent from
-    /// `post`, and its readers are reached through it.
-    ///
-    /// The completeness this buys is a theorem (`changed_for_op_complete`, `proofs/PropagationOps.fst`):
-    /// for an op `Ops.apply` accepts, every survivor whose content, child list or reads differ, and every
-    /// survivor that reads a removed id, is named. So `agree_off` / `touches_off` hold for any evaluator
-    /// that is a function of a node's own content, its child ids and its resolved declared reads — an
-    /// evaluator that reads a node's whole SUBTREE without declaring it is outside that class, and is
-    /// what declared reads are for.
-    let changedForOp
+    /// A `Batch` needs no special case: the diff compares the two ends, so every intermediate tree is
+    /// accounted for by what it left behind — a node a batch moves under a parent it then removes is
+    /// simply absent from `post`, and its readers are reached through it. `post` must be the tree `op`
+    /// produced from `pre`. `seeds` in `proofs/PropagationOps.fst`.
+    let private seedsForOp
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (readsOf: 'Node -> 'Id seq)
@@ -392,11 +354,78 @@ module Propagation =
             |> List.map fst
             |> List.filter (fun k -> not (Map.containsKey k after))
 
-        let seeds = Set.unionMany [ local; Set.ofList removed; touchedBy w idw pre op ]
+        Set.unionMany [ local; Set.ofList removed; touchedBy w idw pre op ]
 
+    /// The dirty set induced by a structural `SkeletonOp` over the PRE-edit tree: every id whose value
+    /// the edit can move, the ids the edit removes included — the seeds above, closed over `root`'s
+    /// dependency graph (`dirtyFromChangedIds`). The map is computed over the **pre-edit** `root` so a
+    /// removed node's now-dangling dependents are captured (they still reference the removed id in the
+    /// pre-edit graph).
+    ///
+    /// **Seeded from the diff since Phase 456.** Until then it closed over `touchedBy` alone, and so
+    /// missed a node the op touches no container of but whose DECLARED READS the edit moved — a node
+    /// whose reads are derived from its subtree, with something inserted or moved two levels below it:
+    /// its value can differ, it reads nothing the op touched, and it was left clean. The seeds name it
+    /// (its read set differs between the two trees), as they have for `changedForOp` since Phase 308;
+    /// this function now closes over the same seeds, computing the post-edit tree with `Ops.apply`. An
+    /// op `Ops.apply` refuses has no post-edit tree to diff, and the closure is over `touchedBy` alone
+    /// there, as before. `changedForOp` is exactly this set restricted to the survivors.
+    ///
+    /// The completeness is a theorem (`dirty_from_op_complete`, `proofs/PropagationOps.fst`): for an op
+    /// `Ops.apply` accepts on a well-formed tree, every survivor whose content, child list or reads
+    /// differ, every removed id, and every id that reads a removed id, is named; and the set is the
+    /// LEAST closed set over the seeds (`dirty_from_op_least`).
+    let dirtyFromOp
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (root: 'Node)
+        (readsOf: 'Node -> 'Id seq)
+        (op: SkeletonOp<'Node, 'Id>)
+        : Set<string> =
+        let seeds =
+            match Ops.apply w idw op root with
+            | Ok post -> seedsForOp w idw readsOf root post op
+            | Error _ -> touchedBy w idw root op
+
+        dirtyFromChangedIds (dependencyMap w idw readsOf root) seeds
+
+    /// The change set to hand `evalFrom` over the POST-edit graph after a structural `SkeletonOp`
+    /// (Phase 250): `dirtyFromOp`'s closure over the PRE-edit tree's dependency graph — the seeds read
+    /// off the diff of the two trees (`seedsForOp`, Phase 308) — restricted to the ids the post-edit
+    /// tree still holds.
+    ///
+    /// Both halves are load-bearing, and each is the obvious thing to get wrong. The dirty set must
+    /// be computed over `pre`, because a removed node's dependents are reachable from it only in the
+    /// graph that still holds it — over `post` they no longer read anything that exists, and a change
+    /// set built there leaves them stale. And the removed ids must then be dropped, because `evalFrom`
+    /// over the post-edit dependency map refuses an id that map does not hold (`EvalUnknownChange`,
+    /// the proved `evalfrom_unknown_refused`) — which is the refusal that catches a domain's
+    /// mistyped change set, and so is kept rather than relaxed. Restricting `touchedBy` to the
+    /// surviving ids instead is accepted by `evalFrom` and is WRONG: it loses exactly the dependents
+    /// of a removed node.
+    ///
+    /// The result names every surviving node whose value the edit can move, so it is an honest
+    /// `changed` for `evalFrom`: over-approximating (a closure handed in as a change set closes to
+    /// itself), never missing a reader. `post` must be the tree `op` produced from `pre`.
+    ///
+    /// The completeness this buys is a theorem (`changed_for_op_complete`, `proofs/PropagationOps.fst`):
+    /// for an op `Ops.apply` accepts, every survivor whose content, child list or reads differ, and every
+    /// survivor that reads a removed id, is named. So `agree_off` / `touches_off` hold for any evaluator
+    /// that is a function of a node's own content, its child ids and its resolved declared reads — an
+    /// evaluator that reads a node's whole SUBTREE without declaring it is outside that class, and is
+    /// what declared reads are for. Over an op that leaves every node's declared reads where they were,
+    /// the composition with incremental evaluation is itself a theorem (`evalfrom_agrees_for_op`).
+    let changedForOp
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (readsOf: 'Node -> 'Id seq)
+        (pre: 'Node)
+        (post: 'Node)
+        (op: SkeletonOp<'Node, 'Id>)
+        : Set<string> =
+        let survivors = Tree.ids w post |> List.map idw.ToString |> Set.ofList
         let deps = dependencyMap w idw readsOf pre
-        let survivors = after |> Map.toList |> List.map fst |> Set.ofList
-        Set.intersect (dirtyFromChangedIds deps seeds) survivors
+        Set.intersect (dirtyFromChangedIds deps (seedsForOp w idw readsOf pre post op)) survivors
 
     // ---- column-granular reads (Phase 250) ----
     // A read of a node may name the PARTS of that node's value it depends on — the columns of a table,

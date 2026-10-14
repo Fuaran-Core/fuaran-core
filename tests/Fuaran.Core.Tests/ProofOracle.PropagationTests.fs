@@ -955,7 +955,65 @@ let tests =
               Expect.isGreaterThan handedPrior 50 "and a recomputed node was handed its prior, so the prior path ran"
 
           testCase
-              "changedForOp names every survivor the edit moved and every reader of a removed id, over every op kind with nested Batch — `changed_for_op_complete`"
+              "dirtyFromOp names a node whose declared reads the edit moved two levels below it — the node touchedBy does not reach (Phase 456)"
+          <| fun _ ->
+              // The counter-example Phase 456 fixed. A `sum` node reads every LEAF below it; an insert
+              // two levels down moves its declared reads although no container of it is touched and
+              // it reads nothing the op touched (the grown container is not a leaf). Seeded from
+              // `touchedBy` alone, `dirtyFromOp` left it clean; seeded from the diff it names it, as
+              // `changedForOp` has since Phase 308. Red with the seeds cut back to `touchedBy`.
+              let subtreeReads (n: RNode) : string seq =
+                  if n.Kind = "sum" then
+                      Tree.preorder nodew n
+                      |> List.tail
+                      |> List.filter (fun d -> List.isEmpty d.Children)
+                      |> List.map _.Id
+                      |> Seq.ofList
+                  else
+                      Seq.empty
+
+              let pre =
+                  RNode.node
+                      "root"
+                      "section"
+                      [ RNode.node "s" "sum" [ RNode.node "c" "section" [ RNode.leaf "a" "para" "" ] ] ]
+
+              let op = InsertChild("c", RNode.leaf "z" "para" "")
+
+              let touched = Propagation.touchedBy nodew idw pre op
+              Expect.isFalse (Set.contains "s" touched) "touchedBy does not reach s"
+
+              Expect.isFalse
+                  (Set.contains
+                      "s"
+                      (Propagation.dirtyFromChangedIds (Propagation.dependencyMap nodew idw subtreeReads pre) touched))
+                  "nor does its closure: s reads the leaf a, and the op touches c and z"
+
+              let dirty = Propagation.dirtyFromOp nodew idw pre subtreeReads op
+              Expect.isTrue (Set.contains "s" dirty) "dirtyFromOp names s, whose declared reads moved"
+
+              match Ops.apply nodew idw op pre with
+              | Error e -> failtestf "%A" e
+              | Ok post ->
+                  Expect.equal
+                      (Propagation.changedForOp nodew idw subtreeReads pre post op)
+                      dirty
+                      "nothing was removed, so the change set is the whole dirty set"
+
+              // An op `Ops.apply` refuses has no post-edit tree to diff: the closure is over `touchedBy`.
+              let refused = MoveNode("root", "c")
+
+              Expect.isError (Ops.apply nodew idw refused pre) "moving the root under its own descendant is refused"
+
+              Expect.equal
+                  (Propagation.dirtyFromOp nodew idw pre subtreeReads refused)
+                  (Propagation.dirtyFromChangedIds
+                      (Propagation.dependencyMap nodew idw subtreeReads pre)
+                      (Propagation.touchedBy nodew idw pre refused))
+                  "a refused op closes over touchedBy alone"
+
+          testCase
+              "changedForOp and dirtyFromOp name every survivor the edit moved and every reader of a removed id — dirtyFromOp the removed ids too, and changedForOp is its restriction to the survivors — over every op kind with nested Batch — `changed_for_op_complete`, `dirty_from_op_complete`"
           <| fun _ ->
               // The theorem's statement, checked of PRODUCTION over generated trees and ops: the set
               // `changed_for_op_complete` says the change set contains is computed here directly from
@@ -966,6 +1024,7 @@ let tests =
               let mutable diffs = []
               let mutable accepted = 0
               let mutable readerOfRemoved = 0
+              let mutable readsMovedUnreached = 0
               let mutable nestedBatch = 0
               let kinds = System.Collections.Generic.HashSet<string>()
 
@@ -974,8 +1033,23 @@ let tests =
                   rng <- r'
                   v
 
+              // A `sum` node reads every leaf below it as well as its own value: the class of node
+              // whose declared reads an edit below it moves, which `touchedBy` cannot reach (Phase 456).
               let reads (n: RNode) : string seq =
-                  if n.Value = "" then Seq.empty else Seq.singleton n.Value
+                  let own = if n.Value = "" then [] else [ n.Value ]
+
+                  let below =
+                      if n.Kind = "sum" then
+                          Tree.preorder nodew n
+                          |> List.tail
+                          |> List.filter (fun d -> List.isEmpty d.Children)
+                          |> List.map _.Id
+                      else
+                          []
+
+                  Seq.ofList (own @ below)
+
+              let readSet (n: RNode) = reads n |> Set.ofSeq
 
               let readValue () =
                   match draw 3 with
@@ -992,7 +1066,13 @@ let tests =
                                 if (j - 1) / 2 = i then
                                     yield build j ]
 
-                      { RNode.node (sprintf "n%d" i) (if draw 2 = 0 then "section" else "para") kids with
+                      let kind =
+                          match draw 3 with
+                          | 0 -> "section"
+                          | 1 -> "para"
+                          | _ -> "sum"
+
+                      { RNode.node (sprintf "n%d" i) kind kids with
                           Value = readValue () }
 
                   build 0
@@ -1055,11 +1135,7 @@ let tests =
                   | Some n ->
                       let own = n.Kind.Length + 10 * List.length n.Children
 
-                      let read =
-                          if n.Value = "" then
-                              0
-                          else
-                              resolve n.Value |> Option.defaultValue 7
+                      let read = reads n |> Seq.sumBy (fun r -> resolve r |> Option.defaultValue 7)
 
                       Ok(own + 100 * read % 9973)
 
@@ -1077,6 +1153,22 @@ let tests =
                           nestedBatch <- nestedBatch + 1
 
                       let changed = Propagation.changedForOp nodew idw reads pre post op
+                      let dirty = Propagation.dirtyFromOp nodew idw pre reads op
+                      let survivors = Tree.ids nodew post |> Set.ofList
+
+                      // Phase 456: the change set is the dirty set restricted to the survivors
+                      // (`changed_for_op_is_dirty_from_op`).
+                      if changed <> Set.intersect dirty survivors then
+                          diffs <-
+                              sprintf
+                                  "trial %d: changedForOp=%A but dirtyFromOp=%A over survivors %A for %A over %A"
+                                  i
+                                  (Set.toList changed)
+                                  (Set.toList dirty)
+                                  (Set.toList survivors)
+                                  op
+                                  pre
+                              :: diffs
 
                       let index t =
                           Tree.preorder nodew t |> List.map (fun n -> n.Id, n) |> Map.ofList
@@ -1087,16 +1179,44 @@ let tests =
                       let kidIds (n: RNode) = n.Children |> List.map _.Id
                       let removedIds = before |> Map.filter (fun k _ -> not (after.ContainsKey k))
 
+                      // What `touchedBy` alone closes to — the pre-Phase-456 `dirtyFromOp`, kept here
+                      // so the case can say it REACHED the gap the diff seeds close.
+                      let touchedClosure =
+                          Propagation.dirtyFromChangedIds
+                              (Propagation.dependencyMap nodew idw reads pre)
+                              (Propagation.touchedBy nodew idw pre op)
+
+                      // `dirty_from_op_complete`'s other two clauses: every removed id, and every
+                      // pre-edit node that read one (surviving or not), is in the dirty set.
+                      for KeyValue(x, m) in before do
+                          let removed = removedIds.ContainsKey x
+                          let readsRemoved = reads m |> Seq.exists removedIds.ContainsKey
+
+                          if (removed || readsRemoved) && not (Set.contains x dirty) then
+                              diffs <-
+                                  sprintf
+                                      "trial %d: %s %s but dirtyFromOp gave %A for %A over %A"
+                                      i
+                                      x
+                                      (if removed then "was removed" else "read a removed id")
+                                      (Set.toList dirty)
+                                      op
+                                      pre
+                                  :: diffs
+
                       for KeyValue(x, n) in after do
                           let moved =
                               match before.TryFind x with
                               | None -> true
-                              | Some m -> shell m <> shell n || kidIds m <> kidIds n
+                              | Some m -> shell m <> shell n || kidIds m <> kidIds n || readSet m <> readSet n
 
                           let readsRemoved =
                               match before.TryFind x with
-                              | Some m -> m.Value <> "" && removedIds.ContainsKey m.Value
+                              | Some m -> reads m |> Seq.exists removedIds.ContainsKey
                               | None -> false
+
+                          if moved && not (Set.contains x touchedClosure) then
+                              readsMovedUnreached <- readsMovedUnreached + 1
 
                           if readsRemoved then
                               readerOfRemoved <- readerOfRemoved + 1
@@ -1129,7 +1249,7 @@ let tests =
                       | Error e -> diffs <- sprintf "trial %d: the pre-edit tree did not evaluate: %A" i e :: diffs
 
               match diffs with
-              | d :: _ -> failtestf "changedForOp missed what the theorem says it names\n%s" d
+              | d :: _ -> failtestf "changedForOp or dirtyFromOp missed what the theorems say they name\n%s" d
               | [] -> ()
 
               Expect.equal
@@ -1139,4 +1259,10 @@ let tests =
 
               Expect.isGreaterThan accepted 500 "most trials applied"
               Expect.isGreaterThan readerOfRemoved 20 "a survivor read a removed id, so that clause was reached"
+
+              Expect.isGreaterThan
+                  readsMovedUnreached
+                  10
+                  "a survivor's declared reads moved with no container of it touched, so the gap the diff seeds close was reached"
+
               Expect.isGreaterThan nestedBatch 5 "nested batches were accepted" ]

@@ -2568,12 +2568,12 @@
     {
       "id": "propagation-change-set-and-prior",
       "level": "assumed",
-      "claim": "WHAT IS LEFT OF THE EVALUATOR CONTRACT after Phase 209 discharged its first clause. It is still the domain's, and since Phase 211 a domain's own green run discharges it. `evalfrom_agrees` holds of an evaluator that (1) differs from the evaluator that produced `prior` only on the ids the change set names (`agree_off`), and reads different nodes only there too (`touches_off` — the same premise's other half, stated separately only because the read set is a model parameter; it is load-bearing at exactly one step, a CLEAN node the incremental walk reuses without checking, where the full walk's check must be the one the old walk already passed); and (2) is handed a `prior` that came from `eval` over the SAME dependency map, or fewer of its values. Neither can be read off a resolver: the first is a claim about two evaluations the driver never sees together, the second about where a `Map` came from. A `premise` from Phase 186 until Phase 211, for the reason Phase 186 gave: no law in the shipped kit ran a DOMAIN'S evaluator (`propagationEvalLaws` is self-contained over a toy one), so there was no green run to cite. Phase 211 took the move Phase 189 made for `witness-surface-scope`: `Conformance.propagationEvaluatorLaws` takes an `EvaluatorWitness` — the domain's own evaluator, dependency map, model generator and edits, each edit with the change set the domain names for it — and certifies, at that evaluator, that it is a function of what it reads (repeated and reordered evaluation agree), that off the named ids an edit moves neither the declared reads nor the evaluator's results or asked reads (`agree_off` and `touches_off`, sampled at four resolvers), and that `evalFrom` over `eval`'s own prior, whole and with holes, equals `eval` over the same map. The second clause is carried by CONSTRUCTION: the law builds every prior the one way the theorem admits, and a domain that persists a prior across an edit that MOVES the dependency map owns re-priming with `eval` over the new map — which is why the family checks such an edit for honesty and never replays it. So the row is a `domain-obligation` with a law, and its level stays what a law run can earn: the evaluator is the model's parameter and outside every theorem. Its adequacy witness is an in-repo formula sheet, because no adopter evaluator existed when the law shipped.",
+      "claim": "WHAT IS LEFT OF THE EVALUATOR CONTRACT after Phase 209 discharged its first clause, NARROWED AGAIN BY PHASE 456: for an evaluator in the structural class — a function of the node's kind, its child ids and the resolver, asking only its declared reads — clause (1) below is a THEOREM off `changedForOp` (`evalfrom_agrees_for_op`, `propagation-evalfrom-agrees-for-op`), so what such a domain owes is that its evaluator IS in the class (the Phase 209 refusal enforces the reads half at run time) and clause (2): a prior from `eval` over the SAME dependency map. Across an edit that MOVES the map, clause (2) is the whole premise, and discharging it needs a theorem the model does not state — that a full evaluation's values do not depend on which certified order produced them — which is why the domain re-primes there, as this row has always said. The rest of the row is Phase 211's account of both clauses as the law samples them. It is still the domain's, and since Phase 211 a domain's own green run discharges it. `evalfrom_agrees` holds of an evaluator that (1) differs from the evaluator that produced `prior` only on the ids the change set names (`agree_off`), and reads different nodes only there too (`touches_off` — the same premise's other half, stated separately only because the read set is a model parameter; it is load-bearing at exactly one step, a CLEAN node the incremental walk reuses without checking, where the full walk's check must be the one the old walk already passed); and (2) is handed a `prior` that came from `eval` over the SAME dependency map, or fewer of its values. Neither can be read off a resolver: the first is a claim about two evaluations the driver never sees together, the second about where a `Map` came from. A `premise` from Phase 186 until Phase 211, for the reason Phase 186 gave: no law in the shipped kit ran a DOMAIN'S evaluator (`propagationEvalLaws` is self-contained over a toy one), so there was no green run to cite. Phase 211 took the move Phase 189 made for `witness-surface-scope`: `Conformance.propagationEvaluatorLaws` takes an `EvaluatorWitness` — the domain's own evaluator, dependency map, model generator and edits, each edit with the change set the domain names for it — and certifies, at that evaluator, that it is a function of what it reads (repeated and reordered evaluation agree), that off the named ids an edit moves neither the declared reads nor the evaluator's results or asked reads (`agree_off` and `touches_off`, sampled at four resolvers), and that `evalFrom` over `eval`'s own prior, whole and with holes, equals `eval` over the same map. The second clause is carried by CONSTRUCTION: the law builds every prior the one way the theorem admits, and a domain that persists a prior across an edit that MOVES the dependency map owns re-priming with `eval` over the new map — which is why the family checks such an edit for honesty and never replays it. So the row is a `domain-obligation` with a law, and its level stays what a law run can earn: the evaluator is the model's parameter and outside every theorem. Its adequacy witness is an in-repo formula sheet, because no adopter evaluator existed when the law shipped.",
       "phase": "fuaran-core#209",
       "class": "domain-obligation",
       "dischargedBy": "Conformance.propagationEvaluatorLawsAt",
       "evidence": {
-        "assumption": "the domain's evaluator is a function of what it reads, changes and reads differently only where the change set says, and prior is eval's own output over the same dependency map — Conformance.propagationEvaluatorLawsAt"
+        "assumption": "the domain's evaluator is a function of what it reads, changes and reads differently only where the change set says (a theorem for the structural class since Phase 456), and prior is eval's own output over the same dependency map — Conformance.propagationEvaluatorLawsAt"
       }
     },
     {
@@ -2590,7 +2590,7 @@
     {
       "id": "propagation-read-witness",
       "level": "assumed",
-      "claim": "THE READ BRIDGE (Phase 209). Production detects an undeclared read by INSTRUMENTING the resolver it hands `evalNode`: the resolver records the ids it is asked for, and the walk refuses on the first one outside the declaration. A `Tot` function cannot observe a call, so the model takes the observation as a parameter — a `read_witness : string -> list string` beside the evaluator, exactly as `topo_result` sits beside `deps` for `propagation-order-distinct` — and nothing in the model ties it to `ev`. The differential supplies it from the same lines the evaluator is written in, so it is sampled there and proved nowhere. `permanent` rather than `unscheduled`, and the reason is worth stating because the obvious closure does not work: a pure model CAN define a semantic dependency set (the ids at which two resolvers differing only there change the answer), but that is a DIFFERENT set — an evaluator may ask for an id and ignore what it gets, and production refuses on the asking. Modelling the asking means modelling an effect the evaluator does not have.",
+      "claim": "THE READ BRIDGE (Phase 209). Production detects an undeclared read by INSTRUMENTING the resolver it hands `evalNode`: the resolver records the ids it is asked for, and the walk refuses on the first one outside the declaration. A `Tot` function cannot observe a call, so the model takes the observation as a parameter — a `read_witness : string -> list string` beside the evaluator, exactly as `topo_result` sits beside `deps` for `propagation-order-distinct` — and nothing in the model ties it to `ev`. The differential supplies it from the same lines the evaluator is written in, so it is sampled there and proved nowhere. `permanent` rather than `unscheduled`, and the reason is worth stating because the obvious closure does not work: a pure model CAN define a semantic dependency set (the ids at which two resolvers differing only there change the answer), but that is a DIFFERENT set — an evaluator may ask for an id and ignore what it gets, and production refuses on the asking. Modelling the asking means modelling an effect the evaluator does not have. Phase 456's structural class takes the declaration itself as the witness (`declared rd t`), which is what an evaluator that asks only its declared reads observes; the bridge is then that production's evaluator asks exactly what it declares — enforced at run time by the Phase 209 refusal, and still sampled here rather than proved.",
       "phase": "fuaran-core#209",
       "class": "model-bridge",
       "closes": "permanent",
@@ -4135,13 +4135,14 @@
     {
       "id": "propagation-ops-differential",
       "level": "tested",
-      "claim": "Production's `changedForOp` is held to the statement of `changed_for_op_complete` over generated trees whose nodes declare reads (present, dangling or absent) and generated ops of EVERY kind — insert, remove, move, reorder, a content-and-reads update, a Batch drawn against one pre-state and a Batch with a Batch nested in it: for every op `Ops.apply` accepts, every survivor whose content, child ids or declared read moved, and every survivor that read a removed id, is in the change set, and `evalFrom` from the survivors' prior over that change set equals `eval` of the post-edit tree under an evaluator that is a function of a node's own content, child count and resolved declared read. The case asserts it drew and accepted every kind, nested Batch included, and reached a reader of a removed id. Measured red with the change set's seeds cut to the removed ids. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "Production's `changedForOp` and `dirtyFromOp` are held to the statements of `changed_for_op_complete` and `dirty_from_op_complete` over generated trees whose nodes declare reads (present, dangling or absent; since Phase 456 a `sum` node also reads every leaf below it, the class whose declared reads an edit below it moves with no container of it touched) and generated ops of EVERY kind — insert, remove, move, reorder, a content-and-reads update, a Batch drawn against one pre-state and a Batch with a Batch nested in it: for every op `Ops.apply` accepts, every survivor whose content, child ids or declared read moved, and every survivor that read a removed id, is in the change set; every removed id and every pre-edit reader of one is in the dirty set, and the change set is the dirty set restricted to the survivors; and `evalFrom` from the survivors' prior over that change set equals `eval` of the post-edit tree under an evaluator that is a function of a node's own content, child count and resolved declared reads. The case asserts it drew and accepted every kind, nested Batch included, reached a reader of a removed id, and reached a survivor whose declared reads moved with no container of it touched. Measured red with the change set's seeds cut to the removed ids, and red both ways with `dirtyFromOp`'s seeds cut back to `touchedBy` (Phase 456). Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#308",
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/PropagationOps.fst",
         "cases": [
-          "changedForOp names every survivor the edit moved and every reader of a removed id, over every op kind with nested Batch — `changed_for_op_complete`"
+          "changedForOp and dirtyFromOp name every survivor the edit moved and every reader of a removed id — dirtyFromOp the removed ids too, and changedForOp is its restriction to the survivors — over every op kind with nested Batch — `changed_for_op_complete`, `dirty_from_op_complete`",
+          "dirtyFromOp names a node whose declared reads the edit moved two levels below it — the node touchedBy does not reach (Phase 456)"
         ],
         "operations": [
           "Ops.apply"
@@ -4149,14 +4150,60 @@
       }
     },
     {
+      "id": "propagation-dirty-from-op-complete",
+      "level": "proved",
+      "claim": "THE DIRTY SET OF AN OP IS COMPLETE (Phase 456). `dirty_from_op` is `Propagation.dirtyFromOp` clause for clause: the seeds `changedForOp` has closed over since Phase 308 — read off the DIFF of the pre- and post-edit trees, with `touchedBy` — closed over the PRE-edit dependency graph (`deps_of`, `Propagation.dependencyMap`) and never restricted, the post-edit tree computed by `apply`; over an op `apply` refuses there is no post-edit tree to diff, and the closure is over `touchedBy` alone, as it was. For an op `apply` accepts on a well-formed tree, `Batch` included at any depth, every surviving node that is new or whose content, child ids or declared reads differ, every id the edit removed, and every pre-edit node that declared a read of a removed id — survivor or not — is in the set (`dirty_from_op_complete`), and `changedForOp` is this set restricted to the survivors (`changed_for_op_is_dirty_from_op`). Until Phase 456 `dirtyFromOp` closed over `touchedBy` alone, and so left clean a node whose declared reads the edit moved with no container of it touched — a node reading every leaf below it, with a leaf inserted two levels down: its value can differ, it reads nothing the op touched, and no theorem spoke for it. The differential reaches that case and holds production to this statement.",
+      "phase": "fuaran-core#456",
+      "evidence": {
+        "theorem": "dirty_from_op_complete",
+        "model": "proofs/PropagationOps.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Propagation.dirtyFromOp",
+          "Propagation.dependencyMap",
+          "Propagation.touchedBy"
+        ]
+      }
+    },
+    {
+      "id": "propagation-dirty-from-op-least",
+      "level": "proved",
+      "claim": "THE DIRTY SET IS THE LEAST CLOSED SET OVER ITS SEEDS (Phase 456). `dirty_from_op_least` and `changed_for_op_least`: any set that holds the seeds and is closed under \"reads\" over the pre-edit graph holds the whole dirty set, and the whole change set — `Propagation.fst`'s `dirty_least` at the op's seeds, so nothing is dirty that the seeds and the declared dependencies do not reach. What this does NOT say is that every seed moved: `touchedBy` and the op's content writes name a moved node's target whether or not its kind, children or reads differ, so the seeds over-approximate the moved set by design (D108: never missing a reader), and the bound is minimality over the seeds, stated so.",
+      "phase": "fuaran-core#456",
+      "evidence": {
+        "theorem": "dirty_from_op_least",
+        "model": "proofs/PropagationOps.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Propagation.dirtyFromOp",
+          "Propagation.changedForOp"
+        ]
+      }
+    },
+    {
+      "id": "propagation-evalfrom-agrees-for-op",
+      "level": "proved",
+      "claim": "INCREMENTAL EVALUATION DRIVEN FROM AN OP AGREES WITH FULL EVALUATION, WITH NO CHANGE-SET PREMISE (Phase 456). `evalfrom_agrees_for_op`: for an evaluator in the STRUCTURAL class — `structural g t`, a function of the node's kind, its child ids and the resolver it is handed, reading its node off the tree and asking only its declared reads, whose witness is therefore the map's own declaration (`declared rd t`) — `evalFrom` from `changedForOp` over the post-edit map equals `eval` of the post-edit tree. The two premises `evalfrom_agrees` took of a change set are DISCHARGED: `agree_on` (off the change set the old and new evaluators are the same function at every id the walk visits — `structural_off`, which is `changed_for_op_names_moved` read backwards) and `checks_on` (the declared witness passes the declared-reads check wherever the old one did — `first_undeclared_of_declared`, in whatever order the reads are listed); `Propagation.fst`'s theorem is restated over them (`evalfrom_agrees_on`, the original now its corollary), because `agree_off` quantified over EVERY id and no evaluator read off a tree the edit removed a node from can meet it there. What the theorem INHERITS is `evalfrom_agrees`'s one-map shape: the prior is the old evaluator's values over the post-edit map and order, or fewer of them. So it speaks for an edit after which every node's declared reads are where they were (a content rewrite, a reorder, a move that reads nothing new), with the prior `propagation-change-set-and-prior`'s remaining clause names. Carrying a prior from a walk over the OLD map across an edit that moves the map needs what no theorem here states — that a full evaluation's values do not depend on which certified order produced them — and that is the open step, named on that row.",
+      "phase": "fuaran-core#456",
+      "evidence": {
+        "theorem": "evalfrom_agrees_for_op",
+        "model": "proofs/PropagationOps.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Propagation.changedForOp",
+          "Propagation.evalFrom"
+        ]
+      }
+    },
+    {
       "id": "propagation-ops-model-bridge",
       "level": "assumed",
-      "claim": "THE MODEL-TO-CODE STEP FOR `PropagationOps.fst` (Phase 308). The model is checked and not extracted (`proofs/check.ps1`'s `$proofOnly`, on `Utf8`'s footing): production reads a node through the witness and the caller's `readsOf`, the model reads content as the kind tag with the reads a parameter over the model's tree, and an extraction would run beside production only through a bridge that re-encodes both — the step under test. So that `changedForOp` IS `changed_for_op` is assumed, and the evidence is the differential that holds production to the theorem's statement directly (`propagation-ops-differential`). Closable by extracting the model and bridging the witness, which nobody has taken.",
+      "claim": "THE MODEL-TO-CODE STEP FOR `PropagationOps.fst` (Phase 308). The model is checked and not extracted (`proofs/check.ps1`'s `$proofOnly`, on `Utf8`'s footing): production reads a node through the witness and the caller's `readsOf`, the model reads content as the kind tag with the reads a parameter over the model's tree, and an extraction would run beside production only through a bridge that re-encodes both — the step under test. So that `changedForOp` IS `changed_for_op` is assumed, and the evidence is the differential that holds production to the theorem's statement directly (`propagation-ops-differential`). Phase 456 widens what is sampled, not what is assumed: `dirtyFromOp` is `dirty_from_op` on the same footing, and the differential holds it to `dirty_from_op_complete` and to `changedForOp` being its restriction to the survivors. Closable by extracting the model and bridging the witness, which nobody has taken — the oracle file and its registration lie outside Phase 456's files, and the differential is what the bridge row has stood on since Phase 308.",
       "phase": "fuaran-core#308",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "Propagation.changedForOp and touchedBy compute what PropagationOps.fst's changed_for_op and touched_by compute, read through the witness — sampled by propagation-ops-differential"
+        "assumption": "Propagation.changedForOp, dirtyFromOp and touchedBy compute what PropagationOps.fst's changed_for_op, dirty_from_op and touched_by compute, read through the witness — sampled by propagation-ops-differential"
       }
     },
     {

@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 358 claims — 256 proved across 33 models, 59 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 361 claims — 259 proved across 33 models, 59 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -1029,13 +1029,13 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.OpStream.Dag` | 88 | 31 | 33 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
-| `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
+| `Fuaran.Core.Propagation` | 25 | 7 | 6 | 0 | 0 | 0 | 0 | 12 |
 | `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Tree` | 65 | 17 | 8 | 1 | 2 | 0 | 0 | 37 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1207 | 294 | 425 | 28 | 13 | 0 | 3 | 444 |
+| **Total** | 1207 | 298 | 424 | 28 | 13 | 0 | 3 | 441 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -5718,6 +5718,9 @@ new, whose content, child ids or declared reads differ, and every survivor that 
 is named — through `kind_kept` (content moves only where the op content-writes), which is what lets
 a witness with no content accessor see content change. The model is checked, not extracted
 (`propagation-ops-model-bridge`); the differential holds production to the theorem's statement.
+`dirtyFromOp`, the older convenience, was left seeded from `touchedBy` alone here; Phase 456 found
+the node it misses, seeded it from the same diff, modelled it and composed the two theorems
+(theorem 25).
 
 **"Any evaluator" now reads "any TOTAL evaluator".** The model's evaluator is a `Tot` function, and
 production does not catch: an evaluator that throws is outside every theorem here
@@ -7384,6 +7387,93 @@ checks in about 136s cold (its budget is re-seeded in `modules.json`); `Capabili
 4. **Not claimed.** The strict read policy (`…With` under `Strict`), for either seam: the members check
    in front of the lenient reader, sampled by the decode layer's tests. `QueryCodec.decodeArgs`, which
    reads a model's argument object no writer of this codec produces. The refusal SENTENCES.
+
+## Theorem 25 — the dirty set an op induces is complete and least over its seeds, and incremental evaluation driven from an op needs no change-set premise (Phase 456)
+
+_(This directory's twenty-fifth. Phase 186 proved incremental evaluation agrees with full evaluation
+GIVEN a change set; Phase 308 proved the change set `changedForOp` computes from a structural edit is
+complete. Three things stood between them: `dirtyFromOp`, the older convenience that computed a
+dirty set from an op, was unmodelled and narrower; nothing composed the two theorems; and the
+functions beside them — `dependencyMap`, `touchedBy` — were census entries saying
+`measured-elsewhere`.)_
+
+**The premise, checked first, was half true.** The shard set out from "the proved engine stands on a
+dirty set nobody has proved is complete". The set `evalFrom` replays after an op is `changedForOp`,
+and `PropagationOps.fst` had already modelled the op side and proved it complete
+(`changed_for_op_complete`, theorem 16). What nobody had proved — or modelled — was `dirtyFromOp`,
+which closed over `touchedBy` alone, and the shard's own prediction held of it: it misses a node the
+op touches no container of but whose DECLARED READS the edit moves. A node reading every leaf below
+it, with a leaf inserted two levels down, reads nothing the op touched (the grown container is not a
+leaf), is no dependent of anything touched, and was left clean while its value could differ. The
+differential now draws that class of node (a `sum` kind) and held production to the gap before the
+fix: red both ways, the go-red case and the differential, with the seeds cut back to `touchedBy`.
+
+**The fix is one function reusing another.** `dirtyFromOp` now closes over the seeds `changedForOp`
+has closed over since Phase 308 — read off the diff of the two trees, `touchedBy` among them — with
+the post-edit tree computed by `Ops.apply`; the seeds are one private `seedsForOp`, and
+`changedForOp` is `dirtyFromOp` restricted to the survivors. An op `Ops.apply` refuses has no
+post-edit tree to diff, and the closure is over `touchedBy` there, as it was. The set only grows
+(every old member is still a seed), which is the safe direction for a dirty set and a behaviour change
+all the same (`docs/releases/0.38.0.md`, DECISIONS D154).
+
+**What is proved** (`proofs/PropagationOps.fst`, sections 5 and 6):
+
+- **`dirty_from_op_complete`** — for an op `apply` accepts on a well-formed tree, `Batch` included,
+  every survivor the edit moved (new, or its content, child ids or declared reads differ), every id
+  the edit removed, and every pre-edit node that declared a read of a removed id — survivor or not —
+  is in `dirtyFromOp`; and **`changed_for_op_is_dirty_from_op`**, the change set is that set
+  restricted to the survivors.
+- **`dirty_from_op_least`** / **`changed_for_op_least`** — any set that holds the seeds and is
+  closed under "reads" over the pre-edit graph holds the whole set: `Propagation.fst`'s `dirty_least`
+  at the op's seeds. Stated as minimality over the SEEDS, because the seeds over-approximate the
+  moved set by design — `touchedBy` and the op's content writes name a moved node's target whether or
+  not anything of it differs (D108: never missing a reader).
+- **`evalfrom_agrees_for_op`** — the composition. For an evaluator in the STRUCTURAL class
+  (`structural g t`: a function of the node's kind, its child ids and the resolver, reading its node
+  off the tree and asking only its declared reads, so its witness is the map's own declaration,
+  `declared rd t`), `evalFrom` from `changedForOp` over the post-edit map equals `eval` of the
+  post-edit tree. The two premises `evalfrom_agrees` took of a change set are DISCHARGED:
+  `agree_on` (off the change set the old and new evaluators are the same function at every id the
+  walk visits — `structural_off`, which is `changed_for_op_names_moved` read backwards) and
+  `checks_on` (the declared witness passes the declared-reads check wherever the old one did, in
+  whatever order the reads are listed — `first_undeclared_of_declared`). `Propagation.fst`'s theorem
+  is restated over the two narrowed premises (`evalfrom_agrees_on`; `evalfrom_agrees` is now its
+  corollary), because `agree_off` quantified over EVERY id and no evaluator read off a tree the edit
+  removed a node from can meet it at the removed id.
+
+**What is inherited, and named rather than claimed.** `evalfrom_agrees` is a ONE-MAP theorem: the
+old evaluation whose values the prior holds is over the same dependency map and order as the new
+one. The composition inherits that shape, so it speaks for an edit after which every node's declared
+reads are where they were — a content rewrite, a reorder, a move that reads nothing new — with the
+prior `propagation-change-set-and-prior`'s remaining clause names. An edit that MOVES the map (a node
+inserted or removed, a declared read added) has its change set proved complete and its agreement
+premise discharged all the same, but the prior a domain actually holds came from a walk over the OLD
+map in the OLD order, and carrying it across needs what no theorem here states: that a full
+evaluation's values do not depend on which certified order produced them. That is the open step. It
+is named on the `propagation-change-set-and-prior` row, which Phase 456 narrows to exactly it: for a
+structural evaluator the domain owes that its evaluator is in the class (the Phase 209 refusal
+enforces the reads half at run time) and a prior from `eval` over the same map; the first clause is
+a theorem. `propagation-read-witness` stays `permanent`, with the class's reading added — the
+declaration IS the witness of an evaluator that asks only what it declares, and that production's
+evaluator does so is enforced at run time and sampled, not proved. `propagation-ops-model-bridge`
+stays `unscheduled`: the model is checked, not extracted, for the reason the row gives, and Phase 456
+widens what the differential samples (`dirtyFromOp` beside `changedForOp`) rather than what is
+assumed — extracting it means an oracle file and its registration outside this phase's files.
+
+**The census.** `dependencyMap`, `touchedBy` and `dirtyFromOp` leave the `measured-elsewhere` entry
+for the rows above; the entry keeps the part-granular trio (`partDependencyMap`, `nodeDependencies`,
+`dirtyFromChangedParts`), which the proved driver does not walk — it recomputes node-granularly, and a
+part-faithful read is the domain's promise — and says so.
+
+### The differential
+
+The Phase 308 case now draws a third node kind, `sum`, whose declared reads are every leaf below it
+beside its own value read; computes `dirtyFromOp` beside `changedForOp` on every accepted op; holds
+the change set to being the dirty set restricted to the survivors; holds the dirty set to naming every
+removed id and every pre-edit reader of one; and asserts it REACHED a survivor whose declared reads
+moved with no container of it touched. The go-red case is the two-level leaf insert under a `sum`
+node, with the refused-op arm (a root moved under its own descendant) pinned to the `touchedBy`
+closure. Both red with the seeds cut back to `touchedBy`.
 
 ## Next
 

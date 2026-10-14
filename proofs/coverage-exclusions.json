@@ -1583,15 +1583,12 @@
     },
     {
       "members": [
-        "Propagation.dependencyMap",
         "Propagation.dirtyFromChangedParts",
-        "Propagation.dirtyFromOp",
         "Propagation.nodeDependencies",
-        "Propagation.partDependencyMap",
-        "Propagation.touchedBy"
+        "Propagation.partDependencyMap"
       ],
       "class": "measured-elsewhere",
-      "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",
+      "reason": "Part-granular propagation (Phase 250) beside the modelled node-granular core (`dependencyMap`, `touchedBy`, `dirtyFromOp` and `changedForOp` carry ladder rows since Phase 456; `validTopo` since Phase 308): the part dependency map, its node projection and first-hop part-level dirtiness, which the proved driver does not walk — it recomputes node-granularly, and a part-faithful read is the domain's promise. The propagation tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/PropagationCompositionTests.fs"
     },
     {
