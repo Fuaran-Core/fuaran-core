@@ -231,8 +231,12 @@ module QueryCodec =
     // path — a page's `pageNum` that is not an integer is `WrongKind` at `value.pageNum`, and a
     // missing `$type` is `MissingField` at `$type`. Until 455 this went through the string reader
     // and answered every refusal `OutOfRange` at the root, the path and the code both lost.
-    let internal deferredResultOf: Decoder<Deferred<QueryResult>> =
-        CapabilityCodec.deferredDecoder resultOf
+    // `deferredDecoder` is `Fuaran.Core.Function`'s internal member, so the reference sits in a
+    // `NoInlining` body taking the full argument list, never copied into a caller's assembly
+    // (DECISIONS.md D129, `CrossAssemblyInliningTests`).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, DecodeError> =
+        CapabilityCodec.deferredDecoder resultOf el
 
     // ---- typed refusal (Phase 251) ----
     // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
