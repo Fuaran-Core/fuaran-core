@@ -231,11 +231,15 @@ module Families =
           // is refused every time leaves every chain empty and all three laws green over nothing;
           // and the tamper is only drawn, so one whose every substitute encodes like the op it
           // replaces never runs the tamper law. Both are the run's to reach.
+          // Phase 454 — the JSONL cell (`tryToJsonl`, `fromJsonl`, `verifyChain` over the result)
+          // is what discharges the op-stream load model's premises at a domain's own witness:
+          // its `Decode` inverts its `Encode`, and the records it chains are ones the checked
+          // writer spells and the loads read back.
           c
               "streamLaws"
               streamWitness
               None
-              []
+              [ "op-stream-load-premises" ]
               (Guarded [ "accepted"; "tampered chain" ])
               (Drawn,
                "the tampered chain it must reject is built only over a chain the caller's StreamGen fills, and a refused append is skipped; guarded on accepted op and tampered chain (Phase 245)")

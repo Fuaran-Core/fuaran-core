@@ -1047,7 +1047,7 @@
       "package": "Fuaran.Core.Conformance",
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": false,
-      "discharges": [],
+      "discharges": ["op-stream-load-premises"],
       "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
