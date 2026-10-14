@@ -1,5 +1,31 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D156: the two slowest proof modules spend their time in a handful of queries whose context carries definitions the proof never needs; the cost is cut by naming what each query may use, not by weakening any statement
+
+**Recorded by Phase 458. `proofs/Temporal.fst`, `proofs/OpStreamLoad.fst`, `proofs/modules.json`,
+`proofs/README.md`. No production code, no theorem statement and no extracted oracle changed.**
+
+**D156.1 — the profile, taken before anything changed.** Each module was checked cold, at the leg's flags
+(`--z3rlimit 40 --quake 3 --report_assumes error`) plus `--timing --query_stats`, by the pinned prover invoked
+directly on the file, its dependencies already in the cache, with no other prover on the machine.
+
+- **`Temporal`: 1,928s.** Two declarations took 85% of it. `year_ends_ok_at` took 1,073s. One goal took
+  135s, 153s and 785s on the three quake seeds: the precondition `yoe < k - 1` of the recursive call, a linear
+  fact. It used at most 5.9 units of a 40-unit rlimit, so the rlimit does not meter the time and does not bound
+  it. The time goes into arithmetic over `year_ends_ok`'s unfolded body, which carries nested integer
+  divisions. `days_of_civil_mono` took 565s, with its one ensures goal at 484s, 67s and 13s. Every other
+  declaration was under 60s: `cmp_prefix` 56s, `doe_in_year` 38s, `yoe_recovered` 32s, `instant_text_parts`
+  31s, `days_civil_days` 23s, and about two hundred small queries after them. The normalisation of the 800
+  year ends (`year_ends_computed`) took 0.2s. The Phase 430 note's account was that the normalisation took
+  close to three minutes, and that is not where the time goes. The 576s that Phase 430 recorded was one
+  lucky draw from the same distribution.
+- **`OpStreamLoad`: 413s, 367s of it in the solver.** `actor_field_reads` took 158s (40 goals per seed at
+  `--fuel 10 --z3rlimit 160`, the heaviest 7-13s each) and `line_members` took 106s. Next came
+  `string_tail_ext` 24s, `clean_quote` 20s, `string_tail_quoted` 13s and `skip_value_actor` 9s. Unlike
+  `Temporal`, these costs are steady across seeds. The fuel unfolds character-level recursions the two
+  lemmas only reach through lemma calls: `olit` over the concrete keys, `string_tail`, `skip_value`,
+  `quote_body` and `app` over symbolic strings.
+
 ## 2026-10-14 — D155: the lane DAG's remaining boundaries are modelled in a sibling module; the index is proved under a stated slot-agreement reading, and `cut`'s band is kept though the replay contract does not need it
 
 **Recorded by Phase 457. `proofs/DagPrimitives.fst` (new, opens `DagFold`), `proofs/oracle/DagPrimitives.fs`,
