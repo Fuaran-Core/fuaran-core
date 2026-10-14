@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 340 claims — 244 proved across 32 models, 56 tested, 38 assumed (8 `domain-obligation`, 24 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 346 claims — 247 proved across 33 models, 57 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -703,7 +703,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 38 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 40 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -712,14 +712,14 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 8 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 9 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 24 rows.
+  `unscheduled` where something could and nobody has. 25 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -779,6 +779,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `decode-layer-refusal-premises` | `domain-obligation` | `Conformance.codecLaws` |
 | `decode-layer-model-bridge` | `model-bridge` | `permanent` |
 | `index-node-is-its-record` | `model-bridge` | `permanent` |
+| `op-stream-load-premises` | `domain-obligation` | `Conformance.streamLaws` |
+| `op-stream-load-model-bridge` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -1022,7 +1024,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
-| `Fuaran.Core.OpStream` | 126 | 10 | 54 | 3 | 1 | 0 | 2 | 56 |
+| `Fuaran.Core.OpStream` | 126 | 28 | 54 | 3 | 1 | 0 | 2 | 38 |
 | `Fuaran.Core.OpStream.Dag` | 88 | 31 | 33 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
@@ -1032,7 +1034,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1207 | 258 | 431 | 28 | 13 | 0 | 3 | 474 |
+| **Total** | 1207 | 276 | 431 | 28 | 13 | 0 | 3 | 456 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7201,6 +7203,98 @@ record invariant in a later model should start there.
    fused list passes.
 4. **Not claimed.** The text entry points (theorem 4 is the parser's; `WireCanon` the renderer's);
    a refusal's `Expected` and `Message`; the schema's agreement with what the reader accepts.
+
+## Theorem 23 — the op-stream readers are total, every fault names its line, and a written stream loads back (Phase 454)
+
+_(This directory's twenty-third. An op stream is read from disk or the wire, so its reader handles
+untrusted input as directly as the decoder does; theorem 3 proved chain integrity and theorem 22 the
+decode blocks, both over a stream already in memory, and the step from bytes to that stream — the
+one JSONL scanner of Phases 296 and 369 and the loads that type their faults since Phase 416 — was
+checked by example only: eighteen census entries said `measured-elsewhere`.)_
+
+`OpStreamLoad.fst` models `OpStream.Jsonl` clause for clause — `skipString` and `decodeString` as
+ONE pass (the decode is total on what the skip accepted, so the pass that does both answers the same
+fault at the same position), `isLiteral`, `skipValue` with its container walk, `checkRaw`,
+`membersOf` with its first-wins member list, `parseLine`, `topFields`, `rawSpan`, `unquote`, the
+field readers up to `actorField`, and `scanRecords` with its `\r\n` normalisation and blank-line
+skip — and the loads over it: `recordOf`, the snapshot scan, Phase 416's carrying witness,
+`settle`, `fromJsonl` / `fromJsonlWithSnapshots` / `fromJsonlLegacyActor` and `fromJsonlVerified`,
+which composes `Chain.fst`'s `first_chain_break`; and the writers they read back, `recordLine` /
+`tryToJsonl` and `Actor.encode` with `JsonString.quote`'s three escape classes. It opens
+`JsonParse.fst` for its alphabet and value spellings (a character is what spells it, a decoded
+character the spelling that produced it) and `Chain.fst` for its records and walk. Production's
+positions are indices into the line; the model's scanner walks suffixes and a fault carries the
+suffix it refused at, so a position is `len line - len at`, recovered where production's `at` adds
+its offset.
+
+- **Totality** (`loads_total`). Every scanner and load is a `Tot` function — no exception path, every
+  walk terminating on the suffix it consumes (section 2's `llen` refinements are what the termination
+  checker spent). Production raises `JsonlScanFault` deep in the scan and catches it at six
+  boundaries; the model has no exception, so every `fail` is a returned `SErr` and the boundaries are
+  the ones that turn it into a `JsonlFault`.
+- **Faults locate** (`scan_fault_locates`, `parse_fault_in_line`, `site_names_its_op`). A fault
+  `scanRecords` answers names a line of the text that the scan reached and did not skip as blank — the
+  1-based number over every line, as an editor shows it — and is exactly the fault that line's parse or
+  decode answered; the scanner's own fault sits within the line. The clause needs the decoder to be
+  `faithful` (its faults name the line it was handed), which every reader of the model is
+  (`line_item_faithful`): stated as a premise of the generic lemma because `scanRecords` takes any
+  decoder, and a decoder that invented a line number would not locate. Every site of an `Undecodable`
+  load names a line that exists, which parsed to a record whose `op` span the witness refused with the
+  site's reason, and whose `hash` member is the site's node id — recovered from the carrying witness's
+  answer `Ok (raw, w.Decode raw)` by `record_of_inv`.
+- **Round trip** (`round_trip`, `verified_round_trip`, `verify_preserved`). Loading what `tryToJsonl`
+  wrote yields the records written: `fromJsonlWithSnapshots` answers them with no snapshot, `fromJsonl`
+  answers them, and `fromJsonlVerified` answers them or the break the chain walk reports of the
+  ORIGINAL records (`walk_carried`: the walk over the carrying witness's records is the walk over the
+  records they carry), so `verify` over a loaded stream is `verify` over the original. The content is
+  five lemmas: a decoded string a writer can spell reads back through the one string pass
+  (`string_tail_quoted`, over `wf_str`); a scan that consumed its whole input consumes that prefix of
+  any extension a terminator follows (`string_tail_ext`, `skip_container_ext`, `bare_token_ext`,
+  `skip_value_ext`); one written member is read as one member (`members_step`); the decimal numeral
+  `string` writes reads back through `intField`'s digit fold within Int32 (`read_int_show`); and
+  `\r\n`-free lines split as they were joined (`split_join`). Under two premises a domain owes: its
+  witness reads back what it writes, and its records are well formed — an actor that names somebody,
+  strings the writer can spell, a sequence number within Int32.
+
+**No premise of the shard was false, and no counter-example was found in production.** The readers
+are total as the shard assumed; every fault locates; the round trip holds under exactly the premises
+`Conformance.streamLaws` already samples. One boundary of the MODEL is pinned by name rather than
+closed: the model identifies a character with its spelling, as `JsonParse.fst` does, so a key spelled
+`"s\u0065q"` is not `seq` there where production reads it as one (DECISIONS.md D152 — a boundary of
+the spelling model, not a defect in either side).
+
+**Fuel is the lever this module spends.** The per-member lemmas unfold `app` once per character of a
+key and a `\uXXXX` pair is twelve characters, so `string_tail_quoted` and `string_tail_ext` run at
+`--fuel 16`; the five-member line and the actor object at `--fuel 8` / `--fuel 10`; `actor_field_reads`
+at `--z3rlimit 160`, the one scoped rlimit. The concrete key spellings (`"seq"`, `"human"`, …) are
+decided by `assert_norm` once (`keys_plain`, `record_keys_distinct`) and spent everywhere.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** In `OpStreamLoad.fst`: `loads_total`;
+   `scan_fault_locates`, `parse_fault_in_line`, `site_names_its_op` with `line_item_faithful` and
+   `record_of_inv`; `round_trip`, `verified_round_trip` and `verify_preserved`, with `record_of_line`,
+   `line_members`, `actor_field_reads`, `members_step`, `read_int_show`, `string_tail_quoted`,
+   the extension lemmas and `split_join` under them. Rows **`op-stream-load-totality`**,
+   **`op-stream-load-faults-locate`**, **`op-stream-load-round-trip`**. Checked by the leg at its
+   flags (`--z3rlimit 40 --quake 3`), `--report_assumes error` on, no `assume`, no `admit`.
+2. **Tested.** **`op-stream-load-differential`** — five `Proofs.Oracle` cases: every building block of
+   `OpStream.Jsonl` over every distinct line of written streams, their mutations and a set of hostile
+   lines; every load over written and mutated texts, fault for fault and record for record, the
+   undecodable sites included, with `tryToJsonl` / `toJsonl` and the negative sequence number beside
+   them; the theorems' statements held to production over every read; the go-red, a bridge that
+   renumbers every model fault to line 1, which loses on exactly the texts refused past their first
+   line; and the escaped-key boundary, pinned.
+3. **Assumed, and stated as such.** **`op-stream-load-premises`** — the witness's `Decode` inverts its
+   `Encode` and the records it chains are well formed: a `domain-obligation` discharged by
+   `Conformance.streamLaws`, whose JSONL cell writes, reads back and verifies a drawn stream at the
+   domain's own witness. **`op-stream-load-model-bridge`** — a decoded character's code unit, the
+   host's whitespace, the host's quote of a loaded actor for the chain walk, the unary carriage
+   of a sequence number outside the stream's indices, the fused passes.
+4. **Not claimed.** The fault renderers (`JsonlFault.toString` and its siblings); the lane loads and
+   the DAG's readers (`Dag.loadLanes`, the checkpoint sidecar), which read through the same scanner
+   and are measured by the lane and DAG tests; the snapshot sidecar's own reader (`Snapshots.ofJsonl`);
+   which Unicode characters `String.Trim` strips.
 
 ## Next
 

@@ -750,6 +750,7 @@ let oracleTests: Test =
           ProofOracle.DecodeLayerTests.tests
           ProofOracle.JsonParseTests.tests
           ProofOracle.NormalizeTests.tests
+          ProofOracle.OpStreamLoadTests.tests
           ProofOracle.PreservationTests.tests
           ProofOracle.PropagationTests.tests
           ProofOracle.QueryTests.tests

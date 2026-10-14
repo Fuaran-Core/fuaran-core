@@ -40,7 +40,8 @@ let twinRoster: (string * (string * (unit -> bool)) list) list =
       "Query", Query.twins |> List.map (fun t -> t.tname, t.tholds)
       "Arbitrate", Arbitrate.twins |> List.map (fun t -> t.tname, t.tholds)
       "DecimalText", DecimalText.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Normalize", Normalize.twins |> List.map (fun t -> t.tname, t.tholds) ]
+      "Normalize", Normalize.twins |> List.map (fun t -> t.tname, t.tholds)
+      "OpStreamLoad", OpStreamLoad.twins |> List.map (fun t -> t.tname, t.tholds) ]
 
 /// Every twin that does NOT hold on the extracted F#, as "<model>/<twin>" — empty is clean.
 let twinFailures (roster: (string * (string * (unit -> bool)) list) list) : string list =

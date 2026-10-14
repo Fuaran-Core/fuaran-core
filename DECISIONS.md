@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D152: the op-stream readers are proved total over the spelling model, and a decoded character is its spelling — so an escaped key is the model's boundary, not a defect in either side, and the scanner ships unchanged
+
+**Recorded by Phase 454.** `proofs/OpStreamLoad.fst` models the one JSONL line scanner
+(`OpStream.Jsonl`) and the stream loads over it clause for clause, opening `JsonParse.fst` for its
+alphabet and `Chain.fst` for its records, and proves the three theorems the phase states: every
+reader and load is total, every fault names a line that exists (and an undecodable site its op and
+hash), and loading what `tryToJsonl` wrote yields the records written, verified or not. Three choices
+the model makes are recorded here because each could be read as a finding about production and is
+not.
+
+**A decoded string is a `list och` — a character is what spelled it.** `JsonParse.fst` deliberately
+computes no code unit for a `\uXXXX` escape and no character for a short escape (Phase 146's header:
+the model carries no integers, and which character a spelling denotes is the host's), and this model
+inherits that. The consequence is that two spellings of one character are two strings in the model
+where production reads one: a key spelled `"s\u0065q"` is read as `seq` by production and missed by
+the model. **Decided: this is a boundary of the spelling model, recorded as the
+`op-stream-load-model-bridge` row and pinned by a named differential case, and NOT a divergence to
+close by teaching the model hex arithmetic.** The theorems do not need it: the round trip is about
+what the writer spells, and the writer spells every key plainly; the fault theorems are about lines
+and positions, which spellings do not move. A model that computed code units would carry a second
+copy of the escape semantics theorem 4 already covers, for no theorem of its own.
+
+**The chain walk counts in unary, so a sequence number outside the stream's indices is carried at
+its length.** `intField` reads at most ten digits into an unbounded integer and refuses outside Int32,
+as production does, so the scan admits `"seq":-1` and `"seq":2147483647` alike; `Chain.fst`'s walk
+counts in a unary `pos`, which a negative number cannot be and a two-billion one cannot be built as
+(the first extraction overflowed the stack on exactly that line of the hostile pool). The model maps
+every sequence number outside `0 .. len - 1` to the position `len`, which no walk index reaches, so the
+walk's verdict — a sequence-number mismatch at that record — agrees with production's, and only the
+break's `got` text (which production spells from the number) does not. **Decided: the verdict is what
+the theorem is about; the `got` text of that one break is a bridge fact, not a reason to widen
+`Chain.fst`'s records to a signed integer.** The differential compares a sequence-number mismatch by
+index and reason, and says so.
+
+**`skipString` and `decodeString` are one pass.** Phase 369 split production's string token into a
+validating skip and a run-based decode for speed; the model fuses them, because the decode is total
+on what the skip accepted and the fused pass answers the same fault at the same position (the
+differential holds every fault, position and decoded string to production over every prefix of a
+record line and every escape shape). **Decided: the two-pass structure is a performance fact about
+production and not a clause the model states.**
+
+**No production change.** No premise of the shard proved false and no counter-example was found: the
+scanner raises its internal `JsonlScanFault` at six boundaries and catches it at every one, the
+positions are what the model computes, and the round trip holds under exactly the premises
+`Conformance.streamLaws` already samples at a domain's witness. The eighteen census entries the
+model covers (`OpStream.Jsonl`'s fifteen building blocks, the two typed loads of Phase 416 and the
+legacy-actor load) move from `measured-elsewhere` to the ladder; `OpStream.fromJsonl`, `toJsonl` and
+`tryToJsonl` stay on `Conformance.streamLaws`' roster, where a domain discharges the premise.
+
 ## 2026-10-14 — D151: `Decoder.andThen`'s function refuses with the triple `Decoder.fail` takes — a `RootDecodeCode`, what the position expected, and a sentence — and `andThen` raises it at the value; a check that points inside the value is `bind` to `at <path> (fail ...)`, which walks the path in the document
 
 **Recorded by Phase 453.** Phase 436 proved that every refusal Core's decode blocks answer resolves in

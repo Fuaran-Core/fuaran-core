@@ -4756,6 +4756,102 @@
       "evidence": {
         "assumption": "the caller's encoder is injective over a node's own content, and the model's node carries none"
       }
+    },
+    {
+      "id": "op-stream-load-totality",
+      "level": "proved",
+      "claim": "THE OP-STREAM READERS ARE TOTAL (Phase 454). `proofs/OpStreamLoad.fst` models the one JSONL line scanner (`OpStream.Jsonl`: `skipString` and `decodeString` as one pass, `isLiteral`, `skipValue` with its container walk, `checkRaw`, `membersOf` with its first-wins member list, `parseLine`, `topFields`, `rawSpan`, `unquote`, `lineNumber`, `lineText`, `refuse`, `tryRawField`, `rawField`, `stringField`, `intField`, `stringsField`, `actorField`, `scanRecords` with its `\\r\\n` normalisation and blank-line skip) and the loads built on it (`recordOf`, `isSnapshotLine`, the snapshot scan, the carrying witness of Phase 416, `settle`, `fromJsonl`, `fromJsonlWithSnapshots`, `fromJsonlLegacyActor`, `fromJsonlVerified` composing `Chain.fst`'s walk) clause for clause over `JsonParse.fst`'s alphabet and value spellings, and every one is a `Tot` function of its input — no exception path and no divergence, every walk terminating on the suffix it consumes (`loads_total` states it for the loads). Production raises `JsonlScanFault` deep in the scan and catches it at six boundaries; the model has no exception, so every `fail` is a returned `SErr` and the boundaries are the ones that turn it into a `JsonlFault`. That production raises nothing on the generated inputs is the differential's (`op-stream-load-differential`).",
+      "phase": "fuaran-core#454",
+      "evidence": {
+        "theorem": "loads_total",
+        "model": "proofs/OpStreamLoad.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "OpStream.Jsonl.actorField",
+          "OpStream.Jsonl.checkRaw",
+          "OpStream.Jsonl.intField",
+          "OpStream.Jsonl.lineNumber",
+          "OpStream.Jsonl.lineText",
+          "OpStream.Jsonl.parseLine",
+          "OpStream.Jsonl.rawField",
+          "OpStream.Jsonl.rawSpan",
+          "OpStream.Jsonl.refuse",
+          "OpStream.Jsonl.scanRecords",
+          "OpStream.Jsonl.stringField",
+          "OpStream.Jsonl.stringsField",
+          "OpStream.Jsonl.topFields",
+          "OpStream.Jsonl.tryRawField",
+          "OpStream.Jsonl.unquote"
+        ]
+      }
+    },
+    {
+      "id": "op-stream-load-faults-locate",
+      "level": "proved",
+      "claim": "EVERY FAULT NAMES A LINE THAT EXISTS, AND AN UNDECODABLE SITE ITS OP (Phase 454). A fault `scanRecords` answers names a line of the text that the scan reached and did not skip as blank — the 1-based number over EVERY line of the text, blank lines counted, as an editor shows it — and is exactly the fault that line's parse or decode answered (`scan_fault_locates`, under `faithful`: a decoder whose faults name the line they were handed, which every reader of the model is, `line_item_faithful`); the scanner's own fault sits within the line, at a character of it or just past its last (`parse_fault_in_line`). Every site of an `Undecodable` load names a line that exists, which parsed to a record whose `op` span the witness refused with the site's reason, and whose `hash` member is the site's node id (`site_names_its_op`, through the carrying witness's answer `Ok (raw, w.Decode raw)` recovered by `record_of_inv`). No fault is produced for a line the writer wrote: `record_of_line` is the per-line half of the round trip.",
+      "phase": "fuaran-core#454",
+      "evidence": {
+        "theorem": "site_names_its_op",
+        "model": "proofs/OpStreamLoad.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "OpStream.fromJsonlLegacyActor",
+          "OpStream.fromJsonlWithSnapshots"
+        ]
+      }
+    },
+    {
+      "id": "op-stream-load-round-trip",
+      "level": "proved",
+      "claim": "LOADING WHAT THE CHECKED WRITER WROTE YIELDS THE STREAM THAT WAS WRITTEN (Phase 454). `tryToJsonl` (`checkedLines` over `checkRaw`, then `recordLine`) is modelled beside the loads, with `Actor.encode` and `JsonString.quote`'s three escape classes; `round_trip` proves `fromJsonlWithSnapshots` answers the written records with no snapshot and `fromJsonl` answers them, and `verified_round_trip` that `fromJsonlVerified` answers them or the break `Chain.first_chain_break` reports of the ORIGINAL records (`walk_carried`: the walk over the carrying witness's records is the walk over the records they carry), so `verify` over a loaded stream is `verify` over the original (`verify_preserved`). The content: a decoded string a writer can spell reads back through the one string pass (`string_tail_quoted`, over `wf_str`: no raw quote, backslash or line break, the eight short escapes, four hex digits, a high surrogate escape followed by a low one); a scan that consumed its whole input consumes that prefix of any extension that a terminator follows (`string_tail_ext`, `skip_container_ext`, `bare_token_ext`, `skip_value_ext`); one written member is read as one member (`members_step`); the decimal numeral `string` writes reads back through `intField`'s digit fold within Int32 (`read_int_show`); the actor object reads back (`actor_field_reads`); `\\r\\n`-free lines split as they were joined (`split_join`). Under the two premises of `op-stream-load-premises`.",
+      "phase": "fuaran-core#454",
+      "evidence": {
+        "theorem": "verified_round_trip",
+        "model": "proofs/OpStreamLoad.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "OpStream.fromJsonlVerified"
+        ]
+      }
+    },
+    {
+      "id": "op-stream-load-differential",
+      "level": "tested",
+      "claim": "The extracted op-stream readers agree with the shipped ones (Phase 454), at the reference counter witness: every building block of `OpStream.Jsonl` over every distinct line of a pool of written streams, their mutations and a set of hostile lines (every prefix of a record line, bad and surrogate escapes, repeated keys, snapshot and actor shapes, over-limit numerals, blank shapes of both whitespace kinds, array spans for `stringsField`), both sides rendered the same way; `fromJsonl`, `fromJsonlWithSnapshots`, `fromJsonlLegacyActor` and `fromJsonlVerified` over written streams and texts mutated by replacement, deletion, insertion, truncation, interleaved blank, snapshot and foreign lines, duplicated and renamed keys, pushed numerals and `\\r\\n` endings, fault for fault and record for record, the undecodable sites included; `tryToJsonl` and `toJsonl` over the written records and over witnesses whose encoding the checked writer refuses; and the negative sequence number the scan admits and the walk refuses. Over every production read the theorems' statements are held to PRODUCTION: nothing raises, every fault names a line of the text that is not blank and is that line's own fault at a position within it, every site names a line whose `op` the witness refuses with the site's reason by the line's `hash`, and every written stream loads back verified and unverified. The go-red is the BLIND bridge that renumbers every model fault to line 1 — a scanner that dropped the line's number — which loses on exactly the texts refused past their first line and on exactly the lines that fault when numbered 3, and on no other. The one boundary the pool exposes is pinned by name: a key spelled with an escape is read by production and missed by the model (`op-stream-load-model-bridge`).",
+      "phase": "fuaran-core#454",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/OpStreamLoad.fst",
+        "cases": [
+          "the op-stream-load oracle agrees with the scanner's building blocks over generated and hostile lines",
+          "the op-stream-load oracle agrees with every load over written streams and their mutations",
+          "every production fault names a line that exists and every undecodable site its op; writes load back",
+          "a model that drops a fault's line number loses - on exactly the faults past the first line",
+          "an escaped key spelling is the model's boundary: production reads it, the model does not"
+        ]
+      }
+    },
+    {
+      "id": "op-stream-load-premises",
+      "level": "assumed",
+      "claim": "WHAT A DOMAIN OWES FOR THE ROUND TRIP (Phase 454). `round_trip` and `verified_round_trip` hold under two hypotheses about what only the domain supplies: its witness reads back what it writes (`witness_rt`: `Decode (Encode op) = Ok op` for every op) and its records are well formed (`records_wf`: an actor that names somebody, strings whose decoded form the writer can spell, a sequence number within Int32 — which `OpStream.append` keeps). Both are sampled by `Conformance.streamLaws` at the domain's own witness: its JSONL cell writes a drawn stream through `tryToJsonl`, reads it back through `fromJsonl` and holds `verifyChain` over the result, so a witness whose `Decode` does not invert its `Encode`, or whose `Encode` the checked writer refuses, is red there. Sampled, never proved, and blind to a hypothesis broken only on ops the generator never draws.",
+      "phase": "fuaran-core#454",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.streamLaws",
+      "evidence": {
+        "assumption": "the witness's Decode inverts its Encode and the records it chains are well formed — Conformance.streamLaws, at the domain's own witness"
+      }
+    },
+    {
+      "id": "op-stream-load-model-bridge",
+      "level": "assumed",
+      "claim": "WHAT THE OP-STREAM LOAD MODEL IS HANDED RATHER THAN DERIVES (Phase 454). A decoded string is a `list och` as `JsonParse.fst` spells one — a character is what spelled it — so the code unit a `\\uXXXX` denotes and the character a short escape spells are the host's (`ren`, the verified load's parameter; the differential's rendering), and two spellings of one character are two strings in the model where production reads one: a key spelled `\"s\\u0065q\"` is not `seq` there, which the differential pins by name as the one divergence its pool exposes. `String.Trim`'s whitespace is a host predicate over the characters the alphabet carries as `COther`. The chain walk re-encodes a LOADED actor by its code units (`JsonString.quote` spells a control as `\\u00xx` and `\\u0041` back as `A`), which the model does not compute, so the walk's actor text is `Actor.encodeWith` over the host's quote (`qh`) of the host's rendering (`ren`): the model owns the shape, the host the escaping, as it owns the hash; the model's own writer spells the canonical strings a host hands it, which is what the round trip reads back. The chain walk counts in `Chain.fst`'s unary `pos`, so a sequence number OUTSIDE the stream's indices — negative, or at or past its length, which the scan admits and no walk index equals — is carried AT the stream's length in the model, where the walk's verdict agrees and the break's `got` text does not (the differential compares a sequence-number mismatch by its index and reason). The lane (`None` on every load of one text), the three fault cases such a load never answers, and production's accumulators, `Replace` / `Split` and `HashSet` passes are written as the direct recursions they equal. Each is sampled by `op-stream-load-differential` and none is proved.",
+      "phase": "fuaran-core#454",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "a decoded character's code unit, the host's whitespace, the host's quote of a loaded actor for the chain walk, the unary carriage of a sequence number outside the stream's indices, and the fused passes are as the model takes them"
+      }
     }
   ]
 }

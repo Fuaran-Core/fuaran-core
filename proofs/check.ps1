@@ -216,6 +216,17 @@ $ErrorActionPreference = 'Stop'
 #                collecting reader's non-empty refusals (decoder totality) and refusal paths that
 #                resolve. Opens WireDecode, so it follows it.
 #
+#   OpStreamLoad — Phase 454, the op-stream READERS: the one JSONL line scanner (`OpStream.Jsonl`:
+#                the string token, a value, `membersOf`, `parseLine` and the field readers) and
+#                the loads over it (`recordOf`, the snapshot scan, the carrying witness, `settle`,
+#                `fromJsonl` / `fromJsonlWithSnapshots` / `fromJsonlLegacyActor` /
+#                `fromJsonlVerified`) and the writers they read (`recordLine`, `tryToJsonl`,
+#                `Actor.encode`), clause for clause over JsonParse's alphabet and value
+#                spellings and Chain's records; totality by typing, every fault proved to name
+#                a line that exists (and an undecodable op's site its op and hash), and the
+#                write-then-load round trip, verified or not. Opens JsonParse and Chain, so it
+#                follows both.
+#
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
 #                (DECISIONS.md D66); they are checked by the compute repository's own proof leg.
@@ -225,7 +236,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement', 'DecodeLayer')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement', 'DecodeLayer', 'OpStreamLoad')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

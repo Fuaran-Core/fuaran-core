@@ -1338,15 +1338,6 @@
     },
     {
       "members": [
-        "OpStream.fromJsonlVerified",
-        "OpStream.fromJsonlWithSnapshots"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/SnapshotTests.fs"
-    },
-    {
-      "members": [
         "OpStream.appendChainOnly",
         "OpStream.appendMany",
         "OpStream.captureHead",
@@ -1383,14 +1374,6 @@
     },
     {
       "members": [
-        "OpStream.fromJsonlLegacyActor"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
-    },
-    {
-      "members": [
         "OpStream.Attributed.byActor",
         "OpStream.Attributed.bySession",
         "OpStream.Attributed.decodeEnvelope",
@@ -1418,29 +1401,6 @@
       "class": "forward",
       "reason": "Replays the compacted stream's tail from its snapshot: `Snapshots.replayFrom` over the record's two fields.",
       "forwardsTo": "OpStream.Snapshots.replayFrom"
-    },
-    {
-      "members": [
-        "OpStream.Jsonl.actorField",
-        "OpStream.Jsonl.checkRaw",
-        "OpStream.Jsonl.intField",
-        "OpStream.Jsonl.lineNumber",
-        "OpStream.Jsonl.lineText",
-        "OpStream.Jsonl.parseLine",
-        "OpStream.Jsonl.rawField",
-        "OpStream.Jsonl.rawSpan",
-        "OpStream.Jsonl.refuse",
-        "OpStream.Jsonl.scanRecords",
-        "OpStream.Jsonl.stringField",
-        "OpStream.Jsonl.stringsField",
-        "OpStream.Jsonl.topFields",
-        "OpStream.Jsonl.tryRawField",
-        "OpStream.Jsonl.unquote"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The JSONL line reader's public building blocks (Phase 301's checked writer reads through them); measured through the stream and DAG JSONL readers whose tests feed them well-formed, malformed and hostile lines.",
-      "through": "OpStream.fromJsonl",
-      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
     },
     {
       "members": [
