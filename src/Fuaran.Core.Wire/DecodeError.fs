@@ -40,8 +40,9 @@ type DecodeCode =
 /// path, and those two cannot stand there: a `MissingField` names its absent member by its path's
 /// last step, so at the empty path it names nothing and resolves in no document; an `InvalidJson` is
 /// the parser's code, which names only the root and stops resolving the moment a combinator carries
-/// it one step down. `Decoder.fail` takes this type, so a decoder cannot raise either: an absent
-/// member is `Decoder.field`'s refusal, and unparseable text the parse entry points'.
+/// it one step down. `Decoder.fail` takes this type, and so does the refusal `Decoder.andThen`'s
+/// function answers (Phase 453), so neither can raise either: an absent member is `Decoder.field`'s
+/// refusal, and unparseable text the parse entry points'.
 [<RequireQualifiedAccess>]
 type RootDecodeCode =
     /// `DecodeCode.WrongKind`.

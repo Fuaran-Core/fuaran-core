@@ -160,14 +160,17 @@ let private genPath (rng: System.Random) : PathSegment list =
 // ---------------------------------------------------------------------------
 
 /// The model's `andThen` function for the probe below: a positive integer, or a root `OutOfRange`.
-let private positive (i: int) : Result<int, DecodeError> =
+let private positive (i: int) : Result<int, RootDecodeCode * string * string> =
     if i > 0 then
         Ok i
     else
-        Error(DecodeError.make DecodeCode.OutOfRange "a positive int" "not positive")
+        Error(RootDecodeCode.OutOfRange, "a positive int", "not positive")
 
-let private mPositive (i: int) : M.result<int, M.derr> =
-    if i > 0 then M.Ok i else M.Error(M.make M.OutOfRange)
+/// The production `andThen` function refusing at `rc`, with no phrases (the model drops them).
+let private refuseAs (rc: RootDecodeCode) : Result<JVal, RootDecodeCode * string * string> = Error(rc, "", "")
+
+let private mPositive (i: int) : M.result<int, M.root_code> =
+    if i > 0 then M.Ok i else M.Error M.ROutOfRange
 
 /// Every combinator the model covers, asked one question of each side, as (name, production,
 /// model). `drop` is the go-red instrument: the identity in every real run, and a path-truncating
@@ -276,6 +279,12 @@ let private decoderProbes
       (DecodePath.resolve path el |> Option.map jr |> string),
       (M.resolve mp m |> mOpt |> Option.map mjr |> string) ]
     @ [ for rc, mrc in rootCodes -> "fail " + string rc, pRes i (Decoder.fail rc "" "" el), mR i (M.fail mrc m) ]
+    // Phase 453: `andThen`'s function refusing at every root code, over a decoder that answers, and
+    // inside a member, so the refusal is anchored at the value and then carried one step down.
+    @ [ for rc, mrc in rootCodes ->
+            "andThen " + string rc,
+            pRes jr (Decoder.field "a" (Decoder.json |> Decoder.andThen (fun (_: JVal) -> refuseAs rc)) el),
+            mR mjr (M.field "a" (M.and_then (fun (_: MJVal) -> (M.Error mrc: M.result<MJVal, M.root_code>)) M.json) m) ]
 
 /// `DecodeError`'s path operations and `resolvesIn`, over a refusal of every code at the path.
 let private errorProbes

@@ -65,18 +65,19 @@
         that resolves at the value a step reaches resolves, one step longer, at the value the
         step started from.
 
-   WHAT IS REFUTED (section 9). Theorem 3 is FALSE of one block as the shard first read it, and
-   the model says so rather than assuming it away:
-     - `Decoder.andThen`'s function and `Codec.make` / `ofDecoder`'s reader are the CALLER's,
-       and their refusals are only as good as the caller makes them: the theorems carry "every
-       refusal `andThen`'s function answers is a root refusal of another code" and "the reader
-       handed to `make` is sound" as hypotheses, and those are the `decode-layer-premises` row.
-   Phase 436 refuted `Decoder.fail` too: it took every code, and at the empty path a `MissingField`
-   names no member and an `InvalidJson` stops resolving one step down. Phase 443 closed that in
-   production rather than in the model: `fail` takes a `RootDecodeCode`, which carries neither, so
-   `fail_sound` holds for every code it accepts with no premise, and the two counter-examples stand
-   in section 9 as statements about the refusals `fail` can no longer mint
-   (`root_missing_never_resolves`, `root_invalid_json_stops_resolving`).
+   WHAT IS NOT CLAIMED, AND WHAT WAS REFUTED (section 9). The reader handed to `Codec.make` /
+   `ofDecoder` is the CALLER's, and its refusals are only as good as the caller makes them: the
+   theorems carry "the reader handed to `make` is sound" as a hypothesis, the
+   `decode-layer-refusal-premises` row. Phase 436 refuted Theorem 3 as the shard first read it at
+   two blocks, and both are closed in PRODUCTION rather than assumed in the model:
+     - `Decoder.fail` took every code, and at the empty path a `MissingField` names no member and
+       an `InvalidJson` stops resolving one step down. Since Phase 443 it takes a `RootDecodeCode`,
+       which carries neither, so `fail_sound` holds for every code it accepts with no premise
+       (`root_missing_never_resolves`, `root_invalid_json_stops_resolving`).
+     - `Decoder.andThen` raised its function's refusal untouched, path and all. Since Phase 453 the
+       function refuses with a `RootDecodeCode`, raised at the value as `fail` raises it, so
+       `and_then_sound` holds for every function with no premise
+       (`and_then_needs_root_refusals` states the shape it no longer takes).
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Helpers are
    defined here rather than taken from `FStar.List.Tot` so that the extracted oracle depends on
@@ -287,11 +288,12 @@ let bind (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: dec num 
     | Ok v -> g v el
     | Error e -> Error e
 
-(* F#: `Decoder.andThen` — `g`'s refusal is raised at the value, untouched. *)
-let and_then (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b derr) (d: dec num flt a) : dec num flt b =
+(* F#: `Decoder.andThen` (its function's two phrases dropped) — since Phase 453 `g` refuses with
+   a `RootDecodeCode`, and the refusal is raised AT the value, as `fail` raises its own. *)
+let and_then (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b root_code) (d: dec num flt a) : dec num flt b =
   fun el ->
     match d el with
-    | Ok v -> g v
+    | Ok v -> (match g v with Ok u -> Ok u | Error c -> Error (make (root c)))
     | Error e -> Error e
 
 (* F#: `Decoder.wrongKind`. *)
@@ -1082,20 +1084,17 @@ let bind_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: de
     | Ok v -> sound_elim (g v) x
     | Error _ -> ())
 
-(* `andThen`'s function refuses at the value it is handed, untouched — so its refusals must be
-   ROOT refusals of a code `ok_make` admits. The premise is the caller's (`decode-layer-premises`). *)
-[@@ noextract_to "FSharp"]
-let root_ok (#b: Type0) (r: result b derr) : bool =
-  match r with
-  | Ok _ -> true
-  | Error e -> (match e.path with [] -> e.code <> InvalidJson && e.code <> MissingField | _ -> false)
-
-let and_then_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b derr) (d: dec num flt a)
-  : Lemma (requires sound d /\ (forall (v: a). root_ok (g v))) (ensures sound (and_then g d)) =
+(* `andThen` is sound for EVERY function (Phase 453): its function refuses with a `root_code`,
+   which `andThen` raises at the value exactly as `fail` does, so no premise on the caller's
+   function remains. Until 453 the function answered a whole refusal, path included, and this
+   lemma carried "every refusal it answers is a root refusal of a code `ok_make` admits" as a
+   hypothesis (section 9 states why it was needed). *)
+let and_then_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b root_code) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (and_then g d)) =
   sound_intro (and_then g d) (fun x ->
     sound_elim d x;
     match d x with
-    | Ok v -> assert (root_ok (g v))
+    | Ok v -> (match g v with Ok _ -> () | Error c -> root_excludes c; ok_make (root c) x)
     | Error _ -> ())
 
 let json_sound (#num #flt: eqtype) : Lemma (sound (json #num #flt)) = ()
@@ -1416,7 +1415,7 @@ let of_decoder_sound (#num #flt: eqtype) (#a: Type0) (w: a -> W.jval num flt) (d
   : Lemma (requires sound d) (ensures codec_sound (c_of_decoder w d)) =
   sound_all_intro (c_of_decoder w d).read_all (fun x -> sound_elim d x)
 
-(* `make`'s reader is the caller's: sound when the caller's is (`decode-layer-premises`). *)
+(* `make`'s reader is the caller's: sound when the caller's is (`decode-layer-refusal-premises`). *)
 let make_sound (#num #flt: eqtype) (#a: Type0) (w: a -> W.jval num flt) (r: W.jval num flt -> result a (list derr))
   : Lemma (requires sound_all r) (ensures codec_sound (c_make w r)) = ()
 
@@ -2069,7 +2068,7 @@ let float_round_trip (#num #flt: eqtype) (to_flt: num -> flt) : Lemma (rt (c_flo
 let bool_round_trip (#num #flt: eqtype) : Lemma (rt (c_bool #num #flt)) = ()
 
 (* `ofDecoder` and `make` take the caller's two faces; their agreement is the caller's
-   (`decode-layer-premises`). *)
+   (`decode-layer-round-trip-premises`). *)
 let of_decoder_round_trip (#num #flt: eqtype) (#a: Type0) (w: a -> W.jval num flt) (d: dec num flt a)
   : Lemma (requires forall (v: a). d (w v) == Ok v) (ensures rt (c_of_decoder w d)) = ()
 
@@ -2169,10 +2168,9 @@ let refine_round_trip (#num #flt: eqtype) (#a #b: Type0) (expected: string) (che
   with (match c.write (back u) with Ok j -> rt_elim c (back u) j | Error _ -> ())
 
 (* ======================================================================================
-   9. WHAT THEOREM 3 IS NOT. The premise the shard did not name, refuted where it fails (a
-      stated counter-example in the model, and the narrowed claim beside it), and the two
-      refusals `RootDecodeCode` keeps out of `fail` (Phase 443), stated about the codes it no
-      longer takes.
+   9. WHAT THEOREM 3 WAS NOT. Phase 436's three counter-examples, each now a statement about a
+      refusal production can no longer mint: the two `RootDecodeCode` keeps out of `fail`
+      (Phase 443), and the pathed refusal it keeps out of `andThen`'s function (Phase 453).
    ====================================================================================== *)
 
 (* A `MissingField` at the EMPTY path names no member: it resolves in no document at all. Until
@@ -2194,11 +2192,18 @@ let root_invalid_json_stops_resolving (#num #flt: eqtype) (#a: Type0) (k: string
            field k raw (W.JObj [(k, x)]) == Error (under (Key k) (make InvalidJson)) /\
            ~(resolves_in (W.JObj [(k, x)]) (under (Key k) (make InvalidJson)))) = ()
 
-(* `Decoder.andThen` raises its function's refusal untouched, so a function that refuses with a
-   path of its own refuses wherever that path happens not to resolve: here, a `MissingField`
-   naming a member the object DOES carry. *)
+(* Until Phase 453 `Decoder.andThen` raised its function's refusal UNTOUCHED, so a function that
+   refused with a path of its own refused wherever that path happened not to resolve: here, a
+   `MissingField` naming a member the object DOES carry (Phase 436's counter-example). `andThen`'s
+   function now answers a `root_code`, which carries no path and neither unsound code, so the
+   refusal below can no longer be handed to it (`and_then_sound` has no premise). `raw` is the
+   combinator `andThen` used to be, written out because `and_then` no longer takes such a
+   function; a check that must point inside the value is `bind` to `at <path> (fail c)`, which
+   walks the path in the document (`at_sound`). *)
 let and_then_needs_root_refusals (#num #flt: eqtype) (k: string) (x: W.jval num flt)
-  : Lemma (and_then #num #flt #(W.jval num flt) #unit (fun _ -> Error (missing k)) json (W.JObj [(k, x)]) == Error (missing k) /\
+  : Lemma (let raw (g: W.jval num flt -> result unit derr) (d: dec num flt (W.jval num flt)) : dec num flt unit =
+             fun el -> (match d el with Ok v -> g v | Error e -> Error e) in
+           raw (fun _ -> Error (missing k)) json (W.JObj [(k, x)]) == Error (missing k) /\
            ~(resolves_in (W.JObj [(k, x)]) (missing k))) = ()
 
 (* ======================================================================================

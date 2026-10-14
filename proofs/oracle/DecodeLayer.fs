@@ -488,9 +488,15 @@ let bind = (fun ( g  :  'a  ->  dec<'num, 'flt, 'b> ) ( d  :  dec<'num, 'flt, 'a
      end))
 
 
-let and_then = (fun ( g  :  'a  ->  result<'b, derr> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with
+let and_then = (fun ( g  :  'a  ->  result<'b, root_code> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with
 | Ok (v) -> begin
-     (g v)
+     (match ((g v)) with
+| Ok (u) -> begin
+     Ok (u)
+     end
+| Error (c) -> begin
+     Error ((make (root c)))
+     end)
      end
 | Error (e) -> begin
      Error (e)

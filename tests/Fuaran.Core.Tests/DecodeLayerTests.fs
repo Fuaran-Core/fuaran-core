@@ -416,6 +416,22 @@ let private capabilities: Capability list =
             Effect = effect }
         Placement = ClientIsland Fable } ]
 
+/// Every `RootDecodeCode` with its case name, in declaration order (Phase 443).
+let private rootCases: (RootDecodeCode * string) list =
+    Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<RootDecodeCode>
+    |> Array.map (fun c -> Microsoft.FSharp.Reflection.FSharpValue.MakeUnion(c, [||]) :?> RootDecodeCode, c.Name)
+    |> List.ofArray
+
+/// One value of every kind, and an object carrying the member `a` — what a refusal at the value is
+/// raised over.
+let private atValues: JVal list =
+    [ JBool true
+      JInt 1
+      JStr "s"
+      JArr [ JInt 2 ]
+      JObj [ "a", JObj [] ]
+      JObj [] ]
+
 [<Tests>]
 let tests =
     testList
@@ -619,11 +635,7 @@ let tests =
                 <| fun _ ->
                     // The go-red is the type: `Decoder.fail DecodeCode.MissingField ...` no longer
                     // compiles (FS0001), and this pins the case set, so restoring either case is red.
-                    let cases =
-                        Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<RootDecodeCode>
-                        |> Array.map (fun c ->
-                            Microsoft.FSharp.Reflection.FSharpValue.MakeUnion(c, [||]) :?> RootDecodeCode, c.Name)
-                        |> List.ofArray
+                    let cases = rootCases
 
                     Expect.equal
                         (cases |> List.map snd)
@@ -632,16 +644,8 @@ let tests =
                          |> List.map DecodeError.codeName)
                         "every code but InvalidJson and MissingField, in declaration order"
 
-                    let values =
-                        [ JBool true
-                          JInt 1
-                          JStr "s"
-                          JArr [ JInt 2 ]
-                          JObj [ "a", JObj [] ]
-                          JObj [] ]
-
                     for rc, name in cases do
-                        for v in values do
+                        for v in atValues do
                             match (Decoder.fail rc "e" "m": Decoder<unit>) v with
                             | Error e ->
                                 Expect.equal (DecodeError.codeName e.Code) name "fail raises the code it is handed"
@@ -655,6 +659,86 @@ let tests =
                                         (sprintf "%s resolves under a member" name)
                                 | _ -> ()
                             | Ok() -> failtest "fail answered a value"
+
+                testCase
+                    "andThen raises its function's refusal at the value, for every root code, and it resolves (Phase 453)"
+                <| fun _ ->
+                    // The go-red is the type: a function answering a `DecodeError` — a path of its
+                    // own, or a `MissingField` / `InvalidJson` — no longer compiles as `andThen`'s
+                    // argument (FS0001); its refusal is the triple `fail` takes.
+                    for rc, name in rootCases do
+                        for v in atValues do
+                            let refuse: Decoder<unit> =
+                                Decoder.json |> Decoder.andThen (fun _ -> Error(rc, "e", "m"))
+
+                            match refuse v with
+                            | Error e ->
+                                Expect.equal (DecodeError.codeName e.Code) name "andThen raises the code it is handed"
+                                Expect.equal e.Path [] "at the value"
+                                Expect.equal (e.Expected, e.Message) ("e", "m") "its phrases, untouched"
+
+                                Expect.equal
+                                    (Error e)
+                                    ((Decoder.fail rc "e" "m": Decoder<unit>) v)
+                                    "exactly fail's refusal"
+
+                                Expect.isTrue (DecodeError.resolvesIn v e) (sprintf "%s resolves in %A" name v)
+
+                                match Decoder.field "a" refuse v with
+                                | Error e2 when e2.Path = [ key "a" ] ->
+                                    Expect.isTrue
+                                        (DecodeError.resolvesIn v e2)
+                                        (sprintf "%s resolves under a member" name)
+                                | _ -> ()
+                            | Ok() -> failtest "andThen answered a value"
+
+                    // A refusal of the inner decoder passes through untouched, its path included.
+                    Expect.equal
+                        (refusal (
+                            (Decoder.field "a" Decoder.int |> Decoder.andThen (fun i -> Ok(i + 1))) (
+                                JObj [ "a", JStr "x" ]
+                            )
+                        ))
+                        (DecodeCode.WrongKind, [ key "a" ])
+                        "the inner refusal keeps its path"
+
+                testCase
+                    "a check that points inside the value goes through bind and at, which walk the document (Phase 453)"
+                <| fun _ ->
+                    // The shape `andThen` no longer admits — a function naming a path of its own — is
+                    // `bind` to `at <path> (fail ...)`: the path is walked in the document, so one the
+                    // document does not hold is refused where the walk stops, and still resolves.
+                    let pointAt (path: PathSegment list) : Decoder<unit> =
+                        Decoder.json
+                        |> Decoder.bind (fun _ -> Decoder.at path (Decoder.fail RootDecodeCode.OutOfRange "e" "m"))
+
+                    let doc = JObj [ "args", JArr [ JInt 1; JInt 2 ] ]
+
+                    for path in
+                        [ [ key "args"; index 1 ]
+                          [ key "args"; index 5 ]
+                          [ key "absent" ]
+                          [ key "args"; key "x" ] ] do
+                        match pointAt path doc with
+                        | Error e -> Expect.isTrue (DecodeError.resolvesIn doc e) (sprintf "%A resolves" path)
+                        | Ok() -> failtest "answered a value"
+
+                    Expect.equal
+                        (refusal (pointAt [ key "args"; index 1 ] doc))
+                        (DecodeCode.OutOfRange, [ key "args"; index 1 ])
+                        "a held path"
+
+                    // Core's one caller that refused below the value, migrated to that shape: a repeated
+                    // address is still refused at its second occurrence.
+                    match
+                        CapabilityCodec.decodeInvocationDetailedWith
+                            ReadPolicy.Lenient
+                            (CapabilityCodec.encodeInvocation "n" [ "n", "1"; "n", "2" ])
+                    with
+                    | Error e ->
+                        Expect.equal (e.Code, e.Path) (DecodeCode.OutOfRange, [ key "args"; index 1 ]) "at args[1]"
+                        Expect.equal e.Message "argument 'n' is given more than once" "its sentence"
+                    | Ok v -> failtestf "accepted %A" v
 
                 testCase "a path round-trips its wire form"
                 <| fun _ ->

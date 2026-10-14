@@ -46,8 +46,19 @@ module Decoder =
             | Ok v -> f v el
             | Error e -> Error e
 
-    /// Decode, then check or convert the answer; a refusal from `f` is raised at the value.
-    let andThen (f: 'T -> Result<'U, DecodeError>) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.bind f
+    /// Decode, then check or convert the answer. `f` refuses with the triple `fail` takes — a
+    /// `RootDecodeCode`, what the position expected, and a sentence — and `andThen` raises it AT the
+    /// value (Phase 453), so every refusal it answers resolves in the value it was handed. A check
+    /// that must point INSIDE the value (an item, a member) is `bind` to `at <path> (fail ...)`,
+    /// which walks the path in the document rather than trusting it.
+    let andThen (f: 'T -> Result<'U, RootDecodeCode * string * string>) (d: Decoder<'T>) : Decoder<'U> =
+        fun el ->
+            match d el with
+            | Ok v ->
+                match f v with
+                | Ok u -> Ok u
+                | Error(code, expected, message) -> fail code expected message el
+            | Error e -> Error e
 
     /// The string-error reading of a decoder — its refusal's sentence. The bridge a codec whose
     /// published error is a `string` returns through.

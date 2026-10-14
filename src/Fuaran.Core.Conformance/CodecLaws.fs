@@ -11,8 +11,8 @@ namespace Fuaran.Core
 /// each premise by its consequence at the composed codec, in the cell whose failure that premise
 /// produces: a refusal of a written value is a `refine` or a reader that does not admit its writer;
 /// a value read back unequal is a `map`, a constructor or an `inject` that does not invert; a
-/// refusal of a mutated document that names nothing in it is a reader, an `andThen` or a `fail`
-/// the domain wrote.
+/// refusal of a mutated document that names nothing in it is a reader the domain wrote (`fail` and
+/// `andThen` refuse at the value by construction since Phases 443 and 453).
 ///
 /// It reuses the corpus harness rather than restating it: the text leg is `Corpus.roundTrip` over
 /// the `Codec.corpus` bridge under every encoding profile, and the refusal leg walks

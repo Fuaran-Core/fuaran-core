@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-14 — D151: `Decoder.andThen`'s function refuses with the triple `Decoder.fail` takes — a `RootDecodeCode`, what the position expected, and a sentence — and `andThen` raises it at the value; a check that points inside the value is `bind` to `at <path> (fail ...)`, which walks the path in the document
+
+**Recorded by Phase 453.** Phase 436 proved that every refusal Core's decode blocks answer resolves in
+the document it was raised over, under one premise at `Decoder.andThen`: its function answered a whole
+`DecodeError` and `andThen` passed it through untouched, so a function that refused with a path of its
+own, or with `MissingField` / `InvalidJson` at the empty path, produced a refusal that need not
+resolve (`and_then_needs_root_refusals`). D149 closed the same defect at `fail` and left this one as a
+stated premise, estimating that closing it meant typing a refusal's path against its code. It does not:
+the function does not need a path at all. A survey of the workspace on 2026-10-14 found six callers,
+all in Core (`CapabilityCodec.tagged`, the `determinism` cross-check and `invocationOf` in
+`Fuaran.Core.Function/Capability.fs`; `EffectCodec.hostDecoder` and `determinismDecoder` in `Effect.fs`;
+`QueryShape.tagged` in `Fuaran.Core.Query/Query.fs`). Five refused at the value with a root code. One
+(`invocationOf`'s duplicate-address check) refused at `args[i]`, a path it computed from the decoded
+list rather than from the document.
+
+**D151.1 — by construction, with the triple `fail` already takes.** The two routes the shard named were
+a function that answers a root-level refusal which `andThen` anchors at the value, or keeping
+`DecodeError` and having `andThen` re-root the function's path and map the two unsound codes. The
+second still trusts a path it cannot check: re-rooting `args[5]` under the value is a refusal at a
+position the document may not hold, and mapping `MissingField` to some other code at run time
+answers something other than what the caller wrote. So the function answers
+`Result<'U, RootDecodeCode * string * string>` and `andThen` raises the refusal exactly as
+`fail code expected message` raises its own. The triple is the one `fail` takes, which costs the
+surface no new type: a record would carry the same three fields and collide on its labels with
+`DecodeError`'s. The old call, a function answering a `DecodeError`, no longer compiles (`FS0001`),
+which is the go-red, and `and_then_sound` holds for every function with no premise.
+
+**D151.2 — a refusal that points inside the value is a walk, not a claim.** The one caller that
+refused below the value moves to `Decoder.bind` and `Decoder.at [ args; i ] (Decoder.fail ...)`: `at`
+walks the path in the document, so it answers the same refusal at `args[i]` when the document holds
+that item, and a sound refusal where the walk stops when it does not. Its refusal is unchanged —
+`OutOfRange` at `$["args"][1]` with the same sentence, pinned in `DecodeLayerTests`. No new combinator:
+`bind`, `at` and `fail` are each proved sound already (`bind_sound`, `at_sound`, `fail_sound`).
+
+**D151.3 — the sibling combinators.** Every other block that takes a caller's function was checked for
+the same shape. `map` takes a total function and refuses nothing. `bind` and `mapListIndexed` take a
+function answering a DECODER of the same value or item, which is sound when the decoder is
+(`bind_sound`, `map_list_indexed_sound`) — a decoder built from the blocks is. `Codec.refine`'s
+`check` answers a `string`, which the block itself raises at the value (`refine_codec_sound`). What
+remains caller-supplied is a raw function used as a decoder, `Decoder<'T>` being an abbreviation of
+`JVal -> Result<'T, DecodeError>`, and the reader handed to `Codec.make` / `ofDecoder`: that is the
+narrowed `decode-layer-refusal-premises`, which `Conformance.codecLaws` samples (D148).
+
+**D151.4 — the model and the ladder.** `DecodeLayer.fst`'s `and_then` takes a function answering
+`root_code` and raises `make (root c)`; `root_ok` is deleted; `and_then_sound` requires only `sound d`.
+`and_then_needs_root_refusals` is kept as a statement about the combinator `andThen` used to be,
+written out as `raw` since `and_then` no longer takes such a function. `decode-layer-refuted-premises`
+is retired — Theorem 3 holds of every block with no condition on the caller's `andThen` — and
+`decode-layer-refusal-premises` keeps only the `make` / `ofDecoder` reader. The oracle is re-extracted
+and the differential probes `andThen` refusing at every root code, inside a member.
+
+**D151.5 — the class.** A breaking change to `Fuaran.Core.Wire`: `Decoder.andThen`'s function changes
+type. No refusal any Core decoder answers changes. The migration is one line per call:
+`Error(DecodeError.make DecodeCode.X expected message)` becomes `Error(RootDecodeCode.X, expected,
+message)`, and a function that refused with a path of its own becomes `Decoder.bind` to
+`Decoder.at <path> (Decoder.fail ...)`. It lands on the `0.38.0` draft, which is untagged.
+
 ## 2026-10-12 — D150: `Tree.Index.isFreshFor` is exact — one walk compares the index with the tree node by node, with no hash; it takes the caller's content encoder, so a content-only edit reads as stale; the `Fingerprint` stamp, `buildWith` and `isFreshForWith` are removed
 
 **Recorded by Phase 447.** Phase 438 proved the build-once index agrees with the walks it caches, and

@@ -154,11 +154,10 @@ module EffectCodec =
             | Some h -> Ok h
             | None ->
                 Error(
-                    DecodeError.make
-                        DecodeCode.UnknownTag
-                        ("one of "
-                         + (hosts |> List.map (fun h -> "'" + hostTag h + "'") |> String.concat ", "))
-                        ("unknown host effect: " + s)
+                    RootDecodeCode.UnknownTag,
+                    "one of "
+                    + (hosts |> List.map (fun h -> "'" + hostTag h + "'") |> String.concat ", "),
+                    "unknown host effect: " + s
                 ))
 
     /// The determinism axis, read back from its canonical label only (`Effect.tryDeterminismOfTag`).
@@ -167,7 +166,7 @@ module EffectCodec =
         |> Decoder.andThen (fun tag ->
             match Effect.tryDeterminismOfTag tag with
             | Some set -> Ok set
-            | None -> Error(DecodeError.make DecodeCode.UnknownTag "a determinism tag" ("unknown determinism: " + tag)))
+            | None -> Error(RootDecodeCode.UnknownTag, "a determinism tag", "unknown determinism: " + tag))
 
     /// The members an effect object carries — what a strict reader admits.
     let members: string list = [ "host"; "determinism" ]

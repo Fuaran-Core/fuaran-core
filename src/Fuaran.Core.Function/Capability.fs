@@ -833,11 +833,10 @@ module CapabilityCodec =
             | Some(_, v) -> Ok v
             | None ->
                 Error(
-                    DecodeError.make
-                        DecodeCode.UnknownTag
-                        ("one of "
-                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
-                        (what + s)
+                    RootDecodeCode.UnknownTag,
+                    "one of "
+                    + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "),
+                    what + s
                 ))
 
     // ---- signature entry + signature ----
@@ -1019,14 +1018,13 @@ module CapabilityCodec =
                      |> Decoder.andThen (fun wireTag ->
                          if wireTag <> expectedTag then
                              Error(
-                                 DecodeError.make
-                                     DecodeCode.OutOfRange
-                                     ("'" + expectedTag + "', the signature's determinism")
-                                     ("capability determinism disagrees with signature effect: wire '"
-                                      + wireTag
-                                      + "' vs signature '"
-                                      + expectedTag
-                                      + "'")
+                                 RootDecodeCode.OutOfRange,
+                                 "'" + expectedTag + "', the signature's determinism",
+                                 "capability determinism disagrees with signature effect: wire '"
+                                 + wireTag
+                                 + "' vs signature '"
+                                 + expectedTag
+                                 + "'"
                              )
                          else
                              Ok()))
@@ -1068,23 +1066,20 @@ module CapabilityCodec =
             both (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
 
         // Phase 307: one address, one argument — a repeated address is refused here as it is by
-        // `validateArgs` (`DuplicateArg`), at the second occurrence.
-        let distinctArgs (args: (string * string) list) : Result<(string * string) list, DecodeError> =
+        // `validateArgs` (`DuplicateArg`), at the second occurrence. The refusal is raised through
+        // `at` (Phase 453), which walks `args[i]` in the document rather than trusting the index.
+        let distinctArgs (cid: string, args: (string * string) list) : Decoder<string * (string * string) list> =
             let rec go (seen: Set<string>) (i: int) =
                 function
-                | [] -> Ok args
+                | [] -> Decoder.succeed (cid, args)
                 | (addr: string, _) :: rest ->
                     if seen.Contains addr then
-                        Error(
-                            DecodeError.under
-                                (PathSegment.Key "args")
-                                (DecodeError.under
-                                    (PathSegment.Index i)
-                                    (DecodeError.make
-                                        DecodeCode.OutOfRange
-                                        "each address once"
-                                        ("argument '" + addr + "' is given more than once")))
-                        )
+                        Decoder.at
+                            [ PathSegment.Key "args"; PathSegment.Index i ]
+                            (Decoder.fail
+                                RootDecodeCode.OutOfRange
+                                "each address once"
+                                ("argument '" + addr + "' is given more than once"))
                     else
                         go (seen.Add addr) (i + 1) rest
 
@@ -1092,7 +1087,7 @@ module CapabilityCodec =
 
         both (Decoder.field "capabilityId" Decoder.str) (Decoder.field "args" (Decoder.list arg)) (fun cid args ->
             cid, args)
-        |> Decoder.andThen (fun (cid, args) -> distinctArgs args |> Result.map (fun a -> cid, a))
+        |> Decoder.bind distinctArgs
 
     /// Read an invocation back as `(capabilityId, args)` in wire order, leniently; argument values are
     /// read as strings and checked against nothing until `validateArgs`, but an address given twice

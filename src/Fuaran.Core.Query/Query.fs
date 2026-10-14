@@ -280,11 +280,10 @@ module internal QueryShape =
             | Some(_, v) -> Ok v
             | None ->
                 Error(
-                    DecodeError.make
-                        DecodeCode.UnknownTag
-                        ("one of "
-                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
-                        (what + s)
+                    RootDecodeCode.UnknownTag,
+                    "one of "
+                    + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "),
+                    what + s
                 ))
 
     /// A column type, spelled by `ColumnType.tag`.

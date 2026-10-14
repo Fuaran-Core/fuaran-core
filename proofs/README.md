@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 341 claims — 245 proved across 32 models, 56 tested, 38 assumed (8 `domain-obligation`, 24 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 340 claims — 244 proved across 32 models, 56 tested, 38 assumed (8 `domain-obligation`, 24 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -7141,12 +7141,16 @@ composition of these blocks, and the property follows by induction on how it was
   `Ok` only when nothing repeats (`repeats_nil`) and no case declares the discriminator
   (`union_faults_nil`).
 
-**A premise the shard did not name is FALSE, and is refuted rather than assumed.** Read as "every
-refusal any block answers resolves", theorem 3 fails at `Decoder.andThen`, which raises its
-function's refusal untouched, so a function that refuses with a path of its own refuses wherever that
-path does not resolve (`and_then_needs_root_refusals`). The narrowed claim is the one proved:
-`andThen` is sound when its function refuses only at the root with a code other than `MissingField`
-and `InvalidJson`.
+**A premise the shard did not name was FALSE, and Phase 453 closed it in production.** Read as
+"every refusal any block answers resolves", theorem 3 failed at `Decoder.andThen`, which raised its
+function's refusal untouched, so a function that refused with a path of its own refused wherever that
+path did not resolve (`and_then_needs_root_refusals`), and Phase 436 proved `andThen` sound only under
+the premise that its function refused at the root with a code other than `MissingField` and
+`InvalidJson`. The function now refuses with a `RootDecodeCode` (with `fail`'s two phrases), which
+`andThen` raises at the value exactly as `fail` does, so `and_then_sound` holds for every function with
+no premise. The counter-example stays in the model as a statement about the combinator `andThen` used to
+be; a check that must point inside the value is `bind` to `at <path> (fail ...)`, which walks the path
+in the document (DECISIONS.md D151).
 
 **`Decoder.fail` was the second refutation, and Phase 443 closed it in production.** Phase 436 found
 that `fail` took every code, and two of them mint a refusal that points nowhere: a `MissingField` at
@@ -7171,10 +7175,10 @@ record invariant in a later model should start there.
    per-block soundness lemmas and `ok_at_under` / `ok_at_within` under them; `strict_reader_total`
    and `decoder_total`; `build_round_trip`, `union_round_trip`, `case_round_trip`,
    `field_round_trip`, `opt_field_round_trip`, `list_round_trip`, `enum_round_trip`,
-   `map_round_trip`, `refine_round_trip` and the leaf round trips; the `andThen` refutation and the
-   two statements about the codes `fail` no longer takes. Rows
-   **`decode-layer-refusals-resolve`**, **`decode-layer-totality`**, **`decode-layer-round-trip`**,
-   **`decode-layer-refuted-premises`**. Checked by the leg at its flags (`--z3rlimit 40 --quake 3`,
+   `map_round_trip`, `refine_round_trip` and the leaf round trips; the three statements about the
+   refusals `fail` and `andThen` no longer mint. Rows
+   **`decode-layer-refusals-resolve`**, **`decode-layer-totality`**, **`decode-layer-round-trip`**
+   (`decode-layer-refuted-premises` was retired by Phase 453: no block is refuted any more). Checked by the leg at its flags (`--z3rlimit 40 --quake 3`,
    default fuel, no scoped option), `--report_assumes error` on, no `assume`, no `admit`. Measured
    red with `Decoder.field`'s refusal not taken under its member: `field_sound` fails.
 2. **Tested.** **`decode-layer-differential`** — four `Proofs.Oracle` cases: every combinator and
@@ -7186,8 +7190,9 @@ record invariant in a later model should start there.
 3. **Assumed, and stated as such.** **`decode-layer-round-trip-premises`** — `map`'s `there` inverts
    `back`, `refine`'s `check` admits every `back`-image, a record's constructor applied to its getters
    is the value, a case's `inject` inverts its `project`, and a `make` / `ofDecoder` reader reads back
-   its writer: the domain's to keep. **`decode-layer-refusal-premises`** — `andThen`'s function and
-   a `make` reader refuse within the narrowed claim (`fail`'s code left this row with Phase 443). Both were filed as premises
+   its writer: the domain's to keep. **`decode-layer-refusal-premises`** — a `make` /
+   `ofDecoder` reader, or a raw function used as a decoder, is sound (`fail`'s code left this row with
+   Phase 443, `andThen`'s function with Phase 453). Both were filed as premises
    because no family of the `Conformance` roster sampled them at a domain's codec; since Phase 442
    both are `domain-obligation` rows discharged by `Conformance.codecLaws`, which samples each at the
    domain's own `Codec<'T>` — round trip at the value and through the canonical text, and every
