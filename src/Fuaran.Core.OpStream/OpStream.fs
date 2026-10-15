@@ -359,10 +359,13 @@ module OpStream =
     /// every string token's escapes (an unknown escape letter, a non-hex `\u` digit, an unpaired
     /// surrogate), every bare value's literal (`true` / `false` / `null` / a JSON number and nothing
     /// else), and — through the typed accessors — a member whose KIND is wrong for its reader (an
-    /// unquoted value where a string is required, a non-integer where an integer is). The interior
-    /// of an array or object value is balanced and its strings checked, but its grammar beyond that
-    /// is the grammar of whoever decodes the raw span. Every refusal is a typed `JsonlFault` naming
-    /// the 1-based line and the scanner's own position; nothing here throws past this module.
+    /// unquoted value where a string is required, a non-integer where an integer is). Since Phase
+    /// 466 it reads by the strict grammar `Wire.Json` reads by (DECISIONS.md D157, D158) at every
+    /// depth of an array or object value: a key read twice in one object (`RepeatedKey`), a raw
+    /// control character in a string (`RawControl`) and a raw surrogate that is not half of a pair
+    /// (`LoneSurrogate`) are refused, each naming the path it is at. Every refusal is a typed
+    /// `JsonlFault` naming the 1-based line and the scanner's own position; nothing here throws past
+    /// this module.
     module Jsonl =
 
         /// Scan one line into a `JsonlLine` carrying its 1-based `number`.
@@ -370,8 +373,8 @@ module OpStream =
             OpStreamJsonl.Jsonl.parseLine number text
 
         /// The members of one flat JSON object, each value as its raw span byte-for-byte (the
-        /// opaque canonical payload a consumer embeds keeps its bytes), first-wins on a repeated key.
-        /// A refusal is numbered line 1.
+        /// opaque canonical payload a consumer embeds keeps its bytes); a repeated key is refused
+        /// (Phase 466; until then the first won). A refusal is numbered line 1.
         let topFields (line: string) : Result<(string * string) list, JsonlFault> = OpStreamJsonl.Jsonl.topFields line
 
         /// The raw span of ONE top-level member of a flat JSON object — `None` when the object has no

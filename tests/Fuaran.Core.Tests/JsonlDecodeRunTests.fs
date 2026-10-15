@@ -3,8 +3,10 @@ module Fuaran.Core.Tests.JsonlDecodeRunTests
 // Phase 369 — an op-stream line is decoded by runs, not characters. `Jsonl.decodeString` decodes a
 // string token `skipString` has already scanned and accepted. It appended one character at a time; it
 // now returns an escape-free body whole (one `Substring`) and otherwise copies each clean run by one
-// ranged `Append`, decoding only the escapes. `skipString` is unchanged, so every refusal, its kind and
-// its position are what they were.
+// ranged `Append`, decoding only the escapes. `skipString` was unchanged by that phase, so every refusal,
+// its kind and its position were what they had been; Phase 466 then held it to the strict grammar (a raw
+// control and a raw unpaired surrogate refused, a pair split between spellings read), and the sweep below
+// still holds every route to one answer under those rules.
 //
 // `decodeString` is private, so production is reached through every public route that calls it:
 // `Jsonl.unquote` (a whole token), `Jsonl.parseLine` / `topFields` (a member key), `Jsonl.stringField`
@@ -363,3 +365,170 @@ let impossibleBranchTests =
                   capture
                   "failwithf \"unreachable: the attempt just journalled for %s/%d did not settle\""
                   "the keyed capture's settle arm fails loudly" ]
+
+// ---- Phase 466: the strict grammar, at the line ----
+//
+// The op-stream reader shares the strict grammar's VECTORS with `Wire.Json`, not its code (D2). Each
+// vector of the refusal corpus that applies to a line is read twice: as a member's VALUE
+// (`{"v":<input>}`), and, when it is an object, as the line itself. A refused vector must be refused at
+// the line in the class the line reader answers for the grammar's class, and an accepted one must
+// read. Two classes of vector do not apply, and are named below rather than skipped in silence.
+
+module private Strict =
+
+    open Fuaran.Core.Tests.RefusalVectorTests
+
+    /// The class of a line refusal — the case's name.
+    let lineClass (r: JsonlFaultReason) : string =
+        (sprintf "%A" r).Split([| ' '; '\n' |]).[0]
+
+    /// The line reader's classes for one class of the grammar's JSON layer.
+    let classesFor (grammarClass: string) : string list =
+        match grammarClass with
+        | "DuplicateMember" -> [ "RepeatedKey" ]
+        | "BadEscape" -> [ "RawControl"; "InvalidEscape"; "LoneSurrogate" ]
+        | "MalformedNumber"
+        | "UnexpectedChar" -> [ "InvalidLiteral" ]
+        | "TrailingCharacters" -> [ "ExpectedCommaOrBrace"; "TrailingContent" ]
+        | other -> [ "<no line class for " + other + ">" ]
+
+    /// Why a vector does not apply to a line, or `None` when it does.
+    let notApplicable (v: RefusalCorpus.Vector) : string option =
+        match v.Codec with
+        | "profile" -> Some "a wire-profile string, not JSON text"
+        | "json" when v.Name = "overflowing-exponent" ->
+            Some
+                "a value-domain refusal: Core's value model has no non-finite float (D157.2), while the line grammar reads 1e999 as a number token and hands its span to the decoder"
+        | _ -> None
+
+    /// The class the JSON layer refuses the vector in, or `None` for one it reads (a column vector the
+    /// column codec refuses over well-formed JSON is read at the line).
+    let grammarRefusal (v: RefusalCorpus.Vector) : string option =
+        match v.Codec, v.Intent with
+        | _, RefusalCorpus.Accept -> None
+        | "json", RefusalCorpus.Refuse cls -> Some cls
+        | "column", RefusalCorpus.Refuse cls when cls.StartsWith "NotJson/" -> Some(cls.Substring 8)
+        | _, RefusalCorpus.Refuse _ -> None
+
+    /// Every disagreement between the line reader and the vector, over the two readings.
+    let disagreements (v: RefusalCorpus.Vector) : string list =
+        let readings =
+            [ yield "as a value", "{\"v\":" + v.Input + "}"
+              if v.Input.StartsWith "{" then
+                  yield "as the line", v.Input ]
+
+        [ for how, line in readings do
+              match grammarRefusal v, OpStream.Jsonl.parseLine 1 line with
+              | None, Ok _ -> ()
+              | None, Error f ->
+                  yield sprintf "%s %s: refused (%s), the grammar reads it" v.Name how (JsonlFault.toString f)
+              | Some cls, Ok _ -> yield sprintf "%s %s: read, the grammar refuses it (%s)" v.Name how cls
+              | Some cls, Error f ->
+                  if not (List.contains (lineClass f.Reason) (classesFor cls)) then
+                      yield sprintf "%s %s: refused as %s, the grammar as %s" v.Name how (lineClass f.Reason) cls ]
+
+    /// A string from its UTF-16 units, so an unpaired surrogate is never an F# literal.
+    let units (codes: int list) : string =
+        System.String(codes |> List.map char |> Array.ofList)
+
+    /// The cases the corpus cannot carry (a JSON file holds no raw lone surrogate), and the paths:
+    /// the line, then the position and refusal, or `None` for a line that reads.
+    let pinned: (string * string * (int * JsonlFaultReason) option) list =
+        [ "a raw high surrogate the string ends after",
+          "{\"a\":\"" + units [ 0xD83D ] + "\"}",
+          Some(6, JsonlFaultReason.LoneSurrogate "$[\"a\"]")
+          "a raw low surrogate with no high before it",
+          "{\"a\":[1,\"x" + units [ 0xDE00 ] + "\"]}",
+          Some(10, JsonlFaultReason.LoneSurrogate "$[\"a\"][1]")
+          "a raw high surrogate followed by a short escape",
+          "{\"a\":\"" + units [ 0xD83D ] + "\\n\"}",
+          Some(6, JsonlFaultReason.LoneSurrogate "$[\"a\"]")
+          "a raw high surrogate followed by a raw control: the control's refusal",
+          "{\"a\":\"" + units [ 0xD83D; 0x01 ] + "\"}",
+          Some(7, JsonlFaultReason.RawControl "$[\"a\"]")
+          "a raw high surrogate followed by an unknown escape: the escape's refusal",
+          "{\"a\":\"" + units [ 0xD83D ] + "\\x\"}",
+          Some(7, JsonlFaultReason.InvalidEscape "\\x")
+          "a raw pair reads", "{\"a\":\"" + units [ 0xD83D; 0xDE00 ] + "\"}", None
+          "an escaped high half and a raw low half read as one character",
+          "{\"a\":\"\\uD83D" + units [ 0xDE00 ] + "\"}",
+          None
+          "a raw high half and an escaped low half read as one character",
+          "{\"a\":\"" + units [ 0xD83D ] + "\\uDE00\"}",
+          None
+          "an escaped high half before a raw non-surrogate keeps its escape refusal",
+          "{\"a\":\"\\uD83Dxy\"}",
+          Some(6, JsonlFaultReason.InvalidEscape "\\uD83Dxy\"}")
+          "a raw control in a key names the object holding it",
+          "{\"o\":{\"k" + units [ 0x1F ] + "\":1}}",
+          Some(8, JsonlFaultReason.RawControl "$[\"o\"]")
+          "a raw tab in a top-level value", "{\"a\":\"x\ty\"}", Some(7, JsonlFaultReason.RawControl "$[\"a\"]")
+          "a repeated key two objects deep, by its path",
+          "{\"op\":{\"items\":[{\"id\":1},{\"id\":2,\"id\":3}]}}",
+          Some(33, JsonlFaultReason.RepeatedKey "$[\"op\"][\"items\"][1][\"id\"]")
+          "keys are compared after unescaping",
+          "{\"a\":{\"k\":1,\"\\u006b\":2}}",
+          Some(12, JsonlFaultReason.RepeatedKey "$[\"a\"][\"k\"]")
+          "a refusal inside the repeated member's value wins",
+          "{\"a\":1,\"a\":[1,,2]}",
+          Some(14, JsonlFaultReason.MissingValue)
+          "the same key in sibling objects and at two depths reads",
+          "{\"a\":[{\"k\":1},{\"k\":2}],\"k\":{\"k\":3}}",
+          None
+          "an array's items are separated", "{\"a\":[1 2]}", Some(8, JsonlFaultReason.ExpectedCommaOrBracket)
+          "a trailing comma in an array", "{\"a\":[1,]}", Some(8, JsonlFaultReason.MissingValue)
+          "a trailing comma in an object value", "{\"a\":{\"b\":1,}}", Some(12, JsonlFaultReason.ExpectedKey)
+          "a nested literal is held to the grammar", "{\"a\":[tru]}", Some(6, JsonlFaultReason.InvalidLiteral "tru")
+          "a line ending inside nested containers is refused at the outermost",
+          "{\"a\":[{\"b\":[1",
+          Some(5, JsonlFaultReason.UnterminatedContainer)
+          "a key's path is quoted as the decode path spells one",
+          "{\"a\\\"b\":{\"c\":1,\"c\":2}}",
+          Some(15, JsonlFaultReason.RepeatedKey "$[\"a\\\"b\"][\"c\"]") ]
+
+[<Tests>]
+let strictTests =
+    testList
+        "JsonlStrictGrammar (Phase 466)"
+        [ testCase "every refusal vector that applies to a line gets the grammar's answer, as a value and as the line"
+          <| fun _ ->
+              let applicable =
+                  RefusalVectorTests.RefusalCorpus.vectors
+                  |> List.filter (fun v -> Option.isNone (Strict.notApplicable v))
+
+              Expect.isGreaterThan applicable.Length 60 "the corpus is the one the grammar is written in"
+
+              Expect.equal
+                  (applicable |> List.collect Strict.disagreements)
+                  []
+                  "no vector that applies is answered differently"
+
+          testCase "the vectors that do not apply are exactly the named ones, and the comparison can fail"
+          <| fun _ ->
+              let named =
+                  RefusalVectorTests.RefusalCorpus.vectors
+                  |> List.choose (fun v -> Strict.notApplicable v |> Option.map (fun _ -> v.Codec, v.Name))
+
+              Expect.equal
+                  (named |> List.filter (fun (codec, _) -> codec <> "profile"))
+                  [ "json", "overflowing-exponent" ]
+                  "one JSON vector, a value-domain refusal; and every profile vector, which is not JSON"
+
+              // The go-red: a vector whose expectation is flipped is caught as a disagreement, so the
+              // comparison above is able to fail.
+              let flipped: RefusalVectorTests.RefusalCorpus.Vector =
+                  { Name = "flipped"
+                    Codec = "json"
+                    Input = "{\"a\":1,\"a\":2}"
+                    Intent = RefusalVectorTests.RefusalCorpus.Accept }
+
+              Expect.isNonEmpty (Strict.disagreements flipped) "a repeated member read as accepted disagrees"
+
+          testCase "the cases the corpus cannot spell, and the paths, are answered as pinned"
+          <| fun _ ->
+              for label, line, want in Strict.pinned do
+                  match want, OpStream.Jsonl.parseLine 1 line with
+                  | None, Ok _ -> ()
+                  | None, Error f -> failtestf "%s: refused (%s)" label (JsonlFault.toString f)
+                  | Some _, Ok _ -> failtestf "%s: read" label
+                  | Some(pos, reason), Error f -> Expect.equal (f.Position, f.Reason) (pos, reason) label ]

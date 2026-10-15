@@ -884,6 +884,7 @@ Integrity is also **opt-in on load**: `OpStream.fromJsonl` / `Dag.fromJsonl` dec
 and do not verify — a tampered, dangling-parent, or cyclic input decodes to a clean `Ok`. Use
 `fromJsonlVerified` (Phase 13; `Dag.loadLanesVerified` for lanes) or verify before trusting. Every load
 answers a typed `StreamLoadFault` from `0.37.0`: a break first, then `Undecodable` ops (Phase 416, D146).
+The scanner refuses a line the strict grammar refuses, at any depth, by path (Phase 466, D158).
 
 **Compaction reads the boundary, it does not check it — verify, then compact (Phase 227).**
 `OpStream.Snapshots.compact`, in either mode and under any config, reads the boundary record's hash
