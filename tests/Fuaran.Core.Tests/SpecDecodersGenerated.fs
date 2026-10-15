@@ -22,7 +22,11 @@ type Strictness =
     | AdvisoryWarning
 
 [<RequireQualifiedAccess>]
-type Slot<'T> =
+type Binding<'T> =
+    | Local of parse: (JVal -> 'T option) * value: 'T
+    | Ref of name: string
+
+and [<RequireQualifiedAccess>] Slot<'T> =
     /// A value supplied inline rather than resolved by name.
     | Fixed of value: 'T
     /// **Deprecated.** Use `Fixed` instead.
@@ -45,6 +49,12 @@ and Point =
     {
       X: float
       Y: float
+    }
+
+// content
+and BindSpec =
+    {
+      Binding: Binding<int>
     }
 
 // meta
@@ -96,6 +106,7 @@ and NoteSpec =
     { Body: Text }
 
 and [<RequireQualifiedAccess>] NodeKind =
+    | Bind of BindSpec
     | Embed of EmbedSpec
     | Group of GroupSpec
     | Link of LinkSpec
@@ -147,6 +158,7 @@ let private encFloat (f: float) : JVal =
 
 let rec private encNodeKind (k: NodeKind) : JVal =
     match k with
+    | NodeKind.Bind s -> encBindSpec s
     | NodeKind.Embed s -> encEmbedSpec s
     | NodeKind.Group s -> encGroupSpec s
     | NodeKind.Link s -> encLinkSpec s
@@ -157,6 +169,11 @@ and private encNode (n: Node) : JVal =
     let kind = encNodeKind n.Kind
 
     JObj([ Some("id", JStr n.Id); Some("kind", kind); (n.Hidden |> Option.map (fun v -> "hidden", JBool v)); (n.Label |> Option.map (fun v -> "label", JStr v)) ] |> List.choose id)
+
+and private encBinding<'T> (encT: 'T -> JVal) (v: Binding<'T>) : JVal =
+    match v with
+    | Binding.Local (parse, value) -> Canon.typed "Local" [ "parse", JStr "<closure>"; "value", encT value ]
+    | Binding.Ref name -> Canon.typed "Ref" [ "name", JStr name ]
 
 and private encSlot<'T> (encT: 'T -> JVal) (v: Slot<'T>) : JVal =
     match v with
@@ -173,6 +190,9 @@ and private encContentHash (s: ContentHash) : JVal =
 
 and private encPoint (s: Point) : JVal =
     JObj([ Some("x", encFloat s.X); Some("y", encFloat s.Y) ] |> List.choose id)
+
+and private encBindSpec (s: BindSpec) : JVal =
+    Canon.typed "Bind" ([ Some("binding", (encBinding JInt) s.Binding) ] |> List.choose id)
 
 and private encEmbedSpec (s: EmbedSpec) : JVal =
     Canon.typed "Embed" ([ Some("componentId", JStr s.ComponentId); (s.ContentHash |> Option.map (fun v -> "contentHash", encContentHash v)); Some("moduleId", JStr s.ModuleId); None; (s.Props |> Option.map (fun v -> "props", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, id v))) v)) ] |> List.choose id)
@@ -368,12 +388,13 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
+    | "Bind" -> decBindSpec j |> Result.map NodeKind.Bind
     | "Embed" -> decEmbedSpec j |> Result.map NodeKind.Embed
     | "Group" -> decGroupSpec j |> Result.map NodeKind.Group
     | "Link" -> decLinkSpec j |> Result.map NodeKind.Link
     | "Measure" -> decMeasureSpec j |> Result.map NodeKind.Measure
     | "Note" -> decNoteSpec j |> Result.map NodeKind.Note
-    | __other -> dUnknown "one of 'Embed', 'Group', 'Link', 'Measure', 'Note'" ("unknown node kind: " + __other)))
+    | __other -> dUnknown "one of 'Bind', 'Embed', 'Group', 'Link', 'Measure', 'Note'" ("unknown node kind: " + __other)))
 
 and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
@@ -382,6 +403,21 @@ and private decNode (j: JVal) : Result<Node, DecodeError> =
     dOpt "hidden" __fs dBool |> Result.bind (fun hidden ->
     dOpt "label" __fs dStr |> Result.bind (fun label ->
     Ok { Id = id; Kind = kind; Hidden = hidden; Label = label })))))
+
+and private decBinding<'T> (decT: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Binding<'T>, DecodeError> =
+    match j with
+    | JObj __fs ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Local" ->
+            dReq "parse" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> (fun (v: JVal) -> decT v |> Result.toOption))) |> Result.bind (fun parse ->
+            dReq "value" __fs decT |> Result.bind (fun value ->
+            Ok(Binding.Local(parse, value))))
+        | "Ref" ->
+            dReq "name" __fs dStr |> Result.bind (fun name ->
+            Ok(Binding.Ref(name)))
+        | __other -> dUnknown "one of 'Local', 'Ref'" ("unknown Binding case: " + __other))
+    | _ -> dFail DecodeCode.WrongKind "object" "expected a Binding object"
 
 and private decSlot<'T> (decT: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Slot<'T>, DecodeError> =
     match j with
@@ -424,6 +460,11 @@ and private decPoint (j: JVal) : Result<Point, DecodeError> =
     dReq "x" __fs dFloat |> Result.bind (fun x ->
     dReq "y" __fs dFloat |> Result.bind (fun y ->
     Ok { X = x; Y = y })))
+
+and private decBindSpec (j: JVal) : Result<BindSpec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "binding" __fs (decBinding dInt) |> Result.bind (fun binding ->
+    Ok { Binding = binding }))
 
 and private decEmbedSpec (j: JVal) : Result<EmbedSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
@@ -473,6 +514,7 @@ let decodeNode (s: string) : Result<Node, DecodeError> =
 
 let private witnessKindTag (n: Node) : string =
     match n.Kind with
+    | NodeKind.Bind _ -> "Bind"
     | NodeKind.Embed _ -> "Embed"
     | NodeKind.Group _ -> "Group"
     | NodeKind.Link _ -> "Link"
@@ -501,6 +543,9 @@ let runValidator (reg: Validator.RuleRegistry<Node, string>) (root: Node) : Defe
 
 // Smart constructors — required-without-default fields are parameters; IDL-declared
 // defaults are filled, other optionals default to None.
+
+let mkBind (id: string) (binding: Binding<int>) : Node =
+    { Id = id; Kind = NodeKind.Bind { Binding = binding }; Hidden = None; Label = None }
 
 let mkEmbed (id: string) (componentId: string) (moduleId: string) : Node =
     { Id = id; Kind = NodeKind.Embed { ComponentId = componentId; ContentHash = None; ModuleId = moduleId; OnMount = ignore; Props = None }; Hidden = None; Label = None }
@@ -606,12 +651,13 @@ let rec private colNodeKind (j: JVal) : Result<NodeKind, DecodeError list> =
     cObj j |> Result.bind (fun __fs ->
     dTag __fs |> cOne |> Result.bind (fun __t ->
     match __t with
+    | "Bind" -> colBindSpec j |> Result.map NodeKind.Bind
     | "Embed" -> colEmbedSpec j |> Result.map NodeKind.Embed
     | "Group" -> colGroupSpec j |> Result.map NodeKind.Group
     | "Link" -> colLinkSpec j |> Result.map NodeKind.Link
     | "Measure" -> colMeasureSpec j |> Result.map NodeKind.Measure
     | "Note" -> colNoteSpec j |> Result.map NodeKind.Note
-    | __other -> cOne (dUnknown "one of 'Embed', 'Group', 'Link', 'Measure', 'Note'" ("unknown node kind: " + __other))))
+    | __other -> cOne (dUnknown "one of 'Bind', 'Embed', 'Group', 'Link', 'Measure', 'Note'" ("unknown node kind: " + __other))))
 
 and private colNode (j: JVal) : Result<Node, DecodeError list> =
     cObj j |> Result.bind (fun __fs ->
@@ -624,7 +670,30 @@ and private colNode (j: JVal) : Result<Node, DecodeError list> =
             Ok { Id = id; Kind = kind; Hidden = hidden; Label = label }
         | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2; cErrs __c3 ]))
 
+and private colBinding<'T> (colT: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<Binding<'T>, DecodeError list> =
+    let decT (__j: JVal) = cFirst (colT __j)
+    match j with
+    | JObj __fs ->
+        dTag __fs |> cOne |> Result.bind (fun __t ->
+        match __t with
+        | "Local" ->
+            let __c0 = cOne (dReq "parse" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> (fun (v: JVal) -> decT v |> Result.toOption))))
+            let __c1 = cReq "value" __fs colT
+            match __c0, __c1 with
+            | Ok parse, Ok value ->
+                Ok(Binding.Local(parse, value))
+            | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ])
+        | "Ref" ->
+            let __c0 = cOne (dReq "name" __fs dStr)
+            match __c0 with
+            | Ok name ->
+                Ok(Binding.Ref(name))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | __other -> cOne (dUnknown "one of 'Local', 'Ref'" ("unknown Binding case: " + __other)))
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected a Binding object")
+
 and private colSlot<'T> (colT: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<Slot<'T>, DecodeError list> =
+    let decT (__j: JVal) = cFirst (colT __j)
     match j with
     | JObj __fs ->
         dTag __fs |> cOne |> Result.bind (fun __t ->
@@ -684,6 +753,14 @@ and private colPoint (j: JVal) : Result<Point, DecodeError list> =
             Ok { X = x; Y = y }
         | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ]))
 
+and private colBindSpec (j: JVal) : Result<BindSpec, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cReq "binding" __fs (colBinding (cLift dInt))
+        match __c0 with
+        | Ok binding ->
+            Ok { Binding = binding }
+        | _ -> Error(List.concat [ cErrs __c0 ]))
+
 and private colEmbedSpec (j: JVal) : Result<EmbedSpec, DecodeError list> =
     cObj j |> Result.bind (fun __fs ->
         let __c0 = cOne (dReq "componentId" __fs dStr)
@@ -735,6 +812,8 @@ and private colNoteSpec (j: JVal) =
 /// Phase 377 — the public per-spec decoders. `decode<Tag>Spec` reads one kind's object and
 /// answers its FIRST defect; `decode<Tag>SpecAll` reads the same object and answers EVERY defect,
 /// in the order stated above the collecting prelude. A consumer delegates one kind at a time.
+let decodeBindSpec (j: JVal) : Result<BindSpec, DecodeError> = decBindSpec j
+let decodeBindSpecAll (j: JVal) : Result<BindSpec, DecodeError list> = colBindSpec j
 let decodeEmbedSpec (j: JVal) : Result<EmbedSpec, DecodeError> = decEmbedSpec j
 let decodeEmbedSpecAll (j: JVal) : Result<EmbedSpec, DecodeError list> = colEmbedSpec j
 let decodeGroupSpec (j: JVal) : Result<GroupSpec, DecodeError> = decGroupSpec j

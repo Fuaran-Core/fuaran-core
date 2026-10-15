@@ -461,7 +461,41 @@ let tests =
                             (match Ref.decodeNodeJson bad, Ref.decodeNodeJsonAll bad with
                              | Error e, Error(h :: _) when e = h -> None
                              | a, b -> Some(sprintf "%A / %A" a b))
-                            "and the short-circuit agrees") ] ]
+                            "and the short-circuit agrees")
+
+                // Phase 460 — the module compiling is the first half (until 460 the collecting
+                // emitter bound no `decT`, and this vocabulary's placeholder names it): the
+                // placeholder's arm collects, and the placeholder itself runs the parameter's decoder
+                // in both forms.
+                testCase
+                    "a placeholder naming the type-parameter decoder runs it, and its arm collects, in both forms"
+                    (fun _ ->
+                        let bad =
+                            parse """{"$type":"Bind","binding":{"$type":"Local","parse":5,"value":"x"}}"""
+
+                        let all = allOf (Ref.decodeBindSpecAll bad)
+
+                        Expect.equal
+                            (shapes all)
+                            [ wrongKind "$[\"binding\"][\"parse\"]"; wrongKind "$[\"binding\"][\"value\"]" ]
+                            "the placeholder's member and the parameter's member, in declaration order"
+
+                        Expect.equal (firstOf (Ref.decodeBindSpec bad)) all.Head "the short-circuit answers the first"
+
+                        let good =
+                            parse """{"$type":"Bind","binding":{"$type":"Local","parse":"<closure>","value":3}}"""
+
+                        let placeholderOf (r: Result<Ref.BindSpec, 'E>) =
+                            match r with
+                            | Ok { Binding = Ref.Binding.Local(p, v) } -> p, v
+                            | other -> failtestf "expected a Local binding, got %A" other
+
+                        for form, (p, v) in
+                            [ "short-circuiting", placeholderOf (Ref.decodeBindSpec good)
+                              "collecting", placeholderOf (Ref.decodeBindSpecAll good) ] do
+                            Expect.equal v 3 (form + ": the parameter's member")
+                            Expect.equal (p (JInt 7)) (Some 7) (form + ": the placeholder decodes through decT")
+                            Expect.equal (p (JStr "x")) None (form + ": and refuses what decT refuses")) ] ]
 
 // ---------------------------------------------------------------------------
 // Phase 380 — the collecting decoders in the TypeScript host (`Gen.typescriptModuleDerived` under
