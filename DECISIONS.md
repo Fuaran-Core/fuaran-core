@@ -1,5 +1,106 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-15 — D158: Core's parser takes a limits record and enforces it on the way down, so a wire host bounds the parse through Core alone; Core still states no limit values and is not a section-21 host; a breach is a typed outcome and never malformed JSON; D84's "no shared limits-taking entry point" clause is refined
+
+**Recorded by Phase 465. ADDITIVE, riding the `0.38.0` draft (`docs/releases/0.38.0.md`).
+`proofs/JsonParse.fst` (and its extracted oracle), `proofs/Limits.fst`, `src/Fuaran.Core.Wire/Json.fs`,
+`DecodeError.fs`, `Decoder.fs`, `conformance/decode/`, `docs/conformance-corpus.md` ("The limits"),
+`proofs.json`. Requirement `suggest-2026-10-15-core-json-syntax-and-rust-spine`, clause S3.**
+
+**D158.1 — the ruling, and what it refines.** The operator ruled on 2026-10-15, refining D84: *"Core is
+still NOT a section-21 host and states no limit VALUES; it gains only the MECHANISM, a parse entry point
+taking a limits record enforced on the way down."* D84's ruling (b) stands in every clause but one: the
+limit values, their units and the error envelope belong to each wire specification, Core's 512 nesting
+cap is its own stack guard and not a conformance claim, and `proofs/Limits.fst` keeps the UI wire's
+values as named premises. The clause this entry refines is D84's last sentence — *"No shared
+limits-taking entry point is added: the hosts already carry the enforcement, in the units and with the
+error the section requires."* That sentence was written against the state in which every wire host
+carried its own parser. Phase 462 made Core the single owner of the JSON-syntax layer (D157), and the
+UI wire's section 21.2 rule 4 requires a limit to be enforced ON THE WAY DOWN, during the parse: a host
+that parses with Core and measures the tree afterwards has already paid the cost the limit exists to
+refuse, so without a limits-taking entry point every host that needs limits keeps a parser of its own,
+and two parsers drift — which is the defect D157 closed. So the mechanism is Core's and the values are
+not: `Json.parseWithLimits policy limits input` takes a `JsonLimits` record, a wire host passes its own
+specification's numbers, and nothing in Core names a number, a unit's conformance status, or a wire's
+error code.
+
+**D158.2 — the record, and what each bound counts.** `JsonLimits` carries five bounds: `MaxDepth` (nested
+objects and arrays admitted, the root counting as one — the cap every entry point already had),
+`MaxStringLength` (Unicode code points in ONE decoded string or member key, a surrogate pair counting as
+one, whichever spelling each unit arrived in), `MaxArrayLength` (items in one array), `MaxObjectMembers`
+(members in one object — an erased member null is not a member, so the tolerant read stays the strict
+read of the erased document under a bound), and `MaxDocumentBytes` (UTF-8 bytes of the whole input,
+counted off its UTF-16 units; a native length under-counts a CJK document threefold). Items and members
+are two fields and not one, though the UI wire's section 21.1 states one value for both: the breach
+names the bound it passed, and a member-count breach reported as an array-length breach sends an author
+to repair the wrong thing — the diagnosis that section's own prose forbids for the two depth bounds.
+`JsonLimits.depthOnly maxDepth` is the record every pre-existing entry point runs under: the three
+counts can never reach `Int32.MaxValue`, so under it no breach but the depth cap's can arise, and
+`parse`, `parseDetailed*`, the tolerant reads, `Decoder.parse*` and `Json.Reader.read` answer every
+document exactly as before — the 512-deep stack guard and no size limit.
+
+**D158.3 — on the way down, and where each breach is raised.** The byte bound is one comparison before a
+character is read (the count is made only when the input's UTF-16 length could encode past the bound).
+The depth cap is tested at the bracket, as it always was. The items bound is tested at the array loop's
+head, before `item` is called, so the `max + 1`-th item is refused where it would start and no character
+of it is read; the members bound after the loop's whitespace and before the key, at the key's opening
+quote; the string bound inside the string reader's unit check, after the two surrogate tests and before
+the unit is appended — on the escape-free fast path the count runs during the scan, before the one
+`Substring` that builds the string, so a hostile string is refused before it is assembled. The first
+fault in document order wins, whichever kind it is: a breach outranks malformed text after it, and
+malformed text outranks a breach after it.
+
+**D158.4 — the breach is typed, carries the path, and never echoes the input.** `JsonRefusal` is the
+limited parse's refusal: `Malformed of JsonError` (exactly `parseDetailed`'s refusal, kind, message and
+position) or `LimitExceeded of JsonLimitBreach` — the `JsonLimit`, its `Declared` value, the `Path` to
+the container the breach was raised in (the array whose count passed the bound, the object whose count
+or whose key's length did, the container opened at the depth bound; a string value's own path; the root
+for document bytes) and the `Position`. `JsonErrorKind` gains NO case: a breach is not a parse error, a
+thirteen-case match stays exhaustive, and `DecodeError.ofJsonRefusal` maps the breach to
+`DecodeCode.LimitExceeded` AT ITS PATH with a sentence naming the limit and the declared value
+(`limit arrayLength of 2 exceeded`), never to `InvalidJson`. `Decoder.parseWithLimits` is the typed-decode
+form of the same call. The scanner tracks the path as two parallel lists, a frame per open container
+(the member key being read, the item index being read), so a member costs no allocation and an unfilled
+slot ends the path at the container. `PathSegment` moves from `DecodePath.fs` to `Json.fs` to sit below
+the parser that now reports it; its full name is unchanged.
+
+**D158.5 — the model first, and what is proved.** `proofs/JsonParse.fst`'s descent takes a `lims` record
+(three bounds, each `Unbounded` or a budget spent as the depth cap is) and the entry point
+`parse_limited` takes a byte verdict as a parameter, as the float readback is. The descent carries the
+breach internally as an `ekind` case `LimitExceeded`, confined by the return types (`bounds_confined`)
+to a bound that is actually set — so `parse`, at `unbounded`, is seen by the type-checker to keep its
+thirteen kinds — and `parse_limited` lifts every breach, the depth cap's `MaxDepthExceeded` included, to
+the distinct `RLimit` constructor. Proved: `limited_at_no_bound_is_the_parser` (at no bound the limited
+entry point answers exactly what `parse` answers, the depth cap lifted), `limit_never_reported_as_malformed`
+(a `RErr` of the limited parse carries one of the thirteen kinds), `bytes_checked_before_the_descent`,
+`string_bound_exact` and `items_bound_exact` (on the canonical string and array families each bound is
+exact at every length and every bound — accepted at the bound, refused one past it, with the bound's own
+breach); exhibited: the members bound from both sides, the depth lift, a breach outranking a later
+malformed item, the string bound reaching a member key, the byte verdict first (`limits_exhibited`).
+Every pre-existing theorem is restated over the generalised descent and still holds; the null-absorption
+bridge (Phase 190) is stated at no bound, and section 11's run lemmas say so. The differential compares
+`Json.parseWithLimits` with the extracted `parse_limited` over hand-picked documents, the near-miss
+table and a bounded soup under five records, with the platform's UTF-8 encoder as the byte verdict's
+independent oracle, and a go-red case (a model handed a wider items bound accepts what production
+refuses). NOT modelled: the breach's path (the decode vectors pin it) and the byte count itself.
+
+**D158.6 — the vectors, and what a host owes.** The `decode/` family gains one vector per bound at the
+bound (accepted) and one past it (`LimitExceeded` at the pinned path), the astral and the CJK vectors
+beside them so a host counting UTF-16 units or bytes fails by name, a key-length vector, two nested-path
+vectors, and the two first-fault-wins vectors. Each declares the record it runs under as a `limits`
+member (`depth`, `stringLength`, `arrayLength`, `objectMembers`, `documentBytes`); a vector without one
+runs at the parser's own cap. A host that parses through Core certifies by reproducing every code and
+path; a host carrying a reader of its own (the IDL host's generated readers do, at the parser's own cap)
+excludes the family's limits vectors by name and says why, as `DecodeVectorsIdl.exclusion` does.
+
+**Rejected.** (1) A `LimitExceeded` case on `JsonErrorKind`: it would break every exhaustive match for a
+fact no `JsonError` consumer branches on, and it would carry the limit, the value and the path in a record
+built for a position and a sentence. (2) Measuring after the parse (`Json.firstRepeatedMember`'s shape):
+it cannot satisfy enforcement on the way down, which is the whole reason the mechanism exists. (3) One
+field for items and members, as the UI wire's table has it: see D158.2. (4) Modelling the path in F\*:
+it would thread a path accumulator through every parser and every induction for a property the vectors
+pin exactly; the model carries the suffix, as it does for every refusal.
+
 ## 2026-10-15 — D157: Core owns the JSON-syntax layer every Fuaran wire cites; a repeated member name and a raw control inside a string are refused at every decode entry point, the model first; an erased member null is not an occurrence; first-wins (D113) is superseded; a value with a repeated member has no rendering a guarded renderer gives
 
 **Recorded by Phase 462. `proofs/JsonParse.fst` and `proofs/WireCanon.fst` (and their extracted oracles),

@@ -2255,8 +2255,8 @@ let rec pstr (s: list ch) : Tot (list JP.och) (decreases s) =
    place. The accumulator is quantified rather than fixed at `[]`, which is what lets the
    induction step reuse the statement — `parse_string` enters the loop at `[]`. *)
 [@@ noextract_to "FSharp"]
-let rec string_body_reads_escape (s rest: list ch) (acc: list JP.och)
-  : Lemma (ensures JP.string_body false acc (pcs (app (escape s) (CQuote :: rest)))
+let rec string_body_reads_escape (s rest: list ch) (n: list unit) (acc: list JP.och)
+  : Lemma (ensures JP.string_body JP.Unbounded n false acc (pcs (app (escape s) (CQuote :: rest)))
                      == JP.POk (JP.rev_app acc (pstr s)) (pcs rest))
           (decreases s) =
   match s with
@@ -2268,15 +2268,18 @@ let rec string_body_reads_escape (s rest: list ch) (acc: list JP.och)
        | CBackslash -> ()
        | CCtrl _ lo -> pc_hex_is_hex lo
        | other -> pc_is_ordinary other);
-      string_body_reads_escape t rest (po c :: acc)
+      string_body_reads_escape t rest (() :: n) (po c :: acc)
 
-(* `parseString` whole, on a rendered string: the quote, the body, the closing quote. *)
+(* `parseString` whole, on a rendered string: the quote, the body, the closing quote. The parser
+   model's string reader takes a bound and a code-point count since Phase 465; the bridge runs it
+   at NO bound (`JP.Unbounded`, the record `JP.parse` passes), and the count is quantified in the
+   loop lemma above because each rendered character advances it. *)
 [@@ noextract_to "FSharp"]
 let parse_string_reads_quoted (s rest: list ch)
-  : Lemma (ensures JP.parse_string (pcs (app (quoted s) rest))
+  : Lemma (ensures JP.parse_string JP.Unbounded (pcs (app (quoted s) rest))
                      == JP.POk (pstr s) (pcs rest)) =
   app_assoc (escape s) [CQuote] rest;
-  string_body_reads_escape s rest []
+  string_body_reads_escape s rest [] []
 
 (* ---- 14.3 the value correspondence ---- *)
 
@@ -2584,7 +2587,7 @@ let rec parse_reads_render (#num #flt: eqtype) (w: wire num flt)
                            (b: list unit) (v: jval num flt) (rest: list ch)
   : Lemma (requires numerals_bridge w fr /\ canonical w v /\ parse_sep rest /\ fits b v /\
                     distinct_keys v)
-          (ensures JP.parse_value fr cap tol b (pcs (app (render w v) rest))
+          (ensures JP.parse_value fr cap JP.unbounded tol b (pcs (app (render w v) rest))
                      == JP.POk (pv w (normalise w v)) (pcs rest))
           (decreases %[(jsize v <: nat); 0]) =
   match v with
@@ -2618,7 +2621,7 @@ and parse_reads_render_items (#num #flt: eqtype) (w: wire num flt)
                              (acc: list JP.jval)
   : Lemma (requires numerals_bridge w fr /\ canonical_items w xs /\ parse_sep rest /\
                     fits_items b xs /\ Cons? xs /\ distinct_keys_items xs)
-          (ensures JP.parse_items fr cap tol b acc (pcs (app (render_items w xs) rest))
+          (ensures JP.parse_items fr cap JP.unbounded tol b acc (pcs (app (render_items w xs) rest))
                      == JP.POk (JP.rev_app acc (pvs w (normalise_items w xs))) (pcs rest))
           (decreases %[(jsizes xs <: nat); 1]) =
   match xs with
@@ -2636,7 +2639,7 @@ and parse_reads_render_kvs (#num #flt: eqtype) (w: wire num flt)
                            (acc: list (list JP.och & JP.jval))
   : Lemma (requires numerals_bridge w fr /\ canonical_kvs w fs /\ parse_sep rest /\
                     fits_kvs b fs /\ Cons? fs /\ distinct_kvs fs /\ keys_apart acc fs)
-          (ensures JP.parse_members fr cap tol b acc (pcs (app (render_kvs w fs) rest))
+          (ensures JP.parse_members fr cap JP.unbounded tol b acc (pcs (app (render_kvs w fs) rest))
                      == JP.POk (JP.rev_app acc (pkvs w (normalise_kvs w fs))) (pcs rest))
           (decreases %[(fsize fs <: nat); 1]) =
   match fs with
@@ -2708,7 +2711,7 @@ let canon_reader_agrees_with_parser (#num #flt: eqtype) (w: wire num flt)
                     parse_sep rest /\ llen b >= jdepth v /\ distinct_keys v)
           (ensures Ok? (read w (app (render w v) rest)) /\
                    (let (u, r) = Ok?.v (read w (app (render w v) rest)) in
-                    JP.parse_value fr cap (JP.EraseMemberNull? pol) b
+                    JP.parse_value fr cap JP.unbounded (JP.EraseMemberNull? pol) b
                                    (pcs (app (render w v) rest))
                       == JP.POk (pv w u) (pcs r))) =
   budget_covers_depth b v;

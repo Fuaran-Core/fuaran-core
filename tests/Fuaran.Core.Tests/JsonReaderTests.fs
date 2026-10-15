@@ -505,3 +505,206 @@ let tests =
                   (Ok())
                   "an empty array has nothing due"
           } ]
+
+// Phase 465 — `Json.parseWithLimits`, the LIMITED parse: held to `parseDetailed` at the parser's own
+// cap, and to its record at every bound. The bounds are enforced on the way down, so each test below
+// pins where a breach is raised (the path and the position) as well as that it is.
+
+let private wide: JsonLimits =
+    { MaxDepth = 512
+      MaxStringLength = 1 <<< 20
+      MaxArrayLength = 100000
+      MaxObjectMembers = 100000
+      MaxDocumentBytes = 1 <<< 25 }
+
+let private breach (limits: JsonLimits) (input: string) : JsonLimitBreach =
+    match Json.parseWithLimits RejectNull limits input with
+    | Error(JsonRefusal.LimitExceeded b) -> b
+    | other -> failtestf "%s: expected a breach, got %A" input other
+
+let private accepted (limits: JsonLimits) (input: string) : JVal =
+    match Json.parseWithLimits RejectNull limits input with
+    | Ok v -> v
+    | Error e -> failtestf "%s: expected acceptance, got %A" input e
+
+[<Tests>]
+let limits =
+    testList
+        "JsonLimits"
+        [ test "at the parser's own cap the limited parse IS parseDetailed, over the corpus and the pool" {
+              let mutable ok = 0
+              let mutable refused = 0
+
+              for input in pool do
+                  let expected = Json.parseDetailed input |> Result.mapError JsonRefusal.Malformed
+
+                  let actual =
+                      Json.parseWithLimits RejectNull (JsonLimits.depthOnly Json.defaultMaxDepth) input
+
+                  Expect.equal actual expected input
+
+                  match actual with
+                  | Ok _ -> ok <- ok + 1
+                  | Error _ -> refused <- refused + 1
+
+              Expect.isGreaterThan ok 50 "accepted documents in the pool"
+              Expect.isGreaterThan refused 1000 "refused documents in the pool"
+
+              // The one answer that differs in SHAPE: the depth cap is the `Depth` breach at the
+              // cap's own position, with the path to the bracket that passed it.
+              let deep = String.replicate 600 "[" + String.replicate 600 "]"
+
+              let cap =
+                  match Json.parseDetailed deep with
+                  | Error e -> e
+                  | Ok _ -> failtest "600 levels parse"
+
+              Expect.equal cap.Kind MaxDepthExceeded "parse's refusal is the cap"
+
+              Expect.equal
+                  (breach (JsonLimits.depthOnly Json.defaultMaxDepth) deep)
+                  { Limit = JsonLimit.Depth
+                    Declared = Json.defaultMaxDepth
+                    Path = List.replicate Json.defaultMaxDepth (PathSegment.Index 0)
+                    Position = cap.Position }
+                  "the limited parse lifts it to the Depth breach"
+          }
+
+          test
+              "each bound admits a document exactly at it and refuses one past it, naming the limit, its value, the path and the position" {
+              // Depth: the bound admits that many nested containers; the next is refused at its
+              // bracket, with the path to it.
+              accepted { wide with MaxDepth = 2 } "[[1]]" |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxDepth = 2 } "[[[1]]]")
+                  { Limit = JsonLimit.Depth
+                    Declared = 2
+                    Path = [ PathSegment.Index 0; PathSegment.Index 0 ]
+                    Position = 2 }
+                  "depth"
+
+              // Strings, in CODE POINTS: a surrogate pair is one, whichever spelling it arrived
+              // in, so an astral string of the bound's length is admitted where a UTF-16 count
+              // would refuse it. The breach is just past the code point that passed the bound.
+              accepted { wide with MaxStringLength = 3 } "\"abc\"" |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxStringLength = 3 } "\"abcd\"")
+                  { Limit = JsonLimit.StringLength
+                    Declared = 3
+                    Path = []
+                    Position = 5 }
+                  "string"
+
+              let smile = "\U0001F600"
+
+              accepted { wide with MaxStringLength = 3 } ("\"" + smile + smile + smile + "\"")
+              |> ignore
+
+              accepted { wide with MaxStringLength = 3 } "\"\\uD83D\\uDE00\\uD83D\\uDE00\\uD83D\\uDE00\""
+              |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxStringLength = 3 } ("\"" + smile + smile + smile + smile + "\"")).Position
+                  8
+                  "four astral code points: refused after the fourth pair's HIGH half, before its low half is read"
+
+              Expect.equal
+                  (breach { wide with MaxStringLength = 3 } "\"\\u0061\\u0062\\u0063\\u0064\"").Position
+                  25
+                  "four escaped code points: refused after the fourth escape"
+
+              // A member KEY is a string: its breach is the object's.
+              Expect.equal
+                  (breach { wide with MaxStringLength = 3 } "{\"abcd\":1}")
+                  { Limit = JsonLimit.StringLength
+                    Declared = 3
+                    Path = []
+                    Position = 6 }
+                  "key"
+
+              // A nested string value names its own position.
+              Expect.equal
+                  (breach { wide with MaxStringLength = 3 } "{\"a\":[\"abcd\"]}").Path
+                  [ PathSegment.Key "a"; PathSegment.Index 0 ]
+                  "nested string"
+
+              // Arrays: the `max + 1`-th item is refused where it would start, the array's path.
+              accepted { wide with MaxArrayLength = 2 } "[1,2]" |> ignore
+              accepted { wide with MaxArrayLength = 0 } "[]" |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxArrayLength = 2 } "[1,2,3]")
+                  { Limit = JsonLimit.ArrayLength
+                    Declared = 2
+                    Path = []
+                    Position = 5 }
+                  "items"
+
+              Expect.equal
+                  (breach { wide with MaxArrayLength = 2 } "{\"a\":[1,2,3]}").Path
+                  [ PathSegment.Key "a" ]
+                  "nested items"
+
+              // Objects: the `max + 1`-th member is refused at its key's opening quote.
+              accepted { wide with MaxObjectMembers = 2 } "{\"a\":1,\"b\":2}" |> ignore
+              accepted { wide with MaxObjectMembers = 0 } "{}" |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxObjectMembers = 2 } "{\"a\":1,\"b\":2,\"c\":3}")
+                  { Limit = JsonLimit.ObjectMembers
+                    Declared = 2
+                    Path = []
+                    Position = 13 }
+                  "members"
+
+              // An erased member null is not a member.
+              Expect.equal
+                  (Json.parseWithLimits EraseMemberNull { wide with MaxObjectMembers = 1 } "{\"a\":null,\"b\":1}")
+                  (Ok(JObj [ "b", JInt 1 ]))
+                  "tolerant"
+
+              // Document bytes, in UTF-8: `"日"` is three units and five bytes.
+              accepted { wide with MaxDocumentBytes = 5 } "\"日\"" |> ignore
+
+              Expect.equal
+                  (breach { wide with MaxDocumentBytes = 4 } "\"日\"")
+                  { Limit = JsonLimit.DocumentBytes
+                    Declared = 4
+                    Path = []
+                    Position = 0 }
+                  "bytes"
+
+              Expect.equal
+                  (breach { wide with MaxDocumentBytes = 0 } "{").Limit
+                  JsonLimit.DocumentBytes
+                  "bytes are checked before parsing: malformed text past the byte bound is the byte breach"
+          }
+
+          test "the first fault in document order wins, a breach and malformed text alike" {
+              Expect.equal
+                  (breach { wide with MaxArrayLength = 2 } "[1,2,3").Limit
+                  JsonLimit.ArrayLength
+                  "a breach before the malformed tail"
+
+              match Json.parseWithLimits RejectNull { wide with MaxArrayLength = 2 } "[1,%,3,4]" with
+              | Error(JsonRefusal.Malformed e) -> Expect.equal e.Kind UnexpectedChar "malformed text before the breach"
+              | other -> failtestf "expected malformed, got %A" other
+          }
+
+          test
+              "Decoder.parseWithLimits maps a breach to LimitExceeded at its path, never echoing the input, and malformed text to InvalidJson" {
+              match Decoder.parseWithLimits { wide with MaxArrayLength = 2 } "{\"a\":[1,2,3]}" with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.LimitExceeded "code"
+                  Expect.equal e.Path [ PathSegment.Key "a" ] "path"
+                  Expect.stringContains e.Message "arrayLength" "names the limit"
+                  Expect.stringContains e.Message "2" "names the declared value"
+                  Expect.isFalse (e.Message.Contains "[1,2,3]") "never echoes the input"
+              | Ok v -> failtestf "accepted %A" v
+
+              match Decoder.parseWithLimits wide "{" with
+              | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "malformed text is InvalidJson"
+              | Ok v -> failtestf "accepted %A" v
+          } ]

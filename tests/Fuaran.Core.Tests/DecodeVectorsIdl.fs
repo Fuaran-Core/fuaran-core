@@ -33,6 +33,9 @@ type DecodeVector =
         Refusal: (string * PathSegment list) option
         Shape: JVal
         Definitions: (string * JVal) list
+        /// Whether the vector declares a limits record (Phase 465): the IDL host parses at the
+        /// parser's own cap, so such a vector is excluded by name.
+        Limited: bool
     }
 
 /// The vector file, relative to the repository root.
@@ -82,7 +85,8 @@ let load () : DecodeVector list =
           Definitions =
             match Decoder.tryMember "definitions" v with
             | Some(JObj ds) -> ds
-            | _ -> [] })
+            | _ -> []
+          Limited = (Decoder.tryMember "limits" v).IsSome })
 
 let private identifier = Regex "^[A-Za-z_][A-Za-z0-9_]*$"
 
@@ -136,7 +140,10 @@ let exclusion (v: DecodeVector) : string option =
             | Some(_, s) -> reason s
         | other -> Some(sprintf "the shape %A" other)
 
-    reason v.Shape
+    if v.Limited then
+        Some "a limits record (Phase 465): the IDL host parses at the parser's own cap and no other bound"
+    else
+        reason v.Shape
 
 /// The kind tag of the vector at `index` in the file.
 let tagOf (index: int) = sprintf "V%02d" index

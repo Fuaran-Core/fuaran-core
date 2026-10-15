@@ -1171,9 +1171,68 @@
       }
     },
     {
+      "id": "parser-limited-at-no-bound-is-the-parser",
+      "level": "proved",
+      "claim": "THE LIMITED ENTRY POINT AT NO BOUND IS THE PARSER (Phase 465): for every document, policy and depth budget, `parse_limited` at `unbounded` and a true byte verdict answers exactly what `parse` answers — the same value, or the same kind, message and position — the one difference being the depth cap's `MaxDepthExceeded`, which it lifts to `RLimit LDepth` at the same suffix. Both run the one descent, which now takes a `lims` record (string, items and members bounds, each `Unbounded` or a budget spent as the depth cap is); `bounds_confined`, carried in every descent signature, is what lets the type-checker see that at `unbounded` the descent raises no breach, so `parse` keeps its thirteen kinds and every pre-existing entry point (production: `parse`, `parseDetailed*`, the tolerant reads, `Decoder.parse*`, `Json.Reader.read`, all under `JsonLimits.depthOnly`) answers every document as it always has.",
+      "phase": "fuaran-core#465",
+      "evidence": {
+        "theorem": "limited_at_no_bound_is_the_parser",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Json.parseWithLimits",
+          "JsonLimits.depthOnly"
+        ]
+      }
+    },
+    {
+      "id": "parser-limit-never-reported-as-malformed",
+      "level": "proved",
+      "claim": "A LIMIT BREACH IS NEVER MALFORMED JSON (Phase 465): whatever bounds are set and whatever the byte verdict, a refusal `parse_limited` reports as `RErr` carries one of the thirteen kinds `parse` reports — never the descent's internal `LimitExceeded` — and a breach is the distinct `RLimit` constructor, lifted from the descent before it is reported. Beside it, `bytes_checked_before_the_descent`: a false byte verdict is `RLimit LBytes` at the start of the input, before a character is read. Production's counterpart is `JsonRefusal`'s two cases and `DecodeError.ofJsonRefusal`, which maps a breach to `LimitExceeded` at its path and never to `InvalidJson`.",
+      "phase": "fuaran-core#465",
+      "evidence": {
+        "theorem": "limit_never_reported_as_malformed",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Json.parseWithLimits",
+          "DecodeError.ofJsonRefusal",
+          "Decoder.parseWithLimits"
+        ]
+      }
+    },
+    {
+      "id": "parser-string-bound-exact",
+      "level": "proved",
+      "claim": "THE STRING BOUND IS EXACT (Phase 465): the document `\"aaa...a\"` of k characters, under a string bound of m code points and no other bound, is accepted to the k-character string iff k <= m, and refused as `RLimit LString` otherwise — at every k and every m. The bound is counted inside `string_body` as `check`'s third test, after the two surrogate tests and before the unit is appended, a unit counting exactly when nothing is pending (so a low half completing a pair is not a new code point), and a unit that would be the max + 1-th is refused after it, before anything is built from it. `items_bound_exact` is the same statement for the items bound on the array of k + 1 empty strings, tested at the loop's head before the item is read; the members bound, the depth lift, a breach outranking a later malformed item, the string bound reaching a member key and the byte verdict first are exhibited at concrete documents (`limits_exhibited`).",
+      "phase": "fuaran-core#465",
+      "evidence": {
+        "theorem": "string_bound_exact",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Json.parseWithLimits"
+        ]
+      }
+    },
+    {
+      "id": "parser-items-bound-exact",
+      "level": "proved",
+      "claim": "THE ITEMS BOUND IS EXACT (Phase 465): the array of k + 1 empty strings, under an items bound of m and no other bound, is accepted iff k + 1 <= m and refused as `RLimit LItems` otherwise, at every k and every m — the bound tested at `parse_items`'s head, before the item's value is read, with the items accumulated so far as the count. The members bound is the same test at `parse_members`'s head, after the loop's whitespace and before the key, over the members accumulated — an erased member null was never accumulated and is not one, which is what keeps the null-absorption bridge true under a bound; it is exhibited from both sides rather than proved on a family, because a distinct-key family is the harder thing to state and the vectors pin it.",
+      "phase": "fuaran-core#465",
+      "evidence": {
+        "theorem": "items_bound_exact",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Json.parseWithLimits"
+        ]
+      }
+    },
+    {
       "id": "parser-differential",
       "level": "tested",
-      "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 102-input near-miss table under both read policies — every classified failure, the number grammar's boundary, and since Phase 306 every surrogate class in every spelling a unit can arrive in, raw and escaped, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised. Since Phase 306 the comparison has NO carve-out: the model makes Phase 299's grammar and surrogate refusals itself, the bridge classifies a raw surrogate unit as the high or the low half, and the generated soup's alphabet carries both halves, so a lone, a paired and a reversed surrogate are each reached. Since Phase 462 the model makes the two decode-determinism refusals itself: a repeated member name (`has_key` over the accumulated members, checked when a member is accumulated, so an erased member null is not an occurrence) and a raw C0 control inside a string (the bridge classifies a raw control as `CCtrl` with its `U+00XX` spelling, and the soup's alphabet carries a tab).",
+      "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 102-input near-miss table under both read policies — every classified failure, the number grammar's boundary, and since Phase 306 every surrogate class in every spelling a unit can arrive in, raw and escaped, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised. Since Phase 306 the comparison has NO carve-out: the model makes Phase 299's grammar and surrogate refusals itself, the bridge classifies a raw surrogate unit as the high or the low half, and the generated soup's alphabet carries both halves, so a lone, a paired and a reversed surrogate are each reached. Since Phase 462 the model makes the two decode-determinism refusals itself: a repeated member name (`has_key` over the accumulated members, checked when a member is accumulated, so an erased member null is not an occurrence) and a raw C0 control inside a string (the bridge classifies a raw control as `CCtrl` with its `U+00XX` spelling, and the soup's alphabet carries a tab). Since Phase 465 the differential also runs `Json.parseWithLimits` beside the extracted `parse_limited` over hand-picked documents (each bound at and past its value, the astral and escaped spellings, a key, nested positions, a breach on either side of malformed text), the near-miss table and a 1,500-input soup under five limits records, with the platform's UTF-8 encoder as the byte verdict's independent oracle, asserts every one of the five limits breached somewhere, and carries a go-red case: a model handed a wider items bound accepts what production refuses by name.",
       "phase": "fuaran-core#146",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -1967,7 +2026,7 @@
     {
       "id": "wire-resource-limits",
       "level": "proved",
-      "claim": "WIRE_FORMAT section 21's eight resource limits, carried as named premises in one place so that a changed limit moves one constant rather than a paragraph of prose, with the two RELATIONS between them that the section's own argument uses: every bound admits something, and the node-depth bound sits below the syntactic-depth bound with room for the worst-shaped kind — which is what makes 'a host must never report a node-depth breach as a syntax-depth breach' a fact about the table rather than a hope about it. The module models no enforcement: section 21.2's host obligations are about code it does not describe, and what a consumer gets here is a number with a caption. `canonical-form-roundtrip` takes exactly one of the eight.",
+      "claim": "WIRE_FORMAT section 21's eight resource limits, carried as named premises in one place so that a changed limit moves one constant rather than a paragraph of prose, with the two RELATIONS between them that the section's own argument uses: every bound admits something, and the node-depth bound sits below the syntactic-depth bound with room for the worst-shaped kind — which is what makes 'a host must never report a node-depth breach as a syntax-depth breach' a fact about the table rather than a hope about it. The module models no enforcement of its own: section 21.2's host obligations are about code it does not describe, and what a consumer gets here is a number with a caption; since Phase 465 the enforcement of the four bounds the parser can see (syntactic depth, string length, array length over items and members, document bytes) is modelled in `JsonParse.fst` section 13 over a record the HOST instantiates, and the numbers stay premises here. `canonical-form-roundtrip` takes exactly one of the eight.",
       "phase": "fuaran-core#149",
       "evidence": {
         "theorem": "depth_bounds_do_not_alias",

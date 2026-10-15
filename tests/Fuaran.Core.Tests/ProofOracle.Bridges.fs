@@ -656,6 +656,68 @@ module JsonParseDiff =
         match JsonParse.parse floatRead (string cap) (modelPolicy policy) modelBudget (bridge input) with
         | JsonParse.ROk v -> "ok " + renderModel v
         | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
+        // `parse` runs at no bound and never answers this (`limited_at_no_bound_is_the_parser`);
+        // the arm is for the match's totality.
+        | JsonParse.RLimit(l, at) -> sprintf "limit %A @%d" l (input.Length - List.length at)
+
+    // ---- the LIMITS (Phase 465) ----
+
+    /// The model's spelling of a limit, as production names it (`JsonLimit.name`), so a breach
+    /// renders the same on both sides.
+    let private limitName (l: JsonParse.limit) : string =
+        match l with
+        | JsonParse.LDepth -> JsonLimit.name JsonLimit.Depth
+        | JsonParse.LString -> JsonLimit.name JsonLimit.StringLength
+        | JsonParse.LItems -> JsonLimit.name JsonLimit.ArrayLength
+        | JsonParse.LMembers -> JsonLimit.name JsonLimit.ObjectMembers
+        | JsonParse.LBytes -> JsonLimit.name JsonLimit.DocumentBytes
+
+    /// One bound as the model spends it: `Int32.MaxValue` — what `JsonLimits.depthOnly` carries —
+    /// is `Unbounded`, any other value a budget.
+    let private modelBound (n: int) : JsonParse.bound =
+        if n = System.Int32.MaxValue then
+            JsonParse.Unbounded
+        else
+            JsonParse.Bounded(budget n)
+
+    /// The three bounds the model's descent enforces, from a production record. The depth cap is
+    /// the budget the model already threads; the byte bound is the model's `bytes_ok` parameter.
+    let modelLims (limits: JsonLimits) : JsonParse.lims =
+        { JsonParse.lstr = modelBound limits.MaxStringLength
+          JsonParse.litems = modelBound limits.MaxArrayLength
+          JsonParse.lmembers = modelBound limits.MaxObjectMembers }
+
+    /// Production's answer under a limits record. A breach renders as `limit <name> @<position>`:
+    /// the model does not carry the path, which the decode vectors compare instead.
+    let prodAnswerLimited (policy: NullPolicy) (limits: JsonLimits) (input: string) : string =
+        match Json.parseWithLimits policy limits input with
+        | Ok v -> "ok " + renderProd v
+        | Error(JsonRefusal.Malformed e) -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
+        | Error(JsonRefusal.LimitExceeded b) -> sprintf "limit %s @%d" (JsonLimit.name b.Limit) b.Position
+
+    /// The model's answer under a record. `bytesOk` is the byte verdict the model takes as a
+    /// parameter (its alphabet cannot count bytes); the differential computes it with the
+    /// platform's UTF-8 encoder, an oracle independent of production's own counter.
+    let modelAnswerLimited
+        (bridge: string -> JsonParse.ch list)
+        (policy: NullPolicy)
+        (limits: JsonLimits)
+        (bytesOk: bool)
+        (input: string)
+        : string =
+        match
+            JsonParse.parse_limited
+                floatRead
+                (string limits.MaxDepth)
+                (modelPolicy policy)
+                (budget limits.MaxDepth)
+                (modelLims limits)
+                bytesOk
+                (bridge input)
+        with
+        | JsonParse.ROk v -> "ok " + renderModel v
+        | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
+        | JsonParse.RLimit(l, at) -> sprintf "limit %s @%d" (limitName l) (input.Length - List.length at)
 
     /// Every way the two disagree over one pool, plus how many inputs reached each outcome class —
     /// a run that only ever refused has compared twelve error messages and measured no parse at

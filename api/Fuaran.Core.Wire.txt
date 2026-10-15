@@ -18,6 +18,10 @@ attribute Fuaran.Core.JValModule RequireQualifiedAccess
 attribute Fuaran.Core.Json+ReadError RequireQualifiedAccess
 attribute Fuaran.Core.Json+Reader Sealed
 attribute Fuaran.Core.Json+ReaderModule RequireQualifiedAccess
+attribute Fuaran.Core.JsonLimit RequireQualifiedAccess
+attribute Fuaran.Core.JsonLimitModule RequireQualifiedAccess
+attribute Fuaran.Core.JsonLimitsModule RequireQualifiedAccess
+attribute Fuaran.Core.JsonRefusal RequireQualifiedAccess
 attribute Fuaran.Core.PathSegment RequireQualifiedAccess
 attribute Fuaran.Core.RootDecodeCode RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+Evolution RequireQualifiedAccess
@@ -28,6 +32,8 @@ ctor Fuaran.Core.Corpus+Outcome..ctor(System.String, System.Boolean, System.Stri
 ctor Fuaran.Core.Corpus+RejectVector..ctor(System.String, System.String, Fuaran.Core.DecodeCode, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>)
 ctor Fuaran.Core.DecodeError..ctor(Fuaran.Core.DecodeCode, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, System.String, System.String)
 ctor Fuaran.Core.JsonError..ctor(System.Int32, System.String, Fuaran.Core.JsonErrorKind)
+ctor Fuaran.Core.JsonLimitBreach..ctor(Fuaran.Core.JsonLimit, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, System.Int32)
+ctor Fuaran.Core.JsonLimits..ctor(System.Int32, System.Int32, System.Int32, System.Int32, System.Int32)
 ctor Fuaran.Core.Versioning+Envelope..ctor(Fuaran.Core.Versioning+Profile, Fuaran.Core.JVal)
 ctor Fuaran.Core.Versioning+Profile..ctor(System.String, System.Int32, System.Int32)
 ctor Fuaran.Core.Versioning+UnknownKind..ctor(System.String, Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Profile>)
@@ -73,6 +79,13 @@ field Fuaran.Core.JsonErrorKind+Tags.UnexpectedChar : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.UnexpectedEndOfInput : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.UnterminatedEscape : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.UnterminatedString : System.Int32 (literal)
+field Fuaran.Core.JsonLimit+Tags.ArrayLength : System.Int32 (literal)
+field Fuaran.Core.JsonLimit+Tags.Depth : System.Int32 (literal)
+field Fuaran.Core.JsonLimit+Tags.DocumentBytes : System.Int32 (literal)
+field Fuaran.Core.JsonLimit+Tags.ObjectMembers : System.Int32 (literal)
+field Fuaran.Core.JsonLimit+Tags.StringLength : System.Int32 (literal)
+field Fuaran.Core.JsonRefusal+Tags.LimitExceeded : System.Int32 (literal)
+field Fuaran.Core.JsonRefusal+Tags.Malformed : System.Int32 (literal)
 field Fuaran.Core.NullPolicy+Tags.EraseMemberNull : System.Int32 (literal)
 field Fuaran.Core.NullPolicy+Tags.RejectNull : System.Int32 (literal)
 field Fuaran.Core.PathSegment+Tags.Index : System.Int32 (literal)
@@ -138,6 +151,7 @@ method Fuaran.Core.DecodeErrorModule.codeName(Fuaran.Core.DecodeCode) : System.S
 method Fuaran.Core.DecodeErrorModule.describe(Fuaran.Core.DecodeError) : System.String
 method Fuaran.Core.DecodeErrorModule.make(Fuaran.Core.DecodeCode, System.String, System.String) : Fuaran.Core.DecodeError
 method Fuaran.Core.DecodeErrorModule.ofJsonError(Fuaran.Core.JsonError) : Fuaran.Core.DecodeError
+method Fuaran.Core.DecodeErrorModule.ofJsonRefusal(Fuaran.Core.JsonRefusal) : Fuaran.Core.DecodeError
 method Fuaran.Core.DecodeErrorModule.render(Fuaran.Core.DecodeError) : System.String
 method Fuaran.Core.DecodeErrorModule.resolvesIn(Fuaran.Core.JVal, Fuaran.Core.DecodeError) : System.Boolean
 method Fuaran.Core.DecodeErrorModule.reword(Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>, Fuaran.Core.DecodeError) : Fuaran.Core.DecodeError
@@ -178,6 +192,7 @@ method Fuaran.Core.Decoder.oneOf`1(Microsoft.FSharp.Collections.FSharpList`1<Sys
 method Fuaran.Core.Decoder.optField`1(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.parseWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
+method Fuaran.Core.Decoder.parseWithLimits(Fuaran.Core.JsonLimits, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.sequence`1(Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.str(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.succeed`1(!!0, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
@@ -219,12 +234,16 @@ method Fuaran.Core.Json.parseDetailedWithPolicy(Fuaran.Core.NullPolicy, System.I
 method Fuaran.Core.Json.parseTolerantOfNull(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseTolerantOfNullWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
+method Fuaran.Core.Json.parseWithLimits(Fuaran.Core.NullPolicy, Fuaran.Core.JsonLimits, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.JsonRefusal>
 method Fuaran.Core.Json.parseWithPolicy(Fuaran.Core.NullPolicy, System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.readInt32(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Json.render(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.renderWith(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.tryEncode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Json.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.JsonLimitModule.declared(Fuaran.Core.JsonLimits, Fuaran.Core.JsonLimit) : System.Int32
+method Fuaran.Core.JsonLimitModule.name(Fuaran.Core.JsonLimit) : System.String
+method Fuaran.Core.JsonLimitsModule.depthOnly(System.Int32) : Fuaran.Core.JsonLimits
 method Fuaran.Core.Versioning+ProfileModule.isValid(Fuaran.Core.Versioning+Profile) : System.Boolean
 method Fuaran.Core.Versioning+ProfileModule.isValidName(System.String) : System.Boolean
 method Fuaran.Core.Versioning+ProfileModule.render(Fuaran.Core.Versioning+Profile) : System.String
@@ -273,6 +292,15 @@ record-field Fuaran.Core.DecodeError.Path #1 : Microsoft.FSharp.Collections.FSha
 record-field Fuaran.Core.JsonError.Kind #2 : Fuaran.Core.JsonErrorKind
 record-field Fuaran.Core.JsonError.Message #1 : System.String
 record-field Fuaran.Core.JsonError.Position #0 : System.Int32
+record-field Fuaran.Core.JsonLimitBreach.Declared #1 : System.Int32
+record-field Fuaran.Core.JsonLimitBreach.Limit #0 : Fuaran.Core.JsonLimit
+record-field Fuaran.Core.JsonLimitBreach.Path #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>
+record-field Fuaran.Core.JsonLimitBreach.Position #3 : System.Int32
+record-field Fuaran.Core.JsonLimits.MaxArrayLength #2 : System.Int32
+record-field Fuaran.Core.JsonLimits.MaxDepth #0 : System.Int32
+record-field Fuaran.Core.JsonLimits.MaxDocumentBytes #4 : System.Int32
+record-field Fuaran.Core.JsonLimits.MaxObjectMembers #3 : System.Int32
+record-field Fuaran.Core.JsonLimits.MaxStringLength #1 : System.Int32
 record-field Fuaran.Core.Versioning+Envelope.Payload #1 : Fuaran.Core.JVal
 record-field Fuaran.Core.Versioning+Envelope.Profile #0 : Fuaran.Core.Versioning+Profile
 record-field Fuaran.Core.Versioning+Profile.Major #1 : System.Int32
@@ -336,6 +364,16 @@ type Fuaran.Core.Json+ReaderModule (module)
 type Fuaran.Core.JsonError (record)
 type Fuaran.Core.JsonErrorKind (union)
 type Fuaran.Core.JsonErrorKind+Tags (type)
+type Fuaran.Core.JsonLimit (union)
+type Fuaran.Core.JsonLimit+Tags (type)
+type Fuaran.Core.JsonLimitBreach (record)
+type Fuaran.Core.JsonLimitModule (module)
+type Fuaran.Core.JsonLimits (record)
+type Fuaran.Core.JsonLimitsModule (module)
+type Fuaran.Core.JsonRefusal (union)
+type Fuaran.Core.JsonRefusal+LimitExceeded (type)
+type Fuaran.Core.JsonRefusal+Malformed (type)
+type Fuaran.Core.JsonRefusal+Tags (type)
 type Fuaran.Core.NullPolicy (union)
 type Fuaran.Core.NullPolicy+Tags (type)
 type Fuaran.Core.PathSegment (union)
@@ -402,6 +440,13 @@ union-case Fuaran.Core.JsonErrorKind.UnexpectedChar #0()
 union-case Fuaran.Core.JsonErrorKind.UnexpectedEndOfInput #1()
 union-case Fuaran.Core.JsonErrorKind.UnterminatedEscape #4()
 union-case Fuaran.Core.JsonErrorKind.UnterminatedString #3()
+union-case Fuaran.Core.JsonLimit.ArrayLength #2()
+union-case Fuaran.Core.JsonLimit.Depth #0()
+union-case Fuaran.Core.JsonLimit.DocumentBytes #4()
+union-case Fuaran.Core.JsonLimit.ObjectMembers #3()
+union-case Fuaran.Core.JsonLimit.StringLength #1()
+union-case Fuaran.Core.JsonRefusal.NewLimitExceeded #1(Item: Fuaran.Core.JsonLimitBreach)
+union-case Fuaran.Core.JsonRefusal.NewMalformed #0(Item: Fuaran.Core.JsonError)
 union-case Fuaran.Core.NullPolicy.EraseMemberNull #1()
 union-case Fuaran.Core.NullPolicy.RejectNull #0()
 union-case Fuaran.Core.PathSegment.NewIndex #1(Item: System.Int32)

@@ -143,7 +143,25 @@ let private expectedExclusions =
       "undeclared-member"
       "undeclared-nested-member"
       "unresolved-shape"
-      "unresolved-nested-shape" ]
+      "unresolved-nested-shape"
+      // Phase 465 — the limits vectors declare a record the IDL host does not read.
+      "limit-depth-at-max"
+      "limit-depth-past"
+      "limit-string-length-at-max"
+      "limit-string-length-past"
+      "limit-string-length-astral-at-max"
+      "limit-string-length-astral-past"
+      "limit-string-length-in-a-key"
+      "limit-string-length-nested"
+      "limit-array-length-at-max"
+      "limit-array-length-past"
+      "limit-array-length-nested"
+      "limit-object-members-at-max"
+      "limit-object-members-past"
+      "limit-document-bytes-at-max"
+      "limit-document-bytes-past"
+      "limit-breach-before-malformed-text"
+      "limit-malformed-text-before-breach" ]
 
 let private pinned (v: DecodeVectorsIdl.DecodeVector) : Answer =
     match DecodeVectorsIdl.expectedRefusal v with

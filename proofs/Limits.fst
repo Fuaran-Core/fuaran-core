@@ -39,8 +39,15 @@ let max_node_depth : nat = 24
 (* SYNTACTIC nesting — the depth of the underlying JSON document; every `{` and `[` counts,
    whether it carries a node, a spec, or a rule-12 payload. This is the one `Canon.fst` takes. *)
 (* This is the FORMAT's limit, modelled as a premise. It is NOT the shipped parser's cap: Core is not a
-   section 21 host (DECISIONS.md D84, ruled 2026-10-01), and `Json.defaultMaxDepth` is 512, a bound of the
-   parser's own, configurable through `Json.parseWith`. Size limits below are likewise the host's to enforce. *)
+   section 21 host (DECISIONS.md D84, ruled 2026-10-01; refined by D158, 2026-10-15), and
+   `Json.defaultMaxDepth` is 512, a bound of the parser's own, configurable through `Json.parseWith`.
+   Since Phase 465 the ENFORCEMENT of this bound, of `max_string_length`, of `max_array_length` (over
+   items and over members) and of `max_document_bytes` is modelled — `JsonParse.fst` section 13, the
+   limited entry point `parse_limited` over a `lims` record — so a host that instantiates those budgets
+   at these numbers has the format's bounds enforced on the way down. The NUMBERS stay premises here:
+   nothing in Core names them to the parser, and the host that passes them is the one making the
+   conformance claim. The four bounds the parser has no notion of (node depth, total nodes, expression
+   nodes, skeleton rows) are the host's to enforce over the decoded tree, as they always were. *)
 let max_json_depth : nat = 256
 
 (* Unicode CODE POINTS in a single decoded JSON string (§21.6 — the unit is the normative half). *)

@@ -168,3 +168,18 @@ module DecodeError =
         match e.Kind with
         | MaxDepthExceeded -> make DecodeCode.LimitExceeded "nesting within the parser's cap" (Json.formatJsonError e)
         | _ -> make DecodeCode.InvalidJson "JSON text" (Json.formatJsonError e)
+
+    /// A limited parse's refusal as a decode refusal (Phase 465): malformed text exactly as
+    /// `ofJsonError` reads it, and a breach as `LimitExceeded` AT THE BREACH'S PATH, naming the limit
+    /// and its declared value and never the input — so a host maps the one code to its own envelope
+    /// and never reports a breach as `InvalidJson`.
+    let ofJsonRefusal (r: JsonRefusal) : DecodeError =
+        match r with
+        | JsonRefusal.Malformed e -> ofJsonError e
+        | JsonRefusal.LimitExceeded b ->
+            let name = JsonLimit.name b.Limit
+
+            { Code = DecodeCode.LimitExceeded
+              Path = b.Path
+              Expected = "within the " + name + " bound of " + string b.Declared
+              Message = "limit " + name + " of " + string b.Declared + " exceeded" }

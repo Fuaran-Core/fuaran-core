@@ -255,6 +255,146 @@ let tests =
               JsonParseDiff.sweep EraseMemberNull 512 (JsonParseDiff.soup 20260915 2000)
               |> JsonParseDiff.expectAgreement "soup, tolerant"
 
+          // ---- the LIMITS (Phase 465) — the limited parse beside `parse_limited` ----
+
+          testCase
+              "the limited parse agrees with the model over hand-picked documents, the near misses and a soup, under five records"
+          <| fun _ ->
+              let wide =
+                  { MaxDepth = 512
+                    MaxStringLength = 1 <<< 20
+                    MaxArrayLength = 100000
+                    MaxObjectMembers = 100000
+                    MaxDocumentBytes = 1 <<< 25 }
+
+              // One record per bound, and one with every bound tight enough for the soup to reach.
+              let records =
+                  [ "depth 2", { wide with MaxDepth = 2 }
+                    "string 3", { wide with MaxStringLength = 3 }
+                    "items 2", { wide with MaxArrayLength = 2 }
+                    "members 2", { wide with MaxObjectMembers = 2 }
+                    "all tight",
+                    { MaxDepth = 3
+                      MaxStringLength = 2
+                      MaxArrayLength = 2
+                      MaxObjectMembers = 2
+                      MaxDocumentBytes = 12 } ]
+
+              let smile = "\U0001F600"
+
+              // Each bound at and past its value, in both spellings where a spelling matters, a
+              // key, a nested position, and a breach beside malformed text on either side of it.
+              let handPicked =
+                  [ "depth at", "[[1]]"
+                    "depth past", "[[[1]]]"
+                    "string at", "\"abc\""
+                    "string past", "\"abcd\""
+                    "string astral at", "\"" + smile + smile + smile + "\""
+                    "string astral past", "\"" + smile + smile + smile + smile + "\""
+                    "string escaped astral at", "\"\\uD83D\\uDE00\\uD83D\\uDE00\\uD83D\\uDE00\""
+                    "string escaped past", "\"\\u0061\\u0062\\u0063\\u0064\""
+                    "string in a key", "{\"abcd\":1}"
+                    "string nested", "{\"a\":[\"abcd\"]}"
+                    "items at", "[1,2]"
+                    "items past", "[1,2,3]"
+                    "items nested", "{\"a\":[1,2,3]}"
+                    "empty array", "[]"
+                    "members at", "{\"a\":1,\"b\":2}"
+                    "members past", "{\"a\":1,\"b\":2,\"c\":3}"
+                    "empty object", "{}"
+                    "breach before malformed", "[1,2,3"
+                    "malformed before breach", "[1,%,3,4]"
+                    "cjk", "\"日本語\"" ]
+
+              let pools =
+                  [ for (rn, r) in records do
+                        for (name, input) in handPicked @ JsonParseDiff.nearMisses @ JsonParseDiff.soup 20261015 1500 do
+                            yield sprintf "%s under %s" name rn, r, input ]
+
+              let bytesOk (r: JsonLimits) (input: string) =
+                  System.Text.Encoding.UTF8.GetByteCount input <= r.MaxDocumentBytes
+
+              let bad =
+                  [ for (name, r, input) in pools do
+                        let p = JsonParseDiff.prodAnswerLimited RejectNull r input
+
+                        let m =
+                            JsonParseDiff.modelAnswerLimited JsonParseDiff.toChs RejectNull r (bytesOk r input) input
+
+                        if p <> m then
+                            yield sprintf "%s: input %s\n    production %s\n    model      %s" name input p m ]
+
+              if not bad.IsEmpty then
+                  failtestf
+                      "limits: the model and production disagree on %d input(s). First 5:\n%s"
+                      bad.Length
+                      (bad |> List.truncate 5 |> String.concat "\n")
+
+              // Non-vacuity: every one of the five limits was breached somewhere, and some document
+              // under a bound was accepted — a comparison that only ever refused measured no bound.
+              let breached =
+                  pools
+                  |> List.choose (fun (_, r, input) ->
+                      match Json.parseWithLimits RejectNull r input with
+                      | Error(JsonRefusal.LimitExceeded b) -> Some b.Limit
+                      | _ -> None)
+                  |> Set.ofList
+
+              for l in
+                  [ JsonLimit.Depth
+                    JsonLimit.StringLength
+                    JsonLimit.ArrayLength
+                    JsonLimit.ObjectMembers
+                    JsonLimit.DocumentBytes ] do
+                  Expect.isTrue (breached.Contains l) (sprintf "the %s bound was breached somewhere" (JsonLimit.name l))
+
+              Expect.isTrue
+                  (pools
+                   |> List.exists (fun (_, r, input) ->
+                       (JsonParseDiff.prodAnswerLimited RejectNull r input).StartsWith "ok "))
+                  "some document under a bound was ACCEPTED"
+
+              // The tolerant policy under a members bound: an erased member null is not a member,
+              // on both sides.
+              let erased = "{\"a\":null,\"b\":1}"
+              let one = { wide with MaxObjectMembers = 1 }
+
+              Expect.equal
+                  (JsonParseDiff.prodAnswerLimited EraseMemberNull one erased)
+                  (JsonParseDiff.modelAnswerLimited JsonParseDiff.toChs EraseMemberNull one true erased)
+                  "tolerant, one member admitted"
+
+              Expect.stringStarts
+                  (JsonParseDiff.prodAnswerLimited EraseMemberNull one erased)
+                  "ok "
+                  "the erased member was not counted"
+
+          testCase "a model whose ITEMS CHECK is out of step DISAGREES with production"
+          <| fun _ ->
+              // The go-red for the limits comparison: the model is handed a wider items bound than
+              // production enforces, accepts what production refuses by name, and the comparison
+              // above is thereby known to be one that can fail on exactly this bound.
+              let wide =
+                  { MaxDepth = 512
+                    MaxStringLength = 1 <<< 20
+                    MaxArrayLength = 2
+                    MaxObjectMembers = 100000
+                    MaxDocumentBytes = 1 <<< 25 }
+
+              let p = JsonParseDiff.prodAnswerLimited RejectNull wide "[1,2,3]"
+
+              let m =
+                  JsonParseDiff.modelAnswerLimited
+                      JsonParseDiff.toChs
+                      RejectNull
+                      { wide with MaxArrayLength = 8 }
+                      true
+                      "[1,2,3]"
+
+              Expect.stringStarts p "limit arrayLength" "production refuses at the bound it was given"
+              Expect.stringStarts m "ok " "and an over-budgeted model does not"
+              Expect.notEqual p m "so the items comparison can lose"
+
           // ---- the teeth: both comparisons can lose ----
 
           testCase "a model whose DEPTH CHECK is out of step DISAGREES with production"

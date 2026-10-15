@@ -11,7 +11,12 @@
    `parseObject` / `parseArray` with the explicit depth counter — including the `EraseMemberNull`
    fork, which lives in the member loop and nowhere else. The entry point's trailing-input check is
    modelled too, because `TrailingCharacters` is the one classified failure the parser does NOT
-   raise through its internal exception.
+   raise through its internal exception. Since Phase 465 the descent also takes a LIMITS record
+   (F#: `JsonLimits`, through `Json.parseWithLimits`): a string-length bound counted in code points
+   as the string is read, an items-per-array and a members-per-object bound checked before the
+   item or member is read, and the document-byte bound checked before anything is — each spent as
+   the depth cap is, and each refused as `LimitExceeded`, a kind the descent carries internally
+   and that NEITHER entry point reports as malformed JSON (section 13).
 
    WHAT IS PROVED.
      - `parse_total` — the parser reaches exactly one outcome on every input: an accepted value or
@@ -39,8 +44,24 @@
        it, and ON the grammar the int53 guard is exact. See the finding below, which this closes.
      - `parse_accepts_only_well_formed_strings` — Phase 306, section 12: every string and every
        member key in a value the parser returns is well-formed UTF-16.
+     - `limited_at_no_bound_is_the_parser`, `limit_never_reported_as_malformed`,
+       `string_bound_exact`, `items_bound_exact` — Phase 465, section 13: the limited entry point
+       at no bound answers exactly what `parse` answers (a depth breach lifted to `RLimit LDepth`),
+       a breach is a `RLimit` and never a `RErr`, and on the canonical string and array families
+       the two linear bounds are exact at every length and every bound. The members bound, the
+       byte bound, and a breach outranking a later malformed item are exhibited
+       (`limits_exhibited`); the CONFINEMENT of each breach to a bound that is actually set rides
+       the return types (`bounds_confined`), which is what lets `parse` keep its thirteen kinds.
 
    WHAT IS NOT MODELLED, AND WHY — the theorem's boundary.
+
+     - THE BREACH'S PATH, AND THE DOCUMENT'S BYTE COUNT (Phase 465). Production reports a breach
+       with the decode path to the container it was raised in; the model reports the SUFFIX, as it
+       does for every refusal, and the path is checked by the decode vectors rather than proved.
+       The byte bound is a comparison on a UTF-8 length this alphabet cannot express (`COther`
+       carries a character of unknown width), so it enters as a verdict, `bytes_ok`, exactly as
+       the float readback does — what is modelled is that a false verdict is refused before the
+       descent reads a character, and as `RLimit LBytes`.
 
      - THE VALUE OF A `\uXXXX` ESCAPE. Its two GUARDS are modelled and proved — a truncated escape
        is `TruncatedUnicodeEscape`, a bad hex digit is `BadHexDigit`, and the position each reports
@@ -255,7 +276,19 @@ type jval =
   | JArr   : items:list jval -> jval
   | JObj   : fields:list (list och & jval) -> jval
 
-(* F#: `JsonErrorKind` — all thirteen cases, in declaration order. *)
+(* F#: `JsonLimit` (Phase 465) — which bound a breach passed. *)
+type limit =
+  | LDepth
+  | LString
+  | LItems
+  | LMembers
+  | LBytes
+
+(* F#: `JsonErrorKind` — all thirteen cases, in declaration order — and ONE more the descent
+   carries internally. `LimitExceeded` is F#'s second scanner exception (`JsonLimitError`), not a
+   case of `JsonErrorKind`: `parse` cannot produce it (its bounds are `Unbounded`, and
+   `bounds_confined` says the kind arises only under a bound that is set), and `parse_limited`
+   lifts it to `RLimit` before it is reported. Section 13. *)
 type ekind =
   | UnexpectedChar
   | UnexpectedEndOfInput
@@ -270,6 +303,41 @@ type ekind =
   | MaxDepthExceeded
   | TrailingCharacters
   | DuplicateMember
+  | LimitExceeded : l:limit -> ekind
+
+(* F#: one field of `JsonLimits` (Phase 465). `Unbounded` is the `Int32.MaxValue` production
+   passes for an entry point that states no such limit; a bounded one is spent as the depth cap
+   is — one element per unit counted — for the reason the header gives (the extraction carries no
+   integers). *)
+type bound =
+  | Unbounded : bound
+  | Bounded : m:list unit -> bound
+
+(* F#: the three fields of `JsonLimits` the DESCENT enforces. The depth cap stays the budget `b`
+   every parser already threads; the byte bound is the entry point's (`parse_limited`). *)
+type lims = { lstr: bound; litems: bound; lmembers: bound }
+
+(* F#: `JsonLimits.depthOnly` — the record every pre-existing entry point runs under. *)
+let unbounded: lims = { lstr = Unbounded; litems = Unbounded; lmembers = Unbounded }
+
+(* F#: `count >= max` — a count that stands at `acc` (the units, items or members taken so far,
+   AS A LIST: the string reader counts in `unit`s, the two loops hand their accumulators) has used
+   the bound up, so the NEXT one breaches it. Checked BEFORE that next thing is read, which is
+   §21.2's "on the way down": nothing past the bound is ever read or built. Spelt by walking the
+   two lists together, because `llen` is proof-only (section 0); the refinement is what the
+   proofs read. *)
+let rec spent_by (#a: Type) (m: list unit) (acc: list a)
+  : Tot (b: bool { b == (llen acc >= llen m) }) (decreases m) =
+  match m, acc with
+  | [], _ -> true
+  | _, [] -> false
+  | _ :: mt, _ :: at -> spent_by mt at
+
+let spent (#a: Type) (bd: bound) (acc: list a)
+  : Tot (b: bool { b == (match bd with Unbounded -> false | Bounded m -> llen acc >= llen m) }) =
+  match bd with
+  | Unbounded -> false
+  | Bounded m -> spent_by m acc
 
 (* F#: `NullPolicy`. *)
 type policy =
@@ -288,6 +356,9 @@ type pres (a: Type) =
 type jresult =
   | ROk  : v:jval -> jresult
   | RErr : k:ekind -> msg:string -> at:list ch -> jresult
+  (* F#: `JsonRefusal.LimitExceeded` (Phase 465) — a DISTINCT outcome, never a `JsonError`: the
+     limit passed and the suffix at the breach. Only `parse_limited` produces it. *)
+  | RLimit : l:limit -> at:list ch -> jresult
 
 (* ---- the messages, verbatim from Json.fs ---- *)
 
@@ -321,6 +392,11 @@ let msg_null_tolerant: string =
    the same reason the cap itself is a list — see the header. *)
 let msg_depth (rendered_cap: string) : Tot string =
   "max nesting depth " ^ rendered_cap ^ " exceeded"
+
+(* A limit breach carries no sentence: production's `JsonLimitBreach` is typed (the limit, the
+   declared value, the path, the position) and never echoes the input. The descent's internal
+   carrier spells its message empty for that reason. *)
+let msg_limit: string = ""
 
 (* ======================================================================================
    3. The two numeric guards, WITHOUT integers.
@@ -430,7 +506,16 @@ let int32_fits (neg: bool) (d: list ch) : Tot bool =
    this refinement catches at the definition rather than in a test. *)
 let str_kind (k: ekind) : Tot bool =
   k = ExpectedToken || k = UnterminatedString || k = UnterminatedEscape ||
-  k = TruncatedUnicodeEscape || k = BadEscape || k = BadHexDigit
+  k = TruncatedUnicodeEscape || k = BadEscape || k = BadHexDigit ||
+  k = LimitExceeded LString
+
+(* The string bound's CONFINEMENT (Phase 465): its breach arises only under a bound that is set.
+   Carried in `string_body`'s and `parse_string`'s return types, so `parse` — which passes
+   `Unbounded` — is seen by the type-checker never to meet it. *)
+let str_confined (#a: Type) (lstr: bound) (r: pres a) : Tot bool =
+  match r with
+  | PErr (LimitExceeded LString) _ _ -> Bounded? lstr
+  | _ -> true
 
 (* F#: `skipWs`. *)
 let rec skip_ws (s: list ch) : Tot (r: list ch { llen r <= llen s }) (decreases s) =
@@ -496,11 +581,20 @@ let sur_fault (pending: bool) (cls: sclass) : Tot (option string) =
    character after `i <- i + 1`, a short escape after its letter, a `\u` escape after `i <- i + 4`
    — so its suffix is what follows the unit. A closing quote met while a high surrogate is pending
    is the same refusal, after the quote. The end-of-input test runs first in production's loop, so
-   an unterminated string is `UnterminatedString` whatever is pending. *)
-let rec string_body (pending: bool) (acc: list och) (s: list ch)
+   an unterminated string is `UnterminatedString` whatever is pending.
+
+   THE STRING BOUND (Phase 465) is `check`'s third test, after the two surrogate tests and before
+   the unit is appended: `n` is the CODE POINTS taken so far (§21.6's unit — a low half that
+   completes a pending high is not a new one, so it is counted exactly when nothing is pending),
+   and a unit that would be the `max + 1`-th is refused after it, at the suffix the surrogate
+   refusal would report, before anything is built from it. *)
+let rec string_body (lstr: bound) (n: list unit) (pending: bool) (acc: list och) (s: list ch)
   : Tot (r: pres (list och) { (POk? r ==> llen (POk?.rest r) < llen s) /\
-                              (PErr? r ==> str_kind (PErr?.k r)) })
+                              (PErr? r ==> str_kind (PErr?.k r)) /\ str_confined lstr r })
         (decreases s) =
+  (* `check u`'s count: the unit is a code point of its own unless it completes a pending pair. *)
+  let n' = if pending then n else () :: n in
+  let over = not pending && spent lstr n in
   match s with
   | [] -> PErr UnterminatedString "unterminated string" []
   | CQuote :: t -> if pending then PErr BadEscape msg_lone_high t else POk (rev acc) t
@@ -513,7 +607,9 @@ let rec string_body (pending: bool) (acc: list och) (s: list ch)
           if is_hex a && is_hex b && is_hex c && is_hex d then
             (match sur_fault pending (uni_class a b) with
              | Some m -> PErr BadEscape m r
-             | None -> string_body (uni_class a b = SHigh) (OUni a b c d :: acc) r)
+             | None ->
+               if over then PErr (LimitExceeded LString) msg_limit r
+               else string_body lstr n' (uni_class a b = SHigh) (OUni a b c d :: acc) r)
           else
             (* F# evaluates the four `hexDigit` calls left to right and `fail` captures `i`, which
                `i <- i + 4` has not yet advanced — so the position is the FIRST hex digit whichever
@@ -524,7 +620,9 @@ let rec string_body (pending: bool) (acc: list och) (s: list ch)
        if is_short_escape e then
          (match sur_fault pending SNone with
           | Some m -> PErr BadEscape m u
-          | None -> string_body false (OEsc e :: acc) u)
+          | None ->
+            if over then PErr (LimitExceeded LString) msg_limit u
+            else string_body lstr n' false (OEsc e :: acc) u)
        else PErr BadEscape (msg_bad_escape e) u)
   | c :: t ->
     (* Phase 462: a raw control is refused AT the character, before the surrogate test - production's
@@ -533,15 +631,17 @@ let rec string_body (pending: bool) (acc: list och) (s: list ch)
     else
       (match sur_fault pending (lit_class c) with
        | Some m -> PErr BadEscape m t
-       | None -> string_body (lit_class c = SHigh) (OLit c :: acc) t)
+       | None ->
+         if over then PErr (LimitExceeded LString) msg_limit t
+         else string_body lstr n' (lit_class c = SHigh) (OLit c :: acc) t)
 
-(* F#: `parseString`. `pendingHigh` starts false. *)
-let parse_string (s: list ch)
+(* F#: `parseString`. `pendingHigh` starts false, and the code-point count at zero. *)
+let parse_string (lstr: bound) (s: list ch)
   : Tot (r: pres (list och) { (POk? r ==> llen (POk?.rest r) < llen s) /\
-                              (PErr? r ==> str_kind (PErr?.k r)) }) =
+                              (PErr? r ==> str_kind (PErr?.k r)) /\ str_confined lstr r }) =
   match expect CQuote s with
   | PErr k m a -> PErr k m a
-  | POk _ t -> string_body false [] t
+  | POk _ t -> string_body lstr [] false [] t
 
 (* F#: the three `while … digit` loops of `parseNumber`. *)
 let rec take_digits (s: list ch)
@@ -701,6 +801,20 @@ let depth_confined (#a: Type) (r: pres a) : Tot bool =
   | PErr k _ at -> val_kind k && (k <> MaxDepthExceeded || starts_container at)
   | POk _ _ -> true
 
+(* THE BOUNDS' CONFINEMENT (Phase 465), the third refinement every descent signature carries: a
+   breach of a bound arises only under that bound being SET, the depth breach rides
+   `MaxDepthExceeded` (the kind the cap has always raised; `parse_limited` lifts it), and the byte
+   bound never arises in the descent at all. So `parse`, which passes `unbounded`, is seen by the
+   type-checker to raise none of them, which is what keeps its thirteen kinds thirteen. *)
+let bounds_confined (#a: Type) (lim: lims) (r: pres a) : Tot bool =
+  match r with
+  | PErr (LimitExceeded LString) _ _ -> Bounded? lim.lstr
+  | PErr (LimitExceeded LItems) _ _ -> Bounded? lim.litems
+  | PErr (LimitExceeded LMembers) _ _ -> Bounded? lim.lmembers
+  | PErr (LimitExceeded LDepth) _ _ -> false
+  | PErr (LimitExceeded LBytes) _ _ -> false
+  | _ -> true
+
 (* F#: the `tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"` test, and the
    `i <- i + 4` it guards — the ONE place in the parser that erases anything. *)
 let drop_null4 (s: list ch) : Tot (o: option (list ch) { Some? o ==> llen (Some?.v o) < llen s }) =
@@ -717,19 +831,20 @@ let rec has_key (k: list och) (fs: list (list och & jval)) : Tot bool (decreases
   | (k', _) :: t -> k = k' || has_key k t
 
 let rec parse_value
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
-  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen s) /\ depth_confined r })
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen s) /\ depth_confined r /\
+                        bounds_confined lim r })
         (decreases %[llen s; 2])
   =
   let w = skip_ws s in
   match w with
   | [] -> PErr UnexpectedEndOfInput "unexpected end of input" []
   | CQuote :: _ ->
-    (match parse_string w with
+    (match parse_string lim.lstr w with
      | PErr k m a -> PErr k m a
      | POk cs r -> POk (JStr cs) r)
-  | CLBrace :: _ -> parse_object float_read cap tol b w
-  | CLBrack :: _ -> parse_array float_read cap tol b w
+  | CLBrace :: _ -> parse_object float_read cap lim tol b w
+  | CLBrack :: _ -> parse_array float_read cap lim tol b w
   (* F#: `parseLiteral "true" (JBool true)`, inlined — the model has the four characters where
      production has a `Substring` comparison, and the failure's position is the same. *)
   | CLt :: CLr :: CLu :: CLe :: t -> POk (JBool true) t
@@ -751,9 +866,10 @@ let rec parse_value
    matching `'{'` — and because that is what makes the depth error's CONFINEMENT checkable here
    rather than asserted about the caller. *)
 and parse_object
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r })
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r /\
+                        bounds_confined lim r })
         (decreases %[llen w; 1])
   =
   (* F#: `if depth >= maxDepth then fail MaxDepthExceeded …`, BEFORE `expect '{'` — so the
@@ -768,14 +884,15 @@ and parse_object
        (match t1 with
         | CRBrace :: t2 -> POk (JObj []) t2
         | _ ->
-          (match parse_members float_read cap tol b' [] t1 with
+          (match parse_members float_read cap lim tol b' [] t1 with
            | PErr k m a -> PErr k m a
            | POk fs r -> POk (JObj fs) r)))
 
 and parse_array
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r })
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r /\
+                        bounds_confined lim r })
         (decreases %[llen w; 1])
   =
   match b with
@@ -788,21 +905,28 @@ and parse_array
        (match t1 with
         | CRBrack :: t2 -> POk (JArr []) t2
         | _ ->
-          (match parse_items float_read cap tol b' [] t1 with
+          (match parse_items float_read cap lim tol b' [] t1 with
            | PErr k m a -> PErr k m a
            | POk xs r -> POk (JArr xs) r)))
 
 (* F#: the `while go` loop of `parseObject`. The budget it is given is already the CHILD's — the
-   members' values sit one level down. *)
+   members' values sit one level down.
+
+   THE MEMBERS BOUND (Phase 465) is tested after the loop's `skipWs` and BEFORE the key is read, at
+   the key's opening quote: the members accumulated so far ARE the count (an erased member null was
+   never accumulated and is not one, which is what keeps section 11's bridge true under it), and a
+   member that would be the `max + 1`-th is refused before a character of it is read. *)
 and parse_members
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list (list och & jval)) (s: list ch)
   : Tot (r: pres (list (list och & jval)) { (POk? r ==> llen (POk?.rest r) <= llen s) /\
-                                            depth_confined r })
+                                            depth_confined r /\ bounds_confined lim r })
         (decreases %[llen s; 0])
   =
   let w = skip_ws s in
-  match parse_string w with
+  if spent lim.lmembers acc then PErr (LimitExceeded LMembers) msg_limit w
+  else
+  match parse_string lim.lstr w with
   | PErr k m a -> PErr k m a
   | POk key t ->
     let t1 = skip_ws t in
@@ -816,11 +940,11 @@ and parse_members
           (* The member is consumed and NOT added — the object reads as though it were omitted. *)
           let t5 = skip_ws t4 in
           (match t5 with
-           | CComma :: t6 -> parse_members float_read cap tol b acc t6
+           | CComma :: t6 -> parse_members float_read cap lim tol b acc t6
            | CRBrace :: t6 -> POk (rev acc) t6
            | _ -> PErr ExpectedToken "expected ',' or '}'" t5)
         | None ->
-          (match parse_value float_read cap tol b t3 with
+          (match parse_value float_read cap lim tol b t3 with
            | PErr k m a -> PErr k m a
            | POk v t4 ->
              (* Phase 462: a repeated name is refused when the member is ACCUMULATED - after its
@@ -832,41 +956,72 @@ and parse_members
              else
                let t5 = skip_ws t4 in
                (match t5 with
-                | CComma :: t6 -> parse_members float_read cap tol b ((key, v) :: acc) t6
+                | CComma :: t6 -> parse_members float_read cap lim tol b ((key, v) :: acc) t6
                 | CRBrace :: t6 -> POk (rev ((key, v) :: acc)) t6
                 | _ -> PErr ExpectedToken "expected ',' or '}'" t5))))
 
 (* F#: the `while go` loop of `parseArray`. Note it calls `parseValue` at the CURRENT position —
    the one edge in this group that recurses without consuming, which is why `parse_items` sits
-   above `parse_value` in the termination order. *)
+   above `parse_value` in the termination order.
+
+   THE ITEMS BOUND (Phase 465) is tested at the loop's head, BEFORE the item's value is read — at
+   the position after the `[` (and its whitespace) or after the `,`, which is where production's
+   `item ()` is called: the items accumulated so far are the count, and an item that would be the
+   `max + 1`-th is refused before a character of it is read. *)
 and parse_items
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list jval) (s: list ch)
-  : Tot (r: pres (list jval) { (POk? r ==> llen (POk?.rest r) <= llen s) /\ depth_confined r })
+  : Tot (r: pres (list jval) { (POk? r ==> llen (POk?.rest r) <= llen s) /\ depth_confined r /\
+                               bounds_confined lim r })
         (decreases %[llen s; 3])
   =
-  match parse_value float_read cap tol b s with
+  if spent lim.litems acc then PErr (LimitExceeded LItems) msg_limit s
+  else
+  match parse_value float_read cap lim tol b s with
   | PErr k m a -> PErr k m a
   | POk v t ->
     let t1 = skip_ws t in
     (match t1 with
-     | CComma :: t2 -> parse_items float_read cap tol b (v :: acc) t2
+     | CComma :: t2 -> parse_items float_read cap lim tol b (v :: acc) t2
      | CRBrack :: t2 -> POk (rev (v :: acc)) t2
      | _ -> PErr ExpectedToken "expected ',' or ']'" t1)
 
 (* F#: `parseDetailedWithPolicy`'s `try … with` — the value, then `skipWs`, then the leftover test.
    `TrailingCharacters` is the one classified failure NOT raised through `JsonParseError`: it is
    constructed here, from the leftover, which is why theorem 4 is stated about this entry point
-   rather than about the raise sites. *)
+   rather than about the raise sites. Runs the descent at NO bound (`unbounded`) — every
+   pre-existing entry point does, and `bounds_confined` is what makes the `RErr k` arm below carry
+   one of the thirteen kinds and never `LimitExceeded`. *)
 let parse
   (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (s: list ch)
   : Tot jresult =
   let tol = EraseMemberNull? pol in
-  match parse_value float_read cap tol b s with
+  match parse_value float_read cap unbounded tol b s with
   | PErr k m a -> RErr k m a
   | POk v r ->
     let r1 = skip_ws r in
     if Nil? r1 then ROk v else RErr TrailingCharacters "trailing characters" r1
+
+(* F#: `Json.parseWithLimits` (Phase 465). The byte verdict first — before a character is read,
+   §21.7 — then the same descent under the record's bounds, and every breach LIFTED to `RLimit`:
+   the depth cap's `MaxDepthExceeded` becomes `RLimit LDepth` at the same suffix (production
+   converts the scanner's one depth refusal to the breach at the catch, with the path the scanner
+   still holds), and each `LimitExceeded l` becomes `RLimit l`. What is left in `RErr` is exactly
+   what `parse` reports: a breach is never malformed JSON. *)
+let parse_limited
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (lim: lims)
+  (bytes_ok: bool) (s: list ch)
+  : Tot jresult =
+  if not bytes_ok then RLimit LBytes s
+  else
+    let tol = EraseMemberNull? pol in
+    match parse_value float_read cap lim tol b s with
+    | PErr MaxDepthExceeded _ a -> RLimit LDepth a
+    | PErr (LimitExceeded l) _ a -> RLimit l a
+    | PErr k m a -> RErr k m a
+    | POk v r ->
+      let r1 = skip_ws r in
+      if Nil? r1 then ROk v else RErr TrailingCharacters "trailing characters" r1
 
 (* ======================================================================================
    6. THEOREM — TOTALITY.
@@ -922,12 +1077,14 @@ let nest_arr (k: list unit) : Tot (list ch) = nest_arr_at k []
    README's note on `--ext context_pruning`: never in `check.ps1`. *)
 #push-options "--fuel 6 --ifuel 3 --z3rlimit 60"
 
-(* Enough budget: the parse accepts and leaves EXACTLY the suffix, at every depth. *)
+(* Enough budget: the parse accepts and leaves EXACTLY the suffix, at every depth. At NO bound,
+   because the family is about the depth cap alone: an items bound of zero would refuse the inner
+   array's one item (section 13 is where those bounds are stated). *)
 [@@ noextract_to "FSharp"]
 let rec nest_accepts
   (float_read: list ch -> freadv) (cap: string) (tol: bool) (b k: list unit) (rest: list ch)
   : Lemma (requires llen b >= llen k)
-          (ensures (let r = parse_value float_read cap tol b (nest_arr_at k rest) in
+          (ensures (let r = parse_value float_read cap unbounded tol b (nest_arr_at k rest) in
                     POk? r /\ POk?.rest r == rest))
           (decreases k)
   =
@@ -944,7 +1101,7 @@ let rec nest_accepts
 let rec nest_refuses
   (float_read: list ch -> freadv) (cap: string) (tol: bool) (b k: list unit) (rest: list ch)
   : Lemma (requires llen b < llen k)
-          (ensures (let r = parse_value float_read cap tol b (nest_arr_at k rest) in
+          (ensures (let r = parse_value float_read cap unbounded tol b (nest_arr_at k rest) in
                     PErr? r /\ PErr?.k r == MaxDepthExceeded))
           (decreases k)
   =
@@ -1205,15 +1362,15 @@ let error_kind_total (float_read: list ch -> freadv) (cap: string) (pol: policy)
    model's reading of production raising eleven kinds through `JsonParseError` and constructing the
    twelfth from the leftover-input test. *)
 let trailing_is_the_entry_points_alone
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
-  : Lemma (ensures (let r = parse_value float_read cap tol b s in
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (let r = parse_value float_read cap lim tol b s in
                     PErr? r ==> PErr?.k r <> TrailingCharacters))
   = ()
 
 (* `MaxDepthExceeded` is a container's alone. *)
 let depth_error_only_at_a_container
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
-  : Lemma (ensures (let r = parse_value float_read cap tol b s in
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (let r = parse_value float_read cap lim tol b s in
                     (PErr? r /\ PErr?.k r == MaxDepthExceeded) ==> starts_container (PErr?.at r)))
   = ()
 
@@ -1385,21 +1542,21 @@ let rec olit_onto (key: list ch) (acc: list och) : Tot (list och) (decreases key
   | c :: t -> olit_onto t (OLit c :: acc)
 
 [@@ noextract_to "FSharp"]
-let rec string_body_plain (acc: list och) (key: list ch) (tail: list ch)
+let rec string_body_plain (n: list unit) (acc: list och) (key: list ch) (tail: list ch)
   : Lemma (requires plain_all key)
-          (ensures string_body false acc (app key (CQuote :: tail))
+          (ensures string_body Unbounded n false acc (app key (CQuote :: tail))
                    == POk (rev (olit_onto key acc)) tail)
           (decreases key) =
   match key with
   | [] -> ()
-  | c :: t -> string_body_plain (OLit c :: acc) t tail
+  | c :: t -> string_body_plain (() :: n) (OLit c :: acc) t tail
 
 [@@ noextract_to "FSharp"]
 let parse_string_plain (key: list ch) (tail: list ch)
   : Lemma (requires plain_all key)
-          (ensures parse_string (CQuote :: app key (CQuote :: tail))
+          (ensures parse_string Unbounded (CQuote :: app key (CQuote :: tail))
                    == POk (rev (olit_onto key [])) tail) =
-  string_body_plain [] key tail
+  string_body_plain [] [] key tail
 
 (* ---- the fork: absorbing a member null is not having written it ---- *)
 
@@ -1416,8 +1573,8 @@ let member_null_absorbed
   (float_read: list ch -> freadv) (cap: string) (b: list unit)
   (acc: list (list och & jval)) (key: list ch) (rest: list ch)
   : Lemma (requires plain_all key)
-          (ensures parse_members float_read cap true b acc (null_member key rest)
-                   == parse_members float_read cap true b acc rest) =
+          (ensures parse_members float_read cap unbounded true b acc (null_member key rest)
+                   == parse_members float_read cap unbounded true b acc rest) =
   parse_string_plain key (CColon :: CLn :: CLu :: CLl :: CLl :: CComma :: rest)
 
 (* A RUN of them, so the erasure is not one member but every member null in an object's list. *)
@@ -1437,8 +1594,8 @@ let rec null_members_absorbed
   (float_read: list ch -> freadv) (cap: string) (b: list unit)
   (acc: list (list och & jval)) (keys: list (list ch)) (rest: list ch)
   : Lemma (requires plain_keys keys)
-          (ensures parse_members float_read cap true b acc (null_members keys rest)
-                   == parse_members float_read cap true b acc rest)
+          (ensures parse_members float_read cap unbounded true b acc (null_members keys rest)
+                   == parse_members float_read cap unbounded true b acc rest)
           (decreases keys) =
   match keys with
   | [] -> ()
@@ -1466,21 +1623,21 @@ let off_fork (#a: Type) (r: pres a) : Tot bool =
    absorbs, the strict reader hands the four characters to `parse_value`, which refuses them by
    name — so the strict side is ON the fork there and the two are allowed to part. *)
 let rec policies_agree_value
-  (float_read: list ch -> freadv) (cap: string) (b: list unit) (s: list ch)
-  : Lemma (ensures (let rs = parse_value float_read cap false b s in
-                    off_fork rs ==> parse_value float_read cap true b s == rs))
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit) (s: list ch)
+  : Lemma (ensures (let rs = parse_value float_read cap lim false b s in
+                    off_fork rs ==> parse_value float_read cap lim true b s == rs))
           (decreases %[llen s; 2]) =
   let w = skip_ws s in
   match w with
-  | CLBrace :: _ -> policies_agree_object float_read cap b w
-  | CLBrack :: _ -> policies_agree_array float_read cap b w
+  | CLBrace :: _ -> policies_agree_object float_read cap lim b w
+  | CLBrack :: _ -> policies_agree_array float_read cap lim b w
   | _ -> ()
 
 and policies_agree_object
-  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (let rs = parse_object float_read cap false b w in
-                    off_fork rs ==> parse_object float_read cap true b w == rs))
+  : Lemma (ensures (let rs = parse_object float_read cap lim false b w in
+                    off_fork rs ==> parse_object float_read cap lim true b w == rs))
           (decreases %[llen w; 1]) =
   match b with
   | [] -> ()
@@ -1491,13 +1648,13 @@ and policies_agree_object
        let t1 = skip_ws t in
        (match t1 with
         | CRBrace :: _ -> ()
-        | _ -> policies_agree_members float_read cap b' [] t1))
+        | _ -> policies_agree_members float_read cap lim b' [] t1))
 
 and policies_agree_array
-  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (let rs = parse_array float_read cap false b w in
-                    off_fork rs ==> parse_array float_read cap true b w == rs))
+  : Lemma (ensures (let rs = parse_array float_read cap lim false b w in
+                    off_fork rs ==> parse_array float_read cap lim true b w == rs))
           (decreases %[llen w; 1]) =
   match b with
   | [] -> ()
@@ -1508,16 +1665,16 @@ and policies_agree_array
        let t1 = skip_ws t in
        (match t1 with
         | CRBrack :: _ -> ()
-        | _ -> policies_agree_items float_read cap b' [] t1))
+        | _ -> policies_agree_items float_read cap lim b' [] t1))
 
 and policies_agree_members
-  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
   (acc: list (list och & jval)) (s: list ch)
-  : Lemma (ensures (let rs = parse_members float_read cap false b acc s in
-                    off_fork rs ==> parse_members float_read cap true b acc s == rs))
+  : Lemma (ensures (let rs = parse_members float_read cap lim false b acc s in
+                    off_fork rs ==> parse_members float_read cap lim true b acc s == rs))
           (decreases %[llen s; 0]) =
   let w = skip_ws s in
-  match parse_string w with
+  match parse_string lim.lstr w with
   | PErr _ _ _ -> ()
   | POk key t ->
     let t1 = skip_ws t in
@@ -1528,28 +1685,28 @@ and policies_agree_members
        (match drop_null4 t3 with
         | Some _ -> ()
         | None ->
-          policies_agree_value float_read cap b t3;
-          (match parse_value float_read cap false b t3 with
+          policies_agree_value float_read cap lim b t3;
+          (match parse_value float_read cap lim false b t3 with
            | PErr _ _ _ -> ()
            | POk v t4 ->
              let t5 = skip_ws t4 in
              (match t5 with
-              | CComma :: t6 -> policies_agree_members float_read cap b ((key, v) :: acc) t6
+              | CComma :: t6 -> policies_agree_members float_read cap lim b ((key, v) :: acc) t6
               | _ -> ()))))
 
 and policies_agree_items
-  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
   (acc: list jval) (s: list ch)
-  : Lemma (ensures (let rs = parse_items float_read cap false b acc s in
-                    off_fork rs ==> parse_items float_read cap true b acc s == rs))
+  : Lemma (ensures (let rs = parse_items float_read cap lim false b acc s in
+                    off_fork rs ==> parse_items float_read cap lim true b acc s == rs))
           (decreases %[llen s; 3]) =
-  policies_agree_value float_read cap b s;
-  (match parse_value float_read cap false b s with
+  policies_agree_value float_read cap lim b s;
+  (match parse_value float_read cap lim false b s with
    | PErr _ _ _ -> ()
    | POk v t ->
      let t1 = skip_ws t in
      (match t1 with
-      | CComma :: t2 -> policies_agree_items float_read cap b (v :: acc) t2
+      | CComma :: t2 -> policies_agree_items float_read cap lim b (v :: acc) t2
       | _ -> ()))
 
 (* THE SECOND HALF, at the entry point. A document the strict reader ACCEPTS, the tolerant reader
@@ -1562,7 +1719,7 @@ let policies_agree_off_the_fork
                     let rt = parse float_read cap EraseMemberNull b s in
                     (ROk? rs ==> rt == rs) /\
                     ((RErr? rs /\ RErr?.k rs <> NullNotRepresentable) ==> rt == rs))) =
-  policies_agree_value float_read cap b s
+  policies_agree_value float_read cap unbounded b s
 
 (* ---- the shape the composition cannot reach: an object that is ALL nulls ---- *)
 
@@ -1576,7 +1733,7 @@ let member_null_last_absorbed
   (float_read: list ch -> freadv) (cap: string) (b: list unit)
   (acc: list (list och & jval)) (key: list ch) (rest: list ch)
   : Lemma (requires plain_all key)
-          (ensures parse_members float_read cap true b acc (null_member_last key rest)
+          (ensures parse_members float_read cap unbounded true b acc (null_member_last key rest)
                    == POk (rev acc) rest) =
   parse_string_plain key (CColon :: CLn :: CLu :: CLl :: CLl :: CRBrace :: rest)
 
@@ -1613,10 +1770,10 @@ let members_follow (s: list ch) : Tot bool =
    skipped is being handed the position. Needed because `parse_object` skips before it descends
    and the run's equation is stated at the unskipped suffix. *)
 let parse_members_skip_ws
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list (list och & jval)) (s: list ch)
-  : Lemma (ensures parse_members float_read cap tol b acc (skip_ws s)
-                   == parse_members float_read cap tol b acc s) =
+  : Lemma (ensures parse_members float_read cap lim tol b acc (skip_ws s)
+                   == parse_members float_read cap lim tol b acc s) =
   skip_ws_idem s
 
 (* THE BRIDGE, AT THE ENTRY POINT. For every member-null run at the head of an object whose
@@ -1658,7 +1815,7 @@ let null_absorption_is_erasure
      | [] -> ()
      | _ ->
        null_members_absorbed float_read cap b' [] keys rest;
-       parse_members_skip_ws float_read cap true b' [] rest)
+       parse_members_skip_ws float_read cap unbounded true b' [] rest)
 
 (* NON-VACUITY, exhibited rather than described — the guard the theorem above needs most, because
    a bridge whose hypotheses nothing satisfies would verify and say nothing. One document where
@@ -1734,9 +1891,9 @@ let rec fwd_rev_app (acc l: list och)
 (* The loop's invariant: `pending` IS the state of the accumulator, at every step, so a string the
    loop closes is one whose every unit was accepted and whose last unit left nothing pending. *)
 [@@ noextract_to "FSharp"]
-let rec string_body_keeps_well_formed (pending: bool) (acc: list och) (s: list ch)
+let rec string_body_keeps_well_formed (lstr: bound) (n: list unit) (pending: bool) (acc: list och) (s: list ch)
   : Lemma (requires racc_state acc == Some pending)
-          (ensures (match string_body pending acc s with
+          (ensures (match string_body lstr n pending acc s with
                     | POk cs _ -> ochs_well_formed cs
                     | PErr _ _ _ -> True))
           (decreases s) =
@@ -1752,30 +1909,34 @@ let rec string_body_keeps_well_formed (pending: bool) (acc: list och) (s: list c
           if is_hex a && is_hex b && is_hex c && is_hex d then
             (match sur_fault pending (uni_class a b) with
              | Some _ -> ()
-             | None -> string_body_keeps_well_formed (uni_class a b = SHigh) (OUni a b c d :: acc) r)
+             | None ->
+               string_body_keeps_well_formed lstr (if pending then n else () :: n)
+                 (uni_class a b = SHigh) (OUni a b c d :: acc) r)
           else ()
         | _ -> ())
      | e :: u ->
        if is_short_escape e then
          (match sur_fault pending SNone with
           | Some _ -> ()
-          | None -> string_body_keeps_well_formed false (OEsc e :: acc) u)
+          | None -> string_body_keeps_well_formed lstr (if pending then n else () :: n) false (OEsc e :: acc) u)
        else ())
   | c :: t ->
     if is_ctrl c then ()
     else
       (match sur_fault pending (lit_class c) with
        | Some _ -> ()
-       | None -> string_body_keeps_well_formed (lit_class c = SHigh) (OLit c :: acc) t)
+       | None ->
+         string_body_keeps_well_formed lstr (if pending then n else () :: n)
+           (lit_class c = SHigh) (OLit c :: acc) t)
 
 (* A STRING THE PARSER ACCEPTS IS WELL-FORMED. *)
-let parse_string_accepts_only_well_formed (s: list ch)
-  : Lemma (ensures (match parse_string s with
+let parse_string_accepts_only_well_formed (lstr: bound) (s: list ch)
+  : Lemma (ensures (match parse_string lstr s with
                     | POk cs _ -> ochs_well_formed cs
                     | PErr _ _ _ -> True)) =
   match expect CQuote s with
   | PErr _ _ _ -> ()
-  | POk _ t -> string_body_keeps_well_formed false [] t
+  | POk _ t -> string_body_keeps_well_formed lstr [] false [] t
 
 (* ---- lifted over a value: every string, and every member key ---- *)
 
@@ -1817,22 +1978,22 @@ let rec rev_app_fields_wf (acc l: list (list och & jval))
    the induction has to follow the descent. The two loops carry their accumulators' invariant. *)
 [@@ noextract_to "FSharp"]
 let rec parsed_value_wf
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
-  : Lemma (ensures (match parse_value float_read cap tol b s with
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse_value float_read cap lim tol b s with
                     | POk v _ -> jval_wf v
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 2]) =
   let w = skip_ws s in
   match w with
-  | CQuote :: _ -> parse_string_accepts_only_well_formed w
-  | CLBrace :: _ -> parsed_object_wf float_read cap tol b w
-  | CLBrack :: _ -> parsed_array_wf float_read cap tol b w
+  | CQuote :: _ -> parse_string_accepts_only_well_formed lim.lstr w
+  | CLBrace :: _ -> parsed_object_wf float_read cap lim tol b w
+  | CLBrack :: _ -> parsed_array_wf float_read cap lim tol b w
   | _ -> ()
 
 and parsed_object_wf
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (match parse_object float_read cap tol b w with
+  : Lemma (ensures (match parse_object float_read cap lim tol b w with
                     | POk v _ -> jval_wf v
                     | PErr _ _ _ -> True))
           (decreases %[llen w; 1]) =
@@ -1845,12 +2006,12 @@ and parsed_object_wf
        let t1 = skip_ws t in
        (match t1 with
         | CRBrace :: _ -> ()
-        | _ -> parsed_members_wf float_read cap tol b' [] t1))
+        | _ -> parsed_members_wf float_read cap lim tol b' [] t1))
 
 and parsed_array_wf
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (match parse_array float_read cap tol b w with
+  : Lemma (ensures (match parse_array float_read cap lim tol b w with
                     | POk v _ -> jval_wf v
                     | PErr _ _ _ -> True))
           (decreases %[llen w; 1]) =
@@ -1863,19 +2024,19 @@ and parsed_array_wf
        let t1 = skip_ws t in
        (match t1 with
         | CRBrack :: _ -> ()
-        | _ -> parsed_items_wf float_read cap tol b' [] t1))
+        | _ -> parsed_items_wf float_read cap lim tol b' [] t1))
 
 and parsed_members_wf
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list (list och & jval)) (s: list ch)
   : Lemma (requires fields_wf acc)
-          (ensures (match parse_members float_read cap tol b acc s with
+          (ensures (match parse_members float_read cap lim tol b acc s with
                     | POk fs _ -> fields_wf fs
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 0]) =
   let w = skip_ws s in
-  parse_string_accepts_only_well_formed w;
-  match parse_string w with
+  parse_string_accepts_only_well_formed lim.lstr w;
+  match parse_string lim.lstr w with
   | PErr _ _ _ -> ()
   | POk key t ->
     let t1 = skip_ws t in
@@ -1888,35 +2049,35 @@ and parsed_members_wf
         | Some t4 ->
           let t5 = skip_ws t4 in
           (match t5 with
-           | CComma :: t6 -> parsed_members_wf float_read cap tol b acc t6
+           | CComma :: t6 -> parsed_members_wf float_read cap lim tol b acc t6
            | CRBrace :: _ -> rev_app_fields_wf acc []
            | _ -> ())
         | None ->
-          parsed_value_wf float_read cap tol b t3;
-          (match parse_value float_read cap tol b t3 with
+          parsed_value_wf float_read cap lim tol b t3;
+          (match parse_value float_read cap lim tol b t3 with
            | PErr _ _ _ -> ()
            | POk v t4 ->
              let t5 = skip_ws t4 in
              (match t5 with
-              | CComma :: t6 -> parsed_members_wf float_read cap tol b ((key, v) :: acc) t6
+              | CComma :: t6 -> parsed_members_wf float_read cap lim tol b ((key, v) :: acc) t6
               | CRBrace :: _ -> rev_app_fields_wf ((key, v) :: acc) []
               | _ -> ()))))
 
 and parsed_items_wf
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list jval) (s: list ch)
   : Lemma (requires jvals_wf acc)
-          (ensures (match parse_items float_read cap tol b acc s with
+          (ensures (match parse_items float_read cap lim tol b acc s with
                     | POk xs _ -> jvals_wf xs
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 3]) =
-  parsed_value_wf float_read cap tol b s;
-  (match parse_value float_read cap tol b s with
+  parsed_value_wf float_read cap lim tol b s;
+  (match parse_value float_read cap lim tol b s with
    | PErr _ _ _ -> ()
    | POk v t ->
      let t1 = skip_ws t in
      (match t1 with
-      | CComma :: t2 -> parsed_items_wf float_read cap tol b (v :: acc) t2
+      | CComma :: t2 -> parsed_items_wf float_read cap lim tol b (v :: acc) t2
       | CRBrack :: _ -> rev_app_vals_wf (v :: acc) []
       | _ -> ()))
 
@@ -1928,7 +2089,7 @@ let parse_accepts_only_well_formed_strings
   : Lemma (ensures (match parse float_read cap pol b s with
                     | ROk v -> jval_wf v
                     | RErr _ _ _ -> True)) =
-  parsed_value_wf float_read cap (EraseMemberNull? pol) b s
+  parsed_value_wf float_read cap unbounded (EraseMemberNull? pol) b s
 
 (* ======================================================================================
    12c. THEOREM — A PARSED OBJECT HAS PAIRWISE DISTINCT MEMBER NAMES (Phase 462).
@@ -2020,21 +2181,21 @@ let rev_keys_distinct (acc: list (list och & jval))
 
 [@@ noextract_to "FSharp"]
 let rec parsed_value_distinct
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
-  : Lemma (ensures (match parse_value float_read cap tol b s with
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse_value float_read cap lim tol b s with
                     | POk v _ -> jval_distinct v
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 2]) =
   let w = skip_ws s in
   match w with
-  | CLBrace :: _ -> parsed_object_distinct float_read cap tol b w
-  | CLBrack :: _ -> parsed_array_distinct float_read cap tol b w
+  | CLBrace :: _ -> parsed_object_distinct float_read cap lim tol b w
+  | CLBrack :: _ -> parsed_array_distinct float_read cap lim tol b w
   | _ -> ()
 
 and parsed_object_distinct
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (match parse_object float_read cap tol b w with
+  : Lemma (ensures (match parse_object float_read cap lim tol b w with
                     | POk v _ -> jval_distinct v
                     | PErr _ _ _ -> True))
           (decreases %[llen w; 1]) =
@@ -2047,12 +2208,12 @@ and parsed_object_distinct
        let t1 = skip_ws t in
        (match t1 with
         | CRBrace :: _ -> ()
-        | _ -> parsed_members_distinct float_read cap tol b' [] t1))
+        | _ -> parsed_members_distinct float_read cap lim tol b' [] t1))
 
 and parsed_array_distinct
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (w: list ch { starts_container w })
-  : Lemma (ensures (match parse_array float_read cap tol b w with
+  : Lemma (ensures (match parse_array float_read cap lim tol b w with
                     | POk v _ -> jval_distinct v
                     | PErr _ _ _ -> True))
           (decreases %[llen w; 1]) =
@@ -2065,18 +2226,18 @@ and parsed_array_distinct
        let t1 = skip_ws t in
        (match t1 with
         | CRBrack :: _ -> ()
-        | _ -> parsed_items_distinct float_read cap tol b' [] t1))
+        | _ -> parsed_items_distinct float_read cap lim tol b' [] t1))
 
 and parsed_members_distinct
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list (list och & jval)) (s: list ch)
   : Lemma (requires keys_distinct acc /\ fields_distinct acc)
-          (ensures (match parse_members float_read cap tol b acc s with
+          (ensures (match parse_members float_read cap lim tol b acc s with
                     | POk fs _ -> keys_distinct fs /\ fields_distinct fs
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 0]) =
   let w = skip_ws s in
-  match parse_string w with
+  match parse_string lim.lstr w with
   | PErr _ _ _ -> ()
   | POk key t ->
     let t1 = skip_ws t in
@@ -2089,12 +2250,12 @@ and parsed_members_distinct
         | Some t4 ->
           let t5 = skip_ws t4 in
           (match t5 with
-           | CComma :: t6 -> parsed_members_distinct float_read cap tol b acc t6
+           | CComma :: t6 -> parsed_members_distinct float_read cap lim tol b acc t6
            | CRBrace :: _ -> rev_keys_distinct acc
            | _ -> ())
         | None ->
-          parsed_value_distinct float_read cap tol b t3;
-          (match parse_value float_read cap tol b t3 with
+          parsed_value_distinct float_read cap lim tol b t3;
+          (match parse_value float_read cap lim tol b t3 with
            | PErr _ _ _ -> ()
            | POk v t4 ->
              if has_key key acc then ()
@@ -2102,25 +2263,25 @@ and parsed_members_distinct
                let t5 = skip_ws t4 in
                (match t5 with
                 | CComma :: t6 ->
-                    parsed_members_distinct float_read cap tol b ((key, v) :: acc) t6
+                    parsed_members_distinct float_read cap lim tol b ((key, v) :: acc) t6
                 | CRBrace :: _ -> rev_keys_distinct ((key, v) :: acc)
                 | _ -> ()))))
 
 and parsed_items_distinct
-  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit)
   (acc: list jval) (s: list ch)
   : Lemma (requires jvals_distinct acc)
-          (ensures (match parse_items float_read cap tol b acc s with
+          (ensures (match parse_items float_read cap lim tol b acc s with
                     | POk xs _ -> jvals_distinct xs
                     | PErr _ _ _ -> True))
           (decreases %[llen s; 3]) =
-  parsed_value_distinct float_read cap tol b s;
-  (match parse_value float_read cap tol b s with
+  parsed_value_distinct float_read cap lim tol b s;
+  (match parse_value float_read cap lim tol b s with
    | PErr _ _ _ -> ()
    | POk v t ->
      let t1 = skip_ws t in
      (match t1 with
-      | CComma :: t2 -> parsed_items_distinct float_read cap tol b (v :: acc) t2
+      | CComma :: t2 -> parsed_items_distinct float_read cap lim tol b (v :: acc) t2
       | CRBrack :: _ -> rev_app_vals_distinct (v :: acc) []
       | _ -> ()))
 
@@ -2131,7 +2292,7 @@ let parse_accepts_only_distinct_member_names
   : Lemma (ensures (match parse float_read cap pol b s with
                     | ROk v -> jval_distinct v
                     | RErr _ _ _ -> True)) =
-  parsed_value_distinct float_read cap (EraseMemberNull? pol) b s
+  parsed_value_distinct float_read cap unbounded (EraseMemberNull? pol) b s
 
 (* THE REFUSALS, by witness, each with the kind, the message and the position production reports:
    a raw lone high surrogate (refused at the closing quote, after it), a raw lone low one (after
@@ -2140,30 +2301,30 @@ let parse_accepts_only_distinct_member_names
    escaped pair, and one of each. *)
 let surrogate_refusals (_: unit)
   : Lemma (ensures
-      parse_string [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
-      parse_string [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
-      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
+      parse_string Unbounded [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
+      parse_string Unbounded [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
+      parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
                             CBackslash; CLu; CUd; CD8; CD0; CD0; CQuote]
         == PErr BadEscape msg_lone_high [CQuote] /\
-      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
+      parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
         == PErr BadEscape msg_lone_high [CQuote] /\
-      POk? (parse_string [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
-      POk? (parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
+      POk? (parse_string Unbounded [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
+      POk? (parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
                                   CBackslash; CLu; CUd; CUe; CD0; CD0; CQuote]) /\
-      POk? (parse_string [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
+      POk? (parse_string Unbounded [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
   =
   assert_norm (
-      parse_string [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
-      parse_string [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
-      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
+      parse_string Unbounded [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
+      parse_string Unbounded [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
+      parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
                             CBackslash; CLu; CUd; CD8; CD0; CD0; CQuote]
         == PErr BadEscape msg_lone_high [CQuote] /\
-      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
+      parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
         == PErr BadEscape msg_lone_high [CQuote] /\
-      POk? (parse_string [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
-      POk? (parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
+      POk? (parse_string Unbounded [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
+      POk? (parse_string Unbounded [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
                                   CBackslash; CLu; CUd; CUe; CD0; CD0; CQuote]) /\
-      POk? (parse_string [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
+      POk? (parse_string Unbounded [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
 
 (* ======================================================================================
    12b. THE TWO DECODE-DETERMINISM ROWS (Phase 462), exhibited.
@@ -2177,18 +2338,18 @@ let surrogate_refusals (_: unit)
 
 let raw_control_refused (_: unit)
   : Lemma (ensures
-      parse_string [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
-      parse_string [CQuote; CCtrl "x" "U+0001"; CQuote]
+      parse_string Unbounded [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
+      parse_string Unbounded [CQuote; CCtrl "x" "U+0001"; CQuote]
         == PErr BadEscape (msg_ctrl (CCtrl "x" "U+0001")) [CCtrl "x" "U+0001"; CQuote] /\
-      parse_string [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
-      POk? (parse_string [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
+      parse_string Unbounded [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
+      POk? (parse_string Unbounded [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
   =
   assert_norm (
-      parse_string [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
-      parse_string [CQuote; CCtrl "x" "U+0001"; CQuote]
+      parse_string Unbounded [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
+      parse_string Unbounded [CQuote; CCtrl "x" "U+0001"; CQuote]
         == PErr BadEscape (msg_ctrl (CCtrl "x" "U+0001")) [CCtrl "x" "U+0001"; CQuote] /\
-      parse_string [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
-      POk? (parse_string [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
+      parse_string Unbounded [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
+      POk? (parse_string Unbounded [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
 
 (* `{"a":0,"b":0,"a":0}` refused at the second `"a"`; `[{"a":0},{"a":0}]` and `{"a":{"a":0}}` read;
    `{"a":null,"a":0}` under the tolerant policy is `{"a":0}` and under the strict one a refusal. *)
@@ -2231,6 +2392,240 @@ let repeated_member_refused (_: unit)
       RErr? (w3_parse RejectNull dup_erased))
 
 (* ======================================================================================
+   13. THEOREM — THE LIMITS (Phase 465).
+
+       Four statements and an exhibit. The limited entry point at NO bound is the parser (so the
+       pre-existing entry points, which run the descent exactly as `parse` does, answer every
+       document as they always have); a breach is a `RLimit` and never a `RErr`, whatever bounds
+       are set; the byte verdict is checked before a character is read; and on the canonical
+       families the two linear bounds are EXACT — accepted at the bound, refused one past it — at
+       every length and every bound. The members bound, the depth lift, a breach outranking a
+       later malformed item, and the string bound reaching a member key are exhibited at concrete
+       documents, as section 12b exhibits Phase 462's rows.
+   ====================================================================================== *)
+
+(* The limited entry point at no bound IS the parser: every outcome `parse` reaches it reaches,
+   the one difference being the depth cap's refusal, lifted to `RLimit LDepth` at the same suffix.
+   Nothing to prove: both run `parse_value` at `unbounded`, and `bounds_confined` is what makes the
+   remaining `RErr` arms coincide. *)
+let limited_at_no_bound_is_the_parser
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (s: list ch)
+  : Lemma (ensures (let p = parse float_read cap pol b s in
+                    let l = parse_limited float_read cap pol b unbounded true s in
+                    (ROk? p ==> l == p) /\
+                    ((RErr? p /\ RErr?.k p <> MaxDepthExceeded) ==> l == p) /\
+                    ((RErr? p /\ RErr?.k p == MaxDepthExceeded) ==> l == RLimit LDepth (RErr?.at p)) /\
+                    (RLimit? l ==> RLimit?.l l == LDepth)))
+  = ()
+
+(* A BREACH IS NEVER MALFORMED JSON. Whatever bounds are set, a refusal the limited entry point
+   reports as `RErr` carries one of the thirteen kinds `parse` reports — never the descent's
+   internal `LimitExceeded` — and a breach is the distinct `RLimit`. The production counterpart is
+   `JsonRefusal`'s two cases, and `DecodeError.ofJsonRefusal` mapping the second to
+   `LimitExceeded` and never to `InvalidJson`. *)
+let limit_never_reported_as_malformed
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (lim: lims)
+  (bytes_ok: bool) (s: list ch)
+  : Lemma (ensures (let r = parse_limited float_read cap pol b lim bytes_ok s in
+                    ROk? r \/ RLimit? r \/
+                    (RErr? r /\ (let k = RErr?.k r in
+                      k = UnexpectedChar || k = UnexpectedEndOfInput || k = ExpectedToken ||
+                      k = UnterminatedString || k = UnterminatedEscape ||
+                      k = TruncatedUnicodeEscape || k = BadEscape || k = BadHexDigit ||
+                      k = MalformedNumber || k = NullNotRepresentable ||
+                      k = TrailingCharacters || k = DuplicateMember))))
+  = ()
+
+(* THE BYTE VERDICT IS CHECKED FIRST: a false verdict is `RLimit LBytes` at the start of the
+   input, before the descent has read a character — whatever the input, whatever the bounds. *)
+let bytes_checked_before_the_descent
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (lim: lims)
+  (s: list ch)
+  : Lemma (ensures parse_limited float_read cap pol b lim false s == RLimit LBytes s)
+  = ()
+
+(* ---- the string bound, exactly, on the family `"aaa…a"` ---- *)
+
+(* `k` characters `a`, then the suffix. *)
+[@@ noextract_to "FSharp"]
+let rec rep_a (k: list unit) (rest: list ch) : Tot (list ch) (decreases k) =
+  match k with
+  | [] -> rest
+  | _ :: t -> CLa :: rep_a t rest
+
+(* The decoded characters, accumulated as `string_body` accumulates them. *)
+[@@ noextract_to "FSharp"]
+let rec olit_a (k: list unit) (acc: list och) : Tot (list och) (decreases k) =
+  match k with
+  | [] -> acc
+  | _ :: t -> olit_a t (OLit CLa :: acc)
+
+(* A record with ONE bound set. *)
+let only_str (m: list unit) : lims = { lstr = Bounded m; litems = Unbounded; lmembers = Unbounded }
+let only_items (m: list unit) : lims = { lstr = Unbounded; litems = Bounded m; lmembers = Unbounded }
+let only_members (m: list unit) : lims = { lstr = Unbounded; litems = Unbounded; lmembers = Bounded m }
+
+#push-options "--fuel 6 --ifuel 3 --z3rlimit 80"
+
+(* Within the bound: every character is taken, and the string closes at its quote. Generalised
+   over the count already taken and the accumulator, which is what makes it inductive. *)
+[@@ noextract_to "FSharp"]
+let rec str_accepts (m k n: list unit) (acc: list och) (rest: list ch)
+  : Lemma (requires llen n + llen k <= llen m)
+          (ensures string_body (Bounded m) n false acc (rep_a k (CQuote :: rest))
+                   == POk (rev (olit_a k acc)) rest)
+          (decreases k) =
+  match k with
+  | [] -> ()
+  | _ :: t -> str_accepts m t (() :: n) (OLit CLa :: acc) rest
+
+(* Past the bound: the `max + 1`-th character is refused as the string bound's breach — and with
+   THIS kind, because there is nothing else wrong with the string. *)
+[@@ noextract_to "FSharp"]
+let rec str_refuses (m k n: list unit) (acc: list och) (rest: list ch)
+  : Lemma (requires llen n <= llen m /\ llen n + llen k > llen m)
+          (ensures (let r = string_body (Bounded m) n false acc (rep_a k (CQuote :: rest)) in
+                    PErr? r /\ PErr?.k r == LimitExceeded LString))
+          (decreases k) =
+  match k with
+  | [] -> ()
+  | _ :: t -> if llen n >= llen m then () else str_refuses m t (() :: n) (OLit CLa :: acc) rest
+
+(* THE STRING BOUND, EXACTLY: the document `"aaa…a"` of `k` characters, under a string bound of
+   `m` code points and no other, is accepted iff `k <= m`, and refused as `RLimit LString`
+   otherwise — at every `k` and every `m`. *)
+let string_bound_exact
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (m k: list unit)
+  : Lemma (ensures (let r = parse_limited float_read cap pol b (only_str m) true
+                              (CQuote :: rep_a k [CQuote]) in
+                    (llen k <= llen m ==> r == ROk (JStr (rev (olit_a k [])))) /\
+                    (llen k > llen m ==> RLimit? r /\ RLimit?.l r == LString)))
+  = if llen k <= llen m then str_accepts m k [] [] [] else str_refuses m k [] [] []
+
+(* ---- the items bound, exactly, on the family `["","",…,""]` ---- *)
+
+(* The innermost value is the empty STRING, for the reason section 7's family gives: it ends at
+   its own quote whatever follows. `more_strs k` is `,"",…,""]` with `k` further items. *)
+[@@ noextract_to "FSharp"]
+let rec more_strs (k: list unit) : Tot (list ch) (decreases k) =
+  match k with
+  | [] -> [CRBrack]
+  | _ :: t -> CComma :: CQuote :: CQuote :: more_strs t
+
+[@@ noextract_to "FSharp"]
+let rec empties (k: list unit) (acc: list jval) : Tot (list jval) (decreases k) =
+  match k with
+  | [] -> acc
+  | _ :: t -> empties t (JStr [] :: acc)
+
+(* Within the bound: every item is read, and the array closes at its bracket. *)
+[@@ noextract_to "FSharp"]
+let rec items_accept
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (m k: list unit)
+  (acc: list jval)
+  : Lemma (requires llen acc + llen k + 1 <= llen m)
+          (ensures parse_items float_read cap (only_items m) tol b acc
+                     (CQuote :: CQuote :: more_strs k)
+                   == POk (rev (empties k (JStr [] :: acc))) [])
+          (decreases k) =
+  match k with
+  | [] -> ()
+  | _ :: t -> items_accept float_read cap tol b m t (JStr [] :: acc)
+
+(* Past the bound: the `max + 1`-th item is refused BEFORE it is read, as the items bound's
+   breach. *)
+[@@ noextract_to "FSharp"]
+let rec items_refuse
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (m k: list unit)
+  (acc: list jval)
+  : Lemma (requires llen acc <= llen m /\ llen acc + llen k + 1 > llen m)
+          (ensures (let r = parse_items float_read cap (only_items m) tol b acc
+                              (CQuote :: CQuote :: more_strs k) in
+                    PErr? r /\ PErr?.k r == LimitExceeded LItems))
+          (decreases k) =
+  match k with
+  | [] -> ()
+  | _ :: t ->
+    if llen acc >= llen m then () else items_refuse float_read cap tol b m t (JStr [] :: acc)
+
+(* THE ITEMS BOUND, EXACTLY: the array of `k + 1` empty strings, under an items bound of `m` and
+   no other, is accepted iff `k + 1 <= m`, and refused as `RLimit LItems` otherwise. The depth
+   budget must admit the one container. *)
+let items_bound_exact
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (m k: list unit)
+  : Lemma (requires Cons? b)
+          (ensures (let r = parse_limited float_read cap pol b (only_items m) true
+                              (CLBrack :: CQuote :: CQuote :: more_strs k) in
+                    (llen k + 1 <= llen m ==> r == ROk (JArr (rev (empties k [JStr []])))) /\
+                    (llen k + 1 > llen m ==> RLimit? r /\ RLimit?.l r == LItems)))
+  = let tol = EraseMemberNull? pol in
+    match b with
+    | _ :: b' ->
+      if llen k + 1 <= llen m then items_accept float_read cap tol b' m k []
+      else items_refuse float_read cap tol b' m k []
+
+#pop-options
+
+(* ---- the rest, exhibited ---- *)
+
+(* The witness parser of section 9 under a limits record, with the byte verdict true. *)
+[@@ noextract_to "FSharp"]
+let wl_parse (lim: lims) (b: list unit) (s: list ch) : Tot jresult =
+  parse_limited fr_all_finite "2" RejectNull b lim true s
+
+(* `{"a":"","b":""}`. *)
+[@@ noextract_to "FSharp"]
+let obj2: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CQuote; CQuote; CComma;
+   CQuote; CLb; CQuote; CColon; CQuote; CQuote; CRBrace]
+
+(* `["","",%]` — two items within an items bound of two, then one the grammar would refuse.
+   Extracted, because a twin reads it. *)
+let bad3: list ch =
+  [CLBrack; CQuote; CQuote; CComma; CQuote; CQuote; CComma; COther "%"; CRBrack]
+
+(* `{"ab":""}` — a member KEY of two code points. *)
+[@@ noextract_to "FSharp"]
+let keydoc: list ch =
+  [CLBrace; CQuote; CLa; CLb; CQuote; CColon; CQuote; CQuote; CRBrace]
+
+(* THE EXHIBITS. The members bound: `{"a":"","b":""}` under two is read, under one is refused at
+   the second key's opening quote, and `{}` under zero is read. The empty array under an items
+   bound of zero is read. The depth cap under the limited entry point is `RLimit LDepth` at the
+   second bracket of `[[]]`. A breach OUTRANKS a later malformed item: `["","",%]` under an items
+   bound of two is the items breach, not `UnexpectedChar`, because the third item is refused
+   before it is read. The string bound reaches a member key: `{"ab":""}` under a string bound of
+   one is refused after the key's second character. And a false byte verdict is refused before
+   anything is read. *)
+let limits_exhibited (_: unit)
+  : Lemma (ensures
+      ROk? (wl_parse (only_members [(); ()]) [()] obj2) /\
+      wl_parse (only_members [()]) [()] obj2
+        == RLimit LMembers [CQuote; CLb; CQuote; CColon; CQuote; CQuote; CRBrace] /\
+      ROk? (wl_parse (only_members []) [()] [CLBrace; CRBrace]) /\
+      ROk? (wl_parse (only_items []) [()] [CLBrack; CRBrack]) /\
+      wl_parse unbounded [()] [CLBrack; CLBrack; CRBrack; CRBrack]
+        == RLimit LDepth [CLBrack; CRBrack; CRBrack] /\
+      wl_parse (only_items [(); ()]) [()] bad3 == RLimit LItems [COther "%"; CRBrack] /\
+      wl_parse (only_str [()]) [()] keydoc
+        == RLimit LString [CQuote; CColon; CQuote; CQuote; CRBrace] /\
+      parse_limited fr_all_finite "2" RejectNull [()] unbounded false [COther "%"]
+        == RLimit LBytes [COther "%"])
+  = assert_norm (
+      ROk? (wl_parse (only_members [(); ()]) [()] obj2) /\
+      wl_parse (only_members [()]) [()] obj2
+        == RLimit LMembers [CQuote; CLb; CQuote; CColon; CQuote; CQuote; CRBrace] /\
+      ROk? (wl_parse (only_members []) [()] [CLBrace; CRBrace]) /\
+      ROk? (wl_parse (only_items []) [()] [CLBrack; CRBrack]) /\
+      wl_parse unbounded [()] [CLBrack; CLBrack; CRBrack; CRBrack]
+        == RLimit LDepth [CLBrack; CRBrack; CRBrack] /\
+      wl_parse (only_items [(); ()]) [()] bad3 == RLimit LItems [COther "%"; CRBrack] /\
+      wl_parse (only_str [()]) [()] keydoc
+        == RLimit LString [CQuote; CColon; CQuote; CQuote; CRBrace] /\
+      parse_limited fr_all_finite "2" RejectNull [()] unbounded false [COther "%"]
+        == RLimit LBytes [COther "%"])
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -2258,7 +2653,7 @@ let twins : list twin = [
   { tname = "a-leading-zero-then-digit-is-not";
     tholds = (fun () -> is_json_number [ CD0; CD1 ] = false) };
   { tname = "parse-string-stops-at-the-quote";
-    tholds = (fun () -> parse_string [ CQuote; CLa; CQuote; CSpace ] = POk [ OLit CLa ] [ CSpace ]) };
+    tholds = (fun () -> parse_string Unbounded [ CQuote; CLa; CQuote; CSpace ] = POk [ OLit CLa ] [ CSpace ]) };
   { tname = "parse-reads-true";
     tholds = (fun () -> parse (fun _ -> FFinite) "c" RejectNull [] [ CLt; CLr; CLu; CLe ] = ROk (JBool true)) };
   { tname = "parse-refuses-trailing-characters";
@@ -2271,6 +2666,14 @@ let twins : list twin = [
       = RErr DuplicateMember msg_duplicate [ CQuote; CLa; CQuote; CColon; CD0; CRBrace ]) };
   { tname = "parse-string-refuses-a-raw-control";
     tholds = (fun () ->
-      parse_string [ CQuote; CTab; CQuote ] = PErr BadEscape (msg_ctrl CTab) [ CTab; CQuote ]) } ]
+      parse_string Unbounded [ CQuote; CTab; CQuote ] = PErr BadEscape (msg_ctrl CTab) [ CTab; CQuote ]) };
+  { tname = "parse-limited-refuses-the-third-item-before-reading-it";
+    tholds = (fun () ->
+      parse_limited (fun _ -> FFinite) "c" RejectNull [ () ] (only_items [ (); () ]) true bad3
+      = RLimit LItems [ COther "%"; CRBrack ]) };
+  { tname = "parse-limited-at-no-bound-reads-what-parse-reads";
+    tholds = (fun () ->
+      parse_limited (fun _ -> FFinite) "c" RejectNull [] unbounded true [ CLt; CLr; CLu; CLe ]
+      = ROk (JBool true)) } ]
 
 let _ = assert_norm (twins_hold twins == true)

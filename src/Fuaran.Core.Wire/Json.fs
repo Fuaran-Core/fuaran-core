@@ -1,5 +1,16 @@
 namespace Fuaran.Core
 
+/// One step of a decode path (Phase 310): a member of an object by its key, or an item of an array
+/// by its zero-based index. A path is the list of steps from the document's root, root first.
+/// Declared beside the parser since Phase 465, because a limited parse reports a breach's path
+/// (`JsonLimitBreach`); `DecodePath` renders and resolves it.
+[<RequireQualifiedAccess>]
+type PathSegment =
+    /// A member of an object by its exact key; where a document repeats the key, the first.
+    | Key of string
+    /// An item of an array, zero-based.
+    | Index of int
+
 /// The classified failure modes of the portable JSON parser (Phase 22) — so an orchestrator
 /// can branch on *what* went wrong structurally instead of string-scraping `parse`'s message.
 type JsonErrorKind =
@@ -77,6 +88,111 @@ type NullPolicy =
     /// every later index). Array-position tolerance, if a consumer ever surfaces a genuine need for
     /// it, is a deliberate extension — not a thing this case quietly already does.
     | EraseMemberNull
+
+/// Which bound a limit breach passed (Phase 465) — one case per field of `JsonLimits`.
+[<RequireQualifiedAccess>]
+type JsonLimit =
+    /// `JsonLimits.MaxDepth`: an object or array opened AT the bound (the bound admits that many
+    /// nested containers, the root counting as one).
+    | Depth
+    /// `JsonLimits.MaxStringLength`: a string, or a member key, past the bound — in Unicode code
+    /// points, a surrogate pair counting as one.
+    | StringLength
+    /// `JsonLimits.MaxArrayLength`: an array's `MaxArrayLength + 1`-th item.
+    | ArrayLength
+    /// `JsonLimits.MaxObjectMembers`: an object's `MaxObjectMembers + 1`-th member (an erased
+    /// member null is not a member).
+    | ObjectMembers
+    /// `JsonLimits.MaxDocumentBytes`: the input's UTF-8 length.
+    | DocumentBytes
+
+/// The bounds a LIMITED parse enforces on the way down (Phase 465): each is checked before the
+/// recursion or the allocation it guards, so nothing past a bound is ever read or built, and a
+/// breach is a `JsonLimitBreach` — never malformed JSON. The VALUES are the caller's: Core states
+/// none and is not a host of any wire's limits section (DECISIONS.md D84, refined by D158); a wire
+/// host passes its own specification's numbers and maps the breach to its own error envelope.
+/// `JsonLimits.depthOnly` is the record every pre-existing entry point runs under.
+type JsonLimits =
+    {
+        /// The nesting cap: the number of nested objects and arrays admitted. `Json.defaultMaxDepth`
+        /// is the parser's own stack guard.
+        MaxDepth: int
+        /// The most Unicode code points one decoded string, or one member key, may hold.
+        MaxStringLength: int
+        /// The most items one array may hold.
+        MaxArrayLength: int
+        /// The most members one object may hold.
+        MaxObjectMembers: int
+        /// The most UTF-8 bytes the whole input may encode to; checked before parsing.
+        MaxDocumentBytes: int
+    }
+
+/// A limit breach (Phase 465): the limit, its declared value, the decode path to the container the
+/// breach was raised in, and the parser's position. It never carries the input. `Path` is the
+/// container's own: an array whose item count passes the bound, an object whose member count or
+/// whose key's length does, the container opened at the depth bound; a string value's breach names
+/// its own position in the document, and a document-bytes breach the root. `Position` is a 0-based
+/// UTF-16 index: the opening bracket for `Depth`, where the refused item or member would start for
+/// `ArrayLength` / `ObjectMembers`, just past the first UTF-16 unit of the code point that passes
+/// the bound for `StringLength` (the high half of a surrogate pair, before its low half is read),
+/// and `0` for `DocumentBytes`.
+type JsonLimitBreach =
+    {
+        /// The bound that was passed.
+        Limit: JsonLimit
+        /// That bound's value in the record the parse ran under.
+        Declared: int
+        /// The decode path to the container the breach was raised in (see above), root first.
+        Path: PathSegment list
+        /// The parser's position at the breach, a 0-based UTF-16 index into the input (see above).
+        Position: int
+    }
+
+/// Why a limited parse refused a document (Phase 465): the text is not JSON — `Malformed` carries
+/// EXACTLY the refusal `parseDetailed` gives it, kind, message and position — or it is JSON and a
+/// bound was passed. The two are distinct cases by construction: a breach is never reported as
+/// malformed, and malformed text never as a breach (DECISIONS.md D158).
+[<RequireQualifiedAccess>]
+type JsonRefusal =
+    /// The text is not JSON: exactly the refusal `parseDetailed` gives it.
+    | Malformed of JsonError
+    /// The text is JSON as far as it was read, and a bound of the record was passed.
+    | LimitExceeded of JsonLimitBreach
+
+/// The limits, named and read (Phase 465).
+[<RequireQualifiedAccess>]
+module JsonLimit =
+    /// The limit's wire name — the member a limits record spells it as, and what a decode vector
+    /// declares: `depth`, `stringLength`, `arrayLength`, `objectMembers`, `documentBytes`.
+    let name (l: JsonLimit) : string =
+        match l with
+        | JsonLimit.Depth -> "depth"
+        | JsonLimit.StringLength -> "stringLength"
+        | JsonLimit.ArrayLength -> "arrayLength"
+        | JsonLimit.ObjectMembers -> "objectMembers"
+        | JsonLimit.DocumentBytes -> "documentBytes"
+
+    /// The limit's value in a record.
+    let declared (limits: JsonLimits) (l: JsonLimit) : int =
+        match l with
+        | JsonLimit.Depth -> limits.MaxDepth
+        | JsonLimit.StringLength -> limits.MaxStringLength
+        | JsonLimit.ArrayLength -> limits.MaxArrayLength
+        | JsonLimit.ObjectMembers -> limits.MaxObjectMembers
+        | JsonLimit.DocumentBytes -> limits.MaxDocumentBytes
+
+/// Limits records (Phase 465).
+[<RequireQualifiedAccess>]
+module JsonLimits =
+    /// The parser's own stack guard at `maxDepth` and no other bound — what every entry point but
+    /// `Json.parseWithLimits` runs under. The three counts can never reach `Int32.MaxValue` (each
+    /// is bounded by the input's length), so no breach but the depth cap's can arise under it.
+    let depthOnly (maxDepth: int) : JsonLimits =
+        { MaxDepth = maxDepth
+          MaxStringLength = System.Int32.MaxValue
+          MaxArrayLength = System.Int32.MaxValue
+          MaxObjectMembers = System.Int32.MaxValue
+          MaxDocumentBytes = System.Int32.MaxValue }
 
 /// Fable-clean encode helpers + the wire-envelope discipline + a portable
 /// (FSharp.Core-only) parser. Per-kind cases stay domain-side; the core owns the
@@ -651,6 +767,11 @@ module Json =
     /// Carries the classified kind, the message, and the position captured at the raise site.
     exception private JsonParseError of JsonErrorKind * string * int
 
+    /// Internal signal for a limit breach (Phase 465): the limit, its declared value and the
+    /// position; the path is read off the scanner's frames at the catch. Never escapes the limited
+    /// entry point, and cannot be raised under `JsonLimits.depthOnly` at all.
+    exception private JsonLimitError of JsonLimit * int * int
+
     /// The default maximum object/array nesting depth for `parse`. Input nested deeper fails
     /// as a named `Error` instead of overflowing the stack — a `StackOverflowException` is
     /// uncatchable in .NET and would crash the host, breaking totality (GP4) on the one entry
@@ -666,17 +787,61 @@ module Json =
     /// `JVal` through them; `Reader` reads typed values through the SAME members, so there is no
     /// second copy of any rule for the two to drift apart on, and a refusal is raised at the same
     /// position with the same kind and message whichever of them asked. One scanner per document.
+    ///
+    /// The scanner runs under a `JsonLimits` record (Phase 465). The depth cap is the record's
+    /// `MaxDepth`, raised as `MaxDepthExceeded` exactly as it always was; the string, array and
+    /// object bounds are checked on the way down — before the unit, item or member they guard is
+    /// read — and raised as `JsonLimitError`, which only `DocumentLimited` catches. Under
+    /// `JsonLimits.depthOnly` none of the three can fire, so every other entry point is the parser
+    /// as it has always been.
     [<Sealed>]
-    type internal Scanner(policy: NullPolicy, maxDepth: int, input: string) =
+    type internal Scanner(policy: NullPolicy, limits: JsonLimits, input: string) =
         let tolerateMemberNull =
             match policy with
             | RejectNull -> false
             | EraseMemberNull -> true
 
+        let maxDepth = limits.MaxDepth
         let n = input.Length
         let mutable i = 0
 
         let fail (kind: JsonErrorKind) (msg: string) : 'a = raise (JsonParseError(kind, msg, i))
+
+        let breach (limit: JsonLimit) : 'a =
+            raise (JsonLimitError(limit, JsonLimit.declared limits limit, i))
+
+        // The container frames open at this position, outermost first — the breach's PATH, kept
+        // as two parallel lists so a member costs no allocation: `frameKeys` holds the key of the
+        // member being read (null while the key itself is being read, and for an array frame),
+        // `frameIdx` the index of the item being read (-1 for an object frame, and for an array
+        // frame while the next item's bound is being tested). A frame whose slot is unfilled ends
+        // the path: the breach is the container's own.
+        let frameKeys = ResizeArray<string>()
+        let frameIdx = ResizeArray<int>()
+
+        let pathNow () : PathSegment list =
+            // Outermost frame first; an unfilled slot can only be the innermost frame (every frame
+            // above it is a value being read, which is a filled slot), and it ends the path.
+            let rec go (k: int) (acc: PathSegment list) =
+                if k >= frameKeys.Count then
+                    List.rev acc
+                elif frameIdx[k] >= 0 then
+                    go (k + 1) (PathSegment.Index frameIdx[k] :: acc)
+                elif not (isNull frameKeys[k]) then
+                    go (k + 1) (PathSegment.Key frameKeys[k] :: acc)
+                else
+                    List.rev acc
+
+            go 0 []
+
+        let pushFrame () =
+            frameKeys.Add null
+            frameIdx.Add -1
+            frameKeys.Count - 1
+
+        let popFrame (top: int) =
+            frameKeys.RemoveAt top
+            frameIdx.RemoveAt top
 
         // EOI sentinel spelled as the ESCAPED literal '\000' — a raw U+0000 byte here
         // previously made this whole file "binary" to ripgrep/GitHub code search,
@@ -738,12 +903,24 @@ module Json =
             expect '"'
             // The last unit taken was a high surrogate still waiting for its low half.
             let mutable pendingHigh = false
+            // The code points taken so far (Phase 465): a low half completing a pending high is
+            // not a new one, so a unit is counted exactly when nothing is pending.
+            let mutable codePoints = 0
 
             let check (u: int) =
                 if pendingHigh && not (isLowSurrogate u) then
                     fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
                 elif not pendingHigh && isLowSurrogate u then
                     fail BadEscape "ill-formed string: a low surrogate with no high surrogate before it"
+
+                if not pendingHigh then
+                    // The string bound, on the way down: a unit that would be the `max + 1`-th
+                    // code point is refused here, after it and before it is appended — whichever
+                    // spelling it arrived in, and before the run it sits in is copied.
+                    if codePoints >= limits.MaxStringLength then
+                        breach JsonLimit.StringLength
+
+                    codePoints <- codePoints + 1
 
                 pendingHigh <- isHighSurrogate u
 
@@ -986,7 +1163,10 @@ module Json =
             if numIsInt then JInt numInt else JFloat v
 
         // The array loop: the depth cap, `[`, then `item` once per element (it reads one value from
-        // the next value position), each followed by `,` or `]`.
+        // the next value position), each followed by `,` or `]`. The items bound (Phase 465) is
+        // tested at the loop's head, before `item` is called: an item that would be the `max + 1`-th
+        // is refused where it would start, before a character of it is read, with the frame's slot
+        // unfilled so the breach's path is the array's own.
         let arrayLoop (depth: int) (item: unit -> unit) : unit =
             if depth >= maxDepth then
                 fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
@@ -997,10 +1177,18 @@ module Json =
             if peek () = ']' then
                 i <- i + 1
             else
+                let top = pushFrame ()
+                let mutable count = 0
                 let mutable go = true
 
                 while go do
+                    if count >= limits.MaxArrayLength then
+                        breach JsonLimit.ArrayLength
+
+                    frameIdx[top] <- count
                     item ()
+                    count <- count + 1
+                    frameIdx[top] <- -1
                     skipWs ()
 
                     match peek () with
@@ -1009,6 +1197,8 @@ module Json =
                         i <- i + 1
                         go <- false
                     | _ -> fail ExpectedToken "expected ',' or ']'"
+
+                popFrame top
 
         // The object loop: the depth cap, `{`, then per member its key, `:`, and `onMember key` (it
         // reads the member's value), each followed by `,` or `}`.
@@ -1020,6 +1210,14 @@ module Json =
         // through to the value reader, which names it exactly as the strict policy does, and a
         // trailing-garbage one (`nullish`) is caught by the ',' / '}' expectation below. Under
         // `RejectNull` the test is never taken and the member path is the pre-existing one.
+        //
+        // The members bound (Phase 465) is tested after the loop's `skipWs` and before the key is
+        // read, at the key's opening quote: the members ACCUMULATED so far are the count — an erased
+        // member null was never accumulated and is not one, which is what keeps the tolerant read
+        // the strict read of the erased document (Phase 190) under a bound too — and a member that
+        // would be the `max + 1`-th is refused before a character of it is read. While the key is
+        // being read the frame's slot is unfilled, so a breach inside the key (its own length) is
+        // the object's.
         let objectLoop (depth: int) (onMember: string -> unit) : unit =
             if depth >= maxDepth then
                 fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
@@ -1030,6 +1228,8 @@ module Json =
             if peek () = '}' then
                 i <- i + 1
             else
+                let top = pushFrame ()
+                let mutable count = 0
                 let mutable go = true
                 // Phase 462: the names read so far. The first is held alone, and the set is built
                 // only when a second member arrives, so a one-member object allocates nothing.
@@ -1038,8 +1238,16 @@ module Json =
 
                 while go do
                     skipWs ()
+                    // The slot is unfilled from here until the key is read: a breach of the members
+                    // bound, or of the string bound inside the key, is the object's own.
+                    frameKeys[top] <- null
+
+                    if count >= limits.MaxObjectMembers then
+                        breach JsonLimit.ObjectMembers
+
                     let keyAt = i
                     let key = parseString ()
+                    frameKeys[top] <- key
                     skipWs ()
                     expect ':'
                     skipWs ()
@@ -1050,6 +1258,7 @@ module Json =
                         i <- i + 4
                     else
                         onMember key
+                        count <- count + 1
 
                         // A repeated name is refused when the member is ACCUMULATED, after its value
                         // is read, at the name's opening quote. So a refusal inside the value still
@@ -1086,6 +1295,8 @@ module Json =
                         i <- i + 1
                         go <- false
                     | _ -> fail ExpectedToken "expected ',' or '}'"
+
+                popFrame top
 
         let rec parseValue (depth: int) : JVal =
             match valueStart () with
@@ -1127,6 +1338,20 @@ module Json =
             arrayLoop depth (fun () -> items.Add(parseValue (depth + 1)))
             JArr(List.ofSeq items)
 
+        // The whole document: one value, then nothing but whitespace — the grammar's refusals
+        // raised, the trailing-input one constructed.
+        let document () : Result<JVal, JsonError> =
+            let v = parseValue 0
+            skipWs ()
+
+            if i <> n then
+                Error
+                    { Position = i
+                      Message = "trailing characters"
+                      Kind = TrailingCharacters }
+            else
+                Ok v
+
         member _.Length = n
         member _.MaxDepth = maxDepth
 
@@ -1145,24 +1370,48 @@ module Json =
         member _.Array(depth: int, item: unit -> unit) : unit = arrayLoop depth item
         member _.Object(depth: int, onMember: string -> unit) : unit = objectLoop depth onMember
 
-        /// The whole document as `parse` reads it: one value, then nothing but whitespace.
+        /// The whole document as `parse` reads it. Under `JsonLimits.depthOnly`, which is what every
+        /// caller of this member passes, no `JsonLimitError` can arise.
         member _.Document() : Result<JVal, JsonError> =
             try
-                let v = parseValue 0
-                skipWs ()
-
-                if i <> n then
-                    Error
-                        { Position = i
-                          Message = "trailing characters"
-                          Kind = TrailingCharacters }
-                else
-                    Ok v
+                document ()
             with JsonParseError(kind, msg, pos) ->
                 Error
                     { Position = pos
                       Message = msg
                       Kind = kind }
+
+        /// The whole document as `parseWithLimits` reads it (Phase 465): every grammar refusal as
+        /// `Malformed`, exactly as `Document` reports it, and every breach as `LimitExceeded` — the
+        /// depth cap's `MaxDepthExceeded` lifted to the `Depth` breach at the same position, with the
+        /// path the frames still hold.
+        member _.DocumentLimited() : Result<JVal, JsonRefusal> =
+            try
+                document () |> Result.mapError JsonRefusal.Malformed
+            with
+            | JsonParseError(MaxDepthExceeded, _, pos) ->
+                Error(
+                    JsonRefusal.LimitExceeded
+                        { Limit = JsonLimit.Depth
+                          Declared = maxDepth
+                          Path = pathNow ()
+                          Position = pos }
+                )
+            | JsonParseError(kind, msg, pos) ->
+                Error(
+                    JsonRefusal.Malformed
+                        { Position = pos
+                          Message = msg
+                          Kind = kind }
+                )
+            | JsonLimitError(limit, declared, pos) ->
+                Error(
+                    JsonRefusal.LimitExceeded
+                        { Limit = limit
+                          Declared = declared
+                          Path = pathNow ()
+                          Position = pos }
+                )
 
     /// `parseDetailed` under an explicit nesting cap **and an explicit `NullPolicy`** — the core
     /// parser every other entry point is a wrapper over. Under `RejectNull` (the default every
@@ -1170,7 +1419,70 @@ module Json =
     /// Returns a structured `JsonError` on failure; the `parseWith` family are the string-error
     /// wrappers.
     let parseDetailedWithPolicy (policy: NullPolicy) (maxDepth: int) (input: string) : Result<JVal, JsonError> =
-        Scanner(policy, maxDepth, input).Document()
+        Scanner(policy, JsonLimits.depthOnly maxDepth, input).Document()
+
+    // The input's UTF-8 length, counted off its UTF-16 units — Fable-clean, and the count a host
+    // handed a decoded string must make (a native length under-counts a CJK document threefold). A
+    // lone surrogate counts the three bytes a replacement character takes; the parser refuses it
+    // anyway.
+    let private utf8Length (s: string) : int64 =
+        let mutable total = 0L
+        let mutable k = 0
+
+        while k < s.Length do
+            let c = int s[k]
+
+            if c < 0x80 then
+                total <- total + 1L
+                k <- k + 1
+            elif c < 0x800 then
+                total <- total + 2L
+                k <- k + 1
+            elif
+                c >= 0xD800
+                && c <= 0xDBFF
+                && k + 1 < s.Length
+                && int s[k + 1] >= 0xDC00
+                && int s[k + 1] <= 0xDFFF
+            then
+                total <- total + 4L
+                k <- k + 2
+            else
+                total <- total + 3L
+                k <- k + 1
+
+        total
+
+    /// The LIMITED parse (Phase 465): `parseDetailedWithPolicy` under a `JsonLimits` record, every
+    /// bound enforced on the way down — the document-bytes bound before a character is read, the
+    /// depth cap as it always was, and the string, array and object bounds before the unit, item or
+    /// member they guard is read — and a breach reported as `JsonRefusal.LimitExceeded`, naming the
+    /// limit, its declared value, the path and the position, never as malformed JSON. Everything
+    /// else is exactly `parseDetailedWithPolicy policy limits.MaxDepth`: a document it accepts is
+    /// accepted to the same value, and one it refuses for any reason but the depth cap is refused
+    /// with `Malformed` carrying its error. The first fault in document order wins, so a breach
+    /// outranks malformed text after it and malformed text outranks a breach after IT.
+    ///
+    /// This is the MECHANISM a wire host bounds its parse with; the values, their units and the
+    /// error envelope are the host's own specification's (DECISIONS.md D84, refined by D158), and
+    /// `Decoder.parseWithLimits` is the typed-decode form of the same call.
+    let parseWithLimits (policy: NullPolicy) (limits: JsonLimits) (input: string) : Result<JVal, JsonRefusal> =
+        // One comparison when the input cannot encode past the bound (three bytes a unit is the
+        // most a unit costs; a pair is four for two), the count otherwise.
+        let bytesOver =
+            int64 input.Length * 3L > int64 limits.MaxDocumentBytes
+            && utf8Length input > int64 limits.MaxDocumentBytes
+
+        if bytesOver then
+            Error(
+                JsonRefusal.LimitExceeded
+                    { Limit = JsonLimit.DocumentBytes
+                      Declared = limits.MaxDocumentBytes
+                      Path = []
+                      Position = 0 }
+            )
+        else
+            Scanner(policy, limits, input).DocumentLimited()
 
     /// `parseDetailed` under an explicit nesting cap (Phases 10 + 22) — the strict parser. Returns a
     /// structured `JsonError` on failure; `parseWith` / `parse` are the string-error wrappers.
@@ -1204,7 +1516,8 @@ module Json =
     /// The cap is THIS PARSER'S OWN stack guard, not the wire format's resource limits. Those
     /// (WIRE_FORMAT §21 — nesting, string and array sizes among them) belong to the wire-format
     /// hosts that decode on top of this parser, which enforce them with the format's own error;
-    /// this parser enforces none of them and claims no §21 conformance (DECISIONS.md D84).
+    /// this entry point enforces none of them and claims no §21 conformance (DECISIONS.md D84). A
+    /// host enforces its own values through `parseWithLimits` (Phase 465, D158).
     let parse (input: string) : Result<JVal, string> = parseWith defaultMaxDepth input
 
     /// `parse` under an explicit `NullPolicy` — the string-error wrapper over
@@ -1379,7 +1692,7 @@ module Json =
         /// Read `input` with `reading`, which reads exactly one value (the document's), then require
         /// nothing but whitespace after it — the document `parseDetailed` reads, read typed.
         let read (reading: Reader -> 'a) (input: string) : Result<'a, ReadError> =
-            let s = Scanner(RejectNull, defaultMaxDepth, input)
+            let s = Scanner(RejectNull, JsonLimits.depthOnly defaultMaxDepth, input)
             let r = Reader(s)
 
             try

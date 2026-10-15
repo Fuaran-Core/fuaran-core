@@ -179,21 +179,49 @@ module DecodeRejectCorpus =
         | Accept
 
     type Vector =
-        { Name: string
-          Shape: string
-          Definitions: string
-          Input: string
-          Intent: Intent }
+        {
+            Name: string
+            Shape: string
+            Definitions: string
+            Input: string
+            /// The limits record the input is read under (Phase 465), or `None` for the parser's
+            /// own cap and no other bound.
+            Limits: JsonLimits option
+            Intent: Intent
+        }
 
     let private v name shape input intent =
         { Name = name
           Shape = shape
           Definitions = "{}"
           Input = input
+          Limits = None
           Intent = intent }
 
     let private str = """{"$type":"string"}"""
     let private int = """{"$type":"int"}"""
+    let private any = """{"$type":"any"}"""
+
+    /// A vector read under a limits record (Phase 465), at the `any` shape: what it pins is the
+    /// parse, not the shape.
+    let private vl name limits input intent =
+        { Name = name
+          Shape = any
+          Definitions = "{}"
+          Input = input
+          Limits = Some limits
+          Intent = intent }
+
+    /// The record every limits vector starts from: generous everywhere, so each vector tightens
+    /// exactly the bound it is about and the others cannot fire.
+    let private wide: JsonLimits =
+        { MaxDepth = 512
+          MaxStringLength = 1024
+          MaxArrayLength = 1024
+          MaxObjectMembers = 1024
+          MaxDocumentBytes = 65536 }
+
+    let private limited (code: DecodeCode) (path: PathSegment list) = Refuse(code, path)
 
     let private obj (fields: (string * string * bool) list) (closed: bool) =
         let fs =
@@ -296,6 +324,7 @@ module DecodeRejectCorpus =
             Shape = """{"$type":"ref","name":"point"}"""
             Definitions = sprintf """{"point":%s}""" (obj [ "x", int, false; "y", int, false ] true)
             Input = """{"x":1,"y":2}"""
+            Limits = None
             Intent = Accept }
           // Phase 462 — the JSON-syntax rows every wire shares, at the shape reader: a refusal of
           // the text is `InvalidJson` at the root whatever shape was asked for.
@@ -304,7 +333,83 @@ module DecodeRejectCorpus =
           v "bare-nan" """{"$type":"float"}""" "NaN" (Refuse(DecodeCode.InvalidJson, []))
           v "raw-control-in-a-string" str ("\"a" + string (char 1) + "\"") (Refuse(DecodeCode.InvalidJson, []))
           v "lone-surrogate" str "\"\\uD800\"" (Refuse(DecodeCode.InvalidJson, []))
-          v "number-outside-the-grammar" int "01" (Refuse(DecodeCode.InvalidJson, [])) ]
+          v "number-outside-the-grammar" int "01" (Refuse(DecodeCode.InvalidJson, []))
+          // Phase 465 — the limits, each declared by the vector and pinned from both sides: a
+          // document exactly at the bound is read, one past it is `LimitExceeded` at the path of
+          // the container the breach was raised in, never `InvalidJson`. A string's unit is the
+          // Unicode code point (the astral pair), the document's is the UTF-8 byte (the CJK
+          // character), and a key is a string.
+          vl "limit-depth-at-max" { wide with MaxDepth = 2 } "[[1]]" Accept
+          vl
+              "limit-depth-past"
+              { wide with MaxDepth = 2 }
+              "[[[1]]]"
+              (limited DecodeCode.LimitExceeded [ index 0; index 0 ])
+          vl "limit-string-length-at-max" { wide with MaxStringLength = 3 } "\"abc\"" Accept
+          vl
+              "limit-string-length-past"
+              { wide with MaxStringLength = 3 }
+              "\"abcd\""
+              (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-string-length-astral-at-max"
+              { wide with MaxStringLength = 3 }
+              "\"\U0001F600\U0001F600\U0001F600\""
+              Accept
+          vl
+              "limit-string-length-astral-past"
+              { wide with MaxStringLength = 3 }
+              "\"\U0001F600\U0001F600\U0001F600\U0001F600\""
+              (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-string-length-in-a-key"
+              { wide with MaxStringLength = 3 }
+              """{"abcd":1}"""
+              (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-string-length-nested"
+              { wide with MaxStringLength = 3 }
+              """{"a":["abcd"]}"""
+              (limited DecodeCode.LimitExceeded [ key "a"; index 0 ])
+          vl "limit-array-length-at-max" { wide with MaxArrayLength = 2 } "[1,2]" Accept
+          vl "limit-array-length-past" { wide with MaxArrayLength = 2 } "[1,2,3]" (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-array-length-nested"
+              { wide with MaxArrayLength = 2 }
+              """{"a":[1,2,3]}"""
+              (limited DecodeCode.LimitExceeded [ key "a" ])
+          vl "limit-object-members-at-max" { wide with MaxObjectMembers = 2 } """{"a":1,"b":2}""" Accept
+          vl
+              "limit-object-members-past"
+              { wide with MaxObjectMembers = 2 }
+              """{"a":1,"b":2,"c":3}"""
+              (limited DecodeCode.LimitExceeded [])
+          vl "limit-document-bytes-at-max" { wide with MaxDocumentBytes = 5 } "\"日\"" Accept
+          vl
+              "limit-document-bytes-past"
+              { wide with MaxDocumentBytes = 4 }
+              "\"日\""
+              (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-breach-before-malformed-text"
+              { wide with MaxArrayLength = 2 }
+              "[1,2,3"
+              (limited DecodeCode.LimitExceeded [])
+          vl
+              "limit-malformed-text-before-breach"
+              { wide with MaxArrayLength = 2 }
+              "[1,%,3,4]"
+              (limited DecodeCode.InvalidJson []) ]
+
+    /// The limits record as a vector declares it: one member per limit, by `JsonLimit.name`.
+    let limitsJson (limits: JsonLimits) : JVal =
+        JObj
+            [ for l in
+                  [ JsonLimit.Depth
+                    JsonLimit.StringLength
+                    JsonLimit.ArrayLength
+                    JsonLimit.ObjectMembers
+                    JsonLimit.DocumentBytes ] -> JsonLimit.name l, JInt(JsonLimit.declared limits l) ]
 
     /// The outcome of a vector, computed by calling the reference decoder: `Error (code, path)` or
     /// `Ok ()` for an acceptance.
@@ -314,7 +419,9 @@ module DecodeRejectCorpus =
             | JObj d -> d
             | _ -> []
 
-        Decoder.parse vec.Input
+        (match vec.Limits with
+         | Some limits -> Decoder.parseWithLimits limits vec.Input
+         | None -> Decoder.parse vec.Input)
         |> Result.bind (shapeDecoder defs (parse vec.Shape))
         |> Result.mapError (fun e -> e.Code, e.Path)
 
@@ -330,16 +437,22 @@ module DecodeRejectCorpus =
             | JObj [] -> []
             | d -> [ "definitions", d ]
 
+        let limits =
+            match vec.Limits with
+            | Some l -> [ "limits", limitsJson l ]
+            | None -> []
+
         Canon.render (
             JObj(
                 [ "name", JStr vec.Name; "shape", parse vec.Shape; "input", JStr vec.Input ]
+                @ limits
                 @ defs
                 @ result
             )
         )
 
     let private description =
-        "Decode reject vectors (Phase 310). Each vector is a SHAPE, a JSON `input` (text, which may not parse), and the outcome computed by reading the input through the reference decoder of that shape: a `refusal` names the decode code (the closed DecodeCode set: InvalidJson, MissingField, WrongKind, UnknownTag, OutOfRange, UndeclaredMember, LimitExceeded, NotAdmitted, SchemaFault) and the path, as an array of member keys (strings) and item indices (integers) from the document root; `accepted` marks an input the shape reads. Shapes: string | int | float | bool | any; list (of, optional maxItems: more items is LimitExceeded at the array); object (fields of name, shape, optional; optional closed: an undeclared member is UndeclaredMember at that member); tagged (key, cases of tag and shape, the case shape reading the SAME object; an absent or non-string tag is refused at the key, an unknown one is UnknownTag there, and a tag outside an optional admit list is NotAdmitted there); intRange (min, max: outside is OutOfRange); ref (name, resolved against the vector's definitions: unresolved is SchemaFault). An object's fields are read in order and the first refusal is the answer; an absent optional field is accepted and a present ill-typed one refused. A MissingField path names the absent member. Parsing nests at most 512 deep. A host certifies its decode error contract by reproducing every code and path; the sentence beside a refusal is the host's own."
+        "Decode reject vectors (Phase 310). Each vector is a SHAPE, a JSON `input` (text, which may not parse), and the outcome computed by reading the input through the reference decoder of that shape: a `refusal` names the decode code (the closed DecodeCode set: InvalidJson, MissingField, WrongKind, UnknownTag, OutOfRange, UndeclaredMember, LimitExceeded, NotAdmitted, SchemaFault) and the path, as an array of member keys (strings) and item indices (integers) from the document root; `accepted` marks an input the shape reads. Shapes: string | int | float | bool | any; list (of, optional maxItems: more items is LimitExceeded at the array); object (fields of name, shape, optional; optional closed: an undeclared member is UndeclaredMember at that member); tagged (key, cases of tag and shape, the case shape reading the SAME object; an absent or non-string tag is refused at the key, an unknown one is UnknownTag there, and a tag outside an optional admit list is NotAdmitted there); intRange (min, max: outside is OutOfRange); ref (name, resolved against the vector's definitions: unresolved is SchemaFault). An object's fields are read in order and the first refusal is the answer; an absent optional field is accepted and a present ill-typed one refused. A MissingField path names the absent member. A vector without a `limits` member is parsed at the parser's own cap of 512 nested containers and no other bound. A vector WITH one (Phase 465) is parsed under that record — `depth` (nested containers admitted), `stringLength` (Unicode code points in one string or member key, a surrogate pair counting as one), `arrayLength` (items in one array), `objectMembers` (members in one object), `documentBytes` (UTF-8 bytes of the whole input) — each enforced on the way down, before the container, unit, item or member it guards is read: a breach is LimitExceeded at the path of the container it was raised in (the string's own path for a string value, the object's for a key, the root for documentBytes) and is never InvalidJson; malformed text is InvalidJson exactly as without the record; and the first fault in document order wins. A host certifies its decode error contract by reproducing every code and path; the sentence beside a refusal is the host's own."
 
     /// The vectors file, rendered: a header, then one canonical line per vector.
     let render () : string =
@@ -1100,6 +1213,50 @@ let tests =
                                 (DecodeError.resolvesIn doc { e with Path = path })
                                 (sprintf "%s: %s resolves" vec.Name (DecodePath.render path))
                         | _ -> ()
+
+                // Phase 465 — the limits vectors pin every limit from both sides: for each of the
+                // five, a vector at the bound is accepted and one past it is the breach of THAT
+                // limit (read through `Json.parseWithLimits`, which names it) at the path the
+                // vector pins — so a host whose unit is wrong (UTF-16 units, bytes) fails the
+                // astral and CJK vectors by name rather than by accident.
+                testCase "every limit is pinned at its bound and one past it, and a breach names its limit"
+                <| fun _ ->
+                    let limitVectors =
+                        DecodeRejectCorpus.vectors
+                        |> List.choose (fun v -> v.Limits |> Option.map (fun l -> v, l))
+
+                    let breached =
+                        [ for v, l in limitVectors do
+                              match v.Intent, Json.parseWithLimits RejectNull l v.Input with
+                              | DecodeRejectCorpus.Refuse(DecodeCode.LimitExceeded, path),
+                                Error(JsonRefusal.LimitExceeded b) ->
+                                  Expect.equal b.Path path (sprintf "%s: the breach's path" v.Name)
+
+                                  Expect.equal
+                                      b.Declared
+                                      (JsonLimit.declared l b.Limit)
+                                      (sprintf "%s: the declared value" v.Name)
+
+                                  yield b.Limit
+                              | DecodeRejectCorpus.Refuse(DecodeCode.LimitExceeded, _), other ->
+                                  failtestf "%s: expected a breach, the parse gave %A" v.Name other
+                              | _ -> () ]
+                        |> Set.ofList
+
+                    let acceptedUnder =
+                        limitVectors
+                        |> List.filter (fun (v, _) -> v.Intent = DecodeRejectCorpus.Accept)
+                        |> List.length
+
+                    for l in
+                        [ JsonLimit.Depth
+                          JsonLimit.StringLength
+                          JsonLimit.ArrayLength
+                          JsonLimit.ObjectMembers
+                          JsonLimit.DocumentBytes ] do
+                        Expect.isTrue (breached.Contains l) (sprintf "a vector breaches %s" (JsonLimit.name l))
+
+                    Expect.isGreaterThanOrEqual acceptedUnder 5 "a vector at each bound is accepted"
 
                 testCase "the committed conformance/decode/ artefacts are the ones this kit renders"
                 <| fun _ ->

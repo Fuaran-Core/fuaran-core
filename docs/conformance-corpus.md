@@ -421,15 +421,35 @@ Three rules sit beside the rows:
 ### The limits
 
 Core states no limit VALUES and is not a host of any wire's limits section (DECISIONS.md D84, ruled
-2026-10-01): its 512 nesting cap is its own stack guard, deliberately looser than any wire's bound,
-so Core never refuses a document a wire says a host must accept, and its refusal there is
-`MaxDepthExceeded` (`LimitExceeded` in the decode error contract). The limits MECHANISM — a parse that
-takes a limits record (JSON depth, string length in code points, members per object and items per
-array, document bytes) and enforces each on the way down, reporting a breach as a limit and never as
-malformed JSON — is Phase 465's; each wire keeps its own values, units and error envelope and cites
-Core for the mechanism alone. **A stricter host-operational ceiling is deployment policy, not
-conformance:** a host that applies one documents it and never describes a document it refuses under
-it as malformed.
+2026-10-01; refined by D158, 2026-10-15): its 512 nesting cap is its own stack guard, deliberately
+looser than any wire's bound, so Core never refuses a document a wire says a host must accept, and its
+refusal there is `MaxDepthExceeded` (`LimitExceeded` in the decode error contract). What Core offers is
+the MECHANISM (Phase 465): `Json.parseWithLimits policy limits input` — and `Decoder.parseWithLimits`,
+its typed-decode form — takes a `JsonLimits` record and enforces each bound ON THE WAY DOWN, before the
+container, unit, item or member it guards is read, so nothing past a bound is ever read or built. Each
+wire keeps its own values, units and error envelope and cites Core for the mechanism alone; a host
+passes its specification's numbers and maps the breach to its own envelope.
+
+| Bound | Counts | Breach raised |
+|---|---|---|
+| `MaxDepth` (`depth`) | nested objects and arrays admitted, the root counting as one | at the bracket of the container opened past the bound; path: that container's |
+| `MaxStringLength` (`stringLength`) | Unicode code points in ONE decoded string or member key — a surrogate pair is one, whichever spelling it arrived in | just past the code point that passes the bound, before it is appended; path: the string value's own, or the object's for a key |
+| `MaxArrayLength` (`arrayLength`) | items in one array | where the `max + 1`-th item would start, before a character of it is read; path: the array's |
+| `MaxObjectMembers` (`objectMembers`) | members in one object (an erased member null is not a member) | at the `max + 1`-th key's opening quote; path: the object's |
+| `MaxDocumentBytes` (`documentBytes`) | UTF-8 bytes of the whole input | before parsing, at position 0; path: the root |
+
+A breach is `JsonRefusal.LimitExceeded` — a `JsonLimitBreach` naming the limit, its declared value, the
+path and the position, never the input — and `LimitExceeded` at that path in the decode error contract,
+with a sentence naming the limit and the value (`limit arrayLength of 2 exceeded`). It is NEVER
+`InvalidJson`, and malformed text is never a breach: `JsonRefusal.Malformed` carries exactly the refusal
+`parseDetailed` gives the text. The first fault in document order wins, whichever kind it is. The
+pre-existing entry points run under `JsonLimits.depthOnly 512` and answer every document as they always
+have. The `decode/` family carries one vector per bound at the bound (accepted) and one past it, each
+declaring its `limits` record, with the astral and CJK vectors that fail a host whose unit is wrong by
+name. The model (`proofs/JsonParse.fst`, section 13) proves the limited entry point at no bound is the
+parser, that a breach is never reported as malformed, and the string and items bounds exact on their
+canonical families. **A stricter host-operational ceiling is deployment policy, not conformance:** a
+host that applies one documents it and never describes a document it refuses under it as malformed.
 
 ### The refusal classes
 

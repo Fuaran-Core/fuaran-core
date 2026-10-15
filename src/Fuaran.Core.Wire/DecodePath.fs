@@ -13,14 +13,8 @@ namespace Fuaran.Core
 //  layer reads identically to every existing caller (DECISIONS.md D99).
 // ============================================================================
 
-/// One step of a decode path (Phase 310): a member of an object by its key, or an item of an array
-/// by its zero-based index. A path is the list of steps from the document's root, root first.
-[<RequireQualifiedAccess>]
-type PathSegment =
-    /// A member of an object by its exact key; where a document repeats the key, the first.
-    | Key of string
-    /// An item of an array, zero-based.
-    | Index of int
+// `PathSegment` itself is declared beside the parser in `Json.fs` (Phase 465): a limited parse
+// reports a breach's path, so the type sits below the parser rather than above it.
 
 /// Paths into a document (Phase 310): rendered, resolved, and carried on the wire.
 [<RequireQualifiedAccess>]

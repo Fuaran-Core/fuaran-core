@@ -419,5 +419,14 @@ module Decoder =
     /// `parseWith` at the parser's default nesting cap.
     let parse (json: string) : Result<JVal, DecodeError> = parseWith Json.defaultMaxDepth json
 
+    /// Parse JSON text under a limits record (Phase 465, `Json.parseWithLimits` at the strict null
+    /// policy): a breach is `LimitExceeded` at the breach's path, naming the limit and its declared
+    /// value (`DecodeError.ofJsonRefusal`); malformed text is `InvalidJson` at the root as `parse`
+    /// reports it. The route by which a wire host enforces its own specification's limits through
+    /// Core's parse alone.
+    let parseWithLimits (limits: JsonLimits) (json: string) : Result<JVal, DecodeError> =
+        Json.parseWithLimits RejectNull limits json
+        |> Result.mapError DecodeError.ofJsonRefusal
+
     /// Parse JSON text and decode it with `d`.
     let ofString (d: Decoder<'T>) (json: string) : Result<'T, DecodeError> = parse json |> Result.bind d

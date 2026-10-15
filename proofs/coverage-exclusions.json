@@ -92,6 +92,14 @@
     },
     {
       "members": [
+        "JsonLimit.name",
+        "JsonLimit.declared"
+      ],
+      "class": "trivial",
+      "reason": "Spells a limit's wire name, and reads its value out of a `JsonLimits` record, by one match each; no computation (Phase 465)."
+    },
+    {
+      "members": [
         "PolicyDecision.denyWith"
       ],
       "class": "trivial",
