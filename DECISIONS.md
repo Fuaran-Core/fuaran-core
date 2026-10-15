@@ -1,5 +1,39 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-15 — D160: every checked op-stream writer checks every member a line carries, the strings it quotes itself as well as the span it embeds, so no checked writer returns text the strict reader refuses; closes D158.6
+
+**Phase 473, the model first: `proofs/OpStreamLoad.fst`'s writer moved, re-verified with the pinned prover and
+re-extracted before the writers did. Rides the `0.38.0` draft (`docs/releases/0.38.0.md`).**
+
+**D160.1 — the gap.** D158.6 recorded it: the checked writers (Phase 301) held only the span they EMBED to
+`checkRaw`. The strings they quote themselves go through `JsonString.quote`, which escapes every control (Phase
+287) but writes a surrogate as it finds it, so after Phase 466 an unpaired surrogate in one of them was written
+`Ok` and refused by the reader. The survey of what each writer quotes: a record's `actor` object, `prevHash`
+and `hash`; a capture's `eff`, `det`, `prevHash` and `hash`; a snapshot's `prevHash` and `hash`; a DAG node's
+`id`, `parents` and `actor`. Two further writers quote strings and are covered already, because their output
+is an op ENCODING a record embeds and `checkRaw` reads: `Attributed.encodeEnvelope` and the keyed capture
+encoding. `seq` and `occ` are numerals the writer spells and cannot be unreadable.
+
+**D160.2 — one checker, every member, line order.** `checkedLines` takes the members each line carries as
+`(member, text)` in line order, the embedded span among them, and refuses the first that `checkRaw` refuses —
+the SAME function the reader's grammar is applied through, rather than a second surrogate test that could drift
+from it. The refusal is `JsonlWriteFault { Line; Member; Reason = Unreadable(LoneSurrogate path) }`, naming the
+member (`actor`, `prevHash`, …) and, inside it, the path (`$["id"]`). No new `JsonlWriteFaultReason` case: the
+existing `Unreadable` already says "the reader would refuse this", which is exactly the claim. `Dag.tryToJsonl`
+checks its four members the same way. On `Ok` every writer's text is the unchecked writer's, byte for byte.
+
+**D160.3 — the model, and what its premise still owes.** `checked_lines` checks `record_members` (actor object,
+op span, `prevHash`, `hash`) and the round trip is re-proved over it. Its `records_wf` premise is NOT retired:
+the READABILITY half of `wf_str` is now enforced by the writer, but the premise's other half is the model's
+alphabet bridge — a host hands the writer each string spelled as the escapes the writer emits — which no check
+on the written text can establish (an escaped high half before a raw low one reads, and is still not a canonical
+spelling). The premise's comment says so. A twin pins the write-side refusal, and the oracle differential
+compares it against production over records whose actor, `prevHash` and `hash` carry an unpaired surrogate.
+
+**D160.4 — the version.** A checked writer that returned `Ok` now refuses (behavioural); no public signature
+moves (`checkedLines` and `firstUnreadable` are internal). The standing `0.38.0` draft already carries the
+breaking class, so the change RIDES it.
+
 ## 2026-10-15 — D159: Core's parser takes a limits record and enforces it on the way down, so a wire host bounds the parse through Core alone; Core still states no limit values and is not a section-21 host; a breach is a typed outcome and never malformed JSON; D84's "no shared limits-taking entry point" clause is refined
 
 **Recorded by Phase 465. ADDITIVE, riding the `0.38.0` draft (`docs/releases/0.38.0.md`).

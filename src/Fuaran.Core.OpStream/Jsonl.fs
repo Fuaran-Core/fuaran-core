@@ -232,7 +232,8 @@ type JsonlWriteFault =
     {
         /// 1-based line of the output the refused item would have occupied.
         Line: int
-        /// The member whose embedded span was refused: `op`, `value` or `state`.
+        /// The member refused: an embedded span (`op`, `value`, `state`) or, since Phase 473, a string
+        /// the writer quotes itself (`actor`, `prevHash`, `hash`, `eff`, `det`, `id`, `parents`).
         Member: string
         /// What is wrong with the encoding. The writer stops at the first refused item and emits nothing.
         Reason: JsonlWriteFaultReason
@@ -1135,13 +1136,25 @@ module internal OpStreamJsonl =
     let spanFault (f: JsonlFault) : string =
         sprintf "%s (position %d)" (JsonlFault.reasonText f.Reason) f.Position
 
-    /// Write one line per item, each from its embedded span (Phase 301): every span is checked
-    /// (`Jsonl.checkRaw`) before any line is built, and the first refused one is the result — by its
-    /// 1-based line and the member that would have carried it. On `Ok` the text is the one the
-    /// unchecked writer produces, byte for byte.
+    /// The first of `members` — `(member, text)` in line order — that `Jsonl.checkRaw` refuses, with
+    /// its reason (Phase 473). A text is the member's value exactly as the line will carry it: an
+    /// embedded span, or a string the writer quotes itself.
+    let firstUnreadable (members: (string * string) list) : (string * JsonlWriteFaultReason) option =
+        members
+        |> List.tryPick (fun (m, text) ->
+            match Jsonl.checkRaw text with
+            | Error reason -> Some(m, reason)
+            | Ok() -> None)
+
+    /// Write one line per item (Phase 301): every member each line carries — the span it embeds
+    /// (`embedded`) and, since Phase 473, every string the writer quotes itself — is checked
+    /// (`Jsonl.checkRaw`) in line order before any line is built, and the first refused one is the
+    /// result, by its 1-based line and member. Until Phase 473 only the span was checked, so an
+    /// unpaired surrogate in a quoted string was written and then refused by the strict reader
+    /// (DECISIONS.md D158.6). On `Ok` the text is the one the unchecked writer produces, byte for byte.
     let checkedLines
-        (memberName: string)
-        (spanOf: 'T -> string)
+        (embedded: string)
+        (membersOf: 'T -> (string * string) list)
         (lineOf: 'T -> string -> string)
         (items: 'T list)
         : Result<string, JsonlWriteFault> =
@@ -1151,16 +1164,16 @@ module internal OpStreamJsonl =
             function
             | [] -> Ok(String.concat "\n" lines)
             | (x: 'T) :: rest ->
-                let span = spanOf x
+                let members = membersOf x
 
-                match Jsonl.checkRaw span with
-                | Error reason ->
+                match firstUnreadable members with
+                | Some(m, reason) ->
                     Error
                         { Line = i + 1
-                          Member = memberName
+                          Member = m
                           Reason = reason }
-                | Ok() ->
-                    lines.Add(lineOf x span)
+                | None ->
+                    lines.Add(lineOf x (members |> List.find (fun (m, _) -> m = embedded) |> snd))
                     go (i + 1) rest
 
         go 0 items
@@ -1169,7 +1182,15 @@ module internal OpStreamJsonl =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (records: OpRecord<'Op> list)
         : Result<string, JsonlWriteFault> =
-        checkedLines "op" (fun (r: OpRecord<'Op>) -> w.Encode r.Op) recordLine records
+        checkedLines
+            "op"
+            (fun (r: OpRecord<'Op>) ->
+                [ "actor", Actor.encode r.Actor
+                  "op", w.Encode r.Op
+                  "prevHash", jstr r.PrevHash
+                  "hash", jstr r.Hash ])
+            recordLine
+            records
 
     /// One record line, decoded — the members in line order, the `op` span handed to the witness.
     let private recordOf

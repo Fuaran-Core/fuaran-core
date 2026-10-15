@@ -872,20 +872,36 @@ let record_line (#op: Type) (r: lrec op) (op_json: list ch) : Tot (list ch) =
 let to_jsonl (#op: Type) (w: witness op) (rs: list (lrec op)) : Tot (list ch) =
   join_sep CNewline (map (fun r -> record_line r (w.enc r.lop)) rs)
 
-(* F#: `checkedLines "op"` over the records — every span checked before any line is built, the
-   first refusal by its 1-based line. *)
+(* F#: the members `tryToJsonl` checks, in line order (Phase 473) — the strings the writer quotes
+   itself (the actor object, `prevHash`, `hash`) beside the span it embeds (`op`). `seq` is a numeral
+   the writer spells and is never unreadable. *)
+let record_members (#op: Type) (w: witness op) (r: lrec op) : Tot (list (list ch & list ch)) =
+  [(k_actor, encode_actor r.lactor); (k_op, w.enc r.lop); (k_prev_hash, quote_str r.lprev);
+   (k_hash, quote_str r.lhash)]
+
+(* F#: `checkedLines`' walk of one item's members — the first `checkRaw` refuses, by member. *)
+let rec first_unreadable (ms: list (list ch & list ch)) : Tot (option (list ch & wreason)) (decreases ms) =
+  match ms with
+  | [] -> None
+  | (k, t) :: rest ->
+    (match check_raw t with
+     | Error why -> Some (k, why)
+     | Ok _ -> first_unreadable rest)
+
+(* F#: `checkedLines` over the records — every member checked before any line is built, the first
+   refusal by its 1-based line and member. Until Phase 473 only the embedded `op` span was checked, so
+   an unpaired surrogate in a quoted string was written and refused by the strict reader (D158.6). *)
 let rec checked_lines (#op: Type) (w: witness op) (i: nat) (rs: list (lrec op))
   : Tot (res (list (list ch)) wfault) (decreases rs) =
   match rs with
   | [] -> Ok []
   | r :: rest ->
-    let span = w.enc r.lop in
-    (match check_raw span with
-     | Error why -> Error { wline = i + 1; wmember = k_op; wreason = why }
-     | Ok _ ->
+    (match first_unreadable (record_members w r) with
+     | Some (k, why) -> Error { wline = i + 1; wmember = k; wreason = why }
+     | None ->
        (match checked_lines w (i + 1) rest with
         | Error f -> Error f
-        | Ok ls -> Ok (record_line r span :: ls)))
+        | Ok ls -> Ok (record_line r (w.enc r.lop) :: ls)))
 
 (* F#: `tryToJsonl`. *)
 let try_to_jsonl (#op: Type) (w: witness op) (rs: list (lrec op)) : Tot (res (list ch) wfault) =
@@ -2238,7 +2254,11 @@ let clean_line (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
 
 (* THE PREMISES a domain owes (named in `../proofs.json`): its witness reads back what it writes,
    and its records are well formed — an actor that names somebody, strings the writer can spell,
-   a sequence number in Int32. *)
+   a sequence number in Int32. Since Phase 473 the checked writer itself refuses a record whose quoted
+   strings the reader cannot read (`record_members`), so the READABILITY half of `wf_str` is enforced
+   rather than assumed; what the premise still owes is the SPELLING half — a host hands the writer
+   each string as the escapes the writer emits (`quote_body` copies an `OLit` it does not re-spell),
+   a property of the model's alphabet bridge that no check on the written text can establish. *)
 [@@ noextract_to "FSharp"]
 let witness_rt (#op: Type) (w: witness op) : Tot prop =
   forall (o: op). {:pattern (w.enc o)} w.dec (w.enc o) == Ok o
@@ -2282,6 +2302,14 @@ let rec oks_list (#op: Type) (rs: list (lrec op)) : Tot (list (res (lrec op) usi
 
 #push-options "--fuel 2 --ifuel 2"
 (* The checked writer's lines are the record lines, every one clean. *)
+(* A record whose members all read is one whose embedded span reads (Phase 473). *)
+[@@ noextract_to "FSharp"]
+let record_members_op_ok (#op: Type) (w: witness op) (r: lrec op)
+  : Lemma (requires first_unreadable (record_members w r) == None) (ensures check_raw (w.enc r.lop) == Ok ()) =
+  match check_raw (encode_actor r.lactor) with
+  | Error _ -> ()
+  | Ok _ -> (match check_raw (w.enc r.lop) with Error _ -> () | Ok _ -> ())
+
 [@@ noextract_to "FSharp"]
 let rec checked_lines_ok (#op: Type) (w: witness op) (k: nat) (rs: list (lrec op)) (ls: list (list ch))
   : Lemma (requires records_wf rs /\ checked_lines w k rs == Ok ls)
@@ -2290,9 +2318,10 @@ let rec checked_lines_ok (#op: Type) (w: witness op) (k: nat) (rs: list (lrec op
   match rs with
   | [] -> ()
   | r :: rest ->
-    (match check_raw (w.enc r.lop) with
-     | Error _ -> ()
-     | Ok _ ->
+    (match first_unreadable (record_members w r) with
+     | Some _ -> ()
+     | None ->
+       record_members_op_ok w r;
        check_raw_ok (w.enc r.lop);
        clean_line r.lseq r.lactor (w.enc r.lop) r.lprev r.lhash;
        (match checked_lines w (k + 1) rest with
@@ -2310,9 +2339,10 @@ let rec scan_written (#op: Type) (ws: ch -> bool) (w: witness op) (k: nat) (rs: 
   | [] -> ()
   | r :: rest ->
     let span = w.enc r.lop in
-    (match check_raw span with
-     | Error _ -> ()
-     | Ok _ ->
+    (match first_unreadable (record_members w r) with
+     | Some _ -> ()
+     | None ->
+       record_members_op_ok w r;
        (match checked_lines w (k + 1) rest with
         | Error _ -> ()
         | Ok ls' ->
@@ -2502,6 +2532,15 @@ let twin_arr_sep: list ch = [CLBrace; CQuote; CLa; CQuote; CColon; CLBrack; CD1;
 
 let twin_mixed_reads (_: unit) : Tot bool = Ok? (parse_line 1 twin_mixed)
 
+(* Phase 473 — a record whose actor id is an unpaired raw surrogate is refused at WRITE, by member. *)
+let twin_lone_rec: lrec (list ch) =
+  { lseq = 0; lactor = AHuman [OLit (CHiSur "h")]; lop = [CLBrace; CRBrace]; lprev = []; lhash = [OLit CLa] }
+
+let twin_writer_refuses (_: unit) : Tot bool =
+  match try_to_jsonl twin_w [twin_lone_rec] with
+  | Error f -> f.wline = 1 && f.wmember = k_actor && Unreadable? f.wreason
+  | Ok _ -> false
+
 let twins : list twin = [
   { tname = "a-repeated-key-is-refused-at-its-second-quote";
     tholds = (fun () -> parse_line 1 twin_dup = Error ({ fline = 1; fpos = 7; freason = RepeatedKey [SKey [OLit CLa]] })) };
@@ -2515,6 +2554,7 @@ let twins : list twin = [
     tholds = (fun () ->
       parse_line 1 twin_lone = Error ({ fline = 1; fpos = 7; freason = LoneSurrogate [SKey [OLit CLa]; SIdx 0] })) };
   { tname = "a-pair-split-between-spellings-is-read"; tholds = twin_mixed_reads };
+  { tname = "the-writer-refuses-a-string-the-reader-would-refuse"; tholds = twin_writer_refuses };
   { tname = "array-items-need-a-separator";
     tholds = (fun () -> parse_line 1 twin_arr_sep = Error ({ fline = 1; fpos = 8; freason = ExpectedCommaOrBracket })) };
   { tname = "parse-line-reads-one-member-at-its-position";

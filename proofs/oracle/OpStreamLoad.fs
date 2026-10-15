@@ -2068,27 +2068,42 @@ let record_line = (fun ( r  :  lrec<'op> ) ( op_json  :  Prims.list<JsonParse.ch
 let to_jsonl = (fun ( w  :  witness<'op> ) ( rs  :  Prims.list<lrec<'op>> ) -> (join_sep JsonParse.CNewline (map (fun ( r  :  lrec<'op> ) -> (record_line r (w.enc r.lop))) rs)))
 
 
+let record_members = (fun ( w  :  witness<'op> ) ( r  :  lrec<'op> ) -> (((k_actor), ((encode_actor r.lactor))))::(((k_op), ((w.enc r.lop))))::(((k_prev_hash), ((quote_str r.lprev))))::(((k_hash), ((quote_str r.lhash))))::[])
+
+
+let rec first_unreadable : Prims.list<(Prims.list<JsonParse.ch> * Prims.list<JsonParse.ch>)>  ->  FStar_Pervasives_Native.option<(Prims.list<JsonParse.ch> * wreason)> = (fun ( ms  :  Prims.list<(Prims.list<JsonParse.ch> * Prims.list<JsonParse.ch>)> ) -> (match (ms) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k, t))::rest -> begin
+     (match ((check_raw t)) with
+| Error (why) -> begin
+     FStar_Pervasives_Native.Some (((k), (why)))
+     end
+| Ok (uu___) -> begin
+     (first_unreadable rest)
+     end)
+     end))
+
+
 let rec checked_lines = (fun ( w  :  witness<'op> ) ( i  :  Prims.nat ) ( rs  :  Prims.list<lrec<'op>> ) -> (match (rs) with
 | [] -> begin
      Ok ([])
      end
 | (r)::rest -> begin
-     (
-
-let span = (w.enc r.lop)
-in (match ((check_raw span)) with
-| Error (why) -> begin
-     Error ({wline = (i + (Prims.parse_int "1")); wmember = k_op; wreason = why})
+     (match ((first_unreadable (record_members w r))) with
+| FStar_Pervasives_Native.Some (k, why) -> begin
+     Error ({wline = (i + (Prims.parse_int "1")); wmember = k; wreason = why})
      end
-| Ok (uu___) -> begin
+| FStar_Pervasives_Native.None -> begin
      (match ((checked_lines w (i + (Prims.parse_int "1")) rest)) with
 | Error (f) -> begin
      Error (f)
      end
 | Ok (ls) -> begin
-     Ok (((record_line r span))::ls)
+     Ok (((record_line r (w.enc r.lop)))::ls)
      end)
-     end))
+     end)
      end))
 
 
@@ -2555,7 +2570,25 @@ let twin_mixed_reads : unit  ->  Prims.bool = (fun ( uu___  :  unit ) -> (match 
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "a-repeated-key-is-refused-at-its-second-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_dup) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "7"); freason = RepeatedKey ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::[])}))))})::({tname = "a-repeated-key-in-a-value-is-refused-at-its-path"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_nested_dup) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "12"); freason = RepeatedKey ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::(SKey ((JsonParse.OLit (JsonParse.CLb))::[]))::[])}))))})::({tname = "a-raw-control-in-a-string-is-refused-at-the-character"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_tab) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "6"); freason = RawControl ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::[])}))))})::({tname = "a-raw-lone-surrogate-is-refused-at-the-unit"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_lone) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "7"); freason = LoneSurrogate ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::(SIdx ((Prims.parse_int "0")))::[])}))))})::({tname = "a-pair-split-between-spellings-is-read"; tholds = twin_mixed_reads})::({tname = "array-items-need-a-separator"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_arr_sep) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "8"); freason = ExpectedCommaOrBracket}))))})::({tname = "parse-line-reads-one-member-at-its-position"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_line1) (Ok ({lnum = (Prims.parse_int "1"); ltext = twin_line1; lfields = ({mkey = (JsonParse.OLit (JsonParse.CLa))::[]; mspan = (JsonParse.CD1)::[]; mpos = (Prims.parse_int "5")})::[]}))))})::({tname = "a-truncated-line-is-refused-past-its-end"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "3") twin_cut) (Error ({fline = (Prims.parse_int "3"); fpos = (Prims.parse_int "5"); freason = Truncated}))))})::({tname = "unquote-reads-back-what-quote-wrote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unquote (quote_str ((JsonParse.OLit (JsonParse.CLa))::(JsonParse.OEsc (JsonParse.CLn))::(JsonParse.OUni (JsonParse.CD0, JsonParse.CD0, JsonParse.CD0, JsonParse.CD1))::[]))) (Ok ((JsonParse.OLit (JsonParse.CLa))::(JsonParse.OEsc (JsonParse.CLn))::(JsonParse.OUni (JsonParse.CD0, JsonParse.CD0, JsonParse.CD0, JsonParse.CD1))::[]))))})::({tname = "read-int-reads-a-negative-numeral"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_int ((JsonParse.CMinus)::(JsonParse.CD4)::(JsonParse.CD2)::[])) (FStar_Pervasives_Native.Some ((Prims.parse_int "-42")))))})::({tname = "read-int-refuses-a-leading-zero"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_int ((JsonParse.CD0)::(JsonParse.CD7)::[])) FStar_Pervasives_Native.None))})::({tname = "check-raw-admits-an-object-and-refuses-trailing-space"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (check_raw ((JsonParse.CLBrace)::(JsonParse.CRBrace)::[])) (Ok (()))) && (Prims.op_Equals (check_raw ((JsonParse.CD1)::(JsonParse.CSpace)::[])) (Error (NotTrimStable)))))})::({tname = "split-lines-normalises-crlf"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (split ((JsonParse.CLa)::(JsonParse.CReturn)::(JsonParse.CNewline)::(JsonParse.CLb)::[])) (((JsonParse.CLa)::[])::((JsonParse.CLb)::[])::[])))})::({tname = "strings-field-reads-an-array-of-strings"; tholds = twin_strings})::({tname = "actor-field-reads-a-human"; tholds = twin_human})::({tname = "from-jsonl-loads-what-try-to-jsonl-wrote"; tholds = twin_round_trip})::({tname = "a-fault-on-the-second-line-names-it"; tholds = twin_second_line})::[]
+let twin_lone_rec : lrec<Prims.list<JsonParse.ch>> = {lseq = (Prims.parse_int "0"); lactor = AHuman ((JsonParse.OLit (JsonParse.CHiSur ("h")))::[]); lop = (JsonParse.CLBrace)::(JsonParse.CRBrace)::[]; lprev = []; lhash = (JsonParse.OLit (JsonParse.CLa))::[]}
+
+
+let twin_writer_refuses : unit  ->  Prims.bool = (fun ( uu___  :  unit ) -> (match ((try_to_jsonl twin_w ((twin_lone_rec)::[]))) with
+| Error (f) -> begin
+     (((Prims.op_Equals f.wline (Prims.parse_int "1")) && (Prims.op_Equals f.wmember k_actor)) && (match (f.wreason) with
+| Unreadable (r) -> begin
+     true
+     end
+| uu___1 -> begin
+     false
+     end))
+     end
+| Ok (uu___1) -> begin
+     false
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "a-repeated-key-is-refused-at-its-second-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_dup) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "7"); freason = RepeatedKey ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::[])}))))})::({tname = "a-repeated-key-in-a-value-is-refused-at-its-path"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_nested_dup) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "12"); freason = RepeatedKey ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::(SKey ((JsonParse.OLit (JsonParse.CLb))::[]))::[])}))))})::({tname = "a-raw-control-in-a-string-is-refused-at-the-character"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_tab) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "6"); freason = RawControl ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::[])}))))})::({tname = "a-raw-lone-surrogate-is-refused-at-the-unit"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_lone) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "7"); freason = LoneSurrogate ((SKey ((JsonParse.OLit (JsonParse.CLa))::[]))::(SIdx ((Prims.parse_int "0")))::[])}))))})::({tname = "a-pair-split-between-spellings-is-read"; tholds = twin_mixed_reads})::({tname = "the-writer-refuses-a-string-the-reader-would-refuse"; tholds = twin_writer_refuses})::({tname = "array-items-need-a-separator"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_arr_sep) (Error ({fline = (Prims.parse_int "1"); fpos = (Prims.parse_int "8"); freason = ExpectedCommaOrBracket}))))})::({tname = "parse-line-reads-one-member-at-its-position"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "1") twin_line1) (Ok ({lnum = (Prims.parse_int "1"); ltext = twin_line1; lfields = ({mkey = (JsonParse.OLit (JsonParse.CLa))::[]; mspan = (JsonParse.CD1)::[]; mpos = (Prims.parse_int "5")})::[]}))))})::({tname = "a-truncated-line-is-refused-past-its-end"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_line (Prims.parse_int "3") twin_cut) (Error ({fline = (Prims.parse_int "3"); fpos = (Prims.parse_int "5"); freason = Truncated}))))})::({tname = "unquote-reads-back-what-quote-wrote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unquote (quote_str ((JsonParse.OLit (JsonParse.CLa))::(JsonParse.OEsc (JsonParse.CLn))::(JsonParse.OUni (JsonParse.CD0, JsonParse.CD0, JsonParse.CD0, JsonParse.CD1))::[]))) (Ok ((JsonParse.OLit (JsonParse.CLa))::(JsonParse.OEsc (JsonParse.CLn))::(JsonParse.OUni (JsonParse.CD0, JsonParse.CD0, JsonParse.CD0, JsonParse.CD1))::[]))))})::({tname = "read-int-reads-a-negative-numeral"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_int ((JsonParse.CMinus)::(JsonParse.CD4)::(JsonParse.CD2)::[])) (FStar_Pervasives_Native.Some ((Prims.parse_int "-42")))))})::({tname = "read-int-refuses-a-leading-zero"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_int ((JsonParse.CD0)::(JsonParse.CD7)::[])) FStar_Pervasives_Native.None))})::({tname = "check-raw-admits-an-object-and-refuses-trailing-space"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (check_raw ((JsonParse.CLBrace)::(JsonParse.CRBrace)::[])) (Ok (()))) && (Prims.op_Equals (check_raw ((JsonParse.CD1)::(JsonParse.CSpace)::[])) (Error (NotTrimStable)))))})::({tname = "split-lines-normalises-crlf"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (split ((JsonParse.CLa)::(JsonParse.CReturn)::(JsonParse.CNewline)::(JsonParse.CLb)::[])) (((JsonParse.CLa)::[])::((JsonParse.CLb)::[])::[])))})::({tname = "strings-field-reads-an-array-of-strings"; tholds = twin_strings})::({tname = "actor-field-reads-a-human"; tholds = twin_human})::({tname = "from-jsonl-loads-what-try-to-jsonl-wrote"; tholds = twin_round_trip})::({tname = "a-fault-on-the-second-line-names-it"; tholds = twin_second_line})::[]
 
 
 

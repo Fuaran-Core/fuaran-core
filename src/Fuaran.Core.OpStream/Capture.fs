@@ -344,7 +344,16 @@ module internal OpStreamCapture =
         captures |> List.map (fun c -> captureLine c c.Value) |> String.concat "\n"
 
     let tryCaptureToJsonl (captures: EffectCapture list) : Result<string, JsonlWriteFault> =
-        checkedLines "value" (fun (c: EffectCapture) -> c.Value) captureLine captures
+        checkedLines
+            "value"
+            (fun (c: EffectCapture) ->
+                [ "eff", jstr c.Eff
+                  "det", jstr c.Determinism
+                  "value", c.Value
+                  "prevHash", jstr c.PrevHash
+                  "hash", jstr c.Hash ])
+            captureLine
+            captures
 
     let captureFromJsonl (text: string) : Result<EffectCapture list, string> =
         text

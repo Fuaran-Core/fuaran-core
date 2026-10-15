@@ -929,6 +929,38 @@ let tests =
 
                   Expect.equal mW pW "tryToJsonl refuses an embedding both sides alike"
 
+              // Phase 473: the strings the writer quotes itself are checked too, by member, in line
+              // order — an unpaired surrogate in the actor, prevHash or hash is refused alike.
+              let lone = string (char 0xD83D)
+
+              match p |> List.head |> (fun (rs, _, _) -> rs) with
+              | r :: _ ->
+                  for bad in
+                      [ { r with Actor = Human("a" + lone) }
+                        { r with PrevHash = lone }
+                        { r with Hash = "h" + lone }
+                        { r with
+                            Actor = Human lone
+                            Hash = lone } ] do
+                      let pW =
+                          match OpStream.tryToJsonl w [ bad ] with
+                          | Ok t -> "Ok " + t
+                          | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
+
+                      let mW =
+                          match M.try_to_jsonl (mWitness w) [ mRecord w bad ] with
+                          | M.Ok text -> "Ok " + tokStr text
+                          | M.Error f ->
+                              sprintf
+                                  "Error line %d member %s: %s"
+                                  (int f.wline)
+                                  (tokStr f.wmember)
+                                  (mWreason f.wreason)
+
+                      Expect.stringStarts pW "Error" "production refuses a quoted unpaired surrogate"
+                      Expect.equal mW pW "tryToJsonl refuses a quoted string both sides alike"
+              | [] -> failtest "no written record to edit"
+
               // A negative sequence number: the scan admits it, the walk refuses it. The one
               // field the model's unary position cannot spell is the break's `got` text.
               let neg = List.head written |> fun t -> t.Replace("\"seq\":0,", "\"seq\":-1,")

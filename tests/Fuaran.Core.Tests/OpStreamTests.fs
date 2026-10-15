@@ -1291,6 +1291,89 @@ let checkedWriterTests =
                   Expect.equal (Dag.tryToJsonl id dag) (Ok(Dag.toJsonl id dag)) "a faithful DAG writes unchanged"
               | Error e -> failtestf "dag append failed: %A" e
 
+          testCase
+              "Phase 473: every checked writer refuses an unpaired surrogate in a string it quotes itself, by member"
+          <| fun _ ->
+              // The text the unchecked writer produces for the same value is refused by the strict
+              // reader (Phase 466) — that is what makes the write-side refusal a go-red, not a choice.
+              let lone = string (char 0xD83D)
+
+              let readerRefuses (text: string) =
+                  text.Split '\n'
+                  |> Array.exists (fun line -> Result.isError (OpStream.Jsonl.parseLine 1 line))
+
+              let refused (what: string) (wanted: string) (checkedResult: Result<string, JsonlWriteFault>) unchecked =
+                  match checkedResult with
+                  | Error f -> Expect.equal (f.Line, f.Member) (1, wanted) (what + ": refused at the write, by member")
+                  | Ok _ -> failtestf "%s: written" what
+
+                  Expect.isTrue (readerRefuses unchecked) (what + ": the unchecked text is refused at the read")
+
+              match rawChain [ "1" ] with
+              | [ r ] ->
+                  for wanted, bad in
+                      [ "actor", { r with Actor = Human("a" + lone) }
+                        "prevHash", { r with PrevHash = lone }
+                        "hash", { r with Hash = lone + "h" } ] do
+                      refused
+                          ("record " + wanted)
+                          wanted
+                          (OpStream.tryToJsonl rawWitness [ bad ])
+                          (OpStream.toJsonl rawWitness [ bad ])
+              | other -> failtestf "expected one record, got %A" other
+
+              let _, caps =
+                  OpStream.captureEffect OpStream.defaultHash id "clock" "t" (fun () -> "5") []
+
+              match caps with
+              | [ c ] ->
+                  for wanted, bad in
+                      [ "eff", { c with Eff = lone }
+                        "det", { c with Determinism = lone }
+                        "prevHash", { c with PrevHash = lone }
+                        "hash", { c with Hash = lone } ] do
+                      refused
+                          ("capture " + wanted)
+                          wanted
+                          (OpStream.tryCaptureToJsonl [ bad ])
+                          (OpStream.captureToJsonl [ bad ])
+              | other -> failtestf "expected one capture, got %A" other
+
+              match fullStream [ Inc 5 ] with
+              | Ok(_, recs) ->
+                  match compactedAt SnapshotMode.Strict recs 1 with
+                  | Ok c ->
+                      for wanted, bad in
+                          [ "prevHash", { c.Snapshot with PrevHash = lone }
+                            "hash", { c.Snapshot with Hash = lone } ] do
+                          refused
+                              ("snapshot " + wanted)
+                              wanted
+                              (OpStream.Snapshots.tryToJsonl enc bad)
+                              (OpStream.Snapshots.toJsonl enc bad)
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+              match Dag.append OpStream.defaultHash rawWitness (Human "t") "5" "" Dag.empty with
+              | Ok(_, dag) ->
+                  let edit (f: DagNode<string> -> DagNode<string>) =
+                      let nodes =
+                          dag.Nodes
+                          |> Map.toList
+                          |> List.map (fun (_, n) -> let e = f n in e.Id, e)
+                          |> Map.ofList
+
+                      match Dag.ofNodes nodes with
+                      | Ok d -> d
+                      | Error e -> failwithf "ofNodes refused the edited map: %A" e
+
+                  for wanted, bad in
+                      [ "id", edit (fun n -> { n with Id = lone })
+                        "parents", edit (fun n -> { n with Parents = [ lone ] })
+                        "actor", edit (fun n -> { n with Actor = Human lone }) ] do
+                      refused ("DAG " + wanted) wanted (Dag.tryToJsonl id bad) (Dag.toJsonl id bad)
+              | Error e -> failtestf "dag append failed: %A" e
+
           testCase "streamLaws' JSONL cell is red for a domain whose encoding the reader would trim"
           <| fun _ ->
               let trailing: StreamWitness<int, int, string> =

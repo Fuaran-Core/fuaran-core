@@ -202,7 +202,14 @@ module internal OpStreamSnapshot =
             lineOf snap (stateEncode snap.State)
 
         let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
-            checkedLines "state" (fun (s: Snapshot<'State>) -> stateEncode s.State) lineOf [ snap ]
+            checkedLines
+                "state"
+                (fun (s: Snapshot<'State>) ->
+                    [ "state", stateEncode s.State
+                      "prevHash", jstr s.PrevHash
+                      "hash", jstr s.Hash ])
+                lineOf
+                [ snap ]
 
         let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
             Jsonl.parseLine 1 line

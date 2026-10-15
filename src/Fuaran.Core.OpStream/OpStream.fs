@@ -334,8 +334,10 @@ module OpStream =
     /// `toJsonl` that refuses what the reader cannot read back (Phase 301). Every op's encoding is
     /// checked before a line is built (`Jsonl.checkRaw`): one carrying a line break, whitespace either
     /// side of the value, or anything but one JSON value would read back changed — split across lines,
-    /// or trimmed — and the read-back chain would fail `verifyChain`. The first such record is the
-    /// `Error`, by its 1-based line and member (`op`). On `Ok` the text is `toJsonl`'s, byte for byte,
+    /// or trimmed — and the read-back chain would fail `verifyChain`. Since Phase 473 the strings the
+    /// writer quotes itself (`actor`, `prevHash`, `hash`) are checked too, in line order, so an unpaired
+    /// surrogate in one is refused here rather than by the strict reader. The first such record is the
+    /// `Error`, by its 1-based line and member. On `Ok` the text is `toJsonl`'s, byte for byte,
     /// and `fromJsonl` reads it back to records that `toJsonl` writes identically.
     let tryToJsonl
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -617,8 +619,8 @@ module OpStream =
             OpStreamSnapshot.Snapshots.toJsonl stateEncode snap
 
         /// `toJsonl` that refuses a state encoding the reader cannot read back (Phase 301) — the
-        /// `Jsonl.checkRaw` check over `stateEncode snap.State`, refused as line 1, member `state`. On
-        /// `Ok` the line is `toJsonl`'s, byte for byte.
+        /// `Jsonl.checkRaw` check over `stateEncode snap.State`, and since Phase 473 over `prevHash` and
+        /// `hash`, refused as line 1 by member. On `Ok` the line is `toJsonl`'s, byte for byte.
         let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
             OpStreamSnapshot.Snapshots.tryToJsonl stateEncode snap
 
@@ -882,7 +884,8 @@ module OpStream =
     let captureToJsonl (captures: EffectCapture list) : string = OpStreamCapture.captureToJsonl captures
 
     /// `captureToJsonl` that refuses a captured value the reader cannot read back (Phase 301) — the
-    /// `Jsonl.checkRaw` check over each `Value` (member `value`). A capture's value is hashed raw, so
+    /// `Jsonl.checkRaw` check over each `Value` (member `value`), and since Phase 473 over the `eff`,
+    /// `det`, `prevHash` and `hash` strings it quotes, by member. A capture's value is hashed raw, so
     /// a value with a line break or whitespace either side read back changed and failed
     /// `verifyCaptures`. On `Ok` the text is `captureToJsonl`'s, byte for byte.
     let tryCaptureToJsonl (captures: EffectCapture list) : Result<string, JsonlWriteFault> =
