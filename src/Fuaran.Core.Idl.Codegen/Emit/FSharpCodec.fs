@@ -375,6 +375,19 @@ let private encFloat (f: float) : JVal =
         // Phase 689 — a `TFn` slot decodes to its declared placeholder. There is
         // nothing on the wire to rebuild a closure from, so the decoded tree is the
         // storage shape and the placeholder is what a host re-attaches over.
+        //
+        // Phase 460 — WHAT A PLACEHOLDER MAY NAME (contract). The placeholder is spliced
+        // verbatim into the short-circuiting `dec*` decoder AND, under
+        // `Gen.Derivation.SpecDecoders`, into its collecting `col*` twin (as a lifted leaf),
+        // so it may reference only what both scopes bind:
+        //   * the module's prelude and its generated `dec*` decoders (`decNode`, `dec<Union>`,
+        //     `dec<Record>`, `dec<Enum>`);
+        //   * inside a parameterised union, each type parameter's short-circuiting decoder,
+        //     `dec<V>: JVal -> Result<'V, DecodeError>` — the short-circuiting decoder's
+        //     parameter, and a local the collecting decoder binds under the same name.
+        // `col<V>`, `__j`, `__fs`, `j` and every member binding are emitter internals, not
+        // contract (some differ between the two decoders or between field positions); a
+        // placeholder naming one is outside the contract.
         | TFn s ->
             Ok(sprintf "(fun (__j: JVal) -> dSentinel \"<closure>\" __j |> Result.map (fun () -> %s))" s.Placeholder)
         // Phase 676 — accept any JSON verbatim; a shape check would contradict the
@@ -778,13 +791,20 @@ let private encFloat (f: float) : JVal =
 
         let tyArgs = objParams msg u.Name u.Params
 
+        // Phase 460 — each type parameter's SHORT-CIRCUITING decoder, bound under the name the
+        // short-circuiting emitter gives its parameter (`dec<V>`), so a placeholder that names it
+        // compiles in both decoders (the contract is stated at [[decFn]]'s `TFn` arm); the refined
+        // case's twin below takes the same bindings.
+        let decBindings =
+            u.Params
+            |> List.map (fun p -> sprintf "    let dec%s (__j: JVal) = cFirst (col%s __j)\n" p p)
+            |> String.concat ""
+
         // The short-circuiting twin, handed each collecting codec's first defect.
         let decApplied =
             "dec"
             + u.Name
-            + (u.Params
-               |> List.map (fun p -> sprintf " (fun __j -> cFirst (col%s __j))" p)
-               |> String.concat "")
+            + (u.Params |> List.map (fun p -> " dec" + p) |> String.concat "")
 
         let ctor (c: IdlUnionCase) =
             match c.Fields with
@@ -848,12 +868,13 @@ let private encFloat (f: float) : JVal =
             fallthrough
             |> Result.map (fun fall ->
                 sprintf
-                    "and private col%s%s%s (j: JVal) : Result<%s%s, DecodeError list> =\n    match j with\n%s\n%s"
+                    "and private col%s%s%s (j: JVal) : Result<%s%s, DecodeError list> =\n%s    match j with\n%s\n%s"
                     u.Name
                     declArgs
                     colArgs
                     u.Name
                     tyArgs
+                    decBindings
                     tagged
                     fall))
 

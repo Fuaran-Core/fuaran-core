@@ -145,6 +145,21 @@ let private pReason (r: JsonlFaultReason) : string =
     | JsonlFaultReason.SnapshotNotAtHead -> "SnapshotNotAtHead"
     | JsonlFaultReason.Refused why -> "Refused(" + why + ")"
     | JsonlFaultReason.ActorInvalid(f, ActorInvalid.EmptyId) -> "ActorInvalid(" + f + ",EmptyId)"
+    | JsonlFaultReason.ExpectedCommaOrBracket -> "ExpectedCommaOrBracket"
+    | JsonlFaultReason.RepeatedKey path -> "RepeatedKey(" + path + ")"
+    | JsonlFaultReason.RawControl path -> "RawControl(" + path + ")"
+    | JsonlFaultReason.LoneSurrogate path -> "LoneSurrogate(" + path + ")"
+
+/// A model path as production renders one (Phase 466): `$`, then each key under the host's quote
+/// of its decoded spelling, or each index.
+let private mPath (p: M.seg list) : string =
+    "$"
+    + (p
+       |> List.map (fun seg ->
+           match seg with
+           | M.SKey k -> "[" + quoteFn (ochsStr k) + "]"
+           | M.SIdx i -> "[" + string i + "]")
+       |> String.concat "")
 
 let private mReason (r: M.reason) : string =
     match r with
@@ -168,6 +183,10 @@ let private mReason (r: M.reason) : string =
     | M.RefusedNoKind -> "Refused(the actor carries no kind)"
     | M.RefusedKind k -> "Refused(unknown actor kind \"" + ochsStr k + "\")"
     | M.ActorInvalid f -> "ActorInvalid(" + tokStr f + ",EmptyId)"
+    | M.ExpectedCommaOrBracket -> "ExpectedCommaOrBracket"
+    | M.RepeatedKey p -> "RepeatedKey(" + mPath p + ")"
+    | M.RawControl p -> "RawControl(" + mPath p + ")"
+    | M.LoneSurrogate p -> "LoneSurrogate(" + mPath p + ")"
 
 let private pFault (f: JsonlFault) : string =
     sprintf "line %d pos %d: %s" f.Line f.Position (pReason f.Reason)
@@ -368,7 +387,12 @@ let private mutationChars: char[] =
        'e'
        '.'
        '\u00A0'
-       't' |]
+       't'
+       // Phase 466: a raw control and each raw surrogate half, which the strict reader refuses
+       // unpaired.
+       char 0x01
+       char 0xD83D
+       char 0xDE00 |]
 
 /// One mutation of a text: a character replaced, dropped or inserted; the text truncated; a
 /// line interleaved (blank, snapshot, a foreign object, a repeated-key record); a numeral
@@ -442,6 +466,41 @@ let private hostileLines: string list =
         "{\"\\n\":1}"
         "{\"a\":1,\"a\":2}"
         "{\"a\":1,\"b\":2,\"a\":3}"
+        // Phase 466 — the strict grammar at every depth: repeated keys by path, raw controls and
+        // raw surrogate halves, pairs split between spellings, and nested container grammar.
+        "{\"a\":{\"b\":1,\"b\":2}}"
+        "{\"a\":[{\"b\":1},{\"b\":1,\"c\":[1,{\"d\":2,\"d\":3}]}]}"
+        "{\"a\":{\"b\":1},\"b\":{\"a\":1}}"
+        "{\"a\":1,\"a\":[1,,2]}"
+        "{\"a\":\"x\ty\"}"
+        "{\"a\":[\"x\", \"" + string (char 0x1F) + "\"]}"
+        "{\"k" + string (char 0x01) + "\":1}"
+        "{\"o\":{\"k" + string (char 0x01) + "\":1}}"
+        "{\"a\":\"" + string (char 0xD83D) + "\"}"
+        "{\"a\":\"" + string (char 0xD83D) + string (char 0xDE00) + "\"}"
+        "{\"a\":\"" + string (char 0xDE00) + "\"}"
+        "{\"a\":\"" + string (char 0xD83D) + "\\n\"}"
+        "{\"a\":\"" + string (char 0xD83D) + "\\x\"}"
+        "{\"a\":\"" + string (char 0xD83D) + string (char 0x01) + "\"}"
+        "{\"a\":\"" + string (char 0xD83D) + "\\uDE00\"}"
+        "{\"a\":\"" + string (char 0xD83D) + "\\u0041\"}"
+        "{\"a\":\"" + string (char 0xD83D) + "\\u12\"}"
+        "{\"a\":\"" + string (char 0xD83D)
+        "{\"a\":\"" + string (char 0xD83D) + "\\"
+        "{\"a\":\"\\uD83D" + string (char 0xDE00) + "\"}"
+        "{\"a\":\"\\uD83D" + string (char 0xD83D) + "\"}"
+        "{\"a\":[1 2]}"
+        "{\"a\":[1,]}"
+        "{\"a\":[,1]}"
+        "{\"a\":[1}"
+        "{\"a\":{\"b\":1]}"
+        "{\"a\":{\"b\":1,}}"
+        "{\"a\":{\"b\"}}"
+        "{\"a\":{1:2}}"
+        "{\"a\":[tru]}"
+        "{\"a\":[[[[[]]]]]}"
+        "{\"a\":[{\"b\":[1"
+        "{\"a\":[1,2]]}"
         "{\"snapshot\":true}"
         "{\"snapshot\":true,\"op\":1}"
         "{\"op\":1,\"snapshot\":true}"

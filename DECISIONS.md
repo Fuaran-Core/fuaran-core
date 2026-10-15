@@ -1,13 +1,13 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-15 — D158: Core's parser takes a limits record and enforces it on the way down, so a wire host bounds the parse through Core alone; Core still states no limit values and is not a section-21 host; a breach is a typed outcome and never malformed JSON; D84's "no shared limits-taking entry point" clause is refined
+## 2026-10-15 — D159: Core's parser takes a limits record and enforces it on the way down, so a wire host bounds the parse through Core alone; Core still states no limit values and is not a section-21 host; a breach is a typed outcome and never malformed JSON; D84's "no shared limits-taking entry point" clause is refined
 
 **Recorded by Phase 465. ADDITIVE, riding the `0.38.0` draft (`docs/releases/0.38.0.md`).
 `proofs/JsonParse.fst` (and its extracted oracle), `proofs/Limits.fst`, `src/Fuaran.Core.Wire/Json.fs`,
 `DecodeError.fs`, `Decoder.fs`, `conformance/decode/`, `docs/conformance-corpus.md` ("The limits"),
 `proofs.json`. Requirement `suggest-2026-10-15-core-json-syntax-and-rust-spine`, clause S3.**
 
-**D158.1 — the ruling, and what it refines.** The operator ruled on 2026-10-15, refining D84: *"Core is
+**D159.1 — the ruling, and what it refines.** The operator ruled on 2026-10-15, refining D84: *"Core is
 still NOT a section-21 host and states no limit VALUES; it gains only the MECHANISM, a parse entry point
 taking a limits record enforced on the way down."* D84's ruling (b) stands in every clause but one: the
 limit values, their units and the error envelope belong to each wire specification, Core's 512 nesting
@@ -24,7 +24,7 @@ not: `Json.parseWithLimits policy limits input` takes a `JsonLimits` record, a w
 specification's numbers, and nothing in Core names a number, a unit's conformance status, or a wire's
 error code.
 
-**D158.2 — the record, and what each bound counts.** `JsonLimits` carries five bounds: `MaxDepth` (nested
+**D159.2 — the record, and what each bound counts.** `JsonLimits` carries five bounds: `MaxDepth` (nested
 objects and arrays admitted, the root counting as one — the cap every entry point already had),
 `MaxStringLength` (Unicode code points in ONE decoded string or member key, a surrogate pair counting as
 one, whichever spelling each unit arrived in), `MaxArrayLength` (items in one array), `MaxObjectMembers`
@@ -39,7 +39,7 @@ counts can never reach `Int32.MaxValue`, so under it no breach but the depth cap
 `parse`, `parseDetailed*`, the tolerant reads, `Decoder.parse*` and `Json.Reader.read` answer every
 document exactly as before — the 512-deep stack guard and no size limit.
 
-**D158.3 — on the way down, and where each breach is raised.** The byte bound is one comparison before a
+**D159.3 — on the way down, and where each breach is raised.** The byte bound is one comparison before a
 character is read (the count is made only when the input's UTF-16 length could encode past the bound).
 The depth cap is tested at the bracket, as it always was. The items bound is tested at the array loop's
 head, before `item` is called, so the `max + 1`-th item is refused where it would start and no character
@@ -50,7 +50,7 @@ the unit is appended — on the escape-free fast path the count runs during the 
 fault in document order wins, whichever kind it is: a breach outranks malformed text after it, and
 malformed text outranks a breach after it.
 
-**D158.4 — the breach is typed, carries the path, and never echoes the input.** `JsonRefusal` is the
+**D159.4 — the breach is typed, carries the path, and never echoes the input.** `JsonRefusal` is the
 limited parse's refusal: `Malformed of JsonError` (exactly `parseDetailed`'s refusal, kind, message and
 position) or `LimitExceeded of JsonLimitBreach` — the `JsonLimit`, its `Declared` value, the `Path` to
 the container the breach was raised in (the array whose count passed the bound, the object whose count
@@ -64,7 +64,7 @@ form of the same call. The scanner tracks the path as two parallel lists, a fram
 slot ends the path at the container. `PathSegment` moves from `DecodePath.fs` to `Json.fs` to sit below
 the parser that now reports it; its full name is unchanged.
 
-**D158.5 — the model first, and what is proved.** `proofs/JsonParse.fst`'s descent takes a `lims` record
+**D159.5 — the model first, and what is proved.** `proofs/JsonParse.fst`'s descent takes a `lims` record
 (three bounds, each `Unbounded` or a budget spent as the depth cap is) and the entry point
 `parse_limited` takes a byte verdict as a parameter, as the float readback is. The descent carries the
 breach internally as an `ekind` case `LimitExceeded`, confined by the return types (`bounds_confined`)
@@ -84,7 +84,7 @@ table and a bounded soup under five records, with the platform's UTF-8 encoder a
 independent oracle, and a go-red case (a model handed a wider items bound accepts what production
 refuses). NOT modelled: the breach's path (the decode vectors pin it) and the byte count itself.
 
-**D158.6 — the vectors, and what a host owes.** The `decode/` family gains one vector per bound at the
+**D159.6 — the vectors, and what a host owes.** The `decode/` family gains one vector per bound at the
 bound (accepted) and one past it (`LimitExceeded` at the pinned path), the astral and the CJK vectors
 beside them so a host counting UTF-16 units or bytes fails by name, a key-length vector, two nested-path
 vectors, and the two first-fault-wins vectors. Each declares the record it runs under as a `limits`
@@ -97,9 +97,94 @@ excludes the family's limits vectors by name and says why, as `DecodeVectorsIdl.
 fact no `JsonError` consumer branches on, and it would carry the limit, the value and the path in a record
 built for a position and a sentence. (2) Measuring after the parse (`Json.firstRepeatedMember`'s shape):
 it cannot satisfy enforcement on the way down, which is the whole reason the mechanism exists. (3) One
-field for items and members, as the UI wire's table has it: see D158.2. (4) Modelling the path in F\*:
+field for items and members, as the UI wire's table has it: see D159.2. (4) Modelling the path in F\*:
 it would thread a path accumulator through every parser and every induction for a property the vectors
 pin exactly; the model carries the suffix, as it does for every refusal.
+## 2026-10-15 — D158: the op-stream JSONL reader reads by the strict grammar at every depth; a repeated key, a raw control and a raw unpaired surrogate are refused at the path they are at; a container value is walked by its grammar; the reader shares D157's vectors, not its code
+
+**Phase 466, the model first: `proofs/OpStreamLoad.fst` (the scanner's accept set) moved, re-verified with the
+pinned prover and re-extracted before `Jsonl.fs` did. Requirement `suggest-2026-10-15-core-json-syntax-and-rust-spine`,
+clause S4 (operator ruling 2026-10-15). Rides the `0.38.0` draft (`docs/releases/0.38.0.md`).**
+
+**D158.1 — the committed stores first.** Before the reader changed, every committed `.json` and `.jsonl`
+document in the workspace was scanned under the stricter rules, read-only, at each repository's `HEAD`
+(`git show`, so no working tree counts): a repeated member name at any depth (compared after unescaping),
+a raw U+0000 to U+001F inside a string, and a string that is not well-formed UTF-16 (escaped or raw).
+Ninety-nine repositories: 29,089 `.json` documents and 127 `.jsonl` files (67,279 lines), the 73 op-stream
+lane files among them (17,177 lines). **No `.jsonl` line breaks a rule — no op-stream line, and no line of any
+other store.** Seventeen `.json` documents do, and every one is a deliberate fixture: the five JSON reject
+vectors of the UI wire's conformance corpus (`reject-json-duplicate-key`, the two lone surrogates, the raw
+control, the split surrogate pair) in its three copies, and the two copies of a renderer test's
+`synthetic-escaping.json`, whose lone surrogate is the input it exists to escape. None is read by this reader.
+Phase 462's scan (D157.8) was the same method over a narrower set; this one read every repository's committed
+tree.
+
+**D158.2 — what the reader refuses now.** `OpStream.Jsonl` is Core's second JSON reader, kept free of a
+`Fuaran.Core.Wire` reference by D2. Phase 462's worker found it kept the FIRST value of a repeated top-level
+key (Phase 45) and passed raw controls and raw lone surrogates through. It now refuses, with three new
+`JsonlFaultReason` cases appended after every existing one (so each existing case keeps its tag), each
+naming a path spelled as `DecodePath.render` spells one (`$["op"]["items"][1]["id"]`):
+
+- **`RepeatedKey path`** — a key read twice in one object, at ANY depth, compared after unescaping. Refused
+  at the repeated key's opening quote once its value is read, so a refusal inside the value wins: the order
+  `Wire.Json` reads in (D157.2). The path is the repeated member's.
+- **`RawControl path`** — a raw U+0000 to U+001F inside a string, at the character. The path is the member
+  or item the string is in; for a key, the object that holds it (its own name is not yet read).
+- **`LoneSurrogate path`** — a RAW surrogate unit that is not half of a pair, at the unit. A raw high unit is
+  judged once what follows it is known: the end of the line is the token's `UnterminatedString`, a raw control
+  is its own refusal and an escape the grammar does not have is that escape's.
+
+An unpaired surrogate ESCAPE keeps the answer it always had (`InvalidEscape` of the escape's text at its
+backslash, six characters or twelve), so no line refused before is refused differently for it. **A pair split
+between the two spellings now READS** — an escaped high half before a raw low one, or a raw high half before an
+escaped low one — where the reader refused it: that is Phase 299's rule (well-formed UTF-16, whichever
+spelling each unit arrived in), which `Wire.Json` already held. It is the one place the change admits a line
+it refused, and it admits exactly the lines the grammar does.
+
+**D158.3 — a container value is walked by its grammar.** Until now an array or object VALUE was balanced and
+its strings checked, and the rest of its grammar was the decoder's. A repeated key inside a value cannot be
+found without reading the value's keys, and the strict grammar's vectors include values the balanced walk
+read (`[00]`, `[1,NaN]`), so `skipValue` now reads every depth: members, items, separators, literals.
+`ExpectedCommaOrBracket` is new for an array's separator. A line ending inside a value is still
+`UnterminatedContainer` at the OUTERMOST opening, where the balanced walk refused it. The walk keeps an explicit
+stack of open containers, so no depth of nesting exhausts the call stack (the model's recursion is that
+stack). Every reader built on the scanner inherits it: `fromJsonl*`, `Snapshots.ofJsonl`, `captureFromJsonl`,
+`Attributed.decodeEnvelope`, `Dag.fromJsonl`, and `checkRaw` under every checked writer.
+
+**D158.4 — the model.** `string_tail` gains the path and the three string rules; `skip_val` / `obj_members` /
+`arr_items` replace the balanced `skip_container`; `members_loop` refuses a repeated key where `first_wins`
+dropped it. All three Phase-454 theorems are re-proved: totality by typing, faults locate (a new refusal's
+position is within its line like every other), and the round trip, whose premise `wf_str` now also excludes a
+raw control and an unpaired surrogate. That narrowing is the change itself: a record carrying such a string
+is not one a reader of the strict grammar reads back. Six twins pin the new answers. One boundary is new and
+recorded in the model's header: the model compares keys by their SPELLING (it has no code units), production
+after unescaping, so the two agree wherever keys are spelled without escapes, which the differential's
+generators keep.
+
+**D158.5 — certified against the grammar's vectors.** `JsonlStrictGrammar` reads every vector of the
+`refusals/` family that applies to a line twice — as a member's value, and as the line itself when it is an
+object — and holds the line reader to the grammar's verdict in the matching class (`DuplicateMember` →
+`RepeatedKey`; `BadEscape` → `RawControl`, `InvalidEscape` or `LoneSurrogate`; `MalformedNumber` and
+`UnexpectedChar` → `InvalidLiteral`; `TrailingCharacters` → `ExpectedCommaOrBrace` or `TrailingContent`).
+Column vectors the column codec refuses over well-formed JSON must READ at the line. **Two classes do not
+apply, named in the suite rather than skipped:** `overflowing-exponent` (`1e999`), a value-domain refusal
+(Core's value model has no non-finite float, D157.2) where the line grammar reads a number token and hands the
+span to its decoder; and every wire-profile vector, which is not JSON text. The cases a JSON file cannot spell
+(a raw lone surrogate) are pinned beside them, with positions and paths.
+
+**D158.6 — the writers are not changed here, and that is a finding routed on, not an omission.** The checked
+writers (`tryToJsonl`, `tryCaptureToJsonl`, `Snapshots.tryToJsonl`, `Dag.tryToJsonl`) check the embedded span
+(`checkRaw`, now strict). The strings they spell themselves — an actor's fields, `prevHash`, `hash`, a capture's
+`eff` and `det` — are quoted by `JsonString.quote`, which escapes every control, so only an UNPAIRED SURROGATE
+in one of them can reach a line the reader now refuses. Before this phase such a record was written and read
+back (and hashed with the platform's U+FFFD, `sha256Hash`'s note). Three of the four writers live outside this
+phase's files, so the fix — every checked writer refusing a string a reader of the grammar cannot read back,
+by member — is a successor's, filed as its own phase from this one's outcome.
+
+**D158.7 — the version.** `JsonlFaultReason` gains four cases (`union-widening`, breaking: an exhaustive match
+gains arms) and a published reader refuses lines it read. The standing `0.38.0` draft already carries the
+breaking class (D157.9), so the change RIDES it; the API baseline `api/Fuaran.Core.OpStream.txt` moves by the
+four cases. The ledger cut and the cohort raise are the slot's, not this phase's.
 
 ## 2026-10-15 — D157: Core owns the JSON-syntax layer every Fuaran wire cites; a repeated member name and a raw control inside a string are refused at every decode entry point, the model first; an erased member null is not an occurrence; first-wins (D113) is superseded; a value with a repeated member has no rendering a guarded renderer gives
 

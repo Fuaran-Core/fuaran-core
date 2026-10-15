@@ -371,16 +371,22 @@ let tests =
 
           // ---- Phase 45: scanner bounds + duplicate-key consistency ----
 
-          testCase "fromJsonl resolves a duplicate top-level key first-wins"
+          testCase "fromJsonl refuses a duplicate top-level key at its second occurrence"
           <| fun _ ->
-              // first-wins matches the JVal decoders (Decode.getProp), not the last-wins Map.ofList.
-              // The actor is the typed object since Phase 320.
+              // Phase 45 resolved a repeated key first-wins, with the JVal decoders; Phase 466 refuses
+              // it, as the strict grammar does (D157), at the repeated key's opening quote.
               let line =
                   """{"seq":0,"actor":{"kind":"human","id":"first"},"actor":{"kind":"human","id":"second"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
 
-              match OpStream.fromJsonl sw line |> Result.mapError StreamLoadFault.toString with
-              | Ok [ r ] -> Expect.equal r.Actor (Human "first") "the first occurrence of a duplicate key wins"
-              | other -> failtestf "expected one record, got %A" other
+              match OpStream.fromJsonl sw line with
+              | Error(StreamLoadFault.Unreadable(None, f)) ->
+                  Expect.equal
+                      f
+                      { Line = 1
+                        Position = line.IndexOf("\"actor\"", 20)
+                        Reason = JsonlFaultReason.RepeatedKey "$[\"actor\"]" }
+                      "the second actor is refused at its quote, by its path"
+              | other -> failtestf "expected the repeated key's refusal, got %A" other
 
           testCase "fromJsonl handles a truncated \\u escape gracefully (no opaque exception)"
           <| fun _ ->
@@ -809,12 +815,20 @@ let scannerRefusalTests =
 
           testCase "the shared scanner is public: topFields keeps raw spans byte-for-byte, rawSpan reads one"
           <| fun _ ->
-              let line = "{\"a\":{\"x\" : [1, 2]},\"b\":\"s\\n\",\"a\":3}"
+              let line = "{\"a\":{\"x\" : [1, 2]},\"b\":\"s\\n\"}"
 
               Expect.equal
                   (OpStream.Jsonl.topFields line)
                   (Ok [ "a", "{\"x\" : [1, 2]}"; "b", "\"s\\n\"" ])
-                  "raw spans, first-wins on a repeated key"
+                  "raw spans, byte for byte"
+
+              Expect.equal
+                  (OpStream.Jsonl.topFields "{\"a\":1,\"a\":3}")
+                  (Error
+                      { Line = 1
+                        Position = 7
+                        Reason = JsonlFaultReason.RepeatedKey "$[\"a\"]" })
+                  "a repeated key is refused (Phase 466; until then the first won)"
 
               Expect.equal (OpStream.Jsonl.rawSpan "b" line) (Ok(Some "\"s\\n\"")) "one member's raw span"
               Expect.equal (OpStream.Jsonl.rawSpan "z" line) (Ok None) "an absent member"

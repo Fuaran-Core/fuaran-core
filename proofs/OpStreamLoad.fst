@@ -9,8 +9,8 @@
      - `src/Fuaran.Core.OpStream/Jsonl.fs`, `OpStream.Jsonl` — the scanner: `skipString` and
        `decodeString` as ONE pass (`string_tail`: the decode is total on what the skip accepted, so
        the pass that does both answers the same fault at the same position), `isLiteral`,
-       `skipValue` with its container walk, `checkRaw`, `membersOf` with its first-wins member
-       list, `parseLine`, `topFields`, `rawSpan`, `unquote`, `lineNumber`, `lineText`, `refuse`,
+       `skipValue` with its structural walk (Phase 466: every depth read by the strict grammar),
+       `checkRaw`, `membersOf` refusing a repeated key, `parseLine`, `topFields`, `rawSpan`, `unquote`, `lineNumber`, `lineText`, `refuse`,
        `tryRawField`, `rawField`, `stringField`, `intField`, `stringsField`, `actorField`,
        `scanRecords` with the `\r\n` normalisation and the blank-line skip.
      - the loads over it: `recordLine` / `toJsonl` / `tryToJsonl` (`checkedLines`), `recordOf`,
@@ -48,8 +48,14 @@
      - The lane (`UndecodableOp.Lane` is `None` on every load of one text) and the two fault
        cases a load of one text never answers (`DuplicateLane`, `Collision`,
        `UnreadableCheckpoint`).
-     - Production's `ResizeArray` accumulators, its `Replace("\r\n", "\n").Split('\n')` and its
-       `HashSet` first-wins pass are written as the direct recursions they equal.
+     - Production's `ResizeArray` accumulators, its `Replace("\r\n", "\n").Split('\n')`, the explicit
+       stack of open containers its walk keeps (Phase 466) and its `HashSet`s of keys are written as
+       the direct recursions and lists they equal.
+     - Which keys are the SAME (Phase 466). Production compares keys after unescaping; the model,
+       which carries no code units, compares their spellings, so a key spelled `a` and one spelled
+       with the escape of `a` are one key there and two here. The two agree wherever keys are spelled
+       without escapes, which the differential's generators keep; a refusal's PATH is rendered from
+       the decoded spelling on both sides.
 
    WHAT IS PROVED — the three theorems Phase 454 states:
      1. TOTALITY (section 9). Every scanner and load is a `Tot` function: no exception path and no
@@ -160,6 +166,14 @@ let rec olit (k: list ch) : Tot (list och) (decreases k) =
    one production case (`Refused of reason: string`) whose text the model does not render: a
    witness refusal carries the witness's string, the two actor refusals are rendered by the host
    as production renders them (`"the actor carries no kind"`, `unknown actor kind "<kind>"`). *)
+
+(* F#: one step of the path a Phase-466 refusal names, root first — a member by its DECODED key
+   (here its spelling, header), an item by its zero-based index. Production renders the path as
+   `DecodePath.render` spells one: `$`, then `["key"]` or `[i]` per step. *)
+type seg =
+  | SKey : k:list och -> seg
+  | SIdx : i:nat -> seg
+
 type reason =
   | NotAnObject
   | Truncated
@@ -181,6 +195,12 @@ type reason =
   | RefusedNoKind
   | RefusedKind : kind:list och -> reason
   | ActorInvalid : field:list ch -> reason
+  (* Phase 466 — the strict grammar's three refusals, each at the path of the member or item
+     it is in, and the array's separator (a container value is walked by its grammar now). *)
+  | ExpectedCommaOrBracket
+  | RepeatedKey : path:list seg -> reason
+  | RawControl : path:list seg -> reason
+  | LoneSurrogate : path:list seg -> reason
 
 (* F#: `JsonlFault` — the 1-based line, the position within it, the reason. *)
 type fault = { fline: nat; fpos: nat; freason: reason }
@@ -228,11 +248,21 @@ let hex4 (u: list ch) : Tot (o: hex4r { H4? o ==> llen (H4?.rest o) < llen u }) 
 
 (* F#: the body of `skipString`'s loop from just past the opening quote at `start`, with
    `decodeString`'s decode folded in — each escape-free character is `OLit`, each short escape
-   `OEsc` by its letter, each `\uXXXX` `OUni` by its digits; a high surrogate escape must be
-   followed at once by a low one (both carried, in order), a lone low one is refused. Every fault
-   is at production's own index: the opening quote for an unterminated token, the backslash for
-   an escape. *)
-let rec string_tail (start: list ch) (acc: list och) (s: list ch)
+   `OEsc` by its letter, each `\uXXXX` `OUni` by its digits. Every fault is at production's own
+   index: the opening quote for an unterminated token, the backslash for an escape.
+
+   THE STRING IS WELL-FORMED UTF-16 OR IT IS REFUSED (Phase 466, the strict grammar's rule, D157
+   and Phase 299): a high surrogate is followed at once by a low one, whichever spelling each half
+   arrived in, a raw unit or a `\uXXXX` escape. A pair split between the two spellings is read
+   (both halves carried, in order). An ESCAPED half that is unpaired keeps the answer it always had,
+   `InvalidEscape` of the escape's text at its backslash (six characters for a low one, twelve for a
+   high one, whatever follows it). A RAW half that is unpaired is `LoneSurrogate` at the raw unit,
+   once what follows it is known: the end of the line is the token's `UnterminatedString`, a raw
+   control is its own refusal, and an escape the grammar does not have is that escape's.
+   A RAW CONTROL (U+0000 to U+001F, `JsonParse.is_ctrl`) is `RawControl` at the character. Both
+   new refusals name the path `pth` of the member or item the string is in; a member's KEY is in
+   the object that holds it, so a key's path is the object's. *)
+let rec string_tail (pth: list seg) (start: list ch) (acc: list och) (s: list ch)
   : Tot (r: sres (list och) { SOk? r ==> llen (SOk?.rest r) < llen s }) (decreases (llen s)) =
   match s with
   | [] -> SErr UnterminatedString start
@@ -245,7 +275,7 @@ let rec string_tail (start: list ch) (acc: list och) (s: list ch)
         | NoHex4 -> SErr (InvalidEscape (take_n 6 s)) s
         | H4 a b c d r ->
           (match uni_class a b with
-           | SNone -> string_tail start (OUni a b c d :: acc) r
+           | SNone -> string_tail pth start (OUni a b c d :: acc) r
            | SLow -> SErr (InvalidEscape (take_n 6 s)) s
            | SHigh ->
              (match r with
@@ -253,14 +283,32 @@ let rec string_tail (start: list ch) (acc: list och) (s: list ch)
                 (match hex4 u2 with
                  | H4 a2 b2 c2 d2 r2 ->
                    if uni_class a2 b2 = SLow
-                   then string_tail start (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) r2
+                   then string_tail pth start (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) r2
                    else SErr (InvalidEscape (take_n 12 s)) s
                  | NoHex4 -> SErr (InvalidEscape (take_n 12 s)) s)
+              | CLoSur y :: r2 -> string_tail pth start (OLit (CLoSur y) :: OUni a b c d :: acc) r2
               | _ -> SErr (InvalidEscape (take_n 12 s)) s)))
      | e :: u ->
-       if is_short_escape e then string_tail start (OEsc e :: acc) u
+       if is_short_escape e then string_tail pth start (OEsc e :: acc) u
        else SErr (InvalidEscape [CBackslash; e]) s)
-  | c :: t -> string_tail start (OLit c :: acc) t
+  | CHiSur x :: t ->
+    (match t with
+     | [] -> SErr UnterminatedString start
+     | CLoSur y :: r -> string_tail pth start (OLit (CLoSur y) :: OLit (CHiSur x) :: acc) r
+     | CBackslash :: t1 ->
+       (match t1 with
+        | [] -> SErr UnterminatedString start
+        | CLu :: u ->
+          (match hex4 u with
+           | NoHex4 -> SErr (InvalidEscape (take_n 6 t)) t
+           | H4 a b c d r ->
+             if uni_class a b = SLow
+             then string_tail pth start (OUni a b c d :: OLit (CHiSur x) :: acc) r
+             else SErr (LoneSurrogate pth) s)
+        | e :: _ -> if is_short_escape e then SErr (LoneSurrogate pth) s else SErr (InvalidEscape [CBackslash; e]) t)
+     | c :: _ -> if is_ctrl c then SErr (RawControl pth) t else SErr (LoneSurrogate pth) s)
+  | CLoSur _ :: _ -> SErr (LoneSurrogate pth) s
+  | c :: t -> if is_ctrl c then SErr (RawControl pth) s else string_tail pth start (OLit c :: acc) t
 
 (* ======================================================================================
    3. A value (F#: `isLiteral`, `skipValue`, `checkRaw`).
@@ -286,39 +334,94 @@ let rec bare_token (s: list ch)
     if is_terminator c then ([], s)
     else (let (tok, r) = bare_token t in (c :: tok, r))
 
-(* F#: the `while depth > 0` loop of `skipValue`, from just past the opening bracket at `start`.
-   A string inside is skipped by `string_tail`, whose fault is the one reported. *)
-let rec skip_container (start: list ch) (depth: pos) (s: list ch)
-  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) < llen s }) (decreases (llen s)) =
-  match s with
-  | [] -> SErr UnterminatedContainer start
-  | CQuote :: t ->
-    (match string_tail s [] t with
-     | SErr why at -> SErr why at
-     | SOk _ r -> skip_container start depth r)
-  | CLBrace :: t -> skip_container start (depth + 1) t
-  | CLBrack :: t -> skip_container start (depth + 1) t
-  | CRBrace :: t -> if depth = 1 then SOk () t else skip_container start (depth - 1) t
-  | CRBrack :: t -> if depth = 1 then SOk () t else skip_container start (depth - 1) t
-  | _ :: t -> skip_container start depth t
+(* Is the key already a member of the object (F#: the object's set of decoded keys)? *)
+let rec mem_key (k: list och) (seen: list (list och)) : Tot bool (decreases seen) =
+  match seen with
+  | [] -> false
+  | x :: t -> k = x || mem_key k t
 
-(* F#: `skipValue` at `start` (no leading whitespace). *)
-let skip_value (s: list ch)
-  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) <= llen s }) =
+(* F#: `skipValue`'s structural walk (Phase 466 — before it, a container value was balanced and
+   its strings checked, and its grammar beyond that was the decoder's). A value at `s` (no leading
+   whitespace) is read by the grammar at every depth: an object's members and an array's items,
+   their separators, every string and every bare literal, and an object's keys pairwise distinct
+   — a repeated key is refused at its opening quote AFTER its value is read, so a refusal inside
+   the value wins (the order `Wire.Json` reads in, D157.2). `pth` is the value's path; `start` is
+   the OUTERMOST container's opening, where the line ending inside it is refused
+   (`UnterminatedContainer`, the position the balanced walk gave). Production walks with an
+   explicit stack, so no depth of nesting exhausts it; the model's recursion is that stack. *)
+let rec skip_val (pth: list seg) (start: list ch) (s: list ch)
+  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) <= llen s }) (decreases %[llen s; 0]) =
   match s with
   | [] -> SErr Truncated []
   | CQuote :: t ->
-    (match string_tail s [] t with
+    (match string_tail pth s [] t with
      | SErr why at -> SErr why at
      | SOk _ r -> SOk () r)
-  | CLBrace :: t -> skip_container s 1 t
-  | CLBrack :: t -> skip_container s 1 t
+  | CLBrace :: t -> obj_members pth start true [] t
+  | CLBrack :: t -> arr_items pth start 0 true t
   | CComma :: _ -> SErr MissingValue s
   | CRBrace :: _ -> SErr MissingValue s
   | CRBrack :: _ -> SErr MissingValue s
   | _ ->
     let (tok, r) = bare_token s in
     if is_literal tok then SOk () r else SErr (InvalidLiteral tok) s
+
+(* An object's members, from just past its `{` (`first`) or a `,`; `seen` holds the keys read. *)
+and obj_members (pth: list seg) (start: list ch) (first: bool) (seen: list (list och)) (s: list ch)
+  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) < llen s }) (decreases %[llen s; 1]) =
+  let w = skip_ws s in
+  match w with
+  | [] -> SErr UnterminatedContainer start
+  | CRBrace :: t -> if first then SOk () t else SErr ExpectedKey w
+  | CQuote :: t ->
+    (match string_tail pth w [] t with
+     | SErr why at -> SErr why at
+     | SOk key r1 ->
+       let w1 = skip_ws r1 in
+       (match w1 with
+        | [] -> SErr UnterminatedContainer start
+        | CColon :: t1 ->
+          let w2 = skip_ws t1 in
+          (match w2 with
+           | [] -> SErr UnterminatedContainer start
+           | _ ->
+             let kp = app pth [SKey key] in
+             (match skip_val kp start w2 with
+              | SErr why at -> SErr why at
+              | SOk _ r2 ->
+                if mem_key key seen then SErr (RepeatedKey kp) w
+                else
+                  let w3 = skip_ws r2 in
+                  (match w3 with
+                   | [] -> SErr UnterminatedContainer start
+                   | CComma :: t3 -> obj_members pth start false (key :: seen) t3
+                   | CRBrace :: t3 -> SOk () t3
+                   | _ -> SErr ExpectedCommaOrBrace w3)))
+        | _ -> SErr ExpectedColon w1))
+  | _ -> SErr ExpectedKey w
+
+(* An array's items, from just past its `[` (`first`) or a `,`; `i` is the next item's index. *)
+and arr_items (pth: list seg) (start: list ch) (i: nat) (first: bool) (s: list ch)
+  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) < llen s }) (decreases %[llen s; 1]) =
+  let w = skip_ws s in
+  match w with
+  | [] -> SErr UnterminatedContainer start
+  | CRBrack :: t -> if first then SOk () t else SErr MissingValue w
+  | _ ->
+    (match skip_val (app pth [SIdx i]) start w with
+     | SErr why at -> SErr why at
+     | SOk _ r ->
+       let w3 = skip_ws r in
+       (match w3 with
+        | [] -> SErr UnterminatedContainer start
+        | CComma :: t3 -> arr_items pth start (i + 1) false t3
+        | CRBrack :: t3 -> SOk () t3
+        | _ -> SErr ExpectedCommaOrBracket w3))
+
+(* F#: `skipValue` — the value's own opening is where a line ending in it is refused. *)
+let skip_value (pth: list seg) (s: list ch)
+  : Tot (r: sres unit { SOk? r ==> llen (SOk?.rest r) <= llen s }) =
+  skip_val pth s s
 
 (* F#: `checkRaw`'s first `\n` / `\r`. *)
 let rec first_break (k: nat) (s: list ch) : Tot (option nat) (decreases s) =
@@ -335,12 +438,12 @@ let check_raw (raw: list ch) : Tot (res unit wreason) =
      | c :: _ ->
        if is_ws c then Error NotTrimStable
        else
-         (match skip_value raw with
+         (match skip_value [] raw with
           | SErr why _ -> Error (Unreadable why)
           | SOk _ [] -> Ok ()
           | SOk _ rest -> if all is_ws rest then Error NotTrimStable else Error (Unreadable TrailingContent))
      | [] ->
-       (match skip_value raw with
+       (match skip_value [] raw with
         | SErr why _ -> Error (Unreadable why)
         | SOk _ _ -> Ok ()))
 
@@ -353,26 +456,22 @@ type member = { mkey: list och; mspan: list ch; mpos: nat }
 
 type jline = { lnum: nat; ltext: list ch; lfields: list member }
 
-let rec mem_key (k: list och) (seen: list (list och)) : Tot bool (decreases seen) =
-  match seen with
-  | [] -> false
-  | x :: t -> k = x || mem_key k t
-
-(* F#: the `HashSet` pass — first wins on a repeated key (Phase 45). *)
-let rec first_wins (seen: list (list och)) (ms: list member) : Tot (list member) (decreases ms) =
+(* Is the key already a member read on the line (F#: the members' set of decoded keys)? *)
+let rec key_in (k: list och) (ms: list member) : Tot bool (decreases ms) =
   match ms with
-  | [] -> []
-  | m :: t -> if mem_key m.mkey seen then first_wins seen t else m :: first_wins (m.mkey :: seen) t
+  | [] -> false
+  | m :: t -> m.mkey = k || key_in k t
 
 (* F#: the `while go` loop of `membersOf`, at `off` within the line, over the suffix `s` of
-   `whole`. A fault's position is `off + pos_in whole at`. *)
+   `whole`. A fault's position is `off + pos_in whole at`. A key read twice is refused at its
+   opening quote once its value is read (Phase 466; until then the first won, Phase 45). *)
 let rec members_loop (off: nat) (whole: list ch) (acc: list member) (s: list ch)
   : Tot (sres (list member)) (decreases (llen s)) =
   let w = skip_ws s in
   match w with
   | [] -> SErr Truncated []
   | CQuote :: t ->
-    (match string_tail w [] t with
+    (match string_tail [] w [] t with
      | SErr why at -> SErr why at
      | SOk key r1 ->
        let w1 = skip_ws r1 in
@@ -383,9 +482,10 @@ let rec members_loop (off: nat) (whole: list ch) (acc: list member) (s: list ch)
           (match w2 with
            | [] -> SErr Truncated []
            | _ ->
-             (match skip_value w2 with
+             (match skip_value [SKey key] w2 with
               | SErr why at -> SErr why at
               | SOk _ r2 ->
+                if key_in key acc then SErr (RepeatedKey [SKey key]) w else
                 let m = { mkey = key; mspan = take_n (sub (len w2) (len r2)) w2; mpos = off + pos_in whole w2 } in
                 let w3 = skip_ws r2 in
                 (match w3 with
@@ -396,11 +496,11 @@ let rec members_loop (off: nat) (whole: list ch) (acc: list member) (s: list ch)
         | _ -> SErr ExpectedColon w1))
   | _ -> SErr ExpectedKey w
 
-(* F#: the tail of `membersOf` — no content after the closing brace, then first wins. *)
+(* F#: the tail of `membersOf` — no content after the closing brace. *)
 let members_end (off: nat) (whole: list ch) (ms: list member) (r: list ch)
   : Tot (res (list member) (nat & reason)) =
   match skip_ws r with
-  | [] -> Ok (first_wins [] ms)
+  | [] -> Ok ms
   | w -> Error (off + pos_in whole w, TrailingContent)
 
 (* F#: `membersOf offset s`. *)
@@ -454,7 +554,7 @@ let unquote (raw: list ch) : Tot (res (list och) reason) =
     (match t with
      | [] -> Error (ExpectedString [])
      | _ ->
-       (match string_tail raw [] t with
+       (match string_tail [] raw [] t with
         | SOk v [] -> Ok v
         | SOk _ _ -> Error (ExpectedString [])
         | SErr why _ -> Error why))
@@ -550,7 +650,7 @@ let rec items_loop (p: nat) (v: list ch) (expect_item: bool) (acc: list (list oc
     (match w with
      | CQuote :: t ->
        if expect_item then
-         (match string_tail w [] t with
+         (match string_tail [] w [] t with
           | SErr why at -> ScanFault (p + pos_in v at) why
           | SOk item r -> items_loop p v false (item :: acc) (skip_ws1 r))
        else Bad
@@ -1326,14 +1426,23 @@ let rec all_app (#a: Type) (p: a -> bool) (x y: list a) : Lemma (ensures all p (
 
 (* A decoded string as the writer leaves it and the scanner admits it: a copied character is
    none of the five the writer re-spells (quote, backslash, tab, line feed, carriage return —
-   production escapes those on the way out, so the host hands them escaped); a short escape is
-   one of the eight; a `\uXXXX` has four hex digits, and a high surrogate escape is followed at
-   once by a low one. *)
+   production escapes those on the way out, so the host hands them escaped) and no other raw
+   control either (production escapes every control, Phase 287; Phase 466's reader refuses one
+   raw); a short escape is one of the eight; a `\uXXXX` has four hex digits; and every surrogate
+   is half of a pair spelled one way — a raw high one followed at once by a raw low one (how
+   `JsonString.quote` writes a character outside the BMP), or a high escape followed at once by a
+   low escape. A string with an unpaired surrogate is not one a reader of the strict grammar reads
+   back, so it is not one of the records the round trip is stated over. *)
 [@@ noextract_to "FSharp"]
 let rec wf_str (s: list och) : Tot bool (decreases s) =
   match s with
   | [] -> true
-  | OLit c :: t -> c <> CQuote && c <> CBackslash && c <> CNewline && c <> CReturn && c <> CTab && wf_str t
+  | OLit c :: t ->
+    c <> CQuote && c <> CBackslash && not (is_ctrl c) &&
+    (match c with
+     | CLoSur _ -> false
+     | CHiSur _ -> (match t with OLit (CLoSur _) :: t2 -> wf_str t2 | _ -> false)
+     | _ -> wf_str t)
   | OEsc e :: t -> is_short_escape e && wf_str t
   | OUni a b c d :: t ->
     is_hex a && is_hex b && is_hex c && is_hex d &&
@@ -1348,42 +1457,56 @@ let rec wf_str (s: list och) : Tot bool (decreases s) =
 
 #push-options "--fuel 16 --ifuel 1"
 [@@ noextract_to "FSharp"]
-let rec string_tail_quoted (start: list ch) (acc: list och) (s: list och) (rest: list ch)
+let rec string_tail_quoted (pth: list seg) (start: list ch) (acc: list och) (s: list och) (rest: list ch)
   : Lemma (requires wf_str s)
-          (ensures string_tail start acc (app (quote_body s) (CQuote :: rest)) == SOk (rev_app acc s) rest)
+          (ensures string_tail pth start acc (app (quote_body s) (CQuote :: rest)) == SOk (rev_app acc s) rest)
           (decreases s) =
   match s with
   | [] -> ()
-  | OLit c :: t -> string_tail_quoted start (OLit c :: acc) t rest
-  | OEsc e :: t -> string_tail_quoted start (OEsc e :: acc) t rest
+  | OLit c :: t ->
+    (match c with
+     | CHiSur x ->
+       (match t with
+        | OLit (CLoSur y) :: t2 -> string_tail_quoted pth start (OLit (CLoSur y) :: OLit c :: acc) t2 rest
+        | _ -> ())
+     | _ -> string_tail_quoted pth start (OLit c :: acc) t rest)
+  | OEsc e :: t -> string_tail_quoted pth start (OEsc e :: acc) t rest
   | OUni a b c d :: t ->
     (match uni_class a b with
-     | SNone -> string_tail_quoted start (OUni a b c d :: acc) t rest
+     | SNone -> string_tail_quoted pth start (OUni a b c d :: acc) t rest
      | SLow -> ()
      | SHigh ->
        (match t with
-        | OUni a2 b2 c2 d2 :: t2 -> string_tail_quoted start (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) t2 rest
+        | OUni a2 b2 c2 d2 :: t2 -> string_tail_quoted pth start (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) t2 rest
         | _ -> ()))
 
 [@@ noextract_to "FSharp"]
 let unquote_quote (s: list och)
   : Lemma (requires wf_str s) (ensures unquote (quote_str s) == Ok s) =
-  string_tail_quoted (quote_str s) [] s []
+  string_tail_quoted [] (quote_str s) [] s []
+
+(* A quoted string is one value wherever it stands — at any path, inside any container. *)
+[@@ noextract_to "FSharp"]
+let skip_val_quoted (pth: list seg) (start: list ch) (s: list och) (rest: list ch)
+  : Lemma (requires wf_str s) (ensures skip_val pth start (app (quote_str s) rest) == SOk () rest) =
+  app_assoc (quote_body s) [CQuote] rest;
+  string_tail_quoted pth (app (quote_str s) rest) [] s rest
 
 [@@ noextract_to "FSharp"]
-let skip_value_quoted (s: list och) (rest: list ch)
-  : Lemma (requires wf_str s) (ensures skip_value (app (quote_str s) rest) == SOk () rest) =
-  app_assoc (quote_body s) [CQuote] rest;
-  string_tail_quoted (app (quote_str s) rest) [] s rest
+let skip_value_quoted (pth: list seg) (s: list och) (rest: list ch)
+  : Lemma (requires wf_str s) (ensures skip_value pth (app (quote_str s) rest) == SOk () rest) =
+  skip_val_quoted pth (app (quote_str s) rest) s rest
 #pop-options
 
 (* ---- 11c. a scan that consumed its input consumes that prefix of any extension ---- *)
 
+(* The path a scan carries and the opening it would refuse at decide no `SOk`: both are named only
+   by a refusal, so the lemmas below change them freely. *)
 #push-options "--fuel 16 --ifuel 2 --z3rlimit 80"
 [@@ noextract_to "FSharp"]
-let rec string_tail_ext (start start': list ch) (acc v: list och) (s r rest: list ch)
-  : Lemma (requires string_tail start acc s == SOk v r)
-          (ensures string_tail start' acc (app s rest) == SOk v (app r rest))
+let rec string_tail_ext (pth pth': list seg) (start start': list ch) (acc v: list och) (s r rest: list ch)
+  : Lemma (requires string_tail pth start acc s == SOk v r)
+          (ensures string_tail pth' start' acc (app s rest) == SOk v (app r rest))
           (decreases (llen s)) =
   match s with
   | [] -> ()
@@ -1397,7 +1520,7 @@ let rec string_tail_ext (start start': list ch) (acc v: list och) (s r rest: lis
         | H4 a b c d r1 ->
           assert (u == a :: b :: c :: d :: r1);
           (match uni_class a b with
-           | SNone -> string_tail_ext start start' (OUni a b c d :: acc) v r1 r rest
+           | SNone -> string_tail_ext pth pth' start start' (OUni a b c d :: acc) v r1 r rest
            | SLow -> ()
            | SHigh ->
              (match r1 with
@@ -1407,33 +1530,43 @@ let rec string_tail_ext (start start': list ch) (acc v: list och) (s r rest: lis
                    assert (u2 == a2 :: b2 :: c2 :: d2 :: r2);
                    assert (app s rest == CBackslash :: CLu :: a :: b :: c :: d :: CBackslash :: CLu :: a2 :: b2 :: c2 :: d2 :: app r2 rest);
                    if uni_class a2 b2 = SLow
-                   then string_tail_ext start start' (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) v r2 r rest
+                   then string_tail_ext pth pth' start start' (OUni a2 b2 c2 d2 :: OUni a b c d :: acc) v r2 r rest
                    else ()
                  | NoHex4 -> ())
+              | CLoSur y :: r2 ->
+                assert (app s rest == CBackslash :: CLu :: a :: b :: c :: d :: CLoSur y :: app r2 rest);
+                string_tail_ext pth pth' start start' (OLit (CLoSur y) :: OUni a b c d :: acc) v r2 r rest
               | _ -> ())))
-     | e :: u -> if is_short_escape e then string_tail_ext start start' (OEsc e :: acc) v u r rest else ())
-  | c :: t -> string_tail_ext start start' (OLit c :: acc) v t r rest
+     | e :: u -> if is_short_escape e then string_tail_ext pth pth' start start' (OEsc e :: acc) v u r rest else ())
+  | CHiSur x :: t ->
+    (match t with
+     | [] -> ()
+     | CLoSur y :: r1 -> string_tail_ext pth pth' start start' (OLit (CLoSur y) :: OLit (CHiSur x) :: acc) v r1 r rest
+     | CBackslash :: t1 ->
+       (match t1 with
+        | [] -> ()
+        | CLu :: u ->
+          (match hex4 u with
+           | NoHex4 -> ()
+           | H4 a b c d r1 ->
+             assert (u == a :: b :: c :: d :: r1);
+             assert (app s rest == CHiSur x :: CBackslash :: CLu :: a :: b :: c :: d :: app r1 rest);
+             if uni_class a b = SLow
+             then string_tail_ext pth pth' start start' (OUni a b c d :: OLit (CHiSur x) :: acc) v r1 r rest
+             else ())
+        | _ -> ())
+     | _ -> ())
+  | CLoSur _ :: _ -> ()
+  | c :: t -> if is_ctrl c then () else string_tail_ext pth pth' start start' (OLit c :: acc) v t r rest
 #pop-options
 
 #push-options "--fuel 2 --ifuel 2"
 [@@ noextract_to "FSharp"]
-let rec skip_container_ext (start start': list ch) (depth: pos) (s r rest: list ch)
-  : Lemma (requires skip_container start depth s == SOk () r)
-          (ensures skip_container start' depth (app s rest) == SOk () (app r rest))
-          (decreases (llen s)) =
+let rec skip_ws_ext (s rest: list ch)
+  : Lemma (requires Cons? (skip_ws s)) (ensures skip_ws (app s rest) == app (skip_ws s) rest) (decreases s) =
   match s with
   | [] -> ()
-  | CQuote :: t ->
-    (match string_tail s [] t with
-     | SErr _ _ -> ()
-     | SOk x r1 ->
-       string_tail_ext s (app s rest) [] x t r1 rest;
-       skip_container_ext start start' depth r1 r rest)
-  | CLBrace :: t -> skip_container_ext start start' (depth + 1) t r rest
-  | CLBrack :: t -> skip_container_ext start start' (depth + 1) t r rest
-  | CRBrace :: t -> if depth = 1 then () else skip_container_ext start start' (depth - 1) t r rest
-  | CRBrack :: t -> if depth = 1 then () else skip_container_ext start start' (depth - 1) t r rest
-  | _ :: t -> skip_container_ext start start' depth t r rest
+  | c :: t -> if is_ws c then skip_ws_ext t rest else ()
 
 [@@ noextract_to "FSharp"]
 let rec bare_token_split (s: list ch)
@@ -1451,18 +1584,113 @@ let rec bare_token_ext (s: list ch) (c: ch) (more: list ch)
   | [] -> ()
   | x :: t -> if is_terminator x then () else bare_token_ext t c more
 
+(* A token cut short of the end is cut at the same terminator in any extension. *)
 [@@ noextract_to "FSharp"]
-let skip_value_ext (s: list ch) (c: ch) (more: list ch)
-  : Lemma (requires skip_value s == SOk () [] /\ is_terminator c)
-          (ensures skip_value (app s (c :: more)) == SOk () (c :: more)) =
+let rec bare_token_cut (s: list ch) (rest: list ch)
+  : Lemma (requires Cons? (snd (bare_token s)))
+          (ensures bare_token (app s rest) == (fst (bare_token s), app (snd (bare_token s)) rest))
+          (decreases s) =
+  match s with
+  | [] -> ()
+  | x :: t -> if is_terminator x then () else bare_token_cut t rest
+
+(* The structural walk, extended (Phase 466): a value read to `r` reads to `r` and what follows it,
+   at any path. A bare literal needs the walk to have stopped short of the end — inside a
+   container it always has, since the container's close is still to come. *)
+[@@ noextract_to "FSharp"]
+let rec skip_val_ext (pth pth': list seg) (start start': list ch) (s r rest: list ch)
+  : Lemma (requires skip_val pth start s == SOk () r /\ (Cons? r \/ rest == []))
+          (ensures skip_val pth' start' (app s rest) == SOk () (app r rest))
+          (decreases %[llen s; 0]) =
   match s with
   | [] -> ()
   | CQuote :: t ->
-    (match string_tail s [] t with
+    (match string_tail pth s [] t with
      | SErr _ _ -> ()
-     | SOk x r -> string_tail_ext s (app s (c :: more)) [] x t r (c :: more))
-  | CLBrace :: t -> skip_container_ext s (app s (c :: more)) 1 t [] (c :: more)
-  | CLBrack :: t -> skip_container_ext s (app s (c :: more)) 1 t [] (c :: more)
+     | SOk x r1 -> string_tail_ext pth pth' s (app s rest) [] x t r1 rest)
+  | CLBrace :: t -> obj_members_ext pth pth' start start' true [] t r rest
+  | CLBrack :: t -> arr_items_ext pth pth' start start' 0 true t r rest
+  | CComma :: _ -> ()
+  | CRBrace :: _ -> ()
+  | CRBrack :: _ -> ()
+  | _ -> if Cons? r then bare_token_cut s rest else app_nil_r s
+
+and obj_members_ext (pth pth': list seg) (start start': list ch) (first: bool) (seen: list (list och))
+  (s r rest: list ch)
+  : Lemma (requires obj_members pth start first seen s == SOk () r)
+          (ensures obj_members pth' start' first seen (app s rest) == SOk () (app r rest))
+          (decreases %[llen s; 1]) =
+  let w = skip_ws s in
+  match w with
+  | [] -> ()
+  | CRBrace :: _ -> skip_ws_ext s rest
+  | CQuote :: t ->
+    skip_ws_ext s rest;
+    (match string_tail pth w [] t with
+     | SErr _ _ -> ()
+     | SOk key r1 ->
+       string_tail_ext pth pth' w (app w rest) [] key t r1 rest;
+       (match skip_ws r1 with
+        | CColon :: t1 ->
+          skip_ws_ext r1 rest;
+          let w2 = skip_ws t1 in
+          (match w2 with
+           | [] -> ()
+           | _ ->
+             skip_ws_ext t1 rest;
+             (match skip_val (app pth [SKey key]) start w2 with
+              | SErr _ _ -> ()
+              | SOk _ r2 ->
+                if mem_key key seen then ()
+                else
+                  (match skip_ws r2 with
+                   | CComma :: t3 ->
+                     skip_val_ext (app pth [SKey key]) (app pth' [SKey key]) start start' w2 r2 rest;
+                     skip_ws_ext r2 rest;
+                     obj_members_ext pth pth' start start' false (key :: seen) t3 r rest
+                   | CRBrace :: _ ->
+                     skip_val_ext (app pth [SKey key]) (app pth' [SKey key]) start start' w2 r2 rest;
+                     skip_ws_ext r2 rest
+                   | _ -> ())))
+        | _ -> ()))
+  | _ -> ()
+
+and arr_items_ext (pth pth': list seg) (start start': list ch) (i: nat) (first: bool) (s r rest: list ch)
+  : Lemma (requires arr_items pth start i first s == SOk () r)
+          (ensures arr_items pth' start' i first (app s rest) == SOk () (app r rest))
+          (decreases %[llen s; 1]) =
+  let w = skip_ws s in
+  match w with
+  | [] -> ()
+  | CRBrack :: _ -> skip_ws_ext s rest
+  | _ ->
+    skip_ws_ext s rest;
+    (match skip_val (app pth [SIdx i]) start w with
+     | SErr _ _ -> ()
+     | SOk _ r1 ->
+       (match skip_ws r1 with
+        | CComma :: t3 ->
+          skip_val_ext (app pth [SIdx i]) (app pth' [SIdx i]) start start' w r1 rest;
+          skip_ws_ext r1 rest;
+          arr_items_ext pth pth' start start' (i + 1) false t3 r rest
+        | CRBrack :: _ ->
+          skip_val_ext (app pth [SIdx i]) (app pth' [SIdx i]) start start' w r1 rest;
+          skip_ws_ext r1 rest
+        | _ -> ()))
+
+(* A top-level value followed by a terminator: the case a member's value is in. *)
+[@@ noextract_to "FSharp"]
+let skip_value_ext (pth pth': list seg) (s: list ch) (c: ch) (more: list ch)
+  : Lemma (requires skip_value pth s == SOk () [] /\ is_terminator c)
+          (ensures skip_value pth' (app s (c :: more)) == SOk () (c :: more)) =
+  match s with
+  | [] -> ()
+  | CQuote :: t ->
+    (match string_tail pth s [] t with
+     | SErr _ _ -> ()
+     | SOk x r -> string_tail_ext pth pth' s (app s (c :: more)) [] x t r (c :: more))
+  | CLBrace :: t -> obj_members_ext pth pth' s (app s (c :: more)) true [] t [] (c :: more)
+  | CLBrack :: t -> arr_items_ext pth pth' s (app s (c :: more)) 0 true t [] (c :: more)
   | CComma :: _ -> ()
   | CRBrace :: _ -> ()
   | CRBrack :: _ -> ()
@@ -1475,19 +1703,21 @@ let skip_value_ext (s: list ch) (c: ch) (more: list ch)
 
 (* ---- 11d. a member the writer spelled is read as one member ---- *)
 
-(* A key spelled plainly: no quote, no backslash, no whitespace to lead with. *)
+(* A key spelled plainly: no quote, no backslash, no raw control and no surrogate (Phase 466: the
+   scanner refuses the last two raw). *)
 [@@ noextract_to "FSharp"]
-let plain_key (k: list ch) : Tot bool = all (fun c -> c <> CQuote && c <> CBackslash) k
+let plain_key (k: list ch) : Tot bool =
+  all (fun c -> c <> CQuote && c <> CBackslash && not (is_ctrl c) && not (CHiSur? c) && not (CLoSur? c)) k
 
 #push-options "--fuel 2 --ifuel 2"
 [@@ noextract_to "FSharp"]
-let rec string_tail_plain (start: list ch) (acc: list och) (k: list ch) (rest: list ch)
+let rec string_tail_plain (pth: list seg) (start: list ch) (acc: list och) (k: list ch) (rest: list ch)
   : Lemma (requires plain_key k)
-          (ensures string_tail start acc (app k (CQuote :: rest)) == SOk (rev_app acc (olit k)) rest)
+          (ensures string_tail pth start acc (app k (CQuote :: rest)) == SOk (rev_app acc (olit k)) rest)
           (decreases k) =
   match k with
   | [] -> ()
-  | c :: t -> string_tail_plain start (OLit c :: acc) t rest
+  | c :: t -> string_tail_plain pth start (OLit c :: acc) t rest
 
 (* The text of `"k":v` followed by `y`, re-associated to the scanner's steps. *)
 [@@ noextract_to "FSharp"]
@@ -1502,17 +1732,25 @@ let member_read (off: nat) (whole: list ch) (k v: list ch) (c: ch) (more: list c
 
 [@@ noextract_to "FSharp"]
 let member_value_ok (v: list ch) : Tot prop =
-  Cons? v /\ not (is_ws (Cons?.hd v)) /\ skip_value v == SOk () []
+  Cons? v /\ not (is_ws (Cons?.hd v)) /\ skip_value [] v == SOk () []
+
+(* A key no member read so far has (the side-condition `members_step` carries since Phase 466). *)
+[@@ noextract_to "FSharp"]
+let key_in_nil (k: list och) : Lemma (ensures not (key_in k [])) = ()
+
+[@@ noextract_to "FSharp"]
+let key_in_cons (k: list och) (m: member) (t: list member)
+  : Lemma (requires m.mkey <> k /\ not (key_in k t)) (ensures not (key_in k (m :: t))) = ()
 
 [@@ noextract_to "FSharp"]
 let members_step (off: nat) (whole: list ch) (acc: list member) (k v: list ch) (c: ch) (more: list ch)
-  : Lemma (requires plain_key k /\ member_value_ok v /\ (c == CComma \/ c == CRBrace))
+  : Lemma (requires plain_key k /\ member_value_ok v /\ not (key_in (olit k) acc) /\ (c == CComma \/ c == CRBrace))
           (ensures (let m = member_read off whole k v c more in
                     members_loop off whole acc (app (member_text k v) (c :: more)) ==
                     (if c = CComma then members_loop off whole (m :: acc) more else SOk (rev (m :: acc)) more))) =
   member_text_app k v (c :: more);
-  string_tail_plain (app (member_text k v) (c :: more)) [] k (CColon :: app v (c :: more));
-  skip_value_ext v c more;
+  string_tail_plain [] (app (member_text k v) (c :: more)) [] k (CColon :: app v (c :: more));
+  skip_value_ext [] [SKey (olit k)] v c more;
   len_app v (c :: more);
   take_n_app v (c :: more)
 #pop-options
@@ -1624,17 +1862,18 @@ let actor_wf (a: actor) : Tot bool =
    | AAgent model version id -> wf_str model && wf_str version && wf_str id)
 
 #push-options "--fuel 6 --ifuel 2"
-(* A quoted member inside a container is walked through: the key's string, the colon, the
-   value's string. *)
+(* A quoted member of an object value is walked through: the key's string, the colon, the
+   value's string, the key checked against the ones before it, then the separator. *)
 [@@ noextract_to "FSharp"]
-let skip_container_member (start: list ch) (depth: pos) (k: list ch) (v: list och) (rest: list ch)
-  : Lemma (requires plain_key k /\ wf_str v)
-          (ensures skip_container start depth (app (member_text k (quote_str v)) rest) == skip_container start depth rest) =
-  member_text_app k (quote_str v) rest;
-  let s = app (member_text k (quote_str v)) rest in
-  string_tail_plain s [] k (CColon :: app (quote_str v) rest);
-  app_assoc (quote_body v) [CQuote] rest;
-  string_tail_quoted (app (quote_str v) rest) [] v rest
+let obj_member_step (pth: list seg) (start: list ch) (first: bool) (seen: list (list och))
+  (k: list ch) (v: list och) (c: ch) (more: list ch)
+  : Lemma (requires plain_key k /\ wf_str v /\ not (mem_key (olit k) seen) /\ (c == CComma \/ c == CRBrace))
+          (ensures obj_members pth start first seen (app (member_text k (quote_str v)) (c :: more)) ==
+                   (if c = CComma then obj_members pth start false (olit k :: seen) more else SOk () more)) =
+  member_text_app k (quote_str v) (c :: more);
+  let s = app (member_text k (quote_str v)) (c :: more) in
+  string_tail_plain pth s [] k (CColon :: app (quote_str v) (c :: more));
+  skip_val_quoted (app pth [SKey (olit k)]) start v (c :: more)
 #pop-options
 
 #push-options "--fuel 8 --ifuel 2"
@@ -1657,12 +1896,13 @@ let keys_plain (_: unit)
 let skip_value_actor (a: actor)
   : Lemma (requires actor_wf a) (ensures member_value_ok (encode_actor a)) =
   keys_plain ();
+  let v = encode_actor a in
   match a with
   | AHuman id ->
     let b = member_text k_id (quote_str id) in
     app_assoc (member_text k_kind (quote_str (olit lit_human))) (CComma :: b) [CRBrace];
-    skip_container_member (encode_actor a) 1 k_kind (olit lit_human) (CComma :: app b [CRBrace]);
-    skip_container_member (encode_actor a) 1 k_id id [CRBrace]
+    obj_member_step [] v true [] k_kind (olit lit_human) CComma (app b [CRBrace]);
+    obj_member_step [] v false [olit k_kind] k_id id CRBrace []
   | AAgent model version id ->
     let m1 = member_text k_kind (quote_str (olit lit_agent)) in
     let m2 = member_text k_model (quote_str model) in
@@ -1671,10 +1911,10 @@ let skip_value_actor (a: actor)
     app_assoc m1 (CComma :: app m2 (CComma :: app m3 (CComma :: m4))) [CRBrace];
     app_assoc m2 (CComma :: app m3 (CComma :: m4)) [CRBrace];
     app_assoc m3 (CComma :: m4) [CRBrace];
-    skip_container_member (encode_actor a) 1 k_kind (olit lit_agent) (CComma :: app m2 (CComma :: app m3 (CComma :: app m4 [CRBrace])));
-    skip_container_member (encode_actor a) 1 k_model model (CComma :: app m3 (CComma :: app m4 [CRBrace]));
-    skip_container_member (encode_actor a) 1 k_version version (CComma :: app m4 [CRBrace]);
-    skip_container_member (encode_actor a) 1 k_id id [CRBrace]
+    obj_member_step [] v true [] k_kind (olit lit_agent) CComma (app m2 (CComma :: app m3 (CComma :: app m4 [CRBrace])));
+    obj_member_step [] v false [olit k_kind] k_model model CComma (app m3 (CComma :: app m4 [CRBrace]));
+    obj_member_step [] v false [olit k_model; olit k_kind] k_version version CComma (app m4 [CRBrace]);
+    obj_member_step [] v false [olit k_version; olit k_model; olit k_kind] k_id id CRBrace []
 #pop-options
 
 (* ---- 11h. the record line parses to its five members, and reads back ---- *)
@@ -1726,7 +1966,7 @@ let obj5 (a b c d e: list ch)
   app_assoc d (CComma :: e) [CRBrace]
 #pop-options
 
-#push-options "--fuel 5 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_container -OpStreamLoad.quote_body -JsonParse.app'"
+#push-options "--fuel 5 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -JsonParse.app'"
 (* The actor object parses to its members, and `actor_field` reads the actor back. *)
 [@@ noextract_to "FSharp"]
 let actor_field_reads (a: actor) (l: jline) (p: nat)
@@ -1741,10 +1981,12 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     obj2 t1 t2;
     app_nil_r (quote_str (olit lit_human));
     app_nil_r (quote_str id);
-    skip_value_quoted (olit lit_human) [];
-    skip_value_quoted id [];
+    skip_value_quoted [] (olit lit_human) [];
+    skip_value_quoted [] id [];
+    key_in_nil (olit k_kind);
     members_step p v [] k_kind (quote_str (olit lit_human)) CComma (app t2 [CRBrace]);
     let m1 = member_read p v k_kind (quote_str (olit lit_human)) CComma (app t2 [CRBrace]) in
+    key_in_nil (olit k_id); key_in_cons (olit k_id) m1 [];
     members_step p v [m1] k_id (quote_str id) CRBrace [];
     let m2 = member_read p v k_id (quote_str id) CRBrace [] in
     assert (members_loop p v [] (app t1 (CComma :: app t2 [CRBrace])) == SOk [m1; m2] []);
@@ -1761,19 +2003,24 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     app_nil_r (quote_str model);
     app_nil_r (quote_str version);
     app_nil_r (quote_str id);
-    skip_value_quoted (olit lit_agent) [];
-    skip_value_quoted model [];
-    skip_value_quoted version [];
-    skip_value_quoted id [];
+    skip_value_quoted [] (olit lit_agent) [];
+    skip_value_quoted [] model [];
+    skip_value_quoted [] version [];
+    skip_value_quoted [] id [];
     let r2 = app t2 (CComma :: app t3 (CComma :: app t4 [CRBrace])) in
     let r3 = app t3 (CComma :: app t4 [CRBrace]) in
     let r4 = app t4 [CRBrace] in
+    key_in_nil (olit k_kind);
     members_step p v [] k_kind (quote_str (olit lit_agent)) CComma r2;
     let m1 = member_read p v k_kind (quote_str (olit lit_agent)) CComma r2 in
+    key_in_nil (olit k_model); key_in_cons (olit k_model) m1 [];
     members_step p v [m1] k_model (quote_str model) CComma r3;
     let m2 = member_read p v k_model (quote_str model) CComma r3 in
+    key_in_nil (olit k_version); key_in_cons (olit k_version) m1 []; key_in_cons (olit k_version) m2 [m1];
     members_step p v [m2; m1] k_version (quote_str version) CComma r4;
     let m3 = member_read p v k_version (quote_str version) CComma r4 in
+    key_in_nil (olit k_id); key_in_cons (olit k_id) m1 []; key_in_cons (olit k_id) m2 [m1];
+    key_in_cons (olit k_id) m3 [m2; m1];
     members_step p v [m3; m2; m1] k_id (quote_str id) CRBrace [];
     let m4 = member_read p v k_id (quote_str id) CRBrace [] in
     assert (members_loop p v [] (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4] []);
@@ -1794,7 +2041,7 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     assert (actor_str k_actor k_id inner == Ok id)
 
 #pop-options
-#push-options "--fuel 6 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_container -OpStreamLoad.quote_body -JsonParse.app'"
+#push-options "--fuel 6 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -JsonParse.app'"
 (* The line the writer spelled parses to exactly its five members. *)
 [@@ noextract_to "FSharp"]
 let line_members (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
@@ -1817,20 +2064,27 @@ let line_members (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
   skip_value_actor a;
   app_nil_r (quote_str prev);
   app_nil_r (quote_str hash);
-  skip_value_quoted prev [];
-  skip_value_quoted hash [];
+  skip_value_quoted [] prev [];
+  skip_value_quoted [] hash [];
   let r2 = app t2 (CComma :: app t3 (CComma :: app t4 (CComma :: app t5 [CRBrace]))) in
   let r3 = app t3 (CComma :: app t4 (CComma :: app t5 [CRBrace])) in
   let r4 = app t4 (CComma :: app t5 [CRBrace]) in
   let r5 = app t5 [CRBrace] in
+  key_in_nil (olit k_seq);
   members_step 0 whole [] k_seq (show_int seq) CComma r2;
   let m1 = member_read 0 whole k_seq (show_int seq) CComma r2 in
+  key_in_nil (olit k_actor); key_in_cons (olit k_actor) m1 [];
   members_step 0 whole [m1] k_actor (encode_actor a) CComma r3;
   let m2 = member_read 0 whole k_actor (encode_actor a) CComma r3 in
+  key_in_nil (olit k_op); key_in_cons (olit k_op) m1 []; key_in_cons (olit k_op) m2 [m1];
   members_step 0 whole [m2; m1] k_op raw CComma r4;
   let m3 = member_read 0 whole k_op raw CComma r4 in
+  key_in_nil (olit k_prev_hash); key_in_cons (olit k_prev_hash) m1 [];
+  key_in_cons (olit k_prev_hash) m2 [m1]; key_in_cons (olit k_prev_hash) m3 [m2; m1];
   members_step 0 whole [m3; m2; m1] k_prev_hash (quote_str prev) CComma r5;
   let m4 = member_read 0 whole k_prev_hash (quote_str prev) CComma r5 in
+  key_in_nil (olit k_hash); key_in_cons (olit k_hash) m1 []; key_in_cons (olit k_hash) m2 [m1];
+  key_in_cons (olit k_hash) m3 [m2; m1]; key_in_cons (olit k_hash) m4 [m3; m2; m1];
   members_step 0 whole [m4; m3; m2; m1] k_hash (quote_str hash) CRBrace [];
   let m5 = member_read 0 whole k_hash (quote_str hash) CRBrace [] in
   assert (members_loop 0 whole [] (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4; m5] []);
@@ -1894,7 +2148,10 @@ let rec split_join (ls: list (list ch))
 let rec clean_quote (s: list och) : Lemma (requires wf_str s) (ensures clean (quote_body s)) (decreases s) =
   match s with
   | [] -> ()
-  | OLit _ :: t -> clean_quote t
+  | OLit c :: t ->
+    (match c with
+     | CHiSur _ -> (match t with OLit _ :: t2 -> clean_quote t2 | _ -> ())
+     | _ -> clean_quote t)
   | OEsc _ :: t -> clean_quote t
   | OUni a b _ _ :: t ->
     (match uni_class a b with
@@ -2225,7 +2482,41 @@ let twin_second_line (_: unit) : Tot bool =
   | Error f -> f.fline = 2 && f.freason = Truncated
   | Ok _ -> false
 
+(* Phase 466 — the strict grammar's refusals. `{"a":1,"a":2}` *)
+let twin_dup: list ch = [CLBrace; CQuote; CLa; CQuote; CColon; CD1; CComma; CQuote; CLa; CQuote; CColon; CD2; CRBrace]
+(* `{"a":{"b":1,"b":2}}` — the repeated key is a member of the value, and its path says so. *)
+let twin_nested_dup: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CLBrace; CQuote; CLb; CQuote; CColon; CD1; CComma;
+   CQuote; CLb; CQuote; CColon; CD2; CRBrace; CRBrace]
+(* `{"a":"<tab>"}` — a raw control inside a string. *)
+let twin_tab: list ch = [CLBrace; CQuote; CLa; CQuote; CColon; CQuote; CTab; CQuote; CRBrace]
+(* `{"a":["<high>"]}` — a raw high surrogate the string ends after. *)
+let twin_lone: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CLBrack; CQuote; CHiSur "h"; CQuote; CRBrack; CRBrace]
+(* `{"a":"\uD800<low>"}` — a pair split between the two spellings is one character. *)
+let twin_mixed: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0; CLoSur "l";
+   CQuote; CRBrace]
+(* `{"a":[1 2]}` — an array's items are separated. *)
+let twin_arr_sep: list ch = [CLBrace; CQuote; CLa; CQuote; CColon; CLBrack; CD1; CSpace; CD2; CRBrack; CRBrace]
+
+let twin_mixed_reads (_: unit) : Tot bool = Ok? (parse_line 1 twin_mixed)
+
 let twins : list twin = [
+  { tname = "a-repeated-key-is-refused-at-its-second-quote";
+    tholds = (fun () -> parse_line 1 twin_dup = Error ({ fline = 1; fpos = 7; freason = RepeatedKey [SKey [OLit CLa]] })) };
+  { tname = "a-repeated-key-in-a-value-is-refused-at-its-path";
+    tholds = (fun () ->
+      parse_line 1 twin_nested_dup
+      = Error ({ fline = 1; fpos = 12; freason = RepeatedKey [SKey [OLit CLa]; SKey [OLit CLb]] })) };
+  { tname = "a-raw-control-in-a-string-is-refused-at-the-character";
+    tholds = (fun () -> parse_line 1 twin_tab = Error ({ fline = 1; fpos = 6; freason = RawControl [SKey [OLit CLa]] })) };
+  { tname = "a-raw-lone-surrogate-is-refused-at-the-unit";
+    tholds = (fun () ->
+      parse_line 1 twin_lone = Error ({ fline = 1; fpos = 7; freason = LoneSurrogate [SKey [OLit CLa]; SIdx 0] })) };
+  { tname = "a-pair-split-between-spellings-is-read"; tholds = twin_mixed_reads };
+  { tname = "array-items-need-a-separator";
+    tholds = (fun () -> parse_line 1 twin_arr_sep = Error ({ fline = 1; fpos = 8; freason = ExpectedCommaOrBracket })) };
   { tname = "parse-line-reads-one-member-at-its-position";
     tholds = (fun () ->
       parse_line 1 twin_line1

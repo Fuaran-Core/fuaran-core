@@ -421,7 +421,7 @@ Three rules sit beside the rows:
 ### The limits
 
 Core states no limit VALUES and is not a host of any wire's limits section (DECISIONS.md D84, ruled
-2026-10-01; refined by D158, 2026-10-15): its 512 nesting cap is its own stack guard, deliberately
+2026-10-01; refined by D159, 2026-10-15): its 512 nesting cap is its own stack guard, deliberately
 looser than any wire's bound, so Core never refuses a document a wire says a host must accept, and its
 refusal there is `MaxDepthExceeded` (`LimitExceeded` in the decode error contract). What Core offers is
 the MECHANISM (Phase 465): `Json.parseWithLimits policy limits input` — and `Decoder.parseWithLimits`,

@@ -7226,8 +7226,9 @@ checked by example only: eighteen census entries said `measured-elsewhere`.)_
 
 `OpStreamLoad.fst` models `OpStream.Jsonl` clause for clause — `skipString` and `decodeString` as
 ONE pass (the decode is total on what the skip accepted, so the pass that does both answers the same
-fault at the same position), `isLiteral`, `skipValue` with its container walk, `checkRaw`,
-`membersOf` with its first-wins member list, `parseLine`, `topFields`, `rawSpan`, `unquote`, the
+fault at the same position), `isLiteral`, `skipValue` with its structural walk (Phase 466: every depth read by the strict
+grammar, a repeated key, a raw control and a raw unpaired surrogate refused at their path),
+`checkRaw`, `membersOf` refusing a repeated key, `parseLine`, `topFields`, `rawSpan`, `unquote`, the
 field readers up to `actorField`, and `scanRecords` with its `\r\n` normalisation and blank-line
 skip — and the loads over it: `recordOf`, the snapshot scan, Phase 416's carrying witness,
 `settle`, `fromJsonl` / `fromJsonlWithSnapshots` / `fromJsonlLegacyActor` and `fromJsonlVerified`,

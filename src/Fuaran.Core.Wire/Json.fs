@@ -109,7 +109,7 @@ type JsonLimit =
 /// The bounds a LIMITED parse enforces on the way down (Phase 465): each is checked before the
 /// recursion or the allocation it guards, so nothing past a bound is ever read or built, and a
 /// breach is a `JsonLimitBreach` — never malformed JSON. The VALUES are the caller's: Core states
-/// none and is not a host of any wire's limits section (DECISIONS.md D84, refined by D158); a wire
+/// none and is not a host of any wire's limits section (DECISIONS.md D84, refined by D159); a wire
 /// host passes its own specification's numbers and maps the breach to its own error envelope.
 /// `JsonLimits.depthOnly` is the record every pre-existing entry point runs under.
 type JsonLimits =
@@ -151,7 +151,7 @@ type JsonLimitBreach =
 /// Why a limited parse refused a document (Phase 465): the text is not JSON — `Malformed` carries
 /// EXACTLY the refusal `parseDetailed` gives it, kind, message and position — or it is JSON and a
 /// bound was passed. The two are distinct cases by construction: a breach is never reported as
-/// malformed, and malformed text never as a breach (DECISIONS.md D158).
+/// malformed, and malformed text never as a breach (DECISIONS.md D159).
 [<RequireQualifiedAccess>]
 type JsonRefusal =
     /// The text is not JSON: exactly the refusal `parseDetailed` gives it.
@@ -1464,7 +1464,7 @@ module Json =
     /// outranks malformed text after it and malformed text outranks a breach after IT.
     ///
     /// This is the MECHANISM a wire host bounds its parse with; the values, their units and the
-    /// error envelope are the host's own specification's (DECISIONS.md D84, refined by D158), and
+    /// error envelope are the host's own specification's (DECISIONS.md D84, refined by D159), and
     /// `Decoder.parseWithLimits` is the typed-decode form of the same call.
     let parseWithLimits (policy: NullPolicy) (limits: JsonLimits) (input: string) : Result<JVal, JsonRefusal> =
         // One comparison when the input cannot encode past the bound (three bytes a unit is the
@@ -1517,7 +1517,7 @@ module Json =
     /// (WIRE_FORMAT §21 — nesting, string and array sizes among them) belong to the wire-format
     /// hosts that decode on top of this parser, which enforce them with the format's own error;
     /// this entry point enforces none of them and claims no §21 conformance (DECISIONS.md D84). A
-    /// host enforces its own values through `parseWithLimits` (Phase 465, D158).
+    /// host enforces its own values through `parseWithLimits` (Phase 465, D159).
     let parse (input: string) : Result<JVal, string> = parseWith defaultMaxDepth input
 
     /// `parse` under an explicit `NullPolicy` — the string-error wrapper over
