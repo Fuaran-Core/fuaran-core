@@ -25,6 +25,12 @@
     {"accepted":true,"input":"{\"a\":1}","name":"closed-object-accepted","shape":{"$type":"object","closed":true,"fields":[{"name":"a","shape":{"$type":"int"}},{"name":"b","optional":true,"shape":{"$type":"string"}}]}},
     {"input":"1","name":"unresolved-shape","refusal":{"code":"SchemaFault","path":[]},"shape":{"$type":"ref","name":"missing"}},
     {"input":"{\"a\":1}","name":"unresolved-nested-shape","refusal":{"code":"SchemaFault","path":["a"]},"shape":{"$type":"object","fields":[{"name":"a","shape":{"$type":"ref","name":"missing"}}]}},
-    {"accepted":true,"definitions":{"point":{"$type":"object","closed":true,"fields":[{"name":"x","shape":{"$type":"int"}},{"name":"y","shape":{"$type":"int"}}]}},"input":"{\"x\":1,\"y\":2}","name":"resolved-shape","shape":{"$type":"ref","name":"point"}}
+    {"accepted":true,"definitions":{"point":{"$type":"object","closed":true,"fields":[{"name":"x","shape":{"$type":"int"}},{"name":"y","shape":{"$type":"int"}}]}},"input":"{\"x\":1,\"y\":2}","name":"resolved-shape","shape":{"$type":"ref","name":"point"}},
+    {"input":"{\"a\":1,\"a\":2}","name":"repeated-member","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"object","fields":[{"name":"a","shape":{"$type":"int"}}]}},
+    {"input":"1 2","name":"content-after-the-root","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"int"}},
+    {"input":"NaN","name":"bare-nan","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"float"}},
+    {"input":"\"a\u0001\"","name":"raw-control-in-a-string","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"string"}},
+    {"input":"\"\\uD800\"","name":"lone-surrogate","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"string"}},
+    {"input":"01","name":"number-outside-the-grammar","refusal":{"code":"InvalidJson","path":[]},"shape":{"$type":"int"}}
   ]
 }

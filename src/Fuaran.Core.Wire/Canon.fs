@@ -84,7 +84,13 @@ module Canon =
                     + " at "
                     + path
                 )
-            | None -> Ok(render v)
+            | None ->
+                // Phase 462: a repeated member name, third. Two members of one name have no one
+                // canonical rendering a parser reads back, and `parse` refuses the text.
+                match Json.firstRepeatedMember v with
+                | Some(path, what) ->
+                    Error("repeated member has no canonical rendering of its own: " + what + " at " + path)
+                | None -> Ok(render v)
 
     /// Render a `JVal` with the SAME canonical escaping and pinned float layout as [[render]],
     /// but object keys in AUTHORED order — no sort. The declared-key-order leg (a vocabulary

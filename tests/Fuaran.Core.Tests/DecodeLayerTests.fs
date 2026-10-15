@@ -296,7 +296,15 @@ module DecodeRejectCorpus =
             Shape = """{"$type":"ref","name":"point"}"""
             Definitions = sprintf """{"point":%s}""" (obj [ "x", int, false; "y", int, false ] true)
             Input = """{"x":1,"y":2}"""
-            Intent = Accept } ]
+            Intent = Accept }
+          // Phase 462 — the JSON-syntax rows every wire shares, at the shape reader: a refusal of
+          // the text is `InvalidJson` at the root whatever shape was asked for.
+          v "repeated-member" (obj [ "a", int, false ] false) """{"a":1,"a":2}""" (Refuse(DecodeCode.InvalidJson, []))
+          v "content-after-the-root" int "1 2" (Refuse(DecodeCode.InvalidJson, []))
+          v "bare-nan" """{"$type":"float"}""" "NaN" (Refuse(DecodeCode.InvalidJson, []))
+          v "raw-control-in-a-string" str ("\"a" + string (char 1) + "\"") (Refuse(DecodeCode.InvalidJson, []))
+          v "lone-surrogate" str "\"\\uD800\"" (Refuse(DecodeCode.InvalidJson, []))
+          v "number-outside-the-grammar" int "01" (Refuse(DecodeCode.InvalidJson, [])) ]
 
     /// The outcome of a vector, computed by calling the reference decoder: `Error (code, path)` or
     /// `Ok ()` for an acceptance.

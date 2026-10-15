@@ -409,12 +409,20 @@ let rec private genN (depth: int) (r: ConfRng.T) : MJValN * ConfRng.T =
     | _ ->
         let count, r2 = ConfRng.intBelow 4 r1
 
+        // Phase 462: the keys are drawn WITHOUT replacement. The model reads a tree, where a
+        // repeated key is two members; the parser reads text, where it is a refusal — so a
+        // repeated key would measure the two models' different inputs, not their agreement.
         let fields, r3 =
             List.fold
-                (fun (acc, rr) _ ->
+                (fun (acc: (string * MJValN) list, rr) _ ->
                     let k, rr1 = ConfRng.intBelow 4 rr
                     let v, rr2 = genN (depth + 1) rr1
-                    acc @ [ "k" + string k, v ], rr2)
+                    let key = "k" + string k
+
+                    if acc |> List.exists (fun (k', _) -> k' = key) then
+                        acc, rr2
+                    else
+                        acc @ [ key, v ], rr2)
                 ([], r2)
                 [ 1..count ]
 

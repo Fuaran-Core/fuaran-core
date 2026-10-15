@@ -19,8 +19,10 @@ conformance/
   laws/decimal-laws.json       the exact decimal's documents (`--emit-laws`, since Phase 276)
   apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
-  refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
+  refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, the decode-determinism rows (Phase 462), column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
   refusals/manifest.json       the refusals family's own index + per-host adoption (`--emit-refusals`)
+  decode/decode-rejects.json   the decode error contract: every decode code at the path it names, and the syntax rows at the shape reader (`--emit-decode`, since Phase 310)
+  decode/manifest.json         the decode family's own index + per-host adoption (`--emit-decode`)
   escape/string-escape.json   the string-escape table as the lines a host diffs (`--emit-escape`, since Phase 349; no corpus copy yet)
 ```
 
@@ -370,6 +372,74 @@ A bump whose only reason is "the corpus moved" is not a reason. Adopting new cor
 purpose — fixtures the proof-oracle pools should read, a re-synced copy — is a change that needs the
 bump, and the `reason` names it; a corpus commit nobody here has a use for yet is one Core does not
 need to certify against, and the AHEAD warning on a local clone is the honest report of that state.
+
+## The JSON-syntax layer every wire cites (normative, Phase 462) {#json-syntax-layer}
+
+Every Fuaran wire — the UI wire, the program wire, the model-execution wire, the column and query
+documents, the op-stream records — is JSON below its own vocabulary, and this section is the ONE
+statement of what that JSON is. A wire specification cites it by this heading and restates nothing;
+Core's reference reader answers it at every decode entry point, the `refusals/` family carries one
+vector per row and per boundary acceptance, and the `decode/` family carries each row at the shape
+reader. (The UI wire's section 20 was the first statement of the rows; its 20.1 records why a row
+binds an ENTRY POINT and not a host, and this section inherits that framing.)
+
+### The rows
+
+A conformant document is one RFC 8259 text, read strictly. Each row below is a refusal of the TEXT
+— `InvalidJson` at the root in the decode error contract, with a `JsonErrorKind` naming the class —
+and none can be reached by a conformant encoder: every input class is one no host can emit, which is
+why the rows cost no legitimate document and is the admission test a further row must meet.
+
+| # | Input class | Core's answer | `JsonErrorKind` |
+|---|---|---|---|
+| 1 | A **repeated member name** in one object (`{"id":"a","id":"b"}`), names compared after unescaping | refused at the repeated name's opening quote, when the member is accumulated (after its value is read) | `DuplicateMember` |
+| 2 | **Content after the root value** (`{}x`, `1 2`, `{} }`) | refused at the first non-whitespace character after the value | `TrailingCharacters` |
+| 3 | A number token outside the **RFC 8259 grammar**: leading `+`, leading zero, no integer part, no fractional digits after the point, no digits after the exponent | refused | `MalformedNumber` (`UnexpectedChar` where the token cannot start a value: `+1`, `.5`) |
+| 4 | A **bare `NaN` / `Infinity` / `-Infinity`** literal | refused: not a JSON token | `UnexpectedChar` (`MalformedNumber` for `-Infinity`, whose sign starts a number) |
+| 5 | A **raw C0 control character** (U+0000 to U+001F) unescaped inside a string | refused at the character, before any other string test | `BadEscape` |
+| 6 | An **unpaired surrogate**, raw or escaped — a high not followed at once by a low, a low with no high before it | refused | `BadEscape` |
+| 7 | An **overflowing exponent** (`1e999`) | refused: Core's value model has no non-finite float, so this is the VALUE domain's refusal, not the syntax's | `MalformedNumber` |
+| 8 | A **quoted sentinel** (`"NaN"`, `"Infinity"`, `"-Infinity"`) | a string; what a typed float slot makes of it is the citing wire's | — |
+
+Three rules sit beside the rows:
+
+- **Every entry point answers alike.** `Json.parse`, `parseWith`, `parseDetailed*`, the tolerant reads
+  (`parseTolerantOfNull*`, `parseWithPolicy`), `Decode.parse*`, `Decoder.parse*` and `Json.Reader.read`
+  share one scanner (Phase 368), and a test holds each of them to one answer per `json` vector in
+  `refusals/`. A reader a wire host carries beside Core's (the generated TypeScript reader is one)
+  answers every row identically or declares the row it diverges on as a conformance gap, never as a
+  second dialect.
+- **An erased member null is not an occurrence of its name.** Under `EraseMemberNull`
+  (`parseTolerantOfNull`), `{"a":null,"a":1}` and `{"a":1,"a":null}` both read as `{"a":1}`: the
+  tolerant read is the strict read of the document with its member nulls deleted (a proved bridge,
+  Phase 190), and the deletion leaves no name behind. Under the strict policy the same documents are
+  the null's refusal. Decision record: DECISIONS.md D157.
+- **Row 7 is where Core is stricter than a wire may be.** A wire that admits a non-finite number at
+  its syntax layer (the UI wire's section 20.2 row 7 does) states that one divergence beside its
+  citation; a wire that inherits Core's answer states nothing.
+
+### The limits
+
+Core states no limit VALUES and is not a host of any wire's limits section (DECISIONS.md D84, ruled
+2026-10-01): its 512 nesting cap is its own stack guard, deliberately looser than any wire's bound,
+so Core never refuses a document a wire says a host must accept, and its refusal there is
+`MaxDepthExceeded` (`LimitExceeded` in the decode error contract). The limits MECHANISM — a parse that
+takes a limits record (JSON depth, string length in code points, members per object and items per
+array, document bytes) and enforces each on the way down, reporting a breach as a limit and never as
+malformed JSON — is Phase 465's; each wire keeps its own values, units and error envelope and cites
+Core for the mechanism alone. **A stricter host-operational ceiling is deployment policy, not
+conformance:** a host that applies one documents it and never describes a document it refuses under
+it as malformed.
+
+### The refusal classes
+
+The decode error contract (`decode/`) carries a row's refusal as `InvalidJson` at the root; the
+parser's `JsonErrorKind` names the class inside it, closed at thirteen cases (`UnexpectedChar`,
+`UnexpectedEndOfInput`, `ExpectedToken`, `UnterminatedString`, `UnterminatedEscape`,
+`TruncatedUnicodeEscape`, `BadEscape`, `BadHexDigit`, `MalformedNumber`, `NullNotRepresentable`,
+`MaxDepthExceeded`, `TrailingCharacters`, `DuplicateMember`). A host reproduces the class per vector;
+the sentence beside it is the host's own. The vectors are emitted, never hand-edited
+(`--emit-refusals`, `--emit-decode`), and the manifests are authoritative for the counts.
 
 ## The `apply/` family
 

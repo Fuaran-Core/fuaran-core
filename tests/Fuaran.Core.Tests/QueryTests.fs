@@ -281,10 +281,12 @@ let duplicateParamTests =
                   (Error [ DuplicateParam "year" ])
                   "validateParamsAll"
 
-              Expect.equal
-                  (QueryCodec.decodeArgs sampleQuery """{"year":2024,"year":2025}""")
-                  (Error [ DuplicateParam "year" ])
-                  "decodeArgs"
+              // Phase 462: on TEXT the parser refuses the repeated name before the query sees it, as
+              // `UnreadableArgs` carrying the parse refusal; the two checks above answer a value.
+              match QueryCodec.decodeArgs sampleQuery """{"year":2024,"year":2025}""" with
+              | Error [ UnreadableArgs e ] ->
+                  Expect.equal e.Code DecodeCode.InvalidJson "decodeArgs: the parser's refusal"
+              | other -> failtestf "decodeArgs: expected UnreadableArgs, got %A" other
 
               Expect.equal
                   (Query.validateParams sampleQuery [ "year", Int 2024; "region", Str "UK" ])

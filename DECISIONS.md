@@ -1,5 +1,98 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-15 — D157: Core owns the JSON-syntax layer every Fuaran wire cites; a repeated member name and a raw control inside a string are refused at every decode entry point, the model first; an erased member null is not an occurrence; first-wins (D113) is superseded; a value with a repeated member has no rendering a guarded renderer gives
+
+**Recorded by Phase 462. `proofs/JsonParse.fst` and `proofs/WireCanon.fst` (and their extracted oracles),
+`src/Fuaran.Core.Wire/Json.fs`, `Canon.fs`, `Corpus.fs`, `src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptCodec.fs`,
+`conformance/refusals/`, `conformance/decode/`, `docs/conformance-corpus.md` ("The JSON-syntax layer"),
+`proofs.json`; rides the `0.38.0` draft (`docs/releases/0.38.0.md`). Requirement
+`suggest-2026-10-15-core-json-syntax-and-rust-spine`, clause S1.**
+
+**D157.1 — the single-owner ruling.** Every Fuaran wire shares one JSON layer below its own vocabulary, and
+each specification either restated its rules or omitted them: the UI wire's section 20 rows and section 21
+limits, the model-execution wire's duplicate-member rule, the program wire's silence. The UI wire records
+why that is a defect rather than a style (its 20.1: the reference host carried two parsers with two accept
+sets, and the gap closes when they are one parser). Core is now the single owner of the syntax layer:
+`docs/conformance-corpus.md` states the rows, the refusal classes and the entry points they bind as a
+citable normative section, the `refusals/` family carries one vector per row and per boundary acceptance,
+and the `decode/` family carries each row at the shape reader. A wire specification cites the section and
+restates nothing. The limit VALUES are not here: D84 stands, Core is not a section-21 host, and Phase 465
+adds the limits MECHANISM (a parse taking a limits record) while each wire keeps its own values, units and
+envelope. A stricter host-operational ceiling is deployment policy, never a conformance claim.
+
+**D157.2 — what the parser refuses now, and where.** Two inputs the one scanner accepted:
+
+- **A repeated member name in one object** — `JsonErrorKind.DuplicateMember`, a new thirteenth case, at the
+  repeated name's opening quote, message `repeated member name in one object`. The check runs when the
+  member is ACCUMULATED, after its value is read: a refusal inside the value still wins, and under the strict
+  policy a repeated member whose value is `null` is the null's refusal. Names are compared after unescaping
+  (`{"a":1,"a":2}` is a repeat); the same name in two sibling objects or at two depths is not; case
+  differs.
+- **A raw C0 control (U+0000 to U+001F) inside a string** — `BadEscape`, at the character, message
+  `unescaped control character U+00XX in a string`, before the surrogate test. Phase 299's precedent is
+  followed: `BadEscape` already names "this string's content is not well-formed", and a fourteenth kind would
+  cost every exhaustive match for no decision a caller takes.
+
+Both ride the one scanner (Phase 368), so every entry point answers alike: `parse*`, `parseDetailed*`, the
+tolerant reads, `Decode.parse*`, `Decoder.parse*`, `Json.Reader.read`, and everything above them. A test
+holds every entry point to one answer per vector. Rows 2, 3, 4 and 6 of the UI wire's section 20.2 (content
+after the root, the number grammar, a bare non-finite literal, an unpaired surrogate) were already refused
+everywhere. Row 7 (`1e999`) stays refused: Core's value model has no non-finite float, so the refusal is the
+value domain's, not the syntax's; a wire that admits a non-finite number at its syntax layer says so as its
+one divergence.
+
+**D157.3 — an erased member null is not an occurrence.** Under `EraseMemberNull`, `{"a":null,"a":1}` reads
+as `{"a":1}` and `{"a":1,"a":null}` reads as `{"a":1}` too. The alternative (count the erased member) would
+falsify Phase 190's proved bridge — the tolerant read IS the strict read of the document with its member
+nulls deleted — and the deletion leaves no name behind to repeat. The accumulator is the set, and an erased
+member is never accumulated. `null_absorption_is_erasure` and `policies_agree_off_the_fork` both still hold,
+which is why the check sits after the value rather than before it: with the check first, strict refused
+`{"a":1,"a":null}` as a duplicate and the tolerant read accepted it, and the two theorems could not both be
+true.
+
+**D157.4 — D113's first-wins is superseded.** D113.3 made the three hosts agree by keeping a repeated key's
+first value. Refusal makes them agree as well and closes the smuggling case the UI wire's 20.3 names, which
+is the differential the device demo is built to show (`langsec-microcontroller-demo.md`, L1). The generated
+TypeScript reader (`dParse`, the F# reader's twin) refuses the same two inputs with the same messages; the
+pinned corners read `InvalidJson` at the root on all three hosts; the mutation law draws the corner and
+holds the hosts to one answer. First-wins remains only where no text exists: `dMap` and the F# host's map
+over a value handed in keep the first entry, as D113.3 said, and nothing reaches them from text with a
+repeated key.
+
+**D157.5 — the encoder side.** `JObj` admits a repeated key, so `Json.render` and `Canon.render` could write
+text the parser now refuses, and the admission test the UI wire's 20.2 states ("no conformant encoder can
+reach it") did not hold of Core itself. `Json.firstRepeatedMember` finds the first object carrying a name
+twice, in document order, and both guarded renderers (`Json.tryRender`, `Canon.tryRender`) refuse on it after
+the non-finite float and the ill-formed string. The total renderers stay total: a repeated key does not make
+a digest platform-dependent, so D84's rule (refuse where a digest depends on it) does not apply, and the chain
+pre-images are unchanged. The fuzz law (`Corpus.fuzzRoundTrip`) keeps drawing keys with replacement and
+holds the refusal as the law where a value repeats one.
+
+**D157.6 — the models moved first.** `proofs/JsonParse.fst` gains `CCtrl` (a raw control, spelt by the
+bridge), `DuplicateMember`, `has_key` over the accumulated members, the refusal arms, a thirteenth
+reachability witness and `raw_control_refused` / `repeated_member_refused`; the surrogate well-formedness
+lemmas and the null-absorption bridge are re-proved over the new grammar. `proofs/WireCanon.fst`'s bridge to
+the parser (section 14) carries one new hypothesis, `distinct_keys` — section 6's reader reads exactly what
+`render` emits, repeated keys included, and the parser no longer does — preserved by the sort and threaded
+through the member induction (`keys_apart`); `pc` sends a `CPlain` carrying a whitespace control to `COther`,
+the same boundary a surrogate sits at. The oracles are re-extracted and the differentials run over the new
+alphabet (a raw tab is in the soup).
+
+**D157.7 — the layer checks pre-empted on text.** `ColumnCodec.decode` and `QueryCodec.decodeArgs` refuse a
+repeated key before their own duplicate checks run; those checks still answer a value built in memory, and
+their tests now exercise both routes.
+
+**D157.8 — the committed stores.** Every committed `.json` and `.jsonl` document in this repository and in the
+workspace's nine roadmap stores was scanned for a repeated member name and a raw control before this landed:
+none was found (the scan and its count are in the phase's outcome). The op-stream JSONL scanner itself is
+Phase 466's: it still keeps the first of a repeated key and passes a raw control, and it has no Wire
+dependency to share the grammar through.
+
+**D157.9 — the version.** `JsonErrorKind` gains a case (`union-widening`, breaking: every exhaustive match in
+a consumer moves) and a published reader refuses documents it accepted. The standing `0.38.0` draft already
+carries the breaking class, so the change RIDES it rather than advancing it; the cohort is raised when the
+slot is cut.
+
 ## 2026-10-14 — D156: the two slowest proof modules spend their time in a handful of queries whose context carries definitions the proof never needs; the cost is cut by naming what each query may use, not by weakening any statement
 
 **Recorded by Phase 458. `proofs/Temporal.fst`, `proofs/OpStreamLoad.fst`, `proofs/modules.json`,

@@ -109,6 +109,44 @@ module RefusalCorpus =
           json "high-at-end" "\"a\\uD83D\"" (Refuse "BadEscape")
           json "lone-surrogate-in-a-key" "{\"\\uD800\":1}" (Refuse "BadEscape")
           json "escaped-pair" "\"\\uD83D\\uDE00\"" Accept
+          // ---- Phase 462: the decode-determinism rows every wire's JSON layer shares ----
+          // a repeated member name in one object, names compared after unescaping (row 1)
+          json "repeated-member" """{"id":"a","id":"b"}""" (Refuse "DuplicateMember")
+          json "repeated-member-same-value" """{"a":1,"a":1}""" (Refuse "DuplicateMember")
+          json "repeated-member-not-adjacent" """{"a":1,"b":2,"a":3}""" (Refuse "DuplicateMember")
+          json "repeated-member-escaped-spelling" """{"a":1,"a":2}""" (Refuse "DuplicateMember")
+          json "repeated-member-nested" """[{"a":1},{"b":1,"b":2}]""" (Refuse "DuplicateMember")
+          json "repeated-empty-name" """{"":1,"":2}""" (Refuse "DuplicateMember")
+          json "one-name-in-sibling-objects" """[{"a":1},{"a":2}]""" Accept
+          json "one-name-at-two-depths" """{"a":{"a":1}}""" Accept
+          json "names-differing-in-case" """{"a":1,"A":2}""" Accept
+          // content after the root value (row 2)
+          json "content-after-object" "{}x" (Refuse "TrailingCharacters")
+          json "second-root-value" "1 2" (Refuse "TrailingCharacters")
+          json "surplus-closing-brace" "{} }" (Refuse "TrailingCharacters")
+          json "whitespace-after-root" "{} \n" Accept
+          // the number grammar's other arms (row 3; the arms above are Phase 299's)
+          json "leading-plus" "+1" (Refuse "UnexpectedChar")
+          json "no-integer-part" ".5" (Refuse "UnexpectedChar")
+          // a bare non-finite literal is no JSON token; the quoted sentinel is a string (rows 4, 8)
+          json "bare-nan" "NaN" (Refuse "UnexpectedChar")
+          json "bare-infinity" "Infinity" (Refuse "UnexpectedChar")
+          json "bare-negative-infinity" "-Infinity" (Refuse "MalformedNumber")
+          json "bare-nan-in-array" "[1,NaN]" (Refuse "UnexpectedChar")
+          json "sentinel-string" "\"NaN\"" Accept
+          // an overflowing exponent: refused because Core's value model holds no non-finite float,
+          // a value-domain refusal rather than a syntax one (DECISIONS.md D157)
+          json "overflowing-exponent" "1e999" (Refuse "MalformedNumber")
+          // a raw C0 control character inside a string (row 5)
+          json "raw-control-u0001" ("\"a" + string (char 1) + "b\"") (Refuse "BadEscape")
+          json "raw-nul" ("\"" + string (char 0) + "\"") (Refuse "BadEscape")
+          json "raw-tab" ("\"a" + string (char 9) + "b\"") (Refuse "BadEscape")
+          json "raw-line-feed" ("\"a" + string (char 10) + "b\"") (Refuse "BadEscape")
+          json "raw-unit-separator" ("\"" + string (char 0x1F) + "\"") (Refuse "BadEscape")
+          json "raw-control-in-a-name" ("{\"a" + string (char 1) + "\":1}") (Refuse "BadEscape")
+          json "raw-control-after-an-escape" ("\"\\n" + string (char 1) + "\"") (Refuse "BadEscape")
+          json "escaped-controls" "\"\\u0000\\u001f\\t\"" Accept
+          json "raw-delete" ("\"" + string (char 0x7F) + "\"") Accept
           // ---- the columnar codec: a cell of its column's type, or a refusal naming it ----
           col "bool-in-int" (one "int" "true") (Refuse "TypeMismatch")
           col "string-in-float" (one "float" "\"1.5\"") (Refuse "TypeMismatch")
@@ -136,7 +174,7 @@ module RefusalCorpus =
           col
               "duplicate-column-key"
               """{"schema":[{"name":"a","type":"int"}],"columns":{"a":[1],"a":[2]}}"""
-              (Refuse "Malformed")
+              (Refuse "NotJson/DuplicateMember")
           col "ragged-columns" """{"columns":{"a":[1,2],"b":[3]}}""" (Refuse "RaggedColumns")
           col "leading-zero-in-a-column" (one "int" "01") (Refuse "NotJson/MalformedNumber")
           col "lone-surrogate-in-a-column" (one "string" "\"\\uD800\"") (Refuse "NotJson/BadEscape")
@@ -209,7 +247,7 @@ module RefusalCorpus =
             .Append(familyId)
             .Append("\",\n  \"description\": \"")
             .Append(
-                "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome."
+                "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. Every `json` vector binds every JSON decode entry point, not one parser (Phase 462). A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome."
             )
             .Append("\",\n  \"vectors\": [\n")
         |> ignore
@@ -242,7 +280,7 @@ module RefusalCorpus =
               string (List.length vectors)
               ", \"adoption\": "
               adoption
-              ", \"description\": \"The JSON number grammar, well-formed UTF-16 strings, the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of.\" }\n"
+              ", \"description\": \"The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of.\" }\n"
               "  ]\n"
               "}\n" ]
 
@@ -271,6 +309,83 @@ let tests =
 
               let names = RefusalCorpus.vectors |> List.map _.Name
               Expect.equal (List.distinct names) names "vector names are unique"
+
+          // Phase 462 — a row binds every ENTRY POINT that turns JSON text into a value, not one
+          // parser. Each `json` vector is put to every one Core has, and each must give the
+          // answer `parseDetailed` gives: the same refusal (kind, message, position) in each
+          // entry point's own error type, or an acceptance of the same value.
+          testCase "every json vector gets one answer at every decode entry point"
+          <| fun _ ->
+              let rec walk (r: Json.Reader) (input: string) : unit =
+                  // A structural reading through the Reader's own object and array loops.
+                  match input.TrimStart() with
+                  | t when t.StartsWith "{" -> Json.Reader.members (fun _ r -> Json.Reader.value r |> ignore) r
+                  | t when t.StartsWith "[" -> Json.Reader.items (fun r -> Json.Reader.value r |> ignore) r
+                  | _ -> Json.Reader.value r |> ignore
+
+              for v in RefusalCorpus.vectors |> List.filter (fun v -> v.Codec = "json") do
+                  let reference = Json.parseDetailed v.Input
+                  let asText = Json.parse v.Input
+
+                  let detailed =
+                      [ "parseDetailedWith 512", Json.parseDetailedWith 512 v.Input
+                        "parseDetailedWithPolicy RejectNull", Json.parseDetailedWithPolicy RejectNull 512 v.Input
+                        // no vector carries a null, so the tolerant policy has nothing to erase
+                        "parseDetailedTolerantOfNull", Json.parseDetailedTolerantOfNull v.Input ]
+
+                  for name, got in detailed do
+                      Expect.equal got reference (sprintf "%s: %s" v.Name name)
+
+                  let text =
+                      [ "parseWith 512", Json.parseWith 512 v.Input
+                        "parseWithPolicy RejectNull", Json.parseWithPolicy RejectNull 512 v.Input
+                        "parseTolerantOfNull", Json.parseTolerantOfNull v.Input
+                        "Decode.parse", Decode.parse v.Input
+                        "Decode.parseTolerantOfNull", Decode.parseTolerantOfNull v.Input ]
+
+                  for name, got in text do
+                      Expect.equal got asText (sprintf "%s: %s" v.Name name)
+
+                  Expect.equal
+                      (Decoder.parse v.Input)
+                      (reference |> Result.mapError DecodeError.ofJsonError)
+                      (sprintf "%s: Decoder.parse" v.Name)
+
+                  let readerAnswer (reading: Json.Reader -> unit) =
+                      match Json.Reader.read reading v.Input with
+                      | Ok() -> Ok()
+                      | Error(Json.ReadError.Malformed e) -> Error e
+                      | Error(Json.ReadError.Mismatch(at, expected)) ->
+                          failtestf "%s: the Reader answered a shape mismatch at %d (%s)" v.Name at expected
+
+                  let expected = reference |> Result.map ignore
+                  Expect.equal (readerAnswer (Json.Reader.value >> ignore)) expected (sprintf "%s: Reader.value" v.Name)
+
+                  Expect.equal
+                      (readerAnswer (fun r -> walk r v.Input))
+                      expected
+                      (sprintf "%s: Reader structural" v.Name)
+
+          // Phase 462 — an erased member null is NOT an occurrence of its name (D157): the tolerant
+          // read is the strict read of the document with its member nulls deleted (Phase 190), and
+          // a repeated name the deletion removes was never there.
+          testCase "an erased member null does not count as an occurrence of its name"
+          <| fun _ ->
+              Expect.equal (Json.parseTolerantOfNull """{"a":null,"a":1}""") (Json.parse """{"a":1}""") "erased first"
+
+              Expect.equal (Json.parseTolerantOfNull """{"a":1,"a":null}""") (Json.parse """{"a":1}""") "erased second"
+
+              match Json.parseDetailedTolerantOfNull """{"a":1,"a":2}""" with
+              | Error e -> Expect.equal e.Kind DuplicateMember "two surviving members still repeat"
+              | Ok v -> failtestf "accepted %A" v
+
+          testCase "a repeated member is refused at its name's opening quote"
+          <| fun _ ->
+              match Json.parseDetailed """{"a":1,"b":2,"a":3}""" with
+              | Error e ->
+                  Expect.equal e.Kind DuplicateMember "kind"
+                  Expect.equal e.Position 13 "at the second \"a\""
+              | Ok v -> failtestf "accepted %A" v
 
           testCase "the committed conformance/refusals/ artefacts are the ones this kit renders"
           <| fun _ ->

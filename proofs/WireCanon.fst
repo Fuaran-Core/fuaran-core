@@ -1569,12 +1569,21 @@ type sscan =
   | AllStringsOk : sscan
   | IllFormed    : path:list pstep -> s:list ch -> is_key:bool -> sscan
 
-(* F#: `Canon.tryRender`'s `Result` — the rendering, or one of its two refusals: the path and the
-   non-finite float it names, or (Phase 306) the path and the ill-formed string it names. *)
+(* F#: `Json.firstRepeatedMember`'s `option` (Phase 462) — the first object, in document order,
+   that carries a member name twice: the object's path and the name, the name being the one whose
+   SECOND occurrence comes first (`seen.Add k` fails there in production). *)
+type rscan =
+  | NoRepeat : rscan
+  | Repeated : path:list pstep -> k:list ch -> rscan
+
+(* F#: `Canon.tryRender`'s `Result` — the rendering, or one of its three refusals: the path and the
+   non-finite float it names, (Phase 306) the path and the ill-formed string it names, or (Phase
+   462) the path of the object and the member name it carries twice. *)
 type guarded (flt: eqtype) =
-  | Rendered      : bytes:list ch -> guarded flt
-  | Refused       : path:list pstep -> f:flt -> guarded flt
-  | RefusedString : path:list pstep -> s:list ch -> is_key:bool -> guarded flt
+  | Rendered        : bytes:list ch -> guarded flt
+  | Refused         : path:list pstep -> f:flt -> guarded flt
+  | RefusedString   : path:list pstep -> s:list ch -> is_key:bool -> guarded flt
+  | RefusedRepeated : path:list pstep -> k:list ch -> guarded flt
 
 (* F#: `firstNonFinite`. The guard `System.Double.IsNaN f || System.Double.IsInfinity f` is
    `w.fclass f <> FFinite` — the negation of `float_canonical`'s first clause, and of nothing more. *)
@@ -1635,16 +1644,60 @@ and first_ill_formed_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list c
          | IllFormed p s isk -> IllFormed (PMember k :: p) s isk
          | AllStringsOk -> first_ill_formed_kvs w t)
 
+(* F#: the `seen.Add k` loop of `Json.firstRepeatedMember` over ONE object's members: the first
+   name whose second occurrence is met, scanning in authored order. *)
+let rec second_occurrence (#num #flt: eqtype) (seen: list (list ch))
+                          (fs: list (list ch & jval num flt))
+  : Tot (option (list ch)) (decreases fs) =
+  match fs with
+  | [] -> None
+  | (k, _) :: t -> if mem k seen then Some k else second_occurrence (k :: seen) t
+
+(* F#: `Json.firstRepeatedMember` (Phase 462). Document order, as the two scans above: an array by
+   index, an object's own members BEFORE its children (the object is the finding, at its own path),
+   then each member's value in authored order. *)
+let rec first_repeated (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot rscan (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> first_repeated_items w 0 xs
+  | JObj fs ->
+      (match second_occurrence [] fs with
+       | Some k -> Repeated [] k
+       | None -> first_repeated_kvs w fs)
+  | _ -> NoRepeat
+
+and first_repeated_items (#num #flt: eqtype) (w: wire num flt) (i: nat) (xs: list (jval num flt))
+  : Tot rscan (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> NoRepeat
+  | x :: t ->
+      (match first_repeated w x with
+       | Repeated p k -> Repeated (PItem i :: p) k
+       | NoRepeat -> first_repeated_items w (i + 1) t)
+
+and first_repeated_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot rscan (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> NoRepeat
+  | (k, v) :: t ->
+      (match first_repeated w v with
+       | Repeated p k' -> Repeated (PMember k :: p) k'
+       | NoRepeat -> first_repeated_kvs w t)
+
 (* F#: `Canon.tryRender`. `render` is called, never re-implemented: the guard adds its refusals
-   and changes no byte. The non-finite float is looked for FIRST, as in production, so every
-   refusal the Phase 165 guard made is the refusal this one makes. *)
+   and changes no byte. The non-finite float is looked for FIRST, as in production, then the
+   ill-formed string, then (Phase 462) the repeated member, so every refusal an earlier guard
+   made is the refusal this one makes. *)
 let try_render (#num #flt: eqtype) (w: wire num flt) (v: jval num flt) : Tot (guarded flt) =
   match first_nonfinite w v with
   | NonFinite p f -> Refused p f
   | AllFinite ->
       (match first_ill_formed w v with
        | IllFormed p s k -> RefusedString p s k
-       | AllStringsOk -> Rendered (render w v))
+       | AllStringsOk ->
+           (match first_repeated w v with
+            | Repeated p k -> RefusedRepeated p k
+            | NoRepeat -> Rendered (render w v)))
 
 (* ---- the predicate, stated independently of the scan ---- *)
 
@@ -1692,6 +1745,57 @@ and strings_ok_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jv
   match fs with
   | [] -> true
   | (k, v) :: t -> w.str_ok k && strings_ok w v && strings_ok_kvs w t
+
+(* Every object in the value carries distinct member names (Phase 462): the predicate the
+   third refusal decides, stated independently of the scan. *)
+[@@ noextract_to "FSharp"]
+let rec names_distinct (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> names_distinct_items w xs
+  | JObj fs -> None? (second_occurrence [] fs) && names_distinct_kvs w fs
+  | _ -> true
+
+and names_distinct_items (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> names_distinct w x && names_distinct_items w t
+
+and names_distinct_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (_, v) :: t -> names_distinct w v && names_distinct_kvs w t
+
+(* The repeated-member scan decides `names_distinct`. *)
+[@@ noextract_to "FSharp"]
+let rec scan_decides_names_distinct (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures NoRepeat? (first_repeated w v) == names_distinct w v)
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> scan_items_decides_names_distinct w 0 xs
+  | JObj fs ->
+      (match second_occurrence [] fs with
+       | Some _ -> ()
+       | None -> scan_kvs_decides_names_distinct w fs)
+  | _ -> ()
+
+and scan_items_decides_names_distinct (#num #flt: eqtype) (w: wire num flt) (i: nat)
+                                      (xs: list (jval num flt))
+  : Lemma (ensures NoRepeat? (first_repeated_items w i xs) == names_distinct_items w xs)
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> scan_decides_names_distinct w x; scan_items_decides_names_distinct w (i + 1) t
+
+and scan_kvs_decides_names_distinct (#num #flt: eqtype) (w: wire num flt)
+                                    (fs: list (list ch & jval num flt))
+  : Lemma (ensures NoRepeat? (first_repeated_kvs w fs) == names_distinct_kvs w fs)
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> scan_decides_names_distinct w v; scan_kvs_decides_names_distinct w t
 
 (* The string scan decides `strings_ok`, and what it names is a string the test refuses. *)
 [@@ noextract_to "FSharp"]
@@ -1907,31 +2011,38 @@ let alias_token (c: fcls) : Tot (list ch) =
    `float_canonical` describes, which is what makes the corollary below a corollary. *)
 [@@ noextract_to "FSharp"]
 let tryrender_is_render_on_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
-  : Lemma (requires finite_all w v /\ strings_ok w v)
+  : Lemma (requires finite_all w v /\ strings_ok w v /\ names_distinct w v)
           (ensures try_render w v == Rendered (render w v)) =
   scan_decides_finite w v;
-  scan_decides_strings_ok w v
+  scan_decides_strings_ok w v;
+  scan_decides_names_distinct w v
 
 [@@ noextract_to "FSharp"]
 let tryrender_is_render_on_canonical (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
-  : Lemma (requires canonical w v /\ strings_ok w v)
+  : Lemma (requires canonical w v /\ strings_ok w v /\ names_distinct w v)
           (ensures try_render w v == Rendered (render w v)) =
   canonical_is_finite w v;
   tryrender_is_render_on_finite w v
 
-(* THE GUARD ACCEPTS EXACTLY THE VALUES WITH NO NON-FINITE FLOAT AND NO ILL-FORMED STRING
-   (Phase 306) — and a string refusal is made only where every float is finite, and names a string
-   the well-formedness test refuses. The two refusals are ordered, not merged: a value with both
-   faults is refused for its float, so nothing the Phase 165 guard said has changed. *)
+(* THE GUARD ACCEPTS EXACTLY THE VALUES WITH NO NON-FINITE FLOAT, NO ILL-FORMED STRING AND NO
+   REPEATED MEMBER NAME (Phases 306 and 462) — a string refusal is made only where every float is
+   finite, and names a string the well-formedness test refuses; a repeated-member refusal only
+   where every float is finite and every string well-formed. The refusals are ordered, not merged:
+   a value with several faults is refused for the earliest class, so nothing an earlier guard said
+   has changed. *)
 [@@ noextract_to "FSharp"]
 let tryrender_refuses_exactly_ill_formed (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
-  : Lemma (ensures (Rendered? (try_render w v) == (finite_all w v && strings_ok w v)) /\
+  : Lemma (ensures (Rendered? (try_render w v)
+                      == (finite_all w v && strings_ok w v && names_distinct w v)) /\
                    (RefusedString? (try_render w v) == (finite_all w v && not (strings_ok w v))) /\
+                   (RefusedRepeated? (try_render w v)
+                      == (finite_all w v && strings_ok w v && not (names_distinct w v))) /\
                    (match try_render w v with
                     | RefusedString _ s _ -> not (w.str_ok s)
                     | _ -> True)) =
   scan_decides_finite w v;
-  scan_decides_strings_ok w v
+  scan_decides_strings_ok w v;
+  scan_decides_names_distinct w v
 
 (* THE GUARD REFUSES EXACTLY THE ALIASING FLOATS. It refuses iff some float is not finite; and what
    a refusal names is a float that is really at that path, whose class is one of the three
@@ -1944,6 +2055,7 @@ let tryrender_refuses_exactly_aliasing (#num #flt: eqtype) (w: wire num flt) (v:
                    (match try_render w v with
                     | Rendered _ -> True
                     | RefusedString _ _ _ -> True
+                    | RefusedRepeated _ _ -> True
                     | Refused p f ->
                         w.fclass f <> FFinite /\
                         reaches v p (JFloat f) /\
@@ -1972,7 +2084,7 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
                 try_render w (JFloat f) == Rendered (render w (JInt #num #flt i))) /\
             ((w.fclass f == FFinite /\ w.fclass g == FFinite /\ w.is_zero f /\ w.is_zero g) ==>
                 try_render w (JFloat #num #flt f) == Rendered (render w (JFloat #num #flt g))) /\
-            ((w.str_ok k1 /\ w.str_ok k2) ==>
+            ((w.str_ok k1 /\ w.str_ok k2 /\ k1 <> k2) ==>
                 try_render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)]) ==
                 Rendered (render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)])))) = ()
 
@@ -2025,7 +2137,13 @@ module JP = JsonParse
 
 (* One clause per class. `CCtrl` has no clause that can be reached from a RENDERING — rule 6
    escapes every control character, so a control never appears verbatim in `render`'s output —
-   and its arm is `COther` of the model's own name for it, which is what `denot` already gives. *)
+   and its arm is `COther` of the model's own name for it, which is what `denot` already gives.
+
+   A `CPlain` carrying a tab, a line feed or a carriage return crosses as `COther` too (Phase
+   462), not as the parser's `CTab` / `CNewline` / `CReturn`: the parser refuses a raw control
+   inside a string, and this model's alphabet spells every control as `CCtrl`, so a `CPlain`
+   carrying one is outside what the bridge expresses — the same boundary as a surrogate, and for
+   the same reason (`pc_is_ordinary` below). *)
 [@@ noextract_to "FSharp"]
 let pc (c: ch) : Tot JP.ch =
   match c with
@@ -2051,9 +2169,6 @@ let pc (c: ch) : Tot JP.ch =
   | CCtrl hi lo -> JP.COther (denot (CCtrl hi lo))
   | CPlain s ->
       if s = " " then JP.CSpace
-      else if s = "\t" then JP.CTab
-      else if s = "\n" then JP.CNewline
-      else if s = "\r" then JP.CReturn
       else if s = "/" then JP.CSlash
       else if s = "l" then JP.CLl
       else if s = "n" then JP.CLn
@@ -2091,7 +2206,7 @@ let pc_spells_the_literals (_: unit)
 let pc_is_ordinary (c: ch)
   : Lemma (requires ~(CQuote? c) /\ ~(CBackslash? c))
           (ensures pc c <> JP.CQuote /\ pc c <> JP.CBackslash /\
-                   JP.lit_class (pc c) == JP.SNone) = ()
+                   JP.lit_class (pc c) == JP.SNone /\ not (JP.is_ctrl (pc c))) = ()
 
 (* Every hex nibble is a hex digit to the parser — what the `\u00XX` arm tests before it accepts
    the escape rule 6 emits. *)
@@ -2245,6 +2360,109 @@ let rec sort_preserves_fits (#num #flt: eqtype) (w: wire num flt) (b: list unit)
   | [] -> ()
   | kv :: t -> sort_preserves_fits w b t; insert_preserves_fits w b kv (sort_kvs w t)
 
+(* ---- 14.4b distinct member names (Phase 462) ---- *)
+
+(* Since Phase 462 theorem 4's parser refuses an object that carries a member name twice
+   (`JP.has_key` on the accumulated members, `DuplicateMember`), where section 6's reader reads
+   exactly what `render` emits, a repeated key included. So the bridge carries one hypothesis
+   the sections before it did not: every object in the value has distinct member names, read in
+   the parser's own form (`pstr`), because that is the form the parser compares. The sort
+   preserves it (a permutation moves no name), and an accumulator the parser has already filled
+   is apart from the names still to come. *)
+[@@ noextract_to "FSharp"]
+let rec has_pkey (#num #flt: eqtype) (k: list JP.och) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases fs) =
+  match fs with
+  | [] -> false
+  | (k', _) :: t -> pstr k' = k || has_pkey k t
+
+[@@ noextract_to "FSharp"]
+let rec distinct_keys (#num #flt: eqtype) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> distinct_keys_items xs
+  | JObj fs -> distinct_kvs fs
+  | _ -> true
+
+and distinct_keys_items (#num #flt: eqtype) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> distinct_keys x && distinct_keys_items t
+
+and distinct_kvs (#num #flt: eqtype) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (k, v) :: t -> not (has_pkey (pstr k) t) && distinct_keys v && distinct_kvs t
+
+(* No name in `fs` is already in the parser's accumulator. *)
+[@@ noextract_to "FSharp"]
+let rec keys_apart (#num #flt: eqtype) (acc: list (list JP.och & JP.jval))
+                   (fs: list (list ch & jval num flt))
+  : Tot bool (decreases fs) =
+  match fs with
+  | [] -> true
+  | (k, _) :: t -> not (JP.has_key (pstr k) acc) && keys_apart acc t
+
+[@@ noextract_to "FSharp"]
+let rec keys_apart_nil (#num #flt: eqtype) (fs: list (list ch & jval num flt))
+  : Lemma (ensures keys_apart #num #flt [] fs) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | _ :: t -> keys_apart_nil t
+
+(* Accumulating a member whose name is not among the rest keeps the rest apart. *)
+[@@ noextract_to "FSharp"]
+let rec keys_apart_cons (#num #flt: eqtype) (acc: list (list JP.och & JP.jval))
+                        (k: list ch) (v: JP.jval) (fs: list (list ch & jval num flt))
+  : Lemma (requires keys_apart acc fs /\ not (has_pkey (pstr k) fs))
+          (ensures keys_apart ((pstr k, v) :: acc) fs) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | _ :: t -> keys_apart_cons acc k v t
+
+[@@ noextract_to "FSharp"]
+let rec has_pkey_insert (#num #flt: eqtype) (w: wire num flt) (k: list JP.och)
+                        (kv: (list ch & jval num flt)) (l: list (list ch & jval num flt))
+  : Lemma (ensures has_pkey k (insert_kv w kv l) == (pstr (fst kv) = k || has_pkey k l))
+          (decreases l) =
+  match l with
+  | [] -> ()
+  | hd :: t -> if w.key_le (fst kv) (fst hd) then () else has_pkey_insert w k kv t
+
+[@@ noextract_to "FSharp"]
+let rec has_pkey_sort (#num #flt: eqtype) (w: wire num flt) (k: list JP.och)
+                      (fs: list (list ch & jval num flt))
+  : Lemma (ensures has_pkey k (sort_kvs w fs) == has_pkey k fs) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | kv :: t -> has_pkey_sort w k t; has_pkey_insert w k kv (sort_kvs w t)
+
+[@@ noextract_to "FSharp"]
+let rec insert_preserves_distinct (#num #flt: eqtype) (w: wire num flt)
+                                  (kv: (list ch & jval num flt))
+                                  (l: list (list ch & jval num flt))
+  : Lemma (requires distinct_kvs l /\ not (has_pkey (pstr (fst kv)) l) /\ distinct_keys (snd kv))
+          (ensures distinct_kvs (insert_kv w kv l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | hd :: t ->
+      if w.key_le (fst kv) (fst hd) then ()
+      else (has_pkey_insert w (pstr (fst hd)) kv t; insert_preserves_distinct w kv t)
+
+[@@ noextract_to "FSharp"]
+let rec sort_preserves_distinct (#num #flt: eqtype) (w: wire num flt)
+                                (fs: list (list ch & jval num flt))
+  : Lemma (requires distinct_kvs fs)
+          (ensures distinct_kvs (sort_kvs w fs)) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | kv :: t ->
+      sort_preserves_distinct w t;
+      has_pkey_sort w (pstr (fst kv)) t;
+      insert_preserves_distinct w kv (sort_kvs w t)
+
 (* The trailing contexts the grammar itself produces after a value: a comma, a closing bracket, a
    closing brace, or the end of the document. STRONGER than section 6's `sep_ok`, and it has to
    be: `sep_ok` asks only that the next character cannot continue a numeric token as THIS model
@@ -2364,7 +2582,8 @@ let render_kvs_head (#num #flt: eqtype) (w: wire num flt)
 let rec parse_reads_render (#num #flt: eqtype) (w: wire num flt)
                            (fr: list JP.ch -> JP.freadv) (cap: string) (tol: bool)
                            (b: list unit) (v: jval num flt) (rest: list ch)
-  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ parse_sep rest /\ fits b v)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ parse_sep rest /\ fits b v /\
+                    distinct_keys v)
           (ensures JP.parse_value fr cap tol b (pcs (app (render w v) rest))
                      == JP.POk (pv w (normalise w v)) (pcs rest))
           (decreases %[(jsize v <: nat); 0]) =
@@ -2384,6 +2603,8 @@ let rec parse_reads_render (#num #flt: eqtype) (w: wire num flt)
   | JObj fs ->
       sort_preserves_canonical w fs;
       sort_preserves_fits w (Cons?.tl b) fs;
+      sort_preserves_distinct w fs;
+      keys_apart_nil (sort_kvs w fs);
       (match sort_kvs w fs with
        | [] -> ()
        | _ :: _ ->
@@ -2396,7 +2617,7 @@ and parse_reads_render_items (#num #flt: eqtype) (w: wire num flt)
                              (b: list unit) (xs: list (jval num flt)) (rest: list ch)
                              (acc: list JP.jval)
   : Lemma (requires numerals_bridge w fr /\ canonical_items w xs /\ parse_sep rest /\
-                    fits_items b xs /\ Cons? xs)
+                    fits_items b xs /\ Cons? xs /\ distinct_keys_items xs)
           (ensures JP.parse_items fr cap tol b acc (pcs (app (render_items w xs) rest))
                      == JP.POk (JP.rev_app acc (pvs w (normalise_items w xs))) (pcs rest))
           (decreases %[(jsizes xs <: nat); 1]) =
@@ -2414,7 +2635,7 @@ and parse_reads_render_kvs (#num #flt: eqtype) (w: wire num flt)
                            (b: list unit) (fs: list (list ch & jval num flt)) (rest: list ch)
                            (acc: list (list JP.och & JP.jval))
   : Lemma (requires numerals_bridge w fr /\ canonical_kvs w fs /\ parse_sep rest /\
-                    fits_kvs b fs /\ Cons? fs)
+                    fits_kvs b fs /\ Cons? fs /\ distinct_kvs fs /\ keys_apart acc fs)
           (ensures JP.parse_members fr cap tol b acc (pcs (app (render_kvs w fs) rest))
                      == JP.POk (JP.rev_app acc (pkvs w (normalise_kvs w fs))) (pcs rest))
           (decreases %[(fsize fs <: nat); 1]) =
@@ -2434,6 +2655,7 @@ and parse_reads_render_kvs (#num #flt: eqtype) (w: wire num flt)
       render_head_dispatches w fr v;
       pcs_head (render w v) (CComma :: app (render_kvs w t) rest);
       parse_reads_render w fr cap tol b v (CComma :: app (render_kvs w t) rest);
+      keys_apart_cons acc k (pv w (normalise w v)) t;
       parse_reads_render_kvs w fr cap tol b t rest ((pstr k, pv w (normalise w v)) :: acc)
 
 (* ---- 14.8 the budget, in the §21 vocabulary ---- *)
@@ -2483,7 +2705,7 @@ let canon_reader_agrees_with_parser (#num #flt: eqtype) (w: wire num flt)
                                     (pol: JP.policy) (b: list unit)
                                     (v: jval num flt) (rest: list ch)
   : Lemma (requires tok_read_ok w /\ numerals_bridge w fr /\ canonical w v /\
-                    parse_sep rest /\ llen b >= jdepth v)
+                    parse_sep rest /\ llen b >= jdepth v /\ distinct_keys v)
           (ensures Ok? (read w (app (render w v) rest)) /\
                    (let (u, r) = Ok?.v (read w (app (render w v) rest)) in
                     JP.parse_value fr cap (JP.EraseMemberNull? pol) b
@@ -2502,7 +2724,8 @@ let canon_reader_agrees_with_parser (#num #flt: eqtype) (w: wire num flt)
 let parse_render_roundtrip (#num #flt: eqtype) (w: wire num flt)
                            (fr: list JP.ch -> JP.freadv) (cap: string) (pol: JP.policy)
                            (b: list unit) (v: jval num flt)
-  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v /\
+                    distinct_keys v)
           (ensures JP.parse fr cap pol b (pcs (render w v)) == JP.ROk (pv w (normalise w v))) =
   budget_covers_depth b v;
   app_nil (render w v);
@@ -2516,7 +2739,8 @@ let parse_render_roundtrip (#num #flt: eqtype) (w: wire num flt)
 let parse_render_is_policy_independent (#num #flt: eqtype) (w: wire num flt)
                                        (fr: list JP.ch -> JP.freadv) (cap: string)
                                        (b: list unit) (v: jval num flt)
-  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v /\
+                    distinct_keys v)
           (ensures JP.parse fr cap JP.RejectNull b (pcs (render w v))
                      == JP.parse fr cap JP.EraseMemberNull b (pcs (render w v))) =
   parse_render_roundtrip w fr cap JP.RejectNull b v;
@@ -2531,7 +2755,7 @@ let parse_render_roundtrip_within_limits (#num #flt: eqtype) (w: wire num flt)
                                          (fr: list JP.ch -> JP.freadv) (cap: string)
                                          (pol: JP.policy) (b: list unit) (v: jval num flt)
   : Lemma (requires numerals_bridge w fr /\ canonical w v /\
-                    jdepth v <= max_json_depth /\ llen b >= max_json_depth)
+                    jdepth v <= max_json_depth /\ llen b >= max_json_depth /\ distinct_keys v)
           (ensures JP.parse fr cap pol b (pcs (render w v)) == JP.ROk (pv w (normalise w v))) =
   parse_render_roundtrip w fr cap pol b v
 

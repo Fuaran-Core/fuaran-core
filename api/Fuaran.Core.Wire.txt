@@ -62,6 +62,7 @@ field Fuaran.Core.Json+ReadError+Tags.Mismatch : System.Int32 (literal)
 field Fuaran.Core.Json.defaultMaxDepth : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.BadEscape : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.BadHexDigit : System.Int32 (literal)
+field Fuaran.Core.JsonErrorKind+Tags.DuplicateMember : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.ExpectedToken : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.MalformedNumber : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.MaxDepthExceeded : System.Int32 (literal)
@@ -206,6 +207,7 @@ method Fuaran.Core.Json.escapeWith(Fuaran.Core.EncodingProfile, System.String) :
 method Fuaran.Core.Json.firstIllFormedString(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Json.firstNonFinite(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
+method Fuaran.Core.Json.firstRepeatedMember(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.isJsonNumber(System.String) : System.Boolean
 method Fuaran.Core.Json.isWellFormedUtf16(System.String) : System.Boolean
 method Fuaran.Core.Json.kindObj(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
@@ -389,6 +391,7 @@ union-case Fuaran.Core.Json+ReadError.NewMalformed #0(Item: Fuaran.Core.JsonErro
 union-case Fuaran.Core.Json+ReadError.NewMismatch #1(position: System.Int32, expected: System.String)
 union-case Fuaran.Core.JsonErrorKind.BadEscape #6()
 union-case Fuaran.Core.JsonErrorKind.BadHexDigit #7()
+union-case Fuaran.Core.JsonErrorKind.DuplicateMember #12()
 union-case Fuaran.Core.JsonErrorKind.ExpectedToken #2()
 union-case Fuaran.Core.JsonErrorKind.MalformedNumber #8()
 union-case Fuaran.Core.JsonErrorKind.MaxDepthExceeded #10()

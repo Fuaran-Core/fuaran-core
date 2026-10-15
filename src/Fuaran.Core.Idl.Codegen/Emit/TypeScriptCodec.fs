@@ -802,8 +802,8 @@ const isObj = (j) => j !== null && typeof j === 'object' && !Array.isArray(j);
 // Phase 347 — what the reader (`dParse`) knows and a JS value cannot carry, kept beside the value
 // for the decode that reads it: per object or array, the members and items whose WHOLE number was
 // written as a float token (an int slot refuses it); and per object whose JS form loses its document
-// order, its members as written — a repeated key (the object holds the first) or an index-like key
-// (the object lists those first).
+// order, its members as written — an index-like key (the object lists those first). A repeated key
+// no longer reaches here: the reader refuses it (Phase 462).
 const dFloatAt = new WeakMap();
 const dMembersOf = new WeakMap();
 // Whether the value being decoded was read as a float token: set by `dRead` as each member or item
@@ -846,8 +846,9 @@ const dList = (dec) => (j) => Array.isArray(j) ? j.map((_, i) => dAt(i, () => de
 // `__proto__` is an entry like any other (on a plain object it replaced the prototype, and every
 // later read of the map went through the document's object), and no key reads one the prototype
 // has (`constructor`, `toString`). Its entries are read in DOCUMENT order, as the interpreter and
-// the F# host read them — an object lists an index-like key first — and a repeated key keeps its
-// first value, as every member read does, after each entry is checked.
+// the F# host read them — an object lists an index-like key first. A repeated key in TEXT is the
+// reader's refusal (Phase 462); one handed in as a value keeps its first entry, as the F# host's
+// `dMap` does.
 const dMap = (dec) => (j) => {
   const o = dObj(j);
   const out = Object.create(null);
@@ -887,12 +888,12 @@ const dSentinel = (sentinel) => (j) => {
     ///
     /// Phase 347 — the leg IS a reader now, the F# reader's twin (`Json.parse`), not `JSON.parse`
     /// behind a scan. `JSON.parse` answers five questions differently from it, and each answer
-    /// reached the decode: it keeps the LAST of a repeated member (the F# reader keeps every
-    /// member, and a member read takes the first); it reads `1.0` and `1e0` as the number `1`, so
+    /// reached the decode: it keeps the LAST of a repeated member (the F# reader refuses one,
+    /// since Phase 462); it reads `1.0` and `1e0` as the number `1`, so
     /// an int slot cannot see they were float tokens; it reads a literal past the double range as
     /// `Infinity` and an integer past 2^53 by rounding it, where the F# reader refuses both; it
-    /// refuses a raw control character in a string and admits a lone surrogate, where the F#
-    /// reader does the opposite; and it reads `null` and any depth. This reader holds the text to
+    /// admits a lone surrogate, where the F# reader refuses it; and it reads `null` and any depth.
+    /// (A raw control character in a string both refuse, since Phase 462.) This reader holds the text to
     /// the F# grammar in the F# order — the first fault met is the one reported, so a malformed
     /// prefix still outranks a container past the cap — and it records, beside the value, what a
     /// JS value cannot carry (`dFloatAt`, `dMembersOf`). An object is built with every key as
@@ -921,8 +922,8 @@ const dParse = (s) => {
     }
     at.add(k);
   };
-  // A string is well-formed UTF-16 or refused, whichever spelling a unit arrived in; any other
-  // character, a control character included, is read as itself.
+  // A string is well-formed UTF-16 or refused, whichever spelling a unit arrived in; a raw control
+  // character (U+0000-U+001F) is refused at the character (Phase 462); any other is read as itself.
   const str = () => {
     expect('"');
     let out = '';
@@ -938,6 +939,7 @@ const dParse = (s) => {
     for (;;) {
       if (i >= n) bad('unterminated string');
       const c = s.charCodeAt(i);
+      if (c < 0x20) bad('unescaped control character U+00' + (c < 16 ? '0' : '') + c.toString(16).toUpperCase() + ' in a string');
       if (!high && c !== 34 && c !== 92 && (c < 0xD800 || c > 0xDFFF)) {
         i++;
         continue;
@@ -1034,14 +1036,14 @@ const dParse = (s) => {
       ws();
       const v = val(depth + 1);
       const f = floatTok;
+      // Phase 462: a repeated member name is refused, as the F# reader refuses it, once its value
+      // is read — a refusal inside the value wins, and a repeated null is the null's refusal.
+      if (hasOwn(o, k)) bad('repeated member name in one object');
       members.push([k, v, f]);
-      if (hasOwn(o, k)) reordered = true;
-      else {
-        if (k === '__proto__') Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
-        else o[k] = v;
-        if (f) markFloat(o, k);
-        if (/^(0|[1-9][0-9]*)$/.test(k)) reordered = true;
-      }
+      if (k === '__proto__') Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
+      else o[k] = v;
+      if (f) markFloat(o, k);
+      if (/^(0|[1-9][0-9]*)$/.test(k)) reordered = true;
       ws();
       if (s[i] === ',') i++;
       else if (s[i] === '}') {

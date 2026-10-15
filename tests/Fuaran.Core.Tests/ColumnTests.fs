@@ -1278,8 +1278,20 @@ let trustsNothingTests =
                   (Error(Malformed "duplicate schema name: a"))
                   "a schema naming a column twice"
 
+              // Phase 462: on TEXT the parser refuses the repeated key before the codec sees it; the
+              // codec's own check still answers a value built in memory.
               match ColumnCodec.decode """{"schema":[{"name":"a","type":"int"}],"columns":{"a":[1],"a":[2]}}""" with
-              | Error(Malformed d) -> Expect.stringContains d "duplicate column key" "a repeated key"
+              | Error(NotJson e) -> Expect.equal e.Kind DuplicateMember "a repeated key is the parser's refusal"
+              | other -> failtestf "expected NotJson DuplicateMember, got %A" other
+
+              match
+                  ColumnCodec.decodeJson (
+                      JObj
+                          [ "schema", JArr [ JObj [ "name", JStr "a"; "type", JStr "int" ] ]
+                            "columns", JObj [ "a", JArr [ JInt 1 ]; "a", JArr [ JInt 2 ] ] ]
+                  )
+              with
+              | Error(Malformed d) -> Expect.stringContains d "duplicate column key" "a repeated key in a value"
               | other -> failtestf "expected Malformed, got %A" other ]
 
 // ---- Phase 417: the typed vector, the typed column, and column equality ----

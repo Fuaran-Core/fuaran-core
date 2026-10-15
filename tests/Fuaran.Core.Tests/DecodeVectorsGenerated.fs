@@ -76,6 +76,11 @@ and R23_1 =
       Y: int
     }
 
+and R24_1 =
+    {
+      A: int
+    }
+
 // decode
 and V00Spec =
     {
@@ -172,6 +177,42 @@ and V23Spec =
       V: R23_1
     }
 
+// decode
+and V24Spec =
+    {
+      V: R24_1
+    }
+
+// decode
+and V25Spec =
+    {
+      V: int
+    }
+
+// decode
+and V26Spec =
+    {
+      V: float
+    }
+
+// decode
+and V27Spec =
+    {
+      V: string
+    }
+
+// decode
+and V28Spec =
+    {
+      V: string
+    }
+
+// decode
+and V29Spec =
+    {
+      V: int
+    }
+
 and [<RequireQualifiedAccess>] NodeKind =
     | V00 of V00Spec
     | V01 of V01Spec
@@ -189,6 +230,12 @@ and [<RequireQualifiedAccess>] NodeKind =
     | V15 of V15Spec
     | V20 of V20Spec
     | V23 of V23Spec
+    | V24 of V24Spec
+    | V25 of V25Spec
+    | V26 of V26Spec
+    | V27 of V27Spec
+    | V28 of V28Spec
+    | V29 of V29Spec
 
 and Node = { Id: string; Kind: NodeKind }
 
@@ -230,6 +277,12 @@ let rec private encNodeKind (k: NodeKind) : JVal =
     | NodeKind.V15 s -> encV15Spec s
     | NodeKind.V20 s -> encV20Spec s
     | NodeKind.V23 s -> encV23Spec s
+    | NodeKind.V24 s -> encV24Spec s
+    | NodeKind.V25 s -> encV25Spec s
+    | NodeKind.V26 s -> encV26Spec s
+    | NodeKind.V27 s -> encV27Spec s
+    | NodeKind.V28 s -> encV28Spec s
+    | NodeKind.V29 s -> encV29Spec s
 
 and private encNode (n: Node) : JVal =
     let kind = encNodeKind n.Kind
@@ -293,6 +346,9 @@ and private encR20_1 (s: R20_1) : JVal =
 and private encR23_1 (s: R23_1) : JVal =
     JObj([ Some("x", JInt s.X); Some("y", JInt s.Y) ] |> List.choose id)
 
+and private encR24_1 (s: R24_1) : JVal =
+    JObj([ Some("a", JInt s.A) ] |> List.choose id)
+
 and private encV00Spec (s: V00Spec) : JVal =
     typedTag "V00" ([ Some("v", JStr s.V) ] |> List.choose id)
 
@@ -340,6 +396,24 @@ and private encV20Spec (s: V20Spec) : JVal =
 
 and private encV23Spec (s: V23Spec) : JVal =
     typedTag "V23" ([ Some("v", encR23_1 s.V) ] |> List.choose id)
+
+and private encV24Spec (s: V24Spec) : JVal =
+    typedTag "V24" ([ Some("v", encR24_1 s.V) ] |> List.choose id)
+
+and private encV25Spec (s: V25Spec) : JVal =
+    typedTag "V25" ([ Some("v", JInt s.V) ] |> List.choose id)
+
+and private encV26Spec (s: V26Spec) : JVal =
+    typedTag "V26" ([ Some("v", encFloat s.V) ] |> List.choose id)
+
+and private encV27Spec (s: V27Spec) : JVal =
+    typedTag "V27" ([ Some("v", JStr s.V) ] |> List.choose id)
+
+and private encV28Spec (s: V28Spec) : JVal =
+    typedTag "V28" ([ Some("v", JStr s.V) ] |> List.choose id)
+
+and private encV29Spec (s: V29Spec) : JVal =
+    typedTag "V29" ([ Some("v", JInt s.V) ] |> List.choose id)
 
 let encodeNode (n: Node) : string = Canon.render (encNode n)
 
@@ -491,7 +565,13 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     | "V15" -> decV15Spec j |> Result.map NodeKind.V15
     | "V20" -> decV20Spec j |> Result.map NodeKind.V20
     | "V23" -> decV23Spec j |> Result.map NodeKind.V23
-    | __other -> dUnknown "one of 'V00', 'V01', 'V03', 'V04', 'V05', 'V06', 'V07', 'V09', 'V10', 'V11', 'V12', 'V13', 'V14', 'V15', 'V20', 'V23'" ("unknown node kind: " + __other)))
+    | "V24" -> decV24Spec j |> Result.map NodeKind.V24
+    | "V25" -> decV25Spec j |> Result.map NodeKind.V25
+    | "V26" -> decV26Spec j |> Result.map NodeKind.V26
+    | "V27" -> decV27Spec j |> Result.map NodeKind.V27
+    | "V28" -> decV28Spec j |> Result.map NodeKind.V28
+    | "V29" -> decV29Spec j |> Result.map NodeKind.V29
+    | __other -> dUnknown "one of 'V00', 'V01', 'V03', 'V04', 'V05', 'V06', 'V07', 'V09', 'V10', 'V11', 'V12', 'V13', 'V14', 'V15', 'V20', 'V23', 'V24', 'V25', 'V26', 'V27', 'V28', 'V29'" ("unknown node kind: " + __other)))
 
 and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
@@ -621,6 +701,11 @@ and private decR23_1 (j: JVal) : Result<R23_1, DecodeError> =
     dReq "y" __fs dInt |> Result.bind (fun y ->
     Ok { X = x; Y = y })))
 
+and private decR24_1 (j: JVal) : Result<R24_1, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "a" __fs dInt |> Result.bind (fun a ->
+    Ok { A = a }))
+
 and private decV00Spec (j: JVal) : Result<V00Spec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "v" __fs dStr |> Result.bind (fun v ->
@@ -701,6 +786,36 @@ and private decV23Spec (j: JVal) : Result<V23Spec, DecodeError> =
     dReq "v" __fs decR23_1 |> Result.bind (fun v ->
     Ok { V = v }))
 
+and private decV24Spec (j: JVal) : Result<V24Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs decR24_1 |> Result.bind (fun v ->
+    Ok { V = v }))
+
+and private decV25Spec (j: JVal) : Result<V25Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs dInt |> Result.bind (fun v ->
+    Ok { V = v }))
+
+and private decV26Spec (j: JVal) : Result<V26Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs dFloat |> Result.bind (fun v ->
+    Ok { V = v }))
+
+and private decV27Spec (j: JVal) : Result<V27Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs dStr |> Result.bind (fun v ->
+    Ok { V = v }))
+
+and private decV28Spec (j: JVal) : Result<V28Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs dStr |> Result.bind (fun v ->
+    Ok { V = v }))
+
+and private decV29Spec (j: JVal) : Result<V29Spec, DecodeError> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "v" __fs dInt |> Result.bind (fun v ->
+    Ok { V = v }))
+
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
 /// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter
@@ -726,6 +841,12 @@ let private witnessKindTag (n: Node) : string =
     | NodeKind.V15 _ -> "V15"
     | NodeKind.V20 _ -> "V20"
     | NodeKind.V23 _ -> "V23"
+    | NodeKind.V24 _ -> "V24"
+    | NodeKind.V25 _ -> "V25"
+    | NodeKind.V26 _ -> "V26"
+    | NodeKind.V27 _ -> "V27"
+    | NodeKind.V28 _ -> "V28"
+    | NodeKind.V29 _ -> "V29"
 
 let private witnessChildren (n: Node) : Node list =
     match n.Kind with
@@ -795,3 +916,21 @@ let mkV20 (id: string) (v: R20_1) : Node =
 
 let mkV23 (id: string) (v: R23_1) : Node =
     { Id = id; Kind = NodeKind.V23 { V = v } }
+
+let mkV24 (id: string) (v: R24_1) : Node =
+    { Id = id; Kind = NodeKind.V24 { V = v } }
+
+let mkV25 (id: string) (v: int) : Node =
+    { Id = id; Kind = NodeKind.V25 { V = v } }
+
+let mkV26 (id: string) (v: float) : Node =
+    { Id = id; Kind = NodeKind.V26 { V = v } }
+
+let mkV27 (id: string) (v: string) : Node =
+    { Id = id; Kind = NodeKind.V27 { V = v } }
+
+let mkV28 (id: string) (v: string) : Node =
+    { Id = id; Kind = NodeKind.V28 { V = v } }
+
+let mkV29 (id: string) (v: int) : Node =
+    { Id = id; Kind = NodeKind.V29 { V = v } }

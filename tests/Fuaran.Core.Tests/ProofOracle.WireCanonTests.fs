@@ -136,6 +136,18 @@ let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal)
 let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTally =
     if not (isCanonicalValue v) then
         t
+    elif (Json.firstRepeatedMember v).IsSome then
+        // Phase 462: the generated pool draws keys with replacement, so it reaches objects with a
+        // repeated member. Section 6's reader reads exactly what `render` emits, repeated keys
+        // included; production's parser refuses the text. The bridge theorem carries the
+        // distinct-keys hypothesis, and here the refusal itself is what is held.
+        match Json.parseDetailed (Canon.render v) with
+        | Result.Error e when e.Kind = DuplicateMember -> t
+        | other ->
+            { t with
+                Diffs =
+                    sprintf "%s: a repeated member — production read %A, not a DuplicateMember refusal" label other
+                    :: t.Diffs }
     else
         let t = { t with RoundTrips = t.RoundTrips + 1 }
 
@@ -292,6 +304,15 @@ let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<st
             + " at "
             + guardPathOfModel p
         )
+    | WireCanon.RefusedRepeated(p, k) ->
+        // Phase 462. The model names the object's path and the repeated name; the sentence is
+        // production's, with the name under `Json.escape` as `firstRepeatedMember` spells it.
+        Result.Error(
+            "repeated member has no canonical rendering of its own: the member name \""
+            + Json.escape (canonFromChs k)
+            + "\" is repeated at "
+            + guardPathOfModel p
+        )
     | WireCanon.RefusedString(p, s, isKey) ->
         // Phase 306. The model names the STRING and whether it is a member key; which unit of it
         // is unpaired is read off the string here, by a scan that is this host's own, so the
@@ -343,6 +364,10 @@ let rec private holdsNonFinite (v: JVal) : bool =
 
 /// The guard's SECOND predicate (Phase 306), written the same way: does the value hold a string or
 /// a member key that is not well-formed UTF-16 — by the platform's strict encoder.
+/// The guard's THIRD predicate (Phase 462): does the value hold an object carrying a member name
+/// twice — production's own scan, which the model's `first_repeated` is held to.
+let private holdsRepeated (v: JVal) : bool = (Json.firstRepeatedMember v).IsSome
+
 let rec private holdsIllFormed (v: JVal) : bool =
     match v with
     | JStr s -> not (strictlyEncodable s)
@@ -435,10 +460,20 @@ let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal)
         let forString = m.StartsWith "ill-formed string"
 
         let t =
-            if holdsNonFinite v || holdsIllFormed v then
+            if holdsNonFinite v || holdsIllFormed v || holdsRepeated v then
                 t
             else
-                diff "production REFUSED a value holding no non-finite float and no ill-formed string" t
+                diff
+                    "production REFUSED a value holding no non-finite float, no ill-formed string and no repeated member"
+                    t
+
+        // The third refusal comes after the other two (Phase 462): a value holding either earlier
+        // fault is never refused for a repeated member.
+        let t =
+            if (holdsNonFinite v || holdsIllFormed v) && m.StartsWith "repeated member" then
+                diff "a value holding an earlier fault was refused for a repeated member" t
+            else
+                t
 
         // The two refusals are ORDERED: a value holding a non-finite float is refused for it,
         // whatever its strings are.

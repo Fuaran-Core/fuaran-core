@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 369 claims — 266 proved across 34 models, 60 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 370 claims — 267 proved across 34 models, 60 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -40,7 +40,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Phase 191 added section 7, SNAPSHOT AND BOUNDED REPLAY: `OpStream.compact` / `replayFrom` / `verifyAcross` with the domain reducer as a parameter, `replay_from_snapshot_eq` and `compact_preserves_verify` proved, and the two places the chartered sentences were too strong stated as theorems. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved; since Phase 462 the two decode-determinism refusals every wire shares (a repeated member name, a raw control inside a string) are the model's own, exhibited by `repeated_member_refused` and `raw_control_refused`. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. Since Phase 286, section 12 models the KEYED engine (`Ops.applyContainedKeyed`) over a two-list tree and shows its insert is the unkeyed insert over the keyed walk, so uniqueness is preserved over every keyed position a domain declares (`keyed_apply_preserves_wf`); that section is not extracted. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -1036,8 +1036,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 65 | 17 | 8 | 1 | 2 | 0 | 0 | 37 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Wire` | 148 | 62 | 16 | 1 | 2 | 0 | 0 | 67 |
-| **Total** | 1207 | 303 | 420 | 28 | 13 | 0 | 3 | 440 |
+| `Fuaran.Core.Wire` | 149 | 63 | 16 | 1 | 2 | 0 | 0 | 67 |
+| **Total** | 1208 | 304 | 420 | 28 | 13 | 0 | 3 | 440 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

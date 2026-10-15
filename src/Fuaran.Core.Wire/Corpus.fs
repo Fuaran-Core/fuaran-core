@@ -187,23 +187,35 @@ module Corpus =
     let fuzzRoundTrip (seed: int) (count: int) (maxDepth: int) : Result<unit, string> =
         let check (name: string) (render: JVal -> string) (at: int) (v: JVal) : Result<unit, string> =
             let s = render v
+            // Phase 462: a value whose object repeats a member name has no text to round-trip to
+            // either (the generator draws keys with replacement, so it reaches this class); the law
+            // there is the refusal, `DuplicateMember`. A value carrying both classes is refused at
+            // whichever the parser meets first in document order, so either kind is the law's answer.
+            let repeated = (Json.firstRepeatedMember v).IsSome
 
-            match Json.parseDetailed s, allStringsWellFormed v with
+            match Json.parseDetailed s, allStringsWellFormed v && not repeated with
             | Ok v2, true when render v2 = s -> Ok()
             | Ok v2, true -> Error(sprintf "fuzz seed=%d: %s not idempotent (%s vs %s)" at name s (render v2))
             | Error e, true -> Error(sprintf "fuzz seed=%d: parse rejected %s output %s — %s" at name s e.Message)
-            | Error e, false when e.Kind = BadEscape -> Ok()
+            | Error e, false when e.Kind = BadEscape && not (allStringsWellFormed v) -> Ok()
+            | Error e, false when e.Kind = DuplicateMember && repeated -> Ok()
             | Error e, false ->
                 Error(
                     sprintf
-                        "fuzz seed=%d: %s output %s carries an ill-formed string and was refused as %A, not BadEscape"
+                        "fuzz seed=%d: %s output %s carries an ill-formed string or a repeated member and was refused as %A, not as that"
                         at
                         name
                         s
                         e.Kind
                 )
             | Ok _, false ->
-                Error(sprintf "fuzz seed=%d: %s output %s carries an ill-formed string and was accepted" at name s)
+                Error(
+                    sprintf
+                        "fuzz seed=%d: %s output %s carries an ill-formed string or a repeated member and was accepted"
+                        at
+                        name
+                        s
+                )
 
         let rec go i =
             if i >= count then

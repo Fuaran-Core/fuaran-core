@@ -527,6 +527,10 @@ module JsonParseDiff =
         // class a raw unit is in is this bridge's to say.
         | other when int other >= 0xD800 && int other <= 0xDBFF -> JsonParse.CHiSur(string other)
         | other when int other >= 0xDC00 && int other <= 0xDFFF -> JsonParse.CLoSur(string other)
+        // A raw control other than the three whitespace ones above is the model's `CCtrl`
+        // (Phase 462), carrying the `U+00XX` spelling production's refusal names it by: the
+        // parser refuses it inside a string, and which units are controls is this bridge's to say.
+        | other when int other < 0x20 -> JsonParse.CCtrl(string other, "U+" + (int other).ToString("X4"))
         | other -> JsonParse.COther(string other)
 
     let toChs (s: string) : JsonParse.ch list = s |> Seq.map toCh |> List.ofSeq
@@ -730,6 +734,27 @@ module JsonParseDiff =
           "trailing brace", "{} }"
           "object missing colon", "{\"a\" 1}"
           "object trailing comma", "{\"a\":1,}"
+          // Phase 462 — the decode-determinism rows the model refuses itself: a repeated member
+          // name (checked when the member is accumulated; an erased null is not an occurrence) and
+          // a raw control inside a string, in a value, in a key, and beside a pending surrogate.
+          "repeated member", "{\"a\":1,\"a\":2}"
+          "repeated member apart", "{\"a\":1,\"b\":2,\"a\":3}"
+          "repeated member escaped spelling", "{\"a\":1,\"\u0061\":2}"
+          "repeated member after an erased null", "{\"a\":null,\"a\":1}"
+          "repeated member then null", "{\"a\":1,\"a\":null}"
+          "repeated member in a nested object", "[{\"a\":1},{\"b\":1,\"b\":2}]"
+          "repeated member with a malformed value", "{\"a\":1,\"a\":[}"
+          "one name in sibling objects", "[{\"a\":1},{\"a\":2}]"
+          "one name at two depths", "{\"a\":{\"a\":1}}"
+          "raw tab in a string", "\"a	b\""
+          "raw control in a string", "\"a" + string (char 1) + "b\""
+          "raw control in a key", "{\"a" + string (char 1) + "\":1}"
+          "raw newline after a high surrogate",
+          "\""
+          + string (char 0xD83D)
+          + "
+\""
+          "escaped controls", "\"\u0000\u001f\t\""
           "array trailing comma", "[1,]"
           "array missing comma", "[1 2]"
           "unclosed object", "{\"a\":1"
@@ -2028,8 +2053,8 @@ module ColumnDiff =
           "empty schema, columns not an object", """{"schema":[],"columns":true}"""
           "no columns member", """{"schema":[]}"""
           "missing column", """{"schema":[{"name":"a","type":"int"}],"columns":{}}"""
-          "duplicate column key",
-          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]},"a":{"values":[2],"validity":[true]}}}"""
+          // (Phase 462: a document with a repeated column KEY no longer parses — the parser refuses
+          // the text before the codec sees it — so that arm is reached only from a value.)
           "duplicate schema name",
           """{"schema":[{"name":"a","type":"int"},{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]}}}"""
           "unknown type",

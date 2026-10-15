@@ -167,6 +167,12 @@ type ch =
      to say, exactly as which character a `COther` carries is. *)
   | CHiSur : c:string -> ch
   | CLoSur : c:string -> ch
+  (* a RAW C0 control unit other than the three whitespace ones above - U+0000-U+001F less tab,
+     line feed and carriage return - carried verbatim with the `U+00XX` spelling production names
+     it by (Phase 462). A constructor rather than a `COther` because `parseString` distinguishes
+     it: a raw control inside a string is refused. Which units are controls, and the spelling, is
+     the bridge's to say, exactly as a surrogate's class is. *)
+  | CCtrl : c:string -> code:string -> ch
 
 (* The one-character spelling, for the messages that name a character. F#: `string c`. *)
 let ch_str (c: ch) : Tot string =
@@ -184,6 +190,7 @@ let ch_str (c: ch) : Tot string =
   | COther s -> s
   | CHiSur s -> s
   | CLoSur s -> s
+  | CCtrl s _ -> s
 
 let rec chs_str (l: list ch) : Tot string (decreases l) =
   match l with
@@ -192,6 +199,20 @@ let rec chs_str (l: list ch) : Tot string (decreases l) =
 
 (* F#: `isWs`. *)
 let is_ws (c: ch) : Tot bool = c = CSpace || c = CTab || c = CNewline || c = CReturn
+
+(* F#: `c < ' '` in `parseString`'s run scanner (Phase 462) - the three whitespace controls, which
+   the alphabet distinguishes for `isWs`, and every other raw control, which it carries as `CCtrl`. *)
+let is_ctrl (c: ch) : Tot bool = c = CTab || c = CNewline || c = CReturn || CCtrl? c
+
+(* The `U+00XX` spelling of a control, as the refusal names it: the three whitespace ones are
+   spelt here, every other arrives spelt by the bridge. *)
+let ctrl_code (c: ch) : Tot string =
+  match c with
+  | CTab -> "U+0009"
+  | CNewline -> "U+000A"
+  | CReturn -> "U+000D"
+  | CCtrl _ code -> code
+  | _ -> ""
 
 let is_digit (c: ch) : Tot bool =
   c = CD0 || c = CD1 || c = CD2 || c = CD3 || c = CD4 ||
@@ -234,7 +255,7 @@ type jval =
   | JArr   : items:list jval -> jval
   | JObj   : fields:list (list och & jval) -> jval
 
-(* F#: `JsonErrorKind` — all twelve cases, in declaration order. *)
+(* F#: `JsonErrorKind` — all thirteen cases, in declaration order. *)
 type ekind =
   | UnexpectedChar
   | UnexpectedEndOfInput
@@ -248,6 +269,7 @@ type ekind =
   | NullNotRepresentable
   | MaxDepthExceeded
   | TrailingCharacters
+  | DuplicateMember
 
 (* F#: `NullPolicy`. *)
 type policy =
@@ -287,6 +309,10 @@ let msg_int53 (tok: list ch) : Tot string =
   ^ chs_str tok
 
 let msg_null_strict: string = "null is not representable in the Fuaran wire JVal model"
+
+(* F#: the two Phase 462 refusals, verbatim. *)
+let msg_ctrl (c: ch) : Tot string = "unescaped control character " ^ ctrl_code c ^ " in a string"
+let msg_duplicate: string = "repeated member name in one object"
 
 let msg_null_tolerant: string =
   "null is not representable in the Fuaran wire JVal model, and this position has no absence to erase it to (only an object-member null is erased)"
@@ -501,9 +527,13 @@ let rec string_body (pending: bool) (acc: list och) (s: list ch)
           | None -> string_body false (OEsc e :: acc) u)
        else PErr BadEscape (msg_bad_escape e) u)
   | c :: t ->
-    (match sur_fault pending (lit_class c) with
-     | Some m -> PErr BadEscape m t
-     | None -> string_body (lit_class c = SHigh) (OLit c :: acc) t)
+    (* Phase 462: a raw control is refused AT the character, before the surrogate test - production's
+       `scanRun` tests `c < ' '` before it advances `i` and before `check`. *)
+    if is_ctrl c then PErr BadEscape (msg_ctrl c) s
+    else
+      (match sur_fault pending (lit_class c) with
+       | Some m -> PErr BadEscape m t
+       | None -> string_body (lit_class c = SHigh) (OLit c :: acc) t)
 
 (* F#: `parseString`. `pendingHigh` starts false. *)
 let parse_string (s: list ch)
@@ -678,6 +708,14 @@ let drop_null4 (s: list ch) : Tot (o: option (list ch) { Some? o ==> llen (Some?
   | CLn :: CLu :: CLl :: CLl :: t -> Some t
   | _ -> None
 
+(* F#: the member-name set `objectLoop` keeps (Phase 462) - whether `k` names a member already
+   accumulated. The accumulator IS the set: a member erased under `EraseMemberNull` was never
+   accumulated, so it is not an occurrence (DECISIONS.md D157). *)
+let rec has_key (k: list och) (fs: list (list och & jval)) : Tot bool (decreases fs) =
+  match fs with
+  | [] -> false
+  | (k', _) :: t -> k = k' || has_key k t
+
 let rec parse_value
   (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
   : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen s) /\ depth_confined r })
@@ -785,11 +823,18 @@ and parse_members
           (match parse_value float_read cap tol b t3 with
            | PErr k m a -> PErr k m a
            | POk v t4 ->
-             let t5 = skip_ws t4 in
-             (match t5 with
-              | CComma :: t6 -> parse_members float_read cap tol b ((key, v) :: acc) t6
-              | CRBrace :: t6 -> POk (rev ((key, v) :: acc)) t6
-              | _ -> PErr ExpectedToken "expected ',' or '}'" t5))))
+             (* Phase 462: a repeated name is refused when the member is ACCUMULATED - after its
+                value is read, so a refusal inside the value still wins, and under the strict policy
+                a repeated member whose value is `null` is the null's refusal. The position is the
+                name's opening quote: production resets `i` to `keyAt`, the position after the
+                loop's `skipWs`, which is `w`. *)
+             if has_key key acc then PErr DuplicateMember msg_duplicate w
+             else
+               let t5 = skip_ws t4 in
+               (match t5 with
+                | CComma :: t6 -> parse_members float_read cap tol b ((key, v) :: acc) t6
+                | CRBrace :: t6 -> POk (rev ((key, v) :: acc)) t6
+                | _ -> PErr ExpectedToken "expected ',' or '}'" t5))))
 
 (* F#: the `while go` loop of `parseArray`. Note it calls `parseValue` at the CURRENT position —
    the one edge in this group that recurses without consuming, which is why `parse_items` sits
@@ -1152,7 +1197,8 @@ let error_kind_total (float_read: list ch -> freadv) (cap: string) (pol: policy)
                       k = UnterminatedString || k = UnterminatedEscape ||
                       k = TruncatedUnicodeEscape || k = BadEscape || k = BadHexDigit ||
                       k = MalformedNumber || k = NullNotRepresentable ||
-                      k = MaxDepthExceeded || k = TrailingCharacters))))
+                      k = MaxDepthExceeded || k = TrailingCharacters ||
+                      k = DuplicateMember))))
   = ()
 
 (* `TrailingCharacters` is the entry point's alone: the descent cannot produce it, which is the
@@ -1193,8 +1239,13 @@ let w_kind (s: list ch) (k: ekind) : Tot bool =
   | RErr k' _ _ -> k' = k
   | ROk _ -> false
 
-(* EVERY ONE OF THE TWELVE IS REACHABLE. Twelve inputs, one per case, each named by what it is:
-   `%`, ``, `tru`, `"a`, `"\`, `"\u1`, `"\q`, `"\uzzzz`, `1e`, `null`, `[[[`, `0 0`. *)
+(* The thirteenth witness (Phase 462): `{"a":0,"a":0}`. Extracted, because a twin reads it. *)
+let dup_doc: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CD0; CComma; CQuote; CLa; CQuote; CColon; CD0; CRBrace]
+
+(* EVERY ONE OF THE THIRTEEN IS REACHABLE. Thirteen inputs, one per case, each named by what it is:
+   `%`, ``, `tru`, `"a`, `"\`, `"\u1`, `"\q`, `"\uzzzz`, `1e`, `null`, `[[[`, `0 0`,
+   `{"a":0,"a":0}`. *)
 let error_kind_exhaustive: unit -> Lemma (ensures
   w_kind [COther "%"] UnexpectedChar /\
   w_kind [] UnexpectedEndOfInput /\
@@ -1207,7 +1258,8 @@ let error_kind_exhaustive: unit -> Lemma (ensures
   w_kind nines17 MalformedNumber /\
   w_kind [CLn; CLu; CLl; CLl] NullNotRepresentable /\
   w_kind [CLBrack; CLBrack; CLBrack] MaxDepthExceeded /\
-  w_kind [CD0; CSpace; CD0] TrailingCharacters)
+  w_kind [CD0; CSpace; CD0] TrailingCharacters /\
+      w_kind dup_doc DuplicateMember)
   = fun () -> assert_norm (
       w_kind [COther "%"] UnexpectedChar /\
       w_kind [] UnexpectedEndOfInput /\
@@ -1220,7 +1272,8 @@ let error_kind_exhaustive: unit -> Lemma (ensures
       w_kind nines17 MalformedNumber /\
       w_kind [CLn; CLu; CLl; CLl] NullNotRepresentable /\
       w_kind [CLBrack; CLBrack; CLBrack] MaxDepthExceeded /\
-      w_kind [CD0; CSpace; CD0] TrailingCharacters)
+      w_kind [CD0; CSpace; CD0] TrailingCharacters /\
+      w_kind dup_doc DuplicateMember)
 
 (* ======================================================================================
    10. The read policy at the parser, where Phase 135 said it lives.
@@ -1315,7 +1368,7 @@ let rec skip_ws_idem (s: list ch) : Lemma (ensures skip_ws (skip_ws s) == skip_w
    refuses a lone one). *)
 [@@ noextract_to "FSharp"]
 let plain (c: ch) : Tot bool =
-  c <> CQuote && c <> CBackslash && not (CHiSur? c) && not (CLoSur? c)
+  c <> CQuote && c <> CBackslash && not (CHiSur? c) && not (CLoSur? c) && not (is_ctrl c)
 
 [@@ noextract_to "FSharp"]
 let rec plain_all (l: list ch) : Tot bool (decreases l) =
@@ -1709,9 +1762,11 @@ let rec string_body_keeps_well_formed (pending: bool) (acc: list och) (s: list c
           | None -> string_body_keeps_well_formed false (OEsc e :: acc) u)
        else ())
   | c :: t ->
-    (match sur_fault pending (lit_class c) with
-     | Some _ -> ()
-     | None -> string_body_keeps_well_formed (lit_class c = SHigh) (OLit c :: acc) t)
+    if is_ctrl c then ()
+    else
+      (match sur_fault pending (lit_class c) with
+       | Some _ -> ()
+       | None -> string_body_keeps_well_formed (lit_class c = SHigh) (OLit c :: acc) t)
 
 (* A STRING THE PARSER ACCEPTS IS WELL-FORMED. *)
 let parse_string_accepts_only_well_formed (s: list ch)
@@ -1875,6 +1930,209 @@ let parse_accepts_only_well_formed_strings
                     | RErr _ _ _ -> True)) =
   parsed_value_wf float_read cap (EraseMemberNull? pol) b s
 
+(* ======================================================================================
+   12c. THEOREM — A PARSED OBJECT HAS PAIRWISE DISTINCT MEMBER NAMES (Phase 462).
+
+       The refusal in `parse_members` is `has_key key acc` over the members accumulated so far,
+       so the property is the loop's invariant made visible: every accumulator the loop builds
+       carries distinct names, and the object it returns is that accumulator reversed. Lifted
+       over a value as section 12 lifts well-formedness, in the group's own termination order,
+       and stated at the entry point under either policy and at any cap. An erased member null
+       is never accumulated, which is why the tolerant reading needs no clause of its own here.
+   ====================================================================================== *)
+
+let rec keys_distinct (fs: list (list och & jval)) : Tot bool (decreases fs) =
+  match fs with
+  | [] -> true
+  | (k, _) :: t -> not (has_key k t) && keys_distinct t
+
+let rec jval_distinct (v: jval) : Tot bool =
+  match v with
+  | JArr xs -> jvals_distinct xs
+  | JObj fs -> keys_distinct fs && fields_distinct fs
+  | _ -> true
+
+and jvals_distinct (xs: list jval) : Tot bool =
+  match xs with
+  | [] -> true
+  | x :: t -> jval_distinct x && jvals_distinct t
+
+(* The VALUES of each member; the names are `keys_distinct`'s. *)
+and fields_distinct (fs: list (list och & jval)) : Tot bool =
+  match fs with
+  | [] -> true
+  | (_, v) :: t -> jval_distinct v && fields_distinct t
+
+(* No name of `a` is a name of `l`. *)
+[@@ noextract_to "FSharp"]
+let rec apart (a l: list (list och & jval)) : Tot bool (decreases a) =
+  match a with
+  | [] -> true
+  | (k, _) :: t -> not (has_key k l) && apart t l
+
+[@@ noextract_to "FSharp"]
+let rec apart_nil (a: list (list och & jval)) : Lemma (ensures apart a []) (decreases a) =
+  match a with
+  | [] -> ()
+  | _ :: t -> apart_nil t
+
+[@@ noextract_to "FSharp"]
+let rec apart_cons (a: list (list och & jval)) (x: (list och & jval)) (l: list (list och & jval))
+  : Lemma (requires apart a l /\ not (has_key (fst x) a))
+          (ensures apart a (x :: l)) (decreases a) =
+  match a with
+  | [] -> ()
+  | _ :: t -> apart_cons t x l
+
+(* Reversal keeps the names distinct: the accumulator's names are distinct and apart from the
+   tail's, and each step moves one across. *)
+[@@ noextract_to "FSharp"]
+let rec rev_app_keys_distinct (acc l: list (list och & jval))
+  : Lemma (requires keys_distinct acc /\ keys_distinct l /\ apart acc l)
+          (ensures keys_distinct (rev_app acc l)) (decreases acc) =
+  match acc with
+  | [] -> ()
+  | (k, v) :: t -> apart_cons t (k, v) l; rev_app_keys_distinct t ((k, v) :: l)
+
+[@@ noextract_to "FSharp"]
+let rec rev_app_fields_distinct (acc l: list (list och & jval))
+  : Lemma (requires fields_distinct acc /\ fields_distinct l)
+          (ensures fields_distinct (rev_app acc l)) (decreases acc) =
+  match acc with
+  | [] -> ()
+  | kv :: rest -> rev_app_fields_distinct rest (kv :: l)
+
+[@@ noextract_to "FSharp"]
+let rec rev_app_vals_distinct (acc l: list jval)
+  : Lemma (requires jvals_distinct acc /\ jvals_distinct l)
+          (ensures jvals_distinct (rev_app acc l)) (decreases acc) =
+  match acc with
+  | [] -> ()
+  | x :: rest -> rev_app_vals_distinct rest (x :: l)
+
+[@@ noextract_to "FSharp"]
+let rev_keys_distinct (acc: list (list och & jval))
+  : Lemma (requires keys_distinct acc /\ fields_distinct acc)
+          (ensures keys_distinct (rev acc) /\ fields_distinct (rev acc)) =
+  apart_nil acc;
+  rev_app_keys_distinct acc [];
+  rev_app_fields_distinct acc []
+
+[@@ noextract_to "FSharp"]
+let rec parsed_value_distinct
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse_value float_read cap tol b s with
+                    | POk v _ -> jval_distinct v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 2]) =
+  let w = skip_ws s in
+  match w with
+  | CLBrace :: _ -> parsed_object_distinct float_read cap tol b w
+  | CLBrack :: _ -> parsed_array_distinct float_read cap tol b w
+  | _ -> ()
+
+and parsed_object_distinct
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (match parse_object float_read cap tol b w with
+                    | POk v _ -> jval_distinct v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrace w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrace :: _ -> ()
+        | _ -> parsed_members_distinct float_read cap tol b' [] t1))
+
+and parsed_array_distinct
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (match parse_array float_read cap tol b w with
+                    | POk v _ -> jval_distinct v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrack w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrack :: _ -> ()
+        | _ -> parsed_items_distinct float_read cap tol b' [] t1))
+
+and parsed_members_distinct
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Lemma (requires keys_distinct acc /\ fields_distinct acc)
+          (ensures (match parse_members float_read cap tol b acc s with
+                    | POk fs _ -> keys_distinct fs /\ fields_distinct fs
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 0]) =
+  let w = skip_ws s in
+  match parse_string w with
+  | PErr _ _ _ -> ()
+  | POk key t ->
+    let t1 = skip_ws t in
+    (match expect CColon t1 with
+     | PErr _ _ _ -> ()
+     | POk _ t2 ->
+       let t3 = skip_ws t2 in
+       let erased = if tol then drop_null4 t3 else None in
+       (match erased with
+        | Some t4 ->
+          let t5 = skip_ws t4 in
+          (match t5 with
+           | CComma :: t6 -> parsed_members_distinct float_read cap tol b acc t6
+           | CRBrace :: _ -> rev_keys_distinct acc
+           | _ -> ())
+        | None ->
+          parsed_value_distinct float_read cap tol b t3;
+          (match parse_value float_read cap tol b t3 with
+           | PErr _ _ _ -> ()
+           | POk v t4 ->
+             if has_key key acc then ()
+             else
+               let t5 = skip_ws t4 in
+               (match t5 with
+                | CComma :: t6 ->
+                    parsed_members_distinct float_read cap tol b ((key, v) :: acc) t6
+                | CRBrace :: _ -> rev_keys_distinct ((key, v) :: acc)
+                | _ -> ()))))
+
+and parsed_items_distinct
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (acc: list jval) (s: list ch)
+  : Lemma (requires jvals_distinct acc)
+          (ensures (match parse_items float_read cap tol b acc s with
+                    | POk xs _ -> jvals_distinct xs
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 3]) =
+  parsed_value_distinct float_read cap tol b s;
+  (match parse_value float_read cap tol b s with
+   | PErr _ _ _ -> ()
+   | POk v t ->
+     let t1 = skip_ws t in
+     (match t1 with
+      | CComma :: t2 -> parsed_items_distinct float_read cap tol b (v :: acc) t2
+      | CRBrack :: _ -> rev_app_vals_distinct (v :: acc) []
+      | _ -> ()))
+
+(* THE THEOREM, at the entry point: a value the parser returns holds no object that carries a
+   member name twice. *)
+let parse_accepts_only_distinct_member_names
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse float_read cap pol b s with
+                    | ROk v -> jval_distinct v
+                    | RErr _ _ _ -> True)) =
+  parsed_value_distinct float_read cap (EraseMemberNull? pol) b s
+
 (* THE REFUSALS, by witness, each with the kind, the message and the position production reports:
    a raw lone high surrogate (refused at the closing quote, after it), a raw lone low one (after
    the unit), an escaped high followed by an escaped high (after the second escape), and a high
@@ -1906,6 +2164,71 @@ let surrogate_refusals (_: unit)
       POk? (parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
                                   CBackslash; CLu; CUd; CUe; CD0; CD0; CQuote]) /\
       POk? (parse_string [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
+
+(* ======================================================================================
+   12b. THE TWO DECODE-DETERMINISM ROWS (Phase 462), exhibited.
+
+       A raw control inside a string is refused at the character, in any string position and
+       before the surrogate test; an escaped one is read. A repeated member name is refused at
+       its opening quote, whether the values agree, whether the names are adjacent, and in a
+       nested object; the same name in two sibling objects, or at two depths, is not repeated.
+       Under the tolerant policy an ERASED member null is not an occurrence of its name.
+   ====================================================================================== *)
+
+let raw_control_refused (_: unit)
+  : Lemma (ensures
+      parse_string [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
+      parse_string [CQuote; CCtrl "x" "U+0001"; CQuote]
+        == PErr BadEscape (msg_ctrl (CCtrl "x" "U+0001")) [CCtrl "x" "U+0001"; CQuote] /\
+      parse_string [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
+      POk? (parse_string [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
+  =
+  assert_norm (
+      parse_string [CQuote; CLa; CTab; CLb; CQuote] == PErr BadEscape (msg_ctrl CTab) [CTab; CLb; CQuote] /\
+      parse_string [CQuote; CCtrl "x" "U+0001"; CQuote]
+        == PErr BadEscape (msg_ctrl (CCtrl "x" "U+0001")) [CCtrl "x" "U+0001"; CQuote] /\
+      parse_string [CQuote; CHiSur "h"; CNewline; CQuote] == PErr BadEscape (msg_ctrl CNewline) [CNewline; CQuote] /\
+      POk? (parse_string [CQuote; CBackslash; CLt; CBackslash; CLu; CD0; CD0; CD0; CD1; CQuote]))
+
+(* `{"a":0,"b":0,"a":0}` refused at the second `"a"`; `[{"a":0},{"a":0}]` and `{"a":{"a":0}}` read;
+   `{"a":null,"a":0}` under the tolerant policy is `{"a":0}` and under the strict one a refusal. *)
+[@@ noextract_to "FSharp"]
+let dup_apart: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CD0; CComma; CQuote; CLb; CQuote; CColon; CD0; CComma;
+   CQuote; CLa; CQuote; CColon; CD0; CRBrace]
+
+[@@ noextract_to "FSharp"]
+let dup_siblings: list ch =
+  [CLBrack; CLBrace; CQuote; CLa; CQuote; CColon; CD0; CRBrace; CComma;
+   CLBrace; CQuote; CLa; CQuote; CColon; CD0; CRBrace; CRBrack]
+
+[@@ noextract_to "FSharp"]
+let dup_depths: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CLBrace; CQuote; CLa; CQuote; CColon; CD0; CRBrace; CRBrace]
+
+[@@ noextract_to "FSharp"]
+let dup_erased: list ch =
+  [CLBrace; CQuote; CLa; CQuote; CColon; CLn; CLu; CLl; CLl; CComma; CQuote; CLa; CQuote; CColon; CD0; CRBrace]
+
+(* The witness parser of section 9 with a budget of three, so the nested object is in reach. *)
+[@@ noextract_to "FSharp"]
+let w3_parse (pol: policy) (s: list ch) : Tot jresult = parse fr_all_finite "3" pol [(); (); ()] s
+
+let repeated_member_refused (_: unit)
+  : Lemma (ensures
+      w3_parse RejectNull dup_apart
+        == RErr DuplicateMember msg_duplicate [CQuote; CLa; CQuote; CColon; CD0; CRBrace] /\
+      ROk? (w3_parse RejectNull dup_siblings) /\
+      ROk? (w3_parse RejectNull dup_depths) /\
+      w3_parse EraseMemberNull dup_erased == ROk (JObj [([OLit CLa], JInt [CD0])]) /\
+      RErr? (w3_parse RejectNull dup_erased))
+  = assert_norm (
+      w3_parse RejectNull dup_apart
+        == RErr DuplicateMember msg_duplicate [CQuote; CLa; CQuote; CColon; CD0; CRBrace] /\
+      ROk? (w3_parse RejectNull dup_siblings) /\
+      ROk? (w3_parse RejectNull dup_depths) /\
+      w3_parse EraseMemberNull dup_erased == ROk (JObj [([OLit CLa], JInt [CD0])]) /\
+      RErr? (w3_parse RejectNull dup_erased))
 
 (* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
@@ -1941,6 +2264,13 @@ let twins : list twin = [
   { tname = "parse-refuses-trailing-characters";
     tholds = (fun () ->
       parse (fun _ -> FFinite) "c" RejectNull [] [ CLt; CLr; CLu; CLe; CSpace; CComma ]
-      = RErr TrailingCharacters "trailing characters" [ CComma ]) } ]
+      = RErr TrailingCharacters "trailing characters" [ CComma ]) };
+  { tname = "parse-refuses-a-repeated-member";
+    tholds = (fun () ->
+      parse (fun _ -> FFinite) "c" RejectNull [ (); () ] dup_doc
+      = RErr DuplicateMember msg_duplicate [ CQuote; CLa; CQuote; CColon; CD0; CRBrace ]) };
+  { tname = "parse-string-refuses-a-raw-control";
+    tholds = (fun () ->
+      parse_string [ CQuote; CTab; CQuote ] = PErr BadEscape (msg_ctrl CTab) [ CTab; CQuote ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)

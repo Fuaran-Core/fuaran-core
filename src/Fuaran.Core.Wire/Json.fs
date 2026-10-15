@@ -16,8 +16,9 @@ type JsonErrorKind =
     | UnterminatedEscape
     /// A `\u` escape had fewer than four characters left before the input ended.
     | TruncatedUnicodeEscape
-    /// A backslash followed by a character outside the JSON escape set, OR a string that is not
-    /// well-formed UTF-16 (a lone or ill-ordered surrogate, raw or escaped).
+    /// A backslash followed by a character outside the JSON escape set, a string that is not
+    /// well-formed UTF-16 (a lone or ill-ordered surrogate, raw or escaped), OR a raw C0 control
+    /// character (U+0000 to U+001F) inside a string, which the grammar requires escaped (Phase 462).
     | BadEscape
     /// A `\u` escape held a character that is not a hex digit (either case is accepted).
     | BadHexDigit
@@ -32,6 +33,10 @@ type JsonErrorKind =
     | MaxDepthExceeded
     /// Something other than whitespace follows one complete value.
     | TrailingCharacters
+    /// One object carries the same member name twice (Phase 462). The position is the repeated
+    /// name's opening quote. A first-wins and a last-wins reader read two different documents from
+    /// these bytes, so the document is refused rather than resolved either way.
+    | DuplicateMember
 
 /// A structured parse failure (Phase 22): the classified `Kind`, the human `Message` (no
 /// position suffix), and the 0-based `Position` in the input. `Json.parse`'s string error is
@@ -444,6 +449,42 @@ module Json =
                 | _ -> None)
             v
 
+    /// The FIRST object in `v` that carries a member name twice, in document order, as
+    /// `(path, description)`; the description names the member. `None` where every object's
+    /// names are distinct. Both guarded renderers refuse on it (Phase 462): `render` writes such
+    /// an object as it stands, and `parse` refuses the text (`DuplicateMember`), so a value with a
+    /// repeated member is un-parseable wire from a guarded entry point, as an ill-formed string is.
+    /// Iterative, for the reason the writer and the scan above are: a value of any depth is answered.
+    let firstRepeatedMember (v: JVal) : (string * string) option =
+        let mutable stack = [ At([], v) ]
+        let mutable found = None
+
+        while found.IsNone && not stack.IsEmpty do
+            match stack with
+            | [] -> ()
+            | At(path, x) :: rest ->
+                stack <- rest
+
+                match x with
+                | JArr xs -> stack <- RestItems(path, 0, xs) :: stack
+                | JObj fields ->
+                    let seen = System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+
+                    match fields |> List.tryPick (fun (k, _) -> if seen.Add k then None else Some k) with
+                    | Some k -> found <- Some(pathText path, "the member name \"" + escape k + "\" is repeated")
+                    | None -> stack <- RestMembers(path, fields) :: stack
+                | _ -> ()
+            | RestItems(path, i, xs) :: rest ->
+                match xs with
+                | [] -> stack <- rest
+                | x :: tail -> stack <- At(Index i :: path, x) :: RestItems(path, i + 1, tail) :: rest
+            | RestMembers(path, fields) :: rest ->
+                match fields with
+                | [] -> stack <- rest
+                | (k, x) :: tail -> stack <- At(Key k :: path, x) :: RestMembers(path, tail) :: rest
+
+        found
+
     /// A `"kind"`-tagged object — the wire envelope every domain node/op serialises as.
     /// `tag` leads; `fields` follow in author order (camelCase keys by discipline).
     let kindObj (tag: string) (fields: (string * JVal) list) : JVal = JObj(("kind", JStr tag) :: fields)
@@ -462,8 +503,10 @@ module Json =
     /// Since Phase 306 it refuses a second class for the same reason: a string (or member key)
     /// that is not well-formed UTF-16. `render` writes a lone surrogate through as it found it, and
     /// `parse` refuses the text — so that, too, was un-parseable wire from a guarded entry point.
-    /// A non-finite float is looked for first, so every refusal this function already made keeps
-    /// its message. Over a value with neither it is exactly `Ok (render v)`, at any nesting depth.
+    /// A non-finite float is looked for first, so every refusal this function already made keeps its
+    /// message. Since Phase 462 it refuses a third class, after the other two: an object carrying a
+    /// member name twice, which `parse` refuses as `DuplicateMember`. Over a value with none of the
+    /// three it is exactly `Ok (render v)`, at any nesting depth.
     let tryRender (v: JVal) : Result<string, string> =
         match firstNonFinite v with
         | Some(_, tok) -> Error("non-finite float is not representable on the Fuaran wire: " + tok)
@@ -476,7 +519,16 @@ module Json =
                     + " at "
                     + path
                 )
-            | None -> Ok(render v)
+            | None ->
+                match firstRepeatedMember v with
+                | Some(path, what) ->
+                    Error(
+                        "repeated member is not representable on the Fuaran wire: "
+                        + what
+                        + " at "
+                        + path
+                    )
+                | None -> Ok(render v)
 
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
@@ -704,6 +756,15 @@ module Json =
 
                     if c = '"' || c = '\\' then
                         go <- false
+                    elif c < ' ' then
+                        // Phase 462: a raw C0 control is refused AT the character. The grammar
+                        // requires it escaped, and no conformant encoder writes it raw.
+                        fail
+                            BadEscape
+                            ("unescaped control character U+00"
+                             + string ("0123456789ABCDEF"[int c >>> 4])
+                             + string ("0123456789ABCDEF"[int c &&& 15])
+                             + " in a string")
                     else
                         i <- i + 1
                         check (int c)
@@ -970,9 +1031,14 @@ module Json =
                 i <- i + 1
             else
                 let mutable go = true
+                // Phase 462: the names read so far. The first is held alone, and the set is built
+                // only when a second member arrives, so a one-member object allocates nothing.
+                let mutable first: string option = None
+                let mutable seen: System.Collections.Generic.HashSet<string> option = None
 
                 while go do
                     skipWs ()
+                    let keyAt = i
                     let key = parseString ()
                     skipWs ()
                     expect ':'
@@ -980,7 +1046,37 @@ module Json =
 
                     let erased = tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"
 
-                    if erased then i <- i + 4 else onMember key
+                    if erased then
+                        i <- i + 4
+                    else
+                        onMember key
+
+                        // A repeated name is refused when the member is ACCUMULATED, after its value
+                        // is read, at the name's opening quote. So a refusal inside the value still
+                        // wins, and under the strict policy a repeated member whose value is `null`
+                        // is the null's refusal. An erased member null is NOT an occurrence: the
+                        // tolerant read IS the strict read of the document with its member nulls
+                        // deleted (Phase 190), and that holds only if the erased member leaves no
+                        // trace here either (DECISIONS.md D157).
+                        let repeated =
+                            match first, seen with
+                            | None, _ ->
+                                first <- Some key
+                                false
+                            | Some f, None ->
+                                if f = key then
+                                    true
+                                else
+                                    let set = System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+                                    set.Add f |> ignore
+                                    set.Add key |> ignore
+                                    seen <- Some set
+                                    false
+                            | Some _, Some set -> not (set.Add key)
+
+                        if repeated then
+                            i <- keyAt
+                            fail DuplicateMember "repeated member name in one object"
 
                     skipWs ()
 
@@ -1273,8 +1369,9 @@ module Json =
             let s = opening r '[' "an array"
             s.Array(r.Depth, (fun () -> nested r (fun () -> item r)))
 
-        /// An object, calling `onMember key` once per member in AUTHORED order, a repeated key as
-        /// often as it is written; `onMember` reads the member's value.
+        /// An object, calling `onMember key` once per member in AUTHORED order; `onMember` reads the
+        /// member's value. A repeated member name is refused (`DuplicateMember`, Phase 462) when the
+        /// scanner reaches it, as `parseDetailed` refuses it.
         let members (onMember: string -> Reader -> unit) (r: Reader) : unit =
             let s = opening r '{' "an object"
             s.Object(r.Depth, (fun key -> nested r (fun () -> onMember key r)))

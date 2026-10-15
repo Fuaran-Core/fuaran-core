@@ -593,17 +593,21 @@ let private corners: (string * string * Answer) list =
       corner "ratio" (Some "100000000000000000"),
       refused "InvalidJson" []
       "a number token outside the JSON grammar", corner "ratio" (Some "1."), refused "InvalidJson" []
+      // Phase 462 — a repeated member is the READER's refusal, whichever value comes first and
+      // wherever the object stands: `InvalidJson` at the root on all three hosts.
       "a repeated member whose FIRST value is of another kind",
       corner "count" (Some "\"x\",\"count\":1"),
-      refused "WrongKind" (member' "count")
-      "a repeated member whose SECOND value is of another kind", corner "count" (Some "1,\"count\":\"x\""), Accepted
+      refused "InvalidJson" []
+      "a repeated member whose SECOND value is of another kind",
+      corner "count" (Some "1,\"count\":\"x\""),
+      refused "InvalidJson" []
       "a repeated map key whose second value is of another kind",
       corner "counts" (Some """{"a":1,"a":"x"}"""),
-      refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "a" ]
+      refused "InvalidJson" []
       "map entries refused in document order when an index-like key comes last",
       corner "counts" (Some """{"b":"x","1":"y"}"""),
       refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "b" ]
-      "a repeated discriminator", corner "kind" (Some "\"Corner\",\"kind\":\"Nope\""), Accepted
+      "a repeated discriminator", corner "kind" (Some "\"Corner\",\"kind\":\"Nope\""), refused "InvalidJson" []
       "a __proto__ map key", corner "counts" (Some """{"__proto__":1}"""), Accepted
       "a __proto__ map key of the wrong kind",
       corner "counts" (Some """{"__proto__":"x"}"""),
@@ -623,7 +627,10 @@ let private corners: (string * string * Answer) list =
       corner "raw" (Some "\"<closure>\""),
       refused "OutOfRange" (member' "raw")
       "an opaque slot absent", corner "raw" None, refused "MissingField" (member' "raw")
-      "a raw control character in a string", corner "meta" (Some("\"a" + string (char 1) + "b\"")), Accepted
+      // Phase 462 — a raw control inside a string is the reader's refusal on all three hosts.
+      "a raw control character in a string",
+      corner "meta" (Some("\"a" + string (char 1) + "b\"")),
+      refused "InvalidJson" []
       "a lone surrogate written as an escape", corner "meta" (Some "\"\\ud800\""), refused "InvalidJson" []
       "a lone surrogate written raw", corner "meta" (Some("\"" + string (char 0xDC00) + "\"")), refused "InvalidJson" []
       "null in a json slot", corner "meta" (Some "null"), refused "InvalidJson" []
@@ -745,53 +752,26 @@ let cornerTests =
                   Expect.equal (get "clean") (JBool true) "Object.prototype is untouched"
                   Expect.equal (get "bytes") (JStr doc) "the TypeScript host writes the document back byte for byte")
 
-          testCase
-              "a repeated key keeps its first value on all three hosts, as a member read and as a map entry"
-              (fun _ ->
-                  let doc =
-                      (corner "counts" (Some """{"a":1,"a":2}""")).Replace("\"count\":1", "\"count\":5,\"count\":6")
+          testCase "a repeated key is the reader's refusal on all three hosts, as a member and as a map entry" (fun _ ->
+              // Phase 462 — the F# reader refuses a repeated member name, so no host reads a first
+              // or a last value from one: the document is `InvalidJson` at the root everywhere.
+              // Until Phase 462 this test pinned first-wins on the three hosts (D113); the ruling
+              // is superseded by D157.
+              let docs =
+                  [ corner "counts" (Some """{"a":1,"a":2}""")
+                    (corner "count" (Some "1")).Replace("\"count\":1", "\"count\":5,\"count\":6") ]
 
-                  match Decode.decodeDetailed RefusalCornersIdl.idl doc with
-                  | Ok(VNode(_, _, fields)) ->
-                      Expect.equal
-                          (fields |> List.tryFind (fun (k, _) -> k = "count") |> Option.map snd)
-                          (Some(VInt 5))
-                          "the interpreter reads the first member"
+              let want = refused "InvalidJson" []
 
-                      match fields |> List.tryFind (fun (k, _) -> k = "counts") with
-                      | Some(_, VMap entries) ->
-                          Expect.equal
-                              (entries |> List.tryFind (fun (k, _) -> k = "a") |> Option.map snd)
-                              (Some(VInt 1))
-                              "and a map read finds the first entry"
-                      | other -> failtestf "the interpreter's map: %A" other
-                  | other -> failtestf "the interpreter: %A" other
+              for doc in docs do
+                  Expect.equal (ofResult (Decode.decodeDetailed RefusalCornersIdl.idl doc)) want "the interpreter"
+                  Expect.equal (ofResult (RefusalCornersGenerated.decodeNode doc)) want "the compiled F# host"
 
-                  match RefusalCornersGenerated.decodeNode doc with
-                  | Ok n ->
-                      match n.Kind with
-                      | RefusalCornersGenerated.NodeKind.Corner c ->
-                          Expect.equal c.Count 5 "the compiled host reads the first member"
-                          Expect.equal (Map.tryFind "a" c.Counts) (Some 1) "and keeps the first map entry"
-                  | Error e -> failtestf "the compiled host refused: %s" (DecodeError.describe e)
-
-                  let script =
-                      tsModuleOf RefusalCornersIdl.idl
-                      + "\nconst r = decodeNode("
-                      + Canon.render (JStr doc)
-                      + ");\nconsole.log(JSON.stringify({ ok: r.ok, count: r.value.count, a: r.value.counts.a }));\n"
-
-                  match nodeJson script with
-                  | None -> skiptest noNode
-                  | Some o ->
-                      Expect.equal (Decoder.tryMember "ok" o) (Some(JBool true)) "the TypeScript host accepts it"
-
-                      Expect.equal
-                          (Decoder.tryMember "count" o)
-                          (Some(JInt 5))
-                          "the TypeScript host reads the first member"
-
-                      Expect.equal (Decoder.tryMember "a" o) (Some(JInt 1)) "and keeps the first map entry") ]
+              match tsAnswers RefusalCornersIdl.idl docs with
+              | None -> skiptest noNode
+              | Some answers ->
+                  for a in answers do
+                      Expect.equal a want "the TypeScript host") ]
 
 // ---------------------------------------------------------------------------
 // Phase 348 — the declaration file types the refusal as the object it is, and the names a

@@ -1392,10 +1392,45 @@ let __proj__IllFormed__item__is_key : sscan  ->  Prims.bool = (fun ( projectee  
      is_key
      end))
 
+type rscan =
+| NoRepeat
+| Repeated of Prims.list<pstep> * Prims.list<ch>
+
+
+let uu___is_NoRepeat : rscan  ->  Prims.bool = (fun ( projectee  :  rscan ) -> (match (projectee) with
+| NoRepeat -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Repeated : rscan  ->  Prims.bool = (fun ( projectee  :  rscan ) -> (match (projectee) with
+| Repeated (path, k) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Repeated__item__path : rscan  ->  Prims.list<pstep> = (fun ( projectee  :  rscan ) -> (match (projectee) with
+| Repeated (path, k) -> begin
+     path
+     end))
+
+
+let __proj__Repeated__item__k : rscan  ->  Prims.list<ch> = (fun ( projectee  :  rscan ) -> (match (projectee) with
+| Repeated (path, k) -> begin
+     k
+     end))
+
 type guarded<'flt> =
 | Rendered of Prims.list<ch>
 | Refused of Prims.list<pstep> * 'flt
 | RefusedString of Prims.list<pstep> * Prims.list<ch> * Prims.bool
+| RefusedRepeated of Prims.list<pstep> * Prims.list<ch>
 
 
 let uu___is_Rendered = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
@@ -1458,6 +1493,27 @@ let __proj__RefusedString__item__s = (fun ( projectee  :  guarded<'flt> ) -> (ma
 let __proj__RefusedString__item__is_key = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
 | RefusedString (path, s, is_key) -> begin
      is_key
+     end))
+
+
+let uu___is_RefusedRepeated = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedRepeated (path, k) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RefusedRepeated__item__path = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedRepeated (path, k) -> begin
+     path
+     end))
+
+
+let __proj__RefusedRepeated__item__k = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedRepeated (path, k) -> begin
+     k
      end))
 
 
@@ -1558,6 +1614,64 @@ if (not ((w.str_ok k))) then begin
      end))
 
 
+let rec second_occurrence = (fun ( seen  :  Prims.list<Prims.list<ch>> ) ( fs  :  Prims.list<(Prims.list<ch> * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k, uu___))::t -> begin
+      
+if (mem k seen) then begin
+     FStar_Pervasives_Native.Some (k)
+     end else begin
+     (second_occurrence ((k)::seen) t)
+     end
+     end))
+
+
+let rec first_repeated = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match (v) with
+| JArr (xs) -> begin
+     (first_repeated_items w (Prims.parse_int "0") xs)
+     end
+| JObj (fs) -> begin
+     (match ((second_occurrence [] fs)) with
+| FStar_Pervasives_Native.Some (k) -> begin
+     Repeated ([], k)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (first_repeated_kvs w fs)
+     end)
+     end
+| uu___ -> begin
+     NoRepeat
+     end))
+and first_repeated_items = (fun ( w  :  wire<'num, 'flt> ) ( i  :  Prims.nat ) ( xs  :  Prims.list<jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     NoRepeat
+     end
+| (x)::t -> begin
+     (match ((first_repeated w x)) with
+| Repeated (p, k) -> begin
+     Repeated ((PItem (i))::p, k)
+     end
+| NoRepeat -> begin
+     (first_repeated_items w (i + (Prims.parse_int "1")) t)
+     end)
+     end))
+and first_repeated_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(Prims.list<ch> * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     NoRepeat
+     end
+| ((k, v))::t -> begin
+     (match ((first_repeated w v)) with
+| Repeated (p, k') -> begin
+     Repeated ((PMember (k))::p, k')
+     end
+| NoRepeat -> begin
+     (first_repeated_kvs w t)
+     end)
+     end))
+
+
 let try_render = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match ((first_nonfinite w v)) with
 | NonFinite (p, f) -> begin
      Refused (p, f)
@@ -1568,7 +1682,13 @@ let try_render = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (
      RefusedString (p, s, k)
      end
 | AllStringsOk -> begin
+     (match ((first_repeated w v)) with
+| Repeated (p, k) -> begin
+     RefusedRepeated (p, k)
+     end
+| NoRepeat -> begin
      Rendered ((render w v))
+     end)
      end)
      end))
 

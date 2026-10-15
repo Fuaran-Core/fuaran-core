@@ -59,6 +59,7 @@ type ch =
 | COther of Prims.string
 | CHiSur of Prims.string
 | CLoSur of Prims.string
+| CCtrl of Prims.string * Prims.string
 
 
 let uu___is_CSpace : ch  ->  Prims.bool = (fun ( projectee  :  ch ) -> (match (projectee) with
@@ -502,6 +503,27 @@ let __proj__CLoSur__item__c : ch  ->  Prims.string = (fun ( projectee  :  ch ) -
      end))
 
 
+let uu___is_CCtrl : ch  ->  Prims.bool = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CCtrl (c, code) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CCtrl__item__c : ch  ->  Prims.string = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CCtrl (c, code) -> begin
+     c
+     end))
+
+
+let __proj__CCtrl__item__code : ch  ->  Prims.string = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CCtrl (c, code) -> begin
+     code
+     end))
+
+
 let ch_str : ch  ->  Prims.string = (fun ( c  :  ch ) -> (match (c) with
 | CSpace -> begin
      " "
@@ -643,6 +665,9 @@ let ch_str : ch  ->  Prims.string = (fun ( c  :  ch ) -> (match (c) with
      end
 | CLoSur (s) -> begin
      s
+     end
+| CCtrl (s, uu___) -> begin
+     s
      end))
 
 
@@ -656,6 +681,33 @@ let rec chs_str : Prims.list<ch>  ->  Prims.string = (fun ( l  :  Prims.list<ch>
 
 
 let is_ws : ch  ->  Prims.bool = (fun ( c  :  ch ) -> ((((Prims.op_Equals c CSpace) || (Prims.op_Equals c CTab)) || (Prims.op_Equals c CNewline)) || (Prims.op_Equals c CReturn)))
+
+
+let is_ctrl : ch  ->  Prims.bool = (fun ( c  :  ch ) -> ((((Prims.op_Equals c CTab) || (Prims.op_Equals c CNewline)) || (Prims.op_Equals c CReturn)) || (match (c) with
+| CCtrl (c1, code) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)))
+
+
+let ctrl_code : ch  ->  Prims.string = (fun ( c  :  ch ) -> (match (c) with
+| CTab -> begin
+     "U+0009"
+     end
+| CNewline -> begin
+     "U+000A"
+     end
+| CReturn -> begin
+     "U+000D"
+     end
+| CCtrl (uu___, code) -> begin
+     code
+     end
+| uu___ -> begin
+     ""
+     end))
 
 
 let is_digit : ch  ->  Prims.bool = (fun ( c  :  ch ) -> ((((((((((Prims.op_Equals c CD0) || (Prims.op_Equals c CD1)) || (Prims.op_Equals c CD2)) || (Prims.op_Equals c CD3)) || (Prims.op_Equals c CD4)) || (Prims.op_Equals c CD5)) || (Prims.op_Equals c CD6)) || (Prims.op_Equals c CD7)) || (Prims.op_Equals c CD8)) || (Prims.op_Equals c CD9)))
@@ -848,6 +900,7 @@ type ekind =
 | NullNotRepresentable
 | MaxDepthExceeded
 | TrailingCharacters
+| DuplicateMember
 
 
 let uu___is_UnexpectedChar : ekind  ->  Prims.bool = (fun ( projectee  :  ekind ) -> (match (projectee) with
@@ -951,6 +1004,15 @@ let uu___is_MaxDepthExceeded : ekind  ->  Prims.bool = (fun ( projectee  :  ekin
 
 let uu___is_TrailingCharacters : ekind  ->  Prims.bool = (fun ( projectee  :  ekind ) -> (match (projectee) with
 | TrailingCharacters -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_DuplicateMember : ekind  ->  Prims.bool = (fun ( projectee  :  ekind ) -> (match (projectee) with
+| DuplicateMember -> begin
      true
      end
 | uu___ -> begin
@@ -1106,6 +1168,12 @@ let msg_int53 : Prims.list<ch>  ->  Prims.string = (fun ( tok  :  Prims.list<ch>
 
 
 let msg_null_strict : Prims.string = "null is not representable in the Fuaran wire JVal model"
+
+
+let msg_ctrl : ch  ->  Prims.string = (fun ( c  :  ch ) -> (Prims.strcat "unescaped control character " (Prims.strcat (ctrl_code c) " in a string")))
+
+
+let msg_duplicate : Prims.string = "repeated member name in one object"
 
 
 let msg_null_tolerant : Prims.string = "null is not representable in the Fuaran wire JVal model, and this position has no absence to erase it to (only an object-member null is erased)"
@@ -1416,6 +1484,10 @@ if (is_short_escape e) then begin
      end)
      end
 | (c)::t -> begin
+      
+if (is_ctrl c) then begin
+     PErr (BadEscape, (msg_ctrl c), s)
+     end else begin
      (match ((sur_fault pending (lit_class c))) with
 | FStar_Pervasives_Native.Some (m) -> begin
      PErr (BadEscape, m, t)
@@ -1423,6 +1495,7 @@ if (is_short_escape e) then begin
 | FStar_Pervasives_Native.None -> begin
      (string_body (Prims.op_Equals (lit_class c) SHigh) ((OLit (c))::acc) t)
      end)
+     end
      end))
 
 
@@ -1816,6 +1889,15 @@ let drop_null4 : Prims.list<ch>  ->  FStar_Pervasives_Native.option<Prims.list<c
      end))
 
 
+let rec has_key : Prims.list<och>  ->  Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( k  :  Prims.list<och> ) ( fs  :  Prims.list<(Prims.list<och> * jval)> ) -> (match (fs) with
+| [] -> begin
+     false
+     end
+| ((k', uu___))::t -> begin
+     ((Prims.op_Equals k k') || (has_key k t))
+     end))
+
+
 let rec parse_value : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  Prims.bool  ->  Prims.list<unit>  ->  Prims.list<ch>  ->  pres<jval> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( tol  :  Prims.bool ) ( b  :  Prims.list<unit> ) ( s  :  Prims.list<ch> ) -> (
 
 let w = (skip_ws s)
@@ -1977,6 +2059,10 @@ in (match (t5) with
      PErr (k, m, a)
      end
 | POk (v, t4) -> begin
+      
+if (has_key key acc) then begin
+     PErr (DuplicateMember, msg_duplicate, w)
+     end else begin
      (
 
 let t5 = (skip_ws t4)
@@ -1990,6 +2076,7 @@ in (match (t5) with
 | uu___1 -> begin
      PErr (ExpectedToken, "expected \',\' or \'}\'", t5)
      end))
+     end
      end)
      end)))
      end))
@@ -2047,6 +2134,9 @@ if (match (r1) with
      end)))
 
 
+let dup_doc : Prims.list<ch> = (CLBrace)::(CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CComma)::(CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]
+
+
 let rec fwd_state : Prims.bool  ->  Prims.list<och>  ->  FStar_Pervasives_Native.option<Prims.bool> = (fun ( p  :  Prims.bool ) ( l  :  Prims.list<och> ) -> (match (l) with
 | [] -> begin
      FStar_Pervasives_Native.Some (p)
@@ -2093,6 +2183,41 @@ and fields_wf : Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( fs
      (((ochs_well_formed k) && (jval_wf v)) && (fields_wf t))
      end))
 
+
+let rec keys_distinct : Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( fs  :  Prims.list<(Prims.list<och> * jval)> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| ((k, uu___))::t -> begin
+     ((not ((has_key k t))) && (keys_distinct t))
+     end))
+
+
+let rec jval_distinct : jval  ->  Prims.bool = (fun ( v  :  jval ) -> (match (v) with
+| JArr (xs) -> begin
+     (jvals_distinct xs)
+     end
+| JObj (fs) -> begin
+     ((keys_distinct fs) && (fields_distinct fs))
+     end
+| uu___ -> begin
+     true
+     end))
+and jvals_distinct : Prims.list<jval>  ->  Prims.bool = (fun ( xs  :  Prims.list<jval> ) -> (match (xs) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((jval_distinct x) && (jvals_distinct t))
+     end))
+and fields_distinct : Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( fs  :  Prims.list<(Prims.list<och> * jval)> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| ((uu___, v))::t -> begin
+     ((jval_distinct v) && (fields_distinct t))
+     end))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -2117,7 +2242,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "a-negative-fraction-is-a-number"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({tname = "a-leading-zero-then-digit-is-not"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({tname = "parse-string-stops-at-the-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({tname = "parse-reads-true"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({tname = "parse-refuses-trailing-characters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::[]
+let twins : Prims.list<twin> = ({tname = "a-negative-fraction-is-a-number"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({tname = "a-leading-zero-then-digit-is-not"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({tname = "parse-string-stops-at-the-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({tname = "parse-reads-true"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({tname = "parse-refuses-trailing-characters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::({tname = "parse-refuses-a-repeated-member"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::[]) dup_doc) (RErr (DuplicateMember, msg_duplicate, (CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]))))})::({tname = "parse-string-refuses-a-raw-control"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string ((CQuote)::(CTab)::(CQuote)::[])) (PErr (BadEscape, (msg_ctrl CTab), (CTab)::(CQuote)::[]))))})::[]
 
 
 
