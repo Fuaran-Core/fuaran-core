@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-16 — D161: a presence read is not split from a content read — measured, no recorded concurrent fold pairs a reorder or a move with anything; the shape is recorded for the reopening
+## 2026-10-16 — D162: a presence read is not split from a content read — measured, no recorded concurrent fold pairs a reorder or a move with anything; the shape is recorded for the reopening
 
 **Decided (Phase 475; the operator's note at accept was "measurement first, and 'not worth the widening' is a
 complete outcome", on the pattern of D47).** `Footprint` keeps its six sets. `Ops.footprint`,
@@ -8,14 +8,14 @@ complete outcome", on the pattern of D47).** `Footprint` keeps its six sets. `Op
 `proofs/DagFold.fst`, the oracles, `proofs.json`, `concurrencyLaws` and the `ops/` footprint vectors. No
 surface moves and nothing rides a draft.
 
-**D161.1 — what was proposed.** Two reads in `footprint` are not tree facts the script cannot name: a
+**D162.1 — what was proposed.** Two reads in `footprint` are not tree facts the script cannot name: a
 `ReorderChildren(parent, order)` reads every named child, and a `MoveNode(target, newParent)` reads and
 content-writes its target. Each exists so that the op meets a concurrent removal of the node, and each also
 makes the op interfere with a concurrent content edit of that node, which it commutes with. Both ops need the
 node to EXIST and read nothing of its content. The proposal was a PRESENCE read — satisfied by existence,
 written only by a removal — as a slot (`(id, "presence")`, riding Phase 340's sets) or as a new set.
 
-**D161.2 — what it could free, checked in the tree before anything was counted.** Within Core's own ops,
+**D162.2 — what it could free, checked in the tree before anything was counted.** Within Core's own ops,
 nothing. `RemoveNode`, `MoveNode` and `UpdateNode` all carry an unknown-parent write, and a reorder or a move
 carries a structure write, so the unknown-parent clause refuses every such pair whatever the reads say. That
 same clause, and not the named-child read, is what makes a reorder meet a concurrent removal of one of its
@@ -24,7 +24,7 @@ children in the skeleton algebra. A freeable pair therefore needs a DOMAIN op lo
 and a reorder or a move reaching `Ops.footprint` on the other. That locates the measurement: only a host whose
 projection has both shapes can ever be refused by these two reads and nothing else.
 
-**D161.3 — the measurement.** Method: a pair either read could refuse has a reorder-shaped or a move-shaped op
+**D162.3 — the measurement.** Method: a pair either read could refuse has a reorder-shaped or a move-shaped op
 on one side. So, per store, over every lane file:
 
 - **T** — cross-lane op pairs: any two ops in different lane files of one store (an upper bound on
@@ -54,14 +54,14 @@ structural zero; an unparseable line must be counted, never skipped. All held, a
 removed from the classifier the first and the fourth went red, so the probe was seen to bite before its zero
 was believed.
 
-**D161.4 — why the zero is structural.** The projections of the measured ledgers' hosts are exhaustive matches
+**D162.4 — why the zero is structural.** The projections of the measured ledgers' hosts are exhaustive matches
 with no reorder and no move arm: their ops lower to inserts, removes, whole-node and slot edits, reads, and the
 empty footprint. The hosts whose projections DO reach Core's reorder and move arms pass skeleton ops through
 `Ops.footprint` beside their own `contentEdit`-shaped payload edits — exactly the pair the widening frees — and
 none has recorded a multi-lane ledger: the one such ledger committed is a single-lane conformance fixture of
 three ops.
 
-**D161.5 — the demand, which is not the measurement, and the reopening.** fuaran#2293's experiment, over one UI
+**D162.5 — the demand, which is not the measurement, and the reopening.** fuaran#2293's experiment, over one UI
 consumer's generated triads (18,597), found 1,629 of 3,791 footprint-refused-but-commuting pairs to be a reorder
 against a restyle or kind edit of a named child, and 354 of 1,820 a move against an edit of the moved node once
 that consumer's projection was slot-precise. Those are a generator's pairs, not recorded folds, and are kept
@@ -70,7 +70,7 @@ host whose projection reaches the reorder or move arm beside a `contentEdit`- or
 UI op-stream DAG, once fuaran#2293 puts it on Core, is the expected one. Re-measuring is the census above over
 that ledger's lanes, with its falsifier.
 
-**D161.6 — the shape, for whoever reopens it (an analysis of the clauses as written, not a proof).** The two
+**D162.6 — the shape, for whoever reopens it (an analysis of the clauses as written, not a proof).** The two
 shapes do not free the same pairs:
 
 - **A slot.** Replacing the read of `x` with a slot read `(x, "presence")` frees a SLOT edit of `x` (no slot
@@ -92,8 +92,52 @@ oracle differential, a law-family draw and a verdict change for every plane that
 set measured at zero. The slot shape needs no record change, so waiting costs the reopening little.
 
 **Not added: an assertion to catch the world changing back.** The change that reopens this is a new host's
-ledger, which nothing in this repository reads, so no test here can see it; the trigger is stated in D161.5
+ledger, which nothing in this repository reads, so no test here can see it; the trigger is stated in D162.5
 instead.
+
+## 2026-10-16 — D161: `Column.ofCells` has no boxed path — an `Int` under a float or a decimal column is already the float or the decimal of its value on its only path, and a cell the type does not carry is refused, so Phase 472's Core half is a finding and not a change; the matching compute decision is `Fuaran.Core.Compute` D40
+
+**Phase 472 asked Core to widen an `Int` under a `Float` or `Decimal` column "on the boxed path, as on the
+typed one". The premise is false, and no code moves; this entry records why, so the question is not
+re-opened.**
+
+**Context.** The compute repository's `Vec.packAt` packs a column typed when every present cell is one the
+type carries and BOXES it — every cell as it was — otherwise, so until compute's Phase 472 an int under a
+float column read as its float on one carrier and as an int on the other, and one unrelated row decided
+which (compute `DECISIONS.md` D38 item 5). Phase 472 widens the int on the boxed form too, in both
+repositories; this is Core's half.
+
+**Decision.**
+
+1. **Core has no boxed path.** `ColumnData` is seven typed cases (`Ints`, `Floats`, `Bools`, `Strs`,
+   `Dates`, `Timestamps`, `Decimals`) and nothing else; there is no `Cell list` carrier and no boxed
+   fall-back anywhere in `Fuaran.Core.Column`. `Column.ofCells` (`storageOfCells`) is the one
+   construction that reads cells: under `FloatType` it holds an `Int i` as `float i`, under `DecimalType`
+   as `string i`, and REFUSES the first present cell whose type does not widen into the column's
+   (`TypeMismatch`, naming the cell's type) rather than falling back to anything. Since `1.0.0` (Phase
+   423) a Core column therefore reads an int under a float column as its float, whatever stands beside it;
+   the suite pins it (`ColumnTests`: "ofCells normalises a widened Int: Float in a float column, Decimal in
+   a decimal column" — `Column.toCells` answers `Float 1.0` for `Int 1`, `Decimal "1"` for `Int 1`, and the
+   column equals the one built from the normal cells). A go-red test for the shard's ask cannot be
+   written, because there is nothing red to show; the pinning test above is the assertion that goes red
+   if this ever changes back.
+
+2. **No caller reads an `Int` back out of a float or decimal column, because none can.** `Column.cell`
+   on `Floats` answers `Float`, on `Decimals` `Decimal`; `tryFloats` / `tryDecimals` lend the typed vector.
+   The survey the phase asked for reduces to that fact: a downstream consumer of Core can only ever have
+   seen the widened cell. The compute repository's boxed vector was the one place an `Int` survived under
+   a float or decimal type, and a boxed vector handed to `Column.ofCells` (through compute's
+   `Vec.toColumn`) was widened here on the way in — which is why compute's half needs no Core change and
+   no pin raise: compute pins the public `0.37.0`, and Core's open draft (`0.38.0` at the take, `0.38.1`
+   at the landing) is untouched by this phase.
+
+3. **Nothing rides the draft.** No source, test, api baseline or stability record of this repository
+   moves; the open draft's release record gains no entry, because there is no behaviour to record. This decision
+   is the whole of Core's half.
+
+**Consequences.** Cell-locality of a column's reading holds in Core by construction and, since compute's
+Phase 472, in the compute repository's `Vec.packAt` on both carriers; a reader of either repository
+meets the same cell for the same input. Compute's D40 records the other half and closes its D38 item 5.
 
 ## 2026-10-15 — D160: every checked op-stream writer checks every member a line carries, the strings it quotes itself as well as the span it embeds, so no checked writer returns text the strict reader refuses; closes D158.6
 
