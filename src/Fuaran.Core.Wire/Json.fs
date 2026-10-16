@@ -584,7 +584,7 @@ module Json =
                 match x with
                 | JArr xs -> stack <- RestItems(path, 0, xs) :: stack
                 | JObj fields ->
-                    let seen = System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+                    let seen = System.Collections.Generic.HashSet<string>(HashIdentity.Structural)
 
                     match fields |> List.tryPick (fun (k, _) -> if seen.Add k then None else Some k) with
                     | Some k -> found <- Some(pathText path, "the member name \"" + escape k + "\" is repeated")
@@ -1276,7 +1276,7 @@ module Json =
                                 if f = key then
                                     true
                                 else
-                                    let set = System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+                                    let set = System.Collections.Generic.HashSet<string>(HashIdentity.Structural)
                                     set.Add f |> ignore
                                     set.Add key |> ignore
                                     seen <- Some set
