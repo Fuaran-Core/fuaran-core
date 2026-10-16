@@ -29,7 +29,7 @@ repositories; this is Core's half.
 
 2. **No caller reads an `Int` back out of a float or decimal column, because none can.** `Column.cell`
    on `Floats` answers `Float`, on `Decimals` `Decimal`; `tryFloats` / `tryDecimals` lend the typed vector.
-   The survey the phase asked for reduces to that fact: a Core consumer in the estate can only ever have
+   The survey the phase asked for reduces to that fact: a downstream consumer of Core can only ever have
    seen the widened cell. The compute repository's boxed vector was the one place an `Int` survived under
    a float or decimal type, and a boxed vector handed to `Column.ofCells` (through compute's
    `Vec.toColumn`) was widened here on the way in — which is why compute's half needs no Core change and
