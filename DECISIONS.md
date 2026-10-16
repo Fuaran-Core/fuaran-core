@@ -1,5 +1,49 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-16 — D161: `Column.ofCells` has no boxed path — an `Int` under a float or a decimal column is already the float or the decimal of its value on its only path, and a cell the type does not carry is refused, so Phase 472's Core half is a finding and not a change; the matching compute decision is `Fuaran.Core.Compute` D40
+
+**Phase 472 asked Core to widen an `Int` under a `Float` or `Decimal` column "on the boxed path, as on the
+typed one". The premise is false, and no code moves; this entry records why, so the question is not
+re-opened.**
+
+**Context.** The compute repository's `Vec.packAt` packs a column typed when every present cell is one the
+type carries and BOXES it — every cell as it was — otherwise, so until compute's Phase 472 an int under a
+float column read as its float on one carrier and as an int on the other, and one unrelated row decided
+which (compute `DECISIONS.md` D38 item 5). Phase 472 widens the int on the boxed form too, in both
+repositories; this is Core's half.
+
+**Decision.**
+
+1. **Core has no boxed path.** `ColumnData` is seven typed cases (`Ints`, `Floats`, `Bools`, `Strs`,
+   `Dates`, `Timestamps`, `Decimals`) and nothing else; there is no `Cell list` carrier and no boxed
+   fall-back anywhere in `Fuaran.Core.Column`. `Column.ofCells` (`storageOfCells`) is the one
+   construction that reads cells: under `FloatType` it holds an `Int i` as `float i`, under `DecimalType`
+   as `string i`, and REFUSES the first present cell whose type does not widen into the column's
+   (`TypeMismatch`, naming the cell's type) rather than falling back to anything. Since `1.0.0` (Phase
+   423) a Core column therefore reads an int under a float column as its float, whatever stands beside it;
+   the suite pins it (`ColumnTests`: "ofCells normalises a widened Int: Float in a float column, Decimal in
+   a decimal column" — `Column.toCells` answers `Float 1.0` for `Int 1`, `Decimal "1"` for `Int 1`, and the
+   column equals the one built from the normal cells). A go-red test for the shard's ask cannot be
+   written, because there is nothing red to show; the pinning test above is the assertion that goes red
+   if this ever changes back.
+
+2. **No caller reads an `Int` back out of a float or decimal column, because none can.** `Column.cell`
+   on `Floats` answers `Float`, on `Decimals` `Decimal`; `tryFloats` / `tryDecimals` lend the typed vector.
+   The survey the phase asked for reduces to that fact: a Core consumer in the estate can only ever have
+   seen the widened cell. The compute repository's boxed vector was the one place an `Int` survived under
+   a float or decimal type, and a boxed vector handed to `Column.ofCells` (through compute's
+   `Vec.toColumn`) was widened here on the way in — which is why compute's half needs no Core change and
+   no pin raise: compute pins the public `0.37.0`, and `0.38.0` stays an untagged draft untouched by this
+   phase.
+
+3. **Nothing rides the draft.** No source, test, api baseline or stability record of this repository
+   moves; `docs/releases/0.38.0.md` gains no entry, because there is no behaviour to record. This decision
+   is the whole of Core's half.
+
+**Consequences.** Cell-locality of a column's reading holds in Core by construction and, since compute's
+Phase 472, in the compute repository's `Vec.packAt` on both carriers; a reader of either repository
+meets the same cell for the same input. Compute's D40 records the other half and closes its D38 item 5.
+
 ## 2026-10-15 — D160: every checked op-stream writer checks every member a line carries, the strings it quotes itself as well as the span it embeds, so no checked writer returns text the strict reader refuses; closes D158.6
 
 **Phase 473, the model first: `proofs/OpStreamLoad.fst`'s writer moved, re-verified with the pinned prover and
