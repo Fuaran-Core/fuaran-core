@@ -35,7 +35,7 @@ on one side. So, per store, over every lane file:
   widening could free, and a zero is conclusive.
 
 Population: every JSONL file in the maintainers' own working repositories, found by a walk that includes hidden
-directories (a first walk that did not returned 134 files and no op-stream at all). Of 226 files, 112 are live
+directories (a first walk that did not missed every store but one, because each keeps its lanes under one). Of 226 files, 112 are live
 op-stream ledgers in 30 stores (concurrent write lanes, single-chain bases, frozen predecessor archives), 30 are
 committed fixtures, and the rest hold no ops (keys, attestations, evaluation results, prompt packs, work logs).
 All 112 parsed, with no unreadable line; one entries ledger with no op lines is named and set aside.
