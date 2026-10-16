@@ -33,11 +33,11 @@ repositories; this is Core's half.
    seen the widened cell. The compute repository's boxed vector was the one place an `Int` survived under
    a float or decimal type, and a boxed vector handed to `Column.ofCells` (through compute's
    `Vec.toColumn`) was widened here on the way in — which is why compute's half needs no Core change and
-   no pin raise: compute pins the public `0.37.0`, and `0.38.0` stays an untagged draft untouched by this
-   phase.
+   no pin raise: compute pins the public `0.37.0`, and Core's open draft (`0.38.0` at the take, `0.38.1`
+   at the landing) is untouched by this phase.
 
 3. **Nothing rides the draft.** No source, test, api baseline or stability record of this repository
-   moves; `docs/releases/0.38.0.md` gains no entry, because there is no behaviour to record. This decision
+   moves; the open draft's release record gains no entry, because there is no behaviour to record. This decision
    is the whole of Core's half.
 
 **Consequences.** Cell-locality of a column's reading holds in Core by construction and, since compute's
