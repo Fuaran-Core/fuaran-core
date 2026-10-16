@@ -1,5 +1,100 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-16 — D161: a presence read is not split from a content read — measured, no recorded concurrent fold pairs a reorder or a move with anything; the shape is recorded for the reopening
+
+**Decided (Phase 475; the operator's note at accept was "measurement first, and 'not worth the widening' is a
+complete outcome", on the pattern of D47).** `Footprint` keeps its six sets. `Ops.footprint`,
+`Ops.interference` and `Ops.independent` are unchanged, byte for byte, and so are `proofs/TreeOps.fst`,
+`proofs/DagFold.fst`, the oracles, `proofs.json`, `concurrencyLaws` and the `ops/` footprint vectors. No
+surface moves and nothing rides a draft.
+
+**D161.1 — what was proposed.** Two reads in `footprint` are not tree facts the script cannot name: a
+`ReorderChildren(parent, order)` reads every named child, and a `MoveNode(target, newParent)` reads and
+content-writes its target. Each exists so that the op meets a concurrent removal of the node, and each also
+makes the op interfere with a concurrent content edit of that node, which it commutes with. Both ops need the
+node to EXIST and read nothing of its content. The proposal was a PRESENCE read — satisfied by existence,
+written only by a removal — as a slot (`(id, "presence")`, riding Phase 340's sets) or as a new set.
+
+**D161.2 — what it could free, checked in the tree before anything was counted.** Within Core's own ops,
+nothing. `RemoveNode`, `MoveNode` and `UpdateNode` all carry an unknown-parent write, and a reorder or a move
+carries a structure write, so the unknown-parent clause refuses every such pair whatever the reads say. That
+same clause, and not the named-child read, is what makes a reorder meet a concurrent removal of one of its
+children in the skeleton algebra. A freeable pair therefore needs a DOMAIN op lowered through
+`Footprint.contentEdit`, `slotEdit` or `reading` (none of which records an unknown-parent write) on one side,
+and a reorder or a move reaching `Ops.footprint` on the other. That locates the measurement: only a host whose
+projection has both shapes can ever be refused by these two reads and nothing else.
+
+**D161.3 — the measurement.** Method: a pair either read could refuse has a reorder-shaped or a move-shaped op
+on one side. So, per store, over every lane file:
+
+- **T** — cross-lane op pairs: any two ops in different lane files of one store (an upper bound on
+  concurrency; a single-chain file contributes T = 0, a structural zero rather than a finding);
+- **Nr / Nm** — reorder-shaped and move-shaped leaf ops, with batches and structural wrappers flattened;
+- **R / M** — cross-lane pairs with a reorder (a move) on at least one side, whatever the partner. A partner
+  that is not a content edit of the named node is still counted, so both are upper bounds on what the
+  widening could free, and a zero is conclusive.
+
+Population: every JSONL file in the maintainers' own working repositories, found by a walk that includes hidden
+directories (a first walk that did not returned 134 files and no op-stream at all). Of 226 files, 112 are live
+op-stream ledgers in 30 stores (concurrent write lanes, single-chain bases, frozen predecessor archives), 30 are
+committed fixtures, and the rest hold no ops (keys, attestations, evaluation results, prompt packs, work logs).
+All 112 parsed, with no unreadable line; one entries ledger with no op lines is named and set aside.
+
+**Result: T = 141,482,012 · Nr = 0 · Nm = 0 · R = 0 · M = 0, over 52,667 leaf ops.** The 30 fixtures (825
+ops, T = 12,119) give the same zeros. An independent text search for every reorder and move spelling over all
+226 files found 38 occurrences in 9 files, and every one is prose inside a string — a key-file list naming the
+`ops/` vectors, a deviations text — never an op kind. The only relocation-shaped ops anywhere are 125
+predecessor-model ship ops, all in two frozen single-chain archives (T = 0) whose ops carry no current
+footprint (D47).
+
+**The falsifier, stated before the run.** Planted in synthetic two-lane stores: a reorder inside a batch
+against a content edit must give R >= 1; a structural move against a payload edit must give M >= 1; the other
+direction, an insert against a content edit, must give T = 1 and R = M = 0; a single-lane reorder must be a
+structural zero; an unparseable line must be counted, never skipped. All held, and with the reorder spelling
+removed from the classifier the first and the fourth went red, so the probe was seen to bite before its zero
+was believed.
+
+**D161.4 — why the zero is structural.** The projections of the measured ledgers' hosts are exhaustive matches
+with no reorder and no move arm: their ops lower to inserts, removes, whole-node and slot edits, reads, and the
+empty footprint. The hosts whose projections DO reach Core's reorder and move arms pass skeleton ops through
+`Ops.footprint` beside their own `contentEdit`-shaped payload edits — exactly the pair the widening frees — and
+none has recorded a multi-lane ledger: the one such ledger committed is a single-lane conformance fixture of
+three ops.
+
+**D161.5 — the demand, which is not the measurement, and the reopening.** fuaran#2293's experiment, over one UI
+consumer's generated triads (18,597), found 1,629 of 3,791 footprint-refused-but-commuting pairs to be a reorder
+against a restyle or kind edit of a named child, and 354 of 1,820 a move against an edit of the moved node once
+that consumer's projection was slot-precise. Those are a generator's pairs, not recorded folds, and are kept
+here as the reason to reopen rather than as the count. **Reopen on the first recorded multi-lane ledger of a
+host whose projection reaches the reorder or move arm beside a `contentEdit`- or `slotEdit`-shaped op** — the
+UI op-stream DAG, once fuaran#2293 puts it on Core, is the expected one. Re-measuring is the census above over
+that ledger's lanes, with its falsifier.
+
+**D161.6 — the shape, for whoever reopens it (an analysis of the clauses as written, not a proof).** The two
+shapes do not free the same pairs:
+
+- **A slot.** Replacing the read of `x` with a slot read `(x, "presence")` frees a SLOT edit of `x` (no slot
+  clashes, and `slotsAgainstNode` sees no whole-node access of `x`), but not a `contentEdit x`: a slot read of
+  `x` meets a whole-node content write of `x` by the existing `LeftSlotsRightNode` clause. That is also why it
+  is sound with no new obligation: a domain that lowers a DESTROY through `contentEdit` (one measured host's
+  bundle retirement does) still meets the reorder. No record change.
+- **A set.** A new presence set can free a `contentEdit` partner too, but only if every op that can make a
+  node absent writes its presence. A projection that lowers a destroy through `contentEdit` would then make a
+  freed reorder unsound for it, so the widening would bind every projection, not Core alone, and the record
+  change is mirrored by hand in `proofs/DagFold.fst` and a second repository's proof tree (D47).
+
+The consumer evidence above was measured slot-precise for the move, which is the slot shape's case. So a
+reopening should start from the slot, and take the set only on a recorded count of `contentEdit` partners.
+
+**Rejected: build it now, because the UI DAG is ruled onto Core.** The ruling makes the demand likely; it does
+not make it recorded. Building to a generator's count before one recorded ledger exists ships a lemma, an
+oracle differential, a law-family draw and a verdict change for every plane that reads `independent`, to free a
+set measured at zero. The slot shape needs no record change, so waiting costs the reopening little.
+
+**Not added: an assertion to catch the world changing back.** The change that reopens this is a new host's
+ledger, which nothing in this repository reads, so no test here can see it; the trigger is stated in D161.5
+instead.
+
 ## 2026-10-15 — D160: every checked op-stream writer checks every member a line carries, the strings it quotes itself as well as the span it embeds, so no checked writer returns text the strict reader refuses; closes D158.6
 
 **Phase 473, the model first: `proofs/OpStreamLoad.fst`'s writer moved, re-verified with the pinned prover and
