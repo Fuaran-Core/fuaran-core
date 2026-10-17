@@ -49,8 +49,8 @@ variable that names a clone kept elsewhere.
 
 Several files are projections the suite holds to what the code renders today: the public-surface
 baselines (`api/`), the wire baselines (`api/wire/`), the generated F# modules under
-`tests/Fuaran.Core.Tests/`, the README's version stamps, the proofs README's tables and the
-doc-comment ratchet. Each is rewritten by an environment switch, and all of them are read by ONE rule
+`tests/Fuaran.Core.Tests/`, the README's version stamps, the proofs README's tables, the
+doc-comment ratchet and the index at the head of `DECISIONS.md`. Each is rewritten by an environment switch, and all of them are read by ONE rule
 (`tests/Fuaran.Core.Tests/Approval.fs`):
 
 | Switch | Governs | A filter value is |
@@ -59,7 +59,7 @@ doc-comment ratchet. Each is rewritten by an environment switch, and all of them
 | `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
 | `CORE_APPROVE_LADDER` | the two generated blocks of `proofs/README.md` | `ladder` or `operations` |
 | `CORE_APPROVE_README` | the README's version stamps | `README` |
-| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json` | `doc-coverage` |
+| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json` and the index of `DECISIONS.md` | `doc-coverage` or `DECISIONS` |
 | `FUARAN_REGEN` | the generated F# modules and `snapshots/spike.json` | the file name without its extension |
 
 Absent, empty, `0` or `false` is no. `1` or `true` rewrites every file the switch governs. Any other
@@ -72,6 +72,28 @@ $env:CORE_APPROVE_WIRE = 'Fuaran.Core.Query'
 dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter 'wire'
 Remove-Item Env:CORE_APPROVE_WIRE
 ```
+
+## Recording a decision
+
+A ruling that changes what the code promises, or declines a change someone will propose again, is an
+entry in [`DECISIONS.md`](DECISIONS.md). An entry is a heading, `## <yyyy-mm-dd> — D<n>: <title>`,
+placed newest first; directly under it, after one blank line, a status line, which is mandatory:
+`**Status:** Live` for a new ruling. The clauses (`Live`, `Amended-by D<n>`, `Superseded-by D<n>`,
+`Moved-to-compute`, `Never-minted`) and how they combine are stated at the head of the file. The number
+is the next one after the newest; a number that was skipped is recorded as `Never-minted`, never
+reused. An entry that changes an earlier one also changes that entry's status line, in the same commit:
+the earlier ruling reads `Amended-by D<n>` or `Superseded-by D<n>` at its own heading, so nobody reads
+it as current. Then regenerate the index and stage the file:
+
+```powershell
+$env:CORE_APPROVE_DOCS = 'DECISIONS'
+dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter 'Decisions'
+Remove-Item Env:CORE_APPROVE_DOCS
+```
+
+`DecisionsTests` fails by name on a heading with no status line, a clause outside the grammar, a status
+naming an entry that is not newer, a missing or repeated number, and an index that is not the render
+of the headings.
 
 ## Coding standards
 

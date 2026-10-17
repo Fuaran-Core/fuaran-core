@@ -332,6 +332,11 @@
          reads no other test module, so the position is free; appended at the end of the
          list (append-only registration). -->
     <Compile Include="PackageRosterTests.fs" />
+    <!-- Phase 501 - DECISIONS.md held to its own headings, on the roster rule above: every entry
+         carries a status line, the ordinals are whole, and the generated index at the head equals
+         the render of the headings (CORE_APPROVE_DOCS=DECISIONS rewrites it). Reads Approval.fs and
+         Snapshots.fs for the repository root, so it follows both; registered beside the roster. -->
+    <Compile Include="DecisionsTests.fs" />
     <!-- Phase 183 — the committed public-surface baseline per package: the renderer over IL
          metadata, the baseline diff, and the classifier that tells a record/union/interface
          widening from ordinary additive growth. Reads PackageRosterTests.fs above for the ONE

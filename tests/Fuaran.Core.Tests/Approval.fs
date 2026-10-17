@@ -86,6 +86,10 @@ module Files =
     [<Literal>]
     let DocCoverage = "doc-coverage"
 
+    /// The generated index block at the head of `DECISIONS.md` (DecisionsTests).
+    [<Literal>]
+    let Decisions = "DECISIONS"
+
 /// The stems a switch governs when they are fixed in source. The API and wire switches are NOT
 /// here: their stems are the packable roster, known only at run time, so their sites check the
 /// filter with `requireMatched` against the roster they iterate.
@@ -101,7 +105,7 @@ let fixedStems (name: string) : string list option =
               Regenerated.Doc ]
     | Ladder -> Some [ Ladders.Summary; Ladders.Operations ]
     | Readme -> Some [ Files.Readme ]
-    | Docs -> Some [ Files.DocCoverage ]
+    | Docs -> Some [ Files.DocCoverage; Files.Decisions ]
     | _ -> None
 
 /// The pure reading of a switch's value; the one place the truthiness rule lives.
