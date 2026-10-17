@@ -85,6 +85,10 @@ let private expected: (string * string) list =
       "confRng/seed-1", "166402301-879050087-1794327795-1338740069-1921087622-1872842638-205863014-1114920338"
       "confRng/seed-neg-1", "2015858743-1309524423-815153517-1875012400-1982543394-218150117-1746742363-2136549504"
       "confRng/seed-1488", "1779094209-974108648-1386259377-469941146-625613426-646666080-1082870579-340445045"
+      // Phase 495: `Corpus.genJVal`'s sample, distinct renderings and their digest. Measured identical
+      // under node; the uint32 LCG it replaced drew 6 distinct values there where .NET drew 1579.
+      "fuzz/sample/seed-1", "172:31b11aab59e16a2746681a9c887709cab0d6c972412437b928e522db2ebad974"
+      "fuzz/sample/seed-299", "155:53ec159cc1b5acf0274a79d0057e39f341f25c1bc82403c3da331a69f29560e0"
       // Phase 299: Min is -1 (NaN is not below it), Max is NaN (NaN sorts last), Median of the five is
       // the third of -1, -0, 3, NaN, NaN, and the four distinct values are 3, NaN, -1 and 0.
       "aggregate/nan-order", "-1/\"NaN\"/3/4"

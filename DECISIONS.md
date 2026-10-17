@@ -421,7 +421,8 @@ repeated key.
 **D157.5 — the encoder side.** `JObj` admits a repeated key, so `Json.render` and `Canon.render` could write
 text the parser now refuses, and the admission test the UI wire's 20.2 states ("no conformant encoder can
 reach it") did not hold of Core itself. `Json.firstRepeatedMember` finds the first object carrying a name
-twice, in document order, and both guarded renderers (`Json.tryRender`, `Canon.tryRender`) refuse on it after
+twice, in document order, and the three guarded renderers (`Json.tryRender`, `Canon.tryRender`, and
+`Canonical.tryWrite` since Phase 495, which this ruling first missed) refuse on it after
 the non-finite float and the ill-formed string. The total renderers stay total: a repeated key does not make
 a digest platform-dependent, so D84's rule (refuse where a digest depends on it) does not apply, and the chain
 pre-images are unchanged. The fuzz law (`Corpus.fuzzRoundTrip`) keeps drawing keys with replacement and

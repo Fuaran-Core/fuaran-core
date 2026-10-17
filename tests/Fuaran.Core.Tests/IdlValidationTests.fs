@@ -673,4 +673,54 @@ let samplerTotalityTests =
 
                   Expect.contains editNotes true "an optional op field is drawn present"
                   Expect.contains editNotes false "an optional op field is drawn absent"
+          }
+
+          // Phase 495 — `encode` wrote a map carrying one key twice as an object carrying one member
+          // twice, which `decode` refuses: `decode (encode v)` was undefined on a value `encode`
+          // accepted. Refused now, by name and at the path, as the guarded renderers refuse it.
+          test "encode refuses a repeated key by name at its path, and decode reads every value encode writes" {
+              let idl =
+                  small
+                  |> withKinds [ kind "Bag" [ f "m" (TMap TInt) Required; f "x" TJson Optional ] ]
+
+              Expect.isEmpty (Declare.errors idl) "the vocabulary is well-formed"
+
+              let bag (m: (string * IdlValue) list) (x: IdlValue) =
+                  VNode("b1", "Bag", [ "m", VMap m; "x", x ])
+
+              let refused (what: string) (v: IdlValue) (path: string) (key: string) =
+                  match Encode.encode idl v with
+                  | Error e ->
+                      Expect.stringContains e "repeated" (what + ": the class")
+                      Expect.stringContains e ("\"" + key + "\"") (what + ": the key, by name")
+                      Expect.stringContains e path (what + ": the path")
+                  | Ok w -> failtestf "%s: encoded as %s, which decode refuses as %A" what w (Decode.decode idl w)
+
+              refused "a map key twice" (bag [ "k", VInt 1; "k", VInt 2 ] VAbsent) "$[\"kind\"][\"m\"]" "k"
+              // not adjacent as authored: the sort brings them together, the scan finds them anyway
+              refused
+                  "a map key twice, apart"
+                  (bag [ "k", VInt 1; "j", VInt 3; "k", VInt 1 ] VAbsent)
+                  "$[\"kind\"][\"m\"]"
+                  "k"
+
+              refused
+                  "a verbatim json member twice"
+                  (bag [] (VJson(JObj [ "q", JInt 1; "q", JInt 1 ])))
+                  "$[\"kind\"][\"x\"]"
+                  "q"
+
+              // The law, over values `encode` accepts: every accepted value's wire decodes, and
+              // re-encodes to the same bytes. The refused values above are its go-red side.
+              for v in
+                  [ bag [ "k", VInt 1; "j", VInt 2 ] VAbsent
+                    bag [] (VJson(JObj [ "q", JInt 1; "r", JArr [ JObj [ "q", JInt 2 ] ] ]))
+                    bag [ "k", VInt 1; "j", VInt 2; "k", VInt 1 ] VAbsent
+                    bag [] (VJson(JArr [ JObj [ "q", JInt 1; "q", JInt 2 ] ])) ] do
+                  match Encode.encode idl v with
+                  | Ok w ->
+                      match Decode.decode idl w |> Result.bind (Encode.encode idl) with
+                      | Ok w2 -> Expect.equal w2 w "decode >> encode is the identity"
+                      | Error e -> failtestf "encode wrote %s, which does not round-trip: %s" w e
+                  | Error e -> Expect.stringContains e "repeated" "the only refusal here is the repeated member"
           } ]

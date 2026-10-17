@@ -269,9 +269,13 @@ module Json =
     /// `\r` and `\t`, which have NO short form here. It is byte-for-byte the UI host's
     /// `CanonicalJson.appendRawString` and the TypeScript twin's escaper, so a hash pre-image that
     /// carries a string means one thing on every host. `Canon.render` escapes through this function
-    /// too; the two copies the standalone layers keep (`Actor.encode` in `Fuaran.Core.OpStream`,
-    /// `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — D2 forbids them a reference here) are held
-    /// value-identical to it by `StringEscapeVectors` in the conformance kit. The parser accepts
+    /// too; the one copy the standalone layers keep (`JsonString.quote` in `Fuaran.Core.OpStream`,
+    /// public as `OpStream.Jsonl.quote` — D2 forbids it a reference here; `Actor.encode` spells
+    /// through it, and `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` has spelled through it rather than
+    /// a copy of its own since Phase 388) is held value-identical to it by `StringEscapeVectors` in the
+    /// conformance kit. Beside that copy sits its legacy twin, `JsonString.quoteLegacy`: the `V1`
+    /// profile's spelling, which `escapeWith EncodingProfile.V1` writes on this side, the two held to
+    /// one table by `EncodingProfileVectors`. The parser accepts
     /// both the short and the `\u` spelling, so nothing changes on read.
     ///
     /// A string with nothing to escape is returned AS IT IS (Phase 365): the scan finds the first
@@ -505,8 +509,8 @@ module Json =
     /// AUTHORED order — as `(path, token)`: the path is `$` for the root, `[i]` for an array item and
     /// `["key"]` for a member (the key under `escape`, so the path is unambiguous for any key), and
     /// the token is `JVal.nonFiniteToken`'s. `None` where every float is finite. Public once
-    /// (Phase 299): it is the scan both guarded renderers (`Json.tryRender`, `Canon.tryRender`)
-    /// refuse on, which each used to carry as a private copy. Iterative since Phase 306.
+    /// (Phase 299): it is the scan the three guarded renderers (`Json.tryRender`, `Canon.tryRender`,
+    /// `Canonical.tryWrite`) refuse on, which each used to carry as a private copy. Iterative since Phase 306.
     let firstNonFinite (v: JVal) : (string * string) option =
         firstInDocumentOrder
             (fun _ -> None)
@@ -546,7 +550,7 @@ module Json =
     /// The FIRST string in `v` that is not well-formed UTF-16, in document order — a member's key
     /// before its value — as `(path, description)`; the description names the unit and its index
     /// and says whether the string is a member key. `None` where every string has code points.
-    /// Both guarded renderers refuse on it (Phase 306).
+    /// The three guarded renderers refuse on it (Phase 306).
     let firstIllFormedString (v: JVal) : (string * string) option =
         let describe (what: string) (s: string) : string option =
             firstIllFormedUnit s
@@ -567,7 +571,8 @@ module Json =
 
     /// The FIRST object in `v` that carries a member name twice, in document order, as
     /// `(path, description)`; the description names the member. `None` where every object's
-    /// names are distinct. Both guarded renderers refuse on it (Phase 462): `render` writes such
+    /// names are distinct. The three guarded renderers refuse on it (Phase 462; `Canonical.tryWrite`
+    /// since Phase 495): `render` writes such
     /// an object as it stands, and `parse` refuses the text (`DuplicateMember`), so a value with a
     /// repeated member is un-parseable wire from a guarded entry point, as an ill-formed string is.
     /// Iterative, for the reason the writer and the scan above are: a value of any depth is answered.

@@ -17,10 +17,22 @@
     <Compile Include="Decoder.fs" />
     <Compile Include="Decode.fs" />
     <Compile Include="Versioning.fs" />
+    <Compile Include="Xorshift32.fs" />
     <Compile Include="Corpus.fs" />
     <Compile Include="Canonical.fs" />
     <Compile Include="CodecDeclarationFault.fs" />
     <Compile Include="Codec.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 495: the xorshift32 kernel (`Xorshift32`) lives here, the lowest package that draws
+         from it — `Corpus.genJVal` here, the IDL sampler (`Fuaran.Core.Idl.Sample`) and the
+         conformance kit's `ConfRng` above — one body, read by the packages above this one rather
+         than copied into them (DECISIONS.md D125's shape). Each friend reads it only from
+         NoInlining functions (D129), because the F# optimiser would otherwise copy a body naming it
+         into a Release-built caller that cannot see it; CrossAssemblyInliningTests holds it, and
+         fails on a grant here that nothing reads. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Idl" />
+    <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

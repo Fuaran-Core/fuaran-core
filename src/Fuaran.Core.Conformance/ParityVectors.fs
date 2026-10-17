@@ -99,6 +99,23 @@ let private profileRoundTrip (s: string) : string =
     | Ok p -> Versioning.Profile.render p
     | Error _ -> "refused"
 
+/// The wire fuzz generator's sample (Phase 495): `count` values `Corpus.genJVal` draws from
+/// consecutive seeds starting at `seed`, nesting at most `maxDepth`, each rendered by `Json.render`,
+/// as `<distinct renderings>:<SHA-256 of the renderings joined by LF>` — ASCII whatever the sample
+/// holds. The one row that reads an internal rather than a public surface: `genJVal` is the sample
+/// `Corpus.fuzzRoundTrip` certifies over, and that function answers only a verdict, which a
+/// degenerate sample also passes. Before Phase 495 the generator was a uint32 LCG and node drew 6
+/// distinct values where .NET drew 1579 (seed 1, 2000 values, depth 6), every law green. Reads
+/// `Fuaran.Core.Wire`'s internals through its `InternalsVisibleTo`, so `NoInlining` (D129).
+[<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+let private fuzzSample (seed: int) (count: int) (maxDepth: int) : string =
+    let texts =
+        [ for i in 0 .. count - 1 -> Json.render (Corpus.genJVal (seed + i) maxDepth) ]
+
+    string (List.length (List.distinct texts))
+    + ":"
+    + Hash.sha256Hex (String.concat "\n" texts)
+
 /// The first eight draws of `ConfRng.next` from a seed, hyphen-joined. EIGHT rather than one
 /// because the first draw is the one a broken generator gets very nearly right: at seed 1488 the
 /// LCG that stood here until 0.20.0 drew `1547650046` on .NET and `1547650048` under Fable — a
@@ -635,6 +652,13 @@ let vectors: (string * string) list =
       "confRng/seed-1", drawsOf 1
       "confRng/seed-neg-1", drawsOf -1
       "confRng/seed-1488", drawsOf 1488
+
+      // ---- Corpus.genJVal — the wire fuzz law's sample (Phase 495) ----
+      // The same defect class one package lower: `Corpus.fuzzRoundTrip` drew from a 32-bit LCG and,
+      // under node, from a near-constant sample, while its verdict stayed green. It draws from the
+      // `Xorshift32` kernel now; these rows hold the sample itself on both pipelines.
+      "fuzz/sample/seed-1", fuzzSample 1 200 4
+      "fuzz/sample/seed-299", fuzzSample 299 200 6
 
       // ---- Column.aggregate — the NaN-aware order (Phase 299) ----
       "aggregate/nan-order", aggregateNanOrder

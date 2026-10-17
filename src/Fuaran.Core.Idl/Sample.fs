@@ -1,6 +1,7 @@
 namespace Fuaran.Core.Idl
 
 open Fuaran.Core
+open System.Runtime.CompilerServices
 
 /// Deterministic, adversarial SAMPLING over a vocabulary: draw `count` nodes from an
 /// [[Idl]] and a seed, reproducibly, on any host and any runtime.
@@ -89,9 +90,16 @@ module Sample =
     type private Rng = { mutable State: uint32 }
 
     /// `ConfRng.ofSeed`: the kernel's seed (`Xorshift32`, Phase 388 — the one body both read).
+    ///
+    /// The three functions here that name `Xorshift32` are `NoInlining` (DECISIONS.md D129): since
+    /// Phase 495 the kernel is internal to `Fuaran.Core.Wire`, read through its `InternalsVisibleTo`,
+    /// and a body naming it that the F# optimiser copied into a Release-built caller of this package
+    /// would fail there with `MethodAccessException`.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let private ofSeed (seed: int) : Rng = { State = Xorshift32.seeded seed }
 
     /// `ConfRng.next`: advance, and answer the top 31 bits of the new state.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let private next (r: Rng) : int =
         r.State <- Xorshift32.step r.State
         Xorshift32.value r.State
@@ -99,6 +107,7 @@ module Sample =
     /// `ConfRng.intBelow`: the kernel's high-bit rejection draw over this mutable position — the
     /// position is threaded as itself, so each draw advances it in place. `n <= 0` draws nothing
     /// (no caller passes one — [[pickAt]] refuses an empty list first).
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let private intBelow (r: Rng) (n: int) : int =
         Xorshift32.below (fun (r: Rng) -> next r, r) n r |> fst
 

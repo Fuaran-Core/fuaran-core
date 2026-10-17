@@ -595,9 +595,9 @@ columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse
 ### Public because a sibling Core package calls it (`0.19.0`)
 
 `Fuaran.Core.*` is nineteen packable assemblies. Between them it grants `InternalsVisibleTo` in
-exactly four declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
-`Fuaran.Core.ContentAddress`, and `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen` and to
-`Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (DECISIONS.md D129); the two
+exactly five declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
+`Fuaran.Core.ContentAddress`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to
+`Fuaran.Core.Idl` and `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the two
 further declarations, `Fuaran.Core.Idl.Cli` and `Fuaran.Core.Conformance` to the test project, grant
 nothing a consumer reaches.
 Everywhere else a function one Core package needs from another has to be public — `internal` cannot

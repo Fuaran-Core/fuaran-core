@@ -47,13 +47,13 @@ module ConfRng =
         }
 
     // The kernel — the step, the seed's warm-up, the top-31-bit draw and the high-bit rejection —
-    // is `Xorshift32`'s (Phase 388; `Fuaran.Core.Idl`, through its `InternalsVisibleTo`), the one
-    // body the IDL sampler draws through too. Its header says why it is shifts and XOR and never a
+    // is `Xorshift32`'s (Phase 388; in `Fuaran.Core.Wire` since Phase 495, read through its
+    // `InternalsVisibleTo`), the one body the IDL sampler and the wire fuzz generator draw through too. Its header says why it is shifts and XOR and never a
     // 32-bit multiply: until 0.20.0 this generator was an LCG on exactly that product, and under
     // Fable every draw after the first collapsed to zero. The cross-pipeline `confRng/*` vectors in
     // `ParityVectors` (this package) are what buy it, and they redden on a reverted multiply.
     // The three functions below that name `Xorshift32` are `NoInlining` (Phase 402, DECISIONS.md
-    // D129): the kernel is internal to `Fuaran.Core.Idl`, and a body naming it that the F# optimiser
+    // D129): the kernel is internal to `Fuaran.Core.Wire`, and a body naming it that the F# optimiser
     // copied into a Release-built caller failed there with `MethodAccessException`.
 
     /// Seed to initial state. Non-zero by construction (see `Xorshift32.step`), and warmed by three

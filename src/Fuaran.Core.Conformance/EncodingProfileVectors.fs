@@ -289,8 +289,9 @@ module EncodingProfileVectors =
           expect (a.Name + " / Actor.encode is V2") "Actor.encode" a.V2 (Actor.encode a.Actor) ]
 
     /// The checks no single vector owns: the two profile types name the same profiles; the DAG's
-    /// parents are sorted into a profiled id exactly as into an unprofiled one; and the capture
-    /// pre-image each profile hashes.
+    /// parents are sorted into a profiled id exactly as into an unprofiled one; the capture
+    /// pre-image each profile hashes; and guard parity — the canonical writer refuses, under every
+    /// profile, each value the other guarded renderers refuse (Phase 495).
     let private runShared () : Corpus.Outcome list =
         [ expect
               "profile names: Wire and OpStream spell the same profiles alike"
@@ -343,7 +344,27 @@ module EncodingProfileVectors =
 
               match OpStream.firstCaptureBreakEncoding op (OpStream.configFor op) reveal [ capture ] with
               | None -> pass name
-              | Some b -> fail name (sprintf "the capture did not recompute: %A" b) ]
+              | Some b -> fail name (sprintf "the capture did not recompute: %A" b)
+          // Phase 495 — guard parity. The three values no profile renders as text that parses back,
+          // one per refused class; the canonical writer refuses each under every profile, as the other
+          // two guarded renderers do. Not rows of the rendered table: that pins the renderings of
+          // values that parse, and these have none. The repeated member is the class `tryWrite` let
+          // through until Phase 495, so a store's id could be minted over text no reader accepts.
+          for p in EncodingProfile.all do
+              for label, value in
+                  [ "a repeated member", JObj [ "a", JInt 1; "a", JInt 2 ]
+                    "a non-finite float", JArr [ JFloat nan ]
+                    "an ill-formed string", JStr(string (char 0xD800)) ] do
+                  let name =
+                      "guard parity / "
+                      + EncodingProfile.name p
+                      + " / "
+                      + label
+                      + " is refused by every guarded writer"
+
+                  match Canonical.tryWrite p value, Json.tryRender value, Canon.tryRender value with
+                  | Error _, Error _, Error _ when not (Canonical.isCanonical p (Canonical.write p value)) -> pass name
+                  | w, j, c -> fail name (sprintf "Canonical.tryWrite %A; Json.tryRender %A; Canon.tryRender %A" w j c) ]
 
     /// Run the whole family.
     let run () : Corpus.Outcome list =
