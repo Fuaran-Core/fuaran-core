@@ -18,7 +18,7 @@
     <WarnOn>3390;$(WarnOn)</WarnOn>
     <!-- What each version changed, and the class it was cut as, is the release ledger:
          docs/releases/<version>.md, one file per slot, indexed by docs/releases/README.md. -->
-    <Version>0.38.1</Version>
+    <Version>0.39.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
