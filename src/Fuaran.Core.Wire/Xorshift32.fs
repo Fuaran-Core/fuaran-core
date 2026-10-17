@@ -1,14 +1,16 @@
 namespace Fuaran.Core
 
 /// The spine's one seed-replayable generator kernel (Phase 388): a uint32 xorshift32 and the draws
-/// built on it. The conformance kit's public `ConfRng` threads it immutably, and the IDL sampler
-/// (`Fuaran.Core.Idl.Sample`) threads it through a mutable position; both read THIS body, so the
-/// sampler draws `ConfRng`'s stream by construction rather than by a copy held equal by a test. It
-/// lives here, in the lower of the two packages, because `Fuaran.Core.Conformance` references this
-/// one; that package reads it through `InternalsVisibleTo` (DECISIONS.md D125). Internal: the
-/// surface is `ConfRng`'s. So every function there that names this module is `NoInlining` (D129): a
-/// body naming an internal member of THIS assembly, copied by the F# optimiser into a Release-built
-/// caller of `ConfRng`, fails there with `MethodAccessException`.
+/// built on it. The conformance kit's public `ConfRng` threads it immutably, the IDL sampler
+/// (`Fuaran.Core.Idl.Sample`) threads it through a mutable position, and the wire fuzz generator
+/// (`Corpus.genJVal`, since Phase 495) through a cell; all three read THIS body, so they draw one
+/// stream by construction rather than by copies held equal by a test. It lives here, in
+/// `Fuaran.Core.Wire`, the lowest package that draws from it (it moved down from `Fuaran.Core.Idl`
+/// in Phase 495, when the fuzz generator here became its third reader); the two packages above read
+/// it through `InternalsVisibleTo` (DECISIONS.md D125's shape). Internal: the surface is
+/// `ConfRng`'s. So every function in another package that names this module is `NoInlining` (D129):
+/// a body naming an internal member of THIS assembly, copied by the F# optimiser into a
+/// Release-built caller, fails there with `MethodAccessException`.
 ///
 /// **Shifts and XOR, never a 32-bit multiply — and that is the whole point of this kernel.** A
 /// `uint32` product is the one arithmetic shape Fable cannot carry: it is formed on a double, so

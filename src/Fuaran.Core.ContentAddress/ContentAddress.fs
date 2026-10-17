@@ -26,8 +26,9 @@ module ContentAddress =
         Digest.ofSha256Bytes (Hash.utf8Bytes text)
 
     /// The digest of `v`'s canonical text under `profile`: `Canonical.tryWrite profile v`, hashed.
-    /// Refused exactly where `tryWrite` refuses (a non-finite float or an ill-formed string, named
-    /// with its path), because there the text would not mean `v` and two values would share it.
+    /// Refused exactly where `tryWrite` refuses (a non-finite float, an ill-formed string or a
+    /// repeated member name, named with its path), because there the text would not mean `v`, two
+    /// values would share it, or no reader would accept it (the repeated member, since Phase 495).
     let ofValue (profile: EncodingProfile) (v: JVal) : Result<Digest, string> =
         Canonical.tryWrite profile v |> Result.map mint
 

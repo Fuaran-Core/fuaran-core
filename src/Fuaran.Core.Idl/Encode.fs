@@ -117,7 +117,8 @@ module Encode =
 
             // Phase 111 — a map has no DECLARED order, so its entries are
             // Ordinal-sorted at encode: a no-op under `Sorted` rendering, and
-            // what keeps `Declared`-order canonical form deterministic.
+            // what keeps `Declared`-order canonical form deterministic. A key
+            // the entries carry twice is refused by [[render]] (Phase 495).
             go
                 []
                 (entries
@@ -274,6 +275,15 @@ module Encode =
     /// parser refuses them on read. Non-finite floats are NOT refused here: at a `float`
     /// slot the quoted token is WIRE_FORMAT §7's spelling, which the slot's type reads back,
     /// and inside a verbatim value [[verbatim]] has already refused it with its path.
+    ///
+    /// Phase 495 — a repeated member name, refused after the ill-formed string as
+    /// `Canon.tryRender` orders them, named and at its path. A `map` value is an entry list,
+    /// so it can carry one key twice, and the sort above keeps both; a verbatim `json` value
+    /// can carry one too. Written as it stands, either is text `Decode.decode` refuses (the
+    /// parser's `DuplicateMember`, surfacing as `InvalidJson` at the root — the decode-rejects
+    /// corpus's `repeated-member` row, which `DecodeVectorsIdl` projects onto this interpreter),
+    /// so `encode` answered `Ok` for wire its own decoder will not read. Refusing here is what
+    /// makes `decode (encode v)` defined on every value `encode` accepts.
     let private render (idl: Idl) (j: JVal) : Result<string, string> =
         match Json.firstIllFormedString j with
         | Some(path, what) ->
@@ -284,9 +294,13 @@ module Encode =
                 + path
             )
         | None ->
-            match idl.Wire.KeyOrder with
-            | KeyOrder.Sorted -> Ok(Canon.render j)
-            | KeyOrder.Declared -> Ok(Canon.renderOrdered j)
+            match Json.firstRepeatedMember j with
+            | Some(path, what) ->
+                Error("repeated member has no canonical rendering of its own: " + what + " at " + path)
+            | None ->
+                match idl.Wire.KeyOrder with
+                | KeyOrder.Sorted -> Ok(Canon.render j)
+                | KeyOrder.Declared -> Ok(Canon.renderOrdered j)
 
     /// Encode an authored node to canonical wire JSON — byte-identical to the UI host.
     let encode (idl: Idl) (v: IdlValue) : Result<string, string> =

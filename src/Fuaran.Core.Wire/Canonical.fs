@@ -26,10 +26,14 @@ module Canonical =
     /// as text that does not mean `v`. `tryWrite` is the form whose output may be hashed.
     let write (profile: EncodingProfile) (v: JVal) : string = Json.renderWith profile v
 
-    /// `write`, GUARDED: the canonical text of `v` under `profile`, or the first non-finite float
-    /// or ill-formed string in document order, named with its path. Over a value carrying neither
-    /// it is exactly `Ok (write profile v)`. The refusal is the reason two values would otherwise
-    /// share bytes, so a consumer that digests canonical text digests this function's `Ok`.
+    /// `write`, GUARDED: the canonical text of `v` under `profile`, or the first non-finite float,
+    /// ill-formed string or repeated member name in document order, named with its path — the three
+    /// classes `Json.tryRender` and `Canon.tryRender` refuse, in their order. Over a value carrying
+    /// none it is exactly `Ok (write profile v)`. The refusal is the reason two values would otherwise
+    /// share bytes, or the text would not parse back, so a consumer that digests canonical text
+    /// digests this function's `Ok`. Since Phase 495 the third class is refused here too: `parse`
+    /// refuses a repeated member (`DuplicateMember`), so before it `ContentAddress.ofValue` minted a
+    /// digest of text no reader accepts, and `isCanonical` answered `false` for this function's `Ok`.
     let tryWrite (profile: EncodingProfile) (v: JVal) : Result<string, string> =
         match Json.firstNonFinite v with
         | Some(path, tok) -> Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
@@ -42,7 +46,11 @@ module Canonical =
                     + " at "
                     + path
                 )
-            | None -> Ok(write profile v)
+            | None ->
+                match Json.firstRepeatedMember v with
+                | Some(path, what) ->
+                    Error("repeated member has no canonical rendering of its own: " + what + " at " + path)
+                | None -> Ok(write profile v)
 
     /// Read canonical text — or any JSON text — as a value, the refusal typed as a `DecodeError` at
     /// the root. It accepts BOTH escaping spellings of a control character (`\n` and `\u000a`), so
@@ -52,7 +60,8 @@ module Canonical =
 
     /// `true` exactly when `text` is the canonical text, under `profile`, of the value it reads
     /// as: it parses, the value has a guarded rendering, and that rendering is `text` byte for
-    /// byte. False for whitespace, a `-0` (it reads as the integer `0`, whose text is `0`), and any
+    /// byte. It agrees with `tryWrite` on every value: `isCanonical profile t` holds for each
+    /// `Ok t` that `tryWrite profile` answers. False for whitespace, a `-0` (it reads as the integer `0`, whose text is `0`), and any
     /// spelling of a control character `profile` does not write. A store whose texts are all
     /// canonical under its profile has ids that recompute from the values alone.
     let isCanonical (profile: EncodingProfile) (text: string) : bool =

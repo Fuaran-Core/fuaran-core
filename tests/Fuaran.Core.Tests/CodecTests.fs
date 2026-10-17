@@ -164,6 +164,43 @@ let tests =
                         | Error e -> Expect.stringContains e "ill-formed" "the class"
                         | Ok t -> failtestf "a lone surrogate rendered as %s" t
 
+                // Phase 495 — the third class. `tryWrite` refused two of the three the other guarded
+                // renderers refuse, so `ContentAddress.ofValue` minted a digest of text `parse` refuses
+                // and `isCanonical` answered false for `tryWrite`'s own output.
+                testCase "a repeated member is refused by all three guarded renderers and by ofValue, at its path"
+                <| fun () ->
+                    let repeated = JObj [ "a", JInt 1; "a", JInt 2 ]
+                    let nested = JArr [ JObj [ "k", JObj [ "a", JInt 1; "a", JInt 2 ] ] ]
+
+                    let refused (what: string) (r: Result<'T, string>) (path: string) =
+                        match r with
+                        | Error e ->
+                            Expect.stringContains e "repeated" (what + ": the class")
+                            Expect.stringContains e "\"a\"" (what + ": the member, by name")
+                            Expect.stringContains e path (what + ": the path")
+                        | Ok t -> failtestf "%s accepted a repeated member: %A" what t
+
+                    for v, path in [ repeated, "$"; nested, "$[0][\"k\"]" ] do
+                        refused "Json.tryRender" (Json.tryRender v) path
+                        refused "Canon.tryRender" (Canon.tryRender v) path
+
+                        for p in EncodingProfile.all do
+                            let name = EncodingProfile.name p
+                            refused ("Canonical.tryWrite " + name) (Canonical.tryWrite p v) path
+                            refused ("ContentAddress.ofValue " + name) (ContentAddress.ofValue p v) path
+                            // the unguarded writer still renders it, and that text is not canonical
+                            Expect.isError (Json.parse (Canonical.write p v)) (name + ": parse refuses the text")
+                            Expect.isFalse (Canonical.isCanonical p (Canonical.write p v)) (name + ": not canonical")
+
+                    // the positive control: the same value with distinct names is written, digested and
+                    // read back as canonical under every profile
+                    let distinct = JObj [ "a", JInt 1; "b", JInt 2 ]
+
+                    for p in EncodingProfile.all do
+                        match Canonical.tryWrite p distinct, ContentAddress.ofValue p distinct with
+                        | Ok t, Ok _ -> Expect.isTrue (Canonical.isCanonical p t) (EncodingProfile.name p)
+                        | w, d -> failtestf "a distinct-named object was refused: %A / %A" w d
+
                 testCase "read accepts both escaping spellings as one value"
                 <| fun () ->
                     Expect.equal (Canonical.read "\"a\\nb\"") (Canonical.read "\"a\\u000ab\"") "one value"

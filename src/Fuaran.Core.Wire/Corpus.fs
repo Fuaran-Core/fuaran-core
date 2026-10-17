@@ -107,10 +107,18 @@ module Corpus =
     // ---- generative round-trip fuzzing (Phase 18) ----
     // The fixed corpus runs hand-written fixtures; this generates a wide random sample of valid
     // `JVal` and asserts the parser and renderer stay mutually consistent — exactly the depth /
-    // escaping / number-format coverage the fixtures cannot enumerate by hand. Self-contained: a
-    // tiny uint32 LCG (the same arithmetic class as Conformance's `ConfRng`, inlined because
-    // `Fuaran.Core.Wire` takes no dependency on `Fuaran.Core.Conformance`), seed-replayable so a
-    // counterexample reproduces. Fable-clean.
+    // escaping / number-format coverage the fixtures cannot enumerate by hand. Seed-replayable so a
+    // counterexample reproduces, and drawn from the spine's one kernel, `Xorshift32` (beside this
+    // file since Phase 495), so the sample is the same on .NET and under Fable.
+    //
+    // Until Phase 495 it drew from an inlined uint32 LCG (`st * 1664525u + 1013904223u`, seeded by
+    // `uint32 seed * 2654435761u`) — the arithmetic class `Xorshift32`'s header records as broken
+    // under Fable. Measured before the move, with that generator copied verbatim, rendered by
+    // `Json.render` and printed by one program on both pipelines: at seed 1, 2000 values, depth 6,
+    // .NET drew 1579 distinct values and node drew 6 (every value `true`, a short string, or an
+    // empty container); at seed 299 / 3000 / depth 4, 2350 against 5; at seed 42 / 500 / depth 5,
+    // 402 against 5. So the public law read green under node over a near-constant sample. The
+    // `fuzz/*` rows in `ParityVectors` now hold the generator's sample on both pipelines.
 
     /// The fuzz alphabet, as ATOMS a generated string is a sequence of (Phase 299): ordinary
     /// characters, the two escaped structural characters, EVERY control character U+0000–U+001F
@@ -145,15 +153,17 @@ module Corpus =
     /// back (`Json.firstIllFormedString`, the scan the guarded renderers refuse on).
     let private allStringsWellFormed (v: JVal) : bool = (Json.firstIllFormedString v).IsNone
 
-    /// Generate one random valid `JVal` from `seed`, nesting no deeper than `maxDepth`.
-    let private genJVal (seed: int) (maxDepth: int) : JVal =
-        let mutable st = (uint32 seed * 2654435761u) + 1u
+    /// Generate one random valid `JVal` from `seed`, nesting no deeper than `maxDepth`. Every choice
+    /// is `Xorshift32.below` over one advancing state, so a seed names one sample on every pipeline.
+    /// Internal, not private: the conformance kit's `fuzz/*` parity rows read the sample itself.
+    let internal genJVal (seed: int) (maxDepth: int) : JVal =
+        let state = ref (Xorshift32.seeded seed)
 
-        let next () =
-            st <- (st * 1664525u) + 1013904223u
-            int (st >>> 1)
+        let draw () =
+            state.Value <- Xorshift32.step state.Value
+            Xorshift32.value state.Value, ()
 
-        let pick (n: int) = next () % n
+        let pick (n: int) = Xorshift32.below draw n () |> fst
 
         let randStr () =
             let len = pick 6

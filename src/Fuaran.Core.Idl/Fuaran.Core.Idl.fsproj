@@ -31,7 +31,6 @@
     <Compile Include="Decode.fs" />
     <Compile Include="Declare.fs" />
     <Compile Include="Sanitize.fs" />
-    <Compile Include="Xorshift32.fs" />
     <Compile Include="Sample.fs" />
     <Compile Include="Artifact.fs" />
     <!-- Phase 702 — the vocabulary-change PROPOSAL document: its reader, its
@@ -46,14 +45,14 @@
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Phase 388: the declaration lookups (`IdlLookup`) are the code generator's too, and the
-         xorshift32 kernel (`Xorshift32`) is the conformance kit's `ConfRng` too — one body each,
-         read by the packages above this one rather than copied into them. Phase 402: each friend
-         reads them only from NoInlining functions (DECISIONS.md D129), because the F# optimiser
-         would otherwise copy a body naming them into a Release-built caller that cannot see them;
-         CrossAssemblyInliningTests holds it, and fails on a grant here that nothing reads. -->
+    <!-- Phase 388: the declaration lookups (`IdlLookup`) are the code generator's too — one body,
+         read by the package above this one rather than copied into it. (The xorshift32 kernel that
+         also lived here moved down to Fuaran.Core.Wire in Phase 495, and the conformance kit reads
+         it there.) Phase 402: the friend reads them only from NoInlining functions (DECISIONS.md
+         D129), because the F# optimiser would otherwise copy a body naming them into a
+         Release-built caller that cannot see them; CrossAssemblyInliningTests holds it, and fails on
+         a grant here that nothing reads. -->
     <InternalsVisibleTo Include="Fuaran.Core.Idl.Codegen" />
-    <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
