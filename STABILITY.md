@@ -275,7 +275,7 @@ These are rules the code already follows; written here so the next type lands in
 without a reader opening the code. A new public type or function that cannot be placed by them is a
 reason to amend this section in the same commit, not to invent a further family.
 
-**The failure families, by suffix.** Every typed failure in `Fuaran.Core.*` is one of seven, and the
+**The failure families, by suffix.** Every typed failure in `Fuaran.Core.*` is one of eight, and the
 suffix says which question it answers:
 
 - **`…Rejection`** — the algebra or the domain refuses a well-formed request against the state it
@@ -296,8 +296,8 @@ suffix says which question it answers:
   `SchemaError`, `RegistrationError`, …).
 - **`…Failure`** — the outcome of a composite flow, whose cases wrap the other families
   (`GatedApplyFailure` is a denial or a rejection; `ProposeFailure`, `ApprovalFailure`).
-- **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would
-  otherwise have run.
+- **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would otherwise have run.
+- **`…Refusal`** — a parser refused the text it was handed, naming the token and its position (`UnitRefusal`; DECISIONS.md D136).
 - **`Defect`** (and `…Defect`) — a finding reported in a list beside an answer, never a refusal: the
   validator's `Defect`, `VerifyDefect`, `ObserverDefect`, `ReferenceDefect`.
 
