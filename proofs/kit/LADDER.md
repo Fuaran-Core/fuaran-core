@@ -20,7 +20,9 @@ Two kinds of reader, deliberately different.
   page; it may never be looser.
 
 Because the reader is tolerant, a field added here is additive: a ladder that does not carry it
-reads exactly as before.
+reads exactly as before. That is also why `claim` stays required beside `statement` and
+`boundary`: a registry written before the split reads `claim`, so a row carries the join until every
+registry reads the two fields it is made of.
 
 ## The document
 
@@ -47,20 +49,26 @@ reads exactly as before.
 |---|---|---|
 | `id` | required | A slug, unique within the file. Stable: a registry names a finding by it. |
 | `level` | required | `proved` \| `tested` \| `assumed` \| `policy`. A CLOSED set, refused when unrecognised — every plausible default is a level, so a typo would silently assert something. |
-| `claim` | required | What is claimed, stated so a reader can tell what it does NOT cover. |
+| `statement` | required | What is claimed, in the present tense. Where a rendered statement (a formula, a typeset page) is wanted, it is generated from this field. |
+| `boundary` | required | What the claim does NOT cover: every hypothesis, parameter, premise, sampling limit and refutation a reader must not read past. The load-bearing half of a row, never empty. |
+| `claim` | required | `statement` and `boundary` joined by one space, exactly. Carried because a registry reads `claim`; the two fields are its source, and a host family holds the join. |
 | `evidence` | required | An object whose shape the level decides (below). Every level carries one. |
-| `phase` | optional | The change that established the row. Optional on purpose: a repository written to a public standard may not cite a planning surface outside itself. |
+| `phase` | optional | The change that established the row. Optional on purpose: a repository written to a public standard may not cite a planning surface outside itself. Where it is present it is the row's ONE citation: how the row came to be is that change's record, never prose in `statement` or `boundary`. |
 | `repo` | optional | The workspace-relative repository the evidence lives in, when it is not this one — a row may legitimately rest on a theorem proved in a repository it consumes. |
 | `class` | `assumed` only | `domain-obligation` \| `model-bridge` \| `premise` (closed; see `../README.md`, "The Core-to-domain proof contract"). |
 | `dischargedBy` | `assumed` only | On a `domain-obligation`: the conformance law whose green run discharges it (`Conformance.<law>`). |
 | `closes` | `assumed` only | What would retire the assumption: a change reference, `permanent`, or `unscheduled`. |
 
-Any other field (`mitigation`, `reason`, `note`, …) is commentary: allowed, never read.
+Any other field (`mitigation`, `reason`, `note`, …) is commentary: allowed, and never read by a
+registry. A repository's own host family may read more of its rows than this page names — it may
+be stricter than this page, never looser.
 
 ## Evidence, by level
 
-Every path is repository-relative (resolved against `repo` when a row carries one). Every NAME is
-matched as a whole identifier, not a substring — `run_total` is not found in `run_total_list`.
+Every path is repository-relative (resolved against `repo` when a row carries one — a registry
+resolves it; a host family that holds rows to its own tree only may refuse a row carrying `repo`).
+Every NAME is matched as a whole identifier, not a substring — `run_total` is not found in
+`run_total_list`. "Must exist" is checked by the host family, not by a registry.
 
 ### `proved` — machine-checked, no admits
 
@@ -69,7 +77,7 @@ matched as a whole identifier, not a substring — `run_total` is not found in `
 | `theorem` | required | The ONE declaration the claim is — a top-level `val` / `let` / `let rec` in `model`, or, for a claim proved by a type system, the type whose construction carries it. |
 | `model` | required | The file that declares it (`proofs/<Model>.fst`, or the source file for a type-system claim). |
 | `prover` | optional | The pin that makes re-checking reproducible (`proofs/fstar-pin.json`; `global.json` for the F# compiler). |
-| `supporting` | optional | Further declarations in the same `model` the claim rests on and a reader should be able to find — each checked like `theorem`. |
+| `supporting` | optional | Further declarations in the same `model` the claim rests on and a reader should be able to find — each held to the model like `theorem`. |
 
 **One row per claim, not per lemma.** `theorem` is the headline; a lemma that only serves it goes in
 `supporting`; a lemma a reader would cite on its own is a claim and gets its own row.
@@ -78,10 +86,10 @@ matched as a whole identifier, not a substring — `run_total` is not found in `
 
 | Field | | Meaning |
 |---|---|---|
-| `family` | required | The test family as it appears in the repository's test sources — or, for a check a script performs rather than a test (an extraction byte-diff), the repository-relative path of that script. A value containing `/` is a path. |
-| `cases` | optional | The case names the family runs for this claim. Each must exist; a ladder family may hold the list to what a run actually reported. |
-| `host` | optional | The test source file the family lives in. When given, `family` and `cases` are looked for there rather than across the whole test tree. |
-| `model` | optional | The model the differential is about, when the family compares one against production. |
+| `family` | required | Which suite the cases are in, in one of three CLOSED forms: `Proofs.Oracle` (the differential host the proof leg runs), `Conformance.<law>` (a conformance law family the repository's kit exports; its suite carries that label), or `Suite:<Module>.<list>` (any other test list, named by its module and its value — never by its label, which is prose and moves with its wording). Anything else is refused. |
+| `cases` | optional | The case names the family runs for this claim, as the family spells them. Each must be a case OF THAT FAMILY, not merely somewhere in the test tree; a host family may require at least one. |
+| `host` | optional | The test source file the family lives in, as a pointer for a reader. Must exist. |
+| `model` | optional | The model the differential is about, when the family compares one against production. A model named here carries at least one `proved` row. |
 | `artifact` | optional | A file the check compares (a committed extraction). Must exist. |
 | `seeds` | optional | The seed(s) the run is replayable from. Carried, never checked. |
 
@@ -91,7 +99,8 @@ matched as a whole identifier, not a substring — `run_total` is not found in `
 |---|---|---|
 | `assumption` | required | The assumption in one sentence, in terms a reader could go and check it in. |
 
-The row's `claim` says why the ladder needs it; `evidence.assumption` is the premise itself.
+The row's `statement` says why the ladder needs it and its `boundary` what would discharge or close
+it; `evidence.assumption` is the premise itself.
 
 ### `policy` — stated, not proved
 
@@ -110,7 +119,8 @@ Some ladders were first written to an earlier spelling. The mapping is mechanica
 
 | Earlier | Here |
 |---|---|
-| `statement` | `claim` |
+| `statement` alone, the boundary in its prose | `statement` and `boundary`, split; `claim` their join |
+| `claim` alone | the same split; the row's history, if its prose tells one, cut to `phase` |
 | proved `module` | `model` |
 | proved `lemmas: [a, b, c]` | `theorem: a`, `supporting: [b, c]` — or a row each, where each is a claim |
 | proved `prover: <alias>` + top-level `provers` | `prover: <the pin file>` |

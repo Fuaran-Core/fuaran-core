@@ -1,23 +1,31 @@
 {
   "kind": "proofs",
   "subject": "fixture",
-  "$comment": "A FIXTURE ladder for the Phase 144 Proofs.Ladder family, NOT this repository's claims ladder — that is /proofs.json. This one is clean: it is the baseline the go-red fixtures beside it each mutate in exactly one place, and the family asserts it produces no finding, so a go-red that fires is known to be firing on the mutation. Since Phase 174 it carries one assumed row per CLASS — premise, domain-obligation, model-bridge — so the three classification clauses are non-vacuous on the baseline, and `contract-ok.md` beside it is the contract table these three rows must agree with.",
+  "$comment": "A FIXTURE ladder for the Phase 144 Proofs.Ladder family, NOT this repository's claims ladder — that is /proofs.json. This one is clean: it is the baseline the go-red fixtures beside it each mutate in exactly one place, and the family asserts it produces no finding, so a go-red that fires is known to be firing on the mutation. Since Phase 174 it carries one assumed row per CLASS — premise, domain-obligation, model-bridge — so the three classification clauses are non-vacuous on the baseline, and `contract-ok.md` beside it is the contract table these three rows must agree with. Since Phase 522 every row also carries `statement` and `boundary`, with `claim` their join, the proved row names `supporting` declarations and the policy row a `document` that exists, so the clauses Phase 522 added are non-vacuous on the baseline too; their go-reds are built in the test from this file, one mutation each.",
   "claims": [
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "statement": "A clean proved row, so the every-module clause stays quiet.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
         "model": "Model.fst",
-        "prover": "fixture"
+        "prover": "fixture",
+        "supporting": [
+          "beta",
+          "gamma"
+        ]
       }
     },
     {
       "id": "fixture-differential",
       "level": "tested",
-      "claim": "A tested row naming a case that exists.",
+      "statement": "A tested row naming a case that exists.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A tested row naming a case that exists. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -29,7 +37,9 @@
     {
       "id": "fixture-premise",
       "level": "assumed",
-      "claim": "An assumed row that nothing discharges and no phase closes.",
+      "statement": "An assumed row that nothing discharges and no phase closes.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "An assumed row that nothing discharges and no phase closes. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "class": "premise",
       "evidence": {
@@ -39,7 +49,9 @@
     {
       "id": "fixture-obligation",
       "level": "assumed",
-      "claim": "An assumed row a domain discharges by running a law of the kit at its own witness.",
+      "statement": "An assumed row a domain discharges by running a law of the kit at its own witness.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "An assumed row a domain discharges by running a law of the kit at its own witness. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "domain-obligation",
       "dischargedBy": "Conformance.fixtureLaws",
@@ -50,7 +62,9 @@
     {
       "id": "fixture-bridge",
       "level": "assumed",
-      "claim": "An assumed row that is this repository's own model-to-production gap.",
+      "statement": "An assumed row that is this repository's own model-to-production gap.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "An assumed row that is this repository's own model-to-production gap. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "model-bridge",
       "closes": "permanent",
@@ -61,10 +75,12 @@
     {
       "id": "fixture-policy",
       "level": "policy",
-      "claim": "A policy row.",
+      "statement": "A policy row.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A policy row. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
-        "document": "fixture"
+        "document": "contract-ok.md"
       }
     }
   ]

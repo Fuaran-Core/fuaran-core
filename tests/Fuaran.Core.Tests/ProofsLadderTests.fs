@@ -11,16 +11,15 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // own rule (D30) is that a committed declared-or-generated artefact is pinned by a check; this
 // family is that check.
 //
-// TEN CLAUSES, each with a go-red fixture beside it — six from Phase 144, four from Phase 174:
+// FOURTEEN CLAUSES, each with a go-red beside it — six from Phase 144, four from Phase 174, four from
+// Phase 522:
 //
 //   theorem-exists          a `proved` row's `evidence.theorem` is a TOP-LEVEL `val` / `let` /
 //                           `let rec` of that name in the model it names.
 //   model-registered        that model file exists, and its module is one `check.ps1` checks — a
 //                           row over a model the leg never runs claims a proof nothing reproduces.
 //   tested-case-exists      a `tested` row names at least one case, and every case it names is in
-//                           the test tree. The citable set is the differential host `Proofs.Oracle`
-//                           plus (Phase 161) the `containerLaws` conformance suite — see
-//                           `realCases` for why it is an enumeration of suites and not a walk.
+//                           the suite its family names (`suiteCases`).
 //   every-module-has-a-row  every model in the roster (`proofs/modules.json`) is named by at least one `proved` row.
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
@@ -36,6 +35,21 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   contract-agrees         (174) `proofs/README.md`'s "Core-to-domain proof contract" table is
 //                           the ladder's assumed rows, in order, with the same class and the same
 //                           third column.
+//
+//   statement-boundary      (522) every row states what it claims in `statement` and what it does
+//                           NOT cover in `boundary`, both non-empty, and neither tells the row's
+//                           history: no `Phase NNN` in either — the row's `phase` is its one citation.
+//   claim-is-the-join       (522) `claim` is `statement` and `boundary` joined by one space: the
+//                           field the estate registry still reads, held to the two it is made of.
+//   tested-family-closed    (522) a `tested` row's family is one of three closed forms —
+//                           `Proofs.Oracle`, `Conformance.<law>` (a law the kit exports) or
+//                           `Suite:<Module>.<list>` (a test list this assembly declares) — and it
+//                           names a suite the test tree holds.
+//   evidence-exists         (522) every path LADDER.md says must exist does (a policy row's
+//                           `document`, a tested row's `artifact` and `host`), every `supporting`
+//                           declaration is top-level in its model like `theorem` (reported under
+//                           theorem-exists), and no row carries `repo`: this family holds rows to
+//                           THIS tree, so a row resting on another repository's cannot be held here.
 //
 // WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
 // and nowhere else, for the reason stated at that clause: the contract table is the same question
@@ -72,8 +86,10 @@ type LadderInputs =
         Root: string
         /// The modules the ladder must cover — the roster's models (`proofs/modules.json`), for the real file.
         Modules: string list
-        /// The case names a `tested` row may name.
-        Cases: Set<string>
+        /// The cases of the suite a `tested` row's family names, or `None` when the family names
+        /// no suite this test tree holds. For the real file it is reflection over the assembly
+        /// (`suiteCases`), so no list of citable suites is restated here.
+        Suites: string -> Set<string> option
         /// The law names a `domain-obligation` row's `dischargedBy` may name — the entry points of
         /// the shipped kit's declared law-family ROSTER, for the real file. Read from
         /// `Fuaran.Core.Families` for the same reason `Cases` is read from the test tree: a second
@@ -107,6 +123,16 @@ let private classes = Set.ofList classOrder
 /// contract's whole content is WHICH kit's green run discharges the row.
 let private lawForm =
     Regex(@"^Conformance\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// `Suite:<Module>.<list>` — a test list this assembly declares, named by its module and its value
+/// (Phase 522). The third closed form a `tested` row's family takes, beside `Proofs.Oracle` and
+/// `Conformance.<law>`: a suite's LABEL is prose and moves with its wording, its value's name does not.
+let suiteForm =
+    Regex(@"^Suite:([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// History told in a row's prose (Phase 522): the row's `phase` is its one citation, and what a
+/// change did lives in that change's record.
+let private historyForm = Regex(@"\bPhases?\s+[0-9]", RegexOptions.Compiled)
 
 /// The two literals a `model-bridge`'s `closes` may carry beside a `fuaran-core#NNN` phase.
 /// `unscheduled` is a value rather than a rounding to `permanent` on purpose: two of this
@@ -254,27 +280,147 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 // a second finding about the same absence would say nothing new.
                                 | Some _ -> []
 
-                            registered @ present @ theoremFindings
+                            // Phase 522: a `supporting` declaration is checked like `theorem`, as
+                            // LADDER.md has always said it is.
+                            let supportingFindings =
+                                match ev |> Option.bind (fun e -> strArrayMember e "supporting") with
+                                | Some names when File.Exists full ->
+                                    let text = File.ReadAllText full
+
+                                    names
+                                    |> List.filter (fun n -> not (declaresTopLevel text n))
+                                    |> List.map (fun n ->
+                                        finding
+                                            id
+                                            "theorem-exists"
+                                            (sprintf
+                                                "%s declares no top-level `%s`, which `evidence.supporting` names"
+                                                path
+                                                n))
+                                | _ -> []
+
+                            registered @ present @ theoremFindings @ supportingFindings
 
                 let testedFindings =
                     if level <> Some "tested" then
                         []
                     else
-                        match ev |> Option.bind (fun e -> strArrayMember e "cases") with
-                        | None
-                        | Some [] ->
+                        // Phase 522: the family is CLOSED, and it names the suite the cases are
+                        // looked for in — a prose family used to pass every clause.
+                        let familyFindings, suite =
+                            match ev |> Option.bind (fun e -> strMember e "family") with
+                            | None ->
+                                [ finding id "tested-family-closed" "a tested row carries no `evidence.family`" ], None
+                            | Some f ->
+                                let law = lawForm.Match f
+
+                                let closed =
+                                    f = "Proofs.Oracle"
+                                    || suiteForm.IsMatch f
+                                    || (law.Success && Set.contains law.Groups[1].Value inputs.Laws)
+
+                                if not closed then
+                                    [ finding
+                                          id
+                                          "tested-family-closed"
+                                          (sprintf
+                                              "family '%s' is none of `Proofs.Oracle`, `Conformance.<law>` (a law the shipped kit exports) or `Suite:<Module>.<list>`"
+                                              f) ],
+                                    None
+                                else
+                                    match inputs.Suites f with
+                                    | Some cases -> [], Some(f, cases)
+                                    | None ->
+                                        [ finding
+                                              id
+                                              "tested-family-closed"
+                                              (sprintf "family '%s' names no suite the test tree declares" f) ],
+                                        None
+
+                        let caseFindings =
+                            match ev |> Option.bind (fun e -> strArrayMember e "cases"), suite with
+                            | None, _
+                            | Some [], _ ->
+                                [ finding
+                                      id
+                                      "tested-case-exists"
+                                      "a tested row must name its cases in `evidence.cases` (a non-empty array of the family's case names) — naming the family alone leaves the claim uncheckable" ]
+                            // A family that names no suite is already a finding; its cases have
+                            // nowhere to be looked for, and a second finding would say nothing new.
+                            | Some _, None -> []
+                            | Some names, Some(family, cases) ->
+                                names
+                                |> List.filter (fun n -> not (Set.contains n cases))
+                                |> List.map (fun n ->
+                                    finding
+                                        id
+                                        "tested-case-exists"
+                                        (sprintf "`evidence.cases` names '%s', which is not a case of %s" n family))
+
+                        familyFindings @ caseFindings
+
+                // ---- Phase 522: what is claimed, what is not, and no history ----
+                let statement = strMember row "statement"
+                let boundary = strMember row "boundary"
+
+                let proseFindings =
+                    [ for name, value in [ "statement", statement; "boundary", boundary ] do
+                          match value with
+                          | Some v when not (String.IsNullOrWhiteSpace v) ->
+                              let m = historyForm.Match v
+
+                              if m.Success then
+                                  yield
+                                      finding
+                                          id
+                                          "statement-boundary"
+                                          (sprintf
+                                              "`%s` tells history ('%s') — the row's `phase` is its one citation, and what a change did is that change's record"
+                                              name
+                                              (v.Substring(m.Index, min 24 (v.Length - m.Index))))
+                          | _ ->
+                              yield
+                                  finding
+                                      id
+                                      "statement-boundary"
+                                      (sprintf
+                                          "no `%s` — a row says what it claims (`statement`) and what it does NOT cover (`boundary`)"
+                                          name) ]
+
+                let joinFindings =
+                    match statement, boundary, strMember row "claim" with
+                    | Some s, Some b, Some c when c = s + " " + b -> []
+                    | Some _, Some _, _ ->
+                        [ finding
+                              id
+                              "claim-is-the-join"
+                              "`claim` is not `statement` and `boundary` joined by one space — the registry reads `claim`, so it must say exactly what the two fields say" ]
+                    | _ -> []
+
+                // ---- Phase 522: every path LADDER.md says must exist, and only this tree ----
+                let pathFindings =
+                    let mustExist (field: string) =
+                        match ev |> Option.bind (fun e -> strMember e field) with
+                        | Some p when not (File.Exists(Path.Combine(inputs.Root, p))) ->
                             [ finding
                                   id
-                                  "tested-case-exists"
-                                  "a tested row must name its cases in `evidence.cases` (a non-empty array of `Proofs.Oracle` case names) — naming the family in prose alone leaves the claim uncheckable" ]
-                        | Some names ->
-                            names
-                            |> List.filter (fun n -> not (Set.contains n inputs.Cases))
-                            |> List.map (fun n ->
-                                finding
-                                    id
-                                    "tested-case-exists"
-                                    (sprintf "`evidence.cases` names '%s', which is not a case in the test tree" n))
+                                  "evidence-exists"
+                                  (sprintf "`evidence.%s` %s is not a file (looked under %s)" field p inputs.Root) ]
+                        | _ -> []
+
+                    (match level with
+                     | Some "policy" -> mustExist "document"
+                     | Some "tested" -> mustExist "artifact" @ mustExist "host"
+                     | _ -> [])
+                    @ (match strMember row "repo" with
+                       | Some r ->
+                           [ finding
+                                 id
+                                 "evidence-exists"
+                                 (sprintf
+                                     "carries `repo`: \"%s\" — this family holds every row to this repository's own tree, so a row resting on another's cannot be checked here"
+                                     r) ]
+                       | None -> [])
 
                 // ---- Phase 174: which KIND of assumed an `assumed` row is ----
                 let cls = strMember row "class"
@@ -409,8 +555,11 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
 
                 levelFindings
                 @ phaseFindings
+                @ proseFindings
+                @ joinFindings
                 @ provedFindings
                 @ testedFindings
+                @ pathFindings
                 @ classFindings
                 @ dischargeFindings)
             |> List.concat
@@ -816,29 +965,30 @@ let isExtracted (e: RosterEntry) = e.Kind = Extracted || e.Kind = Shared
 /// A MODEL — a roster entry that is not a shared module. Every model carries a `proved` row.
 let isModel (e: RosterEntry) = e.Kind <> Shared
 
-/// The `Proofs.Oracle` family's test tree: every `[<Tests>]` value in this assembly whose label is
-/// `Proofs.Oracle`, found by reflection (Phase 504) — so a new differential file is citable by a
-/// `tested` row the moment it declares its list, with no enumeration here to forget it in.
-let oracleTests () : Test =
-    let family =
-        [ for t in Reflection.Assembly.GetExecutingAssembly().GetTypes() do
-              for p in
-                  t.GetProperties(
-                      Reflection.BindingFlags.Static
-                      ||| Reflection.BindingFlags.Public
-                      ||| Reflection.BindingFlags.NonPublic
-                  ) do
-                  if p.PropertyType = typeof<Test> && p.IsDefined(typeof<TestsAttribute>, false) then
-                      match p.GetValue null with
-                      | :? Test as test ->
-                          match test with
-                          | TestLabel("Proofs.Oracle", _, _) -> yield p.DeclaringType.FullName + "." + p.Name, test
-                          | _ -> ()
-                      | _ -> () ]
-        |> List.sortBy fst
-        |> List.map snd
+/// Every `[<Tests>]` value in this assembly whose label is `label`, found by reflection (Phase 504;
+/// any label since Phase 522) — so a new differential file, or a new conformance suite, is citable by
+/// a `tested` row the moment it declares its list, with no enumeration here to forget it in.
+let testsLabelled (label: string) : Test list =
+    [ for t in Reflection.Assembly.GetExecutingAssembly().GetTypes() do
+          for p in
+              t.GetProperties(
+                  Reflection.BindingFlags.Static
+                  ||| Reflection.BindingFlags.Public
+                  ||| Reflection.BindingFlags.NonPublic
+              ) do
+              if p.PropertyType = typeof<Test> && p.IsDefined(typeof<TestsAttribute>, false) then
+                  match p.GetValue null with
+                  | :? Test as test ->
+                      match test with
+                      | TestLabel(l, _, _) when l = label -> yield p.DeclaringType.FullName + "." + p.Name, test
+                      | _ -> ()
+                  | _ -> () ]
+    |> List.sortBy fst
+    |> List.map snd
 
-    testList "Proofs.Oracle" family
+/// The `Proofs.Oracle` family's test tree: every differential list the assembly declares.
+let oracleTests () : Test =
+    testList "Proofs.Oracle" (testsLabelled "Proofs.Oracle")
 
 /// The leaf case names of an Expecto test tree — the labels a `tested` row may cite.
 let rec caseNames (t: Test) : string list =
@@ -876,35 +1026,42 @@ let private realModules () = realRoster () |> List.map _.Module
 let private realModels () =
     realRoster () |> List.filter isModel |> List.map _.Module
 
-/// The case names a `tested` row may cite. `Proofs.Oracle` is where every differential row's
-/// evidence lives, and it was the whole set until Phase 161 — whose `container-laws` row is
-/// evidenced by a CONFORMANCE FAMILY rather than by a differential, and whose cases therefore live
-/// in the suite that certifies that family. Read from the TREE in both cases, so a sibling
-/// appending a case is picked up with no edit here.
+/// The cases of the suite a `tested` row's family names (Phase 522), read from the TREE so a sibling
+/// appending a case — or a suite — is picked up with no edit here. Each of the three closed forms
+/// resolves by reflection: `Proofs.Oracle` and `Conformance.<law>` to every `[<Tests>]` list carrying
+/// that label (a conformance suite is labelled with its law family's name), `Suite:<Module>.<list>`
+/// to the `Test` value of that name in that module. `None` is a family that names no suite.
 ///
-/// Widening the set rather than moving the cases is deliberate: the clause's content is "a `tested`
-/// row's evidence names a case that exists", and a row evidenced by a conformance family is as
-/// checkable as one evidenced by a differential. What the clause must never become is a set so wide
-/// that any string is in it — which is why this is an enumeration of suites and not a walk of the
-/// whole tree. Phase 288 adds the second conformance suite on the same footing: the checkpoint rows
-/// are evidenced by `Conformance.checkpointLaws`, whose cases live in `CheckpointTests`.
-let private realCases () =
-    Set.union (caseNames (oracleTests ()) |> Set.ofList) (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
-    |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
-    |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
-    |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
-    // Phase 304: the old-document evolution differential, evidenced by the hosts that decode old
-    // documents rather than by the oracle.
-    |> Set.union (caseNames IdlStabilityClassTests.evolutionDifferential |> Set.ofList)
-    // Phase 311: the lane store's tested row, evidenced by `Conformance.laneLaws`, whose cases live in
-    // `LaneTests`.
-    |> Set.union (caseNames LaneTests.laneLawTests |> Set.ofList)
-    // Phase 422: the temporal rows evidenced by the column suite's own laws — since Phase 430 the .NET
-    // edge's row alone (the calendar, the texts and the order are `Temporal.fst`'s theorems).
-    |> Set.union (caseNames ColumnTests.temporalTests |> Set.ofList)
-    // Phase 427: the schema field's tested row, evidenced by the column suite's field cases (the
-    // field codec is Phase 428's theorem).
-    |> Set.union (caseNames ColumnTests.fieldTests |> Set.ofList)
+/// It replaces an enumeration of eight suites, one line per phase that cited a new one, under which
+/// a row's cases were looked for across ALL of them whatever its family said — so a prose family
+/// passed and a case was found in a suite its row did not name.
+let suiteCases (family: string) : Set<string> option =
+    let ofTests (tests: Test list) =
+        match tests |> List.collect caseNames with
+        | [] -> None
+        | cases -> Some(Set.ofList cases)
+
+    let suite = suiteForm.Match family
+
+    if family = "Proofs.Oracle" || family.StartsWith "Conformance." then
+        ofTests (testsLabelled family)
+    elif suite.Success then
+        match Reflection.Assembly.GetExecutingAssembly().GetType("Fuaran.Core.Tests." + suite.Groups[1].Value) with
+        | null -> None
+        | t ->
+            match
+                t.GetProperty(
+                    suite.Groups[2].Value,
+                    Reflection.BindingFlags.Static
+                    ||| Reflection.BindingFlags.Public
+                    ||| Reflection.BindingFlags.NonPublic
+                )
+            with
+            | null -> None
+            | p when p.PropertyType = typeof<Test> -> ofTests [ p.GetValue null :?> Test ]
+            | _ -> None
+    else
+        None
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.
@@ -932,15 +1089,20 @@ let private realLaws () =
 let private fixtureInputs (modules: string list) =
     { Root = fixtureDir
       Modules = modules
-      Cases = Set.ofList [ "a fixture case" ]
+      Suites =
+        fun family ->
+            if family = "Proofs.Oracle" then
+                Some(Set.ofList [ "a fixture case" ])
+            else
+                None
       Laws = Set.ofList [ "fixtureLaws" ] }
 
 let private fixture (name: string) =
     File.ReadAllText(Path.Combine(fixtureDir, name))
 
-/// A go-red: this fixture yields EXACTLY one finding, and it names the clause and the subject.
-let private expectOneFinding (modules: string list) (name: string) (clause: string) (subject: string) =
-    let findings = checkLadder (fixtureInputs modules) (fixture name)
+/// A go-red: this ladder text yields EXACTLY one finding, and it names the clause and the subject.
+let private expectOneFindingIn (modules: string list) (name: string) (text: string) (clause: string) (subject: string) =
+    let findings = checkLadder (fixtureInputs modules) text
 
     Expect.equal
         (List.length findings)
@@ -953,6 +1115,34 @@ let private expectOneFinding (modules: string list) (name: string) (clause: stri
     let only = List.head findings
     Expect.stringContains only (sprintf "[%s]" clause) (sprintf "%s: the finding names the clause" name)
     Expect.stringContains only subject (sprintf "%s: the finding names what it is about" name)
+
+/// A go-red over a committed fixture file.
+let private expectOneFinding (modules: string list) (name: string) (clause: string) (subject: string) =
+    expectOneFindingIn modules name (fixture name) clause subject
+
+/// `ladder-ok.json` with ONE row mutated in place (Phase 522): the go-reds of the four clauses Phase
+/// 522 added are each one mutation of the baseline, so a go-red that fires is known to be firing on
+/// its mutation and on nothing a separate fixture file could drift into.
+let private mutated (rowId: string) (mutate: Nodes.JsonObject -> unit) : string =
+    let root = Nodes.JsonNode.Parse(fixture "ladder-ok.json")
+
+    let row =
+        root["claims"].AsArray()
+        |> Seq.map (fun r -> r.AsObject())
+        |> Seq.find (fun r -> r["id"].GetValue<string>() = rowId)
+
+    mutate row
+    root.ToJsonString()
+
+/// Set a row's statement or boundary and keep `claim` its join, so the mutation is ONE defect.
+let private withProse (field: string) (value: string) (row: Nodes.JsonObject) =
+    row[field] <- Nodes.JsonValue.Create value
+
+    row["claim"] <-
+        Nodes.JsonValue.Create(row["statement"].GetValue<string>() + " " + row["boundary"].GetValue<string>())
+
+let private expectMutationFinding (description: string) (rowId: string) mutate (clause: string) (subject: string) =
+    expectOneFindingIn [ "Model" ] description (mutated rowId mutate) clause subject
 
 [<Tests>]
 let proofsLadderTests =
@@ -1057,17 +1247,27 @@ let proofsLadderTests =
               // picked up with no edit here. If this ever collapsed to a handful, the
               // tested-case-exists clause would have quietly stopped measuring anything.
               Expect.isGreaterThan
-                  (Set.count (realCases ()))
+                  (suiteCases "Proofs.Oracle" |> Option.map Set.count |> Option.defaultValue 0)
                   20
-                  "the cited suites' case names are readable, and there are as many as the differential host declares"
+                  "the Proofs.Oracle differential host's case names are readable"
 
-              // and BOTH suites are in it — a union that silently degenerated to one of its
-              // members would leave the other's rows uncheckable while reporting nothing.
-              Expect.isNonEmpty (caseNames (oracleTests ())) "the Proofs.Oracle differential host contributes cases"
+              // and EACH closed form resolves — a form whose reflection silently degenerated would
+              // leave its rows reported as naming no suite, or worse, never asked.
+              for family in
+                  [ "Conformance.containerLaws"
+                    "Conformance.checkpointLaws"
+                    "Suite:ColumnTests.fieldTests" ] do
+                  Expect.isNonEmpty
+                      (suiteCases family |> Option.defaultValue Set.empty)
+                      (sprintf "%s resolves to a suite with cases" family)
 
-              Expect.isNonEmpty
-                  (caseNames ContainedOpsTests.containerLawTests)
-                  "the containerLaws conformance suite contributes cases"
+              // and a family that names nothing resolves to nothing, in every form.
+              for family in
+                  [ "Conformance.noSuchLaws"
+                    "Suite:ColumnTests.noSuchTests"
+                    "Suite:NoSuchModule.tests"
+                    "Column fields: unit, label, description and extensions" ] do
+                  Expect.isNone (suiteCases family) (sprintf "%s resolves to no suite" family)
 
           testCase "the law names a domain-obligation row may cite are the kit's declared roster"
           <| fun _ ->
@@ -1089,6 +1289,27 @@ let proofsLadderTests =
 
           // ---- the subject ----
 
+          testCase "the kit's template ladder is written to the schema it ships beside (Phase 522)"
+          <| fun _ ->
+              // The template's rows are placeholders, so the clauses about the TREE cannot hold of
+              // it; the clauses about a row's SHAPE can, and an adopter copies the template's shape.
+              let template =
+                  File.ReadAllText(Path.Combine(repoRoot, "proofs", "kit", "templates", "proofs.json"))
+
+              let shapeClauses =
+                  [ "[statement-boundary]"; "[claim-is-the-join]"; "[tested-family-closed]" ]
+
+              let findings =
+                  checkLadder
+                      { Root = repoRoot
+                        Modules = []
+                        Suites = fun _ -> Some(Set.ofList [ "<a case name, as the family spells it>" ])
+                        Laws = Set.empty }
+                      template
+                  |> List.filter (fun f -> shapeClauses |> List.exists f.Contains)
+
+              Expect.isEmpty findings "every template row has a statement, a boundary, their join and a closed family"
+
           testCase "the committed proofs.json satisfies every clause"
           <| fun _ ->
               let text = File.ReadAllText ladderPath
@@ -1096,7 +1317,7 @@ let proofsLadderTests =
               let inputs =
                   { Root = repoRoot
                     Modules = realModels ()
-                    Cases = realCases ()
+                    Suites = suiteCases
                     Laws = realLaws () }
 
               let findings = checkLadder inputs text
@@ -1245,6 +1466,100 @@ let proofsLadderTests =
 
           testCase "go-red: bridge-closes — a model bridge carrying no closes at all"
           <| fun _ -> expectOneFinding [ "Model" ] "bridge-closes-absent.json" "bridge-closes" "fixture-bridge"
+
+          // ---- Phase 522: statement and boundary, the join, the closed family, the paths ----
+
+          testCase "go-red: statement-boundary — a row with no boundary"
+          <| fun _ ->
+              expectMutationFinding
+                  "no boundary"
+                  "fixture-premise"
+                  (fun r -> r.Remove "boundary" |> ignore)
+                  "statement-boundary"
+                  "no `boundary`"
+
+          testCase "go-red: statement-boundary — a row whose statement tells its history"
+          <| fun _ ->
+              expectMutationFinding
+                  "history in the statement"
+                  "fixture-policy"
+                  (withProse "statement" "A policy row, recorded by Phase 12 after a review.")
+                  "statement-boundary"
+                  "Phase 12"
+
+          testCase "go-red: claim-is-the-join — a claim that says something its two fields do not"
+          <| fun _ ->
+              expectMutationFinding
+                  "claim not the join"
+                  "fixture-obligation"
+                  (fun r -> r["claim"] <- Nodes.JsonValue.Create "Something the statement never said.")
+                  "claim-is-the-join"
+                  "fixture-obligation"
+
+          testCase "go-red: tested-family-closed — a family written as prose"
+          <| fun _ ->
+              expectMutationFinding
+                  "prose family"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "A differential described in prose")
+                  "tested-family-closed"
+                  "A differential described in prose"
+
+          testCase "go-red: tested-family-closed — a law family the kit does not export"
+          <| fun _ ->
+              expectMutationFinding
+                  "unexported law family"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "Conformance.ghostLaws")
+                  "tested-family-closed"
+                  "Conformance.ghostLaws"
+
+          testCase "go-red: tested-family-closed — a well-formed suite the test tree does not declare"
+          <| fun _ ->
+              expectMutationFinding
+                  "undeclared suite"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "Suite:NoSuchModule.tests")
+                  "tested-family-closed"
+                  "Suite:NoSuchModule.tests"
+
+          testCase "go-red: theorem-exists — a supporting declaration that is not top-level"
+          <| fun _ ->
+              expectMutationFinding
+                  "indented supporting"
+                  "fixture-theorem"
+                  (fun r ->
+                      r["evidence"]["supporting"] <-
+                          Nodes.JsonArray(Nodes.JsonValue.Create "beta", Nodes.JsonValue.Create "delta"))
+                  "theorem-exists"
+                  "`delta`"
+
+          testCase "go-red: evidence-exists — a policy row whose document is not there"
+          <| fun _ ->
+              expectMutationFinding
+                  "missing document"
+                  "fixture-policy"
+                  (fun r -> r["evidence"]["document"] <- Nodes.JsonValue.Create "no-such-document.md")
+                  "evidence-exists"
+                  "no-such-document.md"
+
+          testCase "go-red: evidence-exists — a tested row whose artifact is not there"
+          <| fun _ ->
+              expectMutationFinding
+                  "missing artifact"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["artifact"] <- Nodes.JsonValue.Create "oracle/NoSuch.fs")
+                  "evidence-exists"
+                  "oracle/NoSuch.fs"
+
+          testCase "go-red: evidence-exists — a row resting on another repository's tree"
+          <| fun _ ->
+              expectMutationFinding
+                  "foreign repo"
+                  "fixture-theorem"
+                  (fun r -> r["repo"] <- Nodes.JsonValue.Create "Elsewhere/other-repo")
+                  "evidence-exists"
+                  "Elsewhere/other-repo"
 
           // ---- the contract clause: the README table and the ladder, row for row ----
 

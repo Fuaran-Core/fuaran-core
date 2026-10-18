@@ -6,7 +6,9 @@
     {
       "id": "fixture-premise",
       "level": "assumed",
-      "claim": "An assumed row, so the ladder is not empty.",
+      "statement": "An assumed row, so the ladder is not empty.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "An assumed row, so the ladder is not empty. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "class": "premise",
       "evidence": {
