@@ -1,10 +1,10 @@
 #Requires -Version 7.0
-# <REPO> — the proof leg. TEMPLATE: copy to <repo>/proofs/check.ps1 and edit the three declarations
+# <REPO> — the proof leg. TEMPLATE: copy to <repo>/proofs/check.ps1 and edit the two declarations
 # below. Nothing else in this file needs changing, and nothing in `kit/check-proof-leg.ps1` does.
 #
-# THE ENGINE IS `kit/check-proof-leg.ps1` and this file is the caller: it declares what THIS
-# repository has — the models, where the oracle host lives, which test families the host step runs
-# — and the kit runs the leg. Read the kit script's header for what the three steps are and why
+# THE ENGINE IS `kit/check-proof-leg.ps1` and this file is the caller: it hands the kit what
+# THIS repository has — the models (read from modules.json), where the oracle host lives, which
+# test families the host step runs — and the kit runs the leg. Read the kit script's header for what the three steps are and why
 # each is shaped the way it is; read `kit/README.md` for how a repository adopts the kit.
 #
 # The flags this file forwards are the leg's public surface:
@@ -25,16 +25,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ---- DECLARATION 1: the models -------------------------------------------------------------------
-# Each is proofs/<name>.fst with its committed extraction at proofs/oracle/<name>.fs. Order matters
-# only where one model `open`s another: a model must follow what it opens. Give each one a comment
-# saying what it models and what it proves — the list is the first thing a reader of the leg meets.
-#
-# Adding a model is adding its name here AND a budget entry to modules.json: nothing else is
-# per-module. Keep this as ONE literal line if your repository parses it (see the note below).
-$modules = @('FirstModel')
+# ---- the roster: modules.json ---------------------------------------------------------------------
+# NOT a declaration of this file (since the reference repository's Phase 504): the models are the
+# entries of modules.json, each with a `kind` and an `opens` list, in check order — a model after
+# what it opens. `extracted` models are checked, extracted to proofs/oracle/<name>.fs and diffed;
+# `proofOnly` and `generated` ones are checked only; `shared` ones (`Twin`, `ListAlgebra`, copied from
+# the reference repository) are checked first and extracted, and are no model's subject. Adding a
+# model is adding ONE entry to modules.json. Nothing here needs editing for it.
+$roster = @((Get-Content (Join-Path $PSScriptRoot 'modules.json') -Raw | ConvertFrom-Json).modules)
+$kinds = @('extracted', 'proofOnly', 'generated', 'shared')
+$misdeclared = @($roster | Where-Object { $kinds -notcontains $_.kind -or $null -eq $_.opens } | ForEach-Object { $_.module })
+if ($roster.Count -eq 0 -or $misdeclared.Count -gt 0) {
+    Write-Host "==== proofs: modules.json is not a roster: no module, or $($misdeclared -join ', ') declare(s) no kind among $($kinds -join ', ') or no opens list" -ForegroundColor Red
+    exit 2
+}
+$modules = @($roster | ForEach-Object { $_.module })
+$proofOnly = @($roster | Where-Object { $_.kind -in 'proofOnly', 'generated' } | ForEach-Object { $_.module })
 
-# ---- DECLARATION 2: the host families --------------------------------------------------------------
+# ---- DECLARATION 1: the host families --------------------------------------------------------------
 # One entry per test-runner invocation, each with its own failure message. Separate invocations
 # rather than one prefix filter, so two failures read as what they are rather than as one red suite.
 # An EMPTY list is a legitimate shape for a repository whose models have no differential yet: the
@@ -46,7 +54,7 @@ $hostFilters = @(
     }
 )
 
-# ---- DECLARATION 3: where the host lives ---------------------------------------------------------
+# ---- DECLARATION 2: where the host lives ---------------------------------------------------------
 # Paths relative to the repository root (the parent of proofs/, unless you pass -RepoRoot).
 $hostProject = 'tests/<Your>.Tests'
 $hostProjectFile = 'tests/<Your>.Tests/<Your>.Tests.fsproj'
@@ -55,6 +63,7 @@ $hostProjectFile = 'tests/<Your>.Tests/<Your>.Tests.fsproj'
 
 $legArgs = @{
     Modules         = $modules
+    ProofOnly       = $proofOnly
     ProofsDir       = $PSScriptRoot
     HostProject     = $hostProject
     HostProjectFile = $hostProjectFile

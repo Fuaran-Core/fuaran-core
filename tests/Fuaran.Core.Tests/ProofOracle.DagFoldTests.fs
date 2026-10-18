@@ -746,7 +746,7 @@ let private foundId (r: DagFold.found<string>) : string option =
 /// divergence point. It is as well-formed a `maxBy` as the model's own; what it breaks is agreement
 /// with production, and the delta recovered from the base it names.
 let private shallowestCommon (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (left: string) (right: string) =
-    match DagFold.inter (DagFold.ancestors_of model fuel left) (DagFold.ancestors_of model fuel right) with
+    match ListAlgebra.inter (DagFold.ancestors_of model fuel left) (DagFold.ancestors_of model fuel right) with
     | [] -> None
     | c :: t -> Some(DagFold.max_by (fun x y -> DagFold.deeper ordLt model fuel y x) c t)
 

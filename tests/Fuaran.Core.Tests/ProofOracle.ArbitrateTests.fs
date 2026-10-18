@@ -76,11 +76,11 @@ let private arbitrateAcceptingConflicts (baseTree: TreeOps.tree) (ps: Arbitrate.
         | DagFold.Ok() -> p :: acc, rej
 
     let accRev, rejRev = Arbitrate.pin ps |> List.fold step ([], [])
-    let accepted = DagFold.rev accRev
+    let accepted = ListAlgebra.rev accRev
 
     { Arbitrate.arbitration.accepted = accepted
       Arbitrate.arbitration.merged = Arbitrate.collect_scripts accepted
-      Arbitrate.arbitration.rejected = Arbitrate.recite_all accepted (DagFold.rev rejRev) }
+      Arbitrate.arbitration.rejected = Arbitrate.recite_all accepted (ListAlgebra.rev rejRev) }
 
 type private ArbTally =
     {

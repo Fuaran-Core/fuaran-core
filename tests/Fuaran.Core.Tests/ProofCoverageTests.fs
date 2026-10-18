@@ -485,7 +485,10 @@ let private readJson (relPath: string) =
 let private liveModels () =
     use doc = readJson "proofs/modules.json"
 
+    // A `shared` entry (Phase 504: `Twin`, `ListAlgebra`) is a module every model opens, not a model of
+    // anything, so it attributes no package and is not a subject of the coverage clauses.
     doc.RootElement.GetProperty("modules").EnumerateArray()
+    |> Seq.filter (fun el -> strMember el "kind" <> Some "shared")
     |> Seq.map (fun el ->
         { Module = strMember el "module" |> Option.defaultValue ""
           Packages =
