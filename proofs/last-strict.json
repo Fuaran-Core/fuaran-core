@@ -1,8 +1,8 @@
 {
   "kind": "proofRunVerdict",
   "$comment": "The run verdict of the last green -Strict FULL run of the proof leg, with the tree it verified, written by proofs/check.ps1 and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on.",
-  "tree": "106d07604a9ad6a3a835be3ff946a64de96e81f3",
-  "recordedAt": "2026-10-18T14:41:34Z",
+  "tree": "2260c5914114a3f9408283ca2c652f6b4f979a2b",
+  "recordedAt": "2026-10-18T15:22:29Z",
   "verdict": "green",
   "exit": 0,
   "message": null,
@@ -58,8 +58,8 @@
   "contention": [
     {
       "run": 1,
-      "preflight": "0 fstar process(es) on this machine, 11.8 GB free physical memory",
-      "factor": 0.45,
+      "preflight": "0 fstar process(es) on this machine, 16.3 GB free physical memory",
+      "factor": 0.4,
       "samples": 30,
       "threshold": 0.8,
       "contended": false
@@ -76,65 +76,65 @@
     {
       "module": "ListAlgebra",
       "run": 1,
-      "seconds": 0.4,
+      "seconds": 0.3,
       "budget": 20,
       "percent": 0
     },
     {
       "module": "DagFold",
       "run": 1,
-      "seconds": 58.5,
+      "seconds": 75.7,
       "budget": 360,
-      "percent": 16
+      "percent": 21
     },
     {
       "module": "WireDecode",
       "run": 1,
-      "seconds": 19.4,
+      "seconds": 46.6,
       "budget": 70,
-      "percent": 27
+      "percent": 67
     },
     {
       "module": "TreeOps",
       "run": 1,
-      "seconds": 55.9,
+      "seconds": 73.7,
       "budget": 340,
-      "percent": 16
+      "percent": 22
     },
     {
       "module": "Skeleton",
       "run": 1,
-      "seconds": 0.8,
+      "seconds": 0.7,
       "budget": 20,
       "percent": 5
     },
     {
       "module": "Chain",
       "run": 1,
-      "seconds": 13.9,
+      "seconds": 12.3,
       "budget": 90,
-      "percent": 16
+      "percent": 13
     },
     {
       "module": "JsonParse",
       "run": 1,
-      "seconds": 81.0,
+      "seconds": 69.2,
       "budget": 760,
-      "percent": 11
+      "percent": 9
     },
     {
       "module": "Preservation",
       "run": 1,
-      "seconds": 28.2,
+      "seconds": 23.7,
       "budget": 190,
-      "percent": 15
+      "percent": 13
     },
     {
       "module": "TreeDiff",
       "run": 1,
-      "seconds": 46.8,
+      "seconds": 42.8,
       "budget": 480,
-      "percent": 10
+      "percent": 9
     },
     {
       "module": "Limits",
@@ -146,126 +146,126 @@
     {
       "module": "Utf8",
       "run": 1,
-      "seconds": 18.4,
+      "seconds": 18.0,
       "budget": 70,
       "percent": 26
     },
     {
       "module": "WireCanon",
       "run": 1,
-      "seconds": 61.3,
+      "seconds": 56.7,
       "budget": 430,
-      "percent": 14
+      "percent": 13
     },
     {
       "module": "WireVersioning",
       "run": 1,
       "seconds": 2.5,
       "budget": 20,
-      "percent": 15
+      "percent": 10
     },
     {
       "module": "Unit",
       "run": 1,
-      "seconds": 87.7,
+      "seconds": 90.1,
       "budget": 180,
-      "percent": 49
+      "percent": 50
     },
     {
       "module": "Temporal",
       "run": 1,
-      "seconds": 83.4,
+      "seconds": 71.1,
       "budget": 370,
-      "percent": 22
+      "percent": 19
     },
     {
       "module": "WireColumn",
       "run": 1,
-      "seconds": 34.1,
+      "seconds": 27.3,
       "budget": 160,
-      "percent": 21
+      "percent": 17
     },
     {
       "module": "Vocabulary",
       "run": 1,
-      "seconds": 4.7,
+      "seconds": 3.6,
       "budget": 20,
-      "percent": 25
+      "percent": 20
     },
     {
       "module": "VocabularyProofs",
       "run": 1,
-      "seconds": 7.5,
+      "seconds": 6.4,
       "budget": 30,
-      "percent": 23
+      "percent": 20
     },
     {
       "module": "DocVocabulary",
       "run": 1,
-      "seconds": 4.8,
+      "seconds": 3.9,
       "budget": 30,
-      "percent": 17
+      "percent": 13
     },
     {
       "module": "DocVocabularyProofs",
       "run": 1,
-      "seconds": 11.6,
+      "seconds": 9.6,
       "budget": 70,
-      "percent": 17
+      "percent": 14
     },
     {
       "module": "ScoreVocabulary",
       "run": 1,
-      "seconds": 9.2,
+      "seconds": 7.9,
       "budget": 40,
-      "percent": 22
+      "percent": 20
     },
     {
       "module": "ScoreVocabularyProofs",
       "run": 1,
-      "seconds": 22.4,
+      "seconds": 20.9,
       "budget": 90,
-      "percent": 24
+      "percent": 23
     },
     {
       "module": "Capability",
       "run": 1,
-      "seconds": 64.3,
+      "seconds": 59.3,
       "budget": 290,
-      "percent": 22
+      "percent": 20
     },
     {
       "module": "Propagation",
       "run": 1,
-      "seconds": 9.8,
+      "seconds": 8.7,
       "budget": 60,
-      "percent": 17
+      "percent": 15
     },
     {
       "module": "Query",
       "run": 1,
-      "seconds": 70.6,
+      "seconds": 56.1,
       "budget": 280,
-      "percent": 25
+      "percent": 20
     },
     {
       "module": "Arbitrate",
       "run": 1,
-      "seconds": 7.5,
+      "seconds": 6.6,
       "budget": 50,
-      "percent": 16
+      "percent": 14
     },
     {
       "module": "DecimalText",
       "run": 1,
-      "seconds": 32.1,
+      "seconds": 25.9,
       "budget": 160,
-      "percent": 20
+      "percent": 16
     },
     {
       "module": "Normalize",
       "run": 1,
-      "seconds": 5.8,
+      "seconds": 5.7,
       "budget": 60,
       "percent": 10
     },
@@ -279,53 +279,47 @@
     {
       "module": "PropagationOps",
       "run": 1,
-      "seconds": 4.3,
+      "seconds": 4.1,
       "budget": 20,
       "percent": 20
     },
     {
       "module": "TreeFrame",
       "run": 1,
-      "seconds": 43.0,
+      "seconds": 13.6,
       "budget": 70,
-      "percent": 61
+      "percent": 20
     },
     {
       "module": "ColumnRefinement",
       "run": 1,
-      "seconds": 125.4,
+      "seconds": 42.7,
       "budget": 80,
-      "percent": 156
+      "percent": 54
     },
     {
       "module": "DecodeLayer",
       "run": 1,
-      "seconds": 34.0,
+      "seconds": 14.4,
       "budget": 170,
-      "percent": 20
+      "percent": 8
     },
     {
       "module": "OpStreamLoad",
       "run": 1,
-      "seconds": 169.1,
+      "seconds": 84.8,
       "budget": 590,
-      "percent": 29
+      "percent": 14
     },
     {
       "module": "DagPrimitives",
       "run": 1,
-      "seconds": 10.6,
+      "seconds": 10.5,
       "budget": 50,
       "percent": 22
     }
   ],
-  "findings": [
-    {
-      "run": 1,
-      "text": "ColumnRefinement.fst took 125s against its 80s budget on run 1 of 1 — 45s over, 156% of budget",
-      "label": ""
-    }
-  ],
+  "findings": [],
   "aborts": [],
   "cone": null,
   "refusals": "held"
