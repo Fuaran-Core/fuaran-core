@@ -2,20 +2,14 @@ name: proofs-strict
 
 # Phase 399 — the proof leg's STRICT run, on a schedule.
 #
-# The `proofs` job in ci.yml runs `./proofs/check.ps1 -Runs 3` on every push. This workflow runs the
-# same leg with -Strict once a week and on demand. That run is the RECORDED one: a green strict
-# full run writes proofs/last-strict.json (the tree it verified, the machine, each run's contention
-# factor and every module's time against its budget), and this workflow uploads it as the
-# `strict-baseline` artefact. It commits nothing; a maintainer who wants `check.ps1 -Since` to lean
-# on this run downloads the artefact and commits the file.
-#
-# WHAT MAKES IT RED (DECISIONS.md D131, an operator ruling): a model that does not verify, a second
-# writer caught by the cache provenance check, a check that finishes under the cached-read threshold
-# (`modules.json` `cachedRead`), or an incomplete budget declaration. A COST overrun never makes it
-# red: a module over its budget is a slow cold check. The job summary lists every cost finding with
-# its percentage on every run, red or green, so a module that is over budget week after week is
-# visible; re-seeding it is the recorded act proofs/README.md describes, after a quiet
-# re-measurement.
+# The `proofs` job in ci.yml runs the leg on every push. This workflow runs it with -Strict once a
+# week and on demand. That run is the RECORDED one: every run of the leg writes its run verdict to
+# proofs/obj/last-run.json (Phase 522; what the record holds and what makes a run red are the kit
+# engine's header, proofs/kit/check-proof-leg.ps1, "THE RUN VERDICT"), and a green strict full run
+# also writes that record, with the tree it verified, to proofs/last-strict.json. This workflow
+# summarises the run FROM THE RECORD, never from the log, and uploads both. It commits nothing; a
+# maintainer who wants `check.ps1 -Since` to lean on this run downloads the `strict-baseline`
+# artefact and commits the file.
 #
 # It never runs on a push or a tag: the strict leg is too slow to gate a push, and the publish
 # workflow already runs the leg on the tagged commit.
@@ -67,30 +61,32 @@ jobs:
           $global:LASTEXITCODE = 0
           pwsh -NoProfile -File ./proofs/check.ps1 -Runs 3 -Strict 2>&1 | Tee-Object -FilePath proofs-strict.log
           exit $LASTEXITCODE
-      - name: Summarise the run (cost findings, and why it is red if it is)
+      - name: Summarise the run from its verdict record (proofs/obj/last-run.json)
         if: always()
         shell: pwsh
         run: |
-          $lines = if (Test-Path proofs-strict.log) { Get-Content proofs-strict.log } else { @() }
-          $cost = @($lines | Where-Object { $_ -match '==== proofs: COST' })
-          $contention = @($lines | Where-Object { $_ -match '==== proofs: contention' })
-          $verdict = @($lines | Where-Object { $_ -match '^==== proofs: ' }) | Select-Object -Last 1
-          $summary = @("## Strict proof leg: $(if ('${{ job.status }}' -eq 'success') { 'green' } else { 'RED' })", '')
-          if ('${{ job.status }}' -ne 'success') {
-            $summary += 'Red means a model did not verify, a second writer or a probable cached read was caught, or the budget declaration is incomplete. A cost overrun never makes this run red. The last verdict line:'
+          $path = 'proofs/obj/last-run.json'
+          $record = if (Test-Path $path) { Get-Content $path -Raw | ConvertFrom-Json } else { $null }
+          $summary = @()
+          if ($null -eq $record) {
+            $summary += '## Strict proof leg: RED, and the leg wrote no run verdict'
             $summary += ''
-            $summary += '```'
-            $summary += $(if ($verdict) { $verdict } else { '(no verdict line; read the log artefact)' })
-            $summary += '```'
-            $summary += ''
+            $summary += 'A run that leaves no record was killed before any exit path ran; read the log artefact.'
           }
-          $summary += "### $($cost.Count) cost finding(s) against ``proofs/modules.json``"
-          $summary += 'Recorded, not failed. A module over budget week after week is the case for a re-seed after a quiet re-measurement (`proofs/README.md`, "What the leg costs").'
-          $summary += ''
-          $summary += '```'
-          $summary += $(if ($cost.Count -gt 0) { $cost } else { '(none)' })
-          $summary += $contention
-          $summary += '```'
+          else {
+            $state = if ($record.verdict -eq 'green' -and $record.refusals -eq 'held') { 'green' } else { 'RED' }
+            $summary += "## Strict proof leg: $state ($($record.verdict), exit $($record.exit); refusal tests $($record.refusals))"
+            $summary += ''
+            if ($record.message) { $summary += '```'; $summary += $record.message; $summary += '```'; $summary += '' }
+            $findings = @($record.findings)
+            $summary += "### $($findings.Count) cost finding(s) against ``proofs/modules.json``"
+            $summary += 'Recorded, never red: the kit engine''s header says why, and what to do about a module over budget week after week.'
+            $summary += ''
+            $summary += '```'
+            $summary += $(if ($findings.Count -gt 0) { $findings | ForEach-Object { "run $($_.run): $($_.text)$($_.label)" } } else { '(none)' })
+            $summary += @($record.contention) | ForEach-Object { "contention, run $($_.run): $(if ($null -ne $_.factor) { 'x{0:0.00}' -f $_.factor } else { 'not computed' })$(if ($_.contended) { ' (contended)' })" }
+            $summary += '```'
+          }
           $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Upload the refreshed strict baseline
         if: success()
@@ -99,6 +95,13 @@ jobs:
           name: strict-baseline
           path: proofs/last-strict.json
           if-no-files-found: error
+      - name: Upload the run verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofs-strict-verdict
+          path: proofs/obj/last-run.json
+          if-no-files-found: warn
       - name: Upload the leg's log
         if: always()
         uses: actions/upload-artifact@v4

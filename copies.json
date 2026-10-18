@@ -14,7 +14,7 @@
       "source": "proofs/kit/check-proof-leg.ps1",
       "check": "fingerprint",
       "regen": "copy proofs/kit/check-proof-leg.ps1 from the fuaran-core repository",
-      "$note": "The engine. Copied verbatim — an adopter edits its own proofs/check.ps1, never this."
+      "$note": "The engine. Copied verbatim — an adopter edits its own proofs/check.ps1, never this. Since Phase 522 `-SummaryFile` writes the RUN VERDICT on every exit, green or red (`kind: proofRunVerdict`, the verdict class named, the exit, the red line, and what the run was; the engine's header has the fields), where it used to write run facts on a green leg only; the exit codes and every printed line are unchanged. An adopter re-copies it, and reads the record rather than its log."
     },
     {
       "source": "proofs/kit/extraction-post-pass.ps1",
@@ -26,7 +26,7 @@
       "source": "proofs/kit/check-proof-leg.tests.ps1",
       "check": "fingerprint",
       "regen": "copy proofs/kit/check-proof-leg.tests.ps1 from the fuaran-core repository",
-      "$note": "THE ENGINE'S REFUSALS, held to their exit codes (Phase 221). Copied verbatim beside the engine, and worth calling from the adopter's own `check.ps1` after a green leg, as this repository's does: it runs the engine the way a caller does, over a scratch proofs directory, and asserts that a failed host build, an unrunnable host filter and a refuted model each exit non-zero beside a green control. It needs only the pin and the prover, never the adopter's models, so an adopter copies it unedited."
+      "$note": "THE ENGINE'S REFUSALS, held to their exit codes (Phase 221). Copied verbatim beside the engine, and worth calling from the adopter's own `check.ps1` after a green leg, as this repository's does: it runs the engine the way a caller does, over a scratch proofs directory, and asserts that a failed host build, an unrunnable host filter and a refuted model each exit non-zero beside a green control. It needs only the pin and the prover, never the adopter's models, so an adopter copies it unedited. Since Phase 522 every arm runs the leg with `-SummaryFile` and holds the record to the leg's exit code, and a staged apparatus fault is held to its class: re-copy it WITH the engine, since the two move together."
     },
     {
       "source": "proofs/kit/extraction-post-pass.tests.ps1",
@@ -80,13 +80,19 @@
       "source": "proofs/kit/templates/check.ps1",
       "check": "fingerprint",
       "regen": "copy proofs/kit/templates/check.ps1 from the fuaran-core repository",
-      "$note": "The CALLER template. Copied AND edited by the adopter, so the record is the adopter's own template copy, never its edited check.ps1. Since Phase 504 it enumerates no module: it reads the roster from `modules.json` (each entry's `kind` and `opens`), as this repository's check.ps1 does, so an adopter whose check.ps1 still carries a `$modules` literal re-copies this and moves the list into its modules.json."
+      "$note": "The CALLER template. Copied AND edited by the adopter, so the record is the adopter's own template copy, never its edited check.ps1. Since Phase 504 it enumerates no module: it reads the roster from `modules.json` (each entry's `kind` and `opens`), as this repository's check.ps1 does, so an adopter whose check.ps1 still carries a `$modules` literal re-copies this and moves the list into its modules.json. Since Phase 522 it passes `-SummaryFile obj/last-run.json`, so every run leaves its verdict record: an adopter adds that one assignment to its edited check.ps1."
     },
     {
       "source": "proofs/kit/templates/modules.json",
       "check": "fingerprint",
       "regen": "copy proofs/kit/templates/modules.json from the fuaran-core repository",
-      "$note": "The ROSTER and budget template. Copied AND edited. Since Phase 504 each entry carries `kind` (`extracted`, `proofOnly`, `generated` or `shared`) and `opens`, and the file is the leg's only roster."
+      "$note": "The ROSTER and budget template. Copied AND edited. Since Phase 504 each entry carries `kind` (`extracted`, `proofOnly`, `generated` or `shared`) and `opens`, and the file is the leg's only roster. Since Phase 522 its `$comment` blocks point at the engine's header for what the numbers mean rather than restating it, and the obsolete `seeding.$namingNote` is gone; every number is unchanged, so an adopter's edited copy needs no change to read the same."
+    },
+    {
+      "source": "proofs/kit/templates/proofs.json",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/proofs.json from the fuaran-core repository",
+      "$note": "The CLAIMS-LADDER template, written to `proofs/kit/LADDER.md` (the schema, read in place, never copied). Copied AND edited, so the record is the adopter's own template copy, never its edited ladder. Since Phase 522 every row carries `statement` (what is claimed) and `boundary` (what it does not cover), with the row's history cut to its `phase` and `claim` kept as their exact join for registries that still read it, and a tested row's `family` is one of three closed forms (`Proofs.Oracle`, `Conformance.<law>`, `Suite:<Module>.<list>`). An adopter's ladder that still carries `claim` alone reads exactly as before to a registry; its own host family is where it adopts the split."
     },
     {
       "source": "proofs/kit/templates/Instance.fst.template",

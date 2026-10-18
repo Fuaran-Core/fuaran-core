@@ -31,10 +31,12 @@
 #                    with the reason. An EMPTY cone is green only over a recorded strict run.
 #   -Modules <list>  name a cone by hand (`-Modules TreeOps,Skeleton`): exactly those modules.
 #   -PlanOnly        print what the kit would be handed, and stop before the prover runs.
-# And a green -Strict FULL run now records itself in proofs/last-strict.json (commit the file),
-# which is the baseline an empty cone leans on. Since Phase 399 the record also carries the machine
-# the run was on and each run's contention factor, and .github/workflows/proofs-strict.yml makes
-# that run weekly and hands the refreshed record over as an artefact. The selector section below says how the cone is
+#
+# EVERY RUN of the leg leaves ONE record (Phase 522): the kit's run verdict (its header, "THE RUN
+# VERDICT"), with this script's `cone` added, at proofs/obj/last-run.json — green or red. A green
+# -Strict FULL run's record, with the tree it verified, is proofs/last-strict.json (commit the file):
+# the baseline an empty cone leans on, the record .github/workflows/proofs-strict.yml hands over
+# weekly, and the same shape as every other run's. The selector section below says how the cone is
 # computed and why each input puts a module in it.
 [CmdletBinding()]
 param(
@@ -238,9 +240,9 @@ if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 # tree differs from HEAD in anything a module reads, because then it verified bytes no commit
 # holds. Commit the file it writes.
 #
-# WITH NEITHER SWITCH nothing below changes `$legArgs`: the kit is handed exactly the arguments it
-# was handed before this phase, so the full leg's verdict cannot move. `-PlanOnly` prints what the
-# kit would be handed and stops, which is how the Proofs.Cone family holds that claim.
+# WITH NEITHER SWITCH nothing below changes which modules the kit checks or which budget file it
+# reads, so the full leg's verdict cannot move. `-PlanOnly` prints what the kit would be handed and
+# stops, which is how the Proofs.Cone family holds that claim.
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $hostProjectDir = Join-Path $repoRoot 'tests/Fuaran.Core.Tests'
 $hostProjectPath = Join-Path $hostProjectDir 'Fuaran.Core.Tests.fsproj'
@@ -360,15 +362,35 @@ if ($PlanOnly) {
     exit 0
 }
 
-# Phase 399 — a -Strict FULL run asks the kit for its run facts (the machine, each run's contention
-# factor), so the baseline it records says what kind of machine and what kind of afternoon stand
-# behind it. Outside the cone's work directory, which is removed before the record is written.
-$runFactsPath = $null
-if ($Strict -and $null -eq $selected) {
-    $runFactsPath = Join-Path $PSScriptRoot "obj/run-facts-$PID.json"
-    New-Item -ItemType Directory -Force (Split-Path $runFactsPath -Parent) | Out-Null
-    if (Test-Path $runFactsPath) { Remove-Item $runFactsPath -Force }
-    $legArgs.SummaryFile = $runFactsPath
+# Phase 522 — EVERY run asks the kit for its run verdict, into a file of this process's own (two runs
+# in one worktree must not write one file), outside the cone's work directory. It becomes
+# proofs/obj/last-run.json below, once this script has added what only it knows: the cone.
+$verdictPath = Join-Path $PSScriptRoot "obj/run-verdict-$PID.json"
+$lastRunPath = Join-Path $PSScriptRoot 'obj/last-run.json'
+New-Item -ItemType Directory -Force (Split-Path $verdictPath -Parent) | Out-Null
+if (Test-Path $verdictPath) { Remove-Item $verdictPath -Force }
+$legArgs.SummaryFile = $verdictPath
+
+# Add a member to the run verdict and write it back as proofs/obj/last-run.json. Never changes the
+# leg's exit: a record this script cannot complete says so in yellow.
+# A previous run's last-run.json is never completed in this run's name: when the kit wrote no record
+# (a process killed outright writes none), the file is removed rather than left describing another run.
+$script:verdictSaved = $false
+function Save-RunVerdict([string] $name, $value) {
+    try {
+        $source = if (Test-Path $verdictPath) { $verdictPath } elseif ($script:verdictSaved) { $lastRunPath } else { $null }
+        if ($null -eq $source) {
+            if (Test-Path $lastRunPath) { Remove-Item $lastRunPath -Force }
+            Write-Host "==== proofs: the kit wrote no run verdict to $verdictPath, so this run leaves no record" -ForegroundColor Yellow
+            return
+        }
+        $record = Get-Content $source -Raw | ConvertFrom-Json -AsHashtable
+        $record[$name] = $value
+        [System.IO.File]::WriteAllText($lastRunPath, ($record | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
+        $script:verdictSaved = $true
+        if (Test-Path $verdictPath) { Remove-Item $verdictPath -Force }
+    }
+    catch { Write-Host "==== proofs: the run verdict could not be completed in ${lastRunPath}: $_" -ForegroundColor Yellow }
 }
 
 if ($null -ne $coneBudget) {
@@ -385,6 +407,10 @@ if ($null -ne $coneBudget) {
 & (Join-Path $PSScriptRoot 'kit/check-proof-leg.ps1') @legArgs
 $legExit = $LASTEXITCODE
 Remove-ConeWork
+# The cone: `null` is the full leg, otherwise the modules the kit was handed.
+$coneValue = $null
+if ($null -ne $selected) { $coneValue = [object[]]@($selected) }
+Save-RunVerdict 'cone' $coneValue
 if ($legExit -ne 0) { exit $legExit }
 
 # Then the leg's own refusals, run the same way (Phase 221): a scratch leg over a failed host build,
@@ -393,16 +419,15 @@ if ($legExit -ne 0) { exit $legExit }
 # above be cited as "every step was able to fail" rather than only as "no step said it failed".
 & (Join-Path $PSScriptRoot 'kit/check-proof-leg.tests.ps1') -ProofsDir $PSScriptRoot
 $refusalsExit = $LASTEXITCODE
+# The refusals are part of what a green run stands on, so the record says whether they held.
+Save-RunVerdict 'refusals' $(if ($refusalsExit -eq 0) { 'held' } else { "red (exit $refusalsExit)" })
 if ($refusalsExit -ne 0 -or -not $Strict -or $null -ne $selected) { exit $refusalsExit }
 
-# Phase 328 — a green -Strict FULL run records itself as the baseline an empty cone may lean on.
-# It never changes the verdict: the leg is green whatever the record says, and a record that could
-# not be written says why in yellow.
-$recordArgs = @('--record-strict', "$Runs")
-if ($runFactsPath -and (Test-Path $runFactsPath)) { $recordArgs += @('--run-facts', $runFactsPath) }
-$record = Invoke-ConeTool $recordArgs -Soft
+# Phase 328 — a green -Strict FULL run records itself as the baseline an empty cone may lean on: the
+# run's own verdict record (Phase 522), with the tree it verified. It never changes the verdict: the
+# leg is green whatever the record says, and a record that could not be written says why in yellow.
+$record = Invoke-ConeTool @('--record-strict', '--verdict', $lastRunPath) -Soft
 Remove-ConeWork
-if ($runFactsPath -and (Test-Path $runFactsPath)) { Remove-Item $runFactsPath -Force }
 if ($null -ne $record) {
     if ($record.recorded) { Write-Host "==== proofs: $($record.message)" -ForegroundColor Green }
     else { Write-Host "==== proofs: strict baseline $($record.message)" -ForegroundColor Yellow }

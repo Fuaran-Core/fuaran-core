@@ -1896,12 +1896,13 @@ let proofsKitTemplateTests =
 // it can check the module that references it; listing it keeps every module's clock its own, so a
 // budget and a floor are compared against the module they were seeded for.
 //
-// AN EMPTY CONE is green only over a recorded strict run: `proofs/last-strict.json` names the tree
-// the last green `-Strict` full leg verified, that tree is an ancestor of HEAD, and the cone
-// against IT is empty too — so an empty cone since some other tree cannot lean on a baseline that
-// predates a change nobody verified. A green `-Strict` full run records the file, and refuses to
-// when the working tree differs from HEAD in anything a module reads, because then the run
-// verified bytes no commit holds.
+// AN EMPTY CONE is green only over a recorded strict run: `proofs/last-strict.json` is the RUN
+// VERDICT (Phase 522; the kit's header, "THE RUN VERDICT") of the last green `-Strict` FULL leg with
+// the tree it verified, that tree is an ancestor of HEAD, and the cone against IT is empty too — so
+// an empty cone since some other tree cannot lean on a baseline that predates a change nobody
+// verified. A green `-Strict` full run records the file from its own verdict, and refuses to when
+// the working tree differs from HEAD in anything a module reads, because then the run verified bytes
+// no commit holds.
 
 /// Where the last green `-Strict` full run is recorded, relative to the repository root.
 let coneBaselinePath = "proofs/last-strict.json"
@@ -2429,75 +2430,97 @@ let coneSince (root: string) (since: string) : Result<ConeReport, string> =
 let private short (sha: string) =
     if sha.Length > 12 then sha.Substring(0, 12) else sha
 
-/// What a strict baseline record says about its run, for the line an empty cone prints (Phase 399):
-/// when it ran, on what machine, and each run's contention factor. Empty for a record that predates
-/// those fields; every part is optional, because the record is what a run wrote, not a schema.
+/// What a strict run's verdict record says about its run, for the line an empty cone prints: when it
+/// ran, on what machine, each run's contention factor and the modules over budget. Every part is
+/// optional, because the record is what a run wrote, not a schema this line enforces.
 let describeStrictRun (record: JsonElement) : string =
     let str (e: JsonElement) (name: string) =
         match e.TryGetProperty name with
         | true, v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
         | _ -> None
 
-    match record.TryGetProperty "run" with
-    | true, run when run.ValueKind = JsonValueKind.Object ->
-        let parts =
-            [ match str run "recordedAt" with
-              | Some at -> sprintf "run %s" at
-              | None -> ()
-              match run.TryGetProperty "machine" with
-              | true, m when m.ValueKind = JsonValueKind.Object ->
-                  let what =
-                      match str m "kind", str m "runner" with
-                      | Some "ci", Some runner -> sprintf "CI runner %s" runner
-                      | Some "ci", None -> "a CI runner"
-                      | Some "local", _ -> "a local machine"
-                      | Some other, _ -> other
-                      | None, _ -> "a machine"
+    let parts =
+        [ match str record "recordedAt" with
+          | Some at -> sprintf "run %s" at
+          | None -> ()
+          match record.TryGetProperty "machine" with
+          | true, m when m.ValueKind = JsonValueKind.Object ->
+              let what =
+                  match str m "kind", str m "runner" with
+                  | Some "ci", Some runner -> sprintf "CI runner %s" runner
+                  | Some "ci", None -> "a CI runner"
+                  | Some "local", _ -> "a local machine"
+                  | Some other, _ -> other
+                  | None, _ -> "a machine"
 
-                  let processors =
-                      match m.TryGetProperty "processors" with
-                      | true, p when p.ValueKind = JsonValueKind.Number -> Some(sprintf "%d processors" (p.GetInt32()))
-                      | _ -> None
+              let processors =
+                  match m.TryGetProperty "processors" with
+                  | true, p when p.ValueKind = JsonValueKind.Number -> Some(sprintf "%d processors" (p.GetInt32()))
+                  | _ -> None
 
-                  match [ str m "os"; processors ] |> List.choose id with
-                  | [] -> sprintf "on %s" what
-                  | details -> sprintf "on %s (%s)" what (String.concat ", " details)
-              | _ -> ()
-              match run.TryGetProperty "contention" with
-              | true, c when c.ValueKind = JsonValueKind.Array ->
-                  let factors =
-                      [ for r in c.EnumerateArray() do
-                            match r.TryGetProperty "factor" with
-                            | true, f when f.ValueKind = JsonValueKind.Number -> sprintf "x%.2f" (f.GetDouble())
-                            | _ -> "not computed" ]
+              match [ str m "os"; processors ] |> List.choose id with
+              | [] -> sprintf "on %s" what
+              | details -> sprintf "on %s (%s)" what (String.concat ", " details)
+          | _ -> ()
+          match record.TryGetProperty "contention" with
+          | true, c when c.ValueKind = JsonValueKind.Array ->
+              let factors =
+                  [ for r in c.EnumerateArray() do
+                        match r.TryGetProperty "factor" with
+                        | true, f when f.ValueKind = JsonValueKind.Number -> sprintf "x%.2f" (f.GetDouble())
+                        | _ -> "not computed" ]
 
-                  if not (List.isEmpty factors) then
-                      sprintf "contention %s" (String.concat ", " factors)
-              | _ -> ()
-              // Phase 399: a cost overrun is recorded, never red, so the line names the modules
-              // that ran over budget and the worst percentage each reached.
-              match run.TryGetProperty "costs" with
-              | true, c when c.ValueKind = JsonValueKind.Array ->
-                  let over =
-                      [ for r in c.EnumerateArray() do
-                            match str r "module", r.TryGetProperty "percent" with
-                            | Some m, (true, pc) when pc.ValueKind = JsonValueKind.Number && pc.GetInt32() > 100 ->
-                                m, pc.GetInt32()
-                            | _ -> () ]
-                      |> List.groupBy fst
-                      |> List.map (fun (m, xs) -> sprintf "%s %d%%" m (xs |> List.map snd |> List.max))
+              if not (List.isEmpty factors) then
+                  sprintf "contention %s" (String.concat ", " factors)
+          | _ -> ()
+          // A cost overrun is recorded, never red, so the line names the modules that ran over
+          // budget and the worst percentage each reached.
+          match record.TryGetProperty "costs" with
+          | true, c when c.ValueKind = JsonValueKind.Array ->
+              let over =
+                  [ for r in c.EnumerateArray() do
+                        match str r "module", r.TryGetProperty "percent" with
+                        | Some m, (true, pc) when pc.ValueKind = JsonValueKind.Number && pc.GetInt32() > 100 ->
+                            m, pc.GetInt32()
+                        | _ -> () ]
+                  |> List.groupBy fst
+                  |> List.map (fun (m, xs) -> sprintf "%s %d%%" m (xs |> List.map snd |> List.max))
 
-                  if List.isEmpty over then
-                      "every module within budget"
-                  else
-                      sprintf "over budget: %s" (String.concat ", " over)
-              | _ -> () ]
+              if List.isEmpty over then
+                  "every module within budget"
+              else
+                  sprintf "over budget: %s" (String.concat ", " over)
+          | _ -> () ]
 
-        if List.isEmpty parts then
-            ""
-        else
-            " — " + String.concat ", " parts
-    | _ -> ""
+    if List.isEmpty parts then
+        ""
+    else
+        " — " + String.concat ", " parts
+
+/// Why a run verdict record cannot stand behind an empty cone, or `None` when it can: it must be the
+/// kit's verdict (`kind: proofRunVerdict`) of a GREEN, STRICT, FULL run (`cone` null) — the shape
+/// `recordStrictBaseline` writes, and the one the strict workflow hands over.
+let strictVerdictFault (record: JsonElement) : string option =
+    let member' (name: string) =
+        match record.TryGetProperty name with
+        | true, v -> Some v
+        | _ -> None
+
+    let text name =
+        member' name
+        |> Option.filter (fun v -> v.ValueKind = JsonValueKind.String)
+        |> Option.map (fun v -> v.GetString())
+
+    if text "kind" <> Some "proofRunVerdict" then
+        Some "is not a run verdict (`kind: proofRunVerdict`)"
+    elif text "verdict" <> Some "green" then
+        Some(sprintf "records a %s run, not a green one" (defaultArg (text "verdict") "verdict-less"))
+    elif not (member' "strict" |> Option.exists (fun v -> v.ValueKind = JsonValueKind.True)) then
+        Some "records a run that was not -Strict"
+    elif member' "cone" |> Option.exists (fun v -> v.ValueKind <> JsonValueKind.Null) then
+        Some "records a cone run, not the FULL leg"
+    else
+        None
 
 /// Whether an EMPTY cone may exit green. `Ok` is the line that says what stands behind it; `Error`
 /// is why nothing does.
@@ -2511,7 +2534,7 @@ let emptyConeBaseline (root: string) : Result<string, string> =
                 coneBaselinePath
         )
     else
-        let tree, run =
+        let tree, fault, run =
             try
                 use doc = JsonDocument.Parse(File.ReadAllText file)
 
@@ -2520,13 +2543,14 @@ let emptyConeBaseline (root: string) : Result<string, string> =
                     | true, t when t.ValueKind = JsonValueKind.String -> Some(t.GetString())
                     | _ -> None
 
-                tree, describeStrictRun doc.RootElement
+                tree, strictVerdictFault doc.RootElement, describeStrictRun doc.RootElement
             with :? JsonException ->
-                None, ""
+                None, Some "is not JSON", ""
 
-        match tree with
-        | None -> Error(sprintf "the leg has NO STRICT BASELINE: %s names no `tree`" coneBaselinePath)
-        | Some tree ->
+        match tree, fault with
+        | _, Some why -> Error(sprintf "the leg has NO STRICT BASELINE: %s %s" coneBaselinePath why)
+        | None, None -> Error(sprintf "the leg has NO STRICT BASELINE: %s names no `tree`" coneBaselinePath)
+        | Some tree, None ->
             match resolveCommit root tree with
             | Error _ ->
                 Error(
@@ -2594,113 +2618,83 @@ let private writeJson (path: string) (write: Utf8JsonWriter -> unit) =
 /// working tree matches HEAD in everything a module reads, since otherwise the run verified bytes
 /// no commit holds. `Ok` is the line to print; `Error` says why nothing was written.
 ///
-/// `runFacts` (Phase 399) is the JSON the kit writes under `-SummaryFile`: its `machine` and
-/// `contention` members are copied into the record as they are, so a reader comparing two baselines
-/// can tell a quiet machine from a busy one and one machine from another. A facts file that cannot
-/// be read records the run without them and says so, because the facts describe the run and never
-/// decide whether it is recorded.
-let recordStrictBaseline
-    (root: string)
-    (runs: int)
-    (recordedAt: DateTimeOffset)
-    (runFacts: string option)
-    : Result<string, string> =
-    let runFactsDoc, factsNote =
-        match runFacts with
-        | None -> None, ""
-        | Some path ->
-            try
-                let doc = JsonDocument.Parse(File.ReadAllText path)
+/// The record IS the run's verdict (Phase 522): `verdictFile` is the record the kit wrote and
+/// `check.ps1` completed (`proofs/obj/last-run.json`), copied member for member beneath the tree it
+/// verified and when, so a baseline and any other run are read by one reader. A verdict that is not
+/// a green, strict, full run is refused rather than recorded: the baseline must be what it says.
+let recordStrictBaseline (root: string) (recordedAt: DateTimeOffset) (verdictFile: string) : Result<string, string> =
+    let verdict =
+        try
+            let doc = JsonDocument.Parse(File.ReadAllText verdictFile)
 
-                if doc.RootElement.ValueKind = JsonValueKind.Object then
-                    Some doc, ""
-                else
-                    doc.Dispose()
-                    None, sprintf " (the run facts in %s are not a JSON object, so the record carries none)" path
-            with
-            | :? JsonException
-            | :? IOException as e ->
-                None, sprintf " (the run facts in %s could not be read, so the record carries none: %s)" path e.Message
+            match strictVerdictFault doc.RootElement with
+            | None -> Ok doc
+            | Some why ->
+                doc.Dispose()
+                Error(sprintf "NOT recorded: the run verdict in %s %s" verdictFile why)
+        with
+        | :? JsonException
+        | :? IOException as e ->
+            Error(sprintf "NOT recorded: the run verdict in %s could not be read: %s" verdictFile e.Message)
 
-    use _runFactsDoc =
-        match runFactsDoc with
-        | Some d -> d :> IDisposable
-        | None ->
-            { new IDisposable with
-                member _.Dispose() = () }
+    match verdict with
+    | Error why -> Error why
+    | Ok doc ->
+        use doc = doc
 
-    match resolveCommit root "HEAD" with
-    | Error e -> Error e
-    | Ok head ->
-        match coneFactsSince root head with
+        match resolveCommit root "HEAD" with
         | Error e -> Error e
-        | Ok facts ->
-            let moved = computeCone facts |> List.filter (fun r -> r.Verdict = In)
+        | Ok head ->
+            match coneFactsSince root head with
+            | Error e -> Error e
+            | Ok facts ->
+                let moved = computeCone facts |> List.filter (fun r -> r.Verdict = In)
 
-            if not (List.isEmpty moved) then
-                Error(
-                    sprintf
-                        "NOT recorded: the working tree differs from HEAD in what %d module(s) read (first: %s, %s), so this run verified bytes no commit holds. Commit, then re-run -Strict to record a baseline"
-                        moved.Length
-                        moved.Head.Module
-                        moved.Head.Reason
-                )
-            else
-                let prover =
-                    try
-                        use pin = JsonDocument.Parse(workingText root "proofs/fstar-pin.json")
-
-                        match pin.RootElement.TryGetProperty "fstar" with
-                        | true, v when v.ValueKind = JsonValueKind.String -> v.GetString()
-                        | _ -> "unknown"
-                    with :? JsonException ->
-                        "unknown"
-
-                writeJson (Path.Combine(root, coneBaselinePath)) (fun w ->
-                    w.WriteString("kind", "proofStrictBaseline")
-
-                    w.WriteString(
-                        "$comment",
-                        "The last green -Strict FULL run of the proof leg, written by proofs/check.ps1 (Phase 328) and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on."
+                if not (List.isEmpty moved) then
+                    Error(
+                        sprintf
+                            "NOT recorded: the working tree differs from HEAD in what %d module(s) read (first: %s, %s), so this run verified bytes no commit holds. Commit, then re-run -Strict to record a baseline"
+                            moved.Length
+                            moved.Head.Module
+                            moved.Head.Reason
                     )
+                else
+                    writeJson (Path.Combine(root, coneBaselinePath)) (fun w ->
+                        w.WriteString("kind", "proofRunVerdict")
 
-                    w.WriteString("tree", head)
-                    w.WriteStartObject "run"
-                    w.WriteBoolean("strict", true)
-                    w.WriteNumber("runs", runs)
-                    w.WriteNumber("modules", facts.Roster.Length)
-                    w.WriteString("prover", prover)
-                    w.WriteString("recordedAt", recordedAt.UtcDateTime.ToString "yyyy-MM-ddTHH:mm:ssZ")
+                        w.WriteString(
+                            "$comment",
+                            "The run verdict of the last green -Strict FULL run of the proof leg, with the tree it verified, written by proofs/check.ps1 and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on."
+                        )
 
-                    match runFactsDoc with
-                    | Some doc ->
-                        for name in [ "machine"; "contention"; "costs"; "findings" ] do
-                            match doc.RootElement.TryGetProperty name with
-                            | true, v ->
-                                w.WritePropertyName name
-                                v.WriteTo w
-                            | _ -> ()
-                    | None -> ()
+                        w.WriteString("tree", head)
+                        w.WriteString("recordedAt", recordedAt.UtcDateTime.ToString "yyyy-MM-ddTHH:mm:ssZ")
 
-                    w.WriteEndObject())
+                        for p in doc.RootElement.EnumerateObject() do
+                            if p.Name <> "kind" && p.Name <> "tree" && p.Name <> "recordedAt" then
+                                p.WriteTo w)
 
-                Ok(
-                    sprintf
-                        "strict baseline recorded in %s: the -Strict full run of %s (%d run(s), %d modules)%s. Commit the file."
-                        coneBaselinePath
-                        (short head)
-                        runs
-                        facts.Roster.Length
-                        factsNote
-                )
+                    let runs =
+                        match doc.RootElement.TryGetProperty "runs" with
+                        | true, r when r.ValueKind = JsonValueKind.Number -> r.GetInt32()
+                        | _ -> 0
+
+                    Ok(
+                        sprintf
+                            "strict baseline recorded in %s: the -Strict full run of %s (%d run(s), %d modules). Commit the file."
+                            coneBaselinePath
+                            (short head)
+                            runs
+                            facts.Roster.Length
+                    )
 
 /// `dotnet run --project tests/Fuaran.Core.Tests -- --proof-cone ...`, the half of
 /// `proofs/check.ps1 -Since` that decides. Its answer goes to the `--out` file as JSON, printed
 /// lines included, so `check.ps1` prints them itself and no console code page sits between the two.
 ///   --since <tree> --out <file>          the cone, and for an empty one the baseline verdict
-///   --record-strict <runs> [--run-facts <file>] --out <file>
-///                                        record a green -Strict full run as the baseline, with
-///                                        the kit's run facts (Phase 399) when they are named
+///   --record-strict --verdict <file> --out <file>
+///                                        record a green -Strict full run's verdict (Phase 522) as
+///                                        the baseline
 /// Exit 0 when the answer was computed, whatever it is; 2 when it could not be.
 let coneCli (args: string list) : int =
     match args with
@@ -2738,35 +2732,20 @@ let coneCli (args: string list) : int =
                 w.WriteEndArray())
 
             0
-    | "--record-strict" :: runs :: rest when
-        (match rest with
-         | [ "--out"; _ ]
-         | [ "--run-facts"; _; "--out"; _ ] -> true
-         | _ -> false)
-        ->
-        let runFacts, out =
-            match rest with
-            | [ "--run-facts"; facts; "--out"; out ] -> Some facts, out
-            | _ -> None, List.last rest
+    | [ "--record-strict"; "--verdict"; verdictFile; "--out"; out ] ->
+        let recorded, message =
+            match recordStrictBaseline repoRoot DateTimeOffset.UtcNow verdictFile with
+            | Ok line -> true, line
+            | Error why -> false, why
 
-        match Int32.TryParse runs with
-        | true, n when n >= 1 ->
-            let recorded, message =
-                match recordStrictBaseline repoRoot n DateTimeOffset.UtcNow runFacts with
-                | Ok line -> true, line
-                | Error why -> false, why
+        writeJson out (fun w ->
+            w.WriteBoolean("recorded", recorded)
+            w.WriteString("message", message))
 
-            writeJson out (fun w ->
-                w.WriteBoolean("recorded", recorded)
-                w.WriteString("message", message))
-
-            0
-        | _ ->
-            eprintfn "==== proofs: --record-strict takes a positive run count, not '%s'" runs
-            2
+        0
     | _ ->
         eprintfn
-            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --record-strict <runs> [--run-facts <file>] --out <file>"
+            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --record-strict --verdict <file> --out <file>"
 
         2
 
@@ -3247,34 +3226,45 @@ let proofsConeTests =
                   | Error why ->
                       Expect.stringContains why "NO STRICT BASELINE" "and it says the leg has no strict baseline"
 
-                  // Phase 399 — the kit's run facts ride into the record, and the empty cone's line
-                  // names the run they describe. Written outside the toy tree, as check.ps1 does.
-                  let factsFile =
-                      Path.Combine(Path.GetTempPath(), sprintf "run-facts-%s.json" (Guid.NewGuid().ToString "N"))
+                  // Phase 522 — the record IS the run's verdict, and the empty cone's line names the
+                  // run it describes. Written outside the toy tree, as check.ps1 does.
+                  let verdictFile =
+                      Path.Combine(Path.GetTempPath(), sprintf "run-verdict-%s.json" (Guid.NewGuid().ToString "N"))
 
-                  File.WriteAllText(
-                      factsFile,
-                      """{ "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ], "costs": [ { "module": "A", "run": 1, "percent": 50 }, { "module": "B", "run": 1, "percent": 110 }, { "module": "B", "run": 2, "percent": 125 } ] }"""
-                  )
+                  let strictVerdict =
+                      """{ "kind": "proofRunVerdict", "verdict": "green", "exit": 0, "message": null, "strict": true, "runs": 3, "prover": "v0", "modules": [ "A", "B", "C" ], "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ], "costs": [ { "module": "A", "run": 1, "percent": 50 }, { "module": "B", "run": 1, "percent": 110 }, { "module": "B", "run": 2, "percent": 125 } ], "cone": null, "refusals": "held" }"""
 
                   try
+                      // Not a green, strict, full run: each is refused, naming why.
+                      for find, replace, why in
+                          [ "\"verdict\": \"green\"", "\"verdict\": \"refuted\"", "refuted run"
+                            "\"strict\": true", "\"strict\": false", "not -Strict"
+                            "\"cone\": null", "\"cone\": [ \"A\" ]", "cone run"
+                            "\"kind\": \"proofRunVerdict\"", "\"kind\": \"proofStrictBaseline\"", "not a run verdict" ] do
+                          File.WriteAllText(verdictFile, strictVerdict.Replace(find, replace))
+
+                          match recordStrictBaseline root DateTimeOffset.UtcNow verdictFile with
+                          | Ok line -> failtestf "a verdict that is no green strict full run was recorded: %s" line
+                          | Error message -> Expect.stringContains message why (sprintf "and the refusal says %s" why)
+
+                      Expect.isFalse (File.Exists(Path.Combine(root, coneBaselinePath))) "nothing was written"
+
+                      File.WriteAllText(verdictFile, strictVerdict)
+
                       match
-                          recordStrictBaseline
-                              root
-                              3
-                              (DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero))
-                              (Some factsFile)
+                          recordStrictBaseline root (DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero)) verdictFile
                       with
                       | Error why -> failtestf "a clean tree's strict run was not recorded: %s" why
                       | Ok _ -> ()
                   finally
-                      File.Delete factsFile
+                      File.Delete verdictFile
 
                   let recorded = File.ReadAllText(Path.Combine(root, coneBaselinePath))
                   let head = (gitOk root [ "rev-parse"; "HEAD" ]).Trim()
                   Expect.stringContains recorded head "the record names the tree the run verified"
                   Expect.stringContains recorded "quiet-box" "the record names the machine the run was on"
                   Expect.stringContains recorded "0.31" "and each run's contention factor"
+                  Expect.stringContains recorded "\"refusals\": \"held\"" "and every other member of the verdict"
                   Expect.isFalse (recorded.Contains "\r") "the record is written LF"
                   commitAll root "record the strict baseline"
 
@@ -3290,9 +3280,14 @@ let proofsConeTests =
                   File.AppendAllText(Path.Combine(root, "proofs/A.fst"), "let a2 = 2\n")
                   Expect.equal (coneIn root) (set [ "A"; "B" ]) "the working tree's model edit, and its dependant"
 
-                  match recordStrictBaseline root 1 DateTimeOffset.UtcNow None with
-                  | Ok line -> failtestf "a strict run over an uncommitted model edit was recorded: %s" line
-                  | Error why -> Expect.stringContains why "NOT recorded" "a dirty tree is never recorded"
+                  File.WriteAllText(verdictFile, strictVerdict)
+
+                  try
+                      match recordStrictBaseline root DateTimeOffset.UtcNow verdictFile with
+                      | Ok line -> failtestf "a strict run over an uncommitted model edit was recorded: %s" line
+                      | Error why -> Expect.stringContains why "NOT recorded" "a dirty tree is never recorded"
+                  finally
+                      File.Delete verdictFile
 
                   // An untracked covered source counts too.
                   writeAt root "src/Pkg.A/Y.fs" "module Y\n"
@@ -3319,7 +3314,10 @@ let proofsConeTests =
                   writeAt
                       root
                       coneBaselinePath
-                      """{ "kind": "proofStrictBaseline", "tree": "0000000000000000000000000000000000000001" }"""
+                      (strictVerdict.Replace(
+                          "\"kind\": \"proofRunVerdict\",",
+                          "\"kind\": \"proofRunVerdict\", \"tree\": \"0000000000000000000000000000000000000001\","
+                      ))
 
                   match emptyConeBaseline root with
                   | Ok line -> failtestf "a baseline naming an unknown tree was accepted: %s" line

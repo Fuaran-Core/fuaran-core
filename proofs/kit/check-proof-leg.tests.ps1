@@ -19,8 +19,11 @@
 # FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, since Phase 393 the PIN-RESOLUTION arms,
 # R, which need no prover and run first, and since Phase 402 the CACHE PROVENANCE arms, P (its
 # FLOOR-OS arms, O, retired with the floors in Phase 399, for the CACHED-READ and COST arms, C); since Phase 399 the MIRROR arms, M, and the ORACLE-INDEPENDENCE arms, I, which
-# need no prover either, the GUARD-IN-THE-LEG arms, Q, and the RUN-FACTS arms, S). The first prover arm is the control that
-# makes the other three mean something:
+# need no prover either, the GUARD-IN-THE-LEG arms, Q, and the RUN-FACTS arms, S; since Phase 522 the
+# RUN VERDICT, V: EVERY prover arm below runs the leg with -SummaryFile and asserts that it wrote one
+# record whose `exit` is the leg's own and whose `verdict` is `green` exactly when the leg was, and the
+# arms that stage a class assert its name — `refuted` (D), `failed` (B), `apparatus` (V)). The first
+# prover arm is the control that makes the other three mean something:
 #
 #   A. GREEN CONTROL — a true model, no host step: exit 0 AND `proofs: green`. If this is red, the
 #                      scratch apparatus is broken and a red B–D would prove nothing.
@@ -335,8 +338,17 @@ $hostFilters = @(@{ Filter = 'Leg.Host'; Failure = 'the scratch host is RED' })
 # In THIS process, with `&`, which is the shape that shadowed the exit code. Every stream is
 # captured so the transcript can be searched; the exit code is read from the GLOBAL automatic
 # variable, which is the only one this script never assigns.
+# Every run writes its RUN VERDICT (Phase 522): to the arm's own -SummaryFile when it names one, to a
+# fresh file per run otherwise. The record is read back and held to the run here, once for every arm,
+# so a leg whose record and exit code disagree is red whichever arm it happened in.
+$script:legRuns = 0
+
 function Invoke-Leg([hashtable] $legArgs) {
     $env:FSTAR_HOME = $fstarHome
+    $script:legRuns++
+    $legArgs = $legArgs.Clone()
+    if (-not $legArgs.ContainsKey('SummaryFile')) { $legArgs.SummaryFile = Join-Path $WorkDir "verdict-$($script:legRuns).json" }
+    if (Test-Path $legArgs.SummaryFile) { Remove-Item $legArgs.SummaryFile -Force }
     Push-Location $WorkDir
     $threw = $null
     try {
@@ -352,7 +364,11 @@ function Invoke-Leg([hashtable] $legArgs) {
         $code = 1
     }
     finally { Pop-Location }
-    [pscustomobject]@{ Exit = $code; Green = [bool]($lines -match '==== proofs: green'); Lines = $lines; Threw = $threw }
+    $verdict = if (Test-Path $legArgs.SummaryFile) { Get-Content $legArgs.SummaryFile -Raw | ConvertFrom-Json } else { $null }
+    $green = [bool]($lines -match '==== proofs: green')
+    Assert-That "V. VERDICT — run $($script:legRuns) ($($legArgs.Modules -join ', ')) wrote one record, its exit the leg's and its verdict green exactly when the leg was" (
+        $null -ne $verdict -and $verdict.kind -eq 'proofRunVerdict' -and $verdict.exit -eq $code -and (($verdict.verdict -eq 'green') -eq ($code -eq 0 -and $green))) "exit $code, record $(if ($verdict) { "$($verdict.verdict)/$($verdict.exit)" } else { 'absent' })"
+    [pscustomobject]@{ Exit = $code; Green = $green; Lines = $lines; Threw = $threw; Verdict = $verdict }
 }
 
 function Show-Tail($result) {
@@ -367,6 +383,8 @@ $base = @{ ProofsDir = $scratch; RepoRoot = $WorkDir; Runs = 1 }
 $a = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood') })
 Assert-That 'A. GREEN CONTROL — a true model with no host step exits 0' ($a.Exit -eq 0) "exit $($a.Exit): $(Show-Tail $a)"
 Assert-That 'A. GREEN CONTROL — and prints proofs: green' $a.Green (Show-Tail $a)
+Assert-That 'A. GREEN CONTROL — and records the verdict green, the modules it checked and no message' (
+    $a.Verdict.verdict -eq 'green' -and (@($a.Verdict.modules) -join ',') -eq 'LegGood' -and $null -eq $a.Verdict.message -and $a.Verdict.hostStep -eq 'none declared') "$($a.Verdict | ConvertTo-Json -Compress -Depth 2)"
 if ($a.Exit -ne 0 -or -not $a.Green) {
     Write-Host '==== leg-tests: the GREEN CONTROL is red, so the scratch apparatus is broken and arms B–D would prove nothing. Stopping.' -ForegroundColor Red
     Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -381,6 +399,8 @@ $b = Invoke-Leg ($base + @{
     })
 Assert-That 'B. HOST BUILD — a host project that does not exist exits NON-ZERO' ($b.Exit -ne 0) "exit $($b.Exit): $(Show-Tail $b)"
 Assert-That 'B. HOST BUILD — and does not print proofs: green' (-not $b.Green) (Show-Tail $b)
+Assert-That 'B. HOST BUILD — and records the verdict failed, naming the host step' (
+    $b.Verdict.verdict -eq 'failed' -and $b.Verdict.hostStep -eq 'ran' -and $b.Verdict.message -match 'HOST step') "$($b.Verdict.verdict): $($b.Verdict.message)"
 
 # ---- C. HOST RUN ---------------------------------------------------------------------------------
 
@@ -396,6 +416,8 @@ Assert-That 'C. HOST RUN — and does not print proofs: green' (-not $c.Green) (
 $d = Invoke-Leg ($base + @{ Modules = @('LegBad'); ProofOnly = @('LegBad') })
 Assert-That 'D. CHECK — a model with a type error exits NON-ZERO' ($d.Exit -ne 0) "exit $($d.Exit): $(Show-Tail $d)"
 Assert-That 'D. CHECK — and does not print proofs: green' (-not $d.Green) (Show-Tail $d)
+Assert-That 'D. CHECK — and records the verdict refuted, with the red line it printed' (
+    $d.Verdict.verdict -eq 'refuted' -and $d.Verdict.message -match 'LegBad\.fst did NOT verify') "$($d.Verdict.verdict): $($d.Verdict.message)"
 # Recorded 2026-09-25: a sibling copy of this kit printed `<module>.fst verified` over a refused
 # model and went red only later. The per-module line is held too, not only the closing verdict.
 Assert-That 'D. CHECK — and prints NO LegBad.fst verified line' (-not [bool](@($d.Lines -match 'LegBad\.fst verified').Count)) (Show-Tail $d)
@@ -477,7 +499,8 @@ Assert-That 'Q. GUARD CONTROL — the same leg without the plant is green, and s
 # ---- S. THE RUN FACTS (Phase 399) -------------------------------------------------------------------
 
 # -SummaryFile is what a strict baseline records about its machine: a green leg writes the machine and
-# one contention entry per run, and a red leg writes nothing, so no record can describe a failed run.
+# one contention entry per run. A red leg writes its record too (Phase 522), saying it is red, so a
+# reader of the record — never of the transcript — learns why.
 $factsPath = Join-Path $WorkDir 'run-facts.json'
 $twoRuns = $base.Clone(); $twoRuns.Runs = 2
 $s1 = Invoke-Leg ($twoRuns + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); SummaryFile = $factsPath })
@@ -486,7 +509,20 @@ Assert-That 'S. RUN FACTS — a green leg writes the machine and one contention 
     $s1.Exit -eq 0 -and $null -ne $facts -and $facts.machine.kind -and $facts.machine.os -and $facts.machine.processors -and @($facts.contention).Count -eq 2 -and @($facts.contention)[1].run -eq 2) "exit $($s1.Exit): $(if ($facts) { $facts | ConvertTo-Json -Compress -Depth 6 } else { 'no file' })"
 Remove-Item $factsPath -Force -ErrorAction SilentlyContinue
 $s2 = Invoke-Leg ($base + @{ Modules = @('LegBad'); ProofOnly = @('LegBad'); SummaryFile = $factsPath })
-Assert-That 'S. RUN FACTS — a red leg writes none' ($s2.Exit -ne 0 -and -not (Test-Path $factsPath)) "exit $($s2.Exit): $(Show-Tail $s2)"
+Assert-That 'S. RUN FACTS — a red leg writes its record, saying it is red' ($s2.Exit -ne 0 -and $s2.Verdict.verdict -eq 'refuted' -and $s2.Verdict.exit -eq $s2.Exit) "exit $($s2.Exit): $(Show-Tail $s2)"
+
+# ---- V. THE APPARATUS VERDICT (Phase 522) -----------------------------------------------------------
+
+# The leg's own machinery failing, staged exactly as the 2026-09 incident was: a dependency's checked
+# file removed from the per-invocation cache after the check step and before the extraction that
+# needs it. LegGood is checked only; LegUses opens it and is extracted.
+Set-Content (Join-Path $scratch 'LegUses.fst') "module LegUses`n`nopen LegGood`n`nlet two : nat = one + one`n"
+$v = Invoke-Leg ($base + @{
+        Modules = @('LegGood', 'LegUses'); ProofOnly = @('LegGood'); Extract = $true
+        AfterInvocation = { param($module, $run, $cacheDir) if ($module -eq 'LegUses') { Remove-Item (Join-Path $cacheDir 'LegGood.fst.checked*') -Force } }
+    })
+Assert-That 'V. APPARATUS — a checked dependency removed under the extraction is an apparatus fault, exit 4, recorded as such' (
+    $v.Exit -eq 4 -and $v.Verdict.verdict -eq 'apparatus' -and $v.Verdict.message -match 'APPARATUS') "exit $($v.Exit): $(Show-Tail $v)"
 
 # ---- P. CACHE PROVENANCE (Phase 402) ----------------------------------------------------------------
 
