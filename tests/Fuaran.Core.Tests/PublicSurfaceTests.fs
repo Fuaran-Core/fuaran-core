@@ -1479,27 +1479,10 @@ let private repoRoot () : string = Snapshots.repoFile ""
 
 // ---- git, for the since-the-newest-tag report -----------------------------
 
-let private git (root: string) (arguments: string) : Result<string, string> = ChildProcess.git root arguments
+// The newest tag is `ChildProcess.Tags.newest` over `ChildProcess.Tags.released`: the newest
+// `vX.Y.Z` tag in HEAD's history, ordered by version (Phase 499).
 
-/// Semantic ordering over `vX.Y.Z` tags. A tag this does not parse is dropped rather than
-/// sorted lexically — `v0.9.0` above `v0.26.0` would name the wrong baseline to compare
-/// against, and a wrong comparison is worse than none.
-let internal newestVersionTag (tagLines: string list) : string option =
-    tagLines
-    |> List.map _.Trim()
-    |> List.choose (fun t ->
-        if not (t.StartsWith("v", StringComparison.Ordinal)) then
-            None
-        else
-            match t.Substring(1).Split('.') with
-            | [| a; b; c |] ->
-                match Int32.TryParse a, Int32.TryParse b, Int32.TryParse c with
-                | (true, x), (true, y), (true, z) -> Some((x, y, z), t)
-                | _ -> None
-            | _ -> None)
-    |> function
-        | [] -> None
-        | xs -> xs |> List.maxBy fst |> snd |> Some
+let private git (root: string) (arguments: string) : Result<string, string> = ChildProcess.git root arguments
 
 // ---- the suite ------------------------------------------------------------
 
@@ -1851,21 +1834,15 @@ let tests =
               // report that silently compared nothing is the one outcome worse than no report.
               let root = repoRoot ()
 
-              match git root "tag --list" with
+              match ChildProcess.Tags.released root with
               | Error why ->
                   printfn "PublicSurface since-tag report SKIPPED: %s" why
                   skiptestf "since-tag class report skipped — %s" why
-              | Ok out ->
-                  let tags =
-                      out.Split('\n')
-                      |> Array.toList
-                      |> List.map _.Trim()
-                      |> List.filter (fun l -> l <> "")
-
-                  match newestVersionTag tags with
+              | Ok tags ->
+                  match ChildProcess.Tags.newest tags with
                   | None ->
-                      printfn "PublicSurface since-tag report SKIPPED: no `vX.Y.Z` tag in this clone"
-                      skiptest "since-tag class report skipped — this clone holds no `vX.Y.Z` tag"
+                      printfn "PublicSurface since-tag report SKIPPED: no `vX.Y.Z` tag in HEAD's history"
+                      skiptest "since-tag class report skipped — HEAD's history holds no `vX.Y.Z` tag"
                   | Some tag ->
                       let packable = roster () |> List.map _.PackageId
                       Expect.isNonEmpty packable "at least one packable project was found under src/"
@@ -2805,18 +2782,4 @@ let tests =
                   "a type header has no member, so its `owner` is its namespace"
 
               Expect.isNone (owner "interface-marker B") "an unqualified marker owns nothing"
-          }
-
-          test "the newest tag is chosen by version, not by string order" {
-              Expect.equal
-                  (newestVersionTag [ "v0.9.0"; "v0.26.0"; "v0.25.0" ])
-                  (Some "v0.26.0")
-                  "`v0.26.0` is newer than `v0.9.0` — a lexical sort would name the wrong baseline to compare against"
-
-              Expect.equal
-                  (newestVersionTag [ "v1.0.0"; "not-a-tag"; "v0.26.0"; "v1.0" ])
-                  (Some "v1.0.0")
-                  "a tag this does not parse is dropped rather than ordered by accident"
-
-              Expect.isNone (newestVersionTag [ "nightly"; "release/2" ]) "a clone with no `vX.Y.Z` tag yields none"
           } ]

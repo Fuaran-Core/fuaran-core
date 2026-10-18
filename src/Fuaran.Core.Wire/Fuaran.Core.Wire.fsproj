@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Wire</PackageId>
-    <Description>Fuaran.Core.Wire — the "kind"-tag / camelCase wire-envelope discipline, Fable-clean encode helpers + .NET-guarded decode combinators, and the conformance-corpus tooling (manifest + round-trip/reject runner + coverage gate). Per-kind cases stay domain-side. FSharp.Core only.</Description>
+    <Description>Fuaran.Core.Wire — the "kind"-tag / camelCase wire-envelope discipline, Fable-clean encode helpers + portable decode combinators (one parser and one decode layer on .NET and Fable, with typed refusals), and the conformance-corpus tooling (manifest + round-trip/reject runner + coverage gate). Per-kind cases stay domain-side. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="JVal.fs" />

@@ -252,21 +252,6 @@ let internal staleDraftSentences (tags: Set<string>) (lines: string list) : (int
 /// an entry invented for it — so the rule covers every tag (DECISIONS.md D130).
 let internal entryHeaderFloor = (0, 0, 0)
 
-let private releaseTagRe = Regex(@"^v(\d+)\.(\d+)\.(\d+)$", RegexOptions.Compiled)
-
-/// `(major, minor, patch)` for a plain release tag, else `None`. The shape is deliberately
-/// STRICT: a pre-release spelling (`v0.0.1-alpha.8`) names no released slot in the sense
-/// this rule is about, and every such tag this repository holds sits below the floor in any
-/// case. A tag shape this does not parse is out of frame rather than reported — the
-/// alternative is reddening on someone else's tagging convention.
-let internal releaseTagVersion (tag: string) : (int * int * int) option =
-    let m = releaseTagRe.Match tag
-
-    if m.Success then
-        Some(int m.Groups[1].Value, int m.Groups[2].Value, int m.Groups[3].Value)
-    else
-        None
-
 /// Release tags at or above `floor` that no entry header names, oldest first.
 ///
 /// Ordering is NUMERIC, over the parsed triple, not lexical over the tag string: `0.9.0`
@@ -277,7 +262,7 @@ let internal releaseTagVersion (tag: string) : (int * int * int) option =
 let internal tagsMissingEntryHeader (floor: int * int * int) (tags: Set<string>) (stability: string) : string list =
     tags
     |> Set.toList
-    |> List.choose (fun t -> releaseTagVersion t |> Option.map (fun v -> v, t))
+    |> List.choose (fun t -> ChildProcess.Tags.version t |> Option.map (fun v -> v, t))
     |> List.filter (fun (v, _) -> v >= floor)
     |> List.sortBy fst
     |> List.filter (fun (_, t) -> (entryHeaderNaming (t.Substring 1) stability).IsNone)
@@ -430,7 +415,7 @@ let internal ledgerFaults
         let fromTags =
             tags
             |> Set.toList
-            |> List.choose (fun t -> releaseTagVersion t |> Option.map (fun _ -> t.Substring 1))
+            |> List.choose (fun t -> ChildProcess.Tags.version t |> Option.map (fun _ -> t.Substring 1))
 
         (fromTags @ Option.toList standing)
         |> List.distinct
@@ -567,30 +552,6 @@ let private repoRoot () : string option =
 
     [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
     |> List.tryPick (fun start -> climb start 12)
-
-/// `git tag --list` from `root`, or why it could not be run. Spawned through
-/// `ChildProcess.redirected` so the child's stdout decodes as UTF-8 whatever code page the
-/// runner inherited.
-let private gitTags (root: string) : Result<Set<string>, string> =
-    try
-        let psi = ChildProcess.redirected "git" "tag --list"
-        psi.WorkingDirectory <- root
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "`git tag --list` exited %d: %s" p.ExitCode (err.Trim()))
-        else
-            out.Split('\n')
-            |> Array.toList
-            |> List.map _.Trim()
-            |> List.filter (fun l -> l <> "")
-            |> Set.ofList
-            |> Ok
-    with e ->
-        Error("`git` could not be run: " + e.Message)
 
 let private withRoot (f: string -> unit) =
     match repoRoot () with
@@ -851,14 +812,17 @@ let tests =
 
           test "no 'no tag exists' sentence survives the tag it denies" {
               withRoot (fun root ->
-                  match gitTags root with
+                  match ChildProcess.Tags.released root with
                   | Error why ->
                       // Skipped by NAME with the reason printed, never passed silently.
                       // This is the source-archive / no-git case, not a defect in the tree.
                       printfn "STABILITY draft-slot tag check SKIPPED: %s" why
                       skiptestf "STABILITY draft-slot tag check skipped — %s" why
                   | Ok tags ->
-                      Expect.isNonEmpty (Set.toList tags) "`git tag --list` listed at least one tag"
+                      // A clone with git but no release tag in HEAD's history FAILS here rather than
+                      // skipping, on purpose: with no tag the comparison below passes vacuously. The
+                      // remedy is to fetch the tags (CONTRIBUTING.md, "Prerequisites").
+                      Expect.isNonEmpty (Set.toList tags) "HEAD's history holds at least one `vX.Y.Z` release tag"
 
                       let stale =
                           ledgerFiles root
@@ -886,7 +850,7 @@ let tests =
               // that `<Version>` has moved past is outside its frame entirely — which is
               // how `v0.25.0` came to be tagged with no entry while this file read green.
               withRoot (fun root ->
-                  match gitTags root with
+                  match ChildProcess.Tags.released root with
                   | Error why ->
                       printfn "STABILITY per-tag entry check SKIPPED: %s" why
                       skiptestf "STABILITY per-tag entry check skipped — %s" why
@@ -894,7 +858,7 @@ let tests =
                       let covered =
                           tags
                           |> Set.toList
-                          |> List.choose releaseTagVersion
+                          |> List.choose ChildProcess.Tags.version
                           |> List.filter (fun v -> v >= entryHeaderFloor)
 
                       Expect.isNonEmpty
@@ -960,7 +924,7 @@ let tests =
                       "the ledger holds at least one slot file — an empty read would make every clause vacuous"
 
                   let tags =
-                      match gitTags root with
+                      match ChildProcess.Tags.released root with
                       | Ok tags -> tags
                       | Error why ->
                           // Without git the tag clause has nothing to read; the shape clauses still run.
@@ -1227,15 +1191,17 @@ let tests =
                   "lowering the floor pulls older un-entried slots in, oldest first — the FLOOR is what excludes them, not a gap in the reader"
 
               Expect.equal
-                  (releaseTagVersion "v0.9.0" |> Option.map (fun v -> v < (0, 25, 0)))
+                  (ChildProcess.Tags.version "v0.9.0" |> Option.map (fun v -> v < (0, 25, 0)))
                   (Some true)
                   "ordering is numeric: 0.9.0 is BELOW 0.25.0, which a lexical comparison on the tag string gets backwards"
 
               Expect.isNone
-                  (releaseTagVersion "v0.0.1-alpha.8")
+                  (ChildProcess.Tags.version "v0.0.1-alpha.8")
                   "a pre-release spelling parses to nothing, so it is out of frame rather than reported"
 
-              Expect.isNone (releaseTagVersion "release/v1.2.3") "a foreign tagging convention is out of frame too"
+              Expect.isNone
+                  (ChildProcess.Tags.version "release/v1.2.3")
+                  "a foreign tagging convention is out of frame too"
           }
 
           test "the exclusions reader accepts the plausible shapes and refuses the rest" {

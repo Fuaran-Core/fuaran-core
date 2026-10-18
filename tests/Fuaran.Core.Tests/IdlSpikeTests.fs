@@ -55,24 +55,19 @@ let private generatedKinds =
 [<Literal>]
 let private corpusFamily = "nodes"
 
-let private tryFindGenerated () : string option =
-    let rel = Path.Combine("tests", "Fuaran.Core.Tests", "MiniGenerated.fs")
+/// The committed generated module, at the path `--regen-snapshots` writes it to.
+let private miniGeneratedFile = "tests/Fuaran.Core.Tests/MiniGenerated.fs"
 
-    let rec climb (dir: string) (budget: int) =
-        if budget < 0 || isNull dir then
-            None
-        else
-            let candidate = Path.Combine(dir, rel)
+/// The command that regenerates both of this file's held artefacts.
+let private regenerate =
+    "dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots"
 
-            if File.Exists candidate then
-                Some candidate
-            else
-                match Directory.GetParent dir with
-                | null -> None
-                | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); System.AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
+/// A held artefact that is ABSENT is red, naming the file and the command that writes it (Phase 499):
+/// a guard that skipped here read green over a deleted artefact, where every other held artefact
+/// fails.
+let private requireOnDisk (rel: string) (path: string) =
+    if not (File.Exists path) then
+        failtestf "%s is not on disk (%s) — a held artefact is never absent; regenerate it with: %s" rel path regenerate
 
 /// A wire string crafted to break out of a source literal + inject code (Phase 321).
 let private hostile = "x\"; PWNED(); \\ </script>\n\t<&>"
@@ -285,28 +280,29 @@ let tests =
                   | Ok s -> s
                   | Error e -> failtestf "codegen rejected the spike vocabulary: %A" e
 
-              match tryFindGenerated () with
-              | None -> skiptest "MiniGenerated.fs not found on disk — drift guard skipped"
-              | Some path ->
-                  // Regeneration escape hatch: FUARAN_REGEN=1
-                  // rewrites the committed file instead of asserting, so a deliberate
-                  // generator change is a one-command update, not a hand-edit of
-                  // generated code.
-                  Approval.write Approval.Regen Approval.Regenerated.Mini path generated |> ignore
+              let path = Snapshots.repoFile miniGeneratedFile
 
-                  // BYTE-FOR-BYTE (D30). The committed artefact must be exactly what the
-                  // generator emits — not merely the same modulo whitespace. The normaliser
-                  // this replaced stripped every whitespace character before comparing, so an
-                  // emission differing only in line endings or spacing was equal to it, and
-                  // that insensitivity is why a carriage-return bake in a generated artefact
-                  // reached a downstream consumer before anything here noticed. A
-                  // formatting-only generator change is now red until the artefact is
-                  // regenerated and committed — the same discipline the law-vector corpus
-                  // already applies to its committed vectors.
-                  Expect.equal
-                      generated
-                      (File.ReadAllText path)
-                      "the generator no longer reproduces MiniGenerated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+              // Regeneration escape hatch: FUARAN_REGEN=1
+              // rewrites the committed file instead of asserting, so a deliberate
+              // generator change is a one-command update, not a hand-edit of
+              // generated code.
+              Approval.write Approval.Regen Approval.Regenerated.Mini path generated |> ignore
+              requireOnDisk miniGeneratedFile path
+
+              // BYTE-FOR-BYTE (D30). The committed artefact must be exactly what the
+              // generator emits — not merely the same modulo whitespace. The normaliser
+              // this replaced stripped every whitespace character before comparing, so an
+              // emission differing only in line endings or spacing was equal to it, and
+              // that insensitivity is why a carriage-return bake in a generated artefact
+              // reached a downstream consumer before anything here noticed. A
+              // formatting-only generator change is now red until the artefact is
+              // regenerated and committed — the same discipline the law-vector corpus
+              // already applies to its committed vectors.
+              Expect.equal
+                  generated
+                  (File.ReadAllText path)
+                  ("the generator no longer reproduces MiniGenerated.fs byte-for-byte — regenerate it with: "
+                   + regenerate))
 
           testCase "snapshot store: the committed spike.json IS what the store renders (byte-for-byte)" (fun _ ->
               // D30's third artefact. The two guards above cover the generated F# modules;
@@ -323,20 +319,16 @@ let tests =
               // true and the file stale, which is the same pair `LawVectorTests` keeps.
               let path = Snapshots.mapFile "spike"
 
-              if not (File.Exists path) then
-                  skiptest "snapshots/spike.json not on disk — byte guard skipped"
-              else
-                  Approval.write
-                      Approval.Regen
-                      Approval.Regenerated.Spike
-                      path
-                      (Snapshots.render "spike" miniIdl cases)
-                  |> ignore
+              Approval.write Approval.Regen Approval.Regenerated.Spike path (Snapshots.render "spike" miniIdl cases)
+              |> ignore
 
-                  Expect.equal
-                      (Snapshots.render "spike" miniIdl cases)
-                      (File.ReadAllText path)
-                      "the committed snapshots/spike.json is not what the store renders byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+              requireOnDisk "snapshots/spike.json" path
+
+              Expect.equal
+                  (Snapshots.render "spike" miniIdl cases)
+                  (File.ReadAllText path)
+                  ("the committed snapshots/spike.json is not what the store renders byte-for-byte — regenerate it with: "
+                   + regenerate))
 
           // ---- Phase 317 increment 5: the Core witness-record leg ----
 

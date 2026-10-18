@@ -243,16 +243,16 @@ let internal packageKey (baselineFile: string) : string option =
     else
         None
 
-/// `(version, index)` for every release tag whose tree carries the baselines, oldest first.
+/// `(version, index)` for every release tag in HEAD's history whose tree carries the baselines, oldest
+/// first.
 let private releaseIndexes (root: string) : Result<(string * Set<string>) list, string> =
-    ChildProcess.git root "tag --list"
-    |> Result.bind (fun out ->
+    ChildProcess.Tags.released root
+    |> Result.bind (fun released ->
         let tags =
-            out.Split('\n')
-            |> Array.map _.Trim()
-            |> Array.choose (fun t -> PackageRosterTests.releaseTagVersion t |> Option.map (fun v -> v, t))
-            |> Array.sortBy fst
-            |> Array.toList
+            released
+            |> Set.toList
+            |> List.choose (fun t -> ChildProcess.Tags.version t |> Option.map (fun v -> v, t))
+            |> List.sortBy fst
 
         let rec go acc =
             function
