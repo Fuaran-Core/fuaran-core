@@ -51,7 +51,7 @@ and ids_all : Prims.list<tree>  ->  Prims.list<Prims.string> = (fun ( ts  :  Pri
      []
      end
 | (t)::r -> begin
-     (DagFold.app (ids t) (ids_all r))
+     (ListAlgebra.app (ids t) (ids_all r))
      end))
 
 
@@ -64,7 +64,7 @@ let rec kid_ids : Prims.list<tree>  ->  Prims.list<Prims.string> = (fun ( ts  : 
      end))
 
 
-let has_id : Prims.string  ->  tree  ->  Prims.bool = (fun ( x  :  Prims.string ) ( t  :  tree ) -> (DagFold.mem x (ids t)))
+let has_id : Prims.string  ->  tree  ->  Prims.bool = (fun ( x  :  Prims.string ) ( t  :  tree ) -> (ListAlgebra.mem x (ids t)))
 
 
 let rec find_in : Prims.string  ->  tree  ->  FStar_Pervasives_Native.option<tree> = (fun ( x  :  Prims.string ) ( t  :  tree ) -> (match (t) with
@@ -126,7 +126,7 @@ and parent_all : Prims.string  ->  Prims.list<tree>  ->  FStar_Pervasives_Native
 
 let rec wf : tree  ->  Prims.bool = (fun ( t  :  tree ) -> (match (t) with
 | TNode (i, uu___, cs) -> begin
-     ((not ((DagFold.mem i (ids_all cs)))) && (wf_all cs))
+     ((not ((ListAlgebra.mem i (ids_all cs)))) && (wf_all cs))
      end))
 and wf_all : Prims.list<tree>  ->  Prims.bool = (fun ( ts  :  Prims.list<tree> ) -> (match (ts) with
 | [] -> begin
@@ -398,7 +398,7 @@ let rec ins : Prims.string  ->  tree  ->  tree  ->  tree = (fun ( p  :  Prims.st
 let cs' = (ins_all p n cs)
 in  
 if (Prims.op_Equals i p) then begin
-     TNode (i, k, (DagFold.app cs' ((n)::[])))
+     TNode (i, k, (ListAlgebra.app cs' ((n)::[])))
      end else begin
      TNode (i, k, cs')
      end)
@@ -565,7 +565,7 @@ let rec scan_dup : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  F
      end
 | (i)::rest -> begin
       
-if (DagFold.mem i seen) then begin
+if (ListAlgebra.mem i seen) then begin
      FStar_Pervasives_Native.Some (i)
      end else begin
      (scan_dup ((i)::seen) rest)
@@ -646,7 +646,7 @@ if (not ((has_id np t))) then begin
      end
 | FStar_Pervasives_Native.Some (sub) -> begin
       
-if (DagFold.mem np (ids sub)) then begin
+if (ListAlgebra.mem np (ids sub)) then begin
      DagFold.Error (WouldNestUnderSelf (x))
      end else begin
      (match ((parent_of x t)) with
@@ -761,7 +761,7 @@ let rec no_dups : Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.
      true
      end
 | (x)::r -> begin
-     ((not ((DagFold.mem x r))) && (no_dups r))
+     ((not ((ListAlgebra.mem x r))) && (no_dups r))
      end))
 
 
@@ -771,7 +771,7 @@ let rec locate : Prims.string  ->  Prims.list<tree>  ->  FStar_Pervasives_Native
      end
 | (t)::r -> begin
       
-if (DagFold.mem x (ids t)) then begin
+if (ListAlgebra.mem x (ids t)) then begin
      FStar_Pervasives_Native.Some (t)
      end else begin
      (locate x r)
@@ -893,7 +893,7 @@ let rec precedes : Prims.string  ->  Prims.string  ->  Prims.list<Prims.string> 
 | (h)::r -> begin
       
 if (Prims.op_Equals h p) then begin
-     (DagFold.mem x r)
+     (ListAlgebra.mem x r)
      end else begin
       
 if (Prims.op_Equals h x) then begin
@@ -939,25 +939,16 @@ let lift_batch : op = Batch ((InsertChild ("x", TNode ("n1", "para", [])))::(Reo
 let lift_leaf : op = InsertChild ("y", TNode ("n2", "para", []))
 
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::r -> begin
-     ((Prims.parse_int "1") + (len r))
-     end))
-
-
 let rec shape : tree  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)> = (fun ( t  :  tree ) -> (match (t) with
 | TNode (i, k, cs) -> begin
-     (((i), (k), ((len cs))))::(shape_all cs)
+     (((i), (k), ((ListAlgebra.len cs))))::(shape_all cs)
      end))
 and shape_all : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)> = (fun ( ts  :  Prims.list<tree> ) -> (match (ts) with
 | [] -> begin
      []
      end
 | (t)::r -> begin
-     (DagFold.app (shape t) (shape_all r))
+     (ListAlgebra.app (shape t) (shape_all r))
      end))
 
 
@@ -970,7 +961,7 @@ and labels_all : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string)>
      []
      end
 | (t)::r -> begin
-     (DagFold.app (labels t) (labels_all r))
+     (ListAlgebra.app (labels t) (labels_all r))
      end))
 
 
@@ -1016,7 +1007,7 @@ let place_script : Prims.string  ->  Prims.nat  ->  tree  ->  tree  ->  Prims.li
 
 let cs = (placed_kids p t)
 in  
-if (Prims.op_Equals k (len cs)) then begin
+if (Prims.op_Equals k (ListAlgebra.len cs)) then begin
      (InsertChild (p, n))::[]
      end else begin
      (Batch ((InsertChild (p, n))::(ReorderChildren (p, (insert_at k (tid_of n) (kid_ids cs))))::[]))::[]
@@ -1056,7 +1047,7 @@ and ix_nodes_all : Prims.list<tree>  ->  Prims.list<tree> = (fun ( ts  :  Prims.
      []
      end
 | (t)::r -> begin
-     (DagFold.app (ix_nodes t) (ix_nodes_all r))
+     (ListAlgebra.app (ix_nodes t) (ix_nodes_all r))
      end))
 
 
@@ -1110,7 +1101,7 @@ let rec ix_links : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string
      []
      end
 | (n)::r -> begin
-     (DagFold.app (ix_kid_links (tid_of n) (kids_of n)) (ix_links r))
+     (ListAlgebra.app (ix_kid_links (tid_of n) (kids_of n)) (ix_links r))
      end))
 
 
@@ -1201,7 +1192,7 @@ let rec ix_keys_within = (fun ( l  :  Prims.list<(Prims.string * 'a)> ) ( ks  : 
      true
      end
 | ((k, uu___))::r -> begin
-     ((DagFold.mem k ks) && (ix_keys_within r ks))
+     ((ListAlgebra.mem k ks) && (ix_keys_within r ks))
      end))
 
 
@@ -1233,7 +1224,7 @@ if (Prims.op_Equals fuel (Prims.parse_int "0")) then begin
      (match ((ix_assoc cur ix.ix_parent)) with
 | FStar_Pervasives_Native.Some (p) -> begin
       
-if (DagFold.mem p visited) then begin
+if (ListAlgebra.mem p visited) then begin
      FStar_Pervasives_Native.None
      end else begin
      (ix_up (fuel - (Prims.parse_int "1")) ix ((p)::acc) ((p)::visited) p)
@@ -1250,13 +1241,13 @@ let ix_path : Prims.string  ->  ix_index  ->  FStar_Pervasives_Native.option<Pri
      FStar_Pervasives_Native.None
      end
 | FStar_Pervasives_Native.Some (uu___) -> begin
-     (ix_up ((len ix.ix_by_id) + (Prims.parse_int "1")) ix ((x)::[]) ((x)::[]) x)
+     (ix_up ((ListAlgebra.len ix.ix_by_id) + (Prims.parse_int "1")) ix ((x)::[]) ((x)::[]) x)
      end))
 
 
 let ix_depth : Prims.string  ->  ix_index  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( x  :  Prims.string ) ( ix  :  ix_index ) -> (match ((ix_path x ix)) with
 | FStar_Pervasives_Native.Some (l) -> begin
-     FStar_Pervasives_Native.Some (((len l) - (Prims.parse_int "1")))
+     FStar_Pervasives_Native.Some (((ListAlgebra.len l) - (Prims.parse_int "1")))
      end
 | FStar_Pervasives_Native.None -> begin
      FStar_Pervasives_Native.None
@@ -1366,7 +1357,7 @@ and ix_path_walk_all : Prims.string  ->  Prims.list<tree>  ->  FStar_Pervasives_
 
 let ix_depth_walk : Prims.string  ->  tree  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( x  :  Prims.string ) ( t  :  tree ) -> (match ((ix_path_walk x t)) with
 | FStar_Pervasives_Native.Some (l) -> begin
-     FStar_Pervasives_Native.Some (((len l) - (Prims.parse_int "1")))
+     FStar_Pervasives_Native.Some (((ListAlgebra.len l) - (Prims.parse_int "1")))
      end
 | FStar_Pervasives_Native.None -> begin
      FStar_Pervasives_Native.None
@@ -1410,14 +1401,14 @@ if (match (l) with
 
 let rec ix_plinks : tree  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( t  :  tree ) -> (match (t) with
 | TNode (i, uu___, cs) -> begin
-     (DagFold.app (ix_kid_links i cs) (ix_plinks_all cs))
+     (ListAlgebra.app (ix_kid_links i cs) (ix_plinks_all cs))
      end))
 and ix_plinks_all : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( ts  :  Prims.list<tree> ) -> (match (ts) with
 | [] -> begin
      []
      end
 | (t)::r -> begin
-     (DagFold.app (ix_plinks t) (ix_plinks_all r))
+     (ListAlgebra.app (ix_plinks t) (ix_plinks_all r))
      end))
 
 
@@ -1446,7 +1437,7 @@ let rec ix_mem_chain : Prims.list<(Prims.string * Prims.string)>  ->  Prims.list
 | (a)::r -> begin
      (match (r) with
 | (b)::uu___ -> begin
-     ((DagFold.mem ((b), (a)) lk) && (ix_mem_chain lk r))
+     ((ListAlgebra.mem ((b), (a)) lk) && (ix_mem_chain lk r))
      end
 | [] -> begin
      true
@@ -1477,7 +1468,7 @@ let rec ix_all_in = (fun ( xs  :  Prims.list<'a> ) ( ys  :  Prims.list<'a> ) -> 
      true
      end
 | (x)::r -> begin
-     ((DagFold.mem x ys) && (ix_all_in r ys))
+     ((ListAlgebra.mem x ys) && (ix_all_in r ys))
      end))
 
 
@@ -1495,7 +1486,7 @@ if (Prims.op_Equals (ix_record_of n) r) then begin
      end))
 
 
-let ix_record_blind : tree  ->  (Prims.string * Prims.string * Prims.nat) = (fun ( n  :  tree ) -> (((tid_of n)), ((kind_of n)), ((len (kids_of n)))))
+let ix_record_blind : tree  ->  (Prims.string * Prims.string * Prims.nat) = (fun ( n  :  tree ) -> (((tid_of n)), ((kind_of n)), ((ListAlgebra.len (kids_of n)))))
 
 
 let ix_node_agrees_blind : ix_index  ->  tree  ->  Prims.bool = (fun ( ix  :  ix_index ) ( n  :  tree ) -> (match ((ix_assoc (tid_of n) ix.ix_by_id)) with
@@ -1539,34 +1530,11 @@ let collision_after : tree = TNode ("root", "doc", (TNode ("x", "k414100", [])):
 
 let repeated_twice : tree = TNode ("r", "doc", (TNode ("a", "sec", (TNode ("b", "leaf", []))::[]))::(TNode ("a", "sec", []))::[])
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_tree : tree = TNode ("root", "doc", (TNode ("a", "sec", []))::[])
 
 
-let twins : Prims.list<twin> = ({tname = "apply-inserts-under-a-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (InsertChild ("a", TNode ("n", "para", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "sec", (TNode ("n", "para", []))::[]))::[])))))})::({tname = "apply-refuses-to-remove-the-root"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (RemoveNode ("root")) twin_tree) (DagFold.Error (CannotRemoveRoot))))})::({tname = "apply-refuses-a-mismatched-reorder"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (ReorderChildren ("root", ("b")::[])) twin_tree) (DagFold.Error (ReorderMismatch ("root", ("a")::[], ("b")::[])))))})::({tname = "apply-updates-a-kind-in-place"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (UpdateNode (TNode ("a", "aside", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "aside", []))::[])))))})::({tname = "wf-sees-a-repeated-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (wf (TNode ("r", "d", (TNode ("a", "s", []))::(TNode ("a", "s", []))::[]))) false))})::({tname = "index-find-is-the-walk"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_try_find "a" (ix_build twin_tree)) (find_in "a" twin_tree)))})::({tname = "index-path-walks-up-the-links"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_path "a" (ix_build twin_tree)) (FStar_Pervasives_Native.Some (("root")::("a")::[]))))})::({tname = "index-is-stale-after-an-insert"; tholds = (fun ( uu___  :  unit ) -> (not ((ix_is_fresh_for (TNode ("root", "doc", (TNode ("a", "sec", (TNode ("n", "para", []))::[]))::[])) (ix_build twin_tree)))))})::({tname = "index-try-build-names-the-repeat"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_try_build (TNode ("r", "d", (TNode ("a", "s", []))::(TNode ("a", "s", []))::[]))) (DagFold.Error ("a"))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "apply-inserts-under-a-parent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (InsertChild ("a", TNode ("n", "para", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "sec", (TNode ("n", "para", []))::[]))::[])))))})::({Twin.tname = "apply-refuses-to-remove-the-root"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (RemoveNode ("root")) twin_tree) (DagFold.Error (CannotRemoveRoot))))})::({Twin.tname = "apply-refuses-a-mismatched-reorder"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (ReorderChildren ("root", ("b")::[])) twin_tree) (DagFold.Error (ReorderMismatch ("root", ("a")::[], ("b")::[])))))})::({Twin.tname = "apply-updates-a-kind-in-place"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (UpdateNode (TNode ("a", "aside", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "aside", []))::[])))))})::({Twin.tname = "wf-sees-a-repeated-id"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (wf (TNode ("r", "d", (TNode ("a", "s", []))::(TNode ("a", "s", []))::[]))) false))})::({Twin.tname = "index-find-is-the-walk"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_try_find "a" (ix_build twin_tree)) (find_in "a" twin_tree)))})::({Twin.tname = "index-path-walks-up-the-links"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_path "a" (ix_build twin_tree)) (FStar_Pervasives_Native.Some (("root")::("a")::[]))))})::({Twin.tname = "index-is-stale-after-an-insert"; Twin.tholds = (fun ( uu___  :  unit ) -> (not ((ix_is_fresh_for (TNode ("root", "doc", (TNode ("a", "sec", (TNode ("n", "para", []))::[]))::[])) (ix_build twin_tree)))))})::({Twin.tname = "index-try-build-names-the-repeat"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (ix_try_build (TNode ("r", "d", (TNode ("a", "s", []))::(TNode ("a", "s", []))::[]))) (DagFold.Error ("a"))))})::[]
 
 
 

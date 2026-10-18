@@ -1,7 +1,7 @@
 {
   "kind": "proofModules",
   "subject": "Fuaran-Core",
-  "$comment": "SINCE PHASE 399 the per-module FLOORS are RETIRED: one cachedRead threshold (below) answers the question they answered, each entry keeps the fastestSeconds that decides whether the threshold applies to it (fastestPhase is the phase that recorded it), and the notes below that speak of a floorSeconds or floorSeeding record that history. A cost overrun is never a red leg, under -Strict or not. What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one — since Phase 171 the UNLABELLED ones only, see `contentionSeeding` below. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes. SINCE PHASE 164 each entry also carries a `floorSeconds`, and that number is a GATE rather than a smoke detector: a module that verifies in less than its floor fails the leg on the spot, because a run faster than the module can possibly be is not evidence of speed but of a cache that was not cold. The two rules sit in `seeding` and `floorSeeding` below, and the asymmetry between warning above and failing below is argued in the second of them. SINCE PHASE 166 not every timed line in the log is a candidate measurement: an ABORTED module (the prover died with nothing to say, which is a different verdict from a refutation) is retried once in the same run, and the retry runs against a cache the aborted attempt had already half-filled. `check.ps1` compares that line to NEITHER number here and marks it `(warm cache: NOT a cold measurement)`, and the leg's closing verdict names every abort it retried. DO NOT SEED A BUDGET OR A FLOOR FROM A RETRY LINE — both rules below say `cold run` and mean it, and a budget seeded from a warm one is a ceiling nothing can reach while a floor seeded from a warm one is a red leg on the next honest machine. SINCE PHASE 171 a third block, `contentionSeeding`, says when an overshoot is about the MACHINE rather than about the module: the leg reports a per-run CONTENTION FACTOR read off the modules the tree did not change, labels every cost finding from a run above the threshold, and a labelled finding is NOT a re-seed obligation — so DO NOT SEED A BUDGET FROM A LABELLED RUN EITHER, which is the judgement `TreeOps`'s and `DocVocabularyProofs`'s notes below had to make by hand. SINCE PHASE 203 each entry also carries `packages`: the packable package(s) whose production code the model is about. That is not a cost fact and it is here for one reason — this file is the only place the model ROSTER is enumerated, so it is the only place a package can be joined to a model without inventing a second roster to drift against. It is read by the `Proofs.Coverage` family (`../tests/Fuaran.Core.Tests/ProofCoverageTests.fs`), whose first clause holds every packable package to either a model named here or an entry in `coverage-exclusions.json`. A name here that is not a packable package fails that clause, so the attribution cannot quietly outlive the package it names.",
+  "$comment": "SINCE PHASE 504 this file is also THE PROOF ROSTER, and the only one: each entry carries a `kind` (`extracted`, `proofOnly`, `generated` or `shared`) and an `opens` list (the registered modules its code references, held to the code by the Proofs.Cone family), and the entries are in CHECK ORDER, every module after what it opens. `check.ps1` reads the modules it hands the kit and the ones it exempts from extraction from here; the Proofs.Ladder family reads the ladder's models, the twin roster and the oracle project's Compile list against it; the cone selector selects from it. A `shared` entry (`Twin`, `ListAlgebra`) is not a model: it is opened by the models, references none, and a change to it puts every module in the cone. SINCE PHASE 399 the per-module FLOORS are RETIRED: one cachedRead threshold (below) answers the question they answered, each entry keeps the fastestSeconds that decides whether the threshold applies to it (fastestPhase is the phase that recorded it), and the notes below that speak of a floorSeconds or floorSeeding record that history. A cost overrun is never a red leg, under -Strict or not. What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one — since Phase 171 the UNLABELLED ones only, see `contentionSeeding` below. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes. SINCE PHASE 164 each entry also carries a `floorSeconds`, and that number is a GATE rather than a smoke detector: a module that verifies in less than its floor fails the leg on the spot, because a run faster than the module can possibly be is not evidence of speed but of a cache that was not cold. The two rules sit in `seeding` and `floorSeeding` below, and the asymmetry between warning above and failing below is argued in the second of them. SINCE PHASE 166 not every timed line in the log is a candidate measurement: an ABORTED module (the prover died with nothing to say, which is a different verdict from a refutation) is retried once in the same run, and the retry runs against a cache the aborted attempt had already half-filled. `check.ps1` compares that line to NEITHER number here and marks it `(warm cache: NOT a cold measurement)`, and the leg's closing verdict names every abort it retried. DO NOT SEED A BUDGET OR A FLOOR FROM A RETRY LINE — both rules below say `cold run` and mean it, and a budget seeded from a warm one is a ceiling nothing can reach while a floor seeded from a warm one is a red leg on the next honest machine. SINCE PHASE 171 a third block, `contentionSeeding`, says when an overshoot is about the MACHINE rather than about the module: the leg reports a per-run CONTENTION FACTOR read off the modules the tree did not change, labels every cost finding from a run above the threshold, and a labelled finding is NOT a re-seed obligation — so DO NOT SEED A BUDGET FROM A LABELLED RUN EITHER, which is the judgement `TreeOps`'s and `DocVocabularyProofs`'s notes below had to make by hand. SINCE PHASE 203 each entry also carries `packages`: the packable package(s) whose production code the model is about. That is not a cost fact and it is here for one reason — this file is the only place the model ROSTER is enumerated, so it is the only place a package can be joined to a model without inventing a second roster to drift against. It is read by the `Proofs.Coverage` family (`../tests/Fuaran.Core.Tests/ProofCoverageTests.fs`), whose first clause holds every packable package to either a model named here or an entry in `coverage-exclusions.json`. A name here that is not a packable package fails that clause, so the attribution cannot quietly outlive the package it names.",
   "seeding": {
     "rule": "budgetSeconds = max(2 x the slowest observed cold-cache run, minimumBudgetSeconds), rounded up to the next 10s.",
     "toleranceFactor": 2,
@@ -26,9 +26,188 @@
     "quietPhase": "fuaran-core#171",
     "$comment": "SINCE PHASE 171 the leg reports, at the end of every run, the MEDIAN over the modules the working tree did NOT change of that module's measured seconds divided by the `measuredSeconds` its entry below records — the run's CONTENTION FACTOR. Above this threshold every cost finding from that run is LABELLED a contended pass where the closing verdict prints it, and a labelled finding is explicitly NOT a re-seed obligation: re-seeding a budget from a contended run raises a ceiling to fit a slow afternoon, which is exactly how a budget stops meaning anything. `check.ps1 -Strict` promotes only the UNLABELLED findings. Nothing is multiplied into a measurement — the seconds a green line prints stay the wall clock, and the factor sits beside them. THE SCALE IS NOT THE OBVIOUS ONE AND WAS MEASURED, NOT ASSUMED (Phase 171): `measuredSeconds` is not a typical cost, it is by `seeding`'s own rule the SLOWEST cold run ever observed for that module, and most of the entries below were seeded under six concurrent sessions — so the ratio's neutral point sits well BELOW one. A quiet cold pass of the whole leg on this dev machine measured x0.29 over sixteen contributing modules (DagFold 14s, WireDecode 9s, TreeOps 19s, Chain 4s, JsonParse 19s, Preservation 13s, TreeDiff 4s, WireCanon 9s, Vocabulary 3s, VocabularyProofs 5s, DocVocabulary 4s, DocVocabularyProofs 7s, ScoreVocabulary 7s, ScoreVocabularyProofs 14s, ColumnOps 12s, Capability 6s; machine idle, nothing else on it), and the SAME leg under four sustained competing provers measured x0.40 (every large module 1.4-1.7x its quiet time). The three incidents this threshold exists to name — Chain's 35s/31s against 30s, Phase 162's TreeOps at 145s, Phase 182's Capability at 75s against 20s — all ran beside six concurrent SESSIONS, which is the load `measuredSeconds` itself was seeded under, so they sit near x1.0 by construction. 0.8 is therefore placed between: 2.7x above this machine's quiet pass, so a machine up to 2.7x slower still reads an ordinary pass as ordinary, and below the x1.0 the recorded incidents produce. WHAT THAT COSTS, said plainly: four bare competing provers on this machine (x0.40) is NOT labelled, so the threshold does not fire on mild contention — deliberate, because a false label is the expensive error and a missed one leaves the reader exactly where Phase 148 left them. THE OPEN QUESTION is the same one `seeding` records for its own tolerance: the baseline is machine-dependent, CI's windows-latest runner is a different and slower machine, and its first runs are what will say whether 0.8 clears ITS quiet pass. If it does not, that is a re-seed and a re-seed is recorded — the new number, the quiet factor it came from, and the phase. `minimumSamples` is the smallest set the median may be taken over; below it the leg reports the factor as not computed rather than taking a median of one. The per-module cut — a module whose `measuredSeconds` is under `minimumSeconds` (until Phase 399 the retired floors' `floorSeeding.zeroBelowSeconds`, moved here with the floors' retirement) does not vote, because at whole-second resolution 0s against a recorded 2s is a ratio of 0 and says nothing about the machine — was that rule's number, reused rather than a second one minted; it excludes Skeleton, Limits and WireVersioning. Each entry below may also carry an optional `contentionFactor` beside its `measuredSeconds`, recorded by whichever phase next seeds that number: it says what the machine was doing when the measurement was taken, so a later reader can tell a budget seeded quiet from one seeded busy. It is PROVENANCE ONLY — `check.ps1` holds it to its shape and computes nothing from it, for the same reason the factor is never multiplied into a measurement — and an absent one reads as `not recorded`, never as 1. Phase 171 gave no entry one: it re-seeded no budget, and back-filling a figure for a pass nobody measured would be inventing the very provenance the field exists to carry. The first is `DocVocabularyProofs`'s, recorded by Phase 399's re-seed."
   },
+  "sharedModulesCost": {
+    "phase": "fuaran-core#504",
+    "measured": "2026-10-18, the pinned prover on a local Windows dev machine (16 processors) with other sessions active, by D156's method: each leg run cold, at the leg's own flags, one module after another in roster order, the whole leg once on the tree before the move (78572f8) and twice on the tree after it. The contention factor the leg printed was x0.47 before and x0.46 on both runs after, so the three passes were loaded alike. Seconds are the CHECK lines' wall clock.",
+    "totals": {
+      "before": 1447,
+      "after": [ 1277, 1169 ]
+    },
+    "moved": [ "DecimalText: the one module whose cost moved and stayed moved. Three paired cold checks, before and after the move run side by side under the same load (and a fourth after-run), put `add_associative` at 2.8-5.3s before and 10.9-24.7s after, and `add_parts_denotes` at 3.9-7.3s before and 7.2-14.2s after. The leg runs read 22s before and 77s / 31s after. The cause is isolated. The same file with `len`, `app` and `rev` defined LOCALLY again checks those two lemmas at 3.5s and 4.9s, so the move costs these two queries their speed; no statement changed. The levers were tried in the brief's order, each in one measured run. `#restart-solver` before the two lemmas made `add_associative` slower (65s). `--split_queries always` and per-lemma `--fuel 1 --ifuel 1` / `--fuel 0 --ifuel 1` refuted the lemmas. A `--using_facts_from` dropping the algebra functions the module does not use (`mem`, `distinct`, `inter`, `diff`) changed nothing, and dropping `len`, `app` and `rev` refuted `add_parts_denotes`. No lever is adopted. The module stays far inside its 160s budget, and every reading is inside its recorded 31-78s span.", "Utf8: 11s before, 23s and 21s after. It opens ListAlgebra for `app` alone, and the rise is the same class as DecimalText's, at a quarter of its budget.", "Every other move in the table is within the run-to-run spread the same module shows between the two after-runs (TreeOps 90 / 45, Preservation 26 / 62, DagPrimitives 10 / 28, Capability 70 / 94), and the leg's total fell: 1447s before, 1277s and 1169s after. No budget is exceeded, so no entry is re-seeded." ],
+    "modules": {
+      "Twin": {
+        "after": [ 0, 0 ]
+      },
+      "ListAlgebra": {
+        "after": [ 0, 0 ]
+      },
+      "DagFold": {
+        "before": 59,
+        "after": [ 52, 46 ]
+      },
+      "WireDecode": {
+        "before": 16,
+        "after": [ 20, 15 ]
+      },
+      "TreeOps": {
+        "before": 54,
+        "after": [ 90, 45 ]
+      },
+      "Skeleton": {
+        "before": 1,
+        "after": [ 1, 1 ]
+      },
+      "Chain": {
+        "before": 16,
+        "after": [ 14, 12 ]
+      },
+      "JsonParse": {
+        "before": 190,
+        "after": [ 81, 83 ]
+      },
+      "Preservation": {
+        "before": 35,
+        "after": [ 26, 62 ]
+      },
+      "TreeDiff": {
+        "before": 54,
+        "after": [ 65, 89 ]
+      },
+      "Limits": {
+        "before": 0,
+        "after": [ 0, 0 ]
+      },
+      "Utf8": {
+        "before": 11,
+        "after": [ 23, 21 ]
+      },
+      "WireCanon": {
+        "before": 66,
+        "after": [ 92, 55 ]
+      },
+      "WireVersioning": {
+        "before": 3,
+        "after": [ 4, 2 ]
+      },
+      "Unit": {
+        "before": 153,
+        "after": [ 135, 76 ]
+      },
+      "Temporal": {
+        "before": 121,
+        "after": [ 82, 71 ]
+      },
+      "WireColumn": {
+        "before": 41,
+        "after": [ 34, 34 ]
+      },
+      "Vocabulary": {
+        "before": 8,
+        "after": [ 4, 4 ]
+      },
+      "VocabularyProofs": {
+        "before": 10,
+        "after": [ 7, 7 ]
+      },
+      "DocVocabulary": {
+        "before": 6,
+        "after": [ 5, 4 ]
+      },
+      "DocVocabularyProofs": {
+        "before": 14,
+        "after": [ 13, 12 ]
+      },
+      "ScoreVocabulary": {
+        "before": 18,
+        "after": [ 12, 10 ]
+      },
+      "ScoreVocabularyProofs": {
+        "before": 42,
+        "after": [ 27, 34 ]
+      },
+      "Capability": {
+        "before": 120,
+        "after": [ 70, 94 ]
+      },
+      "Propagation": {
+        "before": 12,
+        "after": [ 11, 10 ]
+      },
+      "Query": {
+        "before": 98,
+        "after": [ 68, 101 ]
+      },
+      "Arbitrate": {
+        "before": 8,
+        "after": [ 8, 8 ]
+      },
+      "DecimalText": {
+        "before": 22,
+        "after": [ 77, 31 ]
+      },
+      "Normalize": {
+        "before": 6,
+        "after": [ 13, 6 ]
+      },
+      "VocabularyVectors": {
+        "before": 1,
+        "after": [ 5, 1 ]
+      },
+      "PropagationOps": {
+        "before": 6,
+        "after": [ 10, 4 ]
+      },
+      "TreeFrame": {
+        "before": 19,
+        "after": [ 33, 15 ]
+      },
+      "ColumnRefinement": {
+        "before": 107,
+        "after": [ 76, 51 ]
+      },
+      "DecodeLayer": {
+        "before": 18,
+        "after": [ 17, 16 ]
+      },
+      "OpStreamLoad": {
+        "before": 101,
+        "after": [ 92, 121 ]
+      },
+      "DagPrimitives": {
+        "before": 11,
+        "after": [ 10, 28 ]
+      }
+    }
+  },
   "modules": [
     {
+      "module": "Twin",
+      "kind": "shared",
+      "opens": [],
+      "packages": [],
+      "budgetSeconds": 20,
+      "measuredSeconds": 1,
+      "fastestSeconds": 0,
+      "fastestPhase": "fuaran-core#504",
+      "phase": "fuaran-core#504",
+      "note": "The twin record and its evaluator, opened by every extracted model (Phase 504). A shared module: it covers no package, carries no ladder row, and a change to it puts every module in the cone. It checks in about a second, so the minimum budget applies, and its fastest cold check is under the cached-read threshold's reach, so it rests on the cache provenance check alone."
+    },
+    {
+      "module": "ListAlgebra",
+      "kind": "shared",
+      "opens": [ "Twin" ],
+      "packages": [],
+      "budgetSeconds": 20,
+      "measuredSeconds": 1,
+      "fastestSeconds": 0,
+      "fastestPhase": "fuaran-core#504",
+      "phase": "fuaran-core#504",
+      "note": "The Prims-only list algebra (`app`, `mem`, `len`, `rev`, `distinct`, `inter`, `diff`), opened by every model that uses it (Phase 504). A shared module, like `Twin`: no package, no ladder row, every module in the cone when it changes. It checks in about a second; the minimum budget applies."
+    },
+    {
       "module": "DagFold",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
       "packages": [ "Fuaran.Core.OpStream.Dag" ],
       "budgetSeconds": 360,
       "measuredSeconds": 178,
@@ -39,6 +218,8 @@
     },
     {
       "module": "WireDecode",
+      "kind": "extracted",
+      "opens": [ "Twin" ],
       "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 70,
       "measuredSeconds": 33,
@@ -49,6 +230,8 @@
     },
     {
       "module": "TreeOps",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold" ],
       "packages": [ "Fuaran.Core.Tree", "Fuaran.Core.Ops" ],
       "budgetSeconds": 340,
       "measuredSeconds": 169,
@@ -59,6 +242,8 @@
     },
     {
       "module": "Skeleton",
+      "kind": "extracted",
+      "opens": [ "Twin", "DagFold", "TreeOps" ],
       "packages": [ "Fuaran.Core.OpStream.Dag", "Fuaran.Core.Ops" ],
       "budgetSeconds": 20,
       "measuredSeconds": 2,
@@ -69,6 +254,8 @@
     },
     {
       "module": "Chain",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
       "packages": [ "Fuaran.Core.OpStream", "Fuaran.Core.OpStream.Dag" ],
       "budgetSeconds": 90,
       "measuredSeconds": 42,
@@ -79,6 +266,8 @@
     },
     {
       "module": "JsonParse",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
       "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 760,
       "measuredSeconds": 373,
@@ -89,6 +278,8 @@
     },
     {
       "module": "Preservation",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold", "TreeOps" ],
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 190,
       "measuredSeconds": 93,
@@ -99,6 +290,8 @@
     },
     {
       "module": "TreeDiff",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold", "TreeOps", "Preservation" ],
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 480,
       "measuredSeconds": 237,
@@ -110,6 +303,8 @@
     },
     {
       "module": "Limits",
+      "kind": "extracted",
+      "opens": [ "Twin" ],
       "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 20,
       "measuredSeconds": 1,
@@ -120,6 +315,8 @@
     },
     {
       "module": "Utf8",
+      "kind": "proofOnly",
+      "opens": [ "ListAlgebra" ],
       "packages": [ "Fuaran.Core.Tree" ],
       "budgetSeconds": 70,
       "measuredSeconds": 35,
@@ -130,6 +327,8 @@
     },
     {
       "module": "WireCanon",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "JsonParse", "Limits", "Utf8" ],
       "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 430,
       "measuredSeconds": 215,
@@ -140,6 +339,8 @@
     },
     {
       "module": "WireVersioning",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "WireCanon" ],
       "packages": [ "Fuaran.Core.Idl" ],
       "budgetSeconds": 20,
       "measuredSeconds": 2,
@@ -149,10 +350,22 @@
       "note": "WIRE_FORMAT section 15.4's evolution-policy table as theorems about the IDL diff: the classifier proved sound, an additive step proved unobservable to a document that predates it, must-ignore-but-preserve proved at the BYTES, and the transport-only Unknown proved un-constructible from an encoder. Carries `#set-options \\\"--ext context_pruning\\\"` INSIDE the module, like the five above it, and here the reason is unusually clean: it opens WireCanon for four definitions and two lemmas, while WireCanon's own ninety-odd patterned facts about sorting, rendering and reading would otherwise be live at every query — and this module's own queries are small list inductions that need none of them. At the 20s seeding minimum: two cold quaked runs measured 2s and 4s (the 4s one with no dependency cache at all, which is not how the leg runs it), and 2x of either is inside process-start noise. The module is cheap because the two inductions are over lists of tags and everything else is a case split once they are in hand — which is a fact about where the difficulty in this phase sat, and it did not sit in the prover. If this one ever overshoots, check FIRST that the pruning option is still in force and SECOND whether a theorem was added that reasons about `render` rather than merely quoting it: the byte claim here is discharged by two WireCanon lemmas and does not re-enter that module's cost class, and a theorem that did would not read in the log as a change of kind. Its floorSeconds is 0 by the floorSeeding rule's zeroBelowSeconds clause, for the reason Skeleton's and Limits's are: the fastest cold run is under 5s, so half of it is inside process-start noise and any positive floor would be a coin toss. Like theirs, this 0 is honest about covering nothing — what covers this module against a warm cache is the per-invocation cache directory Phase 164 put in check.ps1."
     },
     {
+      "module": "Unit",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
+      "packages": [ "Fuaran.Core.Unit" ],
+      "budgetSeconds": 180,
+      "measuredSeconds": 87,
+      "fastestSeconds": 87,
+      "fastestPhase": "fuaran-core#428",
+      "phase": "fuaran-core#428",
+      "note": "Phase 428 — the unit algebra: `src/Fuaran.Core.Unit/Unit.fs` clause for clause over an enumerated ASCII alphabet (the canonical factor product, the vocabulary tables generated from the source, `tryCombine` as a strictly sorted merge, `dimension` / `compatible`, `scale` / `conversionFactor` with Euclid's gcd, `render`, and the iterative `parse` over its frame stack with every refusal class); `combine_comm` / `combine_assoc` / `combine_unit` / `combine_inverse` / `div_is_mul_inverse` (the abelian group, through `ext` and `combine_exp`), `compatible_iff` / `dim_combine`, `scale_combine` / `factor_compose` / `factor_self` / `reduce_exact`, and `parse_render` for every canonical unit. Opens nothing but the library's arithmetic lemmas; default fuel, `--z3rlimit 80` scoped to the component lemma and the loop, `120` to the field reader it feeds in `WireColumn`. SEEDED BY PHASE 428 from one cold observation under the leg's flags: the cone `-Modules Limits,Utf8,JsonParse,WireCanon,Unit,WireColumn,ColumnRefinement` with the dependencies cached ahead of it, 87s, on a 16-processor Windows dev machine with nothing else on it (the contention factor was not computed: no untouched module in the cone carries a measuredSeconds of 5s or more). By the seeding rule the budget is 2 x 87 = 174, rounded up to 180. An earlier 220s observation was of a draft whose vocabulary tables were not yet opaque to the solver and is not a measurement of this module."
+    },
+    {
       "module": "Temporal",
-      "packages": [
-        "Fuaran.Core.Column"
-      ],
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "WireCanon" ],
+      "packages": [ "Fuaran.Core.Column" ],
       "budgetSeconds": 370,
       "measuredSeconds": 182,
       "fastestSeconds": 163,
@@ -162,6 +375,8 @@
     },
     {
       "module": "WireColumn",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "WireCanon", "Unit", "Temporal" ],
       "packages": [ "Fuaran.Core.Column" ],
       "budgetSeconds": 160,
       "measuredSeconds": 77,
@@ -172,6 +387,8 @@
     },
     {
       "module": "Vocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 9,
@@ -183,6 +400,8 @@
     },
     {
       "module": "VocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "Vocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 30,
       "measuredSeconds": 15,
@@ -194,6 +413,8 @@
     },
     {
       "module": "DocVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 30,
       "measuredSeconds": 11,
@@ -204,6 +425,8 @@
     },
     {
       "module": "DocVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "DocVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 70,
       "measuredSeconds": 32,
@@ -215,6 +438,8 @@
     },
     {
       "module": "ScoreVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 40,
       "measuredSeconds": 20,
@@ -226,6 +451,8 @@
     },
     {
       "module": "ScoreVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "ScoreVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 90,
       "measuredSeconds": 42,
@@ -237,6 +464,8 @@
     },
     {
       "module": "Capability",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
       "packages": [ "Fuaran.Core.Function" ],
       "budgetSeconds": 290,
       "measuredSeconds": 141,
@@ -247,6 +476,8 @@
     },
     {
       "module": "Propagation",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
       "packages": [ "Fuaran.Core.Propagation" ],
       "budgetSeconds": 60,
       "measuredSeconds": 30,
@@ -257,6 +488,8 @@
     },
     {
       "module": "Query",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "Capability" ],
       "packages": [ "Fuaran.Core.Query" ],
       "budgetSeconds": 280,
       "measuredSeconds": 136,
@@ -267,6 +500,8 @@
     },
     {
       "module": "Arbitrate",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold", "TreeOps", "Preservation" ],
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 50,
       "measuredSeconds": 25,
@@ -277,9 +512,9 @@
     },
     {
       "module": "DecimalText",
-      "packages": [
-        "Fuaran.Core.Column"
-      ],
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra" ],
+      "packages": [ "Fuaran.Core.Column" ],
       "budgetSeconds": 160,
       "measuredSeconds": 78,
       "fastestSeconds": 31,
@@ -289,6 +524,8 @@
     },
     {
       "module": "Normalize",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold", "TreeOps", "Preservation", "TreeDiff" ],
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 60,
       "measuredSeconds": 26,
@@ -299,18 +536,20 @@
     },
     {
       "module": "VocabularyVectors",
-      "packages": [
-        "Fuaran.Core.Idl.Codegen"
-      ],
+      "kind": "generated",
+      "opens": [ "WireDecode", "Vocabulary", "DocVocabulary", "ScoreVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 3,
-      "fastestSeconds": 3,
-      "fastestPhase": "fuaran-core#303",
+      "fastestSeconds": 0.99,
+      "fastestPhase": "fuaran-core#504",
       "phase": "fuaran-core#303",
       "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the test project (`--emit-fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3."
     },
     {
       "module": "PropagationOps",
+      "kind": "proofOnly",
+      "opens": [ "ListAlgebra", "DagFold", "TreeOps", "Propagation" ],
       "packages": [ "Fuaran.Core.Propagation" ],
       "budgetSeconds": 20,
       "measuredSeconds": 9,
@@ -321,6 +560,8 @@
     },
     {
       "module": "TreeFrame",
+      "kind": "proofOnly",
+      "opens": [ "ListAlgebra", "DagFold", "TreeOps", "Preservation", "TreeDiff" ],
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 70,
       "measuredSeconds": 32,
@@ -331,6 +572,8 @@
     },
     {
       "module": "ColumnRefinement",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "WireCanon", "Temporal", "WireColumn" ],
       "packages": [ "Fuaran.Core.Column" ],
       "budgetSeconds": 80,
       "measuredSeconds": 39,
@@ -340,20 +583,10 @@
       "note": "RE-MEASURED BY PHASE 430, which made the temporal cases integers (`Dates` as day counts, `Timestamps` as a unit, whole seconds and an optional fraction vector) and gave `ofCells` the `Unreadable` refusal: the cold check under the leg's flags, in the cone `-Modules Limits,Utf8,JsonParse,WireCanon,Unit,Temporal,WireColumn,ColumnRefinement,Query` on a quiet machine (contention x0.22), measured 39s against the 37s recorded, so `measuredSeconds` is 39 and the budget stands at 80 (2x39 rounds up to 80). The module opens `Temporal` as well now; its new lemmas are list walks and length facts, no scoped rlimit. Phase 419 — the refinement that carries `WireColumn`'s theorems across Phase 417's representation change: the typed-vector column clause for clause (`Validity`, `ColumnData`, `Column.toCells` / `ofCells`, `ColumnData.Equals`, the typed `Table.firstUncarriableCell` and `validate`, `ColumnCodec.columnJson`'s walks), every `Vector` read through its `toArray`; `to_cells_of_cells`, `of_cells_to_cells` (equal under `Equals`, exact where the absent rows hold the zero, and the well-formedness premise shown necessary), `validate_agrees` with `validate_t_good_wf`, `encode_agrees` on every typed table, `norm_cells_vacuous`, and `typed_decode_image_is_valid` / `typed_round_trip` / `typed_round_trip_in_schema_order` composed from `WireColumn`'s two theorems. Opens `WireCanon` and `WireColumn` and carries `--ext context_pruning` as `WireColumn` does; default fuel, with `--ifuel 2` scoped to the per-case closure lemmas and one `--fuel 2 --ifuel 1` block for the exhibited witness; every query discharges 3/3 under `--quake 3` at the leg's rlimit of 40 with no scoped rlimit. SEEDED BY PHASE 419 from three cold observations under the leg's flags, beside other sessions on the machine: the prover invoked directly on the file against a private cache whose dependencies were lax-checked inside the same clock, 37s; a hand cone of this module alone (`check.ps1 -Modules ColumnRefinement`, the four dependencies checked inside its clock), 32s; and the cone named with its dependencies (`-Modules Limits,Utf8,JsonParse,WireCanon,WireColumn,ColumnRefinement`, each cached ahead of it), 16s, the one genuine measurement of the module alone and so `fastestSeconds`. By the seeding rule the budget is 2 x the slowest observed, 74 rounded up to 80."
     },
     {
-      "module": "Unit",
-      "packages": [ "Fuaran.Core.Unit" ],
-      "budgetSeconds": 180,
-      "measuredSeconds": 87,
-      "fastestSeconds": 87,
-      "fastestPhase": "fuaran-core#428",
-      "phase": "fuaran-core#428",
-      "note": "Phase 428 — the unit algebra: `src/Fuaran.Core.Unit/Unit.fs` clause for clause over an enumerated ASCII alphabet (the canonical factor product, the vocabulary tables generated from the source, `tryCombine` as a strictly sorted merge, `dimension` / `compatible`, `scale` / `conversionFactor` with Euclid's gcd, `render`, and the iterative `parse` over its frame stack with every refusal class); `combine_comm` / `combine_assoc` / `combine_unit` / `combine_inverse` / `div_is_mul_inverse` (the abelian group, through `ext` and `combine_exp`), `compatible_iff` / `dim_combine`, `scale_combine` / `factor_compose` / `factor_self` / `reduce_exact`, and `parse_render` for every canonical unit. Opens nothing but the library's arithmetic lemmas; default fuel, `--z3rlimit 80` scoped to the component lemma and the loop, `120` to the field reader it feeds in `WireColumn`. SEEDED BY PHASE 428 from one cold observation under the leg's flags: the cone `-Modules Limits,Utf8,JsonParse,WireCanon,Unit,WireColumn,ColumnRefinement` with the dependencies cached ahead of it, 87s, on a 16-processor Windows dev machine with nothing else on it (the contention factor was not computed: no untouched module in the cone carries a measuredSeconds of 5s or more). By the seeding rule the budget is 2 x 87 = 174, rounded up to 180. An earlier 220s observation was of a draft whose vocabulary tables were not yet opaque to the solver and is not a measurement of this module."
-    },
-    {
       "module": "DecodeLayer",
-      "packages": [
-        "Fuaran.Core.Wire"
-      ],
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "WireDecode" ],
+      "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 170,
       "measuredSeconds": 84,
       "fastestSeconds": 44,
@@ -363,9 +596,9 @@
     },
     {
       "module": "OpStreamLoad",
-      "packages": [
-        "Fuaran.Core.OpStream"
-      ],
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "Chain", "JsonParse" ],
+      "packages": [ "Fuaran.Core.OpStream" ],
       "budgetSeconds": 590,
       "measuredSeconds": 295,
       "fastestSeconds": 194,
@@ -375,9 +608,9 @@
     },
     {
       "module": "DagPrimitives",
-      "packages": [
-        "Fuaran.Core.OpStream.Dag"
-      ],
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "DagFold" ],
+      "packages": [ "Fuaran.Core.OpStream.Dag" ],
       "budgetSeconds": 50,
       "measuredSeconds": 24,
       "fastestSeconds": 24,

@@ -1,10 +1,11 @@
 namespace Fuaran.Core
 
 /// Change propagation over a reference DAG + tree-level dirty recomputation (Phase 68) — the tree-level
-/// incremental-recomputation surface. (It was written as the third of a trio beside a columnar and a
-/// capability-DAG `evalFrom`; those left this repository with the compute strand under DECISIONS D66,
-/// and this one stays: it is witness-generic tree machinery, not compute.) A domain models its artefact
-/// as a typed tree whose cross-node references are **declared bindings on permanent ids** (a Calc model, a
+/// incremental-recomputation surface. (It was written as one of a trio of `evalFrom`s: the columnar one
+/// left this repository with the compute strand under DECISIONS D66; the capability-DAG one stayed and is
+/// `CapabilityPipeline.evalFrom` in `Fuaran.Core.Function`; and this one stays: it is witness-generic tree
+/// machinery, not compute.) A domain models its artefact as a typed tree whose cross-node references are
+/// **declared bindings on permanent ids** (a Calc model, a
 /// notebook, an Office cross-domain refresh); given the dependency structure this module derives the
 /// dependency order, enumerates any reference cycle (as data, GP4 — never a divergence), and computes the
 /// **minimal dirty set** from a change — so a consumer re-evaluates only downstream-of-change.
@@ -521,9 +522,10 @@ module Propagation =
         Set.union changed (dirtyFromChangedIds deps firstHop)
 
     // ---- incremental recompute driver (Phase 69) ----
-    // The tree-level incremental driver (its columnar and capability-DAG siblings left with the compute
-    // strand, DECISIONS D66). Core owns the *order + reuse plumbing* — it walks the acyclic nodes in
-    // dependency order and threads the value map; the domain injects `evalNode` (the evaluator, GP6 — no
+    // The tree-level incremental driver (its columnar sibling left with the compute strand, DECISIONS
+    // D66; its capability-DAG sibling is `CapabilityPipeline.evalFrom` in `Fuaran.Core.Function`). Core
+    // owns the *order + reuse plumbing* — it walks the acyclic nodes in dependency order and threads
+    // the value map; the domain injects `evalNode` (the evaluator, GP6 — no
     // compute in Core). `evalFrom` recomputes only the dirty subgraph and reuses each clean node's prior
     // value, byte-identical to a full `eval`. Cyclic SCCs are returned as data (the `#CALC!` posture);
     // iterating a cyclic group to a fixed point is a domain policy over `EvalOutcome.Cyclic`.

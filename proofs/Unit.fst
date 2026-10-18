@@ -64,10 +64,12 @@
    lemma splits two lists at once.
 
    THE TWINS (the last section) are the extractor premise sampled at this model — see
-   `WireColumn.fst`'s twins section for what they are and why.
+   `Twin.fst` for what they are and why.
 *)
 module Unit
 
+open Twin
+open ListAlgebra
 open FStar.Math.Lemmas
 open FStar.Math.Euclid
 
@@ -335,17 +337,7 @@ let code_inj (x y: uch) : Lemma (requires code x = code y) (ensures x = y) =
 (* F#: `string` — the text a unit is written in. *)
 type text = list uch
 
-(* ---- the list functions this module uses, as every model here defines its own ---- *)
-
-let rec len (#a: Type) (l: list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
-let rec app (#a: Type) (l m: list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | x :: t -> x :: app t m
+(* ---- the list functions this module uses beyond `ListAlgebra`'s ---- *)
 
 let rec rev_acc (#a: Type) (l acc: list a) : Tot (list a) =
   match l with
@@ -353,11 +345,6 @@ let rec rev_acc (#a: Type) (l acc: list a) : Tot (list a) =
   | x :: t -> rev_acc t (x :: acc)
 
 let rev (#a: Type) (l: list a) : Tot (list a) = rev_acc l []
-
-let rec mem (#a: eqtype) (x: a) (l: list a) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> x = y || mem x t
 
 let rec assoc (#k: eqtype) (#v: Type) (x: k) (l: list (k & v)) : Tot (option v) =
   match l with
@@ -2287,17 +2274,11 @@ let render_no_other (u: uom) : Lemma (requires canonical u) (ensures no_other (r
        no_other_app (atom_text a e) (render_tail (app t (negatives m))))
 
 (* ======================================================================================
-   10. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireColumn.fst`'s
-       twins section for what a twin is: a closure the normaliser discharges to `true` under the
+   10. TWINS (Phase 309) — the extractor premise, sampled at this model. See `Twin.fst` for what a
+       twin is: a closure the normaliser discharges to `true` under the
        model's own semantics, which the oracle host then runs as extracted F#.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l: list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 
 let hour : atom = { symbol = [Lh]; prefix = [] }
 let kilometre : atom = { symbol = [Lm]; prefix = [Lk] }

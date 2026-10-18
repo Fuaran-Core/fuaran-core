@@ -81,28 +81,12 @@
 *)
 module DecimalText
 
+open Twin
+open ListAlgebra
+
 (* ======================================================================================
    0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
    ====================================================================================== *)
-
-(* F#: `List.length` / `String.Length`. *)
-let rec len (#a:Type0) (l: list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
-(* F#: `@` / string `+`. *)
-let rec app (#a:Type0) (l m: list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | x :: t -> x :: app t m
-
-(* F#: `List.rev` — the loops `addMagnitudes` and `subMagnitudes` walk from `a.Length - 1` down
-   to `0`, which is a walk over the REVERSED digit list; the model names that walk as one. *)
-let rec rev (#a:Type0) (l: list a) : Tot (list a) =
-  match l with
-  | [] -> []
-  | x :: t -> app (rev t) [x]
 
 (* F#: `List.take` / `Substring(0, n)`. *)
 let rec take (#a:Type0) (n: nat) (l: list a) : Tot (list a) =
@@ -1134,27 +1118,10 @@ let refusal_exact (a b: list sym)
   parts_iff_grammar a; parts_iff_grammar b
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
   { tname = "try-canonical-trims-a-negative";
     tholds = (fun () ->

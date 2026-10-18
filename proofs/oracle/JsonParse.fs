@@ -1734,15 +1734,6 @@ in (match (uu___) with
      end))
 
 
-let rec app = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (match (x) with
-| [] -> begin
-     y
-     end
-| (h)::t -> begin
-     (h)::(app t y)
-     end))
-
-
 let scan_number : Prims.list<ch>  ->  (Prims.list<ch> * Prims.bool * Prims.list<ch>) = (fun ( s  :  Prims.list<ch> ) -> (
 
 let uu___ = (match (s) with
@@ -1815,7 +1806,7 @@ in (match (uu___4) with
      end)
 in (match (uu___3) with
 | (expo, isf2, s4) -> begin
-     (((app neg (app ints (app frac expo)))), ((isf1 || isf2)), (s4))
+     (((ListAlgebra.app neg (ListAlgebra.app ints (ListAlgebra.app frac expo)))), ((isf1 || isf2)), (s4))
      end))
      end))
      end))
@@ -2528,31 +2519,8 @@ let only_members : Prims.list<unit>  ->  lims = (fun ( m  :  Prims.list<unit> ) 
 
 let bad3 : Prims.list<ch> = (CLBrack)::(CQuote)::(CQuote)::(CComma)::(CQuote)::(CQuote)::(CComma)::(COther ("%"))::(CRBrack)::[]
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "a-negative-fraction-is-a-number"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({tname = "a-leading-zero-then-digit-is-not"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({tname = "parse-string-stops-at-the-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({tname = "parse-reads-true"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({tname = "parse-refuses-trailing-characters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::({tname = "parse-refuses-a-repeated-member"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::[]) dup_doc) (RErr (DuplicateMember, msg_duplicate, (CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]))))})::({tname = "parse-string-refuses-a-raw-control"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CTab)::(CQuote)::[])) (PErr (BadEscape, (msg_ctrl CTab), (CTab)::(CQuote)::[]))))})::({tname = "parse-limited-refuses-the-third-item-before-reading-it"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::[]) (only_items ((())::(())::[])) true bad3) (RLimit (LItems, (COther ("%"))::(CRBrack)::[]))))})::({tname = "parse-limited-at-no-bound-reads-what-parse-reads"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] unbounded true ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "a-negative-fraction-is-a-number"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({Twin.tname = "a-leading-zero-then-digit-is-not"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({Twin.tname = "parse-string-stops-at-the-quote"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({Twin.tname = "parse-reads-true"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({Twin.tname = "parse-refuses-trailing-characters"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::({Twin.tname = "parse-refuses-a-repeated-member"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::[]) dup_doc) (RErr (DuplicateMember, msg_duplicate, (CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]))))})::({Twin.tname = "parse-string-refuses-a-raw-control"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CTab)::(CQuote)::[])) (PErr (BadEscape, (msg_ctrl CTab), (CTab)::(CQuote)::[]))))})::({Twin.tname = "parse-limited-refuses-the-third-item-before-reading-it"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::[]) (only_items ((())::(())::[])) true bad3) (RLimit (LItems, (COther ("%"))::(CRBrack)::[]))))})::({Twin.tname = "parse-limited-at-no-bound-reads-what-parse-reads"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] unbounded true ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::[]
 
 
 

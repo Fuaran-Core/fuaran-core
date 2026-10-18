@@ -81,7 +81,7 @@ let rec norm_go : Prims.list<TreeOps.op>  ->  Prims.list<TreeOps.op>  ->  Prims.
      end))
 and norm_step : Prims.list<TreeOps.op>  ->  TreeOps.op  ->  Prims.list<TreeOps.op> = (fun ( stack  :  Prims.list<TreeOps.op> ) ( o  :  TreeOps.op ) -> (match (o) with
 | TreeOps.Batch (inner) -> begin
-     (match ((DagFold.rev (norm_go [] inner))) with
+     (match ((ListAlgebra.rev (norm_go [] inner))) with
 | [] -> begin
      stack
      end
@@ -94,7 +94,7 @@ and norm_step : Prims.list<TreeOps.op>  ->  TreeOps.op  ->  Prims.list<TreeOps.o
      end))
 
 
-let normalize : Prims.list<TreeOps.op>  ->  Prims.list<TreeOps.op> = (fun ( os  :  Prims.list<TreeOps.op> ) -> (DagFold.rev (norm_go [] os)))
+let normalize : Prims.list<TreeOps.op>  ->  Prims.list<TreeOps.op> = (fun ( os  :  Prims.list<TreeOps.op> ) -> (ListAlgebra.rev (norm_go [] os)))
 
 
 let rec apply_stack : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( stack  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (stack) with
@@ -184,31 +184,8 @@ let cx_tree : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("a", 
 
 let cx_script : Prims.list<TreeOps.op> = (TreeOps.InsertChild ("a", TreeOps.TNode ("a", "para", [])))::(TreeOps.RemoveNode ("a"))::[]
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "normalize-cancels-an-insert-by-its-remove"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "para", [])))::(TreeOps.RemoveNode ("n"))::[])) []))})::({tname = "normalize-keeps-the-last-reorder-on-a-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.ReorderChildren ("p", ("b")::("a")::[]))::(TreeOps.ReorderChildren ("p", ("a")::("b")::[]))::[])) ((TreeOps.ReorderChildren ("p", ("a")::("b")::[]))::[])))})::({tname = "normalize-folds-a-rewrite-into-the-insert-it-follows"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "para", (TreeOps.TNode ("c", "para", []))::[])))::(TreeOps.UpdateNode (TreeOps.TNode ("n", "aside", [])))::[])) ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "aside", (TreeOps.TNode ("c", "para", []))::[])))::[])))})::({tname = "normalize-catches-the-adjacency-a-cancellation-exposes"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.MoveNode ("x", "a"))::(TreeOps.InsertChild ("a", TreeOps.TNode ("n", "para", [])))::(TreeOps.RemoveNode ("n"))::(TreeOps.MoveNode ("x", "b"))::[])) ((TreeOps.MoveNode ("x", "b"))::[])))})::({tname = "normalize-drops-an-empty-batch-and-normalises-inside-one"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.Batch ([]))::(TreeOps.Batch ((TreeOps.UpdateNode (TreeOps.TNode ("a", "k1", [])))::(TreeOps.UpdateNode (TreeOps.TNode ("a", "k2", [])))::[]))::[])) ((TreeOps.Batch ((TreeOps.UpdateNode (TreeOps.TNode ("a", "k2", [])))::[]))::[])))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "normalize-cancels-an-insert-by-its-remove"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "para", [])))::(TreeOps.RemoveNode ("n"))::[])) []))})::({Twin.tname = "normalize-keeps-the-last-reorder-on-a-parent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.ReorderChildren ("p", ("b")::("a")::[]))::(TreeOps.ReorderChildren ("p", ("a")::("b")::[]))::[])) ((TreeOps.ReorderChildren ("p", ("a")::("b")::[]))::[])))})::({Twin.tname = "normalize-folds-a-rewrite-into-the-insert-it-follows"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "para", (TreeOps.TNode ("c", "para", []))::[])))::(TreeOps.UpdateNode (TreeOps.TNode ("n", "aside", [])))::[])) ((TreeOps.InsertChild ("root", TreeOps.TNode ("n", "aside", (TreeOps.TNode ("c", "para", []))::[])))::[])))})::({Twin.tname = "normalize-catches-the-adjacency-a-cancellation-exposes"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.MoveNode ("x", "a"))::(TreeOps.InsertChild ("a", TreeOps.TNode ("n", "para", [])))::(TreeOps.RemoveNode ("n"))::(TreeOps.MoveNode ("x", "b"))::[])) ((TreeOps.MoveNode ("x", "b"))::[])))})::({Twin.tname = "normalize-drops-an-empty-batch-and-normalises-inside-one"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (normalize ((TreeOps.Batch ([]))::(TreeOps.Batch ((TreeOps.UpdateNode (TreeOps.TNode ("a", "k1", [])))::(TreeOps.UpdateNode (TreeOps.TNode ("a", "k2", [])))::[]))::[])) ((TreeOps.Batch ((TreeOps.UpdateNode (TreeOps.TNode ("a", "k2", [])))::[]))::[])))})::[]
 
 
 

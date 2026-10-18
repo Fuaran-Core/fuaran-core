@@ -34,15 +34,6 @@ let __proj__Error__item___0 = (fun ( projectee  :  outcome<'a, 'e> ) -> (match (
      end))
 
 
-let rec mem : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( x  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (y)::t -> begin
-     ((Prims.op_Equals x y) || (mem x t))
-     end))
-
-
 let rec has_key = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
 | [] -> begin
      false
@@ -61,21 +52,12 @@ let rec keys = (fun ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
      end))
 
 
-let rec distinct : Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (x)::t -> begin
-     ((not ((mem x t))) && (distinct t))
-     end))
-
-
 let rec all_in : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( m  :  Prims.list<Prims.string> ) -> (match (l) with
 | [] -> begin
      true
      end
 | (x)::t -> begin
-     ((mem x m) && (all_in t m))
+     ((ListAlgebra.mem x m) && (all_in t m))
      end))
 
 type time_unit =
@@ -1357,7 +1339,7 @@ let rec repeated : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  P
      end
 | (k)::t -> begin
       
-if (mem k seen) then begin
+if (ListAlgebra.mem k seen) then begin
      (k)::(repeated seen t)
      end else begin
      (repeated ((k)::seen) t)
@@ -1629,11 +1611,11 @@ let rec order_fault : Prims.list<(Prims.string * column_type)>  ->  Prims.list<P
      end
 | (k)::r -> begin
       
-if (not ((mem k.k_column (keys s)))) then begin
+if (not ((ListAlgebra.mem k.k_column (keys s)))) then begin
      FStar_Pervasives_Native.Some (UnknownColumn (k.k_column, (keys s)))
      end else begin
       
-if (mem k.k_column seen) then begin
+if (ListAlgebra.mem k.k_column seen) then begin
      FStar_Pervasives_Native.Some (DuplicateSortColumn (k.k_column))
      end else begin
      (order_fault s ((k.k_column)::seen) r)
@@ -1871,7 +1853,7 @@ let rec keep_queries : Prims.list<Prims.string>  ->  Prims.list<query>  ->  Prim
      end
 | (q)::t -> begin
       
-if (mem q.q_id keep) then begin
+if (ListAlgebra.mem q.q_id keep) then begin
      (q)::(keep_queries keep t)
      end else begin
      (keep_queries keep t)
@@ -1888,7 +1870,7 @@ let rec first_shared : Prims.list<query>  ->  Prims.list<query>  ->  FStar_Perva
      end
 | (q)::t -> begin
       
-if (mem q.q_id (ids a)) then begin
+if (ListAlgebra.mem q.q_id (ids a)) then begin
      FStar_Pervasives_Native.Some (q.q_id)
      end else begin
      (first_shared a t)
@@ -1913,29 +1895,6 @@ let union : registry  ->  registry  ->  outcome<registry, query_error> = (fun ( 
      Ok ({queries = (app_queries a.queries b.queries)})
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_query : query = {q_id = "q"; q_params = ({p_name = "region"; p_type = StringType; p_required = true})::[]; q_schema = ((("n"), (StringType)))::[]; q_effect = {host = Pure; determinism = {has_clock = false; has_random = false; has_network = false}}; q_source = "src"; q_timeout_ms = FStar_Pervasives_Native.None; q_page_size = FStar_Pervasives_Native.None; q_where = []; q_order_by = []}
 
@@ -1949,7 +1908,7 @@ let twin_rn : renderers = {render_int = (fun ( uu___  :  Prims.int ) -> ""); ren
 let twin_shaped : query = {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "eu"))::[]; q_order_by = ({k_column = "n"; k_direction = Descending})::[]}
 
 
-let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "validate-params-widens-a-seconds-timestamp-into-a-nanoseconds-param"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = TimestampType (Nanoseconds); p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Timestamp (Seconds, "2026-01-01T00:00:00Z"))))::[])) (Ok (()))) && (Prims.op_Equals (widens (TimestampType (Milliseconds)) (TimestampType (Seconds))) false)))})::({tname = "register-admits-a-coarser-timestamp-literal-and-refuses-a-finer"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Ok ({queries = ({q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by})::[]}))) && (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Microseconds, "2026-01-01T00:00:00.000001Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("t", TimestampType (Milliseconds), TimestampType (Microseconds)))))))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({tname = "an-order-alone-adds-only-its-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({tname = "register-admits-a-well-formed-filter-and-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({tname = "register-refuses-an-undeclared-filter-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({tname = "register-refuses-a-null-literal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({tname = "register-refuses-a-literal-of-another-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({tname = "register-refuses-an-order-naming-a-column-twice"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "validate-params-accepts-a-bound-required-param"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({Twin.tname = "validate-params-refuses-an-unbound-required-param"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({Twin.tname = "validate-params-refuses-a-type-mismatch"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({Twin.tname = "validate-params-widens-an-int-into-a-float-param"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({Twin.tname = "validate-params-refuses-a-float-for-an-int-param"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({Twin.tname = "validate-params-widens-a-seconds-timestamp-into-a-nanoseconds-param"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = TimestampType (Nanoseconds); p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Timestamp (Seconds, "2026-01-01T00:00:00Z"))))::[])) (Ok (()))) && (Prims.op_Equals (widens (TimestampType (Milliseconds)) (TimestampType (Seconds))) false)))})::({Twin.tname = "register-admits-a-coarser-timestamp-literal-and-refuses-a-finer"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Ok ({queries = ({q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by})::[]}))) && (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Microseconds, "2026-01-01T00:00:00.000001Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("t", TimestampType (Milliseconds), TimestampType (Microseconds)))))))})::({Twin.tname = "register-refuses-a-duplicate"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({Twin.tname = "register-refuses-a-repeated-parameter-name"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({Twin.tname = "unregister-undoes-register"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({Twin.tname = "the-first-page-adds-no-field"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({Twin.tname = "a-later-page-leads-with-the-page-triple"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({Twin.tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({Twin.tname = "an-order-alone-adds-only-its-triple"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({Twin.tname = "register-admits-a-well-formed-filter-and-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({Twin.tname = "register-refuses-an-undeclared-filter-column"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({Twin.tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({Twin.tname = "register-refuses-a-null-literal"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({Twin.tname = "register-refuses-a-literal-of-another-type"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({Twin.tname = "register-refuses-an-order-naming-a-column-twice"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
 
 
 let column_tag : column_type  ->  Prims.string = (fun ( t  :  column_type ) -> (match (t) with
@@ -2369,7 +2328,7 @@ let opt_int_json : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>  
      end))
 
 
-let query_tail = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> (Capability.app (opt_int_json "timeoutMs" q.q_timeout_ms) (Capability.app (opt_int_json "pageSize" q.q_page_size) (Capability.app (match (q.q_where) with
+let query_tail = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> (ListAlgebra.app (opt_int_json "timeoutMs" q.q_timeout_ms) (ListAlgebra.app (opt_int_json "pageSize" q.q_page_size) (ListAlgebra.app (match (q.q_where) with
 | [] -> begin
      []
      end
@@ -2408,11 +2367,11 @@ let rec order_fault_at : Prims.list<(Prims.string * column_type)>  ->  Prims.lis
      end
 | (k)::t -> begin
       
-if (not ((mem k.k_column (keys s)))) then begin
+if (not ((ListAlgebra.mem k.k_column (keys s)))) then begin
      FStar_Pervasives_Native.Some (((i), (UnknownColumn (k.k_column, (keys s)))))
      end else begin
       
-if (mem k.k_column seen) then begin
+if (ListAlgebra.mem k.k_column seen) then begin
      FStar_Pervasives_Native.Some (((i), (DuplicateSortColumn (k.k_column))))
      end else begin
      (order_fault_at s ((k.k_column)::seen) (i + (Prims.parse_int "1")) t)
@@ -2569,7 +2528,7 @@ let __proj__Mkquery_result__item__qr_next = (fun ( projectee  :  query_result<'r
      end))
 
 
-let result_tail = (fun ( qr  :  query_result<'r> ) -> (Capability.app (opt_int_json "totalRowCount" qr.qr_total) (match (qr.qr_next) with
+let result_tail = (fun ( qr  :  query_result<'r> ) -> (ListAlgebra.app (opt_int_json "totalRowCount" qr.qr_total) (match (qr.qr_next) with
 | FStar_Pervasives_Native.Some (t) -> begin
      ((("nextPageToken"), (Capability.JStr (t))))::[]
      end
@@ -2971,10 +2930,10 @@ let query_error_json = (fun ( cc  :  column_codec<'r> ) ( e  :  wire_query_error
      Capability.JObj (((("$type"), (Capability.JStr ("duplicateParam"))))::((("name"), (Capability.JStr (name))))::[])
      end
 | QPolicyRefused (policy, reason, allowed) -> begin
-     Capability.JObj (((("$type"), (Capability.JStr ("policyRefused"))))::((("policy"), (Capability.JStr (policy))))::((("reason"), (Capability.JStr (reason))))::((("allowed"), ((strs_j allowed))))::[])
+     Capability.JObj (((("$type"), (Capability.JStr ("queryPolicyRefused"))))::((("policy"), (Capability.JStr (policy))))::((("reason"), (Capability.JStr (reason))))::((("allowed"), ((strs_j allowed))))::[])
      end
 | QApprovalRequired (policy) -> begin
-     Capability.JObj (((("$type"), (Capability.JStr ("approvalRequired"))))::((("policy"), (Capability.JStr (policy))))::[])
+     Capability.JObj (((("$type"), (Capability.JStr ("queryApprovalRequired"))))::((("policy"), (Capability.JStr (policy))))::[])
      end
 | QUnreadableArgs (err) -> begin
      Capability.JObj (((("$type"), (Capability.JStr ("unreadableArgs"))))::((("error"), ((decode_error_json err))))::[])
@@ -3022,7 +2981,7 @@ if ((((((((Prims.op_Equals s "equalTo") || (Prims.op_Equals s "greaterThan")) ||
 let qrefused = (fun ( f  :  'a  ->  query_error ) ( x  :  'a ) -> QRefused ((f x)))
 
 
-let query_error_cases = (fun ( cc  :  column_codec<'r> ) -> ((("noSuchQuery"), ((Capability.both (s_f "id") (sl_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> QRefused (NoSuchQuery (id, known)))))))::((("duplicateQuery"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateQuery (uu___))) (s_f "id")))))::((("unknownParam"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownParam (n, d)))))))::((("paramTypeMismatch"), ((Capability.both (s_f "name") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( n  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (ParamTypeMismatch (n, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("requiredParamsUnbound"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsUnbound (uu___))) (sl_f "names")))))::((("sourceNotResolved"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> SourceNotResolved (uu___))) (s_f "ref")))))::((("executionFailed"), ((Capability.both (s_f "detail") (sl_f "recoverable") (fun ( d  :  Prims.string ) ( rc  :  Prims.list<Prims.string> ) -> QRefused (ExecutionFailed (d, rc)))))))::((("timeout"), ((Capability.d_succeed (QRefused (Timeout))))))::((("requiredParamsNull"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsNull (uu___))) (sl_f "names")))))::((("duplicateParam"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateParam (uu___))) (s_f "name")))))::((("policyRefused"), ((Capability.both (s_f "policy") (Capability.both (s_f "reason") (sl_f "allowed") (fun ( rs  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((rs), (a)))) (fun ( p  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> QPolicyRefused (p, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("approvalRequired"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QApprovalRequired (uu___)) (s_f "policy")))))::((("unreadableArgs"), ((Capability.d_map (fun ( uu___  :  wire_decode_error ) -> QUnreadableArgs (uu___)) (Capability.field "error" decode_error_of_j)))))::((("unknownColumn"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownColumn (n, d)))))))::((("predicateTypeMismatch"), ((Capability.both (s_f "column") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( c  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (PredicateTypeMismatch (c, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("predicateNotApplicable"), ((Capability.both (Capability.field "predicate" (tagged_of predicate_tag_of)) (Capability.both (s_f "column") (ty_f "columnType") (fun ( c  :  Prims.string ) ( t  :  column_type ) -> ((c), (t)))) (fun ( p  :  Prims.string ) ( ct  :  (Prims.string * column_type) ) -> QRefused (PredicateNotApplicable (p, (FStar_Pervasives_Native.fst ct), (FStar_Pervasives_Native.snd ct))))))))::((("illFormedLiteral"), ((Capability.both (s_f "column") (s_f "reason") (fun ( c  :  Prims.string ) ( rs  :  Prims.string ) -> QRefused (IllFormedLiteral (c, rs)))))))::((("duplicateSortColumn"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateSortColumn (uu___))) (s_f "column")))))::((("predicateNotHonoured"), ((Capability.d_map (fun ( uu___  :  predicate ) -> QPredicateNotHonoured (uu___)) (Capability.field "predicate" (predicate_of_j cc))))))::((("orderNotHonoured"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QOrderNotHonoured (uu___)) (s_f "column")))))::[])
+let query_error_cases = (fun ( cc  :  column_codec<'r> ) -> ((("noSuchQuery"), ((Capability.both (s_f "id") (sl_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> QRefused (NoSuchQuery (id, known)))))))::((("duplicateQuery"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateQuery (uu___))) (s_f "id")))))::((("unknownParam"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownParam (n, d)))))))::((("paramTypeMismatch"), ((Capability.both (s_f "name") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( n  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (ParamTypeMismatch (n, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("requiredParamsUnbound"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsUnbound (uu___))) (sl_f "names")))))::((("sourceNotResolved"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> SourceNotResolved (uu___))) (s_f "ref")))))::((("executionFailed"), ((Capability.both (s_f "detail") (sl_f "recoverable") (fun ( d  :  Prims.string ) ( rc  :  Prims.list<Prims.string> ) -> QRefused (ExecutionFailed (d, rc)))))))::((("timeout"), ((Capability.d_succeed (QRefused (Timeout))))))::((("requiredParamsNull"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredParamsNull (uu___))) (sl_f "names")))))::((("duplicateParam"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateParam (uu___))) (s_f "name")))))::((("queryPolicyRefused"), ((Capability.both (s_f "policy") (Capability.both (s_f "reason") (sl_f "allowed") (fun ( rs  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((rs), (a)))) (fun ( p  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> QPolicyRefused (p, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("queryApprovalRequired"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QApprovalRequired (uu___)) (s_f "policy")))))::((("unreadableArgs"), ((Capability.d_map (fun ( uu___  :  wire_decode_error ) -> QUnreadableArgs (uu___)) (Capability.field "error" decode_error_of_j)))))::((("unknownColumn"), ((Capability.both (s_f "name") (sl_f "declared") (fun ( n  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> QRefused (UnknownColumn (n, d)))))))::((("predicateTypeMismatch"), ((Capability.both (s_f "column") (Capability.both (ty_f "expected") (ty_f "got") (fun ( x  :  column_type ) ( g  :  column_type ) -> ((x), (g)))) (fun ( c  :  Prims.string ) ( xg  :  (column_type * column_type) ) -> QRefused (PredicateTypeMismatch (c, (FStar_Pervasives_Native.fst xg), (FStar_Pervasives_Native.snd xg))))))))::((("predicateNotApplicable"), ((Capability.both (Capability.field "predicate" (tagged_of predicate_tag_of)) (Capability.both (s_f "column") (ty_f "columnType") (fun ( c  :  Prims.string ) ( t  :  column_type ) -> ((c), (t)))) (fun ( p  :  Prims.string ) ( ct  :  (Prims.string * column_type) ) -> QRefused (PredicateNotApplicable (p, (FStar_Pervasives_Native.fst ct), (FStar_Pervasives_Native.snd ct))))))))::((("illFormedLiteral"), ((Capability.both (s_f "column") (s_f "reason") (fun ( c  :  Prims.string ) ( rs  :  Prims.string ) -> QRefused (IllFormedLiteral (c, rs)))))))::((("duplicateSortColumn"), ((Capability.d_map (qrefused (fun ( uu___  :  Prims.string ) -> DuplicateSortColumn (uu___))) (s_f "column")))))::((("predicateNotHonoured"), ((Capability.d_map (fun ( uu___  :  predicate ) -> QPredicateNotHonoured (uu___)) (Capability.field "predicate" (predicate_of_j cc))))))::((("orderNotHonoured"), ((Capability.d_map (fun ( uu___  :  Prims.string ) -> QOrderNotHonoured (uu___)) (s_f "column")))))::[])
 
 
 let query_error_of_j = (fun ( cc  :  column_codec<'r> ) -> (Capability.tag_dispatch (query_error_cases cc)))

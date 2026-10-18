@@ -393,7 +393,7 @@ if (not ((ch np0))) then begin
      end
 | FStar_Pervasives_Native.Some (sub) -> begin
       
-if (DagFold.mem np (TreeOps.ids sub)) then begin
+if (ListAlgebra.mem np (TreeOps.ids sub)) then begin
      DagFold.Error (TreeOps.WouldNestUnderSelf (x))
      end else begin
      (match ((TreeOps.parent_of x t)) with
@@ -797,34 +797,11 @@ let rec invert_all_from : Prims.nat  ->  Prims.list<TreeOps.op>  ->  TreeOps.tre
 
 let invert_all : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<Prims.list<TreeOps.op>, (Prims.nat * TreeOps.rejection)> = (fun ( os  :  Prims.list<TreeOps.op> ) ( pre  :  TreeOps.tree ) -> (invert_all_from (Prims.parse_int "0") os pre []))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_tree : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("a", "sec", []))::[])
 
 
-let twins : Prims.list<twin> = ({tname = "can-apply-refuses-an-unknown-target"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.RemoveNode ("zz")) twin_tree) (DagFold.Error (TreeOps.UnknownNode ("zz", ("root")::("a")::[])))))})::({tname = "can-apply-accepts-a-permutation"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.ReorderChildren ("root", ("a")::[])) twin_tree) (DagFold.Ok (()))))})::({tname = "invert-of-an-insert-is-a-remove"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (invert_leaf (TreeOps.InsertChild ("root", TreeOps.TNode ("n", "p", []))) twin_tree) (DagFold.Ok (TreeOps.RemoveNode ("n")))))})::({tname = "a-batch-can-raise-its-members-rejection"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (raisable (TreeOps.Batch ((TreeOps.RemoveNode ("x"))::[])) TreeOps.CannotRemoveRoot) true))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "can-apply-refuses-an-unknown-target"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.RemoveNode ("zz")) twin_tree) (DagFold.Error (TreeOps.UnknownNode ("zz", ("root")::("a")::[])))))})::({Twin.tname = "can-apply-accepts-a-permutation"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.ReorderChildren ("root", ("a")::[])) twin_tree) (DagFold.Ok (()))))})::({Twin.tname = "invert-of-an-insert-is-a-remove"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (invert_leaf (TreeOps.InsertChild ("root", TreeOps.TNode ("n", "p", []))) twin_tree) (DagFold.Ok (TreeOps.RemoveNode ("n")))))})::({Twin.tname = "a-batch-can-raise-its-members-rejection"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (raisable (TreeOps.Batch ((TreeOps.RemoveNode ("x"))::[])) TreeOps.CannotRemoveRoot) true))})::[]
 
 
 

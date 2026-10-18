@@ -783,30 +783,30 @@ module ColumnValidator =
                               ("null in non-null column '" + column + "'")
                               (Some(locOf column i)) ])
 
-    /// Every PRESENT cell in `column` must carry type `ty` (a `Null` is type-agnostic — use `notNull`).
+    /// `column` must be of type `ty`: one `COL-OFTYPE` error, located at the column, when its type is
+    /// another; nothing otherwise.
+    ///
+    /// **A fact about the column, not its cells (Phase 497).** Since Phase 417 a present cell cannot be
+    /// of another type than its column, so the rule has one thing to say. It used to walk the cells and
+    /// read each one's type back from its text, which is not the column's type: a millisecond column
+    /// renders a whole-second instant with no fraction, `Cell.typeOf` reads that text as seconds, and
+    /// every whole-second row of a column OF the declared type was reported.
     let ofType (column: string) (ty: ColumnType) : ColumnRule =
         rule (ruleId "ofType" [ column; ColumnType.tag ty ]) (fun t ->
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
-            | Some c ->
-                Column.toCells c
-                |> List.mapi (fun i cell -> i, cell)
-                |> List.choose (fun (i, cell) ->
-                    match Cell.typeOf cell with
-                    | Some t' when t' <> ty ->
-                        Some(
-                            Defect.create
-                                "COL-OFTYPE"
-                                Severity.Error
-                                ("column '"
-                                 + column
-                                 + "' expected "
-                                 + ColumnType.tag ty
-                                 + ", got "
-                                 + ColumnType.tag t')
-                                (Some(locOf column i))
-                        )
-                    | _ -> None))
+            | Some c when c.Type <> ty ->
+                [ Defect.create
+                      "COL-OFTYPE"
+                      Severity.Error
+                      ("column '"
+                       + column
+                       + "' expected "
+                       + ColumnType.tag ty
+                       + ", got "
+                       + ColumnType.tag c.Type)
+                      (Some column) ]
+            | Some _ -> [])
 
     /// The stock code of a range rule whose BOUNDS are not numbers (Phase 298).
     [<Literal>]

@@ -2,47 +2,32 @@ module Fuaran.Core.Tests.ProofOracle.TwinTests
 
 // Phase 309 - twin evaluation across every extracted model; see the roster below.
 
-open System.IO
 open Expecto
 
-// Phase 428 — the unit algebra's model. Aliased for the same reason: production's `Unit` module
-// (`Fuaran.Core.Unit`) is opened below, and the oracle's `Unit` would be shadowed by it.
-module ModelUnit = Unit
-
-// Phase 309 — TWIN EVALUATION. Every extracted model ends with a `twins` list: fixtures that apply
+// Phase 309 — TWIN EVALUATION. Every extracted module ends with a `twins` list: fixtures that apply
 // the model's own functions to a concrete input and compare the result with the value the model
 // means there, asserted `true` by F*'s NORMALISER (`assert_norm (twins_hold twins == true)` in the
 // model). The list is extracted with the model, so what runs here is the extracted F# evaluating
 // the very closures the normaliser evaluated: a `false` is the F# backend computing something other
-// than the model on that input, which no byte diff of the extraction can see. Declared before
-// `open Fuaran.Core` so that each model's top-level module name means the model and not a
-// production module of the same name. `Proofs.Ladder` holds this roster to `check.ps1`'s extracted
-// set, and the kit's TWIN step holds each model's source to declaring the list.
+// than the model on that input, which no byte diff of the extraction can see.
+//
+// Phase 504 — the roster is FOUND, not written: every type of the oracle assembly that declares a
+// `twins` value of the shared `Twin.twin` record is a module whose twins run here. There is no list
+// to forget a model in; `Proofs.Ladder` holds what is found to `proofs/modules.json`'s extracted set
+// in both directions, and the kit's TWIN step holds each module's source to declaring the list.
 let twinRoster: (string * (string * (unit -> bool)) list) list =
-    [ "DagFold", DagFold.twins |> List.map (fun t -> t.tname, t.tholds)
-      "WireDecode", WireDecode.twins |> List.map (fun t -> t.tname, t.tholds)
-      "DagPrimitives", DagPrimitives.twins |> List.map (fun t -> t.tname, t.tholds)
-      "DecodeLayer", DecodeLayer.twins |> List.map (fun t -> t.tname, t.tholds)
-      "TreeOps", TreeOps.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Skeleton", Skeleton.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Chain", Chain.twins |> List.map (fun t -> t.tname, t.tholds)
-      "JsonParse", JsonParse.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Preservation", Preservation.twins |> List.map (fun t -> t.tname, t.tholds)
-      "TreeDiff", TreeDiff.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Limits", Limits.twins |> List.map (fun t -> t.tname, t.tholds)
-      "WireCanon", WireCanon.twins |> List.map (fun t -> t.tname, t.tholds)
-      "WireVersioning", WireVersioning.twins |> List.map (fun t -> t.tname, t.tholds)
-      "WireColumn", WireColumn.twins |> List.map (fun t -> t.tname, t.tholds)
-      "ColumnRefinement", ColumnRefinement.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Unit", ModelUnit.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Temporal", Temporal.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Capability", Capability.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Propagation", Propagation.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Query", Query.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Arbitrate", Arbitrate.twins |> List.map (fun t -> t.tname, t.tholds)
-      "DecimalText", DecimalText.twins |> List.map (fun t -> t.tname, t.tholds)
-      "Normalize", Normalize.twins |> List.map (fun t -> t.tname, t.tholds)
-      "OpStreamLoad", OpStreamLoad.twins |> List.map (fun t -> t.tname, t.tholds) ]
+    let oracle = typeof<Twin.twin>.Assembly
+
+    [ for t in oracle.GetTypes() do
+          match
+              t.GetProperty("twins", System.Reflection.BindingFlags.Static ||| System.Reflection.BindingFlags.Public)
+          with
+          | null -> ()
+          | p when p.PropertyType = typeof<Twin.twin list> ->
+              let ts = p.GetValue null :?> Twin.twin list
+              yield t.Name, ts |> List.map (fun tw -> tw.tname, tw.tholds)
+          | _ -> () ]
+    |> List.sortBy fst
 
 /// Every twin that does NOT hold on the extracted F#, as "<model>/<twin>" — empty is clean.
 let twinFailures (roster: (string * (string * (unit -> bool)) list) list) : string list =

@@ -1,13 +1,4 @@
 module Chain
-
-let rec mem = (fun ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (y)::t -> begin
-     ((Prims.op_Equals x y) || (mem x t))
-     end))
-
 type found<'a> =
 | Missing
 | Found of 'a
@@ -141,7 +132,7 @@ let rec first_absent : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  -
      end
 | (p)::t -> begin
       
-if (mem p keys) then begin
+if (ListAlgebra.mem p keys) then begin
      (first_absent keys t)
      end else begin
      Found (p)
@@ -423,7 +414,7 @@ let rec no_dup : Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.l
      true
      end
 | (x)::t -> begin
-     ((not ((mem x t))) && (no_dup t))
+     ((not ((ListAlgebra.mem x t))) && (no_dup t))
      end))
 
 
@@ -433,7 +424,7 @@ let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( 
      end
 | (x)::t -> begin
       
-if (mem x t) then begin
+if (ListAlgebra.mem x t) then begin
      (dedup t)
      end else begin
      (x)::(dedup t)
@@ -1571,29 +1562,6 @@ let splice_changes = (fun ( cs  :  Prims.list<cstep<'op>> ) ( sp  :  splice<'op>
      end)
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_show : pos  ->  Prims.string = (fun ( p  :  pos ) -> (match (p) with
 | PZero -> begin
@@ -1625,7 +1593,7 @@ let twin_tampered : Prims.list<record<Prims.string>> = (match ((record_at twin_c
      end)
 
 
-let twins : Prims.list<twin> = ({tname = "join-comma-joins"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (join_comma (("a")::("b")::("c")::[])) "a,b,c"))})::({tname = "first-absent-names-the-missing-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_absent (("k")::[]) (("k")::("p")::[])) (Found ("p"))))})::({tname = "verify-chain-accepts-an-appended-chain"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_chain) true))})::({tname = "verify-chain-refuses-an-op-tamper"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_tampered) false))})::({tname = "first-break-finds-nothing-in-an-intact-dag"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "/A|x"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) Missing))})::({tname = "first-break-names-a-tampered-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "bad"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) (Found ({bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad"}))))})::({tname = "merge-all-parents-dedups-and-sorts"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_all_parents twin_le (("b")::("a")::("b")::[])) (("a")::("b")::[])))})::({tname = "merge-all-id-is-set-determined"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_all_id twin_h twin_enc twin_le (("b")::("a")::[]) "A" "x") (merge_all_id twin_h twin_enc twin_le (("a")::("b")::("a")::[]) "A" "x")))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "join-comma-joins"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (join_comma (("a")::("b")::("c")::[])) "a,b,c"))})::({Twin.tname = "first-absent-names-the-missing-parent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_absent (("k")::[]) (("k")::("p")::[])) (Found ("p"))))})::({Twin.tname = "verify-chain-accepts-an-appended-chain"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_chain) true))})::({Twin.tname = "verify-chain-refuses-an-op-tamper"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_tampered) false))})::({Twin.tname = "first-break-finds-nothing-in-an-intact-dag"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "/A|x"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) Missing))})::({Twin.tname = "first-break-names-a-tampered-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "bad"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) (Found ({bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad"}))))})::({Twin.tname = "merge-all-parents-dedups-and-sorts"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_all_parents twin_le (("b")::("a")::("b")::[])) (("a")::("b")::[])))})::({Twin.tname = "merge-all-id-is-set-determined"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_all_id twin_h twin_enc twin_le (("b")::("a")::[]) "A" "x") (merge_all_id twin_h twin_enc twin_le (("a")::("b")::("a")::[]) "A" "x")))})::[]
 
 
 

@@ -207,10 +207,13 @@ type QueryError =
     /// with `reason` and the `allowed` alternatives its guidance enumerates. Raised after the
     /// parameters validated and before the resolver: no resolver ran, and nothing was captured.
     /// Prefixed `Query…` because `InvokeError.PolicyRefused` is a case in the same namespace, and an
-    /// unqualified case name shared by two unions resolves to whichever was declared last.
+    /// unqualified case name shared by two unions resolves to whichever was declared last. The prefix
+    /// is carried onto the wire (Phase 497): its `$type` is `queryPolicyRefused`, so a refusal
+    /// document names the seam that refused, and the capability seam's `policyRefused` is refused here.
     | QueryPolicyRefused of policy: string * reason: string * allowed: string list
     /// The registry's policy answered `NeedsApproval` (Phase 318): the gate named `policy` will not
-    /// let the query run until an approval is given. No resolver ran.
+    /// let the query run until an approval is given. No resolver ran. On the wire it is
+    /// `queryApprovalRequired`, never the capability seam's `approvalRequired` (Phase 497).
     | QueryApprovalRequired of policy: string
     /// The arguments could not be read at all (Phase 385): `QueryCodec.decodeArgs` was handed text
     /// that is not JSON, a document that is not one object keyed by parameter name, or a parameter
@@ -770,8 +773,8 @@ module internal QueryErrorWire =
         | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
         | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
         | QueryPolicyRefused(policy, reason, allowed) ->
-            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
-        | QueryApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
+            Canon.typed "queryPolicyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | QueryApprovalRequired policy -> Canon.typed "queryApprovalRequired" [ "policy", JStr policy ]
         | UnreadableArgs error -> Canon.typed "unreadableArgs" [ "error", DecodeError.toJson error ]
         | UnknownColumn(name, declared) -> Canon.typed "unknownColumn" [ "name", JStr name; "declared", strs declared ]
         | PredicateTypeMismatch(column, expected, got) ->
@@ -818,12 +821,12 @@ module internal QueryErrorWire =
               "timeout", Decoder.succeed Timeout
               "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
               "duplicateParam", str "name" |> Decoder.map DuplicateParam
-              "policyRefused",
+              "queryPolicyRefused",
               str "policy"
               |> Decoder.bind (fun policy ->
                   both (str "reason") (strList "allowed") (fun reason allowed ->
                       QueryPolicyRefused(policy, reason, allowed)))
-              "approvalRequired", str "policy" |> Decoder.map QueryApprovalRequired
+              "queryApprovalRequired", str "policy" |> Decoder.map QueryApprovalRequired
               "unreadableArgs", Decoder.field "error" decodeErrorOf |> Decoder.map UnreadableArgs
               "unknownColumn", both (str "name") (strList "declared") (fun name d -> UnknownColumn(name, d))
               "predicateTypeMismatch",

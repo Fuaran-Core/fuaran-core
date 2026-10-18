@@ -1,32 +1,5 @@
 module DecimalText
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
-     end))
-
-
-let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     m
-     end
-| (x)::t -> begin
-     (x)::(app t m)
-     end))
-
-
-let rec rev = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     []
-     end
-| (x)::t -> begin
-     (app (rev t) ((x)::[]))
-     end))
-
-
 let rec take = (fun ( n  :  Prims.nat ) ( l  :  Prims.list<'a> ) ->  
 if (Prims.op_Equals n (Prims.parse_int "0")) then begin
      []
@@ -313,12 +286,12 @@ in FStar_Pervasives_Native.Some ({negative = (neg && (not (is_zero))); ip = ip';
      end))
 
 
-let render : dparts  ->  Prims.list<sym> = (fun ( p  :  dparts ) -> (app ( 
+let render : dparts  ->  Prims.list<sym> = (fun ( p  :  dparts ) -> (ListAlgebra.app ( 
 if p.negative then begin
      (Minus)::[]
      end else begin
      []
-     end) (app (of_digits ( 
+     end) (ListAlgebra.app (of_digits ( 
 if (match (p.ip) with
 | [] -> begin
      true
@@ -359,33 +332,33 @@ let zero_text : Prims.list<sym> = (Digit ((Prims.parse_int "0")))::[]
 
 
 let pad_right : Prims.list<digit>  ->  Prims.nat  ->  Prims.list<digit> = (fun ( l  :  Prims.list<digit> ) ( n  :  Prims.nat ) ->  
-if ((len l) >= n) then begin
+if ((ListAlgebra.len l) >= n) then begin
      l
      end else begin
-     (app l (zeros (n - (len l))))
+     (ListAlgebra.app l (zeros (n - (ListAlgebra.len l))))
      end)
 
 
 let pad_left : Prims.list<digit>  ->  Prims.nat  ->  Prims.list<digit> = (fun ( l  :  Prims.list<digit> ) ( n  :  Prims.nat ) ->  
-if ((len l) >= n) then begin
+if ((ListAlgebra.len l) >= n) then begin
      l
      end else begin
-     (app (zeros (n - (len l))) l)
+     (ListAlgebra.app (zeros (n - (ListAlgebra.len l))) l)
      end)
 
 
 let aligned : dparts  ->  dparts  ->  (Prims.list<digit> * Prims.list<digit> * Prims.nat) = (fun ( a  :  dparts ) ( b  :  dparts ) -> (
 
-let scale = (max (len a.fp) (len b.fp))
+let scale = (max (ListAlgebra.len a.fp) (ListAlgebra.len b.fp))
 in (
 
-let ma = (app a.ip (pad_right a.fp scale))
+let ma = (ListAlgebra.app a.ip (pad_right a.fp scale))
 in (
 
-let mb = (app b.ip (pad_right b.fp scale))
+let mb = (ListAlgebra.app b.ip (pad_right b.fp scale))
 in (
 
-let width = (max (len ma) (len mb))
+let width = (max (ListAlgebra.len ma) (ListAlgebra.len mb))
 in (((pad_left ma width)), ((pad_left mb width)), (scale)))))))
 
 
@@ -447,15 +420,15 @@ in (match (uu___1) with
      end))
 
 
-let add_magnitudes : Prims.list<digit>  ->  Prims.list<digit>  ->  Prims.list<digit> = (fun ( a  :  Prims.list<digit> ) ( b  :  Prims.list<digit> ) -> (rev (add_lsb (rev a) (rev b) (Prims.parse_int "0"))))
+let add_magnitudes : Prims.list<digit>  ->  Prims.list<digit>  ->  Prims.list<digit> = (fun ( a  :  Prims.list<digit> ) ( b  :  Prims.list<digit> ) -> (ListAlgebra.rev (add_lsb (ListAlgebra.rev a) (ListAlgebra.rev b) (Prims.parse_int "0"))))
 
 
 let sub_magnitudes : Prims.list<digit>  ->  Prims.list<digit>  ->  Prims.list<digit> = (fun ( a  :  Prims.list<digit> ) ( b  :  Prims.list<digit> ) -> (
 
-let uu___ = (sub_lsb (rev a) (rev b) (Prims.parse_int "0"))
+let uu___ = (sub_lsb (ListAlgebra.rev a) (ListAlgebra.rev b) (Prims.parse_int "0"))
 in (match (uu___) with
 | (digits, uu___1) -> begin
-     (rev digits)
+     (ListAlgebra.rev digits)
      end)))
 
 
@@ -553,10 +526,10 @@ in (match (uu___1) with
 let magnitude1 = (pad_left magnitude (scale + (Prims.parse_int "1")))
 in (
 
-let ip = (take ((len magnitude1) - scale) magnitude1)
+let ip = (take ((ListAlgebra.len magnitude1) - scale) magnitude1)
 in (
 
-let fp = (drop ((len magnitude1) - scale) magnitude1)
+let fp = (drop ((ListAlgebra.len magnitude1) - scale) magnitude1)
 in (
 
 let ip' = (trim_start ip)
@@ -591,31 +564,8 @@ let add : Prims.list<sym>  ->  Prims.list<sym>  ->  FStar_Pervasives_Native.opti
      FStar_Pervasives_Native.None
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "try-canonical-trims-a-negative"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((Minus)::(Digit ((Prims.parse_int "0")))::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::(Digit ((Prims.parse_int "0")))::[])) (FStar_Pervasives_Native.Some ((Minus)::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]))))})::({tname = "add-carries-across-the-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::(Dot)::(Digit ((Prims.parse_int "5")))::[])) (FStar_Pervasives_Native.Some ((Digit ((Prims.parse_int "4")))::[]))))})::({tname = "compare-orders-numerically"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (compare ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::[])) (FStar_Pervasives_Native.Some ((Prims.parse_int "-1")))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "try-canonical-trims-a-negative"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((Minus)::(Digit ((Prims.parse_int "0")))::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::(Digit ((Prims.parse_int "0")))::[])) (FStar_Pervasives_Native.Some ((Minus)::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]))))})::({Twin.tname = "add-carries-across-the-point"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::(Dot)::(Digit ((Prims.parse_int "5")))::[])) (FStar_Pervasives_Native.Some ((Digit ((Prims.parse_int "4")))::[]))))})::({Twin.tname = "compare-orders-numerically"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (compare ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::[])) (FStar_Pervasives_Native.Some ((Prims.parse_int "-1")))))})::[]
 
 
 

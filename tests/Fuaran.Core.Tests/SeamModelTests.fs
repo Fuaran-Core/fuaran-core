@@ -467,7 +467,54 @@ let tests =
                 testCase "an unknown refusal tag is refused by name"
                 <| fun _ ->
                     Expect.isError (CapabilityCodec.decodeInvokeError "{\"$type\":\"nope\"}") "invoke"
-                    Expect.isError (QueryCodec.decodeQueryError "{\"$type\":\"nope\"}") "query" ]
+                    Expect.isError (QueryCodec.decodeQueryError "{\"$type\":\"nope\"}") "query"
+
+                // Phase 497 — the two policy refusals encoded to one `$type` on both seams, so either
+                // seam's reader accepted the other's document and a refusal did not say which seam
+                // refused (the evidence run, before the fix, recorded all four cross-readings as
+                // accepted). The query seam's tags now carry its case-name prefix.
+                testCase "a policy refusal names its seam, and neither seam reads the other's"
+                <| fun _ ->
+                    Expect.equal
+                        (QueryCodec.encodeQueryError (QueryPolicyRefused("p", "r", [ "a" ])))
+                        "{\"$type\":\"queryPolicyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
+                        "the query seam's policy refusal"
+
+                    Expect.equal
+                        (QueryCodec.encodeQueryError (QueryApprovalRequired "p"))
+                        "{\"$type\":\"queryApprovalRequired\",\"policy\":\"p\"}"
+                        "the query seam's approval refusal"
+
+                    Expect.equal
+                        (CapabilityCodec.encodeInvokeError (PolicyRefused("p", "r", [ "a" ])))
+                        "{\"$type\":\"policyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
+                        "the capability seam's policy refusal is unchanged"
+
+                    Expect.equal
+                        (CapabilityCodec.encodeInvokeError (ApprovalRequired "p"))
+                        "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}"
+                        "the capability seam's approval refusal is unchanged"
+
+                    // The query reader refuses the capability seam's tags by name. The sentence is
+                    // `tagDispatchWith`'s, which it writes only for an `UnknownTag` at `$type`, so the
+                    // code and the path are pinned with it.
+                    for tag, doc in
+                        [ "policyRefused",
+                          "{\"$type\":\"policyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}"
+                          "approvalRequired", "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}" ] do
+                        Expect.equal
+                            (QueryCodec.decodeQueryError doc)
+                            (Error("unknown query error: " + tag))
+                            (tag + " is the capability seam's tag")
+
+                    // And the capability reader refuses the query seam's.
+                    for tag, e in
+                        [ "queryPolicyRefused", QueryPolicyRefused("p", "r", [ "a" ])
+                          "queryApprovalRequired", QueryApprovalRequired "p" ] do
+                        Expect.equal
+                            (CapabilityCodec.decodeInvokeError (QueryCodec.encodeQueryError e))
+                            (Error("unknown invoke error: " + tag))
+                            (tag + " is the query seam's tag") ]
 
           testList
               "validated arguments handed on"

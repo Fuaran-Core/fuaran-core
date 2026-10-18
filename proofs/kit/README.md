@@ -112,8 +112,9 @@ whether the F\# the backend emits COMPUTES what the model means: a mis-extractio
 every other step. Twin evaluation discharges that premise on sampled inputs, and it is opt-in —
 `-Twins` on the engine.
 
-- **In each extracted model**, a final section declaring `noeq type twin = { tname : string; tholds :
-  unit -> bool }`, `twins_hold`, a `let twins : list twin = [...]` of fixtures — each closure applies
+- **In each extracted model**, a final section declaring a `let twins : list twin = [...]` of fixtures
+  over the shared `Twin` module's record (`Twin.fst`, opened by every model since the reference
+  repository's Phase 504, which also carries `twins_hold`) — each closure applies
   the model's own functions to a concrete input and compares the result with the value the model
   means — and `let _ = assert_norm (twins_hold twins == true)`. The prover's NORMALISER evaluates
   every fixture at the check step; a wrong expected value is a refutation like any other.
@@ -403,9 +404,10 @@ template where the leg had a caller.
    it instantiates nothing. A domain with its own algebra models its own apply, and `{{DIAMOND}}` is
    the theorem it proves about it before the template applies; `../Preservation.fst` is the shape to
    model preservation against, not a template for it.
-3. **Check.** Add `DagFold`, your domain module and the instance to `$modules` in
-   `<repo>/proofs/check.ps1`, in dependency order (a model follows what it opens), one budget entry
-   each in `modules.json`, `pwsh ./proofs/check.ps1`, and commit the oracle it extracts. The leg
+3. **Check.** Copy the shared `Twin.fst` and `ListAlgebra.fst` beside `DagFold.fst`, and add all of
+   them, your domain module and the instance to the roster in `<repo>/proofs/modules.json`, in
+   dependency order (a model follows what it opens), one entry each with its `kind`, its `opens` and
+   its budget, `pwsh ./proofs/check.ps1`, and commit the oracle it extracts. The leg
    checks the instance from a cold cache like any other model and diffs its extraction like any
    other; nothing about it is special, which is the point.
 

@@ -21,7 +21,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //                           the test tree. The citable set is the differential host `Proofs.Oracle`
 //                           plus (Phase 161) the `containerLaws` conformance suite — see
 //                           `realCases` for why it is an enumeration of suites and not a walk.
-//   every-module-has-a-row  every module in `$modules` is named by at least one `proved` row.
+//   every-module-has-a-row  every model in the roster (`proofs/modules.json`) is named by at least one `proved` row.
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
 //
@@ -48,12 +48,13 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // module list, the case names and the kit's law names — so the real file is ONE input and each
 // fixture is another.
 // That is not decoration: a fixture ladder measured against the REAL module list would go red the
-// moment a sibling appended a model to `$modules`, and one measured against the REAL case names
+// moment a sibling appended a model to the roster, and one measured against the REAL case names
 // would go red on a renamed case. A go-red family has to stay green while the subject it is about
 // changes, or it is not a go-red family for long. For the same reason the case names are read from
-// the TEST TREE (`oracleTests`, the `ProofOracle.*Tests` files' lists) rather than by parsing their source,
-// and the module list is read from `check.ps1`'s own text rather than restated here — a second
-// copy of that list is precisely the drift this family exists to catch.
+// the TEST TREE (`oracleTests`: every `Proofs.Oracle` list the assembly declares) rather than by
+// parsing their source, and the module list is read from `proofs/modules.json`, the one roster
+// (Phase 504), rather than restated here — a second copy of that list is precisely the drift this
+// family exists to catch.
 
 open System
 open System.IO
@@ -69,7 +70,7 @@ type LadderInputs =
     {
         /// The directory a row's `evidence.model` path resolves against.
         Root: string
-        /// The modules the ladder must cover — `proofs/check.ps1`'s `$modules`, for the real file.
+        /// The modules the ladder must cover — the roster's models (`proofs/modules.json`), for the real file.
         Modules: string list
         /// The case names a `tested` row may name.
         Cases: Set<string>
@@ -719,51 +720,125 @@ let regenerateReadme (ladderText: string) (readmeText: string) : Result<string, 
 //  Reading the two inputs out of the tree
 // ---------------------------------------------------------------------------
 
-/// One of `proofs/check.ps1`'s one-line list literals (`$<name> = @('A', 'B')`), parsed from the
-/// script's own text. `parseModules` is this at `modules`; the Phase 328 cone selector also reads
-/// `$proofOnly` through it, so the ladder and the selector share ONE reading of the script.
-let parseScriptList (name: string) (checkScript: string) : string list =
-    let line =
-        Regex.Match(checkScript, @"^\$" + Regex.Escape name + @"\s*=\s*@\(([^)]*)\)", RegexOptions.Multiline)
+/// How the proof leg treats a module — `proofs/modules.json`'s `kind` (Phase 504).
+type ModelKind =
+    /// Checked, extracted to the oracle, twinned, and run beside production by the host.
+    | Extracted
+    /// Checked only: its production side cannot be run beside an extraction (the reason is in
+    /// `check.ps1`'s exemption paragraphs).
+    | ProofOnly
+    /// Emitted by `Fuaran.Core.Idl.Codegen`'s F* target and checked only; the `Proofs.Vocabulary`
+    /// family holds it to a fresh generation.
+    | Generated
+    /// Not a model: a module every model opens and that references no model (`Twin`, `ListAlgebra`).
+    /// Checked and extracted like a model, carries no ladder row, and is a SHARED input of the cone.
+    | Shared
 
-    if not line.Success then
-        []
-    else
-        Regex.Matches(line.Groups[1].Value, "['\"]([^'\"]*)['\"]")
-        |> Seq.map (fun m -> m.Groups[1].Value)
-        |> List.ofSeq
+/// One roster entry: the module, how it is treated, and the registered modules its code references.
+type RosterEntry =
+    { Module: string
+      Kind: ModelKind
+      Opens: string list }
 
-/// `proofs/check.ps1`'s `$modules` list, parsed from the script's own text.
-let parseModules (checkScript: string) : string list = parseScriptList "modules" checkScript
+/// The modules `kind` names, by their spelling in `modules.json`.
+let modelKinds =
+    [ "extracted", Extracted
+      "proofOnly", ProofOnly
+      "generated", Generated
+      "shared", Shared ]
 
-/// The `Proofs.Oracle` family's test tree: one list per `ProofOracle.<Model>Tests.fs` file, in the
-/// compile order the project file gives them.
-let oracleTests: Test =
-    testList
-        "Proofs.Oracle"
-        [ ProofOracle.ArbitrateTests.tests
-          ProofOracle.CapabilityTests.tests
-          ProofOracle.ChainTests.tests
-          ProofOracle.ColumnRefinementTests.tests
-          ProofOracle.DagFoldTests.tests
-          ProofOracle.DecimalTextTests.tests
-          ProofOracle.DecodeLayerTests.tests
-          ProofOracle.JsonParseTests.tests
-          ProofOracle.NormalizeTests.tests
-          ProofOracle.OpStreamLoadTests.tests
-          ProofOracle.PreservationTests.tests
-          ProofOracle.PropagationTests.tests
-          ProofOracle.QueryTests.tests
-          ProofOracle.TemporalTests.tests
-          ProofOracle.TreeDiffTests.tests
-          ProofOracle.TreeOpsTests.tests
-          ProofOracle.UnitTests.tests
-          ProofOracle.Utf8Tests.tests
-          ProofOracle.WireCanonTests.tests
-          ProofOracle.WireColumnTests.tests
-          ProofOracle.WireDecodeTests.tests
-          ProofOracle.WireVersioningTests.tests
-          ProofOracle.TwinTests.tests ]
+/// THE PROOF ROSTER — `proofs/modules.json`'s `modules`, in check order. Since Phase 504 this file
+/// is the only place a model is enumerated: `check.ps1` reads it for the modules it hands the kit and
+/// the ones it exempts from extraction, this family reads it for the ladder, the twin roster and the
+/// oracle project, and the cone selector reads it for the roster it selects from. An entry with no
+/// `kind`, a kind not in `modelKinds`, or no `opens` list is an ERROR naming the entry, never a
+/// default: a roster read as a guess is the silent drift this file replaced.
+let parseRoster (modulesJson: string) : Result<RosterEntry list, string list> =
+    try
+        use doc = JsonDocument.Parse modulesJson
+
+        match doc.RootElement.TryGetProperty "modules" with
+        | true, arr when arr.ValueKind = JsonValueKind.Array ->
+            let read (el: JsonElement) =
+                let str name =
+                    match el.TryGetProperty(name: string) with
+                    | true, v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
+                    | _ -> None
+
+                match str "module" with
+                | None -> Error "an entry names no `module`"
+                | Some m ->
+                    let kind =
+                        str "kind"
+                        |> Option.bind (fun k -> modelKinds |> List.tryFind (fun (s, _) -> s = k) |> Option.map snd)
+
+                    let opens =
+                        match el.TryGetProperty "opens" with
+                        | true, v when v.ValueKind = JsonValueKind.Array ->
+                            v.EnumerateArray()
+                            |> Seq.filter (fun x -> x.ValueKind = JsonValueKind.String)
+                            |> Seq.map _.GetString()
+                            |> List.ofSeq
+                            |> Some
+                        | _ -> None
+
+                    match kind, opens with
+                    | Some k, Some o -> Ok { Module = m; Kind = k; Opens = o }
+                    | None, _ ->
+                        Error(
+                            sprintf "'%s' has no `kind` among %s" m (modelKinds |> List.map fst |> String.concat ", ")
+                        )
+                    | _, None -> Error(sprintf "'%s' has no `opens` list" m)
+
+            let results = arr.EnumerateArray() |> Seq.map read |> List.ofSeq
+
+            match
+                results
+                |> List.choose (function
+                    | Error e -> Some e
+                    | Ok _ -> None)
+            with
+            | [] ->
+                Ok(
+                    results
+                    |> List.choose (function
+                        | Ok e -> Some e
+                        | Error _ -> None)
+                )
+            | errors -> Error errors
+        | _ -> Error [ "the file has no `modules` array" ]
+    with :? JsonException as e ->
+        Error [ sprintf "the file is not JSON: %s" e.Message ]
+
+/// A module the leg extracts to the oracle (and so twins and compiles in the oracle project).
+let isExtracted (e: RosterEntry) = e.Kind = Extracted || e.Kind = Shared
+
+/// A MODEL — a roster entry that is not a shared module. Every model carries a `proved` row.
+let isModel (e: RosterEntry) = e.Kind <> Shared
+
+/// The `Proofs.Oracle` family's test tree: every `[<Tests>]` value in this assembly whose label is
+/// `Proofs.Oracle`, found by reflection (Phase 504) — so a new differential file is citable by a
+/// `tested` row the moment it declares its list, with no enumeration here to forget it in.
+let oracleTests () : Test =
+    let family =
+        [ for t in Reflection.Assembly.GetExecutingAssembly().GetTypes() do
+              for p in
+                  t.GetProperties(
+                      Reflection.BindingFlags.Static
+                      ||| Reflection.BindingFlags.Public
+                      ||| Reflection.BindingFlags.NonPublic
+                  ) do
+                  if p.PropertyType = typeof<Test> && p.IsDefined(typeof<TestsAttribute>, false) then
+                      match p.GetValue null with
+                      | :? Test as test ->
+                          match test with
+                          | TestLabel("Proofs.Oracle", _, _) -> yield p.DeclaringType.FullName + "." + p.Name, test
+                          | _ -> ()
+                      | _ -> () ]
+        |> List.sortBy fst
+        |> List.map snd
+
+    testList "Proofs.Oracle" family
 
 /// The leaf case names of an Expecto test tree — the labels a `tested` row may cite.
 let rec caseNames (t: Test) : string list =
@@ -786,8 +861,20 @@ let private proofsReadmePath = Path.Combine(repoRoot, "proofs", "README.md")
 let private fixtureDir =
     Path.Combine(repoRoot, "tests", "Fuaran.Core.Tests", "fixtures", "proofs-ladder")
 
-let private realModules () =
-    parseModules (File.ReadAllText checkScriptPath)
+let private modulesJsonPath = Path.Combine(repoRoot, "proofs", "modules.json")
+
+/// The real roster; an unreadable one fails the case that asked, naming every bad entry.
+let private realRoster () : RosterEntry list =
+    match parseRoster (File.ReadAllText modulesJsonPath) with
+    | Ok entries -> entries
+    | Error errors -> failtestf "%s is not a readable roster: %s" modulesJsonPath (String.concat "; " errors)
+
+/// Every module the leg checks, in check order.
+let private realModules () = realRoster () |> List.map _.Module
+
+/// The MODELS — what the ladder's `every-module-has-a-row` is about (the shared modules carry none).
+let private realModels () =
+    realRoster () |> List.filter isModel |> List.map _.Module
 
 /// The case names a `tested` row may cite. `Proofs.Oracle` is where every differential row's
 /// evidence lives, and it was the whole set until Phase 161 — whose `container-laws` row is
@@ -802,7 +889,7 @@ let private realModules () =
 /// whole tree. Phase 288 adds the second conformance suite on the same footing: the checkpoint rows
 /// are evidenced by `Conformance.checkpointLaws`, whose cases live in `CheckpointTests`.
 let private realCases () =
-    Set.union (caseNames oracleTests |> Set.ofList) (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
+    Set.union (caseNames (oracleTests ()) |> Set.ofList) (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
     |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
@@ -840,7 +927,7 @@ let private realLaws () =
     |> Set.ofList
 
 /// A fixture ladder is measured against a FIXTURE module list, a FIXTURE case set and a FIXTURE law
-/// set, so nothing a sibling adds to `$modules`, to `Proofs.Oracle` or to the conformance kit can
+/// set, so nothing a sibling adds to the roster, to `Proofs.Oracle` or to the conformance kit can
 /// move a go-red in either direction.
 let private fixtureInputs (modules: string list) =
     { Root = fixtureDir
@@ -875,38 +962,52 @@ let proofsLadderTests =
 
           // ---- the inputs are real, and non-vacuous ----
 
-          testCase "check.ps1's $modules parses, and every module it names has a model file"
+          testCase "modules.json is the roster: every entry has a kind and an opens list, and a model file"
           <| fun _ ->
-              let modules = realModules ()
+              // `realRoster` fails on an entry with no kind or no opens; this asserts what it read is
+              // not vacuous, because a roster read as EMPTY makes every-module-has-a-row silently
+              // vacuous, which is worse than a red.
+              let roster = realRoster ()
 
-              Expect.isNonEmpty
-                  modules
-                  (sprintf
-                      "%s's `$modules` line did not parse — a module list read as EMPTY makes every-module-has-a-row silently vacuous, which is worse than a red"
-                      checkScriptPath)
+              Expect.isNonEmpty roster (sprintf "%s names no module" modulesJsonPath)
+              Expect.isNonEmpty (roster |> List.filter isModel) "the roster names models"
 
-              for m in modules do
-                  let model = Path.Combine(repoRoot, "proofs", m + ".fst")
-                  Expect.isTrue (File.Exists model) (sprintf "the leg checks '%s' but %s is not there" m model)
+              Expect.equal
+                  (roster |> List.map _.Module |> List.distinct |> List.length)
+                  roster.Length
+                  "no module is registered twice"
 
-          testCase "the twin roster runs exactly the models check.ps1 extracts (Phase 309)"
+              for e in roster do
+                  let model = Path.Combine(repoRoot, "proofs", e.Module + ".fst")
+                  Expect.isTrue (File.Exists model) (sprintf "the leg checks '%s' but %s is not there" e.Module model)
+
+          testCase "check.ps1 enumerates no module: the roster is modules.json's (Phase 504)"
+          <| fun _ ->
+              // The script used to carry the roster as two one-line literals this family parsed out
+              // of its text with a regex. It reads modules.json now, and a literal that came back
+              // would be a second roster nothing holds to the first.
+              let script = File.ReadAllText checkScriptPath
+
+              for name in [ "modules"; "proofOnly" ] do
+                  Expect.isFalse
+                      (Regex.IsMatch(script, @"^\$" + name + @"\s*=\s*@\(\s*'", RegexOptions.Multiline))
+                      (sprintf "check.ps1 declares a `$%s` list literal — the roster is proofs/modules.json alone" name)
+
+              Expect.stringContains script "modules.json" "and it reads the roster file"
+
+          testCase "the twin roster runs exactly the modules the leg extracts (Phase 309)"
           <| fun _ ->
               // The host half of twin evaluation's coverage. The kit's TWIN step holds each extracted
-              // model's SOURCE to declaring `twins`; this holds the HOST to running them — a model
+              // module's SOURCE to declaring `twins`; this holds the HOST to running them — a model
               // whose fixtures the normaliser certified and nothing ran would read as covered. Both
-              // directions: an extracted model the roster misses, and a roster entry for a model the
-              // leg no longer extracts.
-              let script = File.ReadAllText checkScriptPath
-              let proofOnly = parseScriptList "proofOnly" script |> Set.ofList
-
+              // directions: an extracted module the oracle assembly carries no twins for, and twins
+              // in the oracle for a module the leg no longer extracts.
               let extracted =
-                  parseModules script
-                  |> List.filter (fun m -> not (Set.contains m proofOnly))
-                  |> Set.ofList
+                  realRoster () |> List.filter isExtracted |> List.map _.Module |> Set.ofList
 
               let rostered = ProofOracle.TwinTests.twinRoster |> List.map fst |> Set.ofList
 
-              Expect.isNonEmpty extracted "check.ps1's extracted set parses"
+              Expect.isNonEmpty extracted "the roster's extracted set is read"
 
               Expect.equal
                   rostered
@@ -915,6 +1016,40 @@ let proofsLadderTests =
                       "the twin roster and the extracted set differ — unrun: %A; stale: %A"
                       (Set.difference extracted rostered)
                       (Set.difference rostered extracted))
+
+          testCase "the oracle project compiles exactly the extracted modules, each after what it opens"
+          <| fun _ ->
+              // Held, not generated (generating the Compile list is a later phase): the project's
+              // `Compile` items, less the hand-written runtime floor, are the roster's extracted set,
+              // and each comes after every extracted module its `opens` names — the order F# needs.
+              let floor = set [ "Prims"; "FStar_Pervasives_Native" ]
+
+              let compiled =
+                  let project =
+                      File.ReadAllText(Path.Combine(repoRoot, "proofs", "oracle", "Fuaran.Core.Proofs.Oracle.fsproj"))
+
+                  Regex.Matches(project, @"<Compile\s+Include=""([^""]+)\.fs""")
+                  |> Seq.map (fun m -> m.Groups[1].Value)
+                  |> Seq.filter (fun m -> not (floor.Contains m))
+                  |> List.ofSeq
+
+              let roster = realRoster ()
+              let extracted = roster |> List.filter isExtracted
+
+              Expect.equal
+                  (Set.ofList compiled)
+                  (extracted |> List.map _.Module |> Set.ofList)
+                  "the oracle project compiles the roster's extracted modules and nothing else"
+
+              let position m = List.findIndex ((=) m) compiled
+
+              for e in extracted do
+                  for o in e.Opens do
+                      if List.contains o compiled then
+                          Expect.isLessThan
+                              (position o)
+                              (position e.Module)
+                              (sprintf "%s opens %s, so the oracle project must compile %s first" e.Module o o)
 
           testCase "the case names a tested row may cite are readable from the test tree"
           <| fun _ ->
@@ -928,7 +1063,7 @@ let proofsLadderTests =
 
               // and BOTH suites are in it — a union that silently degenerated to one of its
               // members would leave the other's rows uncheckable while reporting nothing.
-              Expect.isNonEmpty (caseNames oracleTests) "the Proofs.Oracle differential host contributes cases"
+              Expect.isNonEmpty (caseNames (oracleTests ())) "the Proofs.Oracle differential host contributes cases"
 
               Expect.isNonEmpty
                   (caseNames ContainedOpsTests.containerLawTests)
@@ -960,7 +1095,7 @@ let proofsLadderTests =
 
               let inputs =
                   { Root = repoRoot
-                    Modules = realModules ()
+                    Modules = realModels ()
                     Cases = realCases ()
                     Laws = realLaws () }
 
@@ -1409,9 +1544,11 @@ let proofsKitTemplateTests =
 // cone, and why; `check.ps1` builds this project, calls it through `--proof-cone` (Program.fs) and
 // hands the kit exactly the modules named here. The kit, which runs the prover, is not touched.
 //
-// It lives beside `parseModules` for the reason the phase names: the roster is read by the SAME
+// It lives beside `parseRoster` for the reason the phase names: the roster is read by the SAME
 // function the ladder reads it with, so the ladder and the selector cannot disagree about which
-// models exist. A second roster parser in the script would be a second answer to drift.
+// models exist. Since Phase 504 the roster is `proofs/modules.json` — JSON, read by `check.ps1`
+// through ConvertFrom-Json and here through `parseRoster`, where it used to be a PowerShell literal
+// matched by a regex — and the Proofs.Cone family's `-PlanOnly` cases hold the two readings equal.
 //
 // SOUNDNESS IS THE WHOLE OF ITS CORRECTNESS. A module is IN whenever something its verdict reads
 // changed:
@@ -1421,8 +1558,11 @@ let proofsKitTemplateTests =
 //   * a production source under `src/<Package>/` for a package its `proofs/modules.json` entry
 //     names (Phase 203's `packages` — the map from subject to model lives THERE; `proofs.json`'s
 //     rows name models and theorems, never a source path);
-//   * its `modules.json` entry (the floor there is a gate), its registration in `$modules`, or its
-//     membership of `$proofOnly`.
+//   * its `modules.json` entry — which since Phase 504 is also its registration and its `kind`, so
+//     a module newly registered or moved in or out of extraction is an entry that moved.
+// A SHARED module (`kind: shared` — `Twin`, `ListAlgebra`) is opened by every model and references
+// none, which is `oracle/Prims.fs`'s position: a change to its model is a shared input, so every
+// module is in (DECISIONS.md D102, as amended by Phase 504).
 // And EVERY module is in when a shared input of the whole leg moved: the prover pin, the kit's
 // engine or post-pass, `check.ps1`'s CODE (an edit to its comments alone is not a code change), an
 // unregistered model, or any path under `proofs/` this section does not classify. The default for
@@ -1561,7 +1701,7 @@ type ConeInput =
 /// SHARED input — the sound default, stated here so that nobody mistakes it for an oversight.
 /// The oracle project's own files (`Prims.fs`, the `.fsproj`) are not inputs: the prover never
 /// reads them, and the host step that does is never narrowed.
-let classifyConePath (roster: string list) (path: string) : ConeInput =
+let classifyConePath (roster: string list) (shared: Set<string>) (path: string) : ConeInput =
     let p = path.Replace('\\', '/')
     let segments = p.Split '/'
     let registered name = List.contains name roster
@@ -1581,7 +1721,11 @@ let classifyConePath (roster: string list) (path: string) : ConeInput =
         SharedInput
     elif segments.Length = 2 && (p.EndsWith ".fst" || p.EndsWith ".fsti") then
         let name = Path.GetFileNameWithoutExtension segments[1]
-        if registered name then ModelSource name else SharedInput
+
+        if registered name && not (shared.Contains name) then
+            ModelSource name
+        else
+            SharedInput
     elif segments.Length >= 3 && segments[1] = "oracle" then
         let name = Path.GetFileNameWithoutExtension segments[segments.Length - 1]
 
@@ -1603,18 +1747,14 @@ let classifyConePath (roster: string list) (path: string) : ConeInput =
     else
         SharedInput
 
-/// A leg script's CODE: its text without full-line `#` comments, blank lines and trailing blanks,
-/// and without `check.ps1`'s `$modules` / `$proofOnly` literals, whose changes are read member by
-/// member instead. Two versions with equal code differ in prose only.
+/// A leg script's CODE: its text without full-line `#` comments, blank lines and trailing blanks.
+/// Two versions with equal code differ in prose only.
 let scriptCode (text: string) : string =
     text.Replace("\r\n", "\n").Split '\n'
     |> Array.map _.TrimEnd()
     |> Array.filter (fun l ->
         let t = l.TrimStart()
-
-        t <> ""
-        && not (t.StartsWith "#")
-        && not (Regex.IsMatch(l, @"^\$(modules|proofOnly)\s*=\s*@\(")))
+        t <> "" && not (t.StartsWith "#"))
     |> String.concat "\n"
 
 let private budgetEntries (text: string) : Map<string, JsonElement> =
@@ -1666,8 +1806,10 @@ let budgetPackages (text: string) : Map<string, string list> =
 /// hand any tree it likes.
 type ConeFacts =
     {
-        /// `check.ps1`'s `$modules`, through `parseModules`.
+        /// `proofs/modules.json`'s modules in check order, through `parseRoster`.
         Roster: string list
+        /// The roster's SHARED modules (`kind: shared`): a change to one is a shared input.
+        Shared: Set<string>
         /// Module -> the registered modules its model's code references (`modelReferences`).
         References: Map<string, Set<string>>
         /// Module -> the packages it covers (`budgetPackages`).
@@ -1676,10 +1818,6 @@ type ConeFacts =
         Changed: string list
         /// The leg scripts among `Changed` whose CODE moved (`scriptCode`).
         ScriptCodeMoved: Set<string>
-        /// Modules in `$modules` now that were not in it at the named tree.
-        NewlyRegistered: Set<string>
-        /// Modules that entered or left `$proofOnly`.
-        ExemptionMoved: Set<string>
         /// Modules whose `modules.json` entry moved (`budgetEntriesChanged`).
         EntriesMoved: Set<string>
     }
@@ -1712,7 +1850,7 @@ let computeCone (facts: ConeFacts) : ConeRow list =
     let shared = ResizeArray<string>()
 
     for path in facts.Changed do
-        match classifyConePath facts.Roster path with
+        match classifyConePath facts.Roster facts.Shared path with
         | ModelSource m ->
             causes.Add
                 { Target = m
@@ -1743,18 +1881,6 @@ let computeCone (facts: ConeFacts) : ConeRow list =
         | NotAnInput -> ()
 
     for m in facts.Roster do
-        if facts.NewlyRegistered.Contains m then
-            causes.Add
-                { Target = m
-                  Why = "newly registered in check.ps1's $modules"
-                  Reaches = false }
-
-        if facts.ExemptionMoved.Contains m then
-            causes.Add
-                { Target = m
-                  Why = "it entered or left check.ps1's $proofOnly"
-                  Reaches = false }
-
         if facts.EntriesMoved.Contains m then
             causes.Add
                 { Target = m
@@ -1935,20 +2061,26 @@ let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
     | _, Error e -> Error e
     | Ok tracked, Ok untracked ->
         let changed = tracked @ untracked |> List.distinct |> List.sort
-        let checkNow = workingText root "proofs/check.ps1"
-        let checkThen = textAt root commit "proofs/check.ps1"
-        let roster = parseModules checkNow
+        let budgetNow = workingText root "proofs/modules.json"
 
-        if List.isEmpty roster then
-            Error "proofs/check.ps1's $modules could not be read, so there is no roster to select from"
-        else
-            let rosterThen = parseModules checkThen |> Set.ofList
-            let exemptNow = parseScriptList "proofOnly" checkNow |> Set.ofList
-            let exemptThen = parseScriptList "proofOnly" checkThen |> Set.ofList
-            let budgetNow = workingText root "proofs/modules.json"
+        match parseRoster budgetNow with
+        | Error errors ->
+            Error(
+                sprintf
+                    "proofs/modules.json is not a readable roster, so there is no roster to select from: %s"
+                    (String.concat "; " errors)
+            )
+        | Ok [] -> Error "proofs/modules.json registers no module, so there is no roster to select from"
+        | Ok entries ->
+            let roster = entries |> List.map _.Module
 
             Ok
                 { Roster = roster
+                  Shared =
+                    entries
+                    |> List.filter (fun e -> e.Kind = Shared)
+                    |> List.map _.Module
+                    |> Set.ofList
                   References = modelReferenceGraph root roster
                   Packages = budgetPackages budgetNow
                   Changed = changed
@@ -1958,8 +2090,6 @@ let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
                         List.contains p legScripts
                         && scriptCode (workingText root p) <> scriptCode (textAt root commit p))
                     |> Set.ofList
-                  NewlyRegistered = roster |> List.filter (fun m -> not (rosterThen.Contains m)) |> Set.ofList
-                  ExemptionMoved = Set.difference (Set.union exemptNow exemptThen) (Set.intersect exemptNow exemptThen)
                   EntriesMoved =
                     if List.contains "proofs/modules.json" changed then
                         budgetEntriesChanged (textAt root commit "proofs/modules.json") budgetNow
@@ -2332,24 +2462,27 @@ let coneCli (args: string list) : int =
 /// sets, so a sibling adding a model cannot turn them red.
 let private toyFacts (changed: string list) : ConeFacts =
     { Roster = [ "A"; "B"; "C"; "D" ]
+      Shared = Set.empty
       References = Map.ofList [ "A", Set.empty; "B", set [ "A" ]; "C", set [ "B" ]; "D", Set.empty ]
       Packages = Map.ofList [ "A", [ "Pkg.A" ]; "B", []; "C", [ "Pkg.A" ]; "D", [ "Pkg.D" ] ]
       Changed = changed
       ScriptCodeMoved = Set.empty
-      NewlyRegistered = Set.empty
-      ExemptionMoved = Set.empty
       EntriesMoved = Set.empty }
 
 let private realConeFacts (changed: string list) : ConeFacts =
-    let roster = realModules ()
+    let entries = realRoster ()
+    let roster = entries |> List.map _.Module
 
     { Roster = roster
+      Shared =
+        entries
+        |> List.filter (fun e -> e.Kind = Shared)
+        |> List.map _.Module
+        |> Set.ofList
       References = modelReferenceGraph repoRoot roster
       Packages = budgetPackages (File.ReadAllText(Path.Combine(repoRoot, "proofs", "modules.json")))
       Changed = changed
       ScriptCodeMoved = Set.empty
-      NewlyRegistered = Set.empty
-      ExemptionMoved = Set.empty
       EntriesMoved = Set.empty }
 
 let private withVerdict (v: ConeVerdict) (rows: ConeRow list) : Set<string> =
@@ -2432,7 +2565,7 @@ let private toyRepository () : string =
 
     Directory.CreateDirectory root |> ignore
     gitOk root [ "init"; "-q" ] |> ignore
-    writeAt root "proofs/check.ps1" "# the roster\n$modules = @('A', 'B', 'C')\n$proofOnly = @()\nWrite-Host 'leg'\n"
+    writeAt root "proofs/check.ps1" "# the leg\nWrite-Host 'leg'\n"
     writeAt root "proofs/A.fst" "module A\nlet a = 1\n"
     writeAt root "proofs/B.fst" "module B\nopen A\nlet b = a\n"
     writeAt root "proofs/C.fst" "module C\n(* names B.b in prose only *)\nlet c = 2\n"
@@ -2440,7 +2573,7 @@ let private toyRepository () : string =
     writeAt
         root
         "proofs/modules.json"
-        """{ "modules": [ { "module": "A", "packages": [ "Pkg.A" ] }, { "module": "B", "packages": [] }, { "module": "C", "packages": [] } ] }"""
+        """{ "modules": [ { "module": "A", "kind": "extracted", "opens": [], "packages": [ "Pkg.A" ] }, { "module": "B", "kind": "extracted", "opens": [ "A" ], "packages": [] }, { "module": "C", "kind": "extracted", "opens": [], "packages": [] } ] }"""
 
     writeAt root "proofs/fstar-pin.json" """{ "fstar": "v0" }"""
     writeAt root "src/Pkg.A/X.fs" "module X\n"
@@ -2578,6 +2711,25 @@ let proofsConeTests =
 
               Expect.stringContains (reasonOf "C" rows) "src/Pkg.A/Decode.fs" "the reason names the path"
 
+          testCase
+              "a SHARED module's model is a shared input: every module in, as for the oracle's Prims.fs position (Phase 504)"
+          <| fun _ ->
+              // `Twin` and `ListAlgebra` are registered (they are checked and extracted) and opened by
+              // every model; the cone reads a change to one as it reads the prover pin.
+              let facts =
+                  { toyFacts [ "proofs/A.fst" ] with
+                      Shared = set [ "A" ] }
+
+              Expect.equal
+                  (withVerdict In (computeCone facts))
+                  (set [ "A"; "B"; "C"; "D" ])
+                  "a change to a shared module's model moves every module, D included though it references nothing"
+
+              Expect.equal
+                  (withVerdict In (computeCone (toyFacts [ "proofs/A.fst" ])))
+                  (set [ "A"; "B"; "C" ])
+                  "the same change to an ordinary model moves it and what references it, transitively: D stays out"
+
           testCase "a shared input puts every module in; documentation, templates, kit tests and the ladder put none in"
           <| fun _ ->
               for shared in
@@ -2610,17 +2762,14 @@ let proofsConeTests =
 
           testCase "a leg script's comment-only edit is prose; any other edit is code"
           <| fun _ ->
-              let before = "#Requires -Version 7.0\n# prose\n$modules = @('A')\n$x = 1\n"
+              let before = "#Requires -Version 7.0\n# prose\n$x = 1\n"
 
               let prose =
-                  "#Requires -Version 7.0\n# prose, reworded\n\n    # and indented\n$modules = @('A', 'B')\n$x = 1   \r\n"
+                  "#Requires -Version 7.0\n# prose, reworded\n\n    # and indented\n$x = 1   \r\n"
 
               let code = before + "$legArgs.ZRlimit = 80\n"
 
-              Expect.equal
-                  (scriptCode prose)
-                  (scriptCode before)
-                  "comments, blanks, line endings and the roster literal are not code"
+              Expect.equal (scriptCode prose) (scriptCode before) "comments, blanks and line endings are not code"
 
               Expect.notEqual (scriptCode code) (scriptCode before) "a new statement is"
 
@@ -2671,7 +2820,26 @@ let proofsConeTests =
                   |> List.map (fun m -> m, declaredOpens roster (realModelText m))
                   |> Map.ofList
 
-              for m in roster do
+              let shared = (realConeFacts []).Shared
+              Expect.isNonEmpty shared "the roster declares its shared modules"
+
+              for e in realRoster () do
+                  Expect.equal
+                      (Set.ofList e.Opens)
+                      graph[e.Module]
+                      (sprintf
+                          "%s's `opens` in modules.json is not what its code references — declared %A, read %A"
+                          e.Module
+                          e.Opens
+                          graph[e.Module])
+
+              for m in roster |> List.filter shared.Contains do
+                  Expect.equal
+                      (withVerdict In (computeCone (realConeFacts [ "proofs/" + m + ".fst" ])))
+                      (Set.ofList roster)
+                      (sprintf "perturbing the shared module %s puts every module in" m)
+
+              for m in roster |> List.filter (shared.Contains >> not) do
                   let path = "proofs/" + m + ".fst"
                   let inCone = withVerdict In (computeCone (realConeFacts [ path ]))
                   let expected = reaching roster (fun d -> declared[d]) m
@@ -2699,8 +2867,11 @@ let proofsConeTests =
 
               // A target with a dependant that reaches it ONLY through another module, so the case
               // is about transitivity and not merely about direct opens.
+              let shared = (realConeFacts []).Shared
+
               let witness =
                   roster
+                  |> List.filter (shared.Contains >> not)
                   |> List.tryPick (fun target ->
                       reaching roster (fun d -> declared[d]) target
                       |> Set.toList

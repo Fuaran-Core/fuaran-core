@@ -1148,9 +1148,10 @@ before the post-pass existed, and a proof about the pass is not a proof about th
 when the pass changes, when the prover pin moves, or when you want the retirement condition
 answered.
 
-Every model in the script's `$modules` list goes through all three steps, and `-Runs N` means N
-cold-cache verifications of all of them; adding a model is adding its name to that list and a
-budget entry to `modules.json` beside it. The first
+Every module in the roster, `modules.json`, goes through all three steps (a `proofOnly` or
+`generated` one is checked and not extracted), and `-Runs N` means N cold-cache verifications of all
+of them; adding a model is adding ONE entry there, with its `kind`, its `opens` and its budget
+(Phase 504: nothing else enumerates the models). The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
@@ -1211,8 +1212,8 @@ written as what a module's verdict *reads*:
 - a production source under `src/<Package>/` for a package its `modules.json` entry names — Phase
   203's `packages`, which is where the map from subject to model lives (`../proofs.json`'s rows name
   models and theorems, never a source path);
-- its `modules.json` entry (its `fastestSeconds` decides whether the cached-read gate applies), its registration in `$modules`, or its
-  membership of `$proofOnly`.
+- its `modules.json` entry (its `fastestSeconds` decides whether the cached-read gate applies), which
+  since Phase 504 is also its registration and its `kind`.
 
 **Every** module is in when a shared input of the whole leg moved: `fstar-pin.json`, the kit's
 engine or post-pass, `check.ps1`'s *code* (a comment-only edit is not a code change), an unregistered
@@ -1238,7 +1239,7 @@ floor is compared against the module it was seeded for. `-Modules <list>` is exa
 names and nothing else, so there a named module's clock includes whatever it references; use
 `-Since` when the timings matter.
 
-**Where it is computed.** In the host test project (`--proof-cone`, beside `parseModules` in
+**Where it is computed.** In the host test project (`--proof-cone`, beside `parseRoster` in
 `../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`), which `check.ps1` builds and asks before it hands
 the kit the cone. That placement is the point rather than a convenience: the roster is read by the
 same function the `Proofs.Ladder` family reads it with, so the ladder and the selector cannot
@@ -1440,9 +1441,9 @@ declares the claims ladders below as data — what is proved, what is only teste
 and since Phase 144 the leg CHECKS it rather than trusting it: the `Proofs.Ladder` family
 (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`) holds every row to this tree. A `proved` row's
 `evidence.theorem` must be a top-level `val` / `let` / `let rec` of that name in the model it
-names; that model must be one `$modules` actually checks, and must be there; a `tested` row must
-name `Proofs.Oracle` cases that exist; every module in `$modules` must have at least one `proved`
-row; and every row's `phase` and `level` must be the closed forms. So renaming a theorem without
+names; that model must be one the roster (`modules.json`) registers, and must be there; a `tested`
+row must name `Proofs.Oracle` cases that exist; every model in the roster (every entry but the two
+`shared` modules) must have at least one `proved` row; and every row's `phase` and `level` must be the closed forms. So renaming a theorem without
 touching the file, or adding a model with no claim written down, fails the leg with the row named
 — the same posture as oracle drift, applied to the ladder. Each clause has a go-red fixture beside
 it (`../tests/Fuaran.Core.Tests/fixtures/proofs-ladder/`), so a green ladder is known to be one
@@ -1544,7 +1545,7 @@ opposite of the failure a gate exists for, so it is recorded with its percentage
 leg red. It is also not a job timeout: a timeout says a run died and
 nothing about which module, where an overshoot is attributable.
 
-Coverage is checked both ways, and both are findings rather than failures: a module in `$modules`
+Coverage is checked both ways, and both are findings rather than failures: a module the leg checks
 with no entry is named — so adding a model tells you to budget it, without reddening the leg of
 whoever added it — and an entry for a module the leg does not check is named too, so a removed model
 cannot leave a budget behind pretending to measure something. The entry's SHAPE is the one thing
@@ -1695,13 +1696,13 @@ and writing it out by hand each time means **N copies of one design and N prover
 are behind the day the Nth moves** — F\* releases weekly, so that is a when and not an if.
 
 `proofs/kit/` is that design, extracted and shipped once. **This repository consumes it in place:**
-`proofs/check.ps1` is now a thin caller that declares what this repository has — the `$modules`
-list, the two host families, where the test project is — and hands them to
+`proofs/check.ps1` is now a thin caller that hands the kit what this repository has — the roster
+(read from `modules.json` since Phase 504), the two host families, where the test project is — to
 `kit/check-proof-leg.ps1`, which runs the leg. Nothing about the mechanism is in the caller and
 nothing about this repository is in the kit. The public surface did not move: the same flags, the
-same output lines, the same exit codes, and `$modules` is still one literal line in
-`proofs/check.ps1`, which is where a reader looks for it and where the `Proofs.Ladder` family reads
-it from.
+same output lines, the same exit codes. (Until Phase 504 `$modules` was one literal line in
+`proofs/check.ps1` that the `Proofs.Ladder` family read with a regex; the roster is `modules.json`
+now, read by the script and the tests alike.)
 
 Two small things that were measured rather than assumed while doing it, because both would have
 been silent:
@@ -1754,7 +1755,7 @@ instance (`TreeOps`, `Skeleton`, `Preservation`, `TreeDiff`) and `kit/templates/
 the sources being the live files under this directory, so there is no second copy of any model here.
 A domain instantiates fold confluence at its own witness by copying `DagFold.fst`, filling the
 template's fourteen holes — one of which, `{{DIAMOND}}`, is the obligation it proves — and adding the
-instance to its own `$modules`; the contract is stated under Theorem 2 and the procedure in
+instance to its own roster (`modules.json`); the contract is stated under Theorem 2 and the procedure in
 `kit/README.md`. Not in the set: the six generated modules (`Vocabulary`, `DocVocabulary`,
 `ScoreVocabulary` and their `…Proofs`), which a domain does not copy but REGENERATES from its own
 `Idl` with the same backend, and `WireVersioning.fst`, Theorem 8 about this repository's IDL diff.
@@ -1858,7 +1859,7 @@ family holds each committed model AND its proof script to a fresh GENERATION fro
 in the test project, so the model is the vocabulary the engine is certified on — a vocabulary that
 moves without a regeneration is **vocabulary drift** and the leg names it, with
 `dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The models are
-CHECKED but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs them beside production,
+CHECKED but not EXTRACTED (`kind: generated` in `modules.json`): nothing here runs them beside production,
 because the decoder they model is one a generator emits into a consuming host and not one this
 repository ships. A proof script extracts to nothing at all.
 
@@ -6563,7 +6564,10 @@ evaluation" cases run the extracted closures against the extracted oracle. Measu
 step (`kit/check-proof-leg.ps1` step 2c, `-Twins`): an extracted model that declares no twins is
 refused before the prover runs, and `Proofs.Ladder` holds the host's twin roster to `check.ps1`'s
 extracted set in both directions. The twins live in the model they sample, not in one module beside
-all of them, so a cone run still checks only what a change reaches. `extractor-and-compiler-trusted`
+all of them, so a cone run still checks only what a change reaches. (Since Phase 504 the record and
+`twins_hold` are the shared `Twin.fst`, which every model opens and which references no model, and
+the host finds the twin roster by reflection over the oracle and holds it to `modules.json`'s
+extracted set; the fixtures still live in the model they sample.) `extractor-and-compiler-trusted`
 stays a premise and says what is now checked of it.
 
 **Findings, and what was NOT built.** The shard asked for a "grammar conformance not claimed" row

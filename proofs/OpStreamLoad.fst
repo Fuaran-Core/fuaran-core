@@ -94,11 +94,13 @@
 *)
 module OpStreamLoad
 
+open Twin
+open ListAlgebra
 open JsonParse
 module C = Chain
 
 (* ======================================================================================
-   0. Results and lists — self-contained so the extraction needs only `Prims` and the two
+   0. Results and lists — self-contained so the extraction needs only `Prims`, `ListAlgebra` and the two
       models it opens (README, finding 2).
    ====================================================================================== *)
 
@@ -107,12 +109,8 @@ type res (a: Type) (e: Type) =
   | Ok    : v:a -> res a e
   | Error : err:e -> res a e
 
-(* F#: `String.Length` / `List.length`, EXTRACTED — positions are computed from it. `llen` is
-   JsonParse's proof-only measure; the two agree (`len_llen`). *)
-let rec len (#a: Type) (l: list a) : Tot nat (decreases l) =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
+(* `ListAlgebra.len` is F#'s `String.Length` / `List.length`, EXTRACTED — positions are computed from
+   it. `llen` is JsonParse's proof-only measure; the two agree (`len_llen`). *)
 
 [@@ noextract_to "FSharp"]
 let rec len_llen (#a: Type) (l: list a) : Lemma (ensures len l == llen l) [SMTPat (len l)] =
@@ -1982,7 +1980,7 @@ let obj5 (a b c d e: list ch)
   app_assoc d (CComma :: e) [CRBrace]
 #pop-options
 
-#push-options "--fuel 5 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -JsonParse.app'"
+#push-options "--fuel 5 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -ListAlgebra.app'"
 (* The actor object parses to its members, and `actor_field` reads the actor back. *)
 [@@ noextract_to "FSharp"]
 let actor_field_reads (a: actor) (l: jline) (p: nat)
@@ -2057,7 +2055,7 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     assert (actor_str k_actor k_id inner == Ok id)
 
 #pop-options
-#push-options "--fuel 6 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -JsonParse.app'"
+#push-options "--fuel 6 --ifuel 2 --using_facts_from '* -OpStreamLoad.olit -OpStreamLoad.string_tail -OpStreamLoad.skip_value -OpStreamLoad.skip_val -OpStreamLoad.obj_members -OpStreamLoad.arr_items -OpStreamLoad.quote_body -ListAlgebra.app'"
 (* The line the writer spelled parses to exactly its five members. *)
 [@@ noextract_to "FSharp"]
 let line_members (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
@@ -2465,12 +2463,6 @@ let verify_preserved (#op: eqtype) (h: string -> string -> string) (qh: string -
        input and compares with the value the model means there.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l: list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 
 (* `{"a":1}` *)
 let twin_line1: list ch = [CLBrace; CQuote; CLa; CQuote; CColon; CD1; CRBrace]

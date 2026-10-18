@@ -84,6 +84,9 @@
 *)
 module WireVersioning
 
+open Twin
+open ListAlgebra
+
 (* Opening `WireCanon` brings its whole context — some ninety patterned facts about rendering,
    sorting and reading — into every query here, and this module's own queries are small list
    inductions that need none of them. Pruned for the reason `TreeDiff.fst` gives at the same line,
@@ -103,14 +106,10 @@ open WireCanon
       hands back a SORTED list from `Set.toList` and whose caller may have built it from anything.
    ====================================================================================== *)
 
-(* F#: `Set.difference xs ys |> Set.toList`. Order-preserving in `xs`, which is what makes the
+(* `ListAlgebra.diff` stands for F#'s `Set.difference xs ys |> Set.toList`. Order-preserving in `xs`, which is what makes the
    differential's comparison against `Set.toList` an equality rather than a set comparison: a
    sorted duplicate-free `xs` gives a sorted duplicate-free result, and that is the only shape
    production ever passes. *)
-let rec diff (xs ys: list (list ch)) : Tot (list (list ch)) (decreases xs) =
-  match xs with
-  | [] -> []
-  | h :: t -> if mem h ys then diff t ys else h :: diff t ys
 
 (* The subset relation the table's "additive" row is ABOUT, written once so that three theorems
    can name the same thing. Deliberately a `prop` over `mem` and not a statement about lists. *)
@@ -750,13 +749,6 @@ let ignoring_optionality_moves_a_profile_that_must_not (subj: list ch) (base_pro
       contract is about rather than assuming them away. It is the only hypothesis.
    ====================================================================================== *)
 
-(* F#: `l @ m`. Defined here rather than taken from `FStar.List.Tot`, for the reason `DagFold.fst`
-   gives: the extracted oracle carries no library it does not need. *)
-let rec app (#a: Type) (l m: list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | h :: t -> h :: app t m
-
 (* A field declaration as the classifier reads one: the member's wire name and its optionality
    class, both in the model's character alphabet. *)
 type field_decl = list ch & list ch
@@ -866,27 +858,10 @@ let field_additive_monotone_is_inhabited (c: list ch)
           (ensures not (retires (classify_field_add c))) = ()
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
   { tname = "classify-a-removal-is-breaking";
     tholds = (fun () ->
