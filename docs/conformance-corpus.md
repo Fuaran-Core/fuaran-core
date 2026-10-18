@@ -290,9 +290,11 @@ therefore never reached the corpus from a linked worktree.
 ### What CI does
 
 `.github/workflows/ci.yml` checks the corpus out beside the repository checkout **at the pinned
-commit**, names it in `FUARAN_CORE_CORPUS_DIR`, and sets `FUARAN_CORE_CORPUS_FRESHNESS`, in both the
-`verify` and the `proofs` jobs; `publish-packages.yml` does the same in its `proofs` and `publish`
-jobs, reading the pin from the TAGGED commit. So every push compares against the corpus this
+commit**, names it in `FUARAN_CORE_CORPUS_DIR`, and sets `FUARAN_CORE_CORPUS_FRESHNESS`, in its
+`verify` job, which runs the whole suite. Its `proofs` job reads no corpus: it passes
+`-SkipOracleHost`, so the corpus-reading host families run only in `verify` (Phase 499).
+`publish-packages.yml` checks the corpus out in its `proofs` and `publish` jobs, reading the pin from
+the TAGGED commit, because both run the families that read it. So every push compares against the corpus this
 repository chose, and drift between this kit and that corpus — a stale copy, a model that no longer
 agrees with production over the domain's documents, a vocabulary that moved under the committed F\*
 model — surfaces on the change that caused it instead of on somebody else's change days later. A

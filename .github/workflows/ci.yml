@@ -116,18 +116,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
     steps:
+      # No corpus checkout: with -SkipOracleHost nothing in this job reads the corpus. The host
+      # families that do read it run in `verify`, which checks it out at the pin.
       - uses: actions/checkout@v4
-      # At the pin, as in `verify` (Phase 394).
-      - name: Read the corpus pin (copies.json `corpus`)
-        id: corpus-pin
-        shell: pwsh
-        run: ./.github/scripts/corpus-pin.ps1
-      - name: Check out the wire-format conformance corpus at the pin
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.corpus-pin.outputs.repository }}
-          ref: ${{ steps.corpus-pin.outputs.sha }}
-          path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -139,10 +130,4 @@ jobs:
       # -SkipOracleHost: the `verify` matrix above already ran the four host families in this workflow.
       - name: Proof leg (./proofs/check.ps1 -Runs 3 -SkipOracleHost)
         shell: pwsh
-        env:
-          # The host step's Proofs.Oracle pools over the corpus's ops/ and nodes/ are live-corpus
-          # legs (Phase 172), asked for by name; with -SkipOracleHost they run in `verify`, which
-          # asks for them the same way.
-          FUARAN_CORE_CORPUS_FRESHNESS: '1'
-          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./proofs/check.ps1 -Runs 3 -SkipOracleHost
