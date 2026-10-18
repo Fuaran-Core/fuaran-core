@@ -15,7 +15,7 @@ named beside them, and a leg whose prerequisite is absent is **skipped by name**
 |---|---|---|
 | The .NET SDK pinned in [`global.json`](global.json) | everything | nothing builds |
 | PowerShell 7 (`pwsh`) | `run.ps1`, `verify.ps1`, `proofs/check.ps1` | the launchers do not run |
-| A **full clone with tags** (`git clone`, then `git fetch --tags` in a shallow or tag-less one; CI uses `fetch-depth: 0`) | the legs that read the release tags in HEAD's history (`ReleaseRecord`, the STABILITY per-tag and draft-slot checks, the README's per-release claims, the public and wire since-tag class reports) | **fails**: with no `vX.Y.Z` tag in HEAD's history the `ReleaseRecord` check and the two package-roster tag checks are red by design (an empty list would pass them vacuously) and the rest skip by name. Only git itself being unrunnable skips them all. The one green order is tag, then gate |
+| A **full clone with tags** (`git clone`, then `git fetch --tags` in a shallow or tag-less one; CI uses `fetch-depth: 0`) | the legs that read the release tags in HEAD's history (`ReleaseRecord`, the STABILITY per-tag and draft-slot checks, the README's per-release claims, the public and wire since-tag class reports) | those legs **skip by name**, all of them: a clone holding no `vX.Y.Z` tag (a fork, or a clone made without tags) reads as "no released tag", which says nothing about your change. A clone that holds release tags while HEAD's history contains none of them **fails** the `ReleaseRecord` check and the two package-roster tag checks, because they would otherwise pass vacuously. No checkout of this repository's history can be in that state, so it means the tag reader is broken |
 | `git` on `PATH` | the working-copy line-ending and main-tree anchoring legs | those legs skip |
 | `node` on `PATH`, and `FUARAN_CORE_TSC` naming a TypeScript compiler | the executed TypeScript legs of the IDL suites (round trip, byte identity, type-check) | those legs skip |
 | The shared conformance corpus, **pinned** by [`copies.json`](copies.json) (`corpus.sha`) | the copy-freshness legs and the proof-oracle differentials that read the corpus's fixtures | unasked: the legs report NOT CHECKED or skip. Asked for (`FUARAN_CORE_CORPUS_FRESHNESS`, as CI does): an absent or off-pin corpus **fails** |
@@ -23,6 +23,13 @@ named beside them, and a leg whose prerequisite is absent is **skipped by name**
 
 The skipped legs are counted and named on the gate's last line, so a green run says how much of the
 suite it did not read.
+
+Every leg that reads tags reads the release tags **in HEAD's history** (`git tag --list --merged HEAD`),
+through one reader. So a baseline-class report on a branch cut before the newest tag says "since the
+newest tag in this branch's history", not "since the newest tag anywhere". A tag your branch does not
+contain cannot be a baseline for it (DECISIONS.md D123). Once a release slot's heading is flipped to
+released, its tag must already exist in the history being gated, so the one green order at a release
+is tag, then gate.
 
 ```powershell
 ./run.ps1        # restore tools, format, build, test, sample

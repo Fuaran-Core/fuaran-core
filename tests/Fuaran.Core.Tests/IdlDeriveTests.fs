@@ -497,25 +497,13 @@ let runTsModule (moduleText: string) (harness: string) : string list option =
     File.WriteAllText(tmp, moduleText + "\n\n" + harness)
 
     try
-        let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+        match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+        | Error _ -> None
+        | Ok p ->
+            if p.Exit <> 0 then
+                failtestf "node failed running the generated TS module: %s" p.Stderr
 
-        let proc =
-            try
-                Some(System.Diagnostics.Process.Start psi)
-            with _ ->
-                None
-
-        match proc with
-        | None -> None
-        | Some p ->
-            let stdout = p.StandardOutput.ReadToEndAsync()
-            let stderr = p.StandardError.ReadToEnd()
-            p.WaitForExit()
-
-            if p.ExitCode <> 0 then
-                failtestf "node failed running the generated TS module: %s" stderr
-
-            stdout.Result.Replace("\r\n", "\n").Split('\n')
+            p.Stdout.Replace("\r\n", "\n").Split('\n')
             |> Array.filter (fun l -> l <> "")
             |> List.ofArray
             |> Some
@@ -887,27 +875,15 @@ let tscCheck (tsc: string) (files: (string * string) list) : (int * string) opti
         for name, text in files do
             File.WriteAllText(Path.Combine(dir, name), text)
 
-        let psi =
-            ChildProcess.redirected
-                "node"
-                (sprintf
-                    "\"%s\" --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext consumer.mts"
-                    tsc)
-
-        psi.WorkingDirectory <- dir
-
-        match
-            (try
-                Some(System.Diagnostics.Process.Start psi)
-             with _ ->
-                 None)
-        with
-        | None -> None
-        | Some p ->
-            let stdout = p.StandardOutput.ReadToEndAsync()
-            let stderr = p.StandardError.ReadToEnd()
-            p.WaitForExit()
-            Some(p.ExitCode, stdout.Result + stderr)
+        ChildProcess.command
+            "node"
+            (sprintf
+                "\"%s\" --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext consumer.mts"
+                tsc)
+        |> ChildProcess.inDir dir
+        |> ChildProcess.run
+        |> Result.toOption
+        |> Option.map (fun p -> p.Exit, p.Stdout + p.Stderr)
     finally
         try
             Directory.Delete(dir, true)
@@ -1258,18 +1234,9 @@ module private Projected =
         File.WriteAllText(path, source)
 
         try
-            match
-                (try
-                    Some(System.Diagnostics.Process.Start(ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")))
-                 with _ ->
-                     None)
-            with
-            | None -> None
-            | Some p ->
-                let err = p.StandardError.ReadToEndAsync()
-                let out = p.StandardOutput.ReadToEnd()
-                p.WaitForExit()
-                Some(p.ExitCode, out, err.Result)
+            ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\""))
+            |> Result.toOption
+            |> Option.map (fun p -> p.Exit, p.Stdout, p.Stderr)
         finally
             try
                 File.Delete path

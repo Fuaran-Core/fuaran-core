@@ -196,20 +196,12 @@ let private runFsi (source: string) : (int * string) option =
     File.WriteAllText(path, source)
 
     try
-        let psi = ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")
-
-        match
-            (try
-                Some(Process.Start psi)
-             with _ ->
-                 None)
-        with
-        | None -> None
-        | Some p ->
-            let out = p.StandardOutput.ReadToEnd()
-            let err = p.StandardError.ReadToEnd()
-            p.WaitForExit()
-            Some(p.ExitCode, out + "\n" + err)
+        match ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\"")) with
+        | Error _ -> None
+        | Ok p ->
+            let out = p.Stdout
+            let err = p.Stderr
+            Some(p.Exit, out + "\n" + err)
     finally
         try
             File.Delete path
@@ -276,12 +268,11 @@ let private cliDll () : string =
 
 /// Invoke the command; return its exit code and both streams joined.
 let private runCli (args: string) : int * string =
-    let psi = ChildProcess.redirected "dotnet" ("\"" + cliDll () + "\" " + args)
-    use p = Process.Start psi
-    let out = p.StandardOutput.ReadToEnd()
-    let err = p.StandardError.ReadToEnd()
-    p.WaitForExit()
-    p.ExitCode, out + "\n" + err
+    let p =
+        ChildProcess.run (ChildProcess.command "dotnet" ("\"" + cliDll () + "\" " + args))
+        |> Result.defaultWith failwith
+
+    p.Exit, p.Stdout + "\n" + p.Stderr
 
 let private quoted (name: string) = "\"" + fixturePath name + "\""
 
@@ -931,19 +922,13 @@ module private Evolution304 =
         File.WriteAllText(tmp, script)
 
         try
-            match
-                (try
-                    Some(Process.Start(ChildProcess.redirected "node" ("\"" + tmp + "\"")))
-                 with _ ->
-                     None)
-            with
-            | None -> None
-            | Some p ->
-                let out = p.StandardOutput.ReadToEnd()
-                let err = p.StandardError.ReadToEnd()
-                p.WaitForExit()
+            match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+            | Error _ -> None
+            | Ok p ->
+                let out = p.Stdout
+                let err = p.Stderr
 
-                if p.ExitCode <> 0 then
+                if p.Exit <> 0 then
                     failtestf "node failed running the evolution harness: %s" err
 
                 Some out

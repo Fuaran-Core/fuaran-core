@@ -306,26 +306,11 @@ let private corpusFault (dir: string) : string option =
             | None -> Some(sprintf "manifest.json at '%s' declares no \"kind\" member; %s" manifest expected)
         | Ok _ -> Some(sprintf "manifest.json at '%s' is not a JSON object; %s" manifest expected)
 
-/// The vendored corpus, located the way this project's other fixture stores are:
-/// climb from the CWD / test binary to `tests/Fuaran.Core.Tests` by probing for a
-/// stable marker file, rather than baking in a build-output-relative path.
+/// The vendored corpus, under the repository root the one resolver finds (`Repo.tryRoot`),
+/// rather than a build-output-relative path.
 let private vendoredCorpus () : string option =
-    let rec climb (dir: string) (budget: int) : string option =
-        if budget < 0 || isNull dir then
-            None
-        else
-            let cand = Path.Combine(dir, "tests", "Fuaran.Core.Tests")
-
-            if File.Exists(Path.Combine(cand, "Fuaran.Core.Tests.fsproj")) then
-                Some cand
-            else
-                match Directory.GetParent dir with
-                | null -> None
-                | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
-    |> Option.map (fun projectDir -> Path.Combine(projectDir, "fixtures", "second-domain"))
+    Repo.tryRoot ()
+    |> Option.map (fun root -> Path.Combine(root, "tests", "Fuaran.Core.Tests", "fixtures", "second-domain"))
 
 /// The corpus this run certifies against, with the reason on the failure path —
 /// there is no third outcome in which the legs quietly do nothing.
@@ -795,22 +780,13 @@ let tests =
                   File.WriteAllText(tmp, harness)
 
                   try
-                      let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+                      match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+                      | Error _ -> skiptest "node not on PATH — TS leg skipped"
+                      | Ok p ->
+                          let stdout = p.Stdout
+                          let stderr = p.Stderr
 
-                      let proc =
-                          try
-                              Some(Diagnostics.Process.Start psi)
-                          with _ ->
-                              None
-
-                      match proc with
-                      | None -> skiptest "node not on PATH — TS leg skipped"
-                      | Some p ->
-                          let stdout = p.StandardOutput.ReadToEnd()
-                          let stderr = p.StandardError.ReadToEnd()
-                          p.WaitForExit()
-
-                          if p.ExitCode <> 0 then
+                          if p.Exit <> 0 then
                               failtestf "node failed running the generated TS module: %s" stderr
 
                           let got =

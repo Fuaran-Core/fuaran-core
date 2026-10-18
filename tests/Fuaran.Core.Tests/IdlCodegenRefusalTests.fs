@@ -432,24 +432,13 @@ let scaffoldRefusalTests =
               System.IO.File.WriteAllText(path, fsx)
 
               try
-                  match
-                      (try
-                          Some(
-                              System.Diagnostics.Process.Start(
-                                  ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")
-                              )
-                          )
-                       with _ ->
-                           None)
-                  with
-                  | None -> skiptest "dotnet not on PATH — the compiled scaffold check is skipped"
-                  | Some p ->
-                      let err = p.StandardError.ReadToEndAsync()
-                      let out = p.StandardOutput.ReadToEnd()
-                      p.WaitForExit()
+                  match ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\"")) with
+                  | Error _ -> skiptest "dotnet not on PATH — the compiled scaffold check is skipped"
+                  | Ok p ->
+                      let out = p.Stdout
 
-                      if p.ExitCode <> 0 then
-                          failtestf "fsi failed (%d): %s" p.ExitCode err.Result
+                      if p.Exit <> 0 then
+                          failtestf "fsi failed (%d): %s" p.Exit p.Stderr
 
                       let lines =
                           out.Replace("\r\n", "\n").Split('\n')

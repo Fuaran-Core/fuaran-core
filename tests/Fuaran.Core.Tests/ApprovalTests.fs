@@ -1,4 +1,5 @@
 /// Phase 396 - the approval switches have ONE reading (Approval.fs), and this holds every site to it.
+/// Phase 502 - the same source sweep holds the suite's one spawn site (`ChildProcess.run`).
 module Fuaran.Core.Tests.ApprovalTests
 
 open System
@@ -23,6 +24,19 @@ let private sourceFiles () : (string * string) list =
 /// does not itself match the sweep it runs.
 let private directRead =
     Regex(@"GetEnvironmentVariable\s*\(?\s*""(CORE_" + "APPROVE|FUARAN_" + @"REGEN)", RegexOptions.Compiled)
+
+/// A child-process spawn: starting a `Process`, or building its start info by hand. Phase 502 made
+/// `ChildProcess.run` the suite's one spawn site; built from parts for the same reason as above.
+let private directSpawn =
+    Regex(@"\bProcess" + @"\.Start\b|\bProcess" + @"StartInfo\b", RegexOptions.Compiled)
+
+/// The sources that spawn a child anywhere but `ChildProcess.fs`, as `path:line  text`.
+let internal spawnOffenders (files: (string * string list) list) : string list =
+    [ for rel, lines in files do
+          if rel <> "tests/Fuaran.Core.Tests/ChildProcess.fs" then
+              for i, line in List.indexed lines do
+                  if directSpawn.IsMatch line then
+                      yield sprintf "  %s:%d  %s" rel (i + 1) (line.Trim()) ]
 
 [<Tests>]
 let tests =
@@ -162,4 +176,42 @@ let tests =
 
               Expect.isFalse
                   (directRead.IsMatch "Environment.GetEnvironmentVariable \"FUARAN_CORE_TSC\"")
-                  "other variables are untouched" ]
+                  "other variables are untouched"
+
+          testCase "no source spawns a child outside ChildProcess.fs: ChildProcess.run is the one spawn site"
+          <| fun _ ->
+              let files =
+                  sourceFiles ()
+                  |> List.map (fun (rel, full) -> rel, List.ofArray (File.ReadAllLines full))
+
+              Expect.isTrue
+                  (files
+                   |> List.exists (fun (rel, _) -> rel = "tests/Fuaran.Core.Tests/ChildProcess.fs"))
+                  "the sweep sees the runner it exempts"
+
+              let offenders = spawnOffenders files
+
+              Expect.isEmpty
+                  offenders
+                  ("a child is spawned through ChildProcess.run (both pipes drained at once, UTF-8 pinned), never by hand:\n"
+                   + String.concat "\n" offenders)
+
+          testCase "the spawn sweep bites: a hand-written spawn is named, the runner itself is not"
+          <| fun _ ->
+              let start = "Process" + ".Start psi"
+              let info = "let psi = Process" + "StartInfo(\"git\", \"status\")"
+
+              Expect.equal
+                  (spawnOffenders
+                      [ "tests/X.fs", [ "let ok = 1"; "use p = Diagnostics." + start ]
+                        "tests/Y.fs", [ info ] ])
+                  [ "  tests/X.fs:2  use p = Diagnostics." + start; "  tests/Y.fs:1  " + info ]
+                  "both spellings, by file and line"
+
+              Expect.isEmpty
+                  (spawnOffenders [ "tests/Fuaran.Core.Tests/ChildProcess.fs", [ "use p = " + start ] ])
+                  "the runner's own spawn is the one admitted"
+
+              Expect.isEmpty
+                  (spawnOffenders [ "tests/X.fs", [ "ChildProcess.run (ChildProcess.command \"git\" \"status\")" ] ])
+                  "a call through the runner is not a spawn" ]

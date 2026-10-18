@@ -1003,7 +1003,7 @@ let rec caseNames (t: Test) : string list =
 //  The family
 // ---------------------------------------------------------------------------
 
-let private repoRoot = Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
+let private repoRoot = Repo.root ()
 let private ladderPath = Path.Combine(repoRoot, "proofs.json")
 let private checkScriptPath = Path.Combine(repoRoot, "proofs", "check.ps1")
 let private proofsReadmePath = Path.Combine(repoRoot, "proofs", "README.md")
@@ -2352,16 +2352,12 @@ let renderCone (heading: string) (rows: ConeRow list) : string list =
 // ---- the git half ---------------------------------------------------------------------------
 
 let private runGit (root: string) (args: string list) : int * string * string =
-    let psi = ChildProcess.redirected "git" ""
-
-    for a in [ "-C"; root; "-c"; "core.quotepath=off" ] @ args do
-        psi.ArgumentList.Add a
-
-    use p = Diagnostics.Process.Start psi
-    let out = p.StandardOutput.ReadToEndAsync()
-    let err = p.StandardError.ReadToEndAsync()
-    p.WaitForExit()
-    p.ExitCode, out.Result, err.Result
+    match
+        ChildProcess.argv "git" ([ "-C"; root; "-c"; "core.quotepath=off" ] @ args)
+        |> ChildProcess.run
+    with
+    | Ok o -> o.Exit, o.Stdout, o.Stderr
+    | Error why -> failwith why
 
 let private gitLines (root: string) (args: string list) : Result<string list, string> =
     match runGit root args with
@@ -2966,16 +2962,12 @@ let private coneIn (root: string) : Set<string> =
 // `proofs/check.ps1` run the way a person runs it, for the two cases about what the SCRIPT hands
 // the kit. `-PlanOnly` prints the plan and exits before the prover, the build or git is touched.
 let private runCheckScript (args: string list) : int * string =
-    let psi = ChildProcess.redirected "pwsh" ""
-
-    for a in [ "-NoProfile"; "-NonInteractive"; "-File"; checkScriptPath ] @ args do
-        psi.ArgumentList.Add a
-
-    use p = Diagnostics.Process.Start psi
-    let out = p.StandardOutput.ReadToEndAsync()
-    let err = p.StandardError.ReadToEndAsync()
-    p.WaitForExit()
-    p.ExitCode, Regex.Replace(out.Result + err.Result, "\u001b" + @"\[[0-9;]*m", "")
+    match
+        ChildProcess.argv "pwsh" ([ "-NoProfile"; "-NonInteractive"; "-File"; checkScriptPath ] @ args)
+        |> ChildProcess.run
+    with
+    | Ok o -> o.Exit, Regex.Replace(o.Stdout + o.Stderr, "\u001b" + @"\[[0-9;]*m", "")
+    | Error why -> failwith why
 
 let private planLine (prefix: string) (output: string) : string =
     output.Replace("\r\n", "\n").Split '\n'

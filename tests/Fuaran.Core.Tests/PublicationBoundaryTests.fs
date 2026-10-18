@@ -1,7 +1,6 @@
 module Fuaran.Core.Tests.PublicationBoundaryTests
 
 open System
-open System.Diagnostics
 open System.IO
 open System.Text
 open System.Text.Json
@@ -222,22 +221,8 @@ let private binaryExtensions =
 
 /// `git ls-files --cached --others --exclude-standard -z` from `root`, or why git could not say.
 let private gitFiles (root: string) : Result<string list, string> =
-    try
-        let psi =
-            ChildProcess.redirected "git" "ls-files --cached --others --exclude-standard -z"
-
-        psi.WorkingDirectory <- root
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "`git ls-files` exited %d: %s" p.ExitCode (err.Trim()))
-        else
-            out.Split('\000', StringSplitOptions.RemoveEmptyEntries) |> Array.toList |> Ok
-    with e ->
-        Error("`git` could not be run: " + e.Message)
+    ChildProcess.git root "ls-files --cached --others --exclude-standard -z"
+    |> Result.map (fun out -> out.Split('\000', StringSplitOptions.RemoveEmptyEntries) |> Array.toList)
 
 /// The source-archive fallback: every file under `root` except build output and other
 /// repositories' checkouts. Less precise than git's own list, which is why it is only the fallback.
@@ -508,14 +493,7 @@ let publicationBoundaryTests =
 
                   // A git checkout: the same probe, discovered through `git ls-files` (untracked and
                   // not ignored counts, because that is what a commit would publish).
-                  let psi = ChildProcess.redirected "git" "init -q"
-                  psi.WorkingDirectory <- dir
-                  use p = Process.Start psi
-                  p.StandardOutput.ReadToEnd() |> ignore
-                  p.StandardError.ReadToEnd() |> ignore
-                  p.WaitForExit()
-
-                  if p.ExitCode = 0 then
+                  if ChildProcess.git dir "init -q" |> Result.isOk then
                       File.WriteAllText(Path.Combine(dir, ".gitignore"), "ignored.md\n")
                       File.WriteAllText(Path.Combine(dir, "ignored.md"), r.Example + "\n")
                       let how2, files2 = sweptSet dir

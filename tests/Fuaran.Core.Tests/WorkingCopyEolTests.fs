@@ -1,7 +1,6 @@
 module Fuaran.Core.Tests.WorkingCopyEolTests
 
 open System
-open System.Diagnostics
 open System.IO
 open Expecto
 
@@ -31,23 +30,6 @@ open Expecto
 // what git will do on the next checkout.
 // ---------------------------------------------------------------------------
 
-/// The repository root — the directory holding the solution file. Located by the
-/// same climb the fixture resolvers use, from the CWD and from the test binary,
-/// rather than a build-output-relative path.
-let private repoRoot () : string option =
-    let rec climb (dir: string) (budget: int) : string option =
-        if budget < 0 || isNull dir then
-            None
-        elif File.Exists(Path.Combine(dir, "Fuaran.Core.slnx")) then
-            Some dir
-        else
-            match Directory.GetParent dir with
-            | null -> None
-            | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
-
 /// The tracked paths whose WORKING-COPY ending is not LF, read off
 /// `git ls-files --eol` output. A line is
 /// `i/<index>  w/<worktree>  attr/<attrs><TAB><path>` — the three verdict columns
@@ -73,28 +55,16 @@ let internal driftedPaths (lines: string list) : string list =
             else
                 None)
 
-/// `git ls-files --eol` from `root`, or why it could not be run. Spawned through
-/// `ChildProcess.redirected` so the child's stdout decodes as UTF-8 whatever code
-/// page the runner inherited — a path in this listing can carry any character.
+/// `git ls-files --eol` from `root`, or why it could not be run. Through `ChildProcess.git`, so the
+/// child's stdout decodes as UTF-8 whatever code page the runner inherited: a path in this listing
+/// can carry any character.
 let private lsFilesEol (root: string) : Result<string list, string> =
-    try
-        let psi = ChildProcess.redirected "git" "ls-files --eol"
-        psi.WorkingDirectory <- root
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "`git ls-files --eol` exited %d: %s" p.ExitCode (err.Trim()))
-        else
-            out.Split('\n')
-            |> Array.toList
-            |> List.map (fun l -> l.TrimEnd('\r'))
-            |> List.filter (fun l -> l <> "")
-            |> Ok
-    with e ->
-        Error("`git` could not be run: " + e.Message)
+    ChildProcess.git root "ls-files --eol"
+    |> Result.map (fun out ->
+        out.Split('\n')
+        |> Array.toList
+        |> List.map (fun l -> l.TrimEnd('\r'))
+        |> List.filter (fun l -> l <> ""))
 
 let private remedy =
     "Remedy: `dotnet fantomas src tests` for F# sources (it writes LF per .editorconfig), then "
@@ -107,7 +77,7 @@ let tests =
         [
 
           test "no tracked text file is CRLF in the working copy" {
-              match repoRoot () with
+              match Repo.tryRoot () with
               | None ->
                   failtest "could not locate the repository root (Fuaran.Core.slnx) from the CWD or the test binary"
               | Some root ->

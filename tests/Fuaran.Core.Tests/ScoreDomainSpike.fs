@@ -327,22 +327,8 @@ let private isCorpus (dir: string) =
         false
 
 let private vendoredCorpus () : string option =
-    let rec climb (dir: string) (budget: int) : string option =
-        if budget < 0 || isNull dir then
-            None
-        else
-            let cand = Path.Combine(dir, "tests", "Fuaran.Core.Tests")
-
-            if File.Exists(Path.Combine(cand, "Fuaran.Core.Tests.fsproj")) then
-                Some cand
-            else
-                match Directory.GetParent dir with
-                | null -> None
-                | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
-    |> Option.map (fun projectDir -> Path.Combine(projectDir, "fixtures", "score-domain"))
+    Repo.tryRoot ()
+    |> Option.map (fun root -> Path.Combine(root, "tests", "Fuaran.Core.Tests", "fixtures", "score-domain"))
 
 let private resolveCorpus () : Result<string, string> =
     match Environment.GetEnvironmentVariable "FUARAN_SCORE_SPIKE_CORPUS" with

@@ -94,23 +94,8 @@ let witnessSurfaceLawTests =
 
           testCase "the pinned records are exactly the ones STABILITY.md freezes, and STABILITY.md names the family"
           <| fun _ ->
-              // `Snapshots` compiles after this file, so the repository root is found the same way
-              // it finds it: the nearest ancestor holding the solution.
-              let rec root (dir: System.IO.DirectoryInfo) =
-                  if isNull dir then
-                      failtest "no ancestor of the test output holds Fuaran.Core.slnx"
-                  elif System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "Fuaran.Core.slnx")) then
-                      dir.FullName
-                  else
-                      root dir.Parent
-
               let stability =
-                  System.IO.File.ReadAllText(
-                      System.IO.Path.Combine(
-                          root (System.IO.DirectoryInfo System.AppContext.BaseDirectory),
-                          "STABILITY.md"
-                      )
-                  )
+                  System.IO.File.ReadAllText(System.IO.Path.Combine(Repo.root (), "STABILITY.md"))
 
               let heading = "## Witness-record field freeze"
               let at = stability.IndexOf(heading, System.StringComparison.Ordinal)

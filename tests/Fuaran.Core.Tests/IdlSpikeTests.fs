@@ -520,22 +520,13 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+                  match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+                  | Error _ -> skiptest "node not on PATH — TS-backend byte-identity check skipped"
+                  | Ok p ->
+                      let stdout = p.Stdout
+                      let stderr = p.Stderr
 
-                  let proc =
-                      try
-                          Some(Diagnostics.Process.Start psi)
-                      with _ ->
-                          None
-
-                  match proc with
-                  | None -> skiptest "node not on PATH — TS-backend byte-identity check skipped"
-                  | Some p ->
-                      let stdout = p.StandardOutput.ReadToEnd()
-                      let stderr = p.StandardError.ReadToEnd()
-                      p.WaitForExit()
-
-                      if p.ExitCode <> 0 then
+                      if p.Exit <> 0 then
                           failtestf "node failed running the generated TS encoder: %s" stderr
 
                       let got =
@@ -590,22 +581,13 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+                  match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+                  | Error _ -> skiptest "node not on PATH — TS-backend decode round-trip skipped"
+                  | Ok p ->
+                      let stdout = p.Stdout
+                      let stderr = p.Stderr
 
-                  let proc =
-                      try
-                          Some(Diagnostics.Process.Start psi)
-                      with _ ->
-                          None
-
-                  match proc with
-                  | None -> skiptest "node not on PATH — TS-backend decode round-trip skipped"
-                  | Some p ->
-                      let stdout = p.StandardOutput.ReadToEnd()
-                      let stderr = p.StandardError.ReadToEnd()
-                      p.WaitForExit()
-
-                      if p.ExitCode <> 0 then
+                      if p.Exit <> 0 then
                           failtestf "node failed running the generated TS decoder: %s" stderr
 
                       let got =
@@ -686,22 +668,13 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+                  match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+                  | Error _ -> skiptest "node not on PATH — generative cross-host conformance skipped"
+                  | Ok p ->
+                      let stdout = p.Stdout
+                      let stderr = p.Stderr
 
-                  let proc =
-                      try
-                          Some(Diagnostics.Process.Start psi)
-                      with _ ->
-                          None
-
-                  match proc with
-                  | None -> skiptest "node not on PATH — generative cross-host conformance skipped"
-                  | Some p ->
-                      let stdout = p.StandardOutput.ReadToEnd()
-                      let stderr = p.StandardError.ReadToEnd()
-                      p.WaitForExit()
-
-                      if p.ExitCode <> 0 then
+                      if p.Exit <> 0 then
                           failtestf "node failed running the generative harness: %s" stderr
 
                       let got =
@@ -777,25 +750,17 @@ let tests =
                   File.WriteAllText(path, fsx)
 
                   try
-                      let psi = ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")
-
-                      match
-                          (try
-                              Some(Process.Start psi)
-                           with _ ->
-                               None)
-                      with
-                      | None -> skiptest "dotnet not on PATH — F# scaffold injection-safety check skipped"
-                      | Some p ->
-                          let stdout = p.StandardOutput.ReadToEnd()
-                          let stderr = p.StandardError.ReadToEnd()
-                          p.WaitForExit()
+                      match ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\"")) with
+                      | Error _ -> skiptest "dotnet not on PATH — F# scaffold injection-safety check skipped"
+                      | Ok p ->
+                          let stdout = p.Stdout
+                          let stderr = p.Stderr
 
                           // Proof of no-breakout: the source compiles/parses (exit 0) AND the
                           // wire equals the trusted encoder — a breakout would invalidate the
                           // source (non-zero exit) or alter the output. The payload's "PWNED()"
                           // text appears ONLY as escaped data inside the wire string.
-                          if p.ExitCode <> 0 then
+                          if p.Exit <> 0 then
                               failtestf "fsi failed to compile the scaffolded source (possible breakout): %s" stderr
 
                           Expect.equal
@@ -822,25 +787,17 @@ let tests =
                   File.WriteAllText(path, harness)
 
                   try
-                      let psi = ChildProcess.redirected "node" ("\"" + path + "\"")
-
-                      match
-                          (try
-                              Some(Process.Start psi)
-                           with _ ->
-                               None)
-                      with
-                      | None -> skiptest "node not on PATH — TS scaffold injection-safety check skipped"
-                      | Some p ->
-                          let stdout = p.StandardOutput.ReadToEnd()
-                          let stderr = p.StandardError.ReadToEnd()
-                          p.WaitForExit()
+                      match ChildProcess.run (ChildProcess.command "node" ("\"" + path + "\"")) with
+                      | Error _ -> skiptest "node not on PATH — TS scaffold injection-safety check skipped"
+                      | Ok p ->
+                          let stdout = p.Stdout
+                          let stderr = p.Stderr
 
                           // Proof of no-breakout: the source compiles/parses (exit 0) AND the
                           // wire equals the trusted encoder — a breakout would invalidate the
                           // source (non-zero exit) or alter the output. The payload's "PWNED()"
                           // text appears ONLY as escaped data inside the wire string.
-                          if p.ExitCode <> 0 then
+                          if p.Exit <> 0 then
                               failtestf "node failed running the scaffolded TS (possible breakout): %s" stderr
 
                           Expect.equal
@@ -1007,20 +964,12 @@ module private SecondVocabulary =
 
     /// Run a process over a script file; `None` when the tool is not on PATH.
     let run (tool: string) (args: string) : (int * string * string) option =
-        let psi = ChildProcess.redirected tool args
-
-        match
-            (try
-                Some(Process.Start psi)
-             with _ ->
-                 None)
-        with
-        | None -> None
-        | Some p ->
-            let stdout = p.StandardOutput.ReadToEnd()
-            let stderr = p.StandardError.ReadToEnd()
-            p.WaitForExit()
-            Some(p.ExitCode, stdout.Replace("\r\n", "\n"), stderr)
+        match ChildProcess.run (ChildProcess.command tool args) with
+        | Error _ -> None
+        | Ok p ->
+            let stdout = p.Stdout
+            let stderr = p.Stderr
+            Some(p.Exit, stdout.Replace("\r\n", "\n"), stderr)
 
     let withTemp (ext: string) (text: string) (f: string -> 'a) : 'a =
         let path =

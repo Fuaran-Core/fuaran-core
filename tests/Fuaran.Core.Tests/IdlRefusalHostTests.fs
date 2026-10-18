@@ -53,23 +53,13 @@ let private runNode (script: string) : string option =
     File.WriteAllText(tmp, script)
 
     try
-        let proc =
-            try
-                Some(Diagnostics.Process.Start(ChildProcess.redirected "node" ("\"" + tmp + "\"")))
-            with _ ->
-                None
+        match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+        | Error _ -> None
+        | Ok p ->
+            if p.Exit <> 0 then
+                failtestf "node failed running the refusal harness: %s" p.Stderr
 
-        match proc with
-        | None -> None
-        | Some p ->
-            let stdout = p.StandardOutput.ReadToEnd()
-            let stderr = p.StandardError.ReadToEnd()
-            p.WaitForExit()
-
-            if p.ExitCode <> 0 then
-                failtestf "node failed running the refusal harness: %s" stderr
-
-            Some stdout
+            Some p.Stdout
     finally
         try
             File.Delete tmp
@@ -822,21 +812,11 @@ let private withDir (files: (string * string) list) (f: string -> 'a) : 'a =
 
 /// Run `node <args>` in `dir`: exit code, stdout and stderr; `None` when node is not on PATH.
 let private nodeIn (dir: string) (args: string) : (int * string * string) option =
-    let psi = ChildProcess.redirected "node" args
-    psi.WorkingDirectory <- dir
-
-    match
-        (try
-            Some(Diagnostics.Process.Start psi)
-         with _ ->
-             None)
-    with
-    | None -> None
-    | Some p ->
-        let stdout = p.StandardOutput.ReadToEnd()
-        let stderr = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-        Some(p.ExitCode, stdout, stderr)
+    ChildProcess.command "node" args
+    |> ChildProcess.inDir dir
+    |> ChildProcess.run
+    |> Result.toOption
+    |> Option.map (fun p -> p.Exit, p.Stdout, p.Stderr)
 
 /// The TypeScript compiler the type-check leg runs: `tsc.js` (the `typescript` package's
 /// `lib/tsc.js`) named by `FUARAN_CORE_TSC`. This repository carries no JavaScript dependency, so

@@ -121,15 +121,14 @@ let private legOf (r: SpikeReport) (name: string) =
 /// than called, because an exit code returned by a function is not evidence about a process.
 let private cliDll = typeof<SpikeInput>.Assembly.Location
 
-/// Run `fuaran-core-idl <args>`: exit code, stdout, stderr. Both pipes are drained, stderr on a
-/// task, so a chatty child cannot fill one while the other is being read.
+/// Run `fuaran-core-idl <args>`: exit code, stdout, stderr, through `ChildProcess.run`, which drains
+/// both pipes at once so a chatty child cannot fill one while the other is being read.
 let private runCli (args: string) : int * string * string =
-    let psi = ChildProcess.redirected "dotnet" ("\"" + cliDll + "\" " + args)
-    use p = System.Diagnostics.Process.Start psi
-    let err = p.StandardError.ReadToEndAsync()
-    let out = p.StandardOutput.ReadToEnd()
-    p.WaitForExit()
-    p.ExitCode, out, err.Result
+    let p =
+        ChildProcess.run (ChildProcess.command "dotnet" ("\"" + cliDll + "\" " + args))
+        |> Result.defaultWith failwith
+
+    p.Exit, p.Stdout, p.Stderr
 
 /// A scratch directory holding the three inputs the command reads: the vocabulary artifact, the
 /// proposal, and a corpus directory with one `nodes/` document.
@@ -506,15 +505,12 @@ let tests =
                 testCase
                     "the help text is UTF-8 bytes with no byte-order mark, whatever the console code page"
                     (fun _ ->
-                        let psi = ChildProcess.redirected "dotnet" ("\"" + cliDll + "\" --help")
-                        use p = System.Diagnostics.Process.Start psi
-                        let err = p.StandardError.ReadToEndAsync()
-                        use buffer = new System.IO.MemoryStream()
-                        p.StandardOutput.BaseStream.CopyTo buffer
-                        p.WaitForExit()
-                        err.Wait()
-                        let bytes = buffer.ToArray()
-                        Expect.equal p.ExitCode 0 "help exits 0"
+                        let p =
+                            ChildProcess.run (ChildProcess.command "dotnet" ("\"" + cliDll + "\" --help"))
+                            |> Result.defaultWith failwith
+
+                        let bytes = p.StdoutBytes
+                        Expect.equal p.Exit 0 "help exits 0"
                         Expect.isGreaterThan bytes.Length 3 "the help text is not empty"
 
                         Expect.notEqual

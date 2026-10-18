@@ -1,7 +1,6 @@
 module Fuaran.Core.Tests.SiblingCorpusTests
 
 open System
-open System.Diagnostics
 open System.IO
 open Expecto
 
@@ -54,16 +53,17 @@ let private legacyClimb (start: string) : string option =
 
     climb start 12
 
-let private repoRoot = Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
+let private repoRoot = Repo.root ()
 
+/// `git <arguments>` in `workingDir`: (exit code, stdout and stderr trimmed); git not runnable raises.
 let private runGit (workingDir: string) (arguments: string) : int * string =
-    let psi = ChildProcess.redirected "git" arguments
-    psi.WorkingDirectory <- workingDir
-    use p = Process.Start psi
-    let out = p.StandardOutput.ReadToEnd()
-    let err = p.StandardError.ReadToEnd()
-    p.WaitForExit()
-    p.ExitCode, (out + err).Trim()
+    match
+        ChildProcess.command "git" arguments
+        |> ChildProcess.inDir workingDir
+        |> ChildProcess.run
+    with
+    | Ok o -> o.Exit, (o.Stdout + o.Stderr).Trim()
+    | Error why -> failwith why
 
 let private gitOnPath =
     try
@@ -132,7 +132,7 @@ let tests =
                   skiptest "git not on PATH — the main-tree anchoring proof needs git to create a worktree"
               else
                   withTemporaryWorktree (fun worktree ->
-                      match SiblingCorpus.mainWorkingTreeFrom repoRoot, SiblingCorpus.mainWorkingTreeFrom worktree with
+                      match Repo.mainTreeFrom repoRoot, Repo.mainTreeFrom worktree with
                       | Ok fromHere, Ok fromWorktree ->
                           Expect.equal
                               (Path.GetFullPath fromWorktree)
@@ -167,7 +167,7 @@ let tests =
                   // drawn is between the main tree (where the old climb worked) and a worktree
                   // (where it did not).
                   let mainTree =
-                      match SiblingCorpus.mainWorkingTreeFrom repoRoot with
+                      match Repo.mainTree () with
                       | Ok tree -> tree
                       | Error why -> failtestf "git could not say where the main working tree is: %s" why
 
@@ -336,23 +336,20 @@ let private runPinStep (copiesPath: string) : int * string * string =
     let output = Path.GetTempFileName()
 
     try
-        let psi = ChildProcess.redirected "pwsh" ""
+        let o =
+            ChildProcess.argv
+                "pwsh"
+                [ "-NoProfile"
+                  "-NonInteractive"
+                  "-File"
+                  Path.Combine(repoRoot, ".github", "scripts", "corpus-pin.ps1")
+                  "-CopiesJson"
+                  copiesPath ]
+            |> ChildProcess.withEnv "GITHUB_OUTPUT" output
+            |> ChildProcess.run
+            |> Result.defaultWith failwith
 
-        for a in
-            [ "-NoProfile"
-              "-NonInteractive"
-              "-File"
-              Path.Combine(repoRoot, ".github", "scripts", "corpus-pin.ps1")
-              "-CopiesJson"
-              copiesPath ] do
-            psi.ArgumentList.Add a
-
-        psi.Environment["GITHUB_OUTPUT"] <- output
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEndAsync()
-        let err = p.StandardError.ReadToEndAsync()
-        p.WaitForExit()
-        p.ExitCode, (out.Result + err.Result).Trim(), File.ReadAllText(output).Replace("\r\n", "\n").Trim()
+        o.Exit, (o.Stdout + o.Stderr).Trim(), File.ReadAllText(output).Replace("\r\n", "\n").Trim()
     finally
         File.Delete output
 
