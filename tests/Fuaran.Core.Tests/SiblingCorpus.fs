@@ -164,52 +164,11 @@ let fault (family: string) (root: string) : string option =
 let private git (workingDir: string) (arguments: string) : Result<string, string> =
     ChildProcess.git workingDir arguments |> Result.map _.Trim()
 
-/// This repository's MAIN working tree as git reports it, asked from `from`.
-///
-/// `--git-common-dir` is the one question whose answer is the same from every worktree of a
-/// repository: a linked worktree's own `.git` is a FILE pointing into the main repository's
-/// administrative directory, and the common dir IS that directory — so its parent is the main
-/// working tree, whichever worktree asks. `--path-format=absolute` is asked for first because
-/// a bare `--git-common-dir` answers `.git`, relative to the invocation directory, when it is
-/// asked from the main tree itself; the second form resolves that by hand for a git too old to
-/// know the flag.
-let mainWorkingTreeFrom (from: string) : Result<string, string> =
-    let relative () =
-        git from "rev-parse --git-common-dir"
-        |> Result.map (fun p ->
-            if Path.IsPathRooted p then
-                p
-            else
-                Path.GetFullPath(Path.Combine(from, p)))
-
-    let commonDir =
-        match git from "rev-parse --path-format=absolute --git-common-dir" with
-        | Ok p when not (String.IsNullOrWhiteSpace p) -> Ok p
-        | _ -> relative ()
-
-    commonDir
-    |> Result.bind (fun p ->
-        match Directory.GetParent(p.TrimEnd('/', '\\')) with
-        | null -> Error(sprintf "the git common directory '%s' has no parent working tree" p)
-        | parent -> Ok parent.FullName)
-
-/// `dir` and its ancestors, nearest first, bounded.
-let private ancestors (start: string) (budget: int) : string list =
-    let rec go (dir: string) (n: int) (acc: string list) =
-        if n < 0 || isNull dir then
-            List.rev acc
-        else
-            match Directory.GetParent dir with
-            | null -> List.rev (dir :: acc)
-            | parent -> go parent.FullName (n - 1) (dir :: acc)
-
-    go start budget []
-
 /// Every place a corpus is looked for beneath one anchor, in the order tried: under the
 /// language's own directory, which is where this workspace keeps it, and beside the
 /// repository itself (a plain side-by-side clone, and the in-repository clone CI makes).
 let private candidatesUnder (anchor: string) : string list =
-    ancestors anchor 12
+    Repo.ancestors anchor 12
     |> List.collect (fun dir ->
         [ Path.Combine(dir, "Fuaran-UI", directoryName)
           Path.Combine(dir, directoryName) ])
@@ -263,7 +222,7 @@ let underAnchor (family: string) (anchor: string) (how: string) : Result<string,
 /// worktree of this repository without the environment deciding the answer.
 let anchoredFrom (family: string) (from: string) : Result<string, string> =
     let anchor, how =
-        match mainWorkingTreeFrom from with
+        match Repo.mainTreeFrom from with
         | Ok tree ->
             tree,
             sprintf
@@ -536,16 +495,10 @@ type PinDrift =
 /// EXIT CODE (`merge-base --is-ancestor` says "no" with 1 and "cannot say" with 128), which the
 /// shared `ChildProcess.git` folds into one error.
 let private gitExit (dir: string) (arguments: string) : Result<int * string, string> =
-    try
-        let psi = ChildProcess.redirected "git" arguments
-        psi.WorkingDirectory <- dir
-        use p = Diagnostics.Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-        Ok(p.ExitCode, (out + err).Trim())
-    with e ->
-        Error(sprintf "`git %s` could not be run: %s" arguments e.Message)
+    ChildProcess.command "git" arguments
+    |> ChildProcess.inDir dir
+    |> ChildProcess.run
+    |> Result.map (fun o -> o.Exit, (o.Stdout + o.Stderr).Trim())
 
 let private samePath (a: string) (b: string) =
     let norm (p: string) =

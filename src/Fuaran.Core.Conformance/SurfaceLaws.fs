@@ -1,8 +1,7 @@
 namespace Fuaran.Core
 
 /// A witness record's field list, by name and in declaration order (Phase 391; a pair before
-/// `0.37.0`): an entry of `Conformance.frozenWitnessFields` (the freeze's pin) or of
-/// `Conformance.declaredWitnessFields` (what the record declares).
+/// `0.37.0`): an entry of `Conformance.frozenWitnessFields`, the freeze's pin.
 type WitnessFields =
     {
         /// The record's name without its generic arity — `NodeWitness`, `CapabilitySeamWitness`.
@@ -628,48 +627,6 @@ module internal SurfaceLaws =
         frozenPins
         |> List.map (fun (record, fields) -> { Record = record; Fields = fields })
 
-    /// The fields each frozen witness record DECLARES, by name and in declaration order — the FACT
-    /// beside `frozenWitnessFields`' policy (Phase 387, DECISIONS.md D124).
-    ///
-    /// **Why a committed list rather than reflection.** The field laws read the records by
-    /// reflection on .NET, where it is the strongest reading there is: the assembly a domain
-    /// compiled against, not this file. A Fable-compiled program reads THIS list instead, so no
-    /// reflection runs on that pipeline — record reflection under Fable was compiled and certified
-    /// by nothing. The list is derived from the same reflection and held to it by this repository's
-    /// .NET suite (`SurfaceLawsTests`, "the committed declared-field list is what reflection
-    /// reads"), so a record that grows a field reddens that test until the list is re-derived, and
-    /// the re-derived list then reddens the freeze on both pipelines until the widening is made
-    /// deliberately.
-    let declaredWitnessFields: WitnessFields list =
-        [ "IdWitness", [ "ToString"; "OfString"; "Equals" ]
-          "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
-          "StreamWitness", [ "Apply"; "Encode"; "Decode" ]
-          "ArtifactWitness", [ "Tree"; "IdW"; "Holes"; "Effect"; "Bind" ]
-          "AiSurfaceWitness", [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
-          "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
-          "ObserverWitness", [ "Derive"; "Options" ]
-          "CapabilitySeamWitness", [ "Registry"; "Dispatch"; "GenCall" ]
-          "QuerySeamWitness", [ "Queries"; "Dispatch"; "GenQuery" ]
-          "CapabilityPipelineWitness", [ "PipelineRegistry"; "GenPipeline" ]
-          "ConstructWitness", [ "Surface"; "Construct" ]
-          "KeyedWitness",
-          [ "Surface"
-            "KeyedChildren"
-            "ReplaceKeyedChildren"
-            "PlaceKeyedChild"
-            "IdsUnique" ]
-          "EvaluatorWitness", [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
-          "RefWitness", [ "RefsOf"; "DeclsOf" ]
-          "SanitizeWitness",
-          [ "SanitizeUrl"
-            "SanitizeUrlOrBlank"
-            "IsAllowedAttributeKey"
-            "IsSafeAttributeValue"
-            "SanitizeAttributes"
-            "ScrubMarkdown" ]
-          "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
-        |> List.map (fun (record, fields) -> { Record = record; Fields = fields })
-
     /// The public records named `…Witness` that the freeze deliberately does NOT cover, each with
     /// why (Phase 232). Listing them is what lets `witnessSurfaceLaws` hold every public witness to a
     /// classification; extending the freeze to one of them is a decision recorded in STABILITY.md,
@@ -725,9 +682,9 @@ module internal SurfaceLaws =
 
     /// One frozen record's law over a field list that is DATA rather than a reflected type
     /// (Phase 387): `declared`, by name and in order, equals `pinned`. It is the law a Fable-compiled
-    /// program runs, over `declaredWitnessFields` — reflection-free, so nothing on that pipeline
-    /// depends on record reflection being transpiled faithfully. Same name and counterexample as
-    /// `witnessFieldsLaw`, which reads the record itself on .NET.
+    /// program runs — reflection-free, so nothing on that pipeline depends on record reflection being
+    /// transpiled faithfully. Same name and counterexample as `witnessFieldsLaw`, which reads the
+    /// record itself on .NET.
     let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =
         let law = witnessFieldsCell record
         checkFrozenFields law record pinned declared
@@ -738,7 +695,7 @@ module internal SurfaceLaws =
     // `FSharpType.IsRecord` / `GetRecordFields` were compiled into the Fable distribution, ran under
     // node through `witnessSurfaceLaws ()`, and were certified there by nothing — "Fable supports
     // record reflection, so it probably works". They are fenced to .NET with the assembly
-    // enumeration below, and the Fable pipeline reads `declaredWitnessFields` instead.
+    // enumeration below, and the Fable pipeline reads the pins themselves instead.
 
     /// A type's name without its generic arity suffix — the name a reader and STABILITY.md use.
     let private bareTypeName (t: System.Type) : string =
@@ -866,22 +823,17 @@ module internal SurfaceLaws =
     ///
     /// **The two pipelines read different evidence, and each reads the strongest it has (Phase 387,
     /// DECISIONS.md D124).** On .NET each record's law reflects over the record itself
-    /// (`witnessFieldsLaw`). Under Fable no reflection runs: each record's law reads the committed
-    /// `declaredWitnessFields` (`witnessDeclaredFieldsLaw`), a list this repository's .NET suite holds
-    /// equal to the reflected fields, and the coverage law is absent rather than reported green — a
-    /// transpiled program has no assemblies to enumerate, and the completeness of the pin list is a
-    /// property of this repository's tree, which its own .NET gate holds.
+    /// (`witnessFieldsLaw`). Under Fable no reflection runs, and each record's law reads the pins
+    /// themselves (`witnessDeclaredFieldsLaw` over `frozenWitnessFields`): the claim there is "the
+    /// pins are the pins", which is all a second committed copy of them ever proved (Phase 506
+    /// deleted that copy). That the pins are what the records declare is this repository's .NET
+    /// suite's to hold — by reflection and against the committed `frozen-witness-fields.txt` — and
+    /// the coverage law is absent rather than reported green, since a transpiled program has no
+    /// assemblies to enumerate.
     let witnessSurfaceLaws () : LawResult list =
 #if FABLE_COMPILER
         frozenWitnessFields
-        |> List.map (fun pin ->
-            let declared =
-                declaredWitnessFields
-                |> List.tryFind (fun d -> d.Record = pin.Record)
-                |> Option.map _.Fields
-                |> Option.defaultValue []
-
-            witnessDeclaredFieldsLaw pin.Record pin.Fields declared)
+        |> List.map (fun pin -> witnessDeclaredFieldsLaw pin.Record pin.Fields pin.Fields)
 #else
         let fields =
             frozenWitnessFields

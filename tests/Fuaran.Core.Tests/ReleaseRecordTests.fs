@@ -323,9 +323,6 @@ let internal releaseFaults
 
 // ---- the instrument ---------------------------------------------------------
 
-let private repoRoot () : string =
-    Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
-
 let private remedy =
     "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file and its index entry) and the README stamps in ONE commit, which is the commit the tag names."
 
@@ -377,7 +374,7 @@ let tests =
     testList
         "Release record"
         [ test "every tag is headed released with its receiving-gate record, and every released heading has its tag" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               match ChildProcess.Tags.released root with
               | Error why ->
@@ -414,7 +411,7 @@ let tests =
               // what it claims to: the newest tagged slot's heading put back to DRAFT (a tag placed
               // before the flip — `c441e76`), and the same slot's tag withheld (a flip before the tag
               // — `285751b`).
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               match ChildProcess.Tags.released root with
               | Error why -> skiptestf "release-record plants skipped — %s" why

@@ -4,6 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Families+Takes RequireQualifiedAccess
 attribute Fuaran.Core.FoldConfluence RequireQualifiedAccess
 attribute Fuaran.Core.WireNullTolerance+Claim RequireQualifiedAccess
 ctor Fuaran.Core.CapabilityPipelineWitness..ctor(Fuaran.Core.CapabilityRegistry, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Fuaran.Core.CapabilityPipeline, Fuaran.Core.ConfRng+T>>)
@@ -16,11 +17,10 @@ ctor Fuaran.Core.ConstructWitness`1..ctor(System.String, Microsoft.FSharp.Core.F
 ctor Fuaran.Core.EncodingProfileVectors+ActorVector..ctor(System.String, Fuaran.Core.Actor, System.String, System.String)
 ctor Fuaran.Core.EncodingProfileVectors+Vector..ctor(System.String, Fuaran.Core.JVal, System.String, System.String)
 ctor Fuaran.Core.EvaluatorWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<System.Tuple`2<!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Fuaran.Core.ConfRng+T>>>)
-ctor Fuaran.Core.Families+FamilyOperations..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
-ctor Fuaran.Core.Families+LawFamily..ctor(System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.AdequacyClass, Fuaran.Core.Families+RefusalVerdict)
+ctor Fuaran.Core.Families+LawFamily..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Takes>, Fuaran.Core.Families+Election, Fuaran.Core.AdequacyClass, Fuaran.Core.Families+RefusalVerdict, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Families+RefusalAudit..ctor(System.String, Fuaran.Core.Families+RefusalPopulation, System.String)
 ctor Fuaran.Core.Families+RefusalVerdict..ctor(Fuaran.Core.Families+RefusalPopulation, System.String)
-ctor Fuaran.Core.Families+Roster..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>>)
+ctor Fuaran.Core.Families+Roster..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>)
 ctor Fuaran.Core.FreezeExemption..ctor(System.String, System.String)
 ctor Fuaran.Core.FunctionVerifyReport`2..ctor(System.Boolean, Fuaran.Core.VerifyCoverage, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.VerifyCounterexample`2<!0, !1>>)
 ctor Fuaran.Core.LaneDag`1..ctor(Fuaran.Core.Dag+T`1<!0>, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
@@ -40,6 +40,8 @@ field Fuaran.Core.AdequacyClass+Tags.Guarded : System.Int32 (literal)
 field Fuaran.Core.AdequacyClass+Tags.Unconditional : System.Int32 (literal)
 field Fuaran.Core.AdequacyDemand`1+Tags.ReachesEvery : System.Int32 (literal)
 field Fuaran.Core.AdequacyDemand`1+Tags.Spans : System.Int32 (literal)
+field Fuaran.Core.Families+Election+Tags.BaseRun : System.Int32 (literal)
+field Fuaran.Core.Families+Election+Tags.OptIn : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.NeedsWitnessCapability : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.NoWitnessToCertify : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.SeamNotEveryDomainHas : System.Int32 (literal)
@@ -48,6 +50,26 @@ field Fuaran.Core.Families+RefusalPopulation+Tags.Built : System.Int32 (literal)
 field Fuaran.Core.Families+RefusalPopulation+Tags.Drawn : System.Int32 (literal)
 field Fuaran.Core.Families+RefusalPopulation+Tags.DrawnMissIsRed : System.Int32 (literal)
 field Fuaran.Core.Families+RefusalPopulation+Tags.NoRefusal : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.AiSurfaceWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.ArtifactWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.CapabilityPipelineWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.CapabilitySeamWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.EvaluatorWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.GuardedSurfaceWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.IAttestationSink : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.IdWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.KeyedWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.LaneGen : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.NodeWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.ObserverWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.OpGen : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.ProjectionWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.QuerySeamWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.RefWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.SanitizeWitness : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.StreamGen : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.StreamWitness : System.Int32 (literal)
+field Fuaran.Core.Families.schema : System.Int32 (literal)
 field Fuaran.Core.Families.unmeasuredToken : System.String (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneFolded : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneHalted : System.Int32 (literal)
@@ -172,9 +194,7 @@ method Fuaran.Core.EncodingProfileVectors.runVector(Fuaran.Core.EncodingProfileV
 method Fuaran.Core.EncodingProfileVectors.storedCodecLaws`1(System.String, Fuaran.Core.Codec`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Families.adequacyToken(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
 method Fuaran.Core.Families.adequacyTokenOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Roster>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
-method Fuaran.Core.Families.censusOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>>
 method Fuaran.Core.Families.reasonToken(Fuaran.Core.Families+OptInReason) : System.String
-method Fuaran.Core.Families.refusalAuditOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit>
 method Fuaran.Core.Families.refusalToken(System.String) : System.String
 method Fuaran.Core.Families.refusalTokenOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Roster>, System.String) : System.String
 method Fuaran.Core.Families.toJson() : System.String
@@ -219,17 +239,24 @@ method Fuaran.Core.WireNullTolerance.laws() : Microsoft.FSharp.Collections.FShar
 method Fuaran.Core.WireNullTolerance.lawsWith(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.WireNullTolerance.run(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
 method Fuaran.Core.WireNullTolerance.runVector(Fuaran.Core.WireNullTolerance+Vector) : Fuaran.Core.Corpus+Outcome
-property Fuaran.Core.Conformance.declaredWitnessFields : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WitnessFields> { get }
 property Fuaran.Core.Conformance.frozenWitnessFields : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WitnessFields> { get }
 property Fuaran.Core.Conformance.unfrozenWitnesses : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.FreezeExemption> { get }
 property Fuaran.Core.EncodingProfileVectors.actorVectors : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfileVectors+ActorVector> { get }
 property Fuaran.Core.EncodingProfileVectors.vectors : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfileVectors+Vector> { get }
+property Fuaran.Core.Families+LawFamily.Entry : System.String { get }
+property Fuaran.Core.Families+LawFamily.Module : System.String { get }
+property Fuaran.Core.Families+LawFamily.OptIn : System.Boolean { get }
+property Fuaran.Core.Families+LawFamily.Reason : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason> { get }
+property Fuaran.Core.Families+LawFamily.RefusalAudit : Fuaran.Core.Families+RefusalAudit { get }
+property Fuaran.Core.Families+LawFamily.Witness : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
+property Fuaran.Core.Families+Roster.Census : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>> { get }
+property Fuaran.Core.Families+Roster.RefusalAudit : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit> { get }
+property Fuaran.Core.Families+Takes.TypeName : System.String { get }
 property Fuaran.Core.Families.census : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>> { get }
 property Fuaran.Core.Families.families : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily> { get }
 property Fuaran.Core.Families.ids : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Families.modules : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Families.obligations : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
-property Fuaran.Core.Families.operations : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+FamilyOperations> { get }
 property Fuaran.Core.Families.refusalAudit : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit> { get }
 property Fuaran.Core.Families.roster : Fuaran.Core.Families+Roster { get }
 property Fuaran.Core.FoldConfluence.permutationBound : System.Int32 { get }
@@ -276,26 +303,21 @@ record-field Fuaran.Core.EvaluatorWitness`2.Deps #2 : Microsoft.FSharp.Core.FSha
 record-field Fuaran.Core.EvaluatorWitness`2.EvalNode #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>
 record-field Fuaran.Core.EvaluatorWitness`2.Model #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>
 record-field Fuaran.Core.EvaluatorWitness`2.Surface #0 : System.String
-record-field Fuaran.Core.Families+FamilyOperations.Family #0 : System.String
-record-field Fuaran.Core.Families+FamilyOperations.Operations #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-record-field Fuaran.Core.Families+LawFamily.Adequacy #7 : Fuaran.Core.AdequacyClass
-record-field Fuaran.Core.Families+LawFamily.Discharges #6 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-record-field Fuaran.Core.Families+LawFamily.Entry #2 : System.String
+record-field Fuaran.Core.Families+LawFamily.Adequacy #3 : Fuaran.Core.AdequacyClass
+record-field Fuaran.Core.Families+LawFamily.Discharges #5 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Families+LawFamily.Election #2 : Fuaran.Core.Families+Election
 record-field Fuaran.Core.Families+LawFamily.Id #0 : System.String
-record-field Fuaran.Core.Families+LawFamily.Module #1 : System.String
-record-field Fuaran.Core.Families+LawFamily.OptIn #4 : System.Boolean
-record-field Fuaran.Core.Families+LawFamily.Reason #5 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason>
-record-field Fuaran.Core.Families+LawFamily.Refusal #8 : Fuaran.Core.Families+RefusalVerdict
-record-field Fuaran.Core.Families+LawFamily.Witness #3 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Families+LawFamily.Operations #6 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Families+LawFamily.Refusal #4 : Fuaran.Core.Families+RefusalVerdict
+record-field Fuaran.Core.Families+LawFamily.Spellings #7 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Families+LawFamily.Takes #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Takes>
 record-field Fuaran.Core.Families+RefusalAudit.Family #0 : System.String
 record-field Fuaran.Core.Families+RefusalAudit.Population #1 : Fuaran.Core.Families+RefusalPopulation
 record-field Fuaran.Core.Families+RefusalAudit.Why #2 : System.String
 record-field Fuaran.Core.Families+RefusalVerdict.Population #0 : Fuaran.Core.Families+RefusalPopulation
 record-field Fuaran.Core.Families+RefusalVerdict.Why #1 : System.String
-record-field Fuaran.Core.Families+Roster.Census #3 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>>
 record-field Fuaran.Core.Families+Roster.Families #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>
 record-field Fuaran.Core.Families+Roster.Package #0 : System.String
-record-field Fuaran.Core.Families+Roster.RefusalAudit #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit>
 record-field Fuaran.Core.FreezeExemption.Reason #1 : System.String
 record-field Fuaran.Core.FreezeExemption.Witness #0 : System.String
 record-field Fuaran.Core.FunctionVerifyReport`2.Counterexample #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.VerifyCounterexample`2<!0, !1>>
@@ -365,7 +387,9 @@ type Fuaran.Core.EncodingProfileVectors+ActorVector (record)
 type Fuaran.Core.EncodingProfileVectors+Vector (record)
 type Fuaran.Core.EvaluatorWitness`2 (record)
 type Fuaran.Core.Families (module)
-type Fuaran.Core.Families+FamilyOperations (record)
+type Fuaran.Core.Families+Election (union)
+type Fuaran.Core.Families+Election+OptIn (type)
+type Fuaran.Core.Families+Election+Tags (type)
 type Fuaran.Core.Families+LawFamily (record)
 type Fuaran.Core.Families+OptInReason (union)
 type Fuaran.Core.Families+OptInReason+Tags (type)
@@ -374,6 +398,8 @@ type Fuaran.Core.Families+RefusalPopulation (union)
 type Fuaran.Core.Families+RefusalPopulation+Tags (type)
 type Fuaran.Core.Families+RefusalVerdict (record)
 type Fuaran.Core.Families+Roster (record)
+type Fuaran.Core.Families+Takes (union)
+type Fuaran.Core.Families+Takes+Tags (type)
 type Fuaran.Core.FoldConfluence (module)
 type Fuaran.Core.FreezeExemption (record)
 type Fuaran.Core.FunctionVerifyReport`2 (record)
@@ -418,6 +444,8 @@ union-case Fuaran.Core.AdequacyClass.NewGuarded #0(dimensions: Microsoft.FSharp.
 union-case Fuaran.Core.AdequacyClass.NewUnconditional #1(why: System.String)
 union-case Fuaran.Core.AdequacyDemand`1.NewReachesEvery #0(dimension: System.String, verdicts: Microsoft.FSharp.Collections.FSharpList`1<System.String>, classify: Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 union-case Fuaran.Core.AdequacyDemand`1.NewSpans #1(measure: System.String, atLeast: System.Int32, measureOf: Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Int32>)
+union-case Fuaran.Core.Families+Election.BaseRun #0()
+union-case Fuaran.Core.Families+Election.NewOptIn #1(Item: Fuaran.Core.Families+OptInReason)
 union-case Fuaran.Core.Families+OptInReason.NeedsWitnessCapability #0()
 union-case Fuaran.Core.Families+OptInReason.NoWitnessToCertify #3()
 union-case Fuaran.Core.Families+OptInReason.SeamNotEveryDomainHas #1()
@@ -426,6 +454,25 @@ union-case Fuaran.Core.Families+RefusalPopulation.Built #1()
 union-case Fuaran.Core.Families+RefusalPopulation.Drawn #3()
 union-case Fuaran.Core.Families+RefusalPopulation.DrawnMissIsRed #2()
 union-case Fuaran.Core.Families+RefusalPopulation.NoRefusal #0()
+union-case Fuaran.Core.Families+Takes.AiSurfaceWitness #9()
+union-case Fuaran.Core.Families+Takes.ArtifactWitness #8()
+union-case Fuaran.Core.Families+Takes.CapabilityPipelineWitness #15()
+union-case Fuaran.Core.Families+Takes.CapabilitySeamWitness #14()
+union-case Fuaran.Core.Families+Takes.EvaluatorWitness #11()
+union-case Fuaran.Core.Families+Takes.GuardedSurfaceWitness #10()
+union-case Fuaran.Core.Families+Takes.IAttestationSink #18()
+union-case Fuaran.Core.Families+Takes.IdWitness #1()
+union-case Fuaran.Core.Families+Takes.KeyedWitness #6()
+union-case Fuaran.Core.Families+Takes.LaneGen #5()
+union-case Fuaran.Core.Families+Takes.NodeWitness #0()
+union-case Fuaran.Core.Families+Takes.ObserverWitness #12()
+union-case Fuaran.Core.Families+Takes.OpGen #2()
+union-case Fuaran.Core.Families+Takes.ProjectionWitness #13()
+union-case Fuaran.Core.Families+Takes.QuerySeamWitness #16()
+union-case Fuaran.Core.Families+Takes.RefWitness #7()
+union-case Fuaran.Core.Families+Takes.SanitizeWitness #17()
+union-case Fuaran.Core.Families+Takes.StreamGen #4()
+union-case Fuaran.Core.Families+Takes.StreamWitness #3()
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneFolded #0(stateHash: System.String)
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneHalted #1(report: System.String)
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneRejected #2(reason: System.String)

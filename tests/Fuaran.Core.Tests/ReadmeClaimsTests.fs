@@ -385,9 +385,6 @@ let internal strangerClaimFaults
                   "SECURITY.md does not state the parser's default nesting bound as `Json.defaultMaxDepth` (%d)"
                   defaultDepth ]
 
-let private repoRoot () : string =
-    Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
-
 let private readmePath () = Snapshots.repoFile "README.md"
 
 let private firstDiff (a: string) (b: string) : string =
@@ -466,16 +463,10 @@ let private receivingManifest () : string option =
         | d -> [ d ]
 
     let besides =
-        match SiblingCorpus.mainWorkingTreeFrom (repoRoot ()) with
+        match Repo.mainTree () with
         | Error _ -> []
         | Ok main ->
-            let rec ups (dir: DirectoryInfo) n acc =
-                if isNull dir || n = 0 then
-                    List.rev acc
-                else
-                    ups dir.Parent (n - 1) (dir.FullName :: acc)
-
-            ups (DirectoryInfo main) 6 []
+            Repo.ancestors main 5
             |> List.collect (fun d ->
                 [ Path.Combine(d, "Fuaran-UI", "fuaran-dotnet")
                   Path.Combine(d, "fuaran-dotnet") ])
@@ -917,7 +908,7 @@ let tests =
         "ReadmeClaims"
         [ test
               "every README claim of a surface carries the version it arrived in (CORE_APPROVE_README=1 regenerates them)" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               match releaseIndexes root with
               | Error why -> skiptest ("the release history could not be read, so no arrival can be derived: " + why)
@@ -949,7 +940,7 @@ let tests =
 
           test
               "a stamp naming an unreleased version names the DRAFT heading in the release ledger, and a released one an entry" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let readme = File.ReadAllText(readmePath ())
               let ledger = PackageRosterTests.ledgerText (PackageRosterTests.ledgerFiles root)
               let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
@@ -1109,7 +1100,7 @@ let tests =
           }
 
           test "the README names the Fable versions the receiving gate and this repository pin" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let readme = File.ReadAllText(readmePath ())
 
               match fableLine readme with
@@ -1167,7 +1158,7 @@ let tests =
           // ---- prose held to the tree (Phase 397) ------------------------------------
 
           test "CONTRIBUTING and the README name the stages verify.ps1 runs, and no other" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               match verifyStages (File.ReadAllText(Path.Combine(root, "verify.ps1"))) with
               | Error e -> failtest e
@@ -1194,7 +1185,7 @@ let tests =
           }
 
           test "the format command CONTRIBUTING names covers the directories the format check covers" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let dirs = checkedFormatDirs (File.ReadAllText(Path.Combine(root, "verify.ps1")))
 
               Expect.isNonEmpty dirs "verify.ps1's format-check directories were read"
@@ -1206,7 +1197,7 @@ let tests =
           }
 
           test "the package feed STABILITY.md names is the one the publish workflow pushes to" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               let sources =
                   pushSources (File.ReadAllText(Path.Combine(root, ".github", "workflows", "publish-packages.yml")))
@@ -1220,7 +1211,7 @@ let tests =
           }
 
           test "the friend-grant paragraph states the tree's counts and names every party" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               let packable =
                   PackageRosterTests.packableProjects root |> List.map _.PackageId |> Set.ofList
@@ -1234,7 +1225,7 @@ let tests =
           }
 
           test "the Fable exclusions STABILITY.md names are fable-exclusions.json's, and each is a project here" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               let excluded =
                   PackageRosterTests.declaredExclusions (File.ReadAllText(Path.Combine(root, "fable-exclusions.json")))
@@ -1260,7 +1251,7 @@ let tests =
           }
 
           test "the typed actor's arrival is spelt one way in STABILITY.md and docs/ADOPTION.md" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               for doc in [ "STABILITY.md"; Path.Combine("docs", "ADOPTION.md") ] do
                   let text = File.ReadAllText(Path.Combine(root, doc))
@@ -1275,7 +1266,7 @@ let tests =
           }
 
           test "every member a contract bullet names is on a public-surface baseline" {
-              let root = repoRoot ()
+              let root = Repo.root ()
 
               let names =
                   contractBulletMembers (File.ReadAllText(Path.Combine(root, "STABILITY.md")))
@@ -1366,7 +1357,7 @@ let tests =
           }
 
           test "the witness-freeze counts are the frozen list's length, and the freeze names every frozen record" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let frozen = Fuaran.Core.SurfaceLaws.frozenWitnessFields |> List.map _.Record
               Expect.isNonEmpty frozen "the frozen witness list was read"
 
@@ -1376,7 +1367,7 @@ let tests =
           }
 
           test "the Conformance topic-module count is the project's compile list, and the facade names each" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let dir = Path.Combine(root, "src", "Fuaran.Core.Conformance")
               let fsproj = File.ReadAllText(Path.Combine(dir, "Fuaran.Core.Conformance.fsproj"))
               let modules = topicModules fsproj
@@ -1388,7 +1379,7 @@ let tests =
           }
 
           test "the README's dependency sentence is the project graph under src/" {
-              let root = repoRoot ()
+              let root = Repo.root ()
               let graph = projectGraph root
               Expect.isNonEmpty graph "the projects under src/ were read"
 

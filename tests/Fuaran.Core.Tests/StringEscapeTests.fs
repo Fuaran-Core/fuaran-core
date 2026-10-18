@@ -581,20 +581,13 @@ module EmittedEncStr =
         System.IO.File.WriteAllText(tmp, harness)
 
         try
-            let proc =
-                try
-                    Some(System.Diagnostics.Process.Start(ChildProcess.redirected "node" ("\"" + tmp + "\"")))
-                with _ ->
-                    None
+            match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+            | Error _ -> None
+            | Ok p ->
+                let stdout = p.Stdout
+                let stderr = p.Stderr
 
-            match proc with
-            | None -> None
-            | Some p ->
-                let stdout = p.StandardOutput.ReadToEnd()
-                let stderr = p.StandardError.ReadToEnd()
-                p.WaitForExit()
-
-                if p.ExitCode <> 0 then
+                if p.Exit <> 0 then
                     failtestf "node failed running the emitted encStr: %s" stderr
 
                 let rows =

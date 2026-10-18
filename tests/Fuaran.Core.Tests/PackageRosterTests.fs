@@ -57,7 +57,6 @@ module Fuaran.Core.Tests.PackageRosterTests
 // ---------------------------------------------------------------------------
 
 open System
-open System.Diagnostics
 open System.IO
 open System.Text.Json
 open System.Text.RegularExpressions
@@ -539,22 +538,8 @@ let internal propsHistoryLines (props: string) : string list =
 
 // ---- the instruments ------------------------------------------------------
 
-let private repoRoot () : string option =
-    let rec climb (dir: string) (budget: int) : string option =
-        if budget < 0 || isNull dir then
-            None
-        elif File.Exists(Path.Combine(dir, "Fuaran.Core.slnx")) then
-            Some dir
-        else
-            match Directory.GetParent dir with
-            | null -> None
-            | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
-
 let private withRoot (f: string -> unit) =
-    match repoRoot () with
+    match Repo.tryRoot () with
     | None -> failtest "could not locate the repository root (Fuaran.Core.slnx) from the CWD or the test binary"
     | Some root -> f root
 
@@ -597,34 +582,29 @@ let internal ledgerFiles (root: string) : LedgerFile list = fst (readLedger root
 /// exactly these ids after a push, so a probe whose derivation drifted from `packableProjects`
 /// would verify a different list than the one the README table is gated on.
 let private probeRoster (repo: string) (root: string) : Result<string list, string> =
-    try
-        let psi = ChildProcess.redirected "pwsh" ""
+    let probe = Path.Combine(repo, ".github", "scripts", "probe-registry.ps1")
 
-        for a in
+    match
+        ChildProcess.argv
+            "pwsh"
             [ "-NoProfile"
               "-NonInteractive"
               "-File"
-              Path.Combine(repo, ".github", "scripts", "probe-registry.ps1")
+              probe
               "-ListRoster"
               "-Root"
-              root ] do
-            psi.ArgumentList.Add a
-
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEndAsync()
-        let err = p.StandardError.ReadToEndAsync()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "the probe's -ListRoster exited %d: %s" p.ExitCode ((err.Result + out.Result).Trim()))
-        else
-            out.Result.Split('\n')
-            |> Array.toList
-            |> List.map _.Trim()
-            |> List.filter (fun l -> l <> "")
-            |> Ok
-    with e ->
-        Error("`pwsh` could not be run: " + e.Message)
+              root ]
+        |> ChildProcess.run
+    with
+    | Error why -> Error why
+    | Ok o when o.Exit <> 0 ->
+        Error(sprintf "the probe's -ListRoster exited %d: %s" o.Exit ((o.Stderr + o.Stdout).Trim()))
+    | Ok o ->
+        o.Stdout.Split('\n')
+        |> Array.toList
+        |> List.map _.Trim()
+        |> List.filter (fun l -> l <> "")
+        |> Ok
 
 // ---- the Fable-surface cross-check ---------------------------------------
 
@@ -814,14 +794,16 @@ let tests =
               withRoot (fun root ->
                   match ChildProcess.Tags.released root with
                   | Error why ->
-                      // Skipped by NAME with the reason printed, never passed silently.
-                      // This is the source-archive / no-git case, not a defect in the tree.
+                      // Skipped by NAME with the reason printed, never passed silently: the
+                      // source-archive / no-git case, or a clone holding no release tag at all
+                      // (`ChildProcess.Tags.NoReleaseTag`). Neither is a defect in the tree.
                       printfn "STABILITY draft-slot tag check SKIPPED: %s" why
                       skiptestf "STABILITY draft-slot tag check skipped — %s" why
                   | Ok tags ->
-                      // A clone with git but no release tag in HEAD's history FAILS here rather than
-                      // skipping, on purpose: with no tag the comparison below passes vacuously. The
-                      // remedy is to fetch the tags (CONTRIBUTING.md, "Prerequisites").
+                      // A clone holding release tags of which HEAD descends from none FAILS here
+                      // rather than skipping, on purpose: with no tag the comparison below passes
+                      // vacuously, and that is the shape a broken reader takes (CONTRIBUTING.md,
+                      // "Prerequisites").
                       Expect.isNonEmpty (Set.toList tags) "HEAD's history holds at least one `vX.Y.Z` release tag"
 
                       let stale =

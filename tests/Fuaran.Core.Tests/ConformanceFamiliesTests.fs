@@ -280,39 +280,10 @@ let familiesTests =
                           (witnessOf m)
                           (sprintf "%s declares a witness list its signature does not take" f.Id)
 
-          testCase "a family is opt-in exactly when it says WHY, and the reason is checkable where it can be"
+          testCase "a family's opt-in reason is checkable where the roster's own data decides it"
           <| fun _ ->
-              // Phase 194. `OptIn` is DERIVED from `Reason` at every construction site in
-              // `Families`, so the first half of this cannot fail while that derivation stands —
-              // it is here to fail LOUDLY if someone ever re-introduces the two as independent
-              // fields, which is the shape that let a family be opt-in with no stated reason.
-              for f in KitRoster.families do
-                  Expect.equal
-                      f.OptIn
-                      (Option.isSome f.Reason)
-                      (sprintf "%s: OptIn and Reason disagree — an opt-in family must say why" f.Id)
-
-              // The go-red, on the predicate rather than on the roster: the check must LOSE on a
-              // family that claims opt-in and gives no reason. Constructed here because the roster
-              // can no longer express one.
-              let unexplained: Families.LawFamily =
-                  { Id = "Conformance.unexplainedLaws"
-                    Module = "Conformance"
-                    Entry = "unexplainedLaws"
-                    Witness = []
-                    OptIn = true
-                    Reason = None
-                    Discharges = []
-                    Adequacy = Unconditional "a made-up family"
-                    Refusal =
-                      { Population = Families.NoRefusal
-                        Why = "a made-up family" } }
-
-              Expect.notEqual
-                  unexplained.OptIn
-                  (Option.isSome unexplained.Reason)
-                  "the check cannot fail: an opt-in family with no reason passed it"
-
+              // Phase 194 made "opt-in with no reason" unrepresentable; since Phase 506 `OptIn` and
+              // `Reason` are both read off the one `Election` field, so there is no pair to disagree.
               // `NeedsWitnessCapability` is the one case the ROSTER's own data decides, so it is
               // read back rather than trusted: a family demanding a witness outside the base run's
               // sets is exactly that case, and a family inside them is not.
@@ -433,52 +404,37 @@ let familiesTests =
                   (OwnedConformance.fingerprint (KitRoster.toJsonWith (Export.cases ())))
                   "the committed docs/conformance-families.json is not what the roster renders — re-run `--emit-families` and commit it"
 
-          testCase "the JSON export carries the documented shape, for every family"
+          testCase "the JSON export is the canonical rendering, one family per line"
           <| fun _ ->
-              // The shape is a contract `STABILITY.md` documents and an offline projection reads,
-              // so it is asserted rather than left to the renderer. Not a JSON parse: the point is
-              // that the exact member spellings a reader keys off are present.
+              // Phase 506 — every value is written by `Canon.render`, and the document is that
+              // rendering broken at the families array. So the lines, trimmed and joined, are the
+              // canonical rendering of what they parse to: member order, escaping and number layout
+              // are the wire's own, not this renderer's.
               let json = KitRoster.toJsonWith (Export.cases ())
-
-              Expect.stringContains json "\"kind\": \"fuaran.core.conformance.families\"" "the export names its kind"
-              Expect.stringContains json "\"schema\": 5" "the export carries a schema version"
-
-              Expect.stringContains
-                  json
-                  "\"packages\": [\"Fuaran.Core.Conformance\"]"
-                  "the export names the packages it composes (Phase 257; one since Phase 258)"
-
-              for f in KitRoster.families do
-                  Expect.stringContains json ("\"id\": \"" + f.Id + "\"") (sprintf "%s appears in the export" f.Id)
-
-                  Expect.stringContains
-                      json
-                      ("\"id\": \""
-                       + f.Id
-                       + "\",
-      \"module\": \""
-                       + f.Module
-                       + "\",
-      \"entry\": \""
-                       + f.Entry
-                       + "\",
-      \"package\": \""
-                       + (KitRoster.packageOf f.Id |> Option.defaultValue "?")
-                       + "\"")
-                      (sprintf "%s names the package it ships from" f.Id)
-
-              for member_ in
-                  [ "\"module\":"
-                    "\"entry\":"
-                    "\"witness\":"
-                    "\"optIn\":"
-                    "\"discharges\":"
-                    "\"cases\":"
-                    "\"adequacy\":"
-                    "\"refusal\":" ] do
-                  Expect.stringContains json member_ (sprintf "the export carries %s" member_)
-
               Expect.isTrue (json.EndsWith "\n") "the export ends with a newline"
+
+              match Json.parse json with
+              | Error e -> failtestf "the export does not parse as JSON: %s" e
+              | Ok parsed ->
+                  let lines = json.Split('\n')
+                  let joined = lines |> Array.map (fun l -> l.Trim()) |> String.concat ""
+                  Expect.equal joined (Canon.render parsed) "the export is Canon.render of itself, broken into lines"
+
+                  for f in KitRoster.families do
+                      Expect.equal
+                          (lines
+                           |> Array.filter (fun l -> l.Contains("\"id\":\"" + f.Id + "\""))
+                           |> Array.length)
+                          1
+                          (sprintf "%s is one line of the export" f.Id)
+
+              // The go-red: a document whose members are out of canonical order is not its own
+              // rendering, so the check above can fail.
+              let reordered = "{\"kind\":\"k\",\"families\":[]}"
+
+              match Json.parse reordered with
+              | Ok v -> Expect.notEqual reordered (Canon.render v) "an out-of-order document is not canonical"
+              | Error e -> failtestf "the go-red document does not parse: %s" e
 
           testCase "a schema bump is a recorded contract move: STABILITY.md names the reader and the current schema"
           <| fun _ ->
@@ -488,15 +444,9 @@ let familiesTests =
               // the schema number it was written against, so a bump that does not revisit the entry
               // is red here rather than discovered by the reader.
               let json = KitRoster.toJsonWith (Export.cases ())
-              let marker = "\"schema\": "
-              let at = json.IndexOf marker
-              Expect.isGreaterThanOrEqual at 0 "the export carries a schema member"
+              let schema = string Families.schema
 
-              let schema =
-                  json.Substring(at + marker.Length)
-                  |> Seq.takeWhile System.Char.IsDigit
-                  |> Seq.toArray
-                  |> System.String
+              Expect.stringContains json ("\"schema\":" + schema) "the export carries the schema the module declares"
 
               let entry =
                   File.ReadAllLines(Snapshots.repoFile "STABILITY.md")
@@ -533,31 +483,10 @@ let familiesTests =
           testCase "the export ROUND-TRIPS: parsed back, it is the roster"
           <| fun _ ->
               // The export is what an offline reader consumes, so "documented shape" has to mean a
-              // reader can actually recover the roster from it — not merely that the right
-              // substrings appear. Parsed with the kit's own portable JSON parser and rebuilt into
-              // `LawFamily` records, it must equal `KitRoster.families` exactly. This is the leg
-              // that would catch an escaping bug, a member dropped by a renderer edit, or a
-              // `witness` list silently flattened to a string.
-              // Phase 297: the export carries a family's adequacy class and refusal verdict as
-              // their TOKENS (`adequacy`, `refusal` — see the shape test above); the prose behind
-              // them stays on the roster record. So those two fields are taken from the record the
-              // id names, and the leg still catches every member the export does carry.
-              let mk id m entry witness optIn reason discharges : Families.LawFamily =
-                  let declared =
-                      match KitRoster.tryFind id with
-                      | Some f -> f
-                      | None -> failtestf "the export names %s, which the roster does not carry" id
-
-                  { Id = id
-                    Module = m
-                    Entry = entry
-                    Witness = witness
-                    OptIn = optIn
-                    Reason = reason
-                    Discharges = discharges
-                    Adequacy = declared.Adequacy
-                    Refusal = declared.Refusal }
-
+              // reader can recover the roster from it. Parsed with the kit's own JSON parser, every
+              // family object carries exactly the documented members, and each member is the
+              // record's own reading of itself (the adequacy and refusal TOKENS are the renderer's,
+              // held by the vacuity suite).
               let strList v =
                   match v with
                   | JArr xs ->
@@ -567,6 +496,19 @@ let familiesTests =
                           | other -> failtestf "expected a string in an array, got %A" other)
                   | other -> failtestf "expected an array, got %A" other
 
+              let documented =
+                  [ "adequacy"
+                    "cases"
+                    "discharges"
+                    "entry"
+                    "id"
+                    "module"
+                    "optIn"
+                    "package"
+                    "refusal"
+                    "spellings"
+                    "witness" ]
+
               match Json.parse (KitRoster.toJsonWith (Export.cases ())) with
               | Error e -> failtestf "the export does not parse as JSON: %s" e
               | Ok(JObj top) ->
@@ -575,60 +517,73 @@ let familiesTests =
                       | Some(_, v) -> v
                       | None -> failtestf "the export carries no `%s`" name
 
+                  Expect.equal (top |> List.map fst) [ "families"; "kind"; "packages"; "schema" ] "top-level members"
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
-                  Expect.equal (member_ "schema") (JInt 5) "schema"
+                  Expect.equal (member_ "schema") (JInt Families.schema) "schema"
 
                   Expect.equal
                       (member_ "packages")
                       (JArr(KitRoster.rosters |> List.map (fun r -> JStr r.Package)))
                       "packages"
 
-                  let rebuilt =
+                  let objects =
                       match member_ "families" with
                       | JArr xs ->
                           xs
                           |> List.map (function
-                              | JObj fields ->
-                                  let get name =
-                                      match fields |> List.tryFind (fun (k, _) -> k = name) with
-                                      | Some(_, v) -> v
-                                      | None -> failtestf "a family object carries no `%s`" name
-
-                                  // Phase 194: `reason` is absent for a base-run family, so it is
-                                  // read with a lookup that tolerates absence — `get` fails on it.
-                                  let tryGet name =
-                                      fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
-
-                                  let str name =
-                                      match get name with
-                                      | JStr s -> s
-                                      | other -> failtestf "`%s` is not a string: %A" name other
-
-                                  mk
-                                      (str "id")
-                                      (str "module")
-                                      (str "entry")
-                                      (strList (get "witness"))
-                                      (match get "optIn" with
-                                       | JBool b -> b
-                                       | other -> failtestf "`optIn` is not a boolean: %A" other)
-                                      // Phase 194: `reason` round-trips through its wire token, so a
-                                      // renderer that dropped or misspelled one is caught here too.
-                                      (match tryGet "reason" with
-                                       | None -> None
-                                       | Some(JStr "needs-witness-capability") -> Some Families.NeedsWitnessCapability
-                                       | Some(JStr "seam-not-every-domain-has") -> Some Families.SeamNotEveryDomainHas
-                                       | Some(JStr "stronger-promise") -> Some Families.StrongerPromise
-                                       | Some(JStr "no-witness-to-certify") -> Some Families.NoWitnessToCertify
-                                       | other -> failtestf "`reason` is not a known opt-in token: %A" other)
-                                      (strList (get "discharges"))
+                              | JObj fields -> fields
                               | other -> failtestf "a families entry is not an object: %A" other)
                       | other -> failtestf "`families` is not an array: %A" other
 
+                  let idOf (fields: (string * JVal) list) =
+                      match fields |> List.tryFind (fun (k, _) -> k = "id") with
+                      | Some(_, JStr id) -> id
+                      | other -> failtestf "a family object carries no string `id`: %A" other
+
                   Expect.equal
-                      rebuilt
-                      (KitRoster.families |> List.sortBy _.Id)
-                      "the roster recovered from the export is the roster it was rendered from"
+                      (objects |> List.map idOf)
+                      KitRoster.ids
+                      "the export names exactly the roster's families, in id order"
+
+                  for fields in objects do
+                      let id = idOf fields
+
+                      let get name =
+                          match fields |> List.tryFind (fun (k, _) -> k = name) with
+                          | Some(_, v) -> v
+                          | None -> failtestf "%s carries no `%s`" id name
+
+                      let f = KitRoster.tryFind id |> Option.get
+                      // `reason` is present exactly for an opt-in family: this wire model has no null.
+                      let expected =
+                          (if f.OptIn then documented @ [ "reason" ] else documented) |> List.sort
+
+                      Expect.equal (fields |> List.map fst |> List.sort) expected (sprintf "%s: its members" id)
+                      Expect.equal (get "module") (JStr f.Module) (sprintf "%s: module" id)
+                      Expect.equal (get "entry") (JStr f.Entry) (sprintf "%s: entry" id)
+
+                      Expect.equal
+                          (get "package")
+                          (JStr(KitRoster.packageOf id |> Option.defaultValue "?"))
+                          (sprintf "%s: package" id)
+
+                      Expect.equal (strList (get "witness")) f.Witness (sprintf "%s: witness" id)
+                      Expect.equal (get "optIn") (JBool f.OptIn) (sprintf "%s: optIn" id)
+                      Expect.equal (strList (get "discharges")) f.Discharges (sprintf "%s: discharges" id)
+                      Expect.equal (strList (get "spellings")) f.Spellings (sprintf "%s: spellings" id)
+
+                      // The reason round-trips through its wire token, so a renderer that dropped or
+                      // misspelled one is caught here too.
+                      let reason =
+                          match fields |> List.tryFind (fun (k, _) -> k = "reason") with
+                          | None -> None
+                          | Some(_, JStr "needs-witness-capability") -> Some Families.NeedsWitnessCapability
+                          | Some(_, JStr "seam-not-every-domain-has") -> Some Families.SeamNotEveryDomainHas
+                          | Some(_, JStr "stronger-promise") -> Some Families.StrongerPromise
+                          | Some(_, JStr "no-witness-to-certify") -> Some Families.NoWitnessToCertify
+                          | other -> failtestf "`reason` is not a known opt-in token: %A" other
+
+                      Expect.equal reason f.Reason (sprintf "%s: reason" id)
               | Ok other -> failtestf "the export is not a JSON object: %A" other
 
           testCase "both renderings are sorted by id, so a diff shows only what moved"
@@ -647,6 +602,6 @@ let familiesTests =
                   sorted
                   |> List.map (fun id ->
                       (KitRoster.toJsonWith (Export.cases ()))
-                          .IndexOf("\"id\": \"" + id + "\"", StringComparison.Ordinal))
+                          .IndexOf("\"id\":\"" + id + "\"", StringComparison.Ordinal))
 
               Expect.equal jsonPositions (List.sort jsonPositions) "the JSON families array is in id order" ]

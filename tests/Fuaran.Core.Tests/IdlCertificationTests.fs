@@ -366,22 +366,13 @@ let valueCarryingDefaults =
                   IO.File.WriteAllText(tmp, harness)
 
                   try
-                      let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+                      match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+                      | Error _ -> skiptest "node not on PATH — the executed TS round trip is skipped"
+                      | Ok p ->
+                          let stdout = p.Stdout
+                          let stderr = p.Stderr
 
-                      let proc =
-                          try
-                              Some(Diagnostics.Process.Start psi)
-                          with _ ->
-                              None
-
-                      match proc with
-                      | None -> skiptest "node not on PATH — the executed TS round trip is skipped"
-                      | Some p ->
-                          let stdout = p.StandardOutput.ReadToEnd()
-                          let stderr = p.StandardError.ReadToEnd()
-                          p.WaitForExit()
-
-                          if p.ExitCode <> 0 then
+                          if p.Exit <> 0 then
                               failtestf "node failed running the generated TS module: %s" stderr
 
                           let got =
