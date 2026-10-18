@@ -237,6 +237,18 @@ let private runs =
                    FootprintLawsAtTests.keyedGen
                    2490
                    300)
+           // Phase 500 — the base-aware projection at the reference tree's own stream witness.
+           run
+               "Conformance.footprintInLawsAt"
+               300
+               (Conformance.footprintInLawsAt
+                   FoldFixtures.treeW
+                   FootprintInTests.footprintOf
+                   FootprintInTests.footprintIn
+                   FootprintInTests.treeHash
+                   FootprintInTests.treeGen
+                   5000
+                   300)
            run
                "Conformance.concurrencyLaws"
                300

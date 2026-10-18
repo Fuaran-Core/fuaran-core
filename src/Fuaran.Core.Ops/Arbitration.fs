@@ -313,6 +313,25 @@ module Arbitration =
         atWellFormedBase nodew idw baseTree proposals (fun () ->
             arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw) baseTree proposals)
 
+    /// `arbitrate` with the base-aware footprint (Phase 500) — `arbitrateWith (Ops.footprintIn nodew
+    /// idw baseTree) (Ops.canApplyAll nodew idw) baseTree`, once the base is well-formed. The same
+    /// pinned order, totality and partition; independence is decided by `Ops.footprintIn` at the base
+    /// every proposal is checked against, so two proposals that rewrite different nodes in place, or
+    /// remove and insert under unrelated parents, coexist where `arbitrate` refuses them, and no pair
+    /// `arbitrate` accepts is refused (`FootprintIn.footprint_in_refines`). Every accepted script
+    /// applies at the base (`Ops.canApplyAll`), which is the premise under which the base-aware
+    /// footprint's promise holds (`FootprintIn.footprint_in_sound`). The keyed and contained
+    /// compositions are one call each: `arbitrateWith (Ops.footprintInKeyed keyw nodew idw baseTree)
+    /// (Ops.canApplyAllKeyed keyw canHold nodew idw) baseTree`, after `Tree.wellFormedKeyed`.
+    let arbitrateIn
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        : Arbitration<'Node, 'Id> =
+        atWellFormedBase nodew idw baseTree proposals (fun () ->
+            arbitrateWith (Ops.footprintIn nodew idw baseTree) (Ops.canApplyAll nodew idw) baseTree proposals)
+
     /// `arbitrate` under a container capability (Phase 247) — the `applyContained` /
     /// `canApplyAllWith` precedent, at the partition: applicability is
     /// `Ops.canApplyAllWith canHold`, so a proposal that inserts or moves under a node `canHold`

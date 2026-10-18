@@ -1335,6 +1335,175 @@ module Ops =
             (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
             ops
 
+    // ---- the base-aware footprint (Phase 500) ----
+    // The pure footprint cannot name a relocated or rewritten node's parent, so it records an
+    // unknown-parent write and `independent` refuses that against every structural write — the
+    // pinned over-approximation, NECESSARY over the record for a footprint computed from the script
+    // alone (section 18 of `proofs/TreeOps.fst`). Where the tree is known — arbitration takes a base,
+    // the fold applies every delta to one — the parent IS computable, and so is the subtree a removal
+    // destroys, which is the set Phase 163 named as the precondition of any tightening. `footprintIn`
+    // computes both: every address it records is one the op actually reads or writes at the tree it
+    // applies to, and nothing it records is an address standing in for one it could not name.
+    //
+    // THE SCRIPT IS THREADED. The second op of a script applies to the tree the first op leaves, not
+    // to the base: a removal after a move destroys what the move brought under it. So each op is
+    // footprinted at the state the ops before it reach (`apply`, the engine the script lands with;
+    // `applyContainedKeyed` with an admitting `canHold` for the keyed form, which reaches the same
+    // tree as the domain's engine for every script that engine accepts), and the script's footprint
+    // is the union. Where an op does not apply, the state is lost and every op from there on takes
+    // the PURE arm: conservative, and honest — the promise `independent` makes is for scripts that
+    // apply, which is also the premise of the theorem (`FootprintIn.footprint_in_sound`).
+    //
+    // What each arm resolves against the state it applies to, and what it keeps from the pure form:
+    //   - `InsertChild` and `ReorderChildren`: nothing to resolve — the parent is named by the op,
+    //     and every id the pure arm records is one the op reads or writes. The pure arm, verbatim.
+    //   - `RemoveNode x`, present: the source parent `p` is a KNOWN structure-write and a read (its
+    //     child list is read to be rewritten, as an insert reads its parent), and the content-write
+    //     is the whole subtree `x` roots — the destroyed set — not `x` alone. No unknown-parent write.
+    //   - `MoveNode (x, np)`, both present: the source parent as for a removal; the destination `np`
+    //     a known structure-write and a read as before; `x` content-written; and the ANCESTORS of
+    //     `np` read — the cycle check (`WouldNestUnderSelf`) reads them, so a concurrent move that
+    //     puts an ancestor of `np` under `x` is what makes this op refuse, and reading them is what
+    //     catches it (`relocation_move_pair_also_fails` is the pair; two moves nesting into each
+    //     other's subtrees now fail `RightWritesLeftReads`, where the pure form failed the
+    //     unknown-parent clause). No unknown-parent write.
+    //   - `UpdateNode n`, present: the target read and content-written, with the payload's keyed
+    //     subtrees as before. No unknown-parent write, and no ancestor read either: the removal of an
+    //     ancestor is caught because a removal now content-writes its whole subtree, and the move of
+    //     an ancestor commutes with an in-place rewrite — the theorem is what says the read is not
+    //     needed.
+    //   - a target absent from the state (inserted later in the same script, named by an op that does
+    //     not apply, or held in a keyed position the structural walk does not reach): the pure arm.
+    //
+    // Two in-place edits of different nodes, anywhere in the tree, are therefore independent; an
+    // in-place edit beside the removal of its ancestor is not (its target is in the removed set);
+    // and no pair the pure footprint frees is refused here (`FootprintIn.footprint_in_refines`).
+
+    let private footprintInOver
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (step: SkeletonOp<'Node, 'Id> -> 'Node -> Result<'Node, Rejection<'Id>>)
+        (subtree: 'Node -> 'Id list)
+        (carried: 'Node -> 'Id list)
+        (introduced: 'Node -> 'Id list)
+        (baseTree: 'Node)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
+        let key (i: 'Id) = idw.ToString i
+        let keys (ids: 'Id list) = ids |> List.map key |> Set.ofList
+        let pure = footprintOver nodew idw carried introduced
+
+        // the proper ancestors of `target`, root first, as keys — empty when absent or the root
+        let ancestorKeys (target: 'Id) (t: 'Node) =
+            match Tree.path nodew idw target t with
+            | Some ids -> ids |> List.take (List.length ids - 1) |> keys
+            | None -> Set.empty
+
+        let sourceParent (target: 'Id) (t: 'Node) =
+            match Tree.tryFind nodew idw target t with
+            | Some sub -> Tree.parentOf nodew idw target t |> Option.map (fun p -> sub, key (nodew.Id p))
+            | None -> None
+
+        let rec ofOp (state: 'Node option) (op: SkeletonOp<'Node, 'Id>) : Footprint * 'Node option =
+            let next = state |> Option.bind (fun t -> step op t |> Result.toOption)
+
+            match state, op with
+            | None, _ -> pure [ op ], None
+            | Some t, Batch inner ->
+                let fp, after =
+                    inner
+                    |> List.fold
+                        (fun (acc, st) o ->
+                            let f, st' = ofOp st o
+                            unionFootprint acc f, st')
+                        (emptyFootprint, Some t)
+
+                fp, after
+            | Some t, RemoveNode target ->
+                match sourceParent target t with
+                | Some(sub, p) ->
+                    { emptyFootprint with
+                        Reads = Set.ofList [ key target; p ]
+                        StructureWrites = Set.singleton p
+                        ContentWrites = keys (subtree sub) },
+                    next
+                | None -> pure [ op ], next
+            | Some t, MoveNode(target, newParent) ->
+                match sourceParent target t, Tree.exists nodew idw newParent t with
+                | Some(_, p), true ->
+                    let np = key newParent
+
+                    { emptyFootprint with
+                        Reads = Set.unionMany [ Set.ofList [ key target; np; p ]; ancestorKeys newParent t ]
+                        StructureWrites = Set.ofList [ p; np ]
+                        ContentWrites = Set.singleton (key target) },
+                    next
+                | _ -> pure [ op ], next
+            | Some t, UpdateNode node when Tree.exists nodew idw (nodew.Id node) t ->
+                let target = key (nodew.Id node)
+                let incoming = keys (introduced node)
+
+                { emptyFootprint with
+                    Reads = Set.add target incoming
+                    ContentWrites = Set.add target incoming },
+                next
+            | Some _, _ -> pure [ op ], next
+
+        ops
+        |> List.fold
+            (fun (acc, st) op ->
+                let f, st' = ofOp st op
+                unionFootprint acc f, st')
+            (emptyFootprint, Some baseTree)
+        |> fst
+
+    /// The footprint of an op-script at the tree it applies to (Phase 500) — `footprint`'s address
+    /// kinds with every parent the pure form could not name resolved against `baseTree`: a removal or a
+    /// move names its source parent as a known structure-write (and reads it), a removal
+    /// content-writes the whole subtree it destroys, a move reads its destination's ancestors, and an
+    /// in-place `UpdateNode` reads and content-writes its target and nothing else. No arm records an
+    /// unknown-parent write while its target is in the tree; an op whose target is absent — or any
+    /// op after one that does not apply, since the script is threaded through `apply` — takes the
+    /// pure arm, so this is never less conservative than `footprint` where the tree is silent.
+    ///
+    /// Total, no throws (GP4), mints no ids, never mutates `base`. Sound where the pure footprint is
+    /// sound and strictly more precise (`FootprintIn.footprint_in_sound`, `footprint_in_refines`,
+    /// `Conformance.footprintInLawsAt`): two scripts both applicable at `base` whose footprints here
+    /// are `independent` commute under `apply`, and every pair `footprint` calls independent this
+    /// calls independent too. `Arbitration.arbitrateIn` and `Dag.conflictsIn` / `reconcileIn` are
+    /// the entries that hold the base and compose it.
+    let footprintIn
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
+        footprintInOver w idw (apply w idw) (Tree.ids w) (Tree.ids w) (fun _ -> []) baseTree ops
+
+    /// `footprintIn` over the keyed walk (Phase 500), as `footprintKeyed` is to `footprint`: the ids
+    /// an insert authors and a removal destroys are the graft's and the subtree's keyed walks
+    /// (`Tree.idsKeyed`), an `UpdateNode` payload's keyed subtrees are read and content-written, and
+    /// the script is threaded through the keyed engine with an admitting container capability — the
+    /// tree every script `applyContainedKeyed` accepts reaches. Every other address is
+    /// `footprintIn`'s; for a domain whose `KeyedChildren` is `fun _ -> []` the two agree. Total, no
+    /// throws (GP4).
+    let footprintInKeyed
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
+        footprintInOver
+            nodew
+            idw
+            (applyContainedKeyed keyw (fun _ -> true) nodew idw)
+            (Tree.idsKeyed nodew keyw)
+            (Tree.idsKeyed nodew keyw)
+            (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
+            baseTree
+            ops
+
     /// Every clause of `independent` two footprints fail, with the addresses each fails on (Phase
     /// 248) — the explanation of a `false` verdict, so a refused party can see WHAT it collides on
     /// (the parent it shares, the id the other script reads, the relocation that serialises it)

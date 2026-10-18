@@ -158,6 +158,7 @@
          and FoldConfluence.laneDag. Reads ConformanceTests' keyed reference and FoldFixtures'
          plan domain, so it follows both. -->
     <Compile Include="FootprintLawsAtTests.fs" />
+    <Compile Include="FootprintInTests.fs" />
     <!-- Phase 139 — the `apply/` corpus family: the host-neutral skeleton envelope, its codec,
          and the emitter behind the `emit-apply` flag. It sits HERE rather than beside the other
          corpus exporters further down because ProofOracle.PreservationTests.fs below reads its decoder, to run the

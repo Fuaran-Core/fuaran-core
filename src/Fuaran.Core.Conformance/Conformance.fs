@@ -487,6 +487,19 @@ module Conformance =
         : LawResult list =
         ConcurrencyLaws.footprintLawsAt sw footprintOf hashState gen seed iterations
 
+    /// Forward — see `ConcurrencyLaws.footprintInLawsAt` (Phase 500): the same laws at the base-aware
+    /// projection a domain folds with when it holds the tree, plus its refinement of the pure one.
+    let footprintInLawsAt
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (footprintIn: 'State -> 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ConcurrencyLaws.footprintInLawsAt sw footprintOf footprintIn hashState gen seed iterations
+
     /// Forward — see `ConcurrencyLaws.mergeConflictLaws`.
     let mergeConflictLaws
         (nodew: NodeWitness<'Node, 'Id>)

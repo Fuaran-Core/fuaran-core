@@ -341,6 +341,150 @@ module internal ConcurrencyLaws =
                  @ slotDemands)
                 [ "refused draw", refusedDraws ] ]
 
+    /// The base-aware footprint laws at a domain's own ops (Phase 500) — `footprintLawsAt` for the
+    /// projection a domain actually folds with when it holds the tree: `footprintIn` takes the STATE
+    /// an op applies to (`Ops.footprintIn` over the domain's tree), and `footprintOf` is the pure
+    /// projection it refines. Over the same seed-replayable sample as `footprintLawsAt` (a state
+    /// reached by threading drawn ops, two scripts drawn from it, each threaded through `Apply`) it
+    /// certifies:
+    ///
+    ///  - **soundness** — for every pair `Dag.conflictsIn footprintIn Apply state` reports clean, the
+    ///    independence `Dag.reconcileIn` reads, the two scripts commute under the domain's `Apply`
+    ///    from `state`: both orders apply and land where `hashState` cannot tell them apart;
+    ///  - **refinement** — every pair the pure projection calls independent (`Dag.conflicts
+    ///    footprintOf` clean) the base-aware one calls independent too, so a consumer that moves from
+    ///    `reconcileMany` to `reconcileManyIn` loses no fold;
+    ///  - **determinism** — `footprintIn` is a pure function of the state and the op.
+    ///
+    /// **Starved three ways, all named.** The soundness law runs only on a pair the base-aware
+    /// footprint frees; the refinement law only on a pair the pure one frees; and a sample in which
+    /// no pair is freed by the base-aware footprint ALONE — refused by `footprintOf`, admitted by
+    /// `footprintIn` — has certified nothing about the precision this projection exists for, which is
+    /// the acceptance of Phase 500 (two in-place edits of different nodes under different parents).
+    /// The guard demands all three beside the interfering pairs and the refused draws.
+    let footprintInLawsAt
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (footprintIn: 'State -> 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let soundness =
+            LawKit.LawCell(
+                "base-aware footprint soundness at the domain's ops (a pair Dag.conflictsIn reports clean commutes under the domain's Apply from the state it was read at)",
+                Some "script-pair independence"
+            )
+
+        let refinement =
+            LawKit.LawCell(
+                "base-aware footprint refinement (a pair the pure projection calls independent, the base-aware one calls independent)",
+                Some "script-pair independence"
+            )
+
+        let determinism =
+            LawKit.LawCell
+                "base-aware footprint determinism at the domain's ops (a pure function of the state and the op)"
+
+        let mutable independentPairs = 0
+        let mutable pureIndependentPairs = 0
+        let mutable freedPairs = 0
+        let mutable interferingPairs = 0
+        let mutable refusedDraws = 0
+
+        let thread (rng: LawKit.Draws) (n: int) (s: 'State) =
+            let mutable cur = s
+            let mutable ops = []
+
+            for _ in 1..n do
+                let op = rng.Draw gen.Op
+
+                match sw.Apply op cur with
+                | Ok s' ->
+                    cur <- s'
+                    ops <- op :: ops
+                | Error _ -> refusedDraws <- refusedDraws + 1
+
+            List.rev ops, cur
+
+        let applyAll (ops: 'Op list) (s: 'State) =
+            ops |> List.fold (fun acc op -> acc |> Result.bind (sw.Apply op)) (Ok s)
+
+        let render (ops: 'Op list) =
+            "[" + (ops |> List.map sw.Encode |> String.concat "; ") + "]"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let _, state = thread rng (rng.IntBelow 5) gen.State0
+            let a, _ = thread rng (rng.IntBelow 3 + 1) state
+            let b, _ = thread rng (rng.IntBelow 3 + 1) state
+
+            for op in a @ b do
+                determinism.Check(
+                    footprintIn state op = footprintIn state op,
+                    fun () -> at ("footprintIn is not a pure function of the state and the op " + sw.Encode op)
+                )
+
+            if not (List.isEmpty a) && not (List.isEmpty b) then
+                let pureClean = List.isEmpty (Dag.conflicts footprintOf a b)
+                let baseClean = List.isEmpty (Dag.conflictsIn footprintIn sw.Apply state a b)
+
+                if pureClean then
+                    pureIndependentPairs <- pureIndependentPairs + 1
+
+                    refinement.Check(
+                        baseClean,
+                        fun () ->
+                            at (
+                                "a pair the pure footprint calls independent is REFUSED by the base-aware one: a="
+                                + render a
+                                + " b="
+                                + render b
+                            )
+                    )
+
+                if baseClean then
+                    independentPairs <- independentPairs + 1
+
+                    if not pureClean then
+                        freedPairs <- freedPairs + 1
+
+                    let ab = applyAll a state |> Result.bind (applyAll b) |> Result.map hashState
+
+                    let ba = applyAll b state |> Result.bind (applyAll a) |> Result.map hashState
+
+                    soundness.Check(
+                        (match ab, ba with
+                         | Ok ha, Ok hb -> ha = hb
+                         | _ -> false),
+                        fun () ->
+                            at (
+                                "a pair the base-aware footprint calls INDEPENDENT did not commute under the domain's Apply: a="
+                                + render a
+                                + " b="
+                                + render b
+                                + (match ab with
+                                   | Ok h -> " a;b → " + h
+                                   | Error rej -> sprintf " a;b rejected %A" rej)
+                                + (match ba with
+                                   | Ok h -> " b;a → " + h
+                                   | Error rej -> sprintf " b;a rejected %A" rej)
+                            )
+                    )
+                else
+                    interferingPairs <- interferingPairs + 1)
+
+        LawKit.results [ soundness; refinement; determinism ]
+        @ [ SampleAdequacy.reachedBeside
+                "Conformance.footprintInLawsAt"
+                "script-pair independence and base-aware precision"
+                seed
+                [ "independent pair", independentPairs
+                  "pure-independent pair", pureIndependentPairs
+                  "freed pair (refused by the pure footprint, admitted by the base-aware one)", freedPairs
+                  "interfering pair", interferingPairs ]
+                [ "refused draw", refusedDraws ] ]
+
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the
     /// "detection is the negation of #78 independence, decomposed by shape" claim. Over a
     /// seed-replayable sample it builds two applyable scripts `a`, `b` on a shared tree (each threaded

@@ -1552,6 +1552,48 @@ module Dag =
         : MergeConflict<DagNode<'Op>> list =
         conflicts (fun (n: DagNode<'Op>) -> footprintOf n.Op) deltaA deltaB
 
+    /// `conflicts` with the base-aware footprint (Phase 500): the domain's projection takes the STATE
+    /// an op applies to (`Ops.footprintIn` over its tree), and each delta is threaded through `apply`
+    /// from `base` so every op is footprinted at the state the ops before it reach — the second op of
+    /// a delta applies to the tree the first leaves, not to the base. The report is `conflicts` over
+    /// the footprints so computed, shape for shape and address for address, so a consumer reads it
+    /// exactly as it reads `conflicts`; `[]` is the promise that the two deltas commute under `apply`
+    /// FROM `base` (`FootprintIn.footprint_in_sound`), and every pair `conflicts` reports clean over the
+    /// pure projection is clean here (`footprint_in_refines`). An op that does not apply loses the
+    /// state: the ops after it are footprinted at the last state reached, the domain's projection
+    /// answering for an op its tree does not resolve (`Ops.footprintIn` takes the pure arm), and the
+    /// promise does not cover a delta that does not apply — `reconcileIn` refuses such a delta before
+    /// it stands on this report. Detection only (GP6): nothing is applied to anything a caller holds.
+    let conflictsIn
+        (footprintIn: 'State -> 'Op -> Footprint)
+        (apply: 'Op -> 'State -> Result<'State, 'Rej>)
+        (baseState: 'State)
+        (deltaA: 'Op list)
+        (deltaB: 'Op list)
+        : MergeConflict<'Op> list =
+        let threaded (delta: 'Op list) : ('Op * Footprint) list =
+            delta
+            |> List.fold
+                (fun (acc, st) op ->
+                    let fp = footprintIn st op
+
+                    let st' =
+                        match apply op st with
+                        | Ok s -> s
+                        | Error _ -> st
+
+                    (op, fp) :: acc, st')
+                ([], baseState)
+            |> fst
+            |> List.rev
+
+        conflicts snd (threaded deltaA) (threaded deltaB)
+        |> List.map (fun c ->
+            { Left = fst c.Left
+              Right = fst c.Right
+              Address = c.Address
+              Shape = c.Shape })
+
     // ---- branch reconciliation (Phase 83; the delta rule Phase 300) ----
     // The mechanical FOLD half of a merge. Given the DAG, a base, and the heads: when the lanes'
     // deltas do NOT conflict (Phase 64), emit the deterministic merge script that folds them all;
@@ -1754,6 +1796,85 @@ module Dag =
         (heads: string list)
         : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
         reconcileRegion w footprintOf dag (region dag baseId heads) baseState
+
+    /// `reconcileMany` with the base-aware footprint (Phase 500). The same partition, the same script
+    /// and the same faults, with independence decided by `conflictsIn` at the state the exclusive
+    /// deltas apply to — which is the state the SHARED region reaches from `baseState`, not the base
+    /// itself. So the steps are reordered around that state: the shared region is replayed FIRST
+    /// (`SharedHistoryRejected` on a rejection, before any footprint is read), every unordered pair of
+    /// exclusive deltas is then checked with `conflictsIn` from that state (`LanesInterfere`, nothing
+    /// applied), every exclusive delta is replayed on its own from it (`LanesRejected`), and the script
+    /// is `shared ++ exclusive_1 ++ … ++ exclusive_n` as before. `Ok` carries the base-aware promise:
+    /// the exclusive deltas apply from the shared state and commute there (`FootprintIn.footprint_in_sound`),
+    /// which is `DagFold.fold_confluence_total`'s hypothesis at this footprint. A lane set `reconcileMany`
+    /// folds, this folds (`footprint_in_refines`); a lane set it refuses with `LanesInterfere` this may
+    /// fold, and the fault it reports for a set both refuse is `SharedHistoryRejected` where
+    /// `reconcileMany` would have reported `LanesInterfere` — the one observable reordering.
+    let reconcileManyIn
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintIn: 'State -> 'Op -> Footprint)
+        (dag: T<'Op>)
+        (baseId: string)
+        (baseState: 'State)
+        (heads: string list)
+        : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
+        let r = region dag baseId heads
+        let deltas = r.Exclusive |> List.map (fun (h, ids) -> h, ids, opsOf dag ids)
+
+        let rec replayIds (st: 'State) (ids: string list) : Result<'State, string * 'Rej> =
+            match ids with
+            | [] -> Ok st
+            | id :: rest ->
+                match w.Apply dag.Nodes[id].Op st with
+                | Ok st' -> replayIds st' rest
+                | Error e -> Error(id, e)
+
+        match replayIds baseState r.Shared with
+        | Error(nodeId, rej) -> Error(ReconcileFault.SharedHistoryRejected(nodeId, rej))
+        | Ok sharedState ->
+            let indexed = deltas |> List.map (fun (_, _, ops) -> ops) |> List.indexed
+
+            let interfering =
+                [ for (i, a) in indexed do
+                      for (j, b) in indexed do
+                          if i < j then
+                              yield! conflictsIn footprintIn w.Apply sharedState a b ]
+
+            match interfering with
+            | _ :: _ as cs -> Error(ReconcileFault.LanesInterfere cs)
+            | [] ->
+                let rejected =
+                    deltas
+                    |> List.choose (fun (h, ids, ops) ->
+                        match replayIds sharedState ids with
+                        | Ok _ -> None
+                        | Error(nodeId, rej) ->
+                            Some
+                                { Head = h
+                                  Delta = ops
+                                  NodeId = nodeId
+                                  Reject = rej })
+                    |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Head, b.Head))
+
+                match rejected with
+                | [] -> Ok(opsOf dag r.Shared @ (deltas |> List.collect (fun (_, _, ops) -> ops)))
+                | rs -> Error(ReconcileFault.LanesRejected rs)
+
+    /// `reconcile` with the base-aware footprint (Phase 500): `reconcileManyIn` at two heads. It
+    /// takes the witness and the base's state where `reconcile` takes neither, because the footprint
+    /// is read at the state the exclusive deltas apply to, which only a replay from `baseState` can
+    /// reach; and it reports a `ReconcileFault` rather than the bare conflict list, because holding
+    /// the state it also tests that each lane applies (Phase 300's totality), which `reconcile` cannot.
+    let reconcileIn
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintIn: 'State -> 'Op -> Footprint)
+        (dag: T<'Op>)
+        (baseId: string)
+        (baseState: 'State)
+        (headA: string)
+        (headB: string)
+        : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
+        reconcileManyIn w footprintIn dag baseId baseState [ headA; headB ]
 
     // ---- the reachability index (Phase 289) ----
     // Every graph query above recomputes from the node map: `ancestorsOf` walks the parents on each

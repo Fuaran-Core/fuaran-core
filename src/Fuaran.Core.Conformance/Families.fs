@@ -333,6 +333,17 @@ module Families =
               (Guarded [ "script-pair independence" ])
               (NoRefusal,
                "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law")
+          // Phase 500 — the same laws at the base-aware projection a domain folds with when it holds
+          // the tree, plus refinement against the pure one. Guarded on the pair the base-aware
+          // footprint alone frees, without which the sample has not exercised the precision.
+          c
+              "footprintInLawsAt"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "script-pair independence and base-aware precision" ])
+              (NoRefusal,
+               "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law")
           c
               "concurrencyLaws"
               treeWitness
@@ -1847,6 +1858,8 @@ module Families =
             Operations = [ "Ops.footprint"; "Ops.independent" ] }
           { Family = "Conformance.footprintLawsAt"
             Operations = [ "Ops.interference"; "Dag.conflicts"; "Footprint.slotNodes" ] }
+          { Family = "Conformance.footprintInLawsAt"
+            Operations = [ "Ops.footprintIn"; "Dag.conflictsIn"; "Dag.reconcileIn" ] }
           { Family = "Conformance.freshIdLaws"
             Operations = [ "FreshIds.repairDuplicates"; "TreePlacement.cloneContained" ] }
           { Family = "Conformance.functionVerifyLawsAt"
