@@ -13,33 +13,33 @@
      pair either has no relocating side, where the base-aware footprint IS the pure one, or has
      one, where the other side is inert and its base-aware footprint is empty.
 
-     `footprint_in_sound`: for every pair whose base-aware footprints `independent` declares
-     disjoint and every well-formed tree at which both apply, each applies after the other and the
-     two orders reach the same tree — `TreeOps.wstep`, the shape `tree_independence_diamond` has.
-     Unlike the pure diamond, no pair here is closed without looking at the tree: the base-aware
-     footprint frees exactly the pairs the unknown-parent clause used to refuse, so each of them is
-     a commutation on the tree. Section 3 proves the IN-PLACE fragment — every pair of operations
-     built from `InsertChild`, `ReorderChildren`, `UpdateNode` and `Batch` — which is the fragment
-     the first adopting domain measured (its in-place edits, with the unknown-parent write erased),
-     and section 4 lifts it along a batch's script as section 20 of `TreeOps.fst` lifts the pure
-     diamond. The lift carries ONE fact the pure lift did not need, because the pure footprint is a
-     function of the op alone: that an operation's base-aware footprint is STABLE under the
-     application of an operation it is independent of (`fp_in_stable`), so what the fold read at
+     `footprint_in_sound`: for every pair of operations built from `InsertChild`, `RemoveNode`,
+     `ReorderChildren`, `UpdateNode` and `Batch` - everything but a `MoveNode` - whose base-aware
+     footprints `independent` declares disjoint, and every well-formed tree at which both apply,
+     each applies after the other and the two orders reach the same tree: `TreeOps.wstep`, the
+     shape `tree_independence_diamond` has. Unlike the pure diamond, no pair here is closed without
+     looking at the tree: the base-aware footprint frees exactly the pairs the unknown-parent clause
+     used to refuse, so each of them is a commutation on the tree. Section 4 proves the IN-PLACE
+     fragment (inserts, reorders, rewrites), section 5 lifts it along a batch's script as section
+     20 of `TreeOps.fst` lifts the pure diamond, sections 6 to 8 add the REMOVE pairs - a removal
+     commutes with a removal at another parent, with an insert and a reorder elsewhere and with any
+     rewrite, and leaves every id outside the destroyed subtree in place, found at the same node,
+     under the same parent - and restate the lift over the widened fragment (`no_move`). The lift
+     carries ONE fact the pure lift did not need, because the pure footprint is a function of the
+     op alone: that an operation's base-aware footprint is STABLE under the application of an
+     operation it is independent of (`wstep_in`, `footprint_in_stable`), so what the fold read at
      the base is what holds at every state the fold reaches.
 
-   WHAT IS NOT PROVED HERE, and is named rather than assumed. The relocating pairs — a `RemoveNode`
-   or a `MoveNode` against anything but an inert batch — are outside section 3's fragment:
-   `footprint_in_sound` quantifies over `in_place` operations, and `in_place` is the boundary
-   written as a predicate, exactly as `TreeOps.covered` once was for the batch pairs (Phase 133,
-   closed by Phase 162). The two acceptance theorems of the phase (section 3) are inside the
-   fragment and stated outright. Section 6 lays the tree facts the remove pairs stand on — a
-   removal commutes with a removal at another parent, with an insert and a reorder elsewhere, and
-   with any rewrite, each proved unconditionally because every edit keeps a node's id and so
-   commutes with `drop_kid` list by list; and the source parent's child list loses exactly the
-   one subtree `find_in` answers with (`find_all_drop`). What the successor adds on top of them is
-   what a removal leaves in place under id uniqueness (every id outside the destroyed subtree,
-   found at the same node, under the same parent), the four remove pairs, the move pairs, and the
-   fragment predicate retired.
+   WHAT IS NOT PROVED HERE, and is named rather than assumed. The MOVE pairs - a `MoveNode`
+   against anything but an inert batch - are outside the fragment: `footprint_in_sound`
+   quantifies over `no_move` operations, and `no_move` is the boundary written as a predicate,
+   exactly as `TreeOps.covered` once was for the batch pairs (Phase 133, closed by Phase 162). A
+   move is two edits with a cycle check between them, and its base-aware footprint reads the
+   destination's ancestors for that check; the five pairs it forms (with a move, an insert, a
+   reorder, a rewrite and a removal) need, beyond section 7's facts, that a move elsewhere keeps a
+   node's parent and keeps the path to a destination it does not relocate, and the commutation of
+   the two-edit shape with each other edit. The two acceptance theorems of the phase (section 3)
+   are inside the fragment and stated outright.
 
    HOW TO READ IT. Everything is over `TreeOps`'s definitions, opened; `Preservation` is cited
    qualified for the id-uniqueness invariant at intermediate states, as `Arbitrate.fst` cites it.
@@ -417,7 +417,7 @@ let in_place_leaf_in (a b:op) (t:tree)
     | ReorderChildren p1 o1, ReorderChildren p2 o2 -> reorder_reorder_step p1 o1 p2 o2 t
 
 (* ======================================================================================
-   5. THE LIFT — the fragment's diamond along a batch's script, and the theorem.
+   5. THE LIFT — the in-place fragment's diamond along a batch's script, and its theorem.
 
       Section 20 of `TreeOps.fst`, with one more fact threaded: the base-aware footprint of the
       operation that stands still is the same at every state the script reaches (`wstep_in`'s
@@ -500,28 +500,28 @@ and script_vs_any_in (os:list op) (b:op) (t:tree)
                 | Ok tb1 -> fp_in_cons tb o r tb1
                 | Error _ -> ()))))
 
-(* ---- THE THEOREM, over the fragment ----
+(* ---- THE THEOREM over the in-place fragment (section 8 restates it over everything but a move) ----
 
    Every pair of in-place operations — inserts, reorders, rewrites and batches of them — whose
    base-aware footprints at `t` are independent commutes at `t`, in the shape
    `tree_independence_diamond` has, and each one's footprint is unchanged by the other. *)
-let footprint_in_sound (a b:op) (t:tree)
+let footprint_in_sound_in_place (a b:op) (t:tree)
   : Lemma (requires wf t /\ in_place a /\ in_place b /\ independent (op_fp_in t a) (op_fp_in t b))
           (ensures wstep a b t)
   = any_vs_any_in a b t
 
 (* The script form — what `Dag.conflictsIn` reads: two in-place scripts whose threaded footprints
    are independent at `t` apply in either order from `t` and reach the same tree. *)
-let footprint_in_sound_scripts (a b:list op) (t:tree)
+let footprint_in_sound_in_place_scripts (a b:list op) (t:tree)
   : Lemma (requires wf t /\ in_place_all a /\ in_place_all b
                     /\ independent (fp_in_all t a) (fp_in_all t b))
           (ensures wstep (Batch a) (Batch b) t)
-  = footprint_in_sound (Batch a) (Batch b) t
+  = footprint_in_sound_in_place (Batch a) (Batch b) t
 
 (* And the stability the N-lane fold stands on: after one of two independent in-place
    operations applies, the other's footprint — and so its independence from a third — is what it
    was at `t`. *)
-let footprint_in_stable (a b:op) (t:tree) (ta:tree)
+let footprint_in_stable_in_place (a b:op) (t:tree) (ta:tree)
   : Lemma (requires wf t /\ in_place a /\ in_place b /\ independent (op_fp_in t a) (op_fp_in t b)
                     /\ apply a t == Ok ta /\ Ok? (apply b t))
           (ensures op_fp_in ta b == op_fp_in t b)
@@ -679,3 +679,508 @@ and drop_kid_absent (x:string) (ts:list tree)
   = match ts with
     | [] -> ()
     | t :: r -> tid_in_ids t; drop_kid_absent x r
+
+(* ======================================================================================
+   7. WHAT A REMOVAL LEAVES IN PLACE, and what an insert and a reorder leave in place — the
+      facts under id uniqueness: every id outside the destroyed subtree is still there, found at
+      the same node (its own subtree edited), under the same parent; an insert elsewhere and a
+      reorder anywhere change nobody's parent.
+   ====================================================================================== *)
+
+let rec has_kid_drop (y x:string) (ts:list tree)
+  : Lemma (requires y <> x) (ensures has_kid y (drop_kid x ts) == has_kid y ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> has_kid_drop y x r
+
+let rec has_kid_rem_all (y pid x:string) (ts:list tree)
+  : Lemma (ensures has_kid y (rem_all pid x ts) == has_kid y ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match t with TNode _ _ _ -> has_kid_rem_all y pid x r)
+
+let rec has_kid_ins_all (y q:string) (n:tree) (ts:list tree)
+  : Lemma (ensures has_kid y (ins_all q n ts) == has_kid y ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match t with TNode _ _ _ -> has_kid_ins_all y q n r)
+
+let rec has_kid_app_last (y:string) (ts:list tree) (n:tree)
+  : Lemma (requires tid_of n <> y) (ensures has_kid y (app ts [n]) == has_kid y ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> has_kid_app_last y r n
+
+let rec parent_all_app_last (y:string) (ts:list tree) (n:tree)
+  : Lemma (requires not (mem y (ids n))) (ensures parent_all y (app ts [n]) == parent_all y ts)
+  = match ts with
+    | [] -> Preservation.parent_absent y n
+    | t :: r -> (match parent_of y t with Some _ -> () | None -> parent_all_app_last y r n)
+
+(* ---- the source parent's children lose exactly one subtree ---- *)
+
+let rec ids_drop_keeps (y x:string) (ts:list tree) (sub:tree)
+  : Lemma (requires wf_all ts /\ has_kid x ts /\ find_all x ts == Some sub
+                    /\ mem y (ids_all ts) /\ not (mem y (ids sub)))
+          (ensures mem y (ids_all (drop_kid x ts))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      if tid_of t = x then begin
+        Preservation.find_in_self x t;
+        inter_nil_iff (ids t) (ids_all r);
+        drop_kid_absent x r
+      end
+      else begin
+        find_in_some_iff x t;
+        if mem x (ids t) then (inter_nil_iff (ids t) (ids_all r); has_kid_is_mem x r; kid_ids_sub x r)
+        else if mem y (ids t) then ()
+        else ids_drop_keeps y x r sub
+      end
+
+let rec parent_all_drop (y x:string) (ts:list tree) (sub:tree)
+  : Lemma (requires wf_all ts /\ has_kid x ts /\ find_all x ts == Some sub /\ not (mem y (ids sub)))
+          (ensures parent_all y (drop_kid x ts) == parent_all y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      if tid_of t = x then begin
+        Preservation.find_in_self x t;
+        Preservation.parent_absent y t;
+        inter_nil_iff (ids t) (ids_all r);
+        drop_kid_absent x r
+      end
+      else begin
+        find_in_some_iff x t;
+        if mem x (ids t) then (inter_nil_iff (ids t) (ids_all r); has_kid_is_mem x r; kid_ids_sub x r)
+        else parent_all_drop y x r sub
+      end
+
+(* ---- every id outside the destroyed subtree survives a removal ---- *)
+
+let rec rem_keeps_id (y pid x:string) (t:tree) (sub:tree)
+  : Lemma (requires wf t /\ tid_of t <> x /\ find_in x t == Some sub /\ parent_of x t == Some pid
+                    /\ mem y (ids t) /\ not (mem y (ids sub)))
+          (ensures mem y (ids (rem_at pid x t))) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if has_kid x cs then begin
+        Preservation.rem_all_absent pid x cs;
+        if i = y then () else ids_drop_keeps y x cs sub
+      end
+      else begin
+        Preservation.parent_all_mem x cs pid;
+        if i = y then () else rem_keeps_id_all y pid x cs sub
+      end
+and rem_keeps_id_all (y pid x:string) (ts:list tree) (sub:tree)
+  : Lemma (requires wf_all ts /\ not (has_kid x ts) /\ find_all x ts == Some sub
+                    /\ parent_all x ts == Some pid /\ mem y (ids_all ts) /\ not (mem y (ids sub)))
+          (ensures mem y (ids_all (rem_all pid x ts))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      find_in_some_iff x c;
+      if mem x (ids c) then begin
+        Preservation.parent_exists x c;
+        parent_of_ids x pid c;
+        inter_nil_iff (ids c) (ids_all r);
+        Preservation.rem_all_absent pid x r;
+        if mem y (ids c) then rem_keeps_id y pid x c sub else ()
+      end
+      else begin
+        Preservation.parent_absent x c;
+        Preservation.parent_all_mem x r pid;
+        inter_nil_iff (ids c) (ids_all r);
+        Preservation.rem_absent pid x c;
+        if mem y (ids c) then () else rem_keeps_id_all y pid x r sub
+      end
+
+(* ---- and keeps its parent ---- *)
+
+let rec parent_rem (y pid x:string) (t:tree) (sub:tree)
+  : Lemma (requires wf t /\ tid_of t <> x /\ find_in x t == Some sub /\ parent_of x t == Some pid
+                    /\ not (mem y (ids sub)))
+          (ensures parent_of y (rem_at pid x t) == parent_of y t) (decreases t)
+  = find_in_id x t sub;
+    match t with
+    | TNode i _ cs ->
+      if has_kid x cs then begin
+        Preservation.rem_all_absent pid x cs;
+        has_kid_drop y x cs;
+        if has_kid y cs then () else parent_all_drop y x cs sub
+      end
+      else begin
+        Preservation.parent_all_mem x cs pid;
+        has_kid_rem_all y pid x cs;
+        if has_kid y cs then () else parent_rem_all y pid x cs sub
+      end
+and parent_rem_all (y pid x:string) (ts:list tree) (sub:tree)
+  : Lemma (requires wf_all ts /\ not (has_kid x ts) /\ find_all x ts == Some sub
+                    /\ parent_all x ts == Some pid /\ not (mem y (ids sub)))
+          (ensures parent_all y (rem_all pid x ts) == parent_all y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      find_in_some_iff x c;
+      if mem x (ids c) then begin
+        Preservation.parent_exists x c;
+        parent_of_ids x pid c;
+        inter_nil_iff (ids c) (ids_all r);
+        Preservation.rem_all_absent pid x r;
+        parent_rem y pid x c sub
+      end
+      else begin
+        Preservation.parent_absent x c;
+        Preservation.parent_all_mem x r pid;
+        inter_nil_iff (ids c) (ids_all r);
+        Preservation.rem_absent pid x c;
+        parent_rem_all y pid x r sub
+      end
+
+(* ---- an insert elsewhere changes nobody's parent ---- *)
+
+let rec parent_ins (y q:string) (n:tree) (t:tree)
+  : Lemma (requires not (mem y (ids n))) (ensures parent_of y (ins q n t) == parent_of y t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      parent_ins_all y q n cs;
+      has_kid_ins_all y q n cs;
+      if i = q then begin
+        tid_in_ids n;
+        has_kid_app_last y (ins_all q n cs) n;
+        parent_all_app_last y (ins_all q n cs) n
+      end
+      else ()
+and parent_ins_all (y q:string) (n:tree) (ts:list tree)
+  : Lemma (requires not (mem y (ids n))) (ensures parent_all y (ins_all q n ts) == parent_all y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> parent_ins y q n t; parent_ins_all y q n r
+
+(* ---- and a reorder changes nobody's parent ---- *)
+
+(* Under uniqueness, with no child rooted at `y`, the parent is found in the one child that holds
+   `y` — so the list's order does not matter. *)
+let rec parent_all_locate (y:string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ not (has_kid y ts))
+          (ensures parent_all y ts == (match locate y ts with None -> None | Some c -> parent_of y c))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      if mem y (ids t) then Preservation.parent_exists y t
+      else (Preservation.parent_absent y t; parent_all_locate y r)
+
+let parent_all_order_free (y:string) (l1 l2:list tree)
+  : Lemma (requires wf_all l1 /\ wf_all l2 /\ not (has_kid y l1) /\ not (has_kid y l2)
+                    /\ (forall (c:tree). mem c l1 == mem c l2))
+          (ensures parent_all y l1 == parent_all y l2)
+  = parent_all_locate y l1;
+    parent_all_locate y l2;
+    wf_all_holder_unique y l1;
+    locate_order_free y l1 l2
+
+let rec parent_reorder (y q:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok q o t)
+          (ensures parent_of y (reorder_at q o t) == parent_of y t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      parent_reorder_all y q o cs;
+      let cs' = reorder_all q o cs in
+      has_kid_reorder_all y q o cs;
+      if i = q then begin
+        (* the children are the same set in another order *)
+        reorder_all_wf q o cs;
+        kid_ids_reorder_all q o cs;
+        wf_all_kid_ids_no_dups cs';
+        same_multiset_mem (kid_ids cs') o;
+        arrange_elems o cs';
+        Preservation.arrange_kid_ids o cs';
+        has_kid_is_mem y (arrange o cs');
+        has_kid_is_mem y cs';
+        if has_kid y cs' then ()
+        else begin
+          same_multiset_no_dups (kid_ids cs') o;
+          arrange_wf_all o cs';
+          parent_all_order_free y (arrange o cs') cs'
+        end
+      end
+      else ()
+and parent_reorder_all (y q:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all q o ts)
+          (ensures parent_all y (reorder_all q o ts) == parent_all y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> parent_reorder y q o t; parent_reorder_all y q o r
+and has_kid_reorder_all (y q:string) (o:list string) (ts:list tree)
+  : Lemma (ensures has_kid y (reorder_all q o ts) == has_kid y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match t with TNode _ _ _ -> has_kid_reorder_all y q o r)
+and reorder_all_wf (q:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all q o ts) (ensures wf_all (reorder_all q o ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      reorder_wf q o t;
+      reorder_all_wf q o r;
+      ids_reorder_mem_fa q o t;
+      ids_reorder_mem_all_fa q o r;
+      inter_nil_iff (ids t) (ids_all r);
+      inter_nil_iff (ids (reorder_at q o t)) (ids_all (reorder_all q o r))
+
+(* ======================================================================================
+   8. THE REMOVE PAIRS — a removal beside a removal at another parent, an insert elsewhere, a
+      reorder elsewhere and any rewrite, each in `wstep_in`'s shape; then the fragment widened
+      to everything but a move (`no_move`), and the lift and the theorem restated over it.
+   ====================================================================================== *)
+
+(* A present removal's footprint, and an absent one's. *)
+let remove_fp_in (t:tree) (x:string)
+  : Lemma (ensures op_fp_in t (RemoveNode x) ==
+                   (match find_in x t, parent_of x t with
+                    | Some sub, Some p ->
+                      { reads = [x; p]; structure_writes = [p]; content_writes = ids sub;
+                        unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
+                    | _, _ -> op_fp (RemoveNode x)))
+  = ()
+
+(* ---- CASE R/R ---- *)
+
+let remove_remove_in (x1 x2:string) (t:tree)
+  : Lemma (requires wf t /\ independent (op_fp_in t (RemoveNode x1)) (op_fp_in t (RemoveNode x2)))
+          (ensures wstep_in (RemoveNode x1) (RemoveNode x2) t)
+  = if Ok? (apply (RemoveNode x1) t) && Ok? (apply (RemoveNode x2) t) then begin
+      match find_in x1 t, parent_of x1 t, find_in x2 t, parent_of x2 t with
+      | Some s1, Some p1, Some s2, Some p2 ->
+        inter_nil_iff (ids s1) (ids s2);
+        inter_nil_iff (ids s1) [x2; p2];
+        inter_nil_iff (ids s2) [x1; p1];
+        inter_nil_iff [p1] [p2];
+        find_in_id x1 t s1; find_in_id x2 t s2;
+        tid_in_ids s1; tid_in_ids s2;
+        rem_keeps_id x2 p1 x1 t s1;
+        parent_rem x2 p1 x1 t s1;
+        Preservation.find_rem x2 p1 x1 t;
+        Preservation.rem_absent p1 x1 s2;
+        Preservation.tid_rem p1 x1 t;
+        rem_keeps_id x1 p2 x2 t s2;
+        parent_rem x1 p2 x2 t s2;
+        Preservation.find_rem x1 p2 x2 t;
+        Preservation.rem_absent p2 x2 s1;
+        Preservation.tid_rem p2 x2 t;
+        rem_rem_comm p1 x1 p2 x2 t
+      | _ -> ()
+    end
+    else ()
+
+(* ---- CASE I/R ---- *)
+
+let insert_remove_in (q:string) (n:tree) (x:string) (t:tree)
+  : Lemma (requires wf t /\ independent (op_fp_in t (InsertChild q n)) (op_fp_in t (RemoveNode x)))
+          (ensures wstep_in (InsertChild q n) (RemoveNode x) t)
+  = if Ok? (apply (InsertChild q n) t) && Ok? (apply (RemoveNode x) t) then begin
+      match find_in x t, parent_of x t with
+      | Some sub, Some p ->
+        inter_nil_iff (q :: ids n) (ids sub);
+        inter_nil_iff (ids n) [x; p];
+        inter_nil_iff [q] [p];
+        find_in_id x t sub; tid_in_ids sub;
+        first_dup_none_iff n t;
+        inter_nil_iff (ids n) (ids t);
+        let tr = rem_at p x t in
+        rem_keeps_id q p x t sub;
+        Preservation.ids_rem_sub_fa p x t;
+        inter_nil_iff (ids n) (ids tr);
+        first_dup_none_iff n tr;
+        ids_ins_mem x q n t;
+        parent_ins x q n t;
+        find_ins x q n t;
+        ins_absent q n sub;
+        ins_rem_comm q n p x t
+      | _ -> ()
+    end
+    else ()
+
+(* ---- CASE O/R ---- *)
+
+let reorder_remove_in (q:string) (o:list string) (x:string) (t:tree)
+  : Lemma (requires wf t /\ independent (op_fp_in t (ReorderChildren q o)) (op_fp_in t (RemoveNode x)))
+          (ensures wstep_in (ReorderChildren q o) (RemoveNode x) t)
+  = if Ok? (apply (ReorderChildren q o) t) && Ok? (apply (RemoveNode x) t) then begin
+      match find_in x t, parent_of x t, find_in q t with
+      | Some sub, Some p, Some m ->
+        inter_nil_iff (q :: o) (ids sub);
+        inter_nil_iff [q] [p];
+        find_in_id x t sub; tid_in_ids sub; find_in_id q t m;
+        find_in_some_iff q t;
+        wf_reorder_ok q o t;
+        rem_keeps_id q p x t sub;
+        Preservation.find_rem q p x t;
+        (match m with TNode _ _ cs -> Preservation.kid_ids_rem_all p x cs);
+        Preservation.tid_rem p x t;
+        tid_reorder q o t;
+        ids_reorder_mem x q o t;
+        parent_reorder x q o t;
+        find_reorder x q o t;
+        reorder_absent q o sub;
+        reorder_rem_comm q o p x t
+      | _ -> ()
+    end
+    else ()
+
+(* ---- CASE U/R ---- *)
+
+let update_remove_in (n:tree) (x:string) (t:tree)
+  : Lemma (requires wf t /\ independent (op_fp_in t (UpdateNode n)) (op_fp_in t (RemoveNode x)))
+          (ensures wstep_in (UpdateNode n) (RemoveNode x) t)
+  = let y = tid_of n in
+    let k = kind_of n in
+    update_fp_in t n;
+    find_in_some_iff y t;
+    if not (has_id y t) then ()
+    else if not (Ok? (apply (RemoveNode x) t)) then ()
+    else begin
+      find_in_some_iff x t;
+      match find_in x t, parent_of x t with
+      | Some sub, Some p ->
+        inter_nil_iff [y] (ids sub);
+        inter_nil_iff [y] [x; p];
+        find_in_id x t sub; tid_in_ids sub;
+        rem_keeps_id y p x t sub;
+        find_in_some_iff y (rem_at p x t);
+        Preservation.tid_rem p x t;
+        Preservation.tid_upd y k t;
+        Preservation.ids_upd y k t;
+        Preservation.parent_upd x y k t;
+        Preservation.find_upd x y k t;
+        Preservation.upd_absent y k sub;
+        upd_rem_comm y k p x t
+      | _ -> ()
+    end
+
+(* ---- the fragment widened: everything but a move ---- *)
+
+let rec no_move (o:op) : Tot bool (decreases o) =
+  match o with
+  | MoveNode _ _ -> false
+  | Batch os -> no_move_all os
+  | _ -> true
+and no_move_all (os:list op) : Tot bool (decreases os) =
+  match os with
+  | [] -> true
+  | o :: r -> no_move o && no_move_all r
+
+let rec in_place_no_move (o:op)
+  : Lemma (requires in_place o) (ensures no_move o) (decreases o)
+  = match o with
+    | Batch os -> in_place_no_move_all os
+    | _ -> ()
+and in_place_no_move_all (os:list op)
+  : Lemma (requires in_place_all os) (ensures no_move_all os) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r -> in_place_no_move o; in_place_no_move_all r
+
+(* ---- every leaf pair of the widened fragment ---- *)
+
+let no_move_leaf_in (a b:op) (t:tree)
+  : Lemma (requires wf t /\ is_leaf a /\ is_leaf b /\ no_move a /\ no_move b
+                    /\ independent (op_fp_in t a) (op_fp_in t b))
+          (ensures wstep_in a b t)
+  = match a, b with
+    | RemoveNode x1, RemoveNode x2 -> remove_remove_in x1 x2 t
+    | InsertChild q n, RemoveNode x -> insert_remove_in q n x t
+    | RemoveNode x, InsertChild q n ->
+      independent_sym (op_fp_in t a) (op_fp_in t b); insert_remove_in q n x t; wstep_in_sym b a t
+    | ReorderChildren q o, RemoveNode x -> reorder_remove_in q o x t
+    | RemoveNode x, ReorderChildren q o ->
+      independent_sym (op_fp_in t a) (op_fp_in t b); reorder_remove_in q o x t; wstep_in_sym b a t
+    | UpdateNode n, RemoveNode x -> update_remove_in n x t
+    | RemoveNode x, UpdateNode n ->
+      independent_sym (op_fp_in t a) (op_fp_in t b); update_remove_in n x t; wstep_in_sym b a t
+    | _, _ -> in_place_leaf_in a b t
+
+(* ---- the lift again, over the widened fragment ---- *)
+
+let rec leaf_vs_any_nm (a b:op) (t:tree)
+  : Lemma (requires wf t /\ is_leaf a /\ no_move a /\ no_move b
+                    /\ independent (op_fp_in t a) (op_fp_in t b))
+          (ensures wstep_in a b t) (decreases b)
+  = match b with
+    | Batch os -> leaf_vs_script_nm a os t
+    | _ -> no_move_leaf_in a b t
+and leaf_vs_script_nm (a:op) (os:list op) (t:tree)
+  : Lemma (requires wf t /\ is_leaf a /\ no_move a /\ no_move_all os
+                    /\ independent (op_fp_in t a) (op_fp_in t (Batch os)))
+          (ensures wstep_in a (Batch os) t) (decreases os)
+  = match os with
+    | [] -> ()
+    | b1 :: bs ->
+      (match apply b1 t with
+       | Error _ -> ()
+       | Ok t1 ->
+         fp_in_cons t b1 bs t1;
+         independent_union_right (op_fp_in t a) (op_fp_in t b1) (op_fp_in t1 (Batch bs));
+         leaf_vs_any_nm a b1 t;
+         Preservation.apply_preserves_wf b1 t;
+         (match apply a t with
+          | Error _ -> ()
+          | Ok ta ->
+            leaf_vs_script_nm a bs t1;
+            (match apply (Batch bs) t1 with
+             | Error _ -> ()
+             | Ok tb ->
+               (match apply b1 ta with
+                | Ok ta1 -> fp_in_cons ta b1 bs ta1
+                | Error _ -> ()))))
+
+let rec any_vs_any_nm (a b:op) (t:tree)
+  : Lemma (requires wf t /\ no_move a /\ no_move b /\ independent (op_fp_in t a) (op_fp_in t b))
+          (ensures wstep_in a b t) (decreases a)
+  = match a with
+    | Batch os -> script_vs_any_nm os b t
+    | _ -> leaf_vs_any_nm a b t
+and script_vs_any_nm (os:list op) (b:op) (t:tree)
+  : Lemma (requires wf t /\ no_move_all os /\ no_move b
+                    /\ independent (op_fp_in t (Batch os)) (op_fp_in t b))
+          (ensures wstep_in (Batch os) b t) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      (match apply o t with
+       | Error _ -> ()
+       | Ok to ->
+         fp_in_cons t o r to;
+         independent_union_left (op_fp_in t o) (op_fp_in to (Batch r)) (op_fp_in t b);
+         any_vs_any_nm o b t;
+         Preservation.apply_preserves_wf o t;
+         (match apply b t with
+          | Error _ -> ()
+          | Ok tb ->
+            script_vs_any_nm r b to;
+            (match apply (Batch r) to with
+             | Error _ -> ()
+             | Ok ta ->
+               (match apply o tb with
+                | Ok tb1 -> fp_in_cons tb o r tb1
+                | Error _ -> ()))))
+
+(* ---- THE THEOREM, over everything but a move ---- *)
+
+let footprint_in_sound (a b:op) (t:tree)
+  : Lemma (requires wf t /\ no_move a /\ no_move b /\ independent (op_fp_in t a) (op_fp_in t b))
+          (ensures wstep a b t)
+  = any_vs_any_nm a b t
+
+let footprint_in_sound_scripts (a b:list op) (t:tree)
+  : Lemma (requires wf t /\ no_move_all a /\ no_move_all b
+                    /\ independent (fp_in_all t a) (fp_in_all t b))
+          (ensures wstep (Batch a) (Batch b) t)
+  = footprint_in_sound (Batch a) (Batch b) t
+
+let footprint_in_stable (a b:op) (t:tree) (ta:tree)
+  : Lemma (requires wf t /\ no_move a /\ no_move b /\ independent (op_fp_in t a) (op_fp_in t b)
+                    /\ apply a t == Ok ta /\ Ok? (apply b t))
+          (ensures op_fp_in ta b == op_fp_in t b)
+  = any_vs_any_nm a b t
