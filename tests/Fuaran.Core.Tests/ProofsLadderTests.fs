@@ -11,16 +11,15 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // own rule (D30) is that a committed declared-or-generated artefact is pinned by a check; this
 // family is that check.
 //
-// TEN CLAUSES, each with a go-red fixture beside it — six from Phase 144, four from Phase 174:
+// FOURTEEN CLAUSES, each with a go-red beside it — six from Phase 144, four from Phase 174, four from
+// Phase 522:
 //
 //   theorem-exists          a `proved` row's `evidence.theorem` is a TOP-LEVEL `val` / `let` /
 //                           `let rec` of that name in the model it names.
 //   model-registered        that model file exists, and its module is one `check.ps1` checks — a
 //                           row over a model the leg never runs claims a proof nothing reproduces.
 //   tested-case-exists      a `tested` row names at least one case, and every case it names is in
-//                           the test tree. The citable set is the differential host `Proofs.Oracle`
-//                           plus (Phase 161) the `containerLaws` conformance suite — see
-//                           `realCases` for why it is an enumeration of suites and not a walk.
+//                           the suite its family names (`suiteCases`).
 //   every-module-has-a-row  every model in the roster (`proofs/modules.json`) is named by at least one `proved` row.
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
@@ -36,6 +35,21 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   contract-agrees         (174) `proofs/README.md`'s "Core-to-domain proof contract" table is
 //                           the ladder's assumed rows, in order, with the same class and the same
 //                           third column.
+//
+//   statement-boundary      (522) every row states what it claims in `statement` and what it does
+//                           NOT cover in `boundary`, both non-empty, and neither tells the row's
+//                           history: no `Phase NNN` in either — the row's `phase` is its one citation.
+//   claim-is-the-join       (522) `claim` is `statement` and `boundary` joined by one space: the
+//                           field a registry reading the ladder still reads, held to the two it is made of.
+//   tested-family-closed    (522) a `tested` row's family is one of three closed forms —
+//                           `Proofs.Oracle`, `Conformance.<law>` (a law the kit exports) or
+//                           `Suite:<Module>.<list>` (a test list this assembly declares) — and it
+//                           names a suite the test tree holds.
+//   evidence-exists         (522) every path LADDER.md says must exist does (a policy row's
+//                           `document`, a tested row's `artifact` and `host`), every `supporting`
+//                           declaration is top-level in its model like `theorem` (reported under
+//                           theorem-exists), and no row carries `repo`: this family holds rows to
+//                           THIS tree, so a row resting on another repository's cannot be held here.
 //
 // WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
 // and nowhere else, for the reason stated at that clause: the contract table is the same question
@@ -72,8 +86,10 @@ type LadderInputs =
         Root: string
         /// The modules the ladder must cover — the roster's models (`proofs/modules.json`), for the real file.
         Modules: string list
-        /// The case names a `tested` row may name.
-        Cases: Set<string>
+        /// The cases of the suite a `tested` row's family names, or `None` when the family names
+        /// no suite this test tree holds. For the real file it is reflection over the assembly
+        /// (`suiteCases`), so no list of citable suites is restated here.
+        Suites: string -> Set<string> option
         /// The law names a `domain-obligation` row's `dischargedBy` may name — the entry points of
         /// the shipped kit's declared law-family ROSTER, for the real file. Read from
         /// `Fuaran.Core.Families` for the same reason `Cases` is read from the test tree: a second
@@ -107,6 +123,16 @@ let private classes = Set.ofList classOrder
 /// contract's whole content is WHICH kit's green run discharges the row.
 let private lawForm =
     Regex(@"^Conformance\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// `Suite:<Module>.<list>` — a test list this assembly declares, named by its module and its value
+/// (Phase 522). The third closed form a `tested` row's family takes, beside `Proofs.Oracle` and
+/// `Conformance.<law>`: a suite's LABEL is prose and moves with its wording, its value's name does not.
+let suiteForm =
+    Regex(@"^Suite:([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// History told in a row's prose (Phase 522): the row's `phase` is its one citation, and what a
+/// change did lives in that change's record.
+let private historyForm = Regex(@"\bPhases?\s+[0-9]", RegexOptions.Compiled)
 
 /// The two literals a `model-bridge`'s `closes` may carry beside a `fuaran-core#NNN` phase.
 /// `unscheduled` is a value rather than a rounding to `permanent` on purpose: two of this
@@ -254,27 +280,147 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 // a second finding about the same absence would say nothing new.
                                 | Some _ -> []
 
-                            registered @ present @ theoremFindings
+                            // Phase 522: a `supporting` declaration is checked like `theorem`, as
+                            // LADDER.md has always said it is.
+                            let supportingFindings =
+                                match ev |> Option.bind (fun e -> strArrayMember e "supporting") with
+                                | Some names when File.Exists full ->
+                                    let text = File.ReadAllText full
+
+                                    names
+                                    |> List.filter (fun n -> not (declaresTopLevel text n))
+                                    |> List.map (fun n ->
+                                        finding
+                                            id
+                                            "theorem-exists"
+                                            (sprintf
+                                                "%s declares no top-level `%s`, which `evidence.supporting` names"
+                                                path
+                                                n))
+                                | _ -> []
+
+                            registered @ present @ theoremFindings @ supportingFindings
 
                 let testedFindings =
                     if level <> Some "tested" then
                         []
                     else
-                        match ev |> Option.bind (fun e -> strArrayMember e "cases") with
-                        | None
-                        | Some [] ->
+                        // Phase 522: the family is CLOSED, and it names the suite the cases are
+                        // looked for in — a prose family used to pass every clause.
+                        let familyFindings, suite =
+                            match ev |> Option.bind (fun e -> strMember e "family") with
+                            | None ->
+                                [ finding id "tested-family-closed" "a tested row carries no `evidence.family`" ], None
+                            | Some f ->
+                                let law = lawForm.Match f
+
+                                let closed =
+                                    f = "Proofs.Oracle"
+                                    || suiteForm.IsMatch f
+                                    || (law.Success && Set.contains law.Groups[1].Value inputs.Laws)
+
+                                if not closed then
+                                    [ finding
+                                          id
+                                          "tested-family-closed"
+                                          (sprintf
+                                              "family '%s' is none of `Proofs.Oracle`, `Conformance.<law>` (a law the shipped kit exports) or `Suite:<Module>.<list>`"
+                                              f) ],
+                                    None
+                                else
+                                    match inputs.Suites f with
+                                    | Some cases -> [], Some(f, cases)
+                                    | None ->
+                                        [ finding
+                                              id
+                                              "tested-family-closed"
+                                              (sprintf "family '%s' names no suite the test tree declares" f) ],
+                                        None
+
+                        let caseFindings =
+                            match ev |> Option.bind (fun e -> strArrayMember e "cases"), suite with
+                            | None, _
+                            | Some [], _ ->
+                                [ finding
+                                      id
+                                      "tested-case-exists"
+                                      "a tested row must name its cases in `evidence.cases` (a non-empty array of the family's case names) — naming the family alone leaves the claim uncheckable" ]
+                            // A family that names no suite is already a finding; its cases have
+                            // nowhere to be looked for, and a second finding would say nothing new.
+                            | Some _, None -> []
+                            | Some names, Some(family, cases) ->
+                                names
+                                |> List.filter (fun n -> not (Set.contains n cases))
+                                |> List.map (fun n ->
+                                    finding
+                                        id
+                                        "tested-case-exists"
+                                        (sprintf "`evidence.cases` names '%s', which is not a case of %s" n family))
+
+                        familyFindings @ caseFindings
+
+                // ---- Phase 522: what is claimed, what is not, and no history ----
+                let statement = strMember row "statement"
+                let boundary = strMember row "boundary"
+
+                let proseFindings =
+                    [ for name, value in [ "statement", statement; "boundary", boundary ] do
+                          match value with
+                          | Some v when not (String.IsNullOrWhiteSpace v) ->
+                              let m = historyForm.Match v
+
+                              if m.Success then
+                                  yield
+                                      finding
+                                          id
+                                          "statement-boundary"
+                                          (sprintf
+                                              "`%s` tells history ('%s') — the row's `phase` is its one citation, and what a change did is that change's record"
+                                              name
+                                              (v.Substring(m.Index, min 24 (v.Length - m.Index))))
+                          | _ ->
+                              yield
+                                  finding
+                                      id
+                                      "statement-boundary"
+                                      (sprintf
+                                          "no `%s` — a row says what it claims (`statement`) and what it does NOT cover (`boundary`)"
+                                          name) ]
+
+                let joinFindings =
+                    match statement, boundary, strMember row "claim" with
+                    | Some s, Some b, Some c when c = s + " " + b -> []
+                    | Some _, Some _, _ ->
+                        [ finding
+                              id
+                              "claim-is-the-join"
+                              "`claim` is not `statement` and `boundary` joined by one space — the registry reads `claim`, so it must say exactly what the two fields say" ]
+                    | _ -> []
+
+                // ---- Phase 522: every path LADDER.md says must exist, and only this tree ----
+                let pathFindings =
+                    let mustExist (field: string) =
+                        match ev |> Option.bind (fun e -> strMember e field) with
+                        | Some p when not (File.Exists(Path.Combine(inputs.Root, p))) ->
                             [ finding
                                   id
-                                  "tested-case-exists"
-                                  "a tested row must name its cases in `evidence.cases` (a non-empty array of `Proofs.Oracle` case names) — naming the family in prose alone leaves the claim uncheckable" ]
-                        | Some names ->
-                            names
-                            |> List.filter (fun n -> not (Set.contains n inputs.Cases))
-                            |> List.map (fun n ->
-                                finding
-                                    id
-                                    "tested-case-exists"
-                                    (sprintf "`evidence.cases` names '%s', which is not a case in the test tree" n))
+                                  "evidence-exists"
+                                  (sprintf "`evidence.%s` %s is not a file (looked under %s)" field p inputs.Root) ]
+                        | _ -> []
+
+                    (match level with
+                     | Some "policy" -> mustExist "document"
+                     | Some "tested" -> mustExist "artifact" @ mustExist "host"
+                     | _ -> [])
+                    @ (match strMember row "repo" with
+                       | Some r ->
+                           [ finding
+                                 id
+                                 "evidence-exists"
+                                 (sprintf
+                                     "carries `repo`: \"%s\" — this family holds every row to this repository's own tree, so a row resting on another's cannot be checked here"
+                                     r) ]
+                       | None -> [])
 
                 // ---- Phase 174: which KIND of assumed an `assumed` row is ----
                 let cls = strMember row "class"
@@ -409,8 +555,11 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
 
                 levelFindings
                 @ phaseFindings
+                @ proseFindings
+                @ joinFindings
                 @ provedFindings
                 @ testedFindings
+                @ pathFindings
                 @ classFindings
                 @ dischargeFindings)
             |> List.concat
@@ -816,29 +965,30 @@ let isExtracted (e: RosterEntry) = e.Kind = Extracted || e.Kind = Shared
 /// A MODEL — a roster entry that is not a shared module. Every model carries a `proved` row.
 let isModel (e: RosterEntry) = e.Kind <> Shared
 
-/// The `Proofs.Oracle` family's test tree: every `[<Tests>]` value in this assembly whose label is
-/// `Proofs.Oracle`, found by reflection (Phase 504) — so a new differential file is citable by a
-/// `tested` row the moment it declares its list, with no enumeration here to forget it in.
-let oracleTests () : Test =
-    let family =
-        [ for t in Reflection.Assembly.GetExecutingAssembly().GetTypes() do
-              for p in
-                  t.GetProperties(
-                      Reflection.BindingFlags.Static
-                      ||| Reflection.BindingFlags.Public
-                      ||| Reflection.BindingFlags.NonPublic
-                  ) do
-                  if p.PropertyType = typeof<Test> && p.IsDefined(typeof<TestsAttribute>, false) then
-                      match p.GetValue null with
-                      | :? Test as test ->
-                          match test with
-                          | TestLabel("Proofs.Oracle", _, _) -> yield p.DeclaringType.FullName + "." + p.Name, test
-                          | _ -> ()
-                      | _ -> () ]
-        |> List.sortBy fst
-        |> List.map snd
+/// Every `[<Tests>]` value in this assembly whose label is `label`, found by reflection (Phase 504;
+/// any label since Phase 522) — so a new differential file, or a new conformance suite, is citable by
+/// a `tested` row the moment it declares its list, with no enumeration here to forget it in.
+let testsLabelled (label: string) : Test list =
+    [ for t in Reflection.Assembly.GetExecutingAssembly().GetTypes() do
+          for p in
+              t.GetProperties(
+                  Reflection.BindingFlags.Static
+                  ||| Reflection.BindingFlags.Public
+                  ||| Reflection.BindingFlags.NonPublic
+              ) do
+              if p.PropertyType = typeof<Test> && p.IsDefined(typeof<TestsAttribute>, false) then
+                  match p.GetValue null with
+                  | :? Test as test ->
+                      match test with
+                      | TestLabel(l, _, _) when l = label -> yield p.DeclaringType.FullName + "." + p.Name, test
+                      | _ -> ()
+                  | _ -> () ]
+    |> List.sortBy fst
+    |> List.map snd
 
-    testList "Proofs.Oracle" family
+/// The `Proofs.Oracle` family's test tree: every differential list the assembly declares.
+let oracleTests () : Test =
+    testList "Proofs.Oracle" (testsLabelled "Proofs.Oracle")
 
 /// The leaf case names of an Expecto test tree — the labels a `tested` row may cite.
 let rec caseNames (t: Test) : string list =
@@ -876,35 +1026,42 @@ let private realModules () = realRoster () |> List.map _.Module
 let private realModels () =
     realRoster () |> List.filter isModel |> List.map _.Module
 
-/// The case names a `tested` row may cite. `Proofs.Oracle` is where every differential row's
-/// evidence lives, and it was the whole set until Phase 161 — whose `container-laws` row is
-/// evidenced by a CONFORMANCE FAMILY rather than by a differential, and whose cases therefore live
-/// in the suite that certifies that family. Read from the TREE in both cases, so a sibling
-/// appending a case is picked up with no edit here.
+/// The cases of the suite a `tested` row's family names (Phase 522), read from the TREE so a sibling
+/// appending a case — or a suite — is picked up with no edit here. Each of the three closed forms
+/// resolves by reflection: `Proofs.Oracle` and `Conformance.<law>` to every `[<Tests>]` list carrying
+/// that label (a conformance suite is labelled with its law family's name), `Suite:<Module>.<list>`
+/// to the `Test` value of that name in that module. `None` is a family that names no suite.
 ///
-/// Widening the set rather than moving the cases is deliberate: the clause's content is "a `tested`
-/// row's evidence names a case that exists", and a row evidenced by a conformance family is as
-/// checkable as one evidenced by a differential. What the clause must never become is a set so wide
-/// that any string is in it — which is why this is an enumeration of suites and not a walk of the
-/// whole tree. Phase 288 adds the second conformance suite on the same footing: the checkpoint rows
-/// are evidenced by `Conformance.checkpointLaws`, whose cases live in `CheckpointTests`.
-let private realCases () =
-    Set.union (caseNames (oracleTests ()) |> Set.ofList) (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
-    |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
-    |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
-    |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
-    // Phase 304: the old-document evolution differential, evidenced by the hosts that decode old
-    // documents rather than by the oracle.
-    |> Set.union (caseNames IdlStabilityClassTests.evolutionDifferential |> Set.ofList)
-    // Phase 311: the lane store's tested row, evidenced by `Conformance.laneLaws`, whose cases live in
-    // `LaneTests`.
-    |> Set.union (caseNames LaneTests.laneLawTests |> Set.ofList)
-    // Phase 422: the temporal rows evidenced by the column suite's own laws — since Phase 430 the .NET
-    // edge's row alone (the calendar, the texts and the order are `Temporal.fst`'s theorems).
-    |> Set.union (caseNames ColumnTests.temporalTests |> Set.ofList)
-    // Phase 427: the schema field's tested row, evidenced by the column suite's field cases (the
-    // field codec is Phase 428's theorem).
-    |> Set.union (caseNames ColumnTests.fieldTests |> Set.ofList)
+/// It replaces an enumeration of eight suites, one line per phase that cited a new one, under which
+/// a row's cases were looked for across ALL of them whatever its family said — so a prose family
+/// passed and a case was found in a suite its row did not name.
+let suiteCases (family: string) : Set<string> option =
+    let ofTests (tests: Test list) =
+        match tests |> List.collect caseNames with
+        | [] -> None
+        | cases -> Some(Set.ofList cases)
+
+    let suite = suiteForm.Match family
+
+    if family = "Proofs.Oracle" || family.StartsWith "Conformance." then
+        ofTests (testsLabelled family)
+    elif suite.Success then
+        match Reflection.Assembly.GetExecutingAssembly().GetType("Fuaran.Core.Tests." + suite.Groups[1].Value) with
+        | null -> None
+        | t ->
+            match
+                t.GetProperty(
+                    suite.Groups[2].Value,
+                    Reflection.BindingFlags.Static
+                    ||| Reflection.BindingFlags.Public
+                    ||| Reflection.BindingFlags.NonPublic
+                )
+            with
+            | null -> None
+            | p when p.PropertyType = typeof<Test> -> ofTests [ p.GetValue null :?> Test ]
+            | _ -> None
+    else
+        None
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.
@@ -932,15 +1089,20 @@ let private realLaws () =
 let private fixtureInputs (modules: string list) =
     { Root = fixtureDir
       Modules = modules
-      Cases = Set.ofList [ "a fixture case" ]
+      Suites =
+        fun family ->
+            if family = "Proofs.Oracle" then
+                Some(Set.ofList [ "a fixture case" ])
+            else
+                None
       Laws = Set.ofList [ "fixtureLaws" ] }
 
 let private fixture (name: string) =
     File.ReadAllText(Path.Combine(fixtureDir, name))
 
-/// A go-red: this fixture yields EXACTLY one finding, and it names the clause and the subject.
-let private expectOneFinding (modules: string list) (name: string) (clause: string) (subject: string) =
-    let findings = checkLadder (fixtureInputs modules) (fixture name)
+/// A go-red: this ladder text yields EXACTLY one finding, and it names the clause and the subject.
+let private expectOneFindingIn (modules: string list) (name: string) (text: string) (clause: string) (subject: string) =
+    let findings = checkLadder (fixtureInputs modules) text
 
     Expect.equal
         (List.length findings)
@@ -953,6 +1115,34 @@ let private expectOneFinding (modules: string list) (name: string) (clause: stri
     let only = List.head findings
     Expect.stringContains only (sprintf "[%s]" clause) (sprintf "%s: the finding names the clause" name)
     Expect.stringContains only subject (sprintf "%s: the finding names what it is about" name)
+
+/// A go-red over a committed fixture file.
+let private expectOneFinding (modules: string list) (name: string) (clause: string) (subject: string) =
+    expectOneFindingIn modules name (fixture name) clause subject
+
+/// `ladder-ok.json` with ONE row mutated in place (Phase 522): the go-reds of the four clauses Phase
+/// 522 added are each one mutation of the baseline, so a go-red that fires is known to be firing on
+/// its mutation and on nothing a separate fixture file could drift into.
+let private mutated (rowId: string) (mutate: Nodes.JsonObject -> unit) : string =
+    let root = Nodes.JsonNode.Parse(fixture "ladder-ok.json")
+
+    let row =
+        root["claims"].AsArray()
+        |> Seq.map (fun r -> r.AsObject())
+        |> Seq.find (fun r -> r["id"].GetValue<string>() = rowId)
+
+    mutate row
+    root.ToJsonString()
+
+/// Set a row's statement or boundary and keep `claim` its join, so the mutation is ONE defect.
+let private withProse (field: string) (value: string) (row: Nodes.JsonObject) =
+    row[field] <- Nodes.JsonValue.Create value
+
+    row["claim"] <-
+        Nodes.JsonValue.Create(row["statement"].GetValue<string>() + " " + row["boundary"].GetValue<string>())
+
+let private expectMutationFinding (description: string) (rowId: string) mutate (clause: string) (subject: string) =
+    expectOneFindingIn [ "Model" ] description (mutated rowId mutate) clause subject
 
 [<Tests>]
 let proofsLadderTests =
@@ -1057,17 +1247,27 @@ let proofsLadderTests =
               // picked up with no edit here. If this ever collapsed to a handful, the
               // tested-case-exists clause would have quietly stopped measuring anything.
               Expect.isGreaterThan
-                  (Set.count (realCases ()))
+                  (suiteCases "Proofs.Oracle" |> Option.map Set.count |> Option.defaultValue 0)
                   20
-                  "the cited suites' case names are readable, and there are as many as the differential host declares"
+                  "the Proofs.Oracle differential host's case names are readable"
 
-              // and BOTH suites are in it — a union that silently degenerated to one of its
-              // members would leave the other's rows uncheckable while reporting nothing.
-              Expect.isNonEmpty (caseNames (oracleTests ())) "the Proofs.Oracle differential host contributes cases"
+              // and EACH closed form resolves — a form whose reflection silently degenerated would
+              // leave its rows reported as naming no suite, or worse, never asked.
+              for family in
+                  [ "Conformance.containerLaws"
+                    "Conformance.checkpointLaws"
+                    "Suite:ColumnTests.fieldTests" ] do
+                  Expect.isNonEmpty
+                      (suiteCases family |> Option.defaultValue Set.empty)
+                      (sprintf "%s resolves to a suite with cases" family)
 
-              Expect.isNonEmpty
-                  (caseNames ContainedOpsTests.containerLawTests)
-                  "the containerLaws conformance suite contributes cases"
+              // and a family that names nothing resolves to nothing, in every form.
+              for family in
+                  [ "Conformance.noSuchLaws"
+                    "Suite:ColumnTests.noSuchTests"
+                    "Suite:NoSuchModule.tests"
+                    "Column fields: unit, label, description and extensions" ] do
+                  Expect.isNone (suiteCases family) (sprintf "%s resolves to no suite" family)
 
           testCase "the law names a domain-obligation row may cite are the kit's declared roster"
           <| fun _ ->
@@ -1089,6 +1289,27 @@ let proofsLadderTests =
 
           // ---- the subject ----
 
+          testCase "the kit's template ladder is written to the schema it ships beside (Phase 522)"
+          <| fun _ ->
+              // The template's rows are placeholders, so the clauses about the TREE cannot hold of
+              // it; the clauses about a row's SHAPE can, and an adopter copies the template's shape.
+              let template =
+                  File.ReadAllText(Path.Combine(repoRoot, "proofs", "kit", "templates", "proofs.json"))
+
+              let shapeClauses =
+                  [ "[statement-boundary]"; "[claim-is-the-join]"; "[tested-family-closed]" ]
+
+              let findings =
+                  checkLadder
+                      { Root = repoRoot
+                        Modules = []
+                        Suites = fun _ -> Some(Set.ofList [ "<a case name, as the family spells it>" ])
+                        Laws = Set.empty }
+                      template
+                  |> List.filter (fun f -> shapeClauses |> List.exists f.Contains)
+
+              Expect.isEmpty findings "every template row has a statement, a boundary, their join and a closed family"
+
           testCase "the committed proofs.json satisfies every clause"
           <| fun _ ->
               let text = File.ReadAllText ladderPath
@@ -1096,7 +1317,7 @@ let proofsLadderTests =
               let inputs =
                   { Root = repoRoot
                     Modules = realModels ()
-                    Cases = realCases ()
+                    Suites = suiteCases
                     Laws = realLaws () }
 
               let findings = checkLadder inputs text
@@ -1245,6 +1466,100 @@ let proofsLadderTests =
 
           testCase "go-red: bridge-closes — a model bridge carrying no closes at all"
           <| fun _ -> expectOneFinding [ "Model" ] "bridge-closes-absent.json" "bridge-closes" "fixture-bridge"
+
+          // ---- Phase 522: statement and boundary, the join, the closed family, the paths ----
+
+          testCase "go-red: statement-boundary — a row with no boundary"
+          <| fun _ ->
+              expectMutationFinding
+                  "no boundary"
+                  "fixture-premise"
+                  (fun r -> r.Remove "boundary" |> ignore)
+                  "statement-boundary"
+                  "no `boundary`"
+
+          testCase "go-red: statement-boundary — a row whose statement tells its history"
+          <| fun _ ->
+              expectMutationFinding
+                  "history in the statement"
+                  "fixture-policy"
+                  (withProse "statement" "A policy row, recorded by Phase 12 after a review.")
+                  "statement-boundary"
+                  "Phase 12"
+
+          testCase "go-red: claim-is-the-join — a claim that says something its two fields do not"
+          <| fun _ ->
+              expectMutationFinding
+                  "claim not the join"
+                  "fixture-obligation"
+                  (fun r -> r["claim"] <- Nodes.JsonValue.Create "Something the statement never said.")
+                  "claim-is-the-join"
+                  "fixture-obligation"
+
+          testCase "go-red: tested-family-closed — a family written as prose"
+          <| fun _ ->
+              expectMutationFinding
+                  "prose family"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "A differential described in prose")
+                  "tested-family-closed"
+                  "A differential described in prose"
+
+          testCase "go-red: tested-family-closed — a law family the kit does not export"
+          <| fun _ ->
+              expectMutationFinding
+                  "unexported law family"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "Conformance.ghostLaws")
+                  "tested-family-closed"
+                  "Conformance.ghostLaws"
+
+          testCase "go-red: tested-family-closed — a well-formed suite the test tree does not declare"
+          <| fun _ ->
+              expectMutationFinding
+                  "undeclared suite"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["family"] <- Nodes.JsonValue.Create "Suite:NoSuchModule.tests")
+                  "tested-family-closed"
+                  "Suite:NoSuchModule.tests"
+
+          testCase "go-red: theorem-exists — a supporting declaration that is not top-level"
+          <| fun _ ->
+              expectMutationFinding
+                  "indented supporting"
+                  "fixture-theorem"
+                  (fun r ->
+                      r["evidence"]["supporting"] <-
+                          Nodes.JsonArray(Nodes.JsonValue.Create "beta", Nodes.JsonValue.Create "delta"))
+                  "theorem-exists"
+                  "`delta`"
+
+          testCase "go-red: evidence-exists — a policy row whose document is not there"
+          <| fun _ ->
+              expectMutationFinding
+                  "missing document"
+                  "fixture-policy"
+                  (fun r -> r["evidence"]["document"] <- Nodes.JsonValue.Create "no-such-document.md")
+                  "evidence-exists"
+                  "no-such-document.md"
+
+          testCase "go-red: evidence-exists — a tested row whose artifact is not there"
+          <| fun _ ->
+              expectMutationFinding
+                  "missing artifact"
+                  "fixture-differential"
+                  (fun r -> r["evidence"]["artifact"] <- Nodes.JsonValue.Create "oracle/NoSuch.fs")
+                  "evidence-exists"
+                  "oracle/NoSuch.fs"
+
+          testCase "go-red: evidence-exists — a row resting on another repository's tree"
+          <| fun _ ->
+              expectMutationFinding
+                  "foreign repo"
+                  "fixture-theorem"
+                  (fun r -> r["repo"] <- Nodes.JsonValue.Create "Elsewhere/other-repo")
+                  "evidence-exists"
+                  "Elsewhere/other-repo"
 
           // ---- the contract clause: the README table and the ladder, row for row ----
 
@@ -1581,12 +1896,13 @@ let proofsKitTemplateTests =
 // it can check the module that references it; listing it keeps every module's clock its own, so a
 // budget and a floor are compared against the module they were seeded for.
 //
-// AN EMPTY CONE is green only over a recorded strict run: `proofs/last-strict.json` names the tree
-// the last green `-Strict` full leg verified, that tree is an ancestor of HEAD, and the cone
-// against IT is empty too — so an empty cone since some other tree cannot lean on a baseline that
-// predates a change nobody verified. A green `-Strict` full run records the file, and refuses to
-// when the working tree differs from HEAD in anything a module reads, because then the run
-// verified bytes no commit holds.
+// AN EMPTY CONE is green only over a recorded strict run: `proofs/last-strict.json` is the RUN
+// VERDICT (Phase 522; the kit's header, "THE RUN VERDICT") of the last green `-Strict` FULL leg with
+// the tree it verified, that tree is an ancestor of HEAD, and the cone against IT is empty too — so
+// an empty cone since some other tree cannot lean on a baseline that predates a change nobody
+// verified. A green `-Strict` full run records the file from its own verdict, and refuses to when
+// the working tree differs from HEAD in anything a module reads, because then the run verified bytes
+// no commit holds.
 
 /// Where the last green `-Strict` full run is recorded, relative to the repository root.
 let coneBaselinePath = "proofs/last-strict.json"
@@ -1841,6 +2157,35 @@ type private ConeCause =
         Reaches: bool
     }
 
+/// Every module the cone's MEMBERS reference, however transitively, that is not a member itself,
+/// with the reason it is checked: it goes to the kit as a DEPENDENCY, ahead of the module that needs
+/// it. On a cold cache the prover checks it anyway before the module that references it, and the
+/// extraction of that module needs its checked file; listing it keeps every module's clock its own.
+/// The ONE closure both cones use — `-Since`'s and the hand cone `-Modules` names (Phase 522).
+let private coneDependencies (facts: ConeFacts) (members: Set<string>) : Map<string, string> =
+    let refs m =
+        facts.References |> Map.tryFind m |> Option.defaultValue Set.empty
+
+    let dependencies = System.Collections.Generic.Dictionary<string, string>()
+
+    for m in facts.Roster do
+        if members.Contains m then
+            let stack = System.Collections.Generic.Stack<string>(refs m)
+            let seen = System.Collections.Generic.HashSet<string>()
+
+            while stack.Count > 0 do
+                let r = stack.Pop()
+
+                if seen.Add r then
+                    if not (members.Contains r) && not (dependencies.ContainsKey r) then
+                        dependencies[r] <-
+                            sprintf "a dependency of %s, checked ahead of it so every module's clock is its own" m
+
+                    for x in refs r do
+                        stack.Push x
+
+    dependencies |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+
 /// The cone, one row per registered module, in the roster's order.
 let computeCone (facts: ConeFacts) : ConeRow list =
     let refs m =
@@ -1932,23 +2277,7 @@ let computeCone (facts: ConeFacts) : ConeRow list =
 
                             queue.Enqueue(d, d :: trail)
 
-        let dependencies = System.Collections.Generic.Dictionary<string, string>()
-
-        for m in facts.Roster do
-            if reasons.ContainsKey m then
-                let stack = System.Collections.Generic.Stack<string>(refs m)
-                let seen = System.Collections.Generic.HashSet<string>()
-
-                while stack.Count > 0 do
-                    let r = stack.Pop()
-
-                    if seen.Add r then
-                        if not (reasons.ContainsKey r) && not (dependencies.ContainsKey r) then
-                            dependencies[r] <-
-                                sprintf "a dependency of %s, checked ahead of it so every module's clock is its own" m
-
-                        for x in refs r do
-                            stack.Push x
+        let dependencies = coneDependencies facts (Set.ofSeq reasons.Keys)
 
         facts.Roster
         |> List.map (fun m ->
@@ -1958,8 +2287,8 @@ let computeCone (facts: ConeFacts) : ConeRow list =
                   Verdict = In
                   Reason = why }
             | _ ->
-                match dependencies.TryGetValue m with
-                | true, why ->
+                match dependencies.TryFind m with
+                | Some why ->
                     { Module = m
                       Verdict = Dependency
                       Reason = why }
@@ -1967,6 +2296,31 @@ let computeCone (facts: ConeFacts) : ConeRow list =
                     { Module = m
                       Verdict = Out
                       Reason = "nothing it reads changed" })
+
+/// The cone `check.ps1 -Modules` names by hand (Phase 522): the named modules IN, and every module
+/// they reference as a DEPENDENCY, by the same closure `-Since` uses. Until Phase 522 a hand cone was
+/// exactly what it named, and a named model whose shared modules were not named failed at EXTRACT as
+/// an apparatus fault: its own extraction needs their checked files, and nothing had checked them.
+let handCone (facts: ConeFacts) (named: string list) : ConeRow list =
+    let members = Set.ofList named
+    let dependencies = coneDependencies facts members
+
+    facts.Roster
+    |> List.map (fun m ->
+        if members.Contains m then
+            { Module = m
+              Verdict = In
+              Reason = "named by -Modules" }
+        else
+            match dependencies.TryFind m with
+            | Some why ->
+                { Module = m
+                  Verdict = Dependency
+                  Reason = why }
+            | None ->
+                { Module = m
+                  Verdict = Out
+                  Reason = "not named, and no named module references it" })
 
 /// The modules the kit is handed for a cone: IN and DEPENDENCY, in the roster's order.
 let coneChecked (rows: ConeRow list) : string list =
@@ -2050,6 +2404,35 @@ let modelReferenceGraph (root: string) (roster: string list) : Map<string, Set<s
 /// The facts for the cone of a working tree against a commit: `git diff --name-only` (tracked,
 /// staged or not, a rename split into both of its paths) plus the untracked files git does not
 /// ignore.
+/// The roster half of the cone's facts — the modules, the shared ones, the reference graph and the
+/// packages — with nothing changed. The hand cone needs only this; `-Since` adds what changed.
+let coneRosterFacts (root: string) : Result<ConeFacts, string> =
+    let budgetNow = workingText root "proofs/modules.json"
+
+    match parseRoster budgetNow with
+    | Error errors ->
+        Error(
+            sprintf
+                "proofs/modules.json is not a readable roster, so there is no roster to select from: %s"
+                (String.concat "; " errors)
+        )
+    | Ok [] -> Error "proofs/modules.json registers no module, so there is no roster to select from"
+    | Ok entries ->
+        let roster = entries |> List.map _.Module
+
+        Ok
+            { Roster = roster
+              Shared =
+                entries
+                |> List.filter (fun e -> e.Kind = Shared)
+                |> List.map _.Module
+                |> Set.ofList
+              References = modelReferenceGraph root roster
+              Packages = budgetPackages budgetNow
+              Changed = []
+              ScriptCodeMoved = Set.empty
+              EntriesMoved = Set.empty }
+
 let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
     let tracked =
         gitLines root [ "diff"; "--name-only"; "--no-renames"; "--relative"; commit ]
@@ -2063,38 +2446,21 @@ let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
         let changed = tracked @ untracked |> List.distinct |> List.sort
         let budgetNow = workingText root "proofs/modules.json"
 
-        match parseRoster budgetNow with
-        | Error errors ->
-            Error(
-                sprintf
-                    "proofs/modules.json is not a readable roster, so there is no roster to select from: %s"
-                    (String.concat "; " errors)
-            )
-        | Ok [] -> Error "proofs/modules.json registers no module, so there is no roster to select from"
-        | Ok entries ->
-            let roster = entries |> List.map _.Module
-
-            Ok
-                { Roster = roster
-                  Shared =
-                    entries
-                    |> List.filter (fun e -> e.Kind = Shared)
-                    |> List.map _.Module
-                    |> Set.ofList
-                  References = modelReferenceGraph root roster
-                  Packages = budgetPackages budgetNow
-                  Changed = changed
-                  ScriptCodeMoved =
+        coneRosterFacts root
+        |> Result.map (fun facts ->
+            { facts with
+                Changed = changed
+                ScriptCodeMoved =
                     changed
                     |> List.filter (fun p ->
                         List.contains p legScripts
                         && scriptCode (workingText root p) <> scriptCode (textAt root commit p))
                     |> Set.ofList
-                  EntriesMoved =
+                EntriesMoved =
                     if List.contains "proofs/modules.json" changed then
                         budgetEntriesChanged (textAt root commit "proofs/modules.json") budgetNow
                     else
-                        Set.empty }
+                        Set.empty })
 
 type ConeReport =
     { Since: string
@@ -2114,75 +2480,97 @@ let coneSince (root: string) (since: string) : Result<ConeReport, string> =
 let private short (sha: string) =
     if sha.Length > 12 then sha.Substring(0, 12) else sha
 
-/// What a strict baseline record says about its run, for the line an empty cone prints (Phase 399):
-/// when it ran, on what machine, and each run's contention factor. Empty for a record that predates
-/// those fields; every part is optional, because the record is what a run wrote, not a schema.
+/// What a strict run's verdict record says about its run, for the line an empty cone prints: when it
+/// ran, on what machine, each run's contention factor and the modules over budget. Every part is
+/// optional, because the record is what a run wrote, not a schema this line enforces.
 let describeStrictRun (record: JsonElement) : string =
     let str (e: JsonElement) (name: string) =
         match e.TryGetProperty name with
         | true, v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
         | _ -> None
 
-    match record.TryGetProperty "run" with
-    | true, run when run.ValueKind = JsonValueKind.Object ->
-        let parts =
-            [ match str run "recordedAt" with
-              | Some at -> sprintf "run %s" at
-              | None -> ()
-              match run.TryGetProperty "machine" with
-              | true, m when m.ValueKind = JsonValueKind.Object ->
-                  let what =
-                      match str m "kind", str m "runner" with
-                      | Some "ci", Some runner -> sprintf "CI runner %s" runner
-                      | Some "ci", None -> "a CI runner"
-                      | Some "local", _ -> "a local machine"
-                      | Some other, _ -> other
-                      | None, _ -> "a machine"
+    let parts =
+        [ match str record "recordedAt" with
+          | Some at -> sprintf "run %s" at
+          | None -> ()
+          match record.TryGetProperty "machine" with
+          | true, m when m.ValueKind = JsonValueKind.Object ->
+              let what =
+                  match str m "kind", str m "runner" with
+                  | Some "ci", Some runner -> sprintf "CI runner %s" runner
+                  | Some "ci", None -> "a CI runner"
+                  | Some "local", _ -> "a local machine"
+                  | Some other, _ -> other
+                  | None, _ -> "a machine"
 
-                  let processors =
-                      match m.TryGetProperty "processors" with
-                      | true, p when p.ValueKind = JsonValueKind.Number -> Some(sprintf "%d processors" (p.GetInt32()))
-                      | _ -> None
+              let processors =
+                  match m.TryGetProperty "processors" with
+                  | true, p when p.ValueKind = JsonValueKind.Number -> Some(sprintf "%d processors" (p.GetInt32()))
+                  | _ -> None
 
-                  match [ str m "os"; processors ] |> List.choose id with
-                  | [] -> sprintf "on %s" what
-                  | details -> sprintf "on %s (%s)" what (String.concat ", " details)
-              | _ -> ()
-              match run.TryGetProperty "contention" with
-              | true, c when c.ValueKind = JsonValueKind.Array ->
-                  let factors =
-                      [ for r in c.EnumerateArray() do
-                            match r.TryGetProperty "factor" with
-                            | true, f when f.ValueKind = JsonValueKind.Number -> sprintf "x%.2f" (f.GetDouble())
-                            | _ -> "not computed" ]
+              match [ str m "os"; processors ] |> List.choose id with
+              | [] -> sprintf "on %s" what
+              | details -> sprintf "on %s (%s)" what (String.concat ", " details)
+          | _ -> ()
+          match record.TryGetProperty "contention" with
+          | true, c when c.ValueKind = JsonValueKind.Array ->
+              let factors =
+                  [ for r in c.EnumerateArray() do
+                        match r.TryGetProperty "factor" with
+                        | true, f when f.ValueKind = JsonValueKind.Number -> sprintf "x%.2f" (f.GetDouble())
+                        | _ -> "not computed" ]
 
-                  if not (List.isEmpty factors) then
-                      sprintf "contention %s" (String.concat ", " factors)
-              | _ -> ()
-              // Phase 399: a cost overrun is recorded, never red, so the line names the modules
-              // that ran over budget and the worst percentage each reached.
-              match run.TryGetProperty "costs" with
-              | true, c when c.ValueKind = JsonValueKind.Array ->
-                  let over =
-                      [ for r in c.EnumerateArray() do
-                            match str r "module", r.TryGetProperty "percent" with
-                            | Some m, (true, pc) when pc.ValueKind = JsonValueKind.Number && pc.GetInt32() > 100 ->
-                                m, pc.GetInt32()
-                            | _ -> () ]
-                      |> List.groupBy fst
-                      |> List.map (fun (m, xs) -> sprintf "%s %d%%" m (xs |> List.map snd |> List.max))
+              if not (List.isEmpty factors) then
+                  sprintf "contention %s" (String.concat ", " factors)
+          | _ -> ()
+          // A cost overrun is recorded, never red, so the line names the modules that ran over
+          // budget and the worst percentage each reached.
+          match record.TryGetProperty "costs" with
+          | true, c when c.ValueKind = JsonValueKind.Array ->
+              let over =
+                  [ for r in c.EnumerateArray() do
+                        match str r "module", r.TryGetProperty "percent" with
+                        | Some m, (true, pc) when pc.ValueKind = JsonValueKind.Number && pc.GetInt32() > 100 ->
+                            m, pc.GetInt32()
+                        | _ -> () ]
+                  |> List.groupBy fst
+                  |> List.map (fun (m, xs) -> sprintf "%s %d%%" m (xs |> List.map snd |> List.max))
 
-                  if List.isEmpty over then
-                      "every module within budget"
-                  else
-                      sprintf "over budget: %s" (String.concat ", " over)
-              | _ -> () ]
+              if List.isEmpty over then
+                  "every module within budget"
+              else
+                  sprintf "over budget: %s" (String.concat ", " over)
+          | _ -> () ]
 
-        if List.isEmpty parts then
-            ""
-        else
-            " — " + String.concat ", " parts
-    | _ -> ""
+    if List.isEmpty parts then
+        ""
+    else
+        " — " + String.concat ", " parts
+
+/// Why a run verdict record cannot stand behind an empty cone, or `None` when it can: it must be the
+/// kit's verdict (`kind: proofRunVerdict`) of a GREEN, STRICT, FULL run (`cone` null) — the shape
+/// `recordStrictBaseline` writes, and the one the strict workflow hands over.
+let strictVerdictFault (record: JsonElement) : string option =
+    let member' (name: string) =
+        match record.TryGetProperty name with
+        | true, v -> Some v
+        | _ -> None
+
+    let text name =
+        member' name
+        |> Option.filter (fun v -> v.ValueKind = JsonValueKind.String)
+        |> Option.map (fun v -> v.GetString())
+
+    if text "kind" <> Some "proofRunVerdict" then
+        Some "is not a run verdict (`kind: proofRunVerdict`)"
+    elif text "verdict" <> Some "green" then
+        Some(sprintf "records a %s run, not a green one" (defaultArg (text "verdict") "verdict-less"))
+    elif not (member' "strict" |> Option.exists (fun v -> v.ValueKind = JsonValueKind.True)) then
+        Some "records a run that was not -Strict"
+    elif member' "cone" |> Option.exists (fun v -> v.ValueKind <> JsonValueKind.Null) then
+        Some "records a cone run, not the FULL leg"
+    else
+        None
 
 /// Whether an EMPTY cone may exit green. `Ok` is the line that says what stands behind it; `Error`
 /// is why nothing does.
@@ -2196,7 +2584,7 @@ let emptyConeBaseline (root: string) : Result<string, string> =
                 coneBaselinePath
         )
     else
-        let tree, run =
+        let tree, fault, run =
             try
                 use doc = JsonDocument.Parse(File.ReadAllText file)
 
@@ -2205,13 +2593,14 @@ let emptyConeBaseline (root: string) : Result<string, string> =
                     | true, t when t.ValueKind = JsonValueKind.String -> Some(t.GetString())
                     | _ -> None
 
-                tree, describeStrictRun doc.RootElement
+                tree, strictVerdictFault doc.RootElement, describeStrictRun doc.RootElement
             with :? JsonException ->
-                None, ""
+                None, Some "is not JSON", ""
 
-        match tree with
-        | None -> Error(sprintf "the leg has NO STRICT BASELINE: %s names no `tree`" coneBaselinePath)
-        | Some tree ->
+        match tree, fault with
+        | _, Some why -> Error(sprintf "the leg has NO STRICT BASELINE: %s %s" coneBaselinePath why)
+        | None, None -> Error(sprintf "the leg has NO STRICT BASELINE: %s names no `tree`" coneBaselinePath)
+        | Some tree, None ->
             match resolveCommit root tree with
             | Error _ ->
                 Error(
@@ -2279,113 +2668,84 @@ let private writeJson (path: string) (write: Utf8JsonWriter -> unit) =
 /// working tree matches HEAD in everything a module reads, since otherwise the run verified bytes
 /// no commit holds. `Ok` is the line to print; `Error` says why nothing was written.
 ///
-/// `runFacts` (Phase 399) is the JSON the kit writes under `-SummaryFile`: its `machine` and
-/// `contention` members are copied into the record as they are, so a reader comparing two baselines
-/// can tell a quiet machine from a busy one and one machine from another. A facts file that cannot
-/// be read records the run without them and says so, because the facts describe the run and never
-/// decide whether it is recorded.
-let recordStrictBaseline
-    (root: string)
-    (runs: int)
-    (recordedAt: DateTimeOffset)
-    (runFacts: string option)
-    : Result<string, string> =
-    let runFactsDoc, factsNote =
-        match runFacts with
-        | None -> None, ""
-        | Some path ->
-            try
-                let doc = JsonDocument.Parse(File.ReadAllText path)
+/// The record IS the run's verdict (Phase 522): `verdictFile` is the record the kit wrote and
+/// `check.ps1` completed (`proofs/obj/last-run.json`), copied member for member beneath the tree it
+/// verified and when, so a baseline and any other run are read by one reader. A verdict that is not
+/// a green, strict, full run is refused rather than recorded: the baseline must be what it says.
+let recordStrictBaseline (root: string) (recordedAt: DateTimeOffset) (verdictFile: string) : Result<string, string> =
+    let verdict =
+        try
+            let doc = JsonDocument.Parse(File.ReadAllText verdictFile)
 
-                if doc.RootElement.ValueKind = JsonValueKind.Object then
-                    Some doc, ""
-                else
-                    doc.Dispose()
-                    None, sprintf " (the run facts in %s are not a JSON object, so the record carries none)" path
-            with
-            | :? JsonException
-            | :? IOException as e ->
-                None, sprintf " (the run facts in %s could not be read, so the record carries none: %s)" path e.Message
+            match strictVerdictFault doc.RootElement with
+            | None -> Ok doc
+            | Some why ->
+                doc.Dispose()
+                Error(sprintf "NOT recorded: the run verdict in %s %s" verdictFile why)
+        with
+        | :? JsonException
+        | :? IOException as e ->
+            Error(sprintf "NOT recorded: the run verdict in %s could not be read: %s" verdictFile e.Message)
 
-    use _runFactsDoc =
-        match runFactsDoc with
-        | Some d -> d :> IDisposable
-        | None ->
-            { new IDisposable with
-                member _.Dispose() = () }
+    match verdict with
+    | Error why -> Error why
+    | Ok doc ->
+        use doc = doc
 
-    match resolveCommit root "HEAD" with
-    | Error e -> Error e
-    | Ok head ->
-        match coneFactsSince root head with
+        match resolveCommit root "HEAD" with
         | Error e -> Error e
-        | Ok facts ->
-            let moved = computeCone facts |> List.filter (fun r -> r.Verdict = In)
+        | Ok head ->
+            match coneFactsSince root head with
+            | Error e -> Error e
+            | Ok facts ->
+                let moved = computeCone facts |> List.filter (fun r -> r.Verdict = In)
 
-            if not (List.isEmpty moved) then
-                Error(
-                    sprintf
-                        "NOT recorded: the working tree differs from HEAD in what %d module(s) read (first: %s, %s), so this run verified bytes no commit holds. Commit, then re-run -Strict to record a baseline"
-                        moved.Length
-                        moved.Head.Module
-                        moved.Head.Reason
-                )
-            else
-                let prover =
-                    try
-                        use pin = JsonDocument.Parse(workingText root "proofs/fstar-pin.json")
-
-                        match pin.RootElement.TryGetProperty "fstar" with
-                        | true, v when v.ValueKind = JsonValueKind.String -> v.GetString()
-                        | _ -> "unknown"
-                    with :? JsonException ->
-                        "unknown"
-
-                writeJson (Path.Combine(root, coneBaselinePath)) (fun w ->
-                    w.WriteString("kind", "proofStrictBaseline")
-
-                    w.WriteString(
-                        "$comment",
-                        "The last green -Strict FULL run of the proof leg, written by proofs/check.ps1 (Phase 328) and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on."
+                if not (List.isEmpty moved) then
+                    Error(
+                        sprintf
+                            "NOT recorded: the working tree differs from HEAD in what %d module(s) read (first: %s, %s), so this run verified bytes no commit holds. Commit, then re-run -Strict to record a baseline"
+                            moved.Length
+                            moved.Head.Module
+                            moved.Head.Reason
                     )
+                else
+                    writeJson (Path.Combine(root, coneBaselinePath)) (fun w ->
+                        w.WriteString("kind", "proofRunVerdict")
 
-                    w.WriteString("tree", head)
-                    w.WriteStartObject "run"
-                    w.WriteBoolean("strict", true)
-                    w.WriteNumber("runs", runs)
-                    w.WriteNumber("modules", facts.Roster.Length)
-                    w.WriteString("prover", prover)
-                    w.WriteString("recordedAt", recordedAt.UtcDateTime.ToString "yyyy-MM-ddTHH:mm:ssZ")
+                        w.WriteString(
+                            "$comment",
+                            "The run verdict of the last green -Strict FULL run of the proof leg, with the tree it verified, written by proofs/check.ps1 and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on."
+                        )
 
-                    match runFactsDoc with
-                    | Some doc ->
-                        for name in [ "machine"; "contention"; "costs"; "findings" ] do
-                            match doc.RootElement.TryGetProperty name with
-                            | true, v ->
-                                w.WritePropertyName name
-                                v.WriteTo w
-                            | _ -> ()
-                    | None -> ()
+                        w.WriteString("tree", head)
+                        w.WriteString("recordedAt", recordedAt.UtcDateTime.ToString "yyyy-MM-ddTHH:mm:ssZ")
 
-                    w.WriteEndObject())
+                        for p in doc.RootElement.EnumerateObject() do
+                            if p.Name <> "kind" && p.Name <> "tree" && p.Name <> "recordedAt" then
+                                p.WriteTo w)
 
-                Ok(
-                    sprintf
-                        "strict baseline recorded in %s: the -Strict full run of %s (%d run(s), %d modules)%s. Commit the file."
-                        coneBaselinePath
-                        (short head)
-                        runs
-                        facts.Roster.Length
-                        factsNote
-                )
+                    let runs =
+                        match doc.RootElement.TryGetProperty "runs" with
+                        | true, r when r.ValueKind = JsonValueKind.Number -> r.GetInt32()
+                        | _ -> 0
+
+                    Ok(
+                        sprintf
+                            "strict baseline recorded in %s: the -Strict full run of %s (%d run(s), %d modules). Commit the file."
+                            coneBaselinePath
+                            (short head)
+                            runs
+                            facts.Roster.Length
+                    )
 
 /// `dotnet run --project tests/Fuaran.Core.Tests -- --proof-cone ...`, the half of
 /// `proofs/check.ps1 -Since` that decides. Its answer goes to the `--out` file as JSON, printed
 /// lines included, so `check.ps1` prints them itself and no console code page sits between the two.
 ///   --since <tree> --out <file>          the cone, and for an empty one the baseline verdict
-///   --record-strict <runs> [--run-facts <file>] --out <file>
-///                                        record a green -Strict full run as the baseline, with
-///                                        the kit's run facts (Phase 399) when they are named
+///   --modules <a,b,...> --out <file>     the hand cone: the named modules and what they reference
+///   --record-strict --verdict <file> --out <file>
+///                                        record a green -Strict full run's verdict (Phase 522) as
+///                                        the baseline
 /// Exit 0 when the answer was computed, whatever it is; 2 when it could not be.
 let coneCli (args: string list) : int =
     match args with
@@ -2423,35 +2783,64 @@ let coneCli (args: string list) : int =
                 w.WriteEndArray())
 
             0
-    | "--record-strict" :: runs :: rest when
-        (match rest with
-         | [ "--out"; _ ]
-         | [ "--run-facts"; _; "--out"; _ ] -> true
-         | _ -> false)
-        ->
-        let runFacts, out =
-            match rest with
-            | [ "--run-facts"; facts; "--out"; out ] -> Some facts, out
-            | _ -> None, List.last rest
+    | [ "--modules"; named; "--out"; out ] ->
+        match coneRosterFacts repoRoot with
+        | Error e ->
+            eprintfn "==== proofs: the cone could not be computed: %s" e
+            2
+        | Ok facts ->
+            let names =
+                named.Split([| ','; ' ' |], StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+                |> List.ofArray
 
-        match Int32.TryParse runs with
-        | true, n when n >= 1 ->
-            let recorded, message =
-                match recordStrictBaseline repoRoot n DateTimeOffset.UtcNow runFacts with
-                | Ok line -> true, line
-                | Error why -> false, why
+            let unknown = names |> List.filter (fun n -> not (List.contains n facts.Roster))
+
+            let rows = handCone facts names
+            let checkedModules = coneChecked rows
+
+            let verdict, message =
+                if not (List.isEmpty unknown) then
+                    "refused",
+                    sprintf
+                        "-Modules names %s, which modules.json does not register; the registered modules are %s"
+                        (String.concat ", " unknown)
+                        (String.concat ", " facts.Roster)
+                elif List.isEmpty names then
+                    "refused", "-Modules names no module"
+                else
+                    "verify", ""
 
             writeJson out (fun w ->
-                w.WriteBoolean("recorded", recorded)
-                w.WriteString("message", message))
+                w.WriteString("verdict", verdict)
+                w.WriteString("message", message)
+                w.WriteStartArray "verify"
+
+                for m in checkedModules do
+                    w.WriteStringValue m
+
+                w.WriteEndArray()
+                w.WriteStartArray "lines"
+
+                for line in renderCone "named by hand (-Modules)" rows do
+                    w.WriteStringValue line
+
+                w.WriteEndArray())
 
             0
-        | _ ->
-            eprintfn "==== proofs: --record-strict takes a positive run count, not '%s'" runs
-            2
+    | [ "--record-strict"; "--verdict"; verdictFile; "--out"; out ] ->
+        let recorded, message =
+            match recordStrictBaseline repoRoot DateTimeOffset.UtcNow verdictFile with
+            | Ok line -> true, line
+            | Error why -> false, why
+
+        writeJson out (fun w ->
+            w.WriteBoolean("recorded", recorded)
+            w.WriteString("message", message))
+
+        0
     | _ ->
         eprintfn
-            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --record-strict <runs> [--run-facts <file>] --out <file>"
+            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --modules <a,b,...> --out <file> | --proof-cone --record-strict --verdict <file> --out <file>"
 
         2
 
@@ -2470,20 +2859,9 @@ let private toyFacts (changed: string list) : ConeFacts =
       EntriesMoved = Set.empty }
 
 let private realConeFacts (changed: string list) : ConeFacts =
-    let entries = realRoster ()
-    let roster = entries |> List.map _.Module
-
-    { Roster = roster
-      Shared =
-        entries
-        |> List.filter (fun e -> e.Kind = Shared)
-        |> List.map _.Module
-        |> Set.ofList
-      References = modelReferenceGraph repoRoot roster
-      Packages = budgetPackages (File.ReadAllText(Path.Combine(repoRoot, "proofs", "modules.json")))
-      Changed = changed
-      ScriptCodeMoved = Set.empty
-      EntriesMoved = Set.empty }
+    match coneRosterFacts repoRoot with
+    | Ok facts -> { facts with Changed = changed }
+    | Error e -> failtestf "%s" e
 
 let private withVerdict (v: ConeVerdict) (rows: ConeRow list) : Set<string> =
     rows |> List.filter (fun r -> r.Verdict = v) |> List.map _.Module |> Set.ofList
@@ -2932,34 +3310,45 @@ let proofsConeTests =
                   | Error why ->
                       Expect.stringContains why "NO STRICT BASELINE" "and it says the leg has no strict baseline"
 
-                  // Phase 399 — the kit's run facts ride into the record, and the empty cone's line
-                  // names the run they describe. Written outside the toy tree, as check.ps1 does.
-                  let factsFile =
-                      Path.Combine(Path.GetTempPath(), sprintf "run-facts-%s.json" (Guid.NewGuid().ToString "N"))
+                  // Phase 522 — the record IS the run's verdict, and the empty cone's line names the
+                  // run it describes. Written outside the toy tree, as check.ps1 does.
+                  let verdictFile =
+                      Path.Combine(Path.GetTempPath(), sprintf "run-verdict-%s.json" (Guid.NewGuid().ToString "N"))
 
-                  File.WriteAllText(
-                      factsFile,
-                      """{ "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ], "costs": [ { "module": "A", "run": 1, "percent": 50 }, { "module": "B", "run": 1, "percent": 110 }, { "module": "B", "run": 2, "percent": 125 } ] }"""
-                  )
+                  let strictVerdict =
+                      """{ "kind": "proofRunVerdict", "verdict": "green", "exit": 0, "message": null, "strict": true, "runs": 3, "prover": "v0", "modules": [ "A", "B", "C" ], "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ], "costs": [ { "module": "A", "run": 1, "percent": 50 }, { "module": "B", "run": 1, "percent": 110 }, { "module": "B", "run": 2, "percent": 125 } ], "cone": null, "refusals": "held" }"""
 
                   try
+                      // Not a green, strict, full run: each is refused, naming why.
+                      for find, replace, why in
+                          [ "\"verdict\": \"green\"", "\"verdict\": \"refuted\"", "refuted run"
+                            "\"strict\": true", "\"strict\": false", "not -Strict"
+                            "\"cone\": null", "\"cone\": [ \"A\" ]", "cone run"
+                            "\"kind\": \"proofRunVerdict\"", "\"kind\": \"proofStrictBaseline\"", "not a run verdict" ] do
+                          File.WriteAllText(verdictFile, strictVerdict.Replace(find, replace))
+
+                          match recordStrictBaseline root DateTimeOffset.UtcNow verdictFile with
+                          | Ok line -> failtestf "a verdict that is no green strict full run was recorded: %s" line
+                          | Error message -> Expect.stringContains message why (sprintf "and the refusal says %s" why)
+
+                      Expect.isFalse (File.Exists(Path.Combine(root, coneBaselinePath))) "nothing was written"
+
+                      File.WriteAllText(verdictFile, strictVerdict)
+
                       match
-                          recordStrictBaseline
-                              root
-                              3
-                              (DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero))
-                              (Some factsFile)
+                          recordStrictBaseline root (DateTimeOffset(2026, 9, 30, 0, 0, 0, TimeSpan.Zero)) verdictFile
                       with
                       | Error why -> failtestf "a clean tree's strict run was not recorded: %s" why
                       | Ok _ -> ()
                   finally
-                      File.Delete factsFile
+                      File.Delete verdictFile
 
                   let recorded = File.ReadAllText(Path.Combine(root, coneBaselinePath))
                   let head = (gitOk root [ "rev-parse"; "HEAD" ]).Trim()
                   Expect.stringContains recorded head "the record names the tree the run verified"
                   Expect.stringContains recorded "quiet-box" "the record names the machine the run was on"
                   Expect.stringContains recorded "0.31" "and each run's contention factor"
+                  Expect.stringContains recorded "\"refusals\": \"held\"" "and every other member of the verdict"
                   Expect.isFalse (recorded.Contains "\r") "the record is written LF"
                   commitAll root "record the strict baseline"
 
@@ -2975,9 +3364,14 @@ let proofsConeTests =
                   File.AppendAllText(Path.Combine(root, "proofs/A.fst"), "let a2 = 2\n")
                   Expect.equal (coneIn root) (set [ "A"; "B" ]) "the working tree's model edit, and its dependant"
 
-                  match recordStrictBaseline root 1 DateTimeOffset.UtcNow None with
-                  | Ok line -> failtestf "a strict run over an uncommitted model edit was recorded: %s" line
-                  | Error why -> Expect.stringContains why "NOT recorded" "a dirty tree is never recorded"
+                  File.WriteAllText(verdictFile, strictVerdict)
+
+                  try
+                      match recordStrictBaseline root DateTimeOffset.UtcNow verdictFile with
+                      | Ok line -> failtestf "a strict run over an uncommitted model edit was recorded: %s" line
+                      | Error why -> Expect.stringContains why "NOT recorded" "a dirty tree is never recorded"
+                  finally
+                      File.Delete verdictFile
 
                   // An untracked covered source counts too.
                   writeAt root "src/Pkg.A/Y.fs" "module Y\n"
@@ -3004,7 +3398,10 @@ let proofsConeTests =
                   writeAt
                       root
                       coneBaselinePath
-                      """{ "kind": "proofStrictBaseline", "tree": "0000000000000000000000000000000000000001" }"""
+                      (strictVerdict.Replace(
+                          "\"kind\": \"proofRunVerdict\",",
+                          "\"kind\": \"proofRunVerdict\", \"tree\": \"0000000000000000000000000000000000000001\","
+                      ))
 
                   match emptyConeBaseline root with
                   | Ok line -> failtestf "a baseline naming an unknown tree was accepted: %s" line
@@ -3026,19 +3423,77 @@ let proofsConeTests =
                   "==== proofs: plan -- budget file: the declared proofs/modules.json"
                   "the budget file is the declared one, unfiltered"
 
-          testCase "-Modules names a cone by hand; an unregistered name, or -Since and -Modules together, is refused"
+          testCase "a hand cone is the named modules IN and what they reference as DEP, by -Since's closure (Phase 522)"
           <| fun _ ->
-              let code, output = runCheckScript [ "-Modules"; "Chain,Limits"; "-PlanOnly" ]
-              Expect.equal code 0 (sprintf "a registered hand cone plans:\n%s" output)
+              // The toy tree: C opens B opens A; D stands alone.
+              let rows = handCone (toyFacts []) [ "C" ]
+              Expect.equal (withVerdict In rows) (set [ "C" ]) "the named module is in"
 
               Expect.equal
-                  (plannedModules output)
-                  (realModules () |> List.filter (fun m -> m = "Chain" || m = "Limits"))
-                  "exactly the named modules, in the roster's order"
+                  (withVerdict Dependency rows)
+                  (set [ "A"; "B" ])
+                  "and everything it references, transitively, as DEP"
 
-              let code, output = runCheckScript [ "-Modules"; "NoSuchModel"; "-PlanOnly" ]
-              Expect.notEqual code 0 "an unregistered name is refused"
-              Expect.stringContains output "NoSuchModel" "and the refusal names it"
+              Expect.equal (coneChecked rows) [ "A"; "B"; "C" ] "handed to the kit in the roster's order"
+              Expect.equal (withVerdict Out rows) (set [ "D" ]) "and nothing else"
+
+              // The real tree, and the defect it closes: `-Modules Limits` used to hand the kit Limits
+              // alone, and Limits' extraction failed as an APPARATUS fault because nothing had checked
+              // the shared Twin it opens.
+              let facts = realConeFacts []
+              let real = handCone facts [ "Limits" ]
+              Expect.equal (withVerdict In real) (set [ "Limits" ]) "Limits is in"
+
+              Expect.isTrue
+                  (Set.isSubset (facts.References |> Map.find "Limits") (withVerdict Dependency real))
+                  "and every module it opens is checked ahead of it"
+
+              Expect.isTrue (withVerdict Dependency real |> Set.contains "Twin") "the shared Twin among them"
+
+              Expect.equal
+                  (coneChecked real)
+                  (facts.Roster
+                   |> List.filter (fun m -> m = "Limits" || (withVerdict Dependency real).Contains m))
+                  "in the roster's order, so every dependency is checked before the module that needs it"
+
+          testCase
+              "-Modules is answered by the cone tool; an unregistered name, or -Since and -Modules together, is refused"
+          <| fun _ ->
+              // The tool's answer, in-process: the same function `check.ps1 -Modules` asks.
+              let out =
+                  Path.Combine(Path.GetTempPath(), sprintf "hand-cone-%s.json" (Guid.NewGuid().ToString "N"))
+
+              try
+                  Expect.equal (coneCli [ "--modules"; "Chain,Limits"; "--out"; out ]) 0 "the tool answers"
+                  use doc = JsonDocument.Parse(File.ReadAllText out)
+
+                  Expect.equal
+                      (doc.RootElement.GetProperty("verdict").GetString())
+                      "verify"
+                      "a registered hand cone verifies"
+
+                  Expect.equal
+                      [ for m in doc.RootElement.GetProperty("verify").EnumerateArray() -> m.GetString() ]
+                      (coneChecked (handCone (realConeFacts []) [ "Chain"; "Limits" ]))
+                      "the named modules and their closure"
+
+                  Expect.equal (coneCli [ "--modules"; "NoSuchModel"; "--out"; out ]) 0 "the tool answers a refusal too"
+                  use refused = JsonDocument.Parse(File.ReadAllText out)
+
+                  Expect.equal
+                      (refused.RootElement.GetProperty("verdict").GetString())
+                      "refused"
+                      "an unregistered name is refused"
+
+                  Expect.stringContains
+                      (refused.RootElement.GetProperty("message").GetString())
+                      "NoSuchModel"
+                      "and the refusal names it"
+              finally
+                  File.Delete out
+
+              let script = File.ReadAllText checkScriptPath
+              Expect.stringContains script "'--modules'" "check.ps1 asks the cone tool for a hand cone"
 
               let code, _ = runCheckScript [ "-Since"; "HEAD"; "-Modules"; "Chain"; "-PlanOnly" ]
-              Expect.notEqual code 0 "a cone named two ways is refused" ]
+              Expect.notEqual code 0 "a cone named two ways is refused, before anything is built" ]

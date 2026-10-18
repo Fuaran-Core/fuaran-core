@@ -1182,7 +1182,8 @@ same change that moves the pin (`kit/README.md`, "The pin moves in one place", h
 the kit refuses a mirror that names a different release than the pin.
 
 **Which run gates a publish (Phase 393).** The tag workflow (`.github/workflows/publish-packages.yml`)
-runs its own `proofs` job — `./proofs/check.ps1 -Runs 3`, step for step the ci job — on the tagged
+runs its own `proofs` job — `./proofs/check.ps1 -Runs 3`, the ci job's leg except that it runs the
+oracle HOST step, which the ci job skips (`-SkipOracleHost`) because its own suite job runs those families — on the tagged
 commit, and its `publish` job `needs:` it, so nothing is packed over a red leg. The alternative was a
 step reading the tagged commit's `ci` proof-job conclusion through the Checks API and refusing
 anything but `success`; it was declined. A Checks-API read answers a question about a DIFFERENT run
@@ -1234,10 +1235,11 @@ which F\* requires and which prose read as code would break.
 
 **`DEP` is not `IN`.** A module the cone references whose own inputs did not change is checked
 *ahead* of the modules that need it — on a cold cache the prover must check it anyway before it can
-check them — and listed as `DEP`, so every clock the leg prints is its own module's and a budget or
-floor is compared against the module it was seeded for. `-Modules <list>` is exactly what it
-names and nothing else, so there a named module's clock includes whatever it references; use
-`-Since` when the timings matter.
+check them — and listed as `DEP`, so every clock the leg prints is its own module's and a budget is
+compared against the module it was seeded for. `-Modules <list>` is the named modules `IN` and what
+they reference `DEP`, by the same closure and the same tool (Phase 522): until then a hand cone was
+exactly what it named, and a named model whose shared modules were not named failed at extraction as
+an apparatus fault, because nothing had checked the modules it opens.
 
 **Where it is computed.** In the host test project (`--proof-cone`, beside `parseRoster` in
 `../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`), which `check.ps1` builds and asks before it hands
@@ -1246,15 +1248,17 @@ same function the `Proofs.Ladder` family reads it with, so the ladder and the se
 disagree about which models exist. The kit is handed the cone and a copy of `modules.json` without
 the entries of registered modules left `OUT`, so its both-ways budget coverage still fires for every
 module it checks and for any orphan entry; the kit itself is unchanged. **With neither switch,
-`check.ps1` hands the kit exactly the arguments it handed it before this phase**, so the full leg's
-verdict cannot move — `-PlanOnly` prints those arguments, and the family holds them to the roster.
+`check.ps1` hands the kit the whole roster and the declared budget file**, so the full leg's verdict
+cannot move — `-PlanOnly` prints those arguments, and the family holds them to the roster.
 
-**An empty cone is green only over a recorded strict run.** A green `-Strict` *full* run writes
-`proofs/last-strict.json` — the tree it verified, and the run — and whoever ran it commits the file.
-Since Phase 399 the run includes the machine (a CI runner or a local machine, its OS, processor count
-and memory; never a local host name, since the file is committed) and each run's contention factor,
-and the green empty-cone line repeats them, so a reader can see what stands behind it. The weekly
-`proofs-strict` workflow (below) produces a fresh record as an artefact.
+**Every run leaves one record, and an empty cone is green only over a recorded strict run.** Every
+run of the leg writes its **run verdict** (Phase 522; `kit/check-proof-leg.ps1`'s header, "THE RUN
+VERDICT", is the field list) to `proofs/obj/last-run.json`, red or green, with the cone it ran and
+whether the refusal tests held. A green `-Strict` *full* run's record, with the tree it verified, is
+`proofs/last-strict.json`, and whoever ran it commits the file: the same record, so a baseline and any
+other run are read by one reader. The green empty-cone line repeats its machine, contention and
+over-budget modules, so a reader can see what stands behind it. The weekly `proofs-strict` workflow
+(below) produces a fresh record as an artefact.
 An empty cone exits green only when that tree is an ancestor of HEAD **and** the cone against it is
 empty too, so an empty cone against some later tree cannot lean on a baseline that predates a change
 nobody verified. Otherwise the leg says it has **no strict baseline** and exits 1. The record is
@@ -1396,9 +1400,9 @@ classified.
 
 ### "Cold cache" means it, and "verified" has a floor (Phase 164)
 
-> **Superseded in part by Phase 399.** The per-module floors described at the end of this section
-> are retired. One absolute **cached-read threshold** answers the question they answered; see
-> "Cached read or cold check" below. The per-invocation cache and the cache provenance check stand.
+> **Superseded in part by Phase 399.** The per-module floors are retired: one absolute **cached-read
+> threshold** answers the question they answered (see "Cached read or cold check" below, and the kit
+> engine's header, step 1). The per-invocation cache and the cache provenance check stand.
 
 On 2026-09-14 a background `check.ps1` was orphaned at a turn boundary and went on writing the
 then-shared `proofs/obj/cache` while a replacement run started in the same worktree; the
@@ -1417,33 +1421,18 @@ the cache somewhere you name instead: it is still cleared before every run — o
 would quietly mean "warm" — so the script refuses a directory holding anything but `*.checked`
 files, and leaves it in place at exit, because you named it.
 
-**Each module declares a floor as well as a budget**, `floorSeconds` beside `budgetSeconds` in
-`modules.json`, and a module that verifies in **less** than its floor **fails** the leg on the
-spot, naming the module and the time. The asymmetry with the ceiling is deliberate. An overshoot
-is a true measurement of a true cost, so it warns and the leg stays green; an undershoot says the
-apparatus is broken rather than the module fast, and every module measured after it shares that
-apparatus — implausibly fast is the one direction in which a lie looks like good news. The seeding
-rule is the budget's mirror, in the file's own `floorSeeding` block: **the fastest genuine cold run
-ever observed, halved**, rounded down, and **0** for a module whose fastest cold run is under 5s,
-where halving lands inside process-start noise. `Skeleton` is that case at about one second, so its
-floor is 0 and the file says so — which makes it the one module a shared cache could still speed up
-unnoticed, and the per-invocation directory rather than the floor is what covers it. Halving on top
-of the fastest-ever run leaves an enormous margin, and it costs nothing in detection because the
-failure this catches lands at or near zero seconds. A module with **no** `floorSeconds` is a cost
-finding, not a failure — a sibling adding a model should no more go red for a floor nobody has
-measured than for a budget nobody has measured — and re-seeding a floor downwards is the same
-recorded act as bumping a budget upwards: the new number, the `fastestSeconds` it came from, and
-your phase. `-NoFloor` is the deliberate opt-out for a machine genuinely that fast, and the log
-says when it was passed.
-
 **The host step runs two families, and the second is about this document.** `../proofs.json`
 declares the claims ladders below as data — what is proved, what is only tested, what is assumed —
 and since Phase 144 the leg CHECKS it rather than trusting it: the `Proofs.Ladder` family
 (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`) holds every row to this tree. A `proved` row's
 `evidence.theorem` must be a top-level `val` / `let` / `let rec` of that name in the model it
 names; that model must be one the roster (`modules.json`) registers, and must be there; a `tested`
-row must name `Proofs.Oracle` cases that exist; every model in the roster (every entry but the two
-`shared` modules) must have at least one `proved` row; and every row's `phase` and `level` must be the closed forms. So renaming a theorem without
+row's family must be one of three closed forms (`Proofs.Oracle`, `Conformance.<law>`,
+`Suite:<Module>.<list>`) and its cases must be cases of that family; every model in the roster (every
+entry but the two `shared` modules) must have at least one `proved` row; every row's `phase` and
+`level` must be the closed forms; and since Phase 522 every row states what it claims in `statement`
+and what it does not cover in `boundary`, tells no history in either (its `phase` is its one
+citation), and carries `claim` as their exact join for registries that still read it. So renaming a theorem without
 touching the file, or adding a model with no claim written down, fails the leg with the row named
 — the same posture as oracle drift, applied to the ladder. Each clause has a go-red fixture beside
 it (`../tests/Fuaran.Core.Tests/fixtures/proofs-ladder/`), so a green ladder is known to be one
@@ -1492,15 +1481,9 @@ least `cachedRead.appliesFromFastestSeconds`, which is **3s**, three times the t
 covers a machine about twice as fast as this one, which is what the Linux runner measured
 (`WireColumn` at 16s there).
 
-**Why the floors are retired.** A floor (Phase 164) was the fastest cold run observed, halved: one
-number per module, and in practice per machine. The first Linux run broke one, and Phase 402 switched
-floors off on every OS but the one they were seeded on. The measurement above shows there is nothing
-between a cached read and a cold check for a per-module number to see: a module is either read back
-in half a second or checked. A faster machine reads a cache faster still and stays under the
-threshold, so no OS gate is needed. A much slower machine could take more than a second to read a
-cache, so the threshold would miss; that is the safe direction, and the provenance check still runs.
-A budget file still carrying `floorSeeding` or a `floorSeconds` is refused by name, so a declaration
-cannot keep describing a gate that no longer exists. `fastestSeconds` stays as the threshold's input.
+**The per-module floors are retired**, and a budget file still carrying `floorSeeding` or a
+`floorSeconds` is refused by name; `fastestSeconds` stays as the threshold's input. Why one threshold
+replaces them, and why no OS gate is needed, is stated once in the kit engine's header (step 1).
 
 **Observed and not adopted.** Every cold check above printed at least three `Quake:` query lines
 and every cached read printed none. That is a second discriminator that needs no clock, but this
@@ -1556,14 +1539,13 @@ a budget at all.
 **The strict run is scheduled (Phase 399).** CI's `proofs` job does not pass `-Strict`, so on a push
 an overshoot is only ever a warning, and a real regression could stay a warning forever. The
 `proofs-strict` workflow (`.github/workflows/proofs-strict.yml`) runs `check.ps1 -Runs 3 -Strict` on
-a Windows runner every Monday and on demand, never on a push or a tag. Its job summary lists every
-`COST` finding against `modules.json` with its percentage, and those are the trend: a module that is
-over budget week after week is the case for the re-seeding act in the next paragraph, once a quiet
-re-measurement confirms the module really grew. A cost finding never makes the run red. The run is
-**red** when a model does not verify, when the cache provenance check catches a second writer, or
-when a check finishes under the cached-read threshold. A **green** run records the strict
-baseline (each module's time against its budget, the over-budget modules named) and uploads it as
-the `strict-baseline` artefact. The workflow commits nothing; a
+a Windows runner every Monday and on demand, never on a push or a tag. Its job summary is read from
+the run's verdict record, never from the log: the verdict and its red line, and every `COST` finding
+against `modules.json` with its percentage, which are the trend — a module that is over budget week
+after week is the case for the re-seeding act in the next paragraph, once a quiet re-measurement
+confirms the module really grew. A cost finding never makes the run red; what does is the kit
+engine's header's to say. A **green** run records the strict baseline and uploads it as the
+`strict-baseline` artefact, beside the run's verdict record. The workflow commits nothing; a
 maintainer commits the file when `-Since` should lean on that run.
 
 **Bumping a budget is a deliberate, recorded act.** Time the module on a cold, otherwise-quiet run,
@@ -1596,77 +1578,27 @@ Phase 182 measured `Capability` at 75s against its 20s budget on a run contended
 gates. Every one of those ran beside five other provers, and every one reads in the log exactly like
 a regression.
 
-So the leg measures the afternoon directly. At the end of **each run** it reports the **median**,
-over the modules this working tree did **not** change, of what each module just cost divided by the
-`measuredSeconds` its entry records:
+So the leg measures the afternoon directly. At the end of every **run** it reports a **contention factor** — the median, over the
+modules the working tree did not change, of what each just cost divided by the `measuredSeconds` its
+budget entry records — and labels every cost finding from a run above the budget file's
+`contentionSeeding.threshold` a CONTENDED PASS, which is **not a re-seed obligation**:
 
 ```
 ==== proofs: contention — run 1 of 1, x0.29 over 16 untouched module(s), at or under the x0.80 threshold: an ordinary pass. A cost finding on this run is about its module.
-```
-
-and when the machine was busy, the same line says so and the finding it qualifies carries the label
-where the closing verdict prints it — this pair is from the phase's own probe, which lowered the
-threshold to 0.20 and one budget to 8s so that an ordinary pass crosses it, the labelling path being
-the same one a genuinely contended pass takes:
-
-```
 ==== proofs: contention — run 1 of 1, x0.29 over 4 untouched module(s), ABOVE the x0.20 threshold: this was a CONTENDED pass. 1 cost finding(s) on this run carry the label, and a labelled finding is NOT a re-seed obligation.
      ColumnOps.fst took 12s against its 8s budget on run 1 of 1 — 4s over, 150% of budget — CONTENDED PASS (x0.29 against a x0.20 threshold): the modules this tree did not change ran x0.29 of their recorded measurements on this run, so this figure measures the afternoon and not the module
 ```
 
-An untouched module's cost is a fact about the machine and not about the tree, so a pass in which all
-of them came in at 1.7× their recorded measurements is a pass in which the machine was 1.7× slower,
-whatever any one line says. The median rather than the mean, because a module hitting a pathological
-query — or aborting and retrying — is exactly the outlier a mean would launder into the number.
-
-Above the threshold, every cost finding from that run is **labelled** where the closing verdict
-prints it, and the label carries the whole consequence: **a labelled finding is not a re-seed
-obligation.** Re-seeding a budget from a contended run raises a ceiling to fit a slow afternoon,
-which is how a budget stops meaning anything — the judgement Phase 162 had to make by hand and argue
-in prose. What is new is that the leg makes it, and says so. Until Phase 399 `check.ps1 -Strict`
-promoted the **unlabelled** findings to a red leg; since then it promotes no cost finding at all, and
-the label is what tells a reader of the strict record which overruns measure the machine. Coverage and
-shape findings belong to no run, are never labelled, and are still red under `-Strict`.
-
-**The number's scale is not the obvious one, and this was measured rather than assumed.**
-`measuredSeconds` is not a typical cost — by `seeding`'s own rule it is the **slowest** cold run ever
-observed for that module, and most of the entries below were seeded under six concurrent sessions. So
-the ratio's neutral point sits well *below* one: a quiet cold pass of this leg measures **x0.29**, not
-x1, and the 2026-09-14 contended runs sit near x1.0 because `measuredSeconds` *is* one of them. A
-threshold picked as though 1.0 meant "normal" would sit above any contention this leg can experience
-and would never fire — the *detector that cannot fire* that `TreeOps`'s own entry warns about. The
-threshold therefore lives in `modules.json`'s `contentionSeeding` block, seeded from a measured quiet
-pass and a measured contended one with both figures recorded there, and re-seeding it is the same
-deliberate recorded act as bumping a budget.
-
-Four more things about it are worth knowing before reading a factor:
-
-- **Nothing is multiplied into a measurement.** The seconds a green line prints stay the wall clock
-  the module took, and the factor sits beside them. A normalised measurement would be a number nobody
-  observed, and the value of this leg's cost half is that every figure in it is one somebody's machine
-  really produced. The same reason the optional per-entry `contentionFactor` — recorded beside a
-  `measuredSeconds` by whichever phase seeds it, saying what the machine was doing at the time — is
-  **provenance only**: the leg holds it to its shape and computes nothing from it, and an absent one
-  reads as "not recorded", never as 1.
-- **The untouched set is derived, not declared** — `git status --porcelain` over `proofs/`, so
-  modified, staged and brand-new all count and no branch name is assumed. Its limit: a session that
-  has already **committed** its model edits has a clean tree, so its module reads as untouched and
-  votes. The median absorbs one or two such ratios out of a dozen, and that is the honest boundary of
-  what a working-tree question can answer. Where git cannot answer at all, every module counts as
-  untouched and the leg says so on its own line — "I could not tell" must never print as "nothing is
-  touched".
-- **A module too cheap to time does not vote.** The clock is whole seconds, so `Skeleton` at 0s
-  against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the
-  machine. The cut is `contentionSeeding.minimumSeconds` (until Phase 399 the retired floors'
-  `floorSeeding.zeroBelowSeconds`, moved with its argument); `Skeleton`, `Limits` and `WireVersioning` are the three it excludes
-  here. A run with fewer than `contentionSeeding.minimumSamples` contributors reports the factor as
-  **not computed** rather than taking a median of one.
-- **The label arrives after the finding, and that ordering is deliberate.** A ceiling finding prints
-  unlabelled at the moment it fires, because at that instant the leg genuinely does not yet know what
-  kind of afternoon it is having — the factor is read off the run's own measurements and does not
-  exist until they are all in. The run's contention line follows a few lines later, and the closing
-  verdict prints every finding with its label. Printing a label the leg could not have computed would
-  be a worse lie than printing the measurement alone.
+(the first from a quiet cold pass of this leg, the second from Phase 171's probe, which lowered the
+threshold to 0.20 and one budget to 8s). **The explanation lives once, in the kit engine's
+header** (`kit/check-proof-leg.ps1`: THE CONTENTION FACTOR, WHAT THE NUMBER'S SCALE ACTUALLY IS, and its
+sections 2b and 3c): why the neutral point sits well below one and the threshold must be seeded from a
+measured quiet pass and a measured contended one, why nothing is multiplied into a measurement, how
+the untouched set is derived and where that stops, why a module too cheap to time does not vote
+(`minimumSeconds`, `minimumSamples`), why an absent `contentionSeeding` block is not a finding, and
+why an entry's optional `contentionFactor` is provenance only. This repository's seeding record is the
+`contentionSeeding` block itself, and every run's factor and label are in its run verdict
+(`proofs/obj/last-run.json`).
 
 **The two cost cliffs, to be read before the next model is written.** Both have been paid for once:
 

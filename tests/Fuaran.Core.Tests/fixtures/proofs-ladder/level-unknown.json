@@ -6,7 +6,9 @@
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A clean proved row.",
+      "statement": "A clean proved row.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A clean proved row. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -17,7 +19,9 @@
     {
       "id": "fixture-invented",
       "level": "believed",
-      "claim": "A row at a level the ladder does not define.",
+      "statement": "A row at a level the ladder does not define.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A row at a level the ladder does not define. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "assumption": "nothing"
