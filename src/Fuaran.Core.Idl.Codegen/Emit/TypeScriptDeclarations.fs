@@ -219,7 +219,10 @@ module internal TypeScriptDeclarations =
     /// vocabulary type spelled like a name the file declares for itself (`Node`, `NodeKind`, a
     /// `<Kind>Spec`, `DecodeRefusal`) is refused as `UnsupportedConstruct` rather than declared
     /// twice.
-    let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+    ///
+    /// Phase 505 — this is the file UNSTAMPED, so a caller that adds to it (the derivations)
+    /// stamps the text it actually emits; [[typescriptDeclarations]] is it under its [[Stamp]].
+    let typescriptDeclarationsBody (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
 
         let enums, unions, records = referenced idl kinds
@@ -330,10 +333,7 @@ module internal TypeScriptDeclarations =
                 )
             )
         | None ->
-            [ [ Ok(
-                    "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 252 — type declarations for the TS backend). Do not edit by hand."
-                ) ]
-              enumDecls
+            [ enumDecls
               recordDecls
               unionDecls
               specDecls
@@ -349,3 +349,11 @@ module internal TypeScriptDeclarations =
             |> List.concat
             |> concatR "\n\n"
             |> Result.map (fun s -> normalizeEol s + "\n")
+
+    /// Phase 505 — a TypeScript declaration file's [[Stamp]], over its normalised text.
+    let tsDeclarationsStamp (idl: Idl) (body: string) : string =
+        Stamp.generated (CommentStyle.Line "//") "TypeScript declarations" [ idl ] body
+
+    /// The declarations [[typescriptDeclarationsBody]] emits, under their stamp.
+    let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+        typescriptDeclarationsBody idl kindTags |> Result.map (tsDeclarationsStamp idl)

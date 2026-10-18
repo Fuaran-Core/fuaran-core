@@ -206,8 +206,8 @@ let tests =
 
           testCase "a doc on one member regenerates with exactly the added /// lines and nothing else"
           <| fun _ ->
-              let before = emit undocumented |> lines
-              let after = emit docIdl |> lines
+              let before = emit undocumented |> Snapshots.unstamped |> lines
+              let after = emit docIdl |> Snapshots.unstamped |> lines
 
               match addedLines before after with
               | None ->
@@ -352,7 +352,11 @@ let tests =
                           [ { Name = "Pair"
                               Fields = [ f "left" TStr Required |> withDoc " \r\n\t "; f "right" TStr Required ] } ] }
 
-              Expect.equal (emit blank) (emit undocumented) "a blank doc is byte-identical to none"
+              // Below the stamp (Phase 505): the doc is in the vocabulary, so its identity line moves.
+              Expect.equal
+                  (Snapshots.unstamped (emit blank))
+                  (Snapshots.unstamped (emit undocumented))
+                  "a blank doc is byte-identical to none"
 
           testCase "the committed DocAnnotatedGenerated.fs is what the generator emits (compiled under FS3390-as-error)"
           <| fun _ ->
