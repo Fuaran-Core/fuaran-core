@@ -4055,6 +4055,12 @@ let twins : list twin = [
     tholds = (fun () ->
       not (ix_is_fresh_for (TNode "root" "doc" [ TNode "a" "sec" [ TNode "n" "para" [] ] ]) (ix_build twin_tree))) };
   { tname = "index-try-build-names-the-repeat";
-    tholds = (fun () -> ix_try_build (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = Error "a") } ]
+    tholds = (fun () -> ix_try_build (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = Error "a") };
+  { tname = "footprint-in-resolves-a-removal";
+    tholds = (fun () ->
+      let f = fp_in_all twin_tree [ RemoveNode "a" ] in
+      f.structure_writes = [ "root" ] && f.content_writes = [ "a" ] && f.unknown_parent_writes = []) };
+  { tname = "footprint-in-falls-back-when-the-tree-is-silent";
+    tholds = (fun () -> fp_in_all twin_tree [ RemoveNode "ghost" ] = fp_all [ RemoveNode "ghost" ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)
