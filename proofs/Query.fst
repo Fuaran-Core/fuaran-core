@@ -2635,8 +2635,8 @@ let query_error_json (#r:Type) (cc:column_codec r) (e:wire_query_error) : Tot C.
   | QRefused (RequiredParamsNull names) -> C.JObj [("$type", C.JStr "requiredParamsNull"); ("names", strs_j names)]
   | QRefused (DuplicateParam name) -> C.JObj [("$type", C.JStr "duplicateParam"); ("name", C.JStr name)]
   | QPolicyRefused policy reason allowed ->
-    C.JObj [("$type", C.JStr "policyRefused"); ("policy", C.JStr policy); ("reason", C.JStr reason); ("allowed", strs_j allowed)]
-  | QApprovalRequired policy -> C.JObj [("$type", C.JStr "approvalRequired"); ("policy", C.JStr policy)]
+    C.JObj [("$type", C.JStr "queryPolicyRefused"); ("policy", C.JStr policy); ("reason", C.JStr reason); ("allowed", strs_j allowed)]
+  | QApprovalRequired policy -> C.JObj [("$type", C.JStr "queryApprovalRequired"); ("policy", C.JStr policy)]
   | QUnreadableArgs err -> C.JObj [("$type", C.JStr "unreadableArgs"); ("error", decode_error_json err)]
   | QRefused (UnknownColumn name declared) ->
     C.JObj [("$type", C.JStr "unknownColumn"); ("name", C.JStr name); ("declared", strs_j declared)]
@@ -2676,10 +2676,10 @@ let query_error_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder w
    ("timeout", C.d_succeed (QRefused Timeout));
    ("requiredParamsNull", C.d_map (qrefused RequiredParamsNull) (sl_f "names"));
    ("duplicateParam", C.d_map (qrefused DuplicateParam) (s_f "name"));
-   ("policyRefused",
+   ("queryPolicyRefused",
     C.both (s_f "policy") (C.both (s_f "reason") (sl_f "allowed") (fun rs a -> (rs, a)))
            (fun p (ra:(string & list string)) -> QPolicyRefused p (fst ra) (snd ra)));
-   ("approvalRequired", C.d_map QApprovalRequired (s_f "policy"));
+   ("queryApprovalRequired", C.d_map QApprovalRequired (s_f "policy"));
    ("unreadableArgs", C.d_map QUnreadableArgs (C.field "error" decode_error_of_j));
    ("unknownColumn", C.both (s_f "name") (sl_f "declared") (fun n d -> QRefused (UnknownColumn n d)));
    ("predicateTypeMismatch",

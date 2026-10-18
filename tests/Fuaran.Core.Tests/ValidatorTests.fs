@@ -194,6 +194,61 @@ let tests =
               let inRange = defects |> List.find (fun d -> d.Code = "COL-INRANGE")
               Expect.equal inRange.Node (Some "score#2") "located at score#2"
 
+          // Phase 497 — `ofType` read each cell's type back from its text, and a millisecond
+          // column renders a whole-second instant with no fraction, which reads back as seconds:
+          // every whole-second row of a column of the declared type was a COL-OFTYPE error (the
+          // fixture run before the fix recorded 2 defects here, at c#0 and c#1). The rule is about the column.
+          testCase "ofType over a millisecond column of whole-second instants reports nothing"
+          <| fun _ ->
+              let c =
+                  Column.ofTimestamps
+                      "c"
+                      TimeUnit.Milliseconds
+                      (Vector.ofList [ 0.0; 60.0; 120.0; 180.0 ])
+                      (Some(Vector.ofList [ 0; 0; 250; 0 ]))
+                      (Validity.ofList [ true; true; true; false ])
+
+              let t: Table =
+                  { Schema = [ Field.create "c" (TimestampType TimeUnit.Milliseconds) ]
+                    Columns = [ c ] }
+
+              Expect.equal ((ColumnValidator.ofType "c" (TimestampType TimeUnit.Milliseconds)).Run t) [] "no defect"
+
+          testCase "ofType reports nothing on a column of its declared type, whatever its cells"
+          <| fun _ ->
+              let t: Table =
+                  { Schema = [ Field.create "s" StringType ]
+                    Columns = [ cellColumn "s" StringType [ Str "a"; Null; Str "" ] ] }
+
+              Expect.equal ((ColumnValidator.ofType "s" StringType).Run t) [] "no defect"
+
+          testCase "ofType reports one defect for a column of another type, at the column"
+          <| fun _ ->
+              let t: Table =
+                  { Schema = [ Field.create "n" IntType ]
+                    Columns = [ cellColumn "n" IntType [ Int 1; Int 2; Null; Int 4 ] ] }
+
+              match (ColumnValidator.ofType "n" StringType).Run t with
+              | [ d ] ->
+                  Expect.equal d.Code "COL-OFTYPE" "code"
+                  Expect.equal d.Severity Severity.Error "severity"
+                  Expect.equal d.Node (Some "n") "located at the column, not at a row"
+                  Expect.equal d.Message "column 'n' expected string, got int" "message"
+              | ds -> failtestf "expected one defect, got %A" ds
+
+              let ms =
+                  Column.ofTimestamps "m" TimeUnit.Milliseconds (Vector.ofList [ 0.0 ]) None AllValid
+
+              let tm: Table =
+                  { Schema = [ Field.create "m" (TimestampType TimeUnit.Milliseconds) ]
+                    Columns = [ ms ] }
+
+              Expect.equal
+                  ((ColumnValidator.ofType "m" (TimestampType TimeUnit.Seconds)).Run tm
+                   |> List.map _.Node)
+                  [ Some "m" ]
+                  "a timestamp column of another unit is one defect"
+
           testCase "ColumnValidator reuses the shared severity summary + canonical-codes parity"
           <| fun _ ->
               let t: Table =

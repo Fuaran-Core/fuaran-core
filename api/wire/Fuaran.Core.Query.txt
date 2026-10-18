@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.36.0: breaking
+# class since v0.38.1: breaking
 doc	deferredQueryResult	sha256:d4153f11108020d1acee7de988d8e650af3b1adb12bc2f29588d75a23cde3f45	{"$type":"pending"}
 doc	deferredQueryResult / ColumnData.Bools	sha256:31d2e7b01b7361669cd09a1288361729afe90b65acb935047939bbb562a7c7ac	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true,true],"values":[true,false]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]},"totalRowCount":1}}
 doc	deferredQueryResult / ColumnData.Dates	sha256:5f8732fd775ac77cad0bc18d5e4cbe16ce064712d66ad95725955489cd67ebf9	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true,true],"values":["1970-01-02","1970-01-02"]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]},"totalRowCount":1}}
@@ -123,8 +123,8 @@ doc	queryError / QueryError.ParamTypeMismatch	sha256:40756df6eaad9030851c5f60d6e
 doc	queryError / QueryError.PredicateNotApplicable	sha256:75a0bbe035cbe0c7c69d613eae261c64a5e2cac4104e02bf59af580dece771d8	{"$type":"predicateNotApplicable","column":"s","columnType":"int","predicate":"s"}
 doc	queryError / QueryError.PredicateNotHonoured	sha256:e660b6faa9bff98826357b9f71b83f818de243e848e5027b2cae71d7e3900e08	{"$type":"predicateNotHonoured","predicate":{"$type":"equalTo","column":"s","type":"int","value":1}}
 doc	queryError / QueryError.PredicateTypeMismatch	sha256:cfbec7fbd2d74911e755452718603e0bd30a9ab1fc61601642eb615011a7aa2e	{"$type":"predicateTypeMismatch","column":"s","expected":"int","got":"int"}
-doc	queryError / QueryError.QueryApprovalRequired	sha256:ca8797ddd0dd61af54402cfda6a4d2937216d9ccbc7add43dd47054d906750f4	{"$type":"approvalRequired","policy":"s"}
-doc	queryError / QueryError.QueryPolicyRefused	sha256:5140c5d66e6875c380cc3e0e8a4c2b67ef7085ae0a47998dbb6d4263aa396b73	{"$type":"policyRefused","allowed":["s"],"policy":"s","reason":"s"}
+doc	queryError / QueryError.QueryApprovalRequired	sha256:19fb8172623557e977ab08cbd6647e21455314b48b5495ae8a94f1a8a3e14dd2	{"$type":"queryApprovalRequired","policy":"s"}
+doc	queryError / QueryError.QueryPolicyRefused	sha256:ae153c6a751eace4ab3554778ce7f0850c97b63cbaa00a7a5c4394d80a0ff3de	{"$type":"queryPolicyRefused","allowed":["s"],"policy":"s","reason":"s"}
 doc	queryError / QueryError.RequiredParamsNull	sha256:76ad5f5445e4f43c4d7830b1f625e0804224bdca8da21ed699abdc26c795379e	{"$type":"requiredParamsNull","names":["s"]}
 doc	queryError / QueryError.RequiredParamsUnbound	sha256:9a2fefc533a2dda5897725b59d0e5299e97067ef3da835498dd2aa1d7a0cafc8	{"$type":"requiredParamsUnbound","names":["s"]}
 doc	queryError / QueryError.SourceNotResolved	sha256:5088411cc913767be0d292d368cf38c536db37c279299380d91a111e8c5ad13c	{"$type":"sourceNotResolved","ref":"s"}
