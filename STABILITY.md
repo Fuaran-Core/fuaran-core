@@ -1017,7 +1017,7 @@ ancestors, an in-place `UpdateNode` reads and content-writes its target alone, a
 any op after one that does not apply — takes the pure arm. `Arbitration.arbitrateIn`, `Dag.conflictsIn` /
 `reconcileIn` / `reconcileManyIn` compose it; `Conformance.footprintInLawsAt` certifies it at a domain's
 own ops; the pure entries and their verdicts are unchanged. It refines the pure verdict (`FootprintIn.footprint_in_refines`: no pair the pure form frees is refused)
-and is sound over everything but a move (`footprint_in_sound`; the five move pairs are sampled, not yet proved).
+and is sound over every operation, moves included (`footprint_in_sound`, the five move pairs proved in-phase).
 
 - **A `RemoveNode` / `MoveNode` has an unknown source parent.** Removing or moving a node also rewrites
   its *source* parent's child-list, a tree fact the op does not carry, so the target lands in

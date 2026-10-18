@@ -1063,22 +1063,25 @@ let tests =
               Expect.equal (prodFpParts prod) (modelFpParts model) "the base-aware model footprint is"
 
           testCase
-              "the extracted model keeps the in-place diamond its theorem proves, and the pure independence refuses the same pairs"
+              "the extracted model keeps the diamond its theorem proves, moves included, and the pure independence refuses the same pairs"
           <| fun _ ->
-              // `FootprintIn.footprint_in_sound` over the in-place fragment, sampled on the extracted
-              // model: every pair of in-place scripts the base-aware footprint calls independent at a
-              // state commutes there; and `footprint_in_refines`: every pair the pure footprint frees,
-              // the base-aware one frees.
+              // `FootprintIn.footprint_in_sound`, sampled on the extracted model over every op the
+              // pool draws — removals and moves included, since the theorem quantifies over every
+              // operation: every pair of scripts the base-aware footprint calls independent at a
+              // state commutes there; and `footprint_in_refines`: every pair the pure footprint
+              // frees, the base-aware one frees. A pair with a move on one side is counted, so the
+              // sample is known to reach the move half of the theorem.
               let mutable r = ConfRng.ofSeed 5001
               let mutable independent = 0
               let mutable freed = 0
               let mutable pureFree = 0
+              let mutable moved = 0
 
-              let inPlace (op: SkeletonOp<RNode, string>) =
+              let rec carriesMove (op: SkeletonOp<RNode, string>) =
                   match op with
-                  | RemoveNode _
-                  | MoveNode _ -> false
-                  | _ -> true
+                  | MoveNode _ -> true
+                  | Batch ops -> List.exists carriesMove ops
+                  | _ -> false
 
               for _ in 1..40 do
                   let lanes, r' = treeLaneGen.Lanes 2 r
@@ -1095,8 +1098,7 @@ let tests =
                           ([ treeBase ], treeBase)
                       |> fst
 
-                  let ops =
-                      (generated @ drawnUpdatesAndBatches states generated) |> List.filter inPlace
+                  let ops = generated @ drawnUpdatesAndBatches states generated
 
                   for st in states do
                       let mt = toModelTree st
@@ -1124,6 +1126,9 @@ let tests =
                                   if not pureInd then
                                       freed <- freed + 1
 
+                                  if carriesMove a || carriesMove b then
+                                      moved <- moved + 1
+
                                   match TreeOps.apply mb ta, TreeOps.apply ma tb with
                                   | DagFold.Ok x, DagFold.Ok y ->
                                       Expect.equal
@@ -1135,12 +1140,13 @@ let tests =
                                               (treeW.Encode b))
                                   | _ ->
                                       failtestf
-                                          "an independent in-place pair failed to apply in one order: %s / %s"
+                                          "an independent pair failed to apply in one order: %s / %s"
                                           (treeW.Encode a)
                                           (treeW.Encode b)
                               | _ -> ()
 
-              Expect.isGreaterThan independent 0 "the pool met an independent in-place pair"
+              Expect.isGreaterThan independent 0 "the pool met an independent pair"
+              Expect.isGreaterThan moved 0 "and one with a move on a side, which the theorem's move half is about"
 
               Expect.isGreaterThan
                   freed
