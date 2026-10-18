@@ -40,7 +40,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //                           NOT cover in `boundary`, both non-empty, and neither tells the row's
 //                           history: no `Phase NNN` in either — the row's `phase` is its one citation.
 //   claim-is-the-join       (522) `claim` is `statement` and `boundary` joined by one space: the
-//                           field the estate registry still reads, held to the two it is made of.
+//                           field a registry reading the ladder still reads, held to the two it is made of.
 //   tested-family-closed    (522) a `tested` row's family is one of three closed forms —
 //                           `Proofs.Oracle`, `Conformance.<law>` (a law the kit exports) or
 //                           `Suite:<Module>.<list>` (a test list this assembly declares) — and it
