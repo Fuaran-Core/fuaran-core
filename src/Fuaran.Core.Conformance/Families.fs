@@ -124,8 +124,9 @@ module Families =
             /// row's `dischargedBy` and a projection's roster all use, so it is the one spelling
             /// that must not drift.
             Id: string
-            /// The kit module the entry point lives in (`Conformance`, `FoldConfluence`,
-            /// `IncrementalDelta`).
+            /// The kit module the entry point lives in (`Conformance`, `EncodingProfileVectors`,
+            /// `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`,
+            /// `WireNullTolerance`).
             Module: string
             /// The entry point's own name, unqualified.
             Entry: string
@@ -784,8 +785,7 @@ module Families =
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
               []
-              (Guarded
-                  [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind (delegates to keyedArbitrationLawsWith)" ])
+              (Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ])
               (Drawn, "delegates to keyedArbitrationLawsWith")
           c
               "keyedArbitrationLawsWith"
@@ -818,7 +818,9 @@ module Families =
               [ "EvaluatorWitness" ]
               (Some NeedsWitnessCapability)
               [ "propagation-prior-blind" ]
-              (Guarded [ "evaluator edit"; "prior-aware edit" ])
+              (Guarded
+                  [ "evaluator edit (delegates to propagationEvaluatorLawsAt)"
+                    "prior-aware edit" ])
               (Drawn,
                "runs propagationEvaluatorLawsAt first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit")
 
@@ -919,8 +921,8 @@ module Families =
               (Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base")
               (Built, "a stale-version pack and an unknown base are built")
           // Phase 257 — the `Column.aggregate` half of what was `aggregateParityLaws`; the parity
-          // half ships from `Fuaran.Core.DataFrame.Conformance` with the other dataframe families,
-          // produced by the compute repository since Phase 258 (DECISIONS.md D66).
+          // half ships from `Fuaran.Compute.Conformance` with the other dataframe families, produced
+          // by the compute repository since Phase 258 (DECISIONS.md D66).
           c
               "aggregateNullSkipLaws"
               none
@@ -1293,8 +1295,8 @@ module Families =
     /// and their adequacy census, under the package id a consumer references to run them.
     ///
     /// The kit's families are no longer all in one assembly. Those that read the dataframe layer
-    /// ship from `Fuaran.Core.DataFrame.Conformance` (DECISIONS.md D68) — since Phase 258 from
-    /// the compute repository, which produces that package (D66) — and this package cannot name
+    /// ship from `Fuaran.Compute.Conformance` (DECISIONS.md D68; produced by the compute repository
+    /// since Phase 258, D66, and under that id since its `0.36.0`) — and this package cannot name
     /// them without referencing that one, the upward reference the boundary test refuses. So each
     /// package declares its own share, and a reader that sees several composes them: the
     /// renderings below take a list of rosters. This repository's generated
@@ -1415,10 +1417,16 @@ module Families =
     ///
     /// `schema` reads 5 since Phase 257 split the kit across two packages: the top-level `package`
     /// became `packages`, and each family names its own. It read 4 from Phase 220's `adequacy` and
-    /// `refusal`, 3 from Phase 196's `cases` and 2 from Phase 194's `reason`. Each bump is free and
-    /// therefore taken: a search of the workspace found no reader of this file outside this
-    /// repository's own suite, so nothing keys on the old number, and a shape that changes under an
-    /// unmoved stamp is the drift class consumers keep paying for elsewhere. Members are written
+    /// `refusal`, 3 from Phase 196's `cases` and 2 from Phase 194's `reason`.
+    ///
+    /// A bump is a RECORDED contract move, never a free one (Phase 498). The file has a reader
+    /// outside this repository: a downstream law registry finds it BY NAME
+    /// (`conformance-families.json`), keys on `kind` (`fuaran.core.conformance.families`, never on
+    /// `schema`), and reads `families[].id` and `families[].cases`, falling back to a source parse
+    /// when `kind` does not match. So a bump that keeps those four does not break it, a change to any
+    /// of them does, and every bump is entered in `STABILITY.md` naming that reader and what it reads.
+    /// The stamp still moves with the shape: a shape that changes under an unmoved stamp is the drift
+    /// class consumers keep paying for elsewhere. Members are written
     /// in that order and the array is sorted, so the rendering is byte-stable across runs and a diff
     /// shows only what moved. Two spaces of indent, `\n` line endings, and a trailing newline.
     ///
@@ -1566,7 +1574,7 @@ module Families =
           "the family is guarded, which is what the `Adequacy` cell beside it answers."
           ""
           "**Package.** The package a family ships from — the one reference a consumer adds to run it."
-          "The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conformance`"
+          "The families that read the dataframe layer ship from `Fuaran.Compute.Conformance`"
           "(Phase 257, DECISIONS.md D68), which the compute repository produces since Phase 258"
           "(D66) and whose own generated census lists them; every family here ships from"
           "`Fuaran.Core.Conformance`."

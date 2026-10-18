@@ -10,8 +10,7 @@ minor; from `1.0.0` it waits for the next major and the witness contracts are fr
 Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Published to nuget.org
 (`https://api.nuget.org/v3/index.json`, the one source the publish workflow pushes to) by the
 tag workflow [`RELEASING.md`](RELEASING.md) describes (its gates, the Trusted Publishing policy, the
-post-push registry probe). The publish workflow uses `--skip-duplicate`;
-bump `<Version>` in `Directory.Build.props` before tagging.
+post-push registry probe). The publish workflow uses `--skip-duplicate`; bump `<Version>` in `Directory.Build.props` before tagging.
 
 **Semantic versioning from `1.0.0`; obsolete forwards leave at a major, and `1.0.0` will be one (Phase
 386, DECISIONS.md D133; still the `0.x` line at `0.37.0`, D147).** Through the `0.x` line a breaking
@@ -420,6 +419,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   existing wire changes. Changing the envelope keys, an `Unknown` carrier field, a `negotiate` outcome,
   or dropping preservation is a **major** bump; an additive kind/case is a **minor** bump an older
   consumer tolerates via `decodeTolerant`.
+- **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; a bump past `schema: 5` is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number).
 
 ### The Column and Query strand (first-class)
 

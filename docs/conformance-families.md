@@ -58,7 +58,7 @@ run that misses it fails. `drawn` — drawn, and a run that misses it stays gree
 the family is guarded, which is what the `Adequacy` cell beside it answers.
 
 **Package.** The package a family ships from — the one reference a consumer adds to run it.
-The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conformance`
+The families that read the dataframe layer ship from `Fuaran.Compute.Conformance`
 (Phase 257, DECISIONS.md D68), which the compute repository produces since Phase 258
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
