@@ -1,45 +1,332 @@
 {
-  "kind": "proofStrictBaseline",
-  "$comment": "The last green -Strict FULL run of the proof leg, written by proofs/check.ps1 (Phase 328) and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on.",
-  "tree": "fe507426932679be50f5650eb904f7c621adb25c",
-  "run": {
-    "strict": true,
-    "runs": 3,
-    "modules": 28,
-    "prover": "v2026.09.06",
-    "recordedAt": "2026-10-08T10:02:38Z",
-    "machine": {
-      "kind": "local",
-      "runner": null,
-      "os": "Microsoft Windows 10.0.26200",
-      "processors": 12,
-      "memory": "16 GB"
+  "kind": "proofRunVerdict",
+  "$comment": "The run verdict of the last green -Strict FULL run of the proof leg, with the tree it verified, written by proofs/check.ps1 and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on.",
+  "tree": "106d07604a9ad6a3a835be3ff946a64de96e81f3",
+  "recordedAt": "2026-10-18T14:41:34Z",
+  "verdict": "green",
+  "exit": 0,
+  "message": null,
+  "strict": true,
+  "runs": 1,
+  "prover": "v2026.09.06",
+  "modules": [
+    "Twin",
+    "ListAlgebra",
+    "DagFold",
+    "WireDecode",
+    "TreeOps",
+    "Skeleton",
+    "Chain",
+    "JsonParse",
+    "Preservation",
+    "TreeDiff",
+    "Limits",
+    "Utf8",
+    "WireCanon",
+    "WireVersioning",
+    "Unit",
+    "Temporal",
+    "WireColumn",
+    "Vocabulary",
+    "VocabularyProofs",
+    "DocVocabulary",
+    "DocVocabularyProofs",
+    "ScoreVocabulary",
+    "ScoreVocabularyProofs",
+    "Capability",
+    "Propagation",
+    "Query",
+    "Arbitrate",
+    "DecimalText",
+    "Normalize",
+    "VocabularyVectors",
+    "PropagationOps",
+    "TreeFrame",
+    "ColumnRefinement",
+    "DecodeLayer",
+    "OpStreamLoad",
+    "DagPrimitives"
+  ],
+  "hostStep": "ran",
+  "machine": {
+    "kind": "local",
+    "runner": null,
+    "os": "Microsoft Windows 10.0.26200",
+    "processors": 16,
+    "memory": "32 GB"
+  },
+  "contention": [
+    {
+      "run": 1,
+      "preflight": "0 fstar process(es) on this machine, 11.8 GB free physical memory",
+      "factor": 0.45,
+      "samples": 30,
+      "threshold": 0.8,
+      "contended": false
+    }
+  ],
+  "costs": [
+    {
+      "module": "Twin",
+      "run": 1,
+      "seconds": 0.2,
+      "budget": 20,
+      "percent": 0
     },
-    "contention": [
-      {
-        "run": 1,
-        "preflight": "0 fstar process(es) on this machine, 0.8 GB free physical memory",
-        "factor": 1.03,
-        "samples": 24,
-        "threshold": 0.8,
-        "contended": true
-      },
-      {
-        "run": 2,
-        "preflight": "0 fstar process(es) on this machine, 2.3 GB free physical memory",
-        "factor": 0.82,
-        "samples": 24,
-        "threshold": 0.8,
-        "contended": true
-      },
-      {
-        "run": 3,
-        "preflight": "0 fstar process(es) on this machine, 1.5 GB free physical memory",
-        "factor": 0.89,
-        "samples": 24,
-        "threshold": 0.8,
-        "contended": true
-      }
-    ]
-  }
+    {
+      "module": "ListAlgebra",
+      "run": 1,
+      "seconds": 0.4,
+      "budget": 20,
+      "percent": 0
+    },
+    {
+      "module": "DagFold",
+      "run": 1,
+      "seconds": 58.5,
+      "budget": 360,
+      "percent": 16
+    },
+    {
+      "module": "WireDecode",
+      "run": 1,
+      "seconds": 19.4,
+      "budget": 70,
+      "percent": 27
+    },
+    {
+      "module": "TreeOps",
+      "run": 1,
+      "seconds": 55.9,
+      "budget": 340,
+      "percent": 16
+    },
+    {
+      "module": "Skeleton",
+      "run": 1,
+      "seconds": 0.8,
+      "budget": 20,
+      "percent": 5
+    },
+    {
+      "module": "Chain",
+      "run": 1,
+      "seconds": 13.9,
+      "budget": 90,
+      "percent": 16
+    },
+    {
+      "module": "JsonParse",
+      "run": 1,
+      "seconds": 81.0,
+      "budget": 760,
+      "percent": 11
+    },
+    {
+      "module": "Preservation",
+      "run": 1,
+      "seconds": 28.2,
+      "budget": 190,
+      "percent": 15
+    },
+    {
+      "module": "TreeDiff",
+      "run": 1,
+      "seconds": 46.8,
+      "budget": 480,
+      "percent": 10
+    },
+    {
+      "module": "Limits",
+      "run": 1,
+      "seconds": 0.2,
+      "budget": 20,
+      "percent": 0
+    },
+    {
+      "module": "Utf8",
+      "run": 1,
+      "seconds": 18.4,
+      "budget": 70,
+      "percent": 26
+    },
+    {
+      "module": "WireCanon",
+      "run": 1,
+      "seconds": 61.3,
+      "budget": 430,
+      "percent": 14
+    },
+    {
+      "module": "WireVersioning",
+      "run": 1,
+      "seconds": 2.5,
+      "budget": 20,
+      "percent": 15
+    },
+    {
+      "module": "Unit",
+      "run": 1,
+      "seconds": 87.7,
+      "budget": 180,
+      "percent": 49
+    },
+    {
+      "module": "Temporal",
+      "run": 1,
+      "seconds": 83.4,
+      "budget": 370,
+      "percent": 22
+    },
+    {
+      "module": "WireColumn",
+      "run": 1,
+      "seconds": 34.1,
+      "budget": 160,
+      "percent": 21
+    },
+    {
+      "module": "Vocabulary",
+      "run": 1,
+      "seconds": 4.7,
+      "budget": 20,
+      "percent": 25
+    },
+    {
+      "module": "VocabularyProofs",
+      "run": 1,
+      "seconds": 7.5,
+      "budget": 30,
+      "percent": 23
+    },
+    {
+      "module": "DocVocabulary",
+      "run": 1,
+      "seconds": 4.8,
+      "budget": 30,
+      "percent": 17
+    },
+    {
+      "module": "DocVocabularyProofs",
+      "run": 1,
+      "seconds": 11.6,
+      "budget": 70,
+      "percent": 17
+    },
+    {
+      "module": "ScoreVocabulary",
+      "run": 1,
+      "seconds": 9.2,
+      "budget": 40,
+      "percent": 22
+    },
+    {
+      "module": "ScoreVocabularyProofs",
+      "run": 1,
+      "seconds": 22.4,
+      "budget": 90,
+      "percent": 24
+    },
+    {
+      "module": "Capability",
+      "run": 1,
+      "seconds": 64.3,
+      "budget": 290,
+      "percent": 22
+    },
+    {
+      "module": "Propagation",
+      "run": 1,
+      "seconds": 9.8,
+      "budget": 60,
+      "percent": 17
+    },
+    {
+      "module": "Query",
+      "run": 1,
+      "seconds": 70.6,
+      "budget": 280,
+      "percent": 25
+    },
+    {
+      "module": "Arbitrate",
+      "run": 1,
+      "seconds": 7.5,
+      "budget": 50,
+      "percent": 16
+    },
+    {
+      "module": "DecimalText",
+      "run": 1,
+      "seconds": 32.1,
+      "budget": 160,
+      "percent": 20
+    },
+    {
+      "module": "Normalize",
+      "run": 1,
+      "seconds": 5.8,
+      "budget": 60,
+      "percent": 10
+    },
+    {
+      "module": "VocabularyVectors",
+      "run": 1,
+      "seconds": 1.2,
+      "budget": 20,
+      "percent": 5
+    },
+    {
+      "module": "PropagationOps",
+      "run": 1,
+      "seconds": 4.3,
+      "budget": 20,
+      "percent": 20
+    },
+    {
+      "module": "TreeFrame",
+      "run": 1,
+      "seconds": 43.0,
+      "budget": 70,
+      "percent": 61
+    },
+    {
+      "module": "ColumnRefinement",
+      "run": 1,
+      "seconds": 125.4,
+      "budget": 80,
+      "percent": 156
+    },
+    {
+      "module": "DecodeLayer",
+      "run": 1,
+      "seconds": 34.0,
+      "budget": 170,
+      "percent": 20
+    },
+    {
+      "module": "OpStreamLoad",
+      "run": 1,
+      "seconds": 169.1,
+      "budget": 590,
+      "percent": 29
+    },
+    {
+      "module": "DagPrimitives",
+      "run": 1,
+      "seconds": 10.6,
+      "budget": 50,
+      "percent": 22
+    }
+  ],
+  "findings": [
+    {
+      "run": 1,
+      "text": "ColumnRefinement.fst took 125s against its 80s budget on run 1 of 1 — 45s over, 156% of budget",
+      "label": ""
+    }
+  ],
+  "aborts": [],
+  "cone": null,
+  "refusals": "held"
 }
