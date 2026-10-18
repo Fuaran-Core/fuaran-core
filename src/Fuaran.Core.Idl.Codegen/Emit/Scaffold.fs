@@ -304,10 +304,13 @@ module internal Scaffold =
     /// the source wire hash + the typed actor so generated code is auditable +
     /// reproducible, and states the trust-split invariant: generated code is
     /// inert structure; behaviour is human-bound (named holes, Phase 318).
+    ///
+    /// Phase 505 — written by the one [[Stamp]] renderer every generated header uses; its keyed
+    /// input is the source wire's hash, which is already a content hash of what it was given.
     let provenanceHeader (commentPrefix: string) (sourceWireHash: string) (actor: string) : string =
-        String.concat
-            "\n"
-            [ commentPrefix
-              + " AI-scaffolded by Fuaran.Core.Idl.Gen — INERT structure; behaviour is human-bound (named holes, Phase 318)."
-              commentPrefix + " source-wire-hash: " + sourceWireHash
-              commentPrefix + " actor: " + actor ]
+        Stamp.render
+            (CommentStyle.Line commentPrefix)
+            { Act = "AI-scaffolded"
+              Target = "scaffold"
+              Disposition = "INERT structure; behaviour is human-bound (named holes, Phase 318)."
+              Keys = [ "source-wire-hash", sourceWireHash; "actor", actor ] }

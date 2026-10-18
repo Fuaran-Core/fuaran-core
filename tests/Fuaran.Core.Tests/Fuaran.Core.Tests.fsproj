@@ -507,6 +507,7 @@
          repository root (docs/units.md's atom table and the source's vocabulary). Appended
          (append-only). -->
     <Compile Include="UnitTests.fs" />
+    <Compile Include="IdlStampTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

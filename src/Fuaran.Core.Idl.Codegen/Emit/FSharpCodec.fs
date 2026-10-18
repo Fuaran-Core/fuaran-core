@@ -1521,6 +1521,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               "    Validator.runAll nodeWitness reg root" ]
 
 
+    /// Phase 505 — the F# module's [[Stamp]], over its normalised text.
+    let private fsharpStamp (idl: Idl) (body: string) : string =
+        Stamp.generated (CommentStyle.Line "//") "F# structural layer" [ idl ] body
+
     /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
     /// entry point, which is this composed with it.
     let fsharpModuleUnnormalised
@@ -1665,11 +1669,9 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
                 else
                     ""
 
-            sprintf
-                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen %s. Do not edit by hand.\nmodule %s%s\n\nopen Fuaran.Core"
-                generatorVersion
-                moduleName
-                nowarn
+            // Phase 505 — the stamp above `module` is written by the public entry points, over the
+            // normalised text, so it hashes exactly the bytes it heads.
+            sprintf "module %s%s\n\nopen Fuaran.Core" moduleName nowarn
 
         // Phase 672: the decoder's mutually-recursive group, mirroring `recGroup`.
         // `decNodeKind` dispatches `$type` to the per-kind spec decoder; `decNode`
@@ -1907,7 +1909,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         (kindTags: string list)
         : Result<string, CodegenError> =
         fsharpModuleUnnormalised sup [] false moduleName idl kindTags
-        |> Result.map normalizeEol
+        |> Result.map (normalizeEol >> fsharpStamp idl)
 
     /// Phase 374 — `fsharpModuleWith` plus the requested structural derivations
     /// ([[FSharpDerive]]), and (Phase 377) the collecting decoders and public per-spec entries
@@ -1921,4 +1923,4 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         (kindTags: string list)
         : Result<string, CodegenError> =
         fsharpModuleUnnormalised sup requests decoders moduleName idl kindTags
-        |> Result.map normalizeEol
+        |> Result.map (normalizeEol >> fsharpStamp idl)

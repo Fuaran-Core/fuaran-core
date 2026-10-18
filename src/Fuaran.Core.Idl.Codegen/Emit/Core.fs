@@ -136,27 +136,6 @@ open Fuaran.Core.Idl
 /// backend is `Gen`, a facade of one-line forwards, so nothing here is a published surface.
 module internal Core =
 
-    /// The package version the generator was built as, for the emitted header — the
-    /// informational version with any build-metadata suffix dropped, so a regenerated artefact
-    /// names the release that produced it rather than a phase label frozen at first emission.
-    let generatorVersion: string =
-        let asm = typeof<CodegenError>.Assembly
-
-        let informational =
-            asm.GetCustomAttributes(typeof<System.Reflection.AssemblyInformationalVersionAttribute>, false)
-            |> Seq.tryHead
-            |> Option.map (fun a ->
-                (a :?> System.Reflection.AssemblyInformationalVersionAttribute).InformationalVersion)
-
-        let v =
-            match informational with
-            | Some v when v <> "" -> v
-            | _ -> string (asm.GetName().Version)
-
-        match v.IndexOf '+' with
-        | -1 -> v
-        | i -> v.Substring(0, i)
-
     /// Phase 129 — the emitted text's line endings are the GENERATOR's, never its inputs'.
     ///
     /// Two inputs can carry a CR into an emission and neither is under the caller's control. The
@@ -176,6 +155,83 @@ module internal Core =
     /// this leaves untouched because it is text rather than a control byte.
     let normalizeEol (s: string) : string =
         s.Replace("\r\n", "\n").Replace("\r", "\n")
+
+    /// Phase 505 — how a [[Stamp]] is written in its target's comment syntax: a run of line
+    /// comments under one prefix (`//` for F# and TypeScript, the caller's for a scaffold), or one
+    /// block comment (F*, whose committed models use nothing else).
+    [<RequireQualifiedAccess>]
+    type CommentStyle =
+        | Line of prefix: string
+        | Block of opening: string * closing: string
+
+    /// Phase 505 — what EVERY generated artefact says about where it came from, in one grammar.
+    /// Until 505 there were eight hand-spelled headers: the F# module named the generator's
+    /// package VERSION, so a version cut re-stamped every committed module although no emission
+    /// had moved, while the TypeScript headers carried phase labels frozen at first emission and
+    /// the F* headers no version at all.
+    ///
+    /// The policy is a CONTENT HASH, never a version (the operator's ruling of 2026-10-17, recorded
+    /// in DECISIONS.md): the stamp moves when, and only when, what the generator was given or what
+    /// it emitted moves. `vocabulary` is the identity of the IDL the artefact was generated from (a
+    /// SHA-256 over its canonical `idl.json` value, so an authored reorder the artefact format
+    /// ignores does not move it), and `emission` is a SHA-256 over every byte of the artefact BELOW
+    /// its stamp, which is where every other input lands: the kind selection, the module name, the
+    /// declared support, the requested derivations. A regeneration from unchanged inputs therefore
+    /// rewrites no byte, and a changed input changes the stamp's hash lines and nothing else in it.
+    type Stamp =
+        {
+            /// What made it: `GENERATED` or `AI-scaffolded`.
+            Act: string
+            /// The target that emitted it (`F# structural layer`, `F* model`, ...).
+            Target: string
+            /// The sentence that tells a reader what to do with the file.
+            Disposition: string
+            /// The keyed lines below the first, in order (`vocabulary`, `emission`, ...).
+            Keys: (string * string) list
+        }
+
+    [<RequireQualifiedAccess>]
+    module Stamp =
+
+        /// The generator every stamp names: the package, never its version.
+        [<Literal>]
+        let Generator = "Fuaran.Core.Idl.Codegen"
+
+        /// `sha256:` + 64 lowercase hex over the UTF-8 bytes of `text`.
+        let sha256 (text: string) : string =
+            let bytes =
+                System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes text)
+
+            "sha256:" + System.Convert.ToHexString(bytes).ToLowerInvariant()
+
+        /// The vocabulary's identity: the hash of its canonical `idl.json` value.
+        let vocabulary (idl: Idl) : string =
+            sha256 (Canon.render (Artifact.json idl))
+
+        /// The ONE renderer. No trailing newline.
+        let render (style: CommentStyle) (s: Stamp) : string =
+            let lines =
+                sprintf "%s by %s — %s. %s" s.Act Generator s.Target s.Disposition
+                :: (s.Keys |> List.map (fun (k, v) -> k + ": " + v))
+
+            match style with
+            | CommentStyle.Line prefix -> lines |> List.map (fun l -> prefix + " " + l) |> String.concat "\n"
+            | CommentStyle.Block(opening, closing) ->
+                opening :: (lines |> List.map (fun l -> "   " + l)) @ [ closing ]
+                |> String.concat "\n"
+
+        /// A generated artefact's text: `body` (the whole emission, its line endings already the
+        /// generator's) under the stamp that names `vocabularies` and hashes `body` itself.
+        let generated (style: CommentStyle) (target: string) (vocabularies: Idl list) (body: string) : string =
+            let stamp =
+                { Act = "GENERATED"
+                  Target = target
+                  Disposition = "Do not edit by hand: regenerate it from its inputs."
+                  Keys =
+                    (vocabularies |> List.map (fun idl -> "vocabulary", vocabulary idl))
+                    @ [ "emission", sha256 body ] }
+
+            render style stamp + "\n" + body
 
     /// Sequence a list of codegen results, short-circuiting on the first `CodegenError` (order
     /// preserved). The generator assembles source from many per-kind / per-field fragments; this

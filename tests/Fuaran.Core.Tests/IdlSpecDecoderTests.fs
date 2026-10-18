@@ -198,6 +198,10 @@ let tests =
                                         (tags idl)
                                 )
 
+                            // Below the stamp (Phase 505): the emission hash moves with the decoders.
+                            let plain, withDecoders =
+                                Snapshots.unstamped plain, Snapshots.unstamped withDecoders
+
                             Expect.isTrue
                                 (withDecoders.StartsWith(plain + "\n\n", System.StringComparison.Ordinal))
                                 (name + ": the short-circuiting module must be unchanged ahead of the decoders"))
