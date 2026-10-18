@@ -1018,9 +1018,7 @@ doc-comments), each a place where an exact set is a *tree fact the pure script c
   the op does not carry. So such a target lands in `Footprint.UnknownParentWrites`, and an op that
   removes/moves conservatively conflicts with **every** structural write in a concurrent script.
   Disjoint-subtree independence is therefore **not proven** when either side removes or moves (proving
-  it needs the tree); a remove/move is independent only of a structure-free script. This is why two
-  agents each editing a *different* subtree are still reported dependent if either deletes or relocates a
-  node — safe, deliberately coarse.
+  it needs the tree); a remove/move is independent only of a structure-free script — safe, deliberately coarse.
 - **A `RemoveNode`'s content-write records only the target id, not its (tree-unknown) subtree.** Sound
   for the skeleton five because *every* skeleton op is a structural write, so the unknown-parent rule
   above already serialises a remove/move against any concurrent structural op. A domain that layers a
@@ -1029,10 +1027,12 @@ doc-comments), each a place where an exact set is a *tree fact the pure script c
 - **The same-named-parent rule is pinned:** two ops that write the *same named* parent's child-list
   (two positional inserts, an insert + a reorder, …) are **not** independent — they shift the same
   siblings. Two structural writes on *distinct named* parents (with disjoint content) are independent.
+- **A `ReorderChildren` reads every child it names; a `MoveNode` content-writes its target.** Each is kept — D162 (count zero): no recorded multi-lane ledger reaches either arm; reopen on the first that does.
 
-The `Footprint` record's four address sets (`Reads`, `StructureWrites`, `ContentWrites`,
-`UnknownParentWrites`) are keyed by the `IdWitness.ToString` string form (no `comparison` demanded of
-`'Id`) and grow additively within a major like the rest of the surface.
+The `Footprint` record has six address sets (since Phase 340). `Reads`, `StructureWrites`, `ContentWrites`
+and `UnknownParentWrites`, keyed by the `IdWitness.ToString` form (no `comparison` demanded of `'Id`), feed
+`Ops.independent`'s six node clauses; `SlotReads` and `SlotWrites`, `(node, slot)` pairs no skeleton op
+fills, feed its three slot clauses (`SlotClash`, `LeftSlotsRightNode`, `RightSlotsLeftNode`). All grow additively within a major.
 
 ## Branch merge: conflict enumeration + reconciliation (Phases 64, 83)
 
@@ -1062,8 +1062,8 @@ a policy.
   delta-A-then-delta-B makes the output a pure function of `(base, headA, headB)`.
 
 **Conflict detection inherits #78's conservativity exactly.** `conflicts` fires on a pair *iff*
-`Ops.independent` would reject it — the three shapes partition the negation of the independence
-predicate over the four `Footprint` address kinds. So `conflicts = []` carries the same **promise**
+`Ops.independent` would reject it — the four shapes (the three node-keyed ones and Phase 340's
+`SlotClash`) cover the negation of the independence predicate over the six `Footprint` address sets. So `conflicts = []` carries the same **promise**
 `Ops.independent = true` does: the two deltas provably commute — never a false "clean merge". A
 remove/move is therefore reported against *any* concurrent structural write (its source parent is a
 tree fact the pure script cannot name — the pinned `UnknownParentWrites` over-approximation), tagged

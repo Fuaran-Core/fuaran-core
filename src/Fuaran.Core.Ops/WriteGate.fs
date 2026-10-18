@@ -18,6 +18,11 @@ namespace Fuaran.Core
 //  node allows its subtree: a target is locked when it or any ancestor is in
 //  `Locked`, and (under an allow-list) writable when it or any ancestor is in
 //  `Writable`. A node an op CREATES has the ancestors it is created under.
+//  The ancestors are read along the STRUCTURAL walk (`Tree.path` over the plain
+//  witness), so a node held in a keyed position has no ancestor chain and a lock
+//  on its holder does not reach it: there is no keyed gate yet, and a caller
+//  that applies through `Ops.applyContainedKeyed` gates keyed writes itself
+//  (Phase 496; `KeyedGateDiffTests` (a) pins it).
 //
 //  FSharp.Core + Fuaran.Core.Tree only, as `Ops` is; Fable-clean.
 // ============================================================================

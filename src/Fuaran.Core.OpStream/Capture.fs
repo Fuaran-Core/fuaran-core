@@ -449,6 +449,13 @@ module internal OpStreamCapture =
         let occ = attemptsOf key captures
         occ, appendKeyed cfg hashFn key occ det CapturePhase.Attempted "null" captures
 
+    /// A settlement's phase and value: `Ok v` is `Completed` with `encode v`, `Error reason` is
+    /// `Refused` with the reason as a JSON string.
+    let private settlementOf (encode: 'v -> string) (outcome: Result<'v, string>) : CapturePhase * string =
+        match outcome with
+        | Ok v -> CapturePhase.Completed, encode v
+        | Error reason -> CapturePhase.Refused, jstr reason
+
     let settleEffectKeyedWith
         (cfg: StreamConfig)
         (hashFn: HashFn)
@@ -467,11 +474,7 @@ module internal OpStreamCapture =
             if captures |> List.exists (fun c -> mine c && c.Phase <> CapturePhase.Attempted) then
                 Error(KeyedCaptureFault.AlreadySettled(key, occurrence))
             else
-                let phase, value =
-                    match outcome with
-                    | Ok v -> CapturePhase.Completed, encode v
-                    | Error reason -> CapturePhase.Refused, jstr reason
-
+                let phase, value = settlementOf encode outcome
                 Ok(appendKeyed cfg hashFn key occurrence attempt.Determinism phase value captures)
 
     let captureEffectKeyedWith
@@ -496,16 +499,17 @@ module internal OpStreamCapture =
                   Occurrence = occ
                   Journal = attempted }
             | Some outcome ->
-                let settled =
-                    match settleEffectKeyedWith cfg hashFn encode key occ outcome attempted with
-                    | Ok cs -> cs
-                    // The attempt was just appended and nothing settled it, so the settle cannot
-                    // refuse; a refusal here is a defect in this journal, never a plausible value.
-                    | Error _ -> failwithf "unreachable: the attempt just journalled for %s/%d did not settle" key occ
+                // The attempt just appended is the one this settles, so its settlement is appended
+                // directly rather than looked up again (Phase 496). Over a journal whose pairing holds
+                // this is exactly what `settleEffectKeyedWith` writes. Over one already failing
+                // `keyedPairingHolds` (a settlement at this occurrence with no attempt before it) the
+                // settlement is still written and the journal fails that check as it did before:
+                // total, and the malformation stays where `verifyKeyedCaptures` reports it.
+                let phase, value = settlementOf encode outcome
 
                 { Answer = Some outcome
                   Occurrence = occ
-                  Journal = settled }
+                  Journal = appendKeyed cfg hashFn key occ det phase value attempted }
 
     /// A JSON string literal's text (the inverse of `jstr` over what `jstr` writes), or `None`.
     let private unquote (raw: string) : string option =

@@ -50,6 +50,7 @@
     <Compile Include="TreeLawsTests.fs" />
     <Compile Include="PlacementTests.fs" />
     <Compile Include="KeyedApplyTests.fs" />
+    <Compile Include="KeyedGateDiffTests.fs" />
     <Compile Include="StreamLawsTests.fs" />
     <Compile Include="IntegrityLawsTests.fs" />
     <Compile Include="FootprintTests.fs" />

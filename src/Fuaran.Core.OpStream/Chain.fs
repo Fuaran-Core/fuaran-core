@@ -582,6 +582,28 @@ module internal OpStreamChain =
         : string =
         hashFn prev (cfg.Payload seq actor encodedOp)
 
+    /// Chain ONE op at sequence number `seq` onto tip hash `prev`: the state after it and the record
+    /// it chained, or the witness's rejection. The single-op appends call this directly, so the record
+    /// they return is the one chained here, never one read back out of a list (Phase 496).
+    let private chainOne
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (seq: int)
+        (prev: string)
+        (op: 'Op)
+        (state: 'State)
+        : Result<'State * OpRecord<'Op>, 'Rej> =
+        w.Apply op state
+        |> Result.map (fun state' ->
+            state',
+            { Seq = seq
+              Actor = actor
+              Op = op
+              PrevHash = prev
+              Hash = chainHashOf cfg hashFn seq actor (w.Encode op) prev })
+
     /// Chain `ops` onto a stream whose length is `seq0` and whose tip hash is `prev0`, applying each
     /// op in turn: the new records in order and the final state, or the first rejection with its index
     /// in `ops`. Nothing is copied; the caller splices the new records on once.
@@ -599,20 +621,9 @@ module internal OpStreamChain =
             function
             | [] -> Ok(st, List.rev acc)
             | op :: rest ->
-                match w.Apply op st with
+                match chainOne cfg hashFn w actor (seq0 + i) prev op st with
                 | Error e -> Error(i, e)
-                | Ok st' ->
-                    let seq = seq0 + i
-                    let h = chainHashOf cfg hashFn seq actor (w.Encode op) prev
-
-                    let r =
-                        { Seq = seq
-                          Actor = actor
-                          Op = op
-                          PrevHash = prev
-                          Hash = h }
-
-                    go (i + 1) h st' (r :: acc) rest
+                | Ok(st', r) -> go (i + 1) r.Hash st' (r :: acc) rest
 
         go 0 prev0 state [] ops
 
@@ -627,9 +638,8 @@ module internal OpStreamChain =
         : Result<'State * OpRecord<'Op> list, 'Rej> =
         let n, last = tip cfg records
 
-        match chainOps cfg hashFn w actor n last [ op ] state with
-        | Ok(state', added) -> Ok(state', records @ added)
-        | Error(_, e) -> Error e
+        chainOne cfg hashFn w actor n last op state
+        |> Result.map (fun (state', r) -> state', records @ [ r ])
 
     let append
         (hashFn: HashFn)
@@ -849,13 +859,27 @@ module internal OpStreamChain =
 
     // ---- compare-and-append / optimistic concurrency (Phase 79) ----
 
-    /// The compare-and-append core: the extended stream AND the entry it chained, so the idempotent
-    /// forms index the new record without walking the stream again.
+    /// Append at the tip `(n, head)` of `records`: the extended stream AND the entry it chained, so the
+    /// idempotent forms index the new record without walking the stream again.
+    let private appendAt
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (n: int, head: string)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (records: OpRecord<'Op> list)
+        : Result<'State * OpRecord<'Op> list * EntryRef, 'Rej> =
+        chainOne cfg hashFn w actor n head op state
+        |> Result.map (fun (state', r) -> state', records @ [ r ], { Seq = r.Seq; Hash = r.Hash })
+
+    /// The compare-and-append core: `appendAt` behind the head check.
     let private appendIfCore
         (cfg: StreamConfig)
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
-        (expectedHead: string option)
+        (expectedHead: string)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
@@ -863,13 +887,11 @@ module internal OpStreamChain =
         : Result<'State * OpRecord<'Op> list * EntryRef, AppendRejection<'Rej>> =
         let n, actualHead = tip cfg records
 
-        match expectedHead with
-        | Some expected when expected <> actualHead -> Error(AppendRejection.StaleHead(expected, actualHead))
-        | _ ->
-            match chainOps cfg hashFn w actor n actualHead [ op ] state with
-            | Ok(state', ([ r ] as added)) -> Ok(state', records @ added, { Seq = r.Seq; Hash = r.Hash })
-            | Ok _ -> failwith "unreachable: chainOps chains exactly one record for one op"
-            | Error(_, rej) -> Error(AppendRejection.Domain rej)
+        if expectedHead <> actualHead then
+            Error(AppendRejection.StaleHead(expectedHead, actualHead))
+        else
+            appendAt cfg hashFn w (n, actualHead) actor op state records
+            |> Result.mapError AppendRejection.Domain
 
     let appendIfWith
         (cfg: StreamConfig)
@@ -881,7 +903,7 @@ module internal OpStreamChain =
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, AppendRejection<'Rej>> =
-        appendIfCore cfg hashFn w (Some expectedHead) actor op state records
+        appendIfCore cfg hashFn w expectedHead actor op state records
         |> Result.map (fun (state', records', _) -> state', records')
 
     let appendIf
@@ -910,10 +932,9 @@ module internal OpStreamChain =
         match KeyIndex.tryFind key index with
         | Some existing -> Ok(AppendOutcome.Duplicate existing)
         | None ->
-            match appendIfCore canonicalConfig hashFn w None actor op state records with
-            | Ok(state', records', entry) -> Ok(AppendOutcome.Appended(state', records', KeyIndex.add key entry index))
-            | Error(AppendRejection.Domain rej) -> Error rej
-            | Error(AppendRejection.StaleHead _) -> failwith "unreachable: no head was expected"
+            appendAt canonicalConfig hashFn w (tip canonicalConfig records) actor op state records
+            |> Result.map (fun (state', records', entry) ->
+                AppendOutcome.Appended(state', records', KeyIndex.add key entry index))
 
     let appendIdempotentIf
         (hashFn: HashFn)
@@ -929,6 +950,6 @@ module internal OpStreamChain =
         match KeyIndex.tryFind key index with
         | Some existing -> Ok(AppendOutcome.Duplicate existing)
         | None ->
-            appendIfCore canonicalConfig hashFn w (Some expectedHead) actor op state records
+            appendIfCore canonicalConfig hashFn w expectedHead actor op state records
             |> Result.map (fun (state', records', entry) ->
                 AppendOutcome.Appended(state', records', KeyIndex.add key entry index))

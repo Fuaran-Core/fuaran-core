@@ -116,7 +116,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.keyedApplyLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` | 2100 | `guarded-reached` | `built` |
 | `Conformance.keyedArbitrationLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `drawn` |
 | `Conformance.keyedArbitrationLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `drawn` |
-| `Conformance.keyedCaptureLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1000 | `unconditional` | `built` |
+| `Conformance.keyedCaptureLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `unconditional` | `built` |
 | `Conformance.keyedChildrenLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `guarded-reached` | `built` |
 | `Conformance.laneLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.loweringLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 800 | `guarded-reached` | `built` |

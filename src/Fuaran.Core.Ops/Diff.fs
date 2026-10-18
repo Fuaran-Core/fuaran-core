@@ -3,6 +3,12 @@ namespace Fuaran.Core
 /// Structural tree-diff → op script (Phase 245): the inverse direction of `Ops.apply`.
 /// Given two trees over a shared id space, derive a `SkeletonOp` list that transforms one
 /// into the other — so a desired tree lowers to the apply/op-stream path every domain has.
+///
+/// **Structural positions only (Phase 496).** There is no keyed diff: over the plain witness a change
+/// below a keyed child is seen only where the caller's encoder reads the holder's keyed positions
+/// (as that holder's `UpdateNode`), and `Tree.traversal` is not a witness to diff over, because the
+/// shells the diff builds (`ReplaceChildren n []`) are shorter than the keyed arity it must preserve
+/// (`KeyedGateDiffTests` (b) and (c) pin both).
 module Diff =
 
     /// Why a diff could not be produced — a typed result, never an unapplyable script.

@@ -597,6 +597,9 @@ module internal PolicySeamLaws =
     ///    (`NotAttempted`);
     ///  - **tampering is detected** — a changed value, or a record dropped from before the tip, fails
     ///    verification (a journal cut at its tip verifies on its own, as `verifyCaptures`' does);
+    ///  - **capture is total over a malformed journal** (Phase 496) — capturing under a key whose
+    ///    settlement has lost its attempt answers the live outcome, journals the new attempt and its
+    ///    settlement, and the result still fails verification (built, every iteration);
     ///  - **the seam replays exactly** — a `network` capability dispatched through
     ///    `CapabilityRegistry.dispatchCaptured` replays through `dispatchReplayed` with the recorded
     ///    answer even when the live body would now answer otherwise, and an invocation the policy
@@ -614,6 +617,10 @@ module internal PolicySeamLaws =
 
         let tamper =
             LawKit.LawCell "a changed value or a record dropped from before the tip fails verification"
+
+        let total =
+            LawKit.LawCell
+                "capturing over a journal whose pairing already fails is total, and the result still fails verification"
 
         let seam =
             LawKit.LawCell
@@ -741,6 +748,25 @@ module internal PolicySeamLaws =
                 fun () -> at "a tampered keyed journal verified"
             )
 
+            // totality over a malformed journal (Phase 496): settle an invocation under a fresh key,
+            // drop its attempt so the settlement is an orphan, and capture under that key again —
+            // the input that reached a `failwithf "unreachable"` before 0.39.0
+            let orphanKey = "orphan"
+
+            let orphaned =
+                (OpStream.captureEffectKeyed hashFn enc "network" orphanKey (fun () -> Some(Ok 1)) journal).Journal
+                |> List.filter (fun c -> not (c.Key = orphanKey && c.Phase = CapturePhase.Attempted))
+
+            let again =
+                OpStream.captureEffectKeyed hashFn enc "network" orphanKey (fun () -> Some(Ok 2)) orphaned
+
+            total.Check(
+                again.Answer = Some(Ok 2)
+                && List.length again.Journal = List.length orphaned + 2
+                && not (OpStream.verifyKeyedCaptures hashFn again.Journal),
+                fun () -> at (sprintf "capture over an orphaned settlement answered %A" again.Answer)
+            )
+
             // the seam
             let recordedN = rng.IntBelow 10
             let arg = rng.IntBelow 10
@@ -792,4 +818,4 @@ module internal PolicySeamLaws =
                 fun () -> at (sprintf "the seam did not replay exactly: %A" replay)
             ))
 
-        LawKit.results [ verifies; byKey; refuses; tamper; seam ]
+        LawKit.results [ verifies; byKey; refuses; tamper; total; seam ]

@@ -258,7 +258,11 @@ let indexTests =
                   (Tree.tryFind nodew idw "a1" edited |> Option.map _.Value)
                   "which is why it is not the default: tryFind's node went stale"
 
-          testCase "isFreshFor reads no tree carrying an id twice as fresh, build's own included"
+          // Phase 496 — the one answer `build`'s doc states: over a repeated id `tryBuild` refuses,
+          // naming what `wellFormed` names; `build` is the lenient form, keeping the LAST occurrence
+          // as `Tree.digests` does; and `isFreshFor` reads no index of such a tree as fresh, build's
+          // own included (the index keeps the last `a`, the walk finds the first).
+          testCase "a repeated id: tryBuild refuses as wellFormed does, build keeps the last, none is fresh"
           <| fun _ ->
               let twice =
                   RNode.node
@@ -267,9 +271,21 @@ let indexTests =
                       [ RNode.node "a" "section" [ RNode.leaf "b" "para" "x" ]
                         RNode.node "a" "section" [] ]
 
-              Expect.isFalse
-                  (Tree.Index.isFreshFor nodew idw encNode twice (Tree.Index.build nodew idw twice))
-                  "the index keeps the last a, the walk finds the first"
+              Expect.equal
+                  (Tree.Index.tryBuild nodew idw twice |> Result.map ignore)
+                  (Error(Tree.wellFormed nodew idw twice))
+                  "tryBuild's refusal is wellFormed's verdict"
+
+              Expect.equal (Tree.wellFormed nodew idw twice) (Tree.RepeatedId "a") "which names the repeat"
+
+              let ix = Tree.Index.build nodew idw twice
+
+              Expect.equal
+                  (Tree.Index.tryFind idw "a" ix |> Option.map (nodew.Children >> List.length))
+                  (Some 0)
+                  "build keeps the last a"
+
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode twice ix) "and no index of it is fresh"
 
           testCase "isFreshFor refuses an index holding a key the tree does not"
           <| fun _ ->

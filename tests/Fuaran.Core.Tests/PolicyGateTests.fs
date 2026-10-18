@@ -427,4 +427,41 @@ let tests =
                           settled)
                       (Ok(Some(Error "timed out"), Map.ofList [ "k", 1 ]))
                       "the failure replays as the same failure"
-              | Error f -> failtestf "settle refused: %A" f ]
+              | Error f -> failtestf "settle refused: %A" f
+
+          // Phase 496 — this input reached a `failwithf "unreachable"` in `captureEffectKeyedWith`:
+          // a settlement at the occurrence the next attempt takes, with no attempt before it.
+          testCase "capturing over a journal whose pairing already fails is total, and still fails verification"
+          <| fun _ ->
+              let hashFn = OpStream.defaultHash
+              let enc (v: int) = string v
+
+              let settledOnce =
+                  (OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> Some(Ok 1)) []).Journal
+
+              // drop the attempt: the settlement at occurrence 0 is now an orphan
+              let orphaned =
+                  settledOnce |> List.filter (fun c -> c.Phase <> CapturePhase.Attempted)
+
+              Expect.isFalse (OpStream.verifyKeyedCaptures hashFn orphaned) "the input is malformed"
+
+              let captured =
+                  OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> Some(Ok 2)) orphaned
+
+              Expect.equal (captured.Answer, captured.Occurrence) (Some(Ok 2), 0) "the live answer, at occurrence 0"
+
+              Expect.equal
+                  (captured.Journal |> List.skip (List.length orphaned) |> List.map _.Phase)
+                  [ CapturePhase.Attempted; CapturePhase.Completed ]
+                  "the attempt and its settlement are journalled"
+
+              Expect.isFalse
+                  (OpStream.verifyKeyedCaptures hashFn captured.Journal)
+                  "and the malformation is still reported"
+
+              let occ, attempted = OpStream.beginEffectKeyed hashFn "network" "k" orphaned
+
+              Expect.equal
+                  (OpStream.settleEffectKeyed hashFn enc "k" occ (Ok 2) attempted)
+                  (Error(KeyedCaptureFault.AlreadySettled("k", 0)))
+                  "the two-step form refuses the same input on its typed channel" ]

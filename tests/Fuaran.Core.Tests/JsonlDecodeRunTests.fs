@@ -334,15 +334,18 @@ let tests =
               Expect.isNonEmpty dropped "a decoder that drops the run after an escape is caught"
               Expect.exists dropped (fun m -> m.StartsWith "\\n run |") "on a run after a short escape" ]
 
-// ---- Phase 383 — the OpStream impossible branches fail loudly ----
+// ---- Phase 383, then Phase 496 — the OpStream impossible branches are gone ----
 
 [<Tests>]
 let impossibleBranchTests =
     testList
-        "OpStream impossible branches (Phase 383)"
-        // The two impossible branches the 2026-10-07 review named fail loudly in the house style
-        // rather than answering a plausible value; nothing can reach them, so the source is read.
-        [ testCase "the linear append's and the keyed capture's impossible branches fail loudly"
+        "OpStream impossible branches (Phases 383, 496)"
+        // Phase 383 made the two branches the 2026-10-07 review named fail loudly rather than answer a
+        // plausible value. Phase 496 removed them: the single-op appends return the record they
+        // chained, and the keyed capture appends the settlement of the attempt it just wrote (the
+        // capture's branch was reachable, over a journal holding an orphaned settlement). What 383
+        // guarded still holds and is read from the source: no fabricated entry, no dropped settlement.
+        [ testCase "the linear append and the keyed capture carry no impossible branch, and fabricate nothing"
           <| fun _ ->
               let read (rel: string) =
                   System.IO.File.ReadAllText(Snapshots.repoFile rel).Replace("\r\n", "\n")
@@ -354,17 +357,10 @@ let impossibleBranchTests =
                   (chain.Contains "{ Seq = n; Hash = actualHead }")
                   "no EntryRef fabricated at the previous head"
 
-              Expect.stringContains
-                  chain
-                  "failwith \"unreachable: chainOps chains exactly one record for one op\""
-                  "the append's fallback arm fails loudly"
-
               Expect.isFalse (capture.Contains "| Error _ -> attempted") "no settle failure dropped"
 
-              Expect.stringContains
-                  capture
-                  "failwithf \"unreachable: the attempt just journalled for %s/%d did not settle\""
-                  "the keyed capture's settle arm fails loudly" ]
+              for name, text in [ "Chain.fs", chain; "Capture.fs", capture ] do
+                  Expect.isFalse (text.Contains "failwith") (name + " throws nowhere: its facade says total") ]
 
 // ---- Phase 466: the strict grammar, at the line ----
 //

@@ -688,11 +688,16 @@ module Tree =
     /// new semantics.
     module Index =
 
-        /// Build both maps in a single preorder pass. Over a tree that is not well-formed (an id
-        /// carried twice) `ById` and `ParentOf` keep the LAST occurrence, and the parent links can
-        /// form a cycle; every read below terminates on such an index regardless (Phase 298),
-        /// `isFreshFor` reads it as stale for every tree (Phase 447), and `tryBuild` refuses the
-        /// tree instead.
+        /// Build both maps in a single preorder pass. **The lenient builder** (Phase 496 states the one
+        /// answer the three functions give to a repeated id): over a tree that is not well-formed (an id
+        /// carried twice) `ById` and `ParentOf` keep the LAST occurrence — as `Tree.digests` does — and
+        /// the parent links can form a cycle; every read below terminates on such an index regardless
+        /// (Phase 298), `isFreshFor` certifies no such index as fresh (Phase 447), and `tryBuild` refuses
+        /// the tree instead. So the index of a malformed tree is never one a caller can certify: a
+        /// caller that may meet one builds with `tryBuild`. `build` keeps its total `NodeIndex`
+        /// signature because `Ops.Index.afterOp`'s fallback and its `afterOp ≡ build` law read it;
+        /// making `build` refuse is a signature change, recorded as pending for a breaking cut in
+        /// `docs/releases/0.39.0.md`.
         let build (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : NodeIndex<'Node, 'Id> =
             let nodes = preorder w root
 

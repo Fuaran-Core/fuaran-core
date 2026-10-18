@@ -1265,37 +1265,40 @@ module Dag =
         (lineOf: Map<string, int>)
         (dag: T<string * Result<'Op, string>>)
         : Result<T<'Op>, StreamLoadFault<'Break>> =
-        let sites =
-            dag.Nodes
-            |> Map.toList
-            |> List.choose (fun (id, n) ->
+        // One pass: every decoded node into the map, every refused one into the sites, so the
+        // answer is built from what was decoded and never re-reads a carried `Error` (Phase 496).
+        let decoded, sites =
+            ((Map.empty, []), dag.Nodes)
+            ||> Map.fold (fun (decoded: Map<string, DagNode<'Op>>, sites) id n ->
                 match snd n.Op with
-                | Ok _ -> None
+                | Ok op ->
+                    Map.add
+                        id
+                        { Id = n.Id
+                          Parents = n.Parents
+                          Actor = n.Actor
+                          Op = op }
+                        decoded,
+                    sites
                 | Error why ->
-                    Some
-                        { Lane = laneOf id
-                          Line = Map.tryFind id lineOf |> Option.defaultValue 0
-                          NodeId = id
-                          Reason = why })
+                    decoded,
+                    { Lane = laneOf id
+                      Line = Map.tryFind id lineOf |> Option.defaultValue 0
+                      NodeId = id
+                      Reason = why }
+                    :: sites)
+
+        match sites with
+        | [] -> Ok { NodeMap = decoded }
+        | _ ->
+            // back to id order before the (stable) sort, so ties keep the order they always had
+            List.rev sites
             |> List.sortWith (fun a b ->
                 match System.String.CompareOrdinal(Option.defaultValue "" a.Lane, Option.defaultValue "" b.Lane) with
                 | 0 -> compare a.Line b.Line
                 | c -> c)
-
-        match sites with
-        | [] ->
-            Ok
-                { NodeMap =
-                    dag.Nodes
-                    |> Map.map (fun _ n ->
-                        { Id = n.Id
-                          Parents = n.Parents
-                          Actor = n.Actor
-                          Op =
-                            match snd n.Op with
-                            | Ok op -> op
-                            | Error why -> invalidOp why }) }
-        | _ -> Error(StreamLoadFault.Undecodable sites)
+            |> StreamLoadFault.Undecodable
+            |> Error
 
     /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`) through the ONE
     /// JSONL scanner, `OpStream.Jsonl` (Phase 296; until then this module carried a verbatim copy).

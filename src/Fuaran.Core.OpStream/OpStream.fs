@@ -1042,7 +1042,9 @@ module OpStream =
     /// open and the returned `Occurrence` is what `settleEffectKeyed` settles it with later. A
     /// `deterministic` label journals nothing (occurrence `0`, the journal unchanged), as
     /// `captureEffect`'s does. A `CapturedEffect` since Phase 391 (a positional triple before
-    /// `0.37.0`).
+    /// `0.37.0`). Total (GP4; Phase 496): over a journal whose pairing already fails
+    /// `verifyKeyedCaptures` it still journals the attempt and its settlement, and the journal still
+    /// fails that check.
     let captureEffectKeyed
         (hashFn: HashFn)
         (encode: 'v -> string)
