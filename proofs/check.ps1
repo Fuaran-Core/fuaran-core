@@ -29,7 +29,8 @@
 #   -Since <tree>    verify, cold, only the models whose inputs changed between <tree> and the
 #                    working tree — the cone — and print every registered module IN, DEP or OUT
 #                    with the reason. An EMPTY cone is green only over a recorded strict run.
-#   -Modules <list>  name a cone by hand (`-Modules TreeOps,Skeleton`): exactly those modules.
+#   -Modules <list>  name a cone by hand (`-Modules TreeOps,Skeleton`): those modules, and (since
+#                    Phase 522) what they reference, checked ahead of them as -Since checks it.
 #   -PlanOnly        print what the kit would be handed, and stop before the prover runs.
 #
 # EVERY RUN of the leg leaves ONE record (Phase 522): the kit's run verdict (its header, "THE RUN
@@ -301,36 +302,33 @@ if ($Since -or $Cone) {
 
 if ($Since -and $Cone) { Stop-Leg '-Since and -Modules each name a cone; pass one of them' }
 
-$width = ($modules | Measure-Object -Property Length -Maximum).Maximum
-
-if ($Cone) {
-    # Split as well as accept an array: through `pwsh -File`, `-Modules A,B` arrives as ONE string.
-    $named = @($Cone | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
-    if ($named.Count -eq 0) { Stop-Leg '-Modules names no module' }
-    $unknown = @($named | Where-Object { $modules -notcontains $_ })
-    if ($unknown.Count -gt 0) {
-        Stop-Leg "-Modules names $($unknown -join ', '), which `$modules does not register; the registered modules are $($modules -join ', ')"
-    }
-    $selected = @($modules | Where-Object { $named -contains $_ })
-
-    Write-Host ("==== proofs: cone named by hand (-Modules) -- $($selected.Count) of $($modules.Count) registered module(s) IN, " +
-        "0 checked as a dependency, $($modules.Count - $selected.Count) OUT") -ForegroundColor Cyan
-    foreach ($module in $modules) {
-        if ($selected -contains $module) { Write-Host ('     IN   {0}  named by -Modules' -f $module.PadRight($width)) -ForegroundColor Green }
-        else { Write-Host ('     OUT  {0}  not named' -f $module.PadRight($width)) -ForegroundColor DarkGray }
-    }
-    Write-Host ('     A hand cone is exactly what it names. A module a named one references is still checked by the prover, ' +
-        'inside the named module''s clock, so a cost line here is not a cold measurement of that module alone; -Since lists them.') -ForegroundColor DarkGray
-}
-elseif ($Since) {
-    $answer = Invoke-ConeTool @('--since', $Since)
-    foreach ($line in @($answer.lines)) {
+# The cone tool's printed lines, coloured by verdict. -Since and -Modules print the same way.
+function Write-ConeLines($lines) {
+    foreach ($line in @($lines)) {
         $colour = if ($line.StartsWith('====')) { 'Cyan' }
         elseif ($line.Length -ge 8 -and $line.Substring(5, 3) -eq 'IN ') { 'Green' }
         elseif ($line.Length -ge 8 -and $line.Substring(5, 3) -eq 'DEP') { 'Cyan' }
         else { 'DarkGray' }
         Write-Host $line -ForegroundColor $colour
     }
+}
+
+if ($Cone) {
+    # A HAND CONE (Phase 522): the named modules IN, and every module they reference handed to the kit
+    # as a DEPENDENCY ahead of them, by the SAME closure -Since uses, computed by the same tool. Until
+    # Phase 522 a hand cone was exactly what it named, and a named model whose shared modules were not
+    # named failed at EXTRACT as an apparatus fault: nothing had checked the modules it opens.
+    # Split as well as accept an array: through `pwsh -File`, `-Modules A,B` arrives as ONE string.
+    $named = @($Cone | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+    if ($named.Count -eq 0) { Stop-Leg '-Modules names no module' }
+    $answer = Invoke-ConeTool @('--modules', ($named -join ','))
+    if ($answer.verdict -ne 'verify') { Stop-Leg $answer.message 1 }
+    Write-ConeLines $answer.lines
+    $selected = @($answer.verify)
+}
+elseif ($Since) {
+    $answer = Invoke-ConeTool @('--since', $Since)
+    Write-ConeLines $answer.lines
 
     switch ($answer.verdict) {
         'verify' { $selected = @($answer.verify) }

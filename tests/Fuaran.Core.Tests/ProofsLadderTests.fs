@@ -2157,6 +2157,35 @@ type private ConeCause =
         Reaches: bool
     }
 
+/// Every module the cone's MEMBERS reference, however transitively, that is not a member itself,
+/// with the reason it is checked: it goes to the kit as a DEPENDENCY, ahead of the module that needs
+/// it. On a cold cache the prover checks it anyway before the module that references it, and the
+/// extraction of that module needs its checked file; listing it keeps every module's clock its own.
+/// The ONE closure both cones use — `-Since`'s and the hand cone `-Modules` names (Phase 522).
+let private coneDependencies (facts: ConeFacts) (members: Set<string>) : Map<string, string> =
+    let refs m =
+        facts.References |> Map.tryFind m |> Option.defaultValue Set.empty
+
+    let dependencies = System.Collections.Generic.Dictionary<string, string>()
+
+    for m in facts.Roster do
+        if members.Contains m then
+            let stack = System.Collections.Generic.Stack<string>(refs m)
+            let seen = System.Collections.Generic.HashSet<string>()
+
+            while stack.Count > 0 do
+                let r = stack.Pop()
+
+                if seen.Add r then
+                    if not (members.Contains r) && not (dependencies.ContainsKey r) then
+                        dependencies[r] <-
+                            sprintf "a dependency of %s, checked ahead of it so every module's clock is its own" m
+
+                    for x in refs r do
+                        stack.Push x
+
+    dependencies |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+
 /// The cone, one row per registered module, in the roster's order.
 let computeCone (facts: ConeFacts) : ConeRow list =
     let refs m =
@@ -2248,23 +2277,7 @@ let computeCone (facts: ConeFacts) : ConeRow list =
 
                             queue.Enqueue(d, d :: trail)
 
-        let dependencies = System.Collections.Generic.Dictionary<string, string>()
-
-        for m in facts.Roster do
-            if reasons.ContainsKey m then
-                let stack = System.Collections.Generic.Stack<string>(refs m)
-                let seen = System.Collections.Generic.HashSet<string>()
-
-                while stack.Count > 0 do
-                    let r = stack.Pop()
-
-                    if seen.Add r then
-                        if not (reasons.ContainsKey r) && not (dependencies.ContainsKey r) then
-                            dependencies[r] <-
-                                sprintf "a dependency of %s, checked ahead of it so every module's clock is its own" m
-
-                        for x in refs r do
-                            stack.Push x
+        let dependencies = coneDependencies facts (Set.ofSeq reasons.Keys)
 
         facts.Roster
         |> List.map (fun m ->
@@ -2274,8 +2287,8 @@ let computeCone (facts: ConeFacts) : ConeRow list =
                   Verdict = In
                   Reason = why }
             | _ ->
-                match dependencies.TryGetValue m with
-                | true, why ->
+                match dependencies.TryFind m with
+                | Some why ->
                     { Module = m
                       Verdict = Dependency
                       Reason = why }
@@ -2283,6 +2296,31 @@ let computeCone (facts: ConeFacts) : ConeRow list =
                     { Module = m
                       Verdict = Out
                       Reason = "nothing it reads changed" })
+
+/// The cone `check.ps1 -Modules` names by hand (Phase 522): the named modules IN, and every module
+/// they reference as a DEPENDENCY, by the same closure `-Since` uses. Until Phase 522 a hand cone was
+/// exactly what it named, and a named model whose shared modules were not named failed at EXTRACT as
+/// an apparatus fault: its own extraction needs their checked files, and nothing had checked them.
+let handCone (facts: ConeFacts) (named: string list) : ConeRow list =
+    let members = Set.ofList named
+    let dependencies = coneDependencies facts members
+
+    facts.Roster
+    |> List.map (fun m ->
+        if members.Contains m then
+            { Module = m
+              Verdict = In
+              Reason = "named by -Modules" }
+        else
+            match dependencies.TryFind m with
+            | Some why ->
+                { Module = m
+                  Verdict = Dependency
+                  Reason = why }
+            | None ->
+                { Module = m
+                  Verdict = Out
+                  Reason = "not named, and no named module references it" })
 
 /// The modules the kit is handed for a cone: IN and DEPENDENCY, in the roster's order.
 let coneChecked (rows: ConeRow list) : string list =
@@ -2366,6 +2404,35 @@ let modelReferenceGraph (root: string) (roster: string list) : Map<string, Set<s
 /// The facts for the cone of a working tree against a commit: `git diff --name-only` (tracked,
 /// staged or not, a rename split into both of its paths) plus the untracked files git does not
 /// ignore.
+/// The roster half of the cone's facts — the modules, the shared ones, the reference graph and the
+/// packages — with nothing changed. The hand cone needs only this; `-Since` adds what changed.
+let coneRosterFacts (root: string) : Result<ConeFacts, string> =
+    let budgetNow = workingText root "proofs/modules.json"
+
+    match parseRoster budgetNow with
+    | Error errors ->
+        Error(
+            sprintf
+                "proofs/modules.json is not a readable roster, so there is no roster to select from: %s"
+                (String.concat "; " errors)
+        )
+    | Ok [] -> Error "proofs/modules.json registers no module, so there is no roster to select from"
+    | Ok entries ->
+        let roster = entries |> List.map _.Module
+
+        Ok
+            { Roster = roster
+              Shared =
+                entries
+                |> List.filter (fun e -> e.Kind = Shared)
+                |> List.map _.Module
+                |> Set.ofList
+              References = modelReferenceGraph root roster
+              Packages = budgetPackages budgetNow
+              Changed = []
+              ScriptCodeMoved = Set.empty
+              EntriesMoved = Set.empty }
+
 let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
     let tracked =
         gitLines root [ "diff"; "--name-only"; "--no-renames"; "--relative"; commit ]
@@ -2379,38 +2446,21 @@ let coneFactsSince (root: string) (commit: string) : Result<ConeFacts, string> =
         let changed = tracked @ untracked |> List.distinct |> List.sort
         let budgetNow = workingText root "proofs/modules.json"
 
-        match parseRoster budgetNow with
-        | Error errors ->
-            Error(
-                sprintf
-                    "proofs/modules.json is not a readable roster, so there is no roster to select from: %s"
-                    (String.concat "; " errors)
-            )
-        | Ok [] -> Error "proofs/modules.json registers no module, so there is no roster to select from"
-        | Ok entries ->
-            let roster = entries |> List.map _.Module
-
-            Ok
-                { Roster = roster
-                  Shared =
-                    entries
-                    |> List.filter (fun e -> e.Kind = Shared)
-                    |> List.map _.Module
-                    |> Set.ofList
-                  References = modelReferenceGraph root roster
-                  Packages = budgetPackages budgetNow
-                  Changed = changed
-                  ScriptCodeMoved =
+        coneRosterFacts root
+        |> Result.map (fun facts ->
+            { facts with
+                Changed = changed
+                ScriptCodeMoved =
                     changed
                     |> List.filter (fun p ->
                         List.contains p legScripts
                         && scriptCode (workingText root p) <> scriptCode (textAt root commit p))
                     |> Set.ofList
-                  EntriesMoved =
+                EntriesMoved =
                     if List.contains "proofs/modules.json" changed then
                         budgetEntriesChanged (textAt root commit "proofs/modules.json") budgetNow
                     else
-                        Set.empty }
+                        Set.empty })
 
 type ConeReport =
     { Since: string
@@ -2692,6 +2742,7 @@ let recordStrictBaseline (root: string) (recordedAt: DateTimeOffset) (verdictFil
 /// `proofs/check.ps1 -Since` that decides. Its answer goes to the `--out` file as JSON, printed
 /// lines included, so `check.ps1` prints them itself and no console code page sits between the two.
 ///   --since <tree> --out <file>          the cone, and for an empty one the baseline verdict
+///   --modules <a,b,...> --out <file>     the hand cone: the named modules and what they reference
 ///   --record-strict --verdict <file> --out <file>
 ///                                        record a green -Strict full run's verdict (Phase 522) as
 ///                                        the baseline
@@ -2732,6 +2783,50 @@ let coneCli (args: string list) : int =
                 w.WriteEndArray())
 
             0
+    | [ "--modules"; named; "--out"; out ] ->
+        match coneRosterFacts repoRoot with
+        | Error e ->
+            eprintfn "==== proofs: the cone could not be computed: %s" e
+            2
+        | Ok facts ->
+            let names =
+                named.Split([| ','; ' ' |], StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+                |> List.ofArray
+
+            let unknown = names |> List.filter (fun n -> not (List.contains n facts.Roster))
+
+            let rows = handCone facts names
+            let checkedModules = coneChecked rows
+
+            let verdict, message =
+                if not (List.isEmpty unknown) then
+                    "refused",
+                    sprintf
+                        "-Modules names %s, which modules.json does not register; the registered modules are %s"
+                        (String.concat ", " unknown)
+                        (String.concat ", " facts.Roster)
+                elif List.isEmpty names then
+                    "refused", "-Modules names no module"
+                else
+                    "verify", ""
+
+            writeJson out (fun w ->
+                w.WriteString("verdict", verdict)
+                w.WriteString("message", message)
+                w.WriteStartArray "verify"
+
+                for m in checkedModules do
+                    w.WriteStringValue m
+
+                w.WriteEndArray()
+                w.WriteStartArray "lines"
+
+                for line in renderCone "named by hand (-Modules)" rows do
+                    w.WriteStringValue line
+
+                w.WriteEndArray())
+
+            0
     | [ "--record-strict"; "--verdict"; verdictFile; "--out"; out ] ->
         let recorded, message =
             match recordStrictBaseline repoRoot DateTimeOffset.UtcNow verdictFile with
@@ -2745,7 +2840,7 @@ let coneCli (args: string list) : int =
         0
     | _ ->
         eprintfn
-            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --record-strict --verdict <file> --out <file>"
+            "usage: --proof-cone --since <tree> --out <file> | --proof-cone --modules <a,b,...> --out <file> | --proof-cone --record-strict --verdict <file> --out <file>"
 
         2
 
@@ -2764,20 +2859,9 @@ let private toyFacts (changed: string list) : ConeFacts =
       EntriesMoved = Set.empty }
 
 let private realConeFacts (changed: string list) : ConeFacts =
-    let entries = realRoster ()
-    let roster = entries |> List.map _.Module
-
-    { Roster = roster
-      Shared =
-        entries
-        |> List.filter (fun e -> e.Kind = Shared)
-        |> List.map _.Module
-        |> Set.ofList
-      References = modelReferenceGraph repoRoot roster
-      Packages = budgetPackages (File.ReadAllText(Path.Combine(repoRoot, "proofs", "modules.json")))
-      Changed = changed
-      ScriptCodeMoved = Set.empty
-      EntriesMoved = Set.empty }
+    match coneRosterFacts repoRoot with
+    | Ok facts -> { facts with Changed = changed }
+    | Error e -> failtestf "%s" e
 
 let private withVerdict (v: ConeVerdict) (rows: ConeRow list) : Set<string> =
     rows |> List.filter (fun r -> r.Verdict = v) |> List.map _.Module |> Set.ofList
@@ -3339,19 +3423,77 @@ let proofsConeTests =
                   "==== proofs: plan -- budget file: the declared proofs/modules.json"
                   "the budget file is the declared one, unfiltered"
 
-          testCase "-Modules names a cone by hand; an unregistered name, or -Since and -Modules together, is refused"
+          testCase "a hand cone is the named modules IN and what they reference as DEP, by -Since's closure (Phase 522)"
           <| fun _ ->
-              let code, output = runCheckScript [ "-Modules"; "Chain,Limits"; "-PlanOnly" ]
-              Expect.equal code 0 (sprintf "a registered hand cone plans:\n%s" output)
+              // The toy tree: C opens B opens A; D stands alone.
+              let rows = handCone (toyFacts []) [ "C" ]
+              Expect.equal (withVerdict In rows) (set [ "C" ]) "the named module is in"
 
               Expect.equal
-                  (plannedModules output)
-                  (realModules () |> List.filter (fun m -> m = "Chain" || m = "Limits"))
-                  "exactly the named modules, in the roster's order"
+                  (withVerdict Dependency rows)
+                  (set [ "A"; "B" ])
+                  "and everything it references, transitively, as DEP"
 
-              let code, output = runCheckScript [ "-Modules"; "NoSuchModel"; "-PlanOnly" ]
-              Expect.notEqual code 0 "an unregistered name is refused"
-              Expect.stringContains output "NoSuchModel" "and the refusal names it"
+              Expect.equal (coneChecked rows) [ "A"; "B"; "C" ] "handed to the kit in the roster's order"
+              Expect.equal (withVerdict Out rows) (set [ "D" ]) "and nothing else"
+
+              // The real tree, and the defect it closes: `-Modules Limits` used to hand the kit Limits
+              // alone, and Limits' extraction failed as an APPARATUS fault because nothing had checked
+              // the shared Twin it opens.
+              let facts = realConeFacts []
+              let real = handCone facts [ "Limits" ]
+              Expect.equal (withVerdict In real) (set [ "Limits" ]) "Limits is in"
+
+              Expect.isTrue
+                  (Set.isSubset (facts.References |> Map.find "Limits") (withVerdict Dependency real))
+                  "and every module it opens is checked ahead of it"
+
+              Expect.isTrue (withVerdict Dependency real |> Set.contains "Twin") "the shared Twin among them"
+
+              Expect.equal
+                  (coneChecked real)
+                  (facts.Roster
+                   |> List.filter (fun m -> m = "Limits" || (withVerdict Dependency real).Contains m))
+                  "in the roster's order, so every dependency is checked before the module that needs it"
+
+          testCase
+              "-Modules is answered by the cone tool; an unregistered name, or -Since and -Modules together, is refused"
+          <| fun _ ->
+              // The tool's answer, in-process: the same function `check.ps1 -Modules` asks.
+              let out =
+                  Path.Combine(Path.GetTempPath(), sprintf "hand-cone-%s.json" (Guid.NewGuid().ToString "N"))
+
+              try
+                  Expect.equal (coneCli [ "--modules"; "Chain,Limits"; "--out"; out ]) 0 "the tool answers"
+                  use doc = JsonDocument.Parse(File.ReadAllText out)
+
+                  Expect.equal
+                      (doc.RootElement.GetProperty("verdict").GetString())
+                      "verify"
+                      "a registered hand cone verifies"
+
+                  Expect.equal
+                      [ for m in doc.RootElement.GetProperty("verify").EnumerateArray() -> m.GetString() ]
+                      (coneChecked (handCone (realConeFacts []) [ "Chain"; "Limits" ]))
+                      "the named modules and their closure"
+
+                  Expect.equal (coneCli [ "--modules"; "NoSuchModel"; "--out"; out ]) 0 "the tool answers a refusal too"
+                  use refused = JsonDocument.Parse(File.ReadAllText out)
+
+                  Expect.equal
+                      (refused.RootElement.GetProperty("verdict").GetString())
+                      "refused"
+                      "an unregistered name is refused"
+
+                  Expect.stringContains
+                      (refused.RootElement.GetProperty("message").GetString())
+                      "NoSuchModel"
+                      "and the refusal names it"
+              finally
+                  File.Delete out
+
+              let script = File.ReadAllText checkScriptPath
+              Expect.stringContains script "'--modules'" "check.ps1 asks the cone tool for a hand cone"
 
               let code, _ = runCheckScript [ "-Since"; "HEAD"; "-Modules"; "Chain"; "-PlanOnly" ]
-              Expect.notEqual code 0 "a cone named two ways is refused" ]
+              Expect.notEqual code 0 "a cone named two ways is refused, before anything is built" ]

@@ -1235,10 +1235,11 @@ which F\* requires and which prose read as code would break.
 
 **`DEP` is not `IN`.** A module the cone references whose own inputs did not change is checked
 *ahead* of the modules that need it — on a cold cache the prover must check it anyway before it can
-check them — and listed as `DEP`, so every clock the leg prints is its own module's and a budget or
-floor is compared against the module it was seeded for. `-Modules <list>` is exactly what it
-names and nothing else, so there a named module's clock includes whatever it references; use
-`-Since` when the timings matter.
+check them — and listed as `DEP`, so every clock the leg prints is its own module's and a budget is
+compared against the module it was seeded for. `-Modules <list>` is the named modules `IN` and what
+they reference `DEP`, by the same closure and the same tool (Phase 522): until then a hand cone was
+exactly what it named, and a named model whose shared modules were not named failed at extraction as
+an apparatus fault, because nothing had checked the modules it opens.
 
 **Where it is computed.** In the host test project (`--proof-cone`, beside `parseRoster` in
 `../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`), which `check.ps1` builds and asks before it hands
