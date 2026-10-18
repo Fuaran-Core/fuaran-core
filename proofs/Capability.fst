@@ -137,13 +137,16 @@
    which refuses it: a value space has one reader spelling, `"$type"`.)
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
-   `ColumnOps.fst`. The module is SELF-CONTAINED like `ColumnOps.fst` — it opens nothing,
+   `ColumnOps.fst`. The module is SELF-CONTAINED like `ColumnOps.fst` — it opens no other model,
    restates `outcome` and the list helpers it needs, and extracts beside the other models into
    the same oracle assembly sharing only `Prims.fs` and the `option` shim.
 
    Apache-2.0, like everything beside it.
 *)
 module Capability
+
+open Twin
+open ListAlgebra
 
 (* ======================================================================================
    0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
@@ -153,24 +156,6 @@ module Capability
 type outcome (a e:Type) =
   | Ok    : a -> outcome a e
   | Error : e -> outcome a e
-
-(* F#: `List.length`. *)
-let rec len (#a:Type) (l:list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
-(* F#: `@`. *)
-let rec app (#a:Type) (l m:list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | x :: t -> x :: app t m
-
-(* F#: `List.rev`. *)
-let rec rev (#a:Type) (l:list a) : Tot (list a) =
-  match l with
-  | [] -> []
-  | x :: t -> app (rev t) [x]
 
 (* F#: `List.map`. *)
 let rec map (#a #b:Type) (f:a -> b) (l:list a) : Tot (list b) =
@@ -211,12 +196,6 @@ let rec fold_left (#a #b:Type) (f:b -> a -> b) (acc:b) (l:list a) : Tot b (decre
   | [] -> acc
   | x :: t -> fold_left f (f acc x) t
 
-(* F#: `List.contains` on strings. *)
-let rec mem (x:string) (l:list string) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> x = y || mem x t
-
 (* Propositional membership, for the abstract node type (no decidable equality asked of it). *)
 let rec memp (#a:Type) (x:a) (l:list a) : Tot prop =
   match l with
@@ -240,12 +219,6 @@ let rec keys (#a:Type) (l:list (string & a)) : Tot (list string) =
   match l with
   | [] -> []
   | (k, _) :: t -> k :: keys t
-
-(* F#: `List.distinct xs = xs`, as the predicate a registry's ids satisfy. *)
-let rec distinct (l:list string) : Tot bool =
-  match l with
-  | [] -> true
-  | x :: t -> not (mem x t) && distinct t
 
 (* The named walks the clauses below would otherwise write as closures. Named rather than
    `List.tryFind (fun ...)` so that the prover sees one function where the F# has one lambda —
@@ -1864,7 +1837,7 @@ let invocation_key (kr:key_renderers) (c:capability) (a:invocation) : Tot string
   c.c_id ^ "#" ^ kr.k_hash (key_canonical kr (sort_bindings kr (keyed kr c a)))
 
 (* HOW A STRING IS READ — the reading `Chain.fst` and `Query.fst` take, restated because this
-   module opens nothing: concatenation is symbol-list append, and equal symbols are one string.
+   module opens no other model: concatenation is symbol-list append, and equal symbols are one string.
    A HYPOTHESIS in the `requires` of the lemmas that spend it, never an `assume`. *)
 [@@ noextract_to "FSharp"]
 let symbols_faithful (#sym:eqtype) (reveal:string -> list sym) : prop =
@@ -2861,12 +2834,6 @@ let bind_handlers_order_independent (#node #h:Type) (le:string -> string -> bool
    ====================================================================================== *)
 
 (* ---- sets as lists, each naming the F# `Set` function it stands for ---- *)
-
-(* F#: `Set.difference a b`. *)
-let rec diff (a b:list string) : Tot (list string) =
-  match a with
-  | [] -> []
-  | h :: t -> if mem h b then diff t b else h :: diff t b
 
 (* F#: `Set.union a b`, read as membership: `a`, then what `b` adds. *)
 let union (a b:list string) : Tot (list string) = app a (diff b a)
@@ -4773,27 +4740,10 @@ let pipeline_roundtrip (rd:readers) (cr:codec_readers) (p:pipeline)
   = nodes_roundtrip rd cr 0 p.p_nodes
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
   { tname = "determinism-tag-of-clock-and-network";
     tholds = (fun () ->

@@ -65,22 +65,12 @@
 *)
 module PropagationOps
 
+open ListAlgebra
 open DagFold
 open TreeOps
 module P = Propagation
 
 #set-options "--ext context_pruning"
-
-(* ======================================================================================
-   1. The bridge between the two models' membership. `Propagation.fst` is self-contained and
-      restates `mem` over strings; it is the same function as `DagFold.mem` at strings.
-   ====================================================================================== *)
-
-let rec mem_bridge (x:string) (l:list string)
-  : Lemma (ensures P.mem x l == mem x l) (decreases l) =
-  match l with
-  | [] -> ()
-  | _ :: t -> mem_bridge x t
 
 (* ======================================================================================
    2. The production functions, clause for clause.
@@ -416,20 +406,19 @@ let moved (rd:tree -> list string) (pre post:tree) (x:string) : Tot bool =
   | _, None -> false
 
 let seed_named (rd:tree -> list string) (pre post:tree) (o:op) (x:string)
-  : Lemma (requires has_id x post /\ P.mem x (seeds rd o pre post))
-          (ensures P.mem x (changed_for_op rd pre post o)) =
+  : Lemma (requires has_id x post /\ mem x (seeds rd o pre post))
+          (ensures mem x (changed_for_op rd pre post o)) =
   let s = seeds rd o pre post in
   let d = P.dirty_from_changed_ids (deps_of rd pre) s in
   P.dirty_sound (deps_of rd pre) s x [];
-  mem_bridge x d;
   mem_filt (survives post) d x;
-  mem_bridge x (changed_for_op rd pre post o)
+  ()
 
 (* THEOREM — changed_for_op_names_moved. Every surviving node whose content, child ids or declared
    reads the edit moved, or that the edit created, is in the change set. *)
 let changed_for_op_names_moved (rd:tree -> list string) (o:op) (pre post:tree) (x:string)
   : Lemma (requires wf pre /\ apply o pre == Ok post /\ moved rd pre post x)
-          (ensures P.mem x (changed_for_op rd pre post o)) =
+          (ensures mem x (changed_for_op rd pre post o)) =
   find_in_some_iff x post;
   (match find_in x pre, find_in x post with
    | Some m, Some n ->
@@ -439,24 +428,21 @@ let changed_for_op_names_moved (rd:tree -> list string) (o:op) (pre post:tree) (
   let l = local rd o pre post in
   let rest = app (removed pre post) (touched_by pre o) in
   mem_app x l rest;
-  mem_bridge x (seeds rd o pre post);
   seed_named rd pre post o x
 
 (* THEOREM — changed_for_op_names_readers. Every surviving node that declared, in the PRE-edit
    tree, a read of an id the edit removed is in the change set. *)
 let changed_for_op_names_readers (rd:tree -> list string) (o:op) (pre post:tree) (x r:string)
   : Lemma (requires has_id x post /\ has_id r pre /\ not (has_id r post) /\ P.edge (deps_of rd pre) x r)
-          (ensures P.mem x (changed_for_op rd pre post o)) =
+          (ensures mem x (changed_for_op rd pre post o)) =
   let s = seeds rd o pre post in
   let d = P.dirty_from_changed_ids (deps_of rd pre) s in
   mem_filt (gone post) (ids pre) r;
   mem_app r (removed pre post) (touched_by pre o);
   mem_app r (local rd o pre post) (app (removed pre post) (touched_by pre o));
-  mem_bridge r s;
   P.dirty_sound (deps_of rd pre) s r [x];
-  mem_bridge x d;
   mem_filt (survives post) d x;
-  mem_bridge x (changed_for_op rd pre post o)
+  ()
 
 (* THEOREM — changed_for_op_complete. For an op `apply` accepts on a well-formed tree — `Batch`
    included, at any depth — the change set names every survivor the edit moved (new, or its
@@ -466,7 +452,7 @@ let changed_for_op_complete (rd:tree -> list string) (o:op) (pre post:tree) (x r
   : Lemma (requires wf pre /\ apply o pre == Ok post /\ has_id x post /\
                     (moved rd pre post x \/
                      (has_id r pre /\ not (has_id r post) /\ P.edge (deps_of rd pre) x r)))
-          (ensures P.mem x (changed_for_op rd pre post o)) =
+          (ensures mem x (changed_for_op rd pre post o)) =
   if moved rd pre post x then changed_for_op_names_moved rd o pre post x
   else changed_for_op_names_readers rd o pre post x r
 
@@ -502,27 +488,24 @@ let dirty_from_op_complete (rd:tree -> list string) (o:op) (pre post:tree) (x r:
                     ((has_id x post /\ moved rd pre post x) \/
                      (has_id x pre /\ not (has_id x post)) \/
                      (has_id r pre /\ not (has_id r post) /\ P.edge (deps_of rd pre) x r)))
-          (ensures P.mem x (dirty_from_op rd pre o)) =
+          (ensures mem x (dirty_from_op rd pre o)) =
   let s = seeds rd o pre post in
   let d = P.dirty_from_changed_ids (deps_of rd pre) s in
   if has_id x post && moved rd pre post x then begin
     changed_for_op_names_moved rd o pre post x;
-    mem_bridge x (changed_for_op rd pre post o);
     mem_filt (survives post) d x;
-    mem_bridge x d
+    ()
   end
   else if has_id x pre && not (has_id x post) then begin
     mem_filt (gone post) (ids pre) x;
     mem_app x (removed pre post) (touched_by pre o);
     mem_app x (local rd o pre post) (app (removed pre post) (touched_by pre o));
-    mem_bridge x s;
     P.dirty_sound (deps_of rd pre) s x []
   end
   else begin
     mem_filt (gone post) (ids pre) r;
     mem_app r (removed pre post) (touched_by pre o);
     mem_app r (local rd o pre post) (app (removed pre post) (touched_by pre o));
-    mem_bridge r s;
     P.dirty_sound (deps_of rd pre) s r [x]
   end
 
@@ -542,11 +525,9 @@ let changed_for_op_least (rd:tree -> list string) (o:op) (pre post:tree) (s:list
           (ensures P.subset (changed_for_op rd pre post o) s) =
   let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
   P.dirty_least (deps_of rd pre) (seeds rd o pre post) s;
-  let aux (y:string) : Lemma (P.mem y (changed_for_op rd pre post o) ==> P.mem y s) =
-    mem_bridge y (changed_for_op rd pre post o);
+  let aux (y:string) : Lemma (mem y (changed_for_op rd pre post o) ==> mem y s) =
     mem_filt (survives post) d y;
-    mem_bridge y d;
-    if P.mem y d then P.subset_mem d s y else ()
+    if mem y d then P.subset_mem d s y else ()
   in
   FStar.Classical.forall_intro aux;
   P.subset_intro (changed_for_op rd pre post o) s
@@ -624,19 +605,19 @@ and deps_of_key_all (rd:tree -> list string) (ts:list tree) (x:string)
 let structural_off (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
                    (x:string) (f:string -> option v)
   : Lemma (requires wf pre /\ apply o pre == Ok post /\ has_id x post /\
-                    not (P.mem x (changed_for_op rd pre post o)))
+                    not (mem x (changed_for_op rd pre post o)))
           (ensures structural g post f x == structural g pre f x) =
   find_in_some_iff x post;
   if moved rd pre post x then changed_for_op_names_moved rd o pre post x else ()
 
 let structural_agree_on (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
                         (ids:list string)
-  : Lemma (requires wf pre /\ apply o pre == Ok post /\ (forall (x:string). P.mem x ids ==> has_id x post))
+  : Lemma (requires wf pre /\ apply o pre == Ok post /\ (forall (x:string). mem x ids ==> has_id x post))
           (ensures P.agree_on (structural g pre) (structural g post) (changed_for_op rd pre post o) ids) =
   let c = changed_for_op rd pre post o in
   let aux (f:string -> option v) (x:string)
-    : Lemma (P.mem x ids /\ not (P.mem x c) ==> structural g post f x == structural g pre f x) =
-    if P.mem x ids && not (P.mem x c) then structural_off g rd o pre post x f else ()
+    : Lemma (mem x ids /\ not (mem x c) ==> structural g post f x == structural g pre f x) =
+    if mem x ids && not (mem x c) then structural_off g rd o pre post x f else ()
   in
   FStar.Classical.forall_intro_2 aux
 
@@ -655,8 +636,7 @@ let changed_for_op_known (rd:tree -> list string) (o:op) (pre post:tree)
           (ensures Nil? (P.unknown_of (deps_of rd post) (changed_for_op rd pre post o))) =
   let c = changed_for_op rd pre post o in
   let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
-  let aux (y:string) : Lemma (P.mem y c ==> P.has_key y (deps_of rd post)) =
-    mem_bridge y c;
+  let aux (y:string) : Lemma (mem y c ==> P.has_key y (deps_of rd post)) =
     mem_filt (survives post) d y;
     if mem y c then deps_of_key rd post y else ()
   in
@@ -670,7 +650,7 @@ let changed_for_op_known (rd:tree -> list string) (o:op) (pre post:tree)
 let evalfrom_agrees_for_op (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op) (pre post:tree)
                            (topo:P.topo_result) (out0:P.eval_outcome v) (prior:list (string & v))
   : Lemma (requires wf pre /\ apply o pre == Ok post /\
-                    (forall (x:string). P.mem x topo.order ==> has_id x post) /\ P.distinct topo.order /\
+                    (forall (x:string). mem x topo.order ==> has_id x post) /\ distinct topo.order /\
                     P.eval (structural g pre) (declared rd pre) (deps_of rd post) topo == P.Ok out0 /\
                     P.prior_of prior out0.values)
           (ensures P.eval_from (structural g post) (declared rd post) prior (changed_for_op rd pre post o)

@@ -53,6 +53,8 @@
 *)
 module Arbitrate
 
+open Twin
+open ListAlgebra
 open DagFold
 open TreeOps
 
@@ -500,11 +502,6 @@ let rec every_interferer_is_cited (fp:footprint) (acc:list proposal) (a:proposal
 
 (* ---- and the partition is TOTAL: nothing is dropped, nothing is duplicated ---- *)
 
-let rec len (#a:Type) (l:list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
 let rec len_app (#a:Type) (l m:list a)
   : Lemma (ensures len (app l m) == len l + len m)
   = match l with
@@ -868,27 +865,10 @@ let merged_applies_and_order_free (base:tree) (ps:list proposal)
     replay_wapply_is_apply_all (concat (scripts_of order)) base
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twin_base : tree = TNode "root" "doc" [ TNode "x" "sec" []; TNode "y" "sec" [] ]
 let twin_p1 : proposal = { pid = 1; holder = "A"; script = [ InsertChild "x" (TNode "n1" "para" []) ] }
 let twin_p2 : proposal = { pid = 2; holder = "B"; script = [ InsertChild "y" (TNode "n2" "para" []) ] }

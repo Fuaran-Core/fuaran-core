@@ -136,6 +136,9 @@
 *)
 module Query
 
+open Twin
+open ListAlgebra
+
 (* Phase 455: the codec section (19) reads the capability seam's codec layer by name — its `JVal`,
    its decoders and the refusal law — rather than restating it a third time. *)
 module C = Capability
@@ -149,12 +152,6 @@ type outcome (a e:Type) =
   | Ok    : a -> outcome a e
   | Error : e -> outcome a e
 
-(* F#: `List.contains` on strings. *)
-let rec mem (x:string) (l:list string) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> x = y || mem x t
-
 (* F#: `Map.containsKey` on `Map.ofList l` — membership of the key, whichever binding wins. *)
 let rec has_key (#a:Type) (k:string) (l:list (string & a)) : Tot bool =
   match l with
@@ -167,12 +164,6 @@ let rec keys (#a:Type) (l:list (string & a)) : Tot (list string) =
   | [] -> []
   | (k, _) :: t -> k :: keys t
 
-(* F#: `List.distinct xs = xs`, as the predicate a registry's ids satisfy. *)
-let rec distinct (l:list string) : Tot bool =
-  match l with
-  | [] -> true
-  | x :: t -> not (mem x t) && distinct t
-
 (* Every element of `l` is in `m`. *)
 let rec all_in (l m:list string) : Tot bool =
   match l with
@@ -184,7 +175,7 @@ let rec all_in (l m:list string) : Tot bool =
       `QueryError`.
    ====================================================================================== *)
 
-(* F#: `TimeUnit` (Phase 422), restated here as `outcome` is: the module opens nothing. The
+(* F#: `TimeUnit` (Phase 422), restated here as `outcome` is: the module opens no other model. The
    digits are what `TimeUnit.widens` compares. *)
 type time_unit =
   | Seconds
@@ -1148,15 +1139,10 @@ let invocation_key_unshaped (rn:renderers) (q:query) (a:arguments)
 
 (* HOW A STRING IS READ. F*'s `string` is primitive and `^` is opaque, so no argument about
    where one field ends is possible without a reading of a string as its symbols — the same
-   reading `Chain.fst` takes for its splices, restated here because this module opens nothing.
+   reading `Chain.fst` takes for its splices, restated here because this module opens no other model.
    `symbols_faithful reveal` says two things true of `System.String` by construction:
    concatenation is symbol-list append, and two strings with the same symbols are one string.
    It is a HYPOTHESIS in the `requires` of the lemmas that spend it, never an `assume`. *)
-[@@ noextract_to "FSharp"]
-let rec app (#a:Type) (x y:list a) : Tot (list a) =
-  match x with
-  | [] -> y
-  | h :: t -> h :: app t y
 
 [@@ noextract_to "FSharp"]
 let symbols_faithful (#sym:eqtype) (reveal:string -> list sym) : prop =
@@ -1803,27 +1789,10 @@ let union_members (a b:registry) (id:string)
     app_ids a.queries b.queries id
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twin_query : query =
   { q_id = "q";
     q_params = [ { p_name = "region"; p_type = StringType; p_required = true } ];
@@ -2196,9 +2165,9 @@ let opt_int_json (name:string) (v:option int) : Tot (list (string & C.jval)) =
 
 (* The members `queryJson` writes after the six it always writes. *)
 let query_tail (#r:Type) (cc:column_codec r) (q:query) : Tot (list (string & C.jval)) =
-  C.app (opt_int_json "timeoutMs" q.q_timeout_ms)
-      (C.app (opt_int_json "pageSize" q.q_page_size)
-           (C.app (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))])
+  app (opt_int_json "timeoutMs" q.q_timeout_ms)
+      (app (opt_int_json "pageSize" q.q_page_size)
+           (app (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))])
                 (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))])))
 
 (* F#: `QueryCodec.queryJson`. *)
@@ -2240,13 +2209,13 @@ let admission_fault_at (q:query) : Tot (option (list C.path_seg & query_error)) 
 
 let rec where_fault_at_agrees (s:list (string & column_type)) (i:nat) (w:list predicate)
   : Lemma (ensures (match where_fault_at s i w with
-                    | Some (j, e) -> where_fault s w == Some e /\ j < i + C.len w
+                    | Some (j, e) -> where_fault s w == Some e /\ j < i + len w
                     | None -> where_fault s w == None)) (decreases w)
   = match w with [] -> () | _ :: t -> where_fault_at_agrees s (i + 1) t
 
 let rec order_fault_at_agrees (s:list (string & column_type)) (seen:list string) (i:nat) (o:list sort_key)
   : Lemma (ensures (match order_fault_at s seen i o with
-                    | Some (j, e) -> order_fault s seen o == Some e /\ j < i + C.len o
+                    | Some (j, e) -> order_fault s seen o == Some e /\ j < i + len o
                     | None -> order_fault s seen o == None)) (decreases o)
   = match o with [] -> () | k :: t -> order_fault_at_agrees s (k.k_column :: seen) (i + 1) t
 
@@ -2336,10 +2305,10 @@ let query_tail_members (#r:Type) (cc:column_codec r) (q:query)
     let o = (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))]) in
     let pg = opt_int_json "pageSize" q.q_page_size in
     let tm = opt_int_json "timeoutMs" q.q_timeout_ms in
-    C.assoc_app "timeoutMs" tm (C.app pg (C.app w o)); C.assoc_app "timeoutMs" pg (C.app w o); C.assoc_app "timeoutMs" w o;
-    C.assoc_app "pageSize" tm (C.app pg (C.app w o)); C.assoc_app "pageSize" pg (C.app w o); C.assoc_app "pageSize" w o;
-    C.assoc_app "where" tm (C.app pg (C.app w o)); C.assoc_app "where" pg (C.app w o); C.assoc_app "where" w o;
-    C.assoc_app "orderBy" tm (C.app pg (C.app w o)); C.assoc_app "orderBy" pg (C.app w o); C.assoc_app "orderBy" w o
+    C.assoc_app "timeoutMs" tm (app pg (app w o)); C.assoc_app "timeoutMs" pg (app w o); C.assoc_app "timeoutMs" w o;
+    C.assoc_app "pageSize" tm (app pg (app w o)); C.assoc_app "pageSize" pg (app w o); C.assoc_app "pageSize" w o;
+    C.assoc_app "where" tm (app pg (app w o)); C.assoc_app "where" pg (app w o); C.assoc_app "where" w o;
+    C.assoc_app "orderBy" tm (app pg (app w o)); C.assoc_app "orderBy" pg (app w o); C.assoc_app "orderBy" w o
 
 (* THE DECLARATION ROUND TRIP (Phase 455), `query_roundtrip`. F#: `QueryCodec.queryOf` after
    `queryJson`, EXACTLY, for every declaration whose filter literals are carried, over any column
@@ -2371,14 +2340,14 @@ let query_roundtrip_identity (#r:Type) (cc:column_codec r) (q:query)
 (* ---- the declaration reader's refusals resolve ---- *)
 
 let rec list_from_len (#a:Type) (d:C.decoder a) (i:nat) (xs:list C.jval)
-  : Lemma (ensures (match C.list_from d i xs with C.Ok ys -> C.len ys == C.len xs | C.Error _ -> True)) (decreases xs)
+  : Lemma (ensures (match C.list_from d i xs with C.Ok ys -> len ys == len xs | C.Error _ -> True)) (decreases xs)
   = match xs with [] -> () | _ :: t -> list_from_len d (i + 1) t
 
 (* An optional list member read as present: its value is an array of as many items as were read. *)
 let opt_list_read (#a:Type) (name:string) (d:C.decoder a) (fs:list (string & C.jval))
   : Lemma (match C.opt_field name (C.d_list d) (C.JObj fs) with
            | C.Ok (Some ys) -> (match C.assoc name fs with
-                                | Some (C.JArr xs) -> C.len xs == C.len ys
+                                | Some (C.JArr xs) -> len xs == len ys
                                 | _ -> False)
            | _ -> True)
   = match C.assoc name fs with
@@ -2475,7 +2444,7 @@ type query_result (r:Type) = { qr_rows: r; qr_page_num: int; qr_total: option in
 
 (* The members `resultJson` writes after its fixed three. *)
 let result_tail (#r:Type) (qr:query_result r) : Tot (list (string & C.jval)) =
-  C.app (opt_int_json "totalRowCount" qr.qr_total)
+  app (opt_int_json "totalRowCount" qr.qr_total)
       (match qr.qr_next with Some t -> [("nextPageToken", C.JStr t)] | None -> [])
 
 (* F#: `QueryCodec.resultJson`. *)

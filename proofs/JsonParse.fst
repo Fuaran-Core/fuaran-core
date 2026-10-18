@@ -128,6 +128,9 @@
 *)
 module JsonParse
 
+open Twin
+open ListAlgebra
+
 (* The parser is a large mutual group over a 47-constructor alphabet, so the default context makes
    the depth induction's queries expensive — 128s for the module, against 72s with upstream's
    context pruning, which is the successor to the proof hints the pinned release removed (README
@@ -138,7 +141,7 @@ module JsonParse
 #set-options "--ext context_pruning"
 
 (* ======================================================================================
-   0. Lists, self-contained so the extraction needs only `Prims` (README, finding 2).
+   0. Lists, self-contained so the extraction needs only `Prims` and `ListAlgebra` (README, finding 2).
    ====================================================================================== *)
 
 (* PROOF-ONLY — erased at extraction, and the measure every refinement below is written in. *)
@@ -655,11 +658,6 @@ let rec take_digits (s: list ch)
       (d :: ds, r)
     else ([], s)
   | [] -> ([], s)
-
-let rec app (#a: Type) (x y: list a) : Tot (list a) (decreases x) =
-  match x with
-  | [] -> y
-  | h :: t -> h :: app t y
 
 (* F#: the token scan of `parseNumber` — optional sign, integer digits, optional fraction,
    optional exponent — returning the token, whether it is a FLOAT token, and the rest. It consumes
@@ -2626,27 +2624,10 @@ let limits_exhibited (_: unit)
         == RLimit LBytes [COther "%"])
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
   { tname = "a-negative-fraction-is-a-number";
     tholds = (fun () -> is_json_number [ CMinus; CD0; CDot; CD5 ] = true) };

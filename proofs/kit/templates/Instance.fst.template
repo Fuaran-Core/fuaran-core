@@ -65,11 +65,16 @@
    WHAT THIS TEMPLATE DOES NOT GIVE. The apply-engine preservation theorems (`Preservation.fst`),
    the diff theorems (`TreeDiff.fst`) and the tree algebra's own diamond (`TreeOps.fst`) are stated
    ABOUT the skeleton-op tree algebra, not generically over a domain. A domain whose state IS that
-   tree under those operations inherits them by copying the four files and declaring the copies; a
+   tree under those operations inherits them by copying the four files (and the two shared modules
+   every model opens, `ListAlgebra.fst` and `Twin.fst`) and declaring the copies; a
    domain with its own algebra models its own apply, and `{{DIAMOND}}` is the theorem it must
    prove about it before this template applies. That is not a limitation of the template so much as
    what the template is for: the fold theorem is the generic half, and the diamond is the half that
    is the domain's.
+
+   WHAT IT OPENS (Phase 504). `Twin`, the shared twin record the instance's fixtures are written
+   in, beside `DagFold` and the domain; `DagFold` opens the shared list algebra `ListAlgebra`. An
+   adopter copies both shared modules beside `DagFold.fst` and checks them first.
 *)
 (* ==== END OF PREAMBLE ==== *)
 (*
@@ -77,6 +82,7 @@
 *)
 module {{MODULE}}
 
+open Twin
 open DagFold
 open {{DOMAIN}}
 

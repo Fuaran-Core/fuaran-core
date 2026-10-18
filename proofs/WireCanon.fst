@@ -144,6 +144,9 @@
 *)
 module WireCanon
 
+open Twin
+open ListAlgebra
+
 (* The reader is a mutual group whose termination rides refinements in the return types, which is
    the shape theorem 4's parser has and the shape this directory's cost note names as expensive
    under the default SMT context. Scoped here rather than in `check.ps1`'s flags, for the reason
@@ -155,7 +158,7 @@ module WireCanon
 open Limits
 
 (* ======================================================================================
-   0. Lists and the outcome, self-contained so the extraction needs only `Prims`
+   0. Lists and the outcome, self-contained so the extraction needs only `Prims` and `ListAlgebra`
       (README, finding 2).
    ====================================================================================== *)
 
@@ -169,18 +172,6 @@ let rec llen (#a: Type) (l: list a) : Tot nat =
   match l with
   | [] -> 0
   | _ :: t -> 1 + llen t
-
-(* F#: `@` / `List.append`, and `String.concat` at the character level — the canonical renderer is
-   a concatenation and nothing else. *)
-let rec app (#a: Type) (l1 l2: list a) : Tot (list a) (decreases l1) =
-  match l1 with
-  | [] -> l2
-  | x :: t -> x :: app t l2
-
-let rec mem (#a: eqtype) (x: a) (l: list a) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> x = y || mem x t
 
 [@@ noextract_to "FSharp"]
 let rec app_assoc (#a: Type) (l1 l2 l3: list a)
@@ -3100,7 +3091,7 @@ let good (sp: spelling) (l: list ch) : Tot bool = all_dom sp l && U.well_formed 
 
 [@@ noextract_to "FSharp"]
 let rec units_app (sp: spelling) (a b: list ch)
-  : Lemma (ensures units sp (app a b) == U.app (units sp a) (units sp b)) (decreases a) =
+  : Lemma (ensures units sp (app a b) == app (units sp a) (units sp b)) (decreases a) =
   match a with
   | [] -> ()
   | _ :: t -> units_app sp t b
@@ -3444,27 +3435,10 @@ let spelling_ok_is_satisfiable (_: unit) : Lemma (ensures spelling_ok witness_sp
 #pop-options
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twin_wire : wire string string =
   { int_str = (fun s -> [ CPlain s ]);
     float_str = (fun s -> [ CPlain s ]);

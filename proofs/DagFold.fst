@@ -44,37 +44,18 @@
 *)
 module DagFold
 
+open Twin
+open ListAlgebra
+
 (* ======================================================================================
    0. Lists read as sets (F#: `Set<string>` and the `Set.*` calls in `Ops.independent` and
       `Dag.conflicts`).
    ====================================================================================== *)
 
-let rec mem (#a:eqtype) (x:a) (l:list a) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> x = y || mem x t
-
-let rec app (#a:Type) (l m:list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | x :: t -> x :: app t m
-
 let rec concat (#a:Type) (ls:list (list a)) : Tot (list a) =
   match ls with
   | [] -> []
   | l :: t -> app l (concat t)
-
-(* F#: `Set.intersect` *)
-let rec inter (#a:eqtype) (x y:list a) : Tot (list a) =
-  match x with
-  | [] -> []
-  | h :: t -> if mem h y then h :: inter t y else inter t y
-
-(* F#: `Set.difference` *)
-let rec diff (#a:eqtype) (x y:list a) : Tot (list a) =
-  match x with
-  | [] -> []
-  | h :: t -> if mem h y then diff t y else h :: diff t y
 
 (* F#: `Set.union` — membership union; duplicates are harmless under the set reading. *)
 let union (#a:eqtype) (x y:list a) : Tot (list a) = app x y
@@ -1022,17 +1003,7 @@ let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
    on them — is proved.
    ====================================================================================== *)
 
-(* ---- list helpers the recovery needs, in the module's own Prims-only idiom ---- *)
-
-let rec rev (#a:Type) (l:list a) : Tot (list a) =
-  match l with
-  | [] -> []
-  | x :: t -> app (rev t) [x]
-
-let rec distinct (#a:eqtype) (l:list a) : Tot bool =
-  match l with
-  | [] -> true
-  | x :: t -> not (mem x t) && distinct t
+(* ---- list facts the recovery needs ---- *)
 
 let rec rev_app (#a:Type) (l m:list a)
   : Lemma (ensures rev (app l m) == app (rev m) (rev l))
@@ -4742,12 +4713,6 @@ let whole_node_refuses_every_slot (n s:string)
 
 (* ---- 18.1 `deeper` is a strict total order on ids ---- *)
 
-[@@ noextract_to "FSharp"]  (* proof-only: the model stays free of integers *)
-let rec len (#a:Type) (l:list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
 let rec shorter_len (#a #b:Type) (l:list a) (m:list b)
   : Lemma (ensures shorter l m == (len l < len m)) (decreases m)
   = match m with
@@ -6463,22 +6428,9 @@ let truncation_preserves_replay (#op:eqtype) (#state #rej:Type)
 #pop-options
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
-
-noeq type twin = { tname : string; tholds : unit -> bool }
 
 (* Every conflict in a report is `c`, up to the Left/Right swap — the other half of "one
    conflict, read canonically" beside `mem_u`. *)
@@ -6487,10 +6439,6 @@ let rec all_ueq (#op:eqtype) (c:conflict op) (cs:list (conflict op)) : Tot bool 
   | [] -> true
   | d :: t -> ueq c d && all_ueq c t
 
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twin_lt (x y:string) : Tot bool =
   (x = "a" && not (y = "a")) || (x = "b" && (y = "c" || y = "m")) || (x = "c" && y = "m")
 
