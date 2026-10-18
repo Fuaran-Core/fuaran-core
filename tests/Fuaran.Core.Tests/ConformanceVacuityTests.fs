@@ -703,9 +703,17 @@ let private classOf (id: string) : AdequacyClass =
     | None -> failwithf "%s has no census row (SampleAdequacy.census) — the roster and the census disagree" id
 
 /// Phase 297 — what one family's guards say against the roster and its census class: every guard
-/// label is a roster id (a delegating family emits its delegate's, which is one), a `Guarded` family
-/// emits at least one guard, and an `Unconditional` family emits none. Pure, so the go-red perturbs
-/// its input rather than the tree.
+/// carries the family's own id, a `Guarded` family emits at least one guard, and an `Unconditional`
+/// family emits none. Pure, so the go-red perturbs its input rather than the tree.
+///
+/// Phase 498 — the one other label a guard may carry is a delegate the family's OWN census row
+/// declares, as `(delegates to <entry>)` in a `Guarded` dimension: a family that runs another entry
+/// point which mints its guard under its own id (`reconcileLaws` runs `reconcileLawsWith`,
+/// `laneFoldLawsAt` the public `laneFoldLawsWith`, which takes no label to hand it) emits that
+/// entry's guard, and the row says so. Until Phase 498 ANY roster id passed, which is how
+/// `keyedArbitrationLawsAt` read its guard under `keyedArbitrationLawsWith`'s id with nothing able to
+/// object; it now hands the internal its own id, its row declares no delegate, and the label is held
+/// to the row rather than to the whole roster.
 let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results: LawResult list) : string list =
     let opening = SampleAdequacy.guardOpening
 
@@ -718,12 +726,34 @@ let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results
         results
         |> List.filter (fun r -> r.Law.StartsWith(opening, System.StringComparison.Ordinal))
 
+    // A declared delegate is in the family's own module: `<Module>.<entry>`.
+    let declared =
+        let marker = "(delegates to "
+        let modulePrefix = id.Substring(0, id.LastIndexOf '.' + 1)
+
+        match klass with
+        | Guarded dims ->
+            [ for d in dims do
+                  let at = d.IndexOf marker
+
+                  if at >= 0 then
+                      let rest = d.Substring(at + marker.Length)
+                      let close = rest.IndexOf ')'
+
+                      if close > 0 then
+                          yield modulePrefix + rest.Substring(0, close) ]
+        | Unconditional _ -> []
+
     let bare =
         guards
         |> List.map (fun r -> labelOf r.Law)
-        |> List.filter (fun l -> not (Set.contains l ids))
+        |> List.filter (fun l -> l <> id && not (List.contains l declared && Set.contains l ids))
         |> List.distinct
-        |> List.map (fun l -> sprintf "%s: a guard is labelled `%s`, which is not a roster id" id l)
+        |> List.map (fun l ->
+            sprintf
+                "%s: a guard is labelled `%s`, which is neither its own id nor a roster id its census row declares it delegates to"
+                id
+                l)
 
     let classDefect =
         match klass, guards with
@@ -947,7 +977,7 @@ let vacuityTests =
           // ---- Phase 297: guards the census can see, and a class read off the code ----
 
           testCase
-              "every guard is labelled with a roster id, every Guarded family emits one, and no Unconditional family does"
+              "every guard carries its family's own id or a delegate its census row declares, every Guarded family emits one, and no Unconditional family does"
           <| fun _ ->
               // Until Phase 297 seven families labelled their guards with a bare entry name and one
               // with its module name, so a census keyed by roster id read none of them; and the
@@ -980,12 +1010,33 @@ let vacuityTests =
                     Counterexample = None }
 
               Expect.isEmpty
+                  (guardDefects ids "M.f" (Guarded [ "arm (delegates to fWith)" ]) [ subject; guard "M.fWith" ])
+                  "a delegate the row declares is a legitimate label"
+
+              Expect.isNonEmpty
                   (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject; guard "M.fWith" ])
-                  "a delegate's roster id is a legitimate label"
+                  "a delegate the row does not declare is named, roster id or not"
 
               Expect.isNonEmpty
                   (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject; guard "f" ])
                   "a bare entry name is not a roster id"
+
+              // Phase 498 — another family's roster id is no longer enough: the label is the
+              // family's own id or a delegate its own row declares, so an `…At` form labelled with
+              // the `…With` id it shares an internal with is named.
+              let wider = Set.ofList [ "M.f"; "M.fWith"; "M.fAt"; "M.g" ]
+
+              Expect.isNonEmpty
+                  (guardDefects wider "M.f" (Guarded [ "arm (delegates to fWith)" ]) [ subject; guard "M.g" ])
+                  "another family's roster id is not this family's label"
+
+              Expect.isNonEmpty
+                  (guardDefects wider "M.fAt" (Guarded [ "arm" ]) [ subject; guard "M.fWith" ])
+                  "an `…At` family labelled with the `…With` id it does not declare is named"
+
+              Expect.isEmpty
+                  (guardDefects wider "M.fAt" (Guarded [ "arm" ]) [ subject; guard "M.fAt" ])
+                  "an `…At` family labelled with its own id is clean"
 
               Expect.isNonEmpty
                   (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject ])

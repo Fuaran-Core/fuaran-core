@@ -587,7 +587,9 @@ module Conformance =
     /// this family with the pair as a further parameter, last before the seed):
     /// `Ops.footprintKeyed keyw nodew idw` and `Ops.canApplyAllKeyed keyw canHold nodew idw`, with
     /// `canHold` the generator's `CanHold` (every node, when it is `None`). The shape a domain that
-    /// arbitrates over containers or keyed positions runs.
+    /// arbitrates over containers or keyed positions runs. Its guards carry this family's own id, as
+    /// every `…At` family's do whose internal takes the label (Phase 498), so the census reads them
+    /// under the row that ran.
     let keyedArbitrationLawsAt
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
@@ -598,7 +600,7 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         KeyedArbitrationLaws.keyedArbitrationLawsWith
-            "Conformance.keyedArbitrationLawsWith"
+            "Conformance.keyedArbitrationLawsAt"
             keyw
             nodew
             idw

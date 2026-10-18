@@ -1252,12 +1252,12 @@ const cEveryOf = (read) => {
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        typescriptModule idl kindTags
+        typescriptModuleBody idl kindTags
         |> Result.bind (fun baseText ->
             tsDerivedParts requests decoders idl kindTags
             |> Result.map (fun parts ->
                 match parts with
-                | None -> baseText
+                | None -> tsModuleStamp idl baseText
                 | Some parts ->
                     let texts = parts |> List.map _.Text
 
@@ -1266,7 +1266,9 @@ const cEveryOf = (read) => {
                         | [] -> []
                         | names -> [ "export { " + String.concat ", " names + " };" ]
 
-                    String.concat "\n\n" ((baseText :: texts) @ exported) |> normalizeEol))
+                    String.concat "\n\n" ((baseText :: texts) @ exported)
+                    |> normalizeEol
+                    |> tsModuleStamp idl))
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member the derived module
     /// exports, appended after the file's own; no request and no decoders IS
@@ -1282,12 +1284,12 @@ const cEveryOf = (read) => {
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        typescriptDeclarations idl kindTags
+        typescriptDeclarationsBody idl kindTags
         |> Result.bind (fun baseText ->
             tsDerivedParts requests decoders idl kindTags
             |> Result.map (fun parts ->
                 match parts with
-                | None -> baseText
+                | None -> tsDeclarationsStamp idl baseText
                 | Some parts ->
                     let header =
                         [ yield
@@ -1297,18 +1299,14 @@ const cEveryOf = (read) => {
                                   "// `mapMsg` is not declared: the module emits no `mapMsg`, because this host holds a handler slot as its sentinel's `null` and carries no message type, so a message map has nothing to rewrite." ]
                         |> String.concat "\n"
 
-                    // The base file's first line is its header comment; the derived lines join it.
-                    let firstBreak = baseText.IndexOf '\n'
-
-                    let headed =
-                        baseText.Substring(0, firstBreak)
-                        + "\n"
-                        + header
-                        + baseText.Substring firstBreak
+                    // The derived lines head the unstamped file, directly under the stamp (Phase 505).
+                    let headed = header + "\n" + baseText
 
                     let decls =
                         parts
                         |> List.map (fun p -> String.concat "\n" p.Decls)
                         |> List.filter (fun s -> s <> "")
 
-                    String.concat "\n\n" (headed.TrimEnd '\n' :: decls) + "\n" |> normalizeEol))
+                    String.concat "\n\n" (headed.TrimEnd '\n' :: decls) + "\n"
+                    |> normalizeEol
+                    |> tsDeclarationsStamp idl))

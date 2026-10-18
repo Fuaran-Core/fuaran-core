@@ -480,6 +480,56 @@ let familiesTests =
 
               Expect.isTrue (json.EndsWith "\n") "the export ends with a newline"
 
+          testCase "a schema bump is a recorded contract move: STABILITY.md names the reader and the current schema"
+          <| fun _ ->
+              // Phase 498 — the export has a reader outside this repository, which keys on `kind`
+              // and reads `families[].id` and `families[].cases`. Until this phase the source called
+              // every bump free on the claim that no such reader existed. The contract entry carries
+              // the schema number it was written against, so a bump that does not revisit the entry
+              // is red here rather than discovered by the reader.
+              let json = KitRoster.toJsonWith (Export.cases ())
+              let marker = "\"schema\": "
+              let at = json.IndexOf marker
+              Expect.isGreaterThanOrEqual at 0 "the export carries a schema member"
+
+              let schema =
+                  json.Substring(at + marker.Length)
+                  |> Seq.takeWhile System.Char.IsDigit
+                  |> Seq.toArray
+                  |> System.String
+
+              let entry =
+                  File.ReadAllLines(Snapshots.repoFile "STABILITY.md")
+                  |> Array.tryFind (fun l ->
+                      l.Contains "`docs/conformance-families.json` has a reader outside this repository")
+
+              match entry with
+              | None -> failtest "STABILITY.md carries no entry for the families export's outside reader"
+              | Some line ->
+                  for read in
+                      [ "`kind`"
+                        "`families[].id`"
+                        "`families[].cases`"
+                        sprintf "`schema: %s`" schema ] do
+                      Expect.stringContains
+                          line
+                          read
+                          (sprintf
+                              "the STABILITY.md entry for the families export does not name %s — a schema bump revisits the entry in the commit that makes it"
+                              read)
+
+          testCase "the families document names the compute strand's package by its current id"
+          <| fun _ ->
+              // Phase 498 — `Fuaran.Core.DataFrame.Conformance` stopped at `0.34.0`; the compute
+              // repository ships the dataframe families as `Fuaran.Compute.Conformance` since its
+              // `0.36.0`. The generated document said the old id until this phase.
+              let md = KitRoster.toMarkdownWith (Export.cases ())
+              Expect.stringContains md "`Fuaran.Compute.Conformance`" "the document names the current id"
+
+              Expect.isFalse
+                  (md.Contains "Fuaran.Core.DataFrame.Conformance")
+                  "the document names an id that stopped at 0.34.0"
+
           testCase "the export ROUND-TRIPS: parsed back, it is the roster"
           <| fun _ ->
               // The export is what an offline reader consumes, so "documented shape" has to mean a

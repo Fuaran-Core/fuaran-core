@@ -1140,7 +1140,10 @@ const dFormat = (format, v) => {
     /// the encoder emitted the key unconditionally and the decoder demanded it, in an artefact
     /// whose own IDL said the slot was omitted at its default. A backend that emits source for a
     /// declaration it cannot honour is worse than one that refuses.
-    let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+    ///
+    /// Phase 505 — this is the module UNSTAMPED, so a caller that appends to it (the derivations)
+    /// stamps the text it actually emits; [[typescriptModule]] is it under its [[Stamp]].
+    let typescriptModuleBody (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
 
         let _, unions, _ = referenced idl kinds
@@ -1155,8 +1158,7 @@ const dFormat = (format, v) => {
         // there is none. The escaping loop below it is unchanged, so the bytes are too
         // (`StringEscapeTests` runs the emitted function against the .NET escaper under node).
         let prelude =
-            """// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 8 — TS backend). Do not edit by hand.
-const encStr = (s) => {
+            """const encStr = (s) => {
   if (!/["\\\u0000-\u001f]/.test(s)) return '"' + s + '"';
   let out = '"';
   for (const ch of s) {
@@ -1455,3 +1457,11 @@ const plain = (pairs) =>
         // from; the three preludes above are multi-line templates and would otherwise carry the
         // line endings of whichever checkout compiled them. See [[normalizeEol]].
         |> Result.map normalizeEol
+
+    /// Phase 505 — a TypeScript module's [[Stamp]], over its normalised text.
+    let tsModuleStamp (idl: Idl) (body: string) : string =
+        Stamp.generated (CommentStyle.Line "//") "TypeScript module" [ idl ] body
+
+    /// The module [[typescriptModuleBody]] emits, under its stamp.
+    let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+        typescriptModuleBody idl kindTags |> Result.map (tsModuleStamp idl)

@@ -193,7 +193,13 @@ let tests =
                             DeriveIdl.deriveIdl
 
                     match plain, derived with
-                    | Ok p, Ok d -> Expect.isTrue (d.Replace("module Probe", "module M").StartsWith p) "prefix"
+                    | Ok p, Ok d ->
+                        // Below the stamp (Phase 505): the emission hash moves with the appended members.
+                        Expect.isTrue
+                            ((Snapshots.unstamped d)
+                                .Replace("module Probe", "module M")
+                                .StartsWith(Snapshots.unstamped p))
+                            "prefix"
                     | _ -> failtest "both emissions should succeed") ]
 
           testList
@@ -689,6 +695,8 @@ let typescriptTests =
               for name, ds, idl in cases do
                   match Gen.typescriptModule idl (tags idl), tsDerive ds idl with
                   | Ok plain, Ok derived ->
+                      // Below the stamp (Phase 505): the emission hash moves with the appended members.
+                      let plain, derived = Snapshots.unstamped plain, Snapshots.unstamped derived
                       Expect.isTrue (derived.StartsWith(plain + "\n\n", System.StringComparison.Ordinal)) name
                       Expect.isTrue (derived.Length > plain.Length) (name + ": something was appended")
                   | p, d -> failtestf "%s: plain %A, derived %A" name (Result.isOk p) d)
@@ -1046,8 +1054,11 @@ let declarationTests =
                   tsDeclare DeriveIdl.derivations DeriveIdl.deriveIdl
               with
               | Ok plain, Ok derived ->
+                  // Below the stamp (Phase 505): the emission hash moves with the appended members.
+                  let plain = Snapshots.unstamped plain
+
                   let unheaded =
-                      derived.Split('\n')
+                      (Snapshots.unstamped derived).Split('\n')
                       |> Array.filter (fun l ->
                           not (
                               l.StartsWith("// Phase 381", System.StringComparison.Ordinal)
