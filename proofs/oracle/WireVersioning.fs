@@ -1,18 +1,4 @@
 module WireVersioning
-
-let rec diff : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>> = (fun ( xs  :  Prims.list<Prims.list<WireCanon.ch>> ) ( ys  :  Prims.list<Prims.list<WireCanon.ch>> ) -> (match (xs) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (WireCanon.mem h ys) then begin
-     (diff t ys)
-     end else begin
-     (h)::(diff t ys)
-     end
-     end))
-
 type evolution =
 | Additive of Prims.list<Prims.list<WireCanon.ch>>
 | Breaking of Prims.list<Prims.list<WireCanon.ch>> * Prims.list<Prims.list<WireCanon.ch>>
@@ -56,10 +42,10 @@ let __proj__Breaking__item__added : evolution  ->  Prims.list<Prims.list<WireCan
 
 let classify : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>>  ->  evolution = (fun ( before  :  Prims.list<Prims.list<WireCanon.ch>> ) ( after  :  Prims.list<Prims.list<WireCanon.ch>> ) -> (
 
-let added = (diff after before)
+let added = (ListAlgebra.diff after before)
 in (
 
-let removed = (diff before after)
+let removed = (ListAlgebra.diff before after)
 in  
 if (match (removed) with
 | [] -> begin
@@ -242,7 +228,7 @@ let __proj__Unknown__item__u = (fun ( projectee  :  decoded<'num, 'flt, 't> ) ->
      end))
 
 
-let known_in : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<WireCanon.ch>  ->  Prims.bool = (fun ( v  :  Prims.list<Prims.list<WireCanon.ch>> ) ( x  :  Prims.list<WireCanon.ch> ) -> (WireCanon.mem x v))
+let known_in : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<WireCanon.ch>  ->  Prims.bool = (fun ( v  :  Prims.list<Prims.list<WireCanon.ch>> ) ( x  :  Prims.list<WireCanon.ch> ) -> (ListAlgebra.mem x v))
 
 
 let decode_tolerant = (fun ( tag_of  :  WireCanon.jval<'num, 'flt>  ->  WireCanon.outcome<Prims.list<WireCanon.ch>> ) ( is_known  :  Prims.list<WireCanon.ch>  ->  Prims.bool ) ( decode_known  :  WireCanon.jval<'num, 'flt>  ->  WireCanon.outcome<'t> ) ( read_required  :  WireCanon.jval<'num, 'flt>  ->  FStar_Pervasives_Native.option<profile> ) ( el  :  WireCanon.jval<'num, 'flt> ) -> (match ((tag_of el)) with
@@ -274,7 +260,7 @@ let reencode = (fun ( encode_known  :  't  ->  WireCanon.jval<'num, 'flt> ) ( d 
      end))
 
 
-let classify_ignoring_removals : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>>  ->  evolution = (fun ( before  :  Prims.list<Prims.list<WireCanon.ch>> ) ( after  :  Prims.list<Prims.list<WireCanon.ch>> ) -> Additive ((diff after before)))
+let classify_ignoring_removals : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>>  ->  evolution = (fun ( before  :  Prims.list<Prims.list<WireCanon.ch>> ) ( after  :  Prims.list<Prims.list<WireCanon.ch>> ) -> Additive ((ListAlgebra.diff after before)))
 
 type severity =
 | SAdditive
@@ -392,15 +378,6 @@ let evolution_of : Prims.list<(severity * Prims.list<WireCanon.ch>)>  ->  evolut
 let classify_field_add_ignoring_optionality : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) -> SAdditive)
 
 
-let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     m
-     end
-| (h)::t -> begin
-     (h)::(app t m)
-     end))
-
-
 type field_decl = (Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)
 
 
@@ -485,31 +462,8 @@ if (Prims.op_Equals opt_class host_only_chars) then begin
      end
      end)
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "classify-a-removal-is-breaking"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("b"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Breaking (((WireCanon.CPlain ("b"))::[])::[], ((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "classify-an-addition-is-additive"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Additive (((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "a-required-field-breaks-the-wire"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify_field_add required_chars) SBreakingWire))})::({tname = "an-old-document-is-refused-under-an-added-required-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), (required_chars)))::[]) (WireCanon.JObj ([]))) (WireCanon.Error ("required field is absent"))))})::({tname = "an-old-document-is-unchanged-under-an-added-optional-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), ((WireCanon.CPlain ("o"))::[])))::[]) (WireCanon.JObj (((((WireCanon.CPlain ("b"))::[]), (WireCanon.JInt ((Prims.parse_int "1")))))::[]))) (WireCanon.Ok ([]))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "classify-a-removal-is-breaking"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("b"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Breaking (((WireCanon.CPlain ("b"))::[])::[], ((WireCanon.CPlain ("c"))::[])::[]))))})::({Twin.tname = "classify-an-addition-is-additive"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Additive (((WireCanon.CPlain ("c"))::[])::[]))))})::({Twin.tname = "a-required-field-breaks-the-wire"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify_field_add required_chars) SBreakingWire))})::({Twin.tname = "an-old-document-is-refused-under-an-added-required-field"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), (required_chars)))::[]) (WireCanon.JObj ([]))) (WireCanon.Error ("required field is absent"))))})::({Twin.tname = "an-old-document-is-unchanged-under-an-added-optional-field"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), ((WireCanon.CPlain ("o"))::[])))::[]) (WireCanon.JObj (((((WireCanon.CPlain ("b"))::[]), (WireCanon.JInt ((Prims.parse_int "1")))))::[]))) (WireCanon.Ok ([]))))})::[]
 
 
 

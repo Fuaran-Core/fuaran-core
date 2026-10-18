@@ -270,39 +270,12 @@ let __proj__Error__item__err = (fun ( projectee  :  result<'a, 'e> ) -> (match (
      end))
 
 
-let rec app = (fun ( l1  :  Prims.list<'a> ) ( l2  :  Prims.list<'a> ) -> (match (l1) with
-| [] -> begin
-     l2
-     end
-| (x)::t -> begin
-     (x)::(app t l2)
-     end))
-
-
-let rec mem = (fun ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (y)::t -> begin
-     ((Prims.op_Equals y x) || (mem x t))
-     end))
-
-
 let rec map_l = (fun ( f  :  'a  ->  'b ) ( l  :  Prims.list<'a> ) -> (match (l) with
 | [] -> begin
      []
      end
 | (x)::t -> begin
      ((f x))::(map_l f t)
-     end))
-
-
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
      end))
 
 
@@ -325,7 +298,7 @@ let rec concat_map = (fun ( f  :  'a  ->  Prims.list<'b> ) ( l  :  Prims.list<'a
      []
      end
 | (x)::t -> begin
-     (app (f x) (concat_map f t))
+     (ListAlgebra.app (f x) (concat_map f t))
      end))
 
 
@@ -353,7 +326,7 @@ let make : code  ->  derr = (fun ( c  :  code ) -> {code = c; path = []})
 let under : seg  ->  derr  ->  derr = (fun ( s  :  seg ) ( e  :  derr ) -> {code = e.code; path = (s)::e.path})
 
 
-let within : Prims.list<seg>  ->  derr  ->  derr = (fun ( p  :  Prims.list<seg> ) ( e  :  derr ) -> {code = e.code; path = (app p e.path)})
+let within : Prims.list<seg>  ->  derr  ->  derr = (fun ( p  :  Prims.list<seg> ) ( e  :  derr ) -> {code = e.code; path = (ListAlgebra.app p e.path)})
 
 
 let rec memb = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * WireDecode.jval<'num, 'flt>)> ) -> (match (fs) with
@@ -700,7 +673,7 @@ let list_d = (fun ( d  :  dec<'num, 'flt, 'a> ) -> (map_list_indexed (fun ( uu__
 let bounded_list = (fun ( max_items  :  Prims.int ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
 | WireDecode.JArr (xs) -> begin
       
-if ((len xs) > max_items) then begin
+if ((ListAlgebra.len xs) > max_items) then begin
      Error ((make LimitExceeded))
      end else begin
      (list_d d el)
@@ -871,7 +844,7 @@ let rec undeclared_go = (fun ( known  :  Prims.list<Prims.string> ) ( fields  : 
      end
 | ((k, uu___))::t -> begin
       
-if (mem k known) then begin
+if (ListAlgebra.mem k known) then begin
      (undeclared_go known t)
      end else begin
      ((under (Key (k)) (make UndeclaredMember)))::(undeclared_go known t)
@@ -1046,7 +1019,7 @@ let both = (fun ( fr  :  result<'a  ->  'b, Prims.list<derr>> ) ( ar  :  result<
      Error (e)
      end
 | (Error (e1), Error (e2)) -> begin
-     Error ((app e1 e2))
+     Error ((ListAlgebra.app e1 e2))
      end))
 
 
@@ -1090,7 +1063,7 @@ let rec occurs_twice : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.boo
 | (y)::t -> begin
       
 if (Prims.op_Equals y x) then begin
-     (mem x t)
+     (ListAlgebra.mem x t)
      end else begin
      (occurs_twice x t)
      end
@@ -1103,7 +1076,7 @@ let rec dedup_go : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  P
      end
 | (x)::t -> begin
       
-if (mem x seen) then begin
+if (ListAlgebra.mem x seen) then begin
      (dedup_go seen t)
      end else begin
      (x)::(dedup_go ((x)::seen) t)
@@ -1181,7 +1154,7 @@ let rec collect_errors = (fun ( rs  :  Prims.list<result<'a, Prims.list<derr>>> 
      (collect_errors t)
      end
 | (Error (es))::t -> begin
-     (app es (collect_errors t))
+     (ListAlgebra.app es (collect_errors t))
      end))
 
 
@@ -1266,7 +1239,7 @@ let c_field = (fun ( name  :  Prims.string ) ( get  :  'r  ->  'a ) ( cd  :  cod
 | Ok (before) -> begin
      (match ((cd.write (get x))) with
 | Ok (j) -> begin
-     Ok ((app before ((((name), (j)))::[])))
+     Ok ((ListAlgebra.app before ((((name), (j)))::[])))
      end
 | Error (f) -> begin
      Error ((fault_under (Key (name)) f))
@@ -1283,7 +1256,7 @@ let this = (match ((memb name ms)) with
 | FStar_Pervasives_Native.None -> begin
      Error (((missing name))::[])
      end)
-in (both (fs.read_fields ms) this))); names = (app fs.names ((name)::[]))})
+in (both (fs.read_fields ms) this))); names = (ListAlgebra.app fs.names ((name)::[]))})
 
 
 let c_opt_field = (fun ( name  :  Prims.string ) ( get  :  'r  ->  FStar_Pervasives_Native.option<'a> ) ( cd  :  codec<'num, 'flt, 'a> ) ( fs  :  fields<'num, 'flt, 'r, FStar_Pervasives_Native.option<'a>  ->  'c> ) -> {write_fields = (fun ( x  :  'r ) -> (match ((get x)) with
@@ -1292,7 +1265,7 @@ let c_opt_field = (fun ( name  :  Prims.string ) ( get  :  'r  ->  FStar_Pervasi
 | Ok (before) -> begin
      (match ((cd.write y)) with
 | Ok (j) -> begin
-     Ok ((app before ((((name), (j)))::[])))
+     Ok ((ListAlgebra.app before ((((name), (j)))::[])))
      end
 | Error (f) -> begin
      Error ((fault_under (Key (name)) f))
@@ -1319,7 +1292,7 @@ let this = (match ((memb name ms)) with
 | FStar_Pervasives_Native.None -> begin
      Ok (FStar_Pervasives_Native.None)
      end)
-in (both (fs.read_fields ms) this))); names = (app fs.names ((name)::[]))})
+in (both (fs.read_fields ms) this))); names = (ListAlgebra.app fs.names ((name)::[]))})
 
 
 let strict_object = (fun ( names  :  Prims.list<Prims.string> ) ( j  :  WireDecode.jval<'num, 'flt> ) ( read  :  Prims.list<(Prims.string * WireDecode.jval<'num, 'flt>)>  ->  result<'a, Prims.list<derr>> ) -> (match (j) with
@@ -1332,7 +1305,7 @@ let strict_object = (fun ( names  :  Prims.list<Prims.string> ) ( j  :  WireDeco
      Error (u)
      end
 | (u, Error (e)) -> begin
-     Error ((app u e))
+     Error ((ListAlgebra.app u e))
      end)
      end
 | other -> begin
@@ -1408,8 +1381,8 @@ let rec tags = (fun ( cases  :  Prims.list<ccase<'num, 'flt, 't>> ) -> (match (c
      end))
 
 
-let union_faults = (fun ( key  :  Prims.string ) ( cases  :  Prims.list<ccase<'num, 'flt, 't>> ) -> (app (concat_map (fun ( c  :  ccase<'num, 'flt, 't> ) -> (map_l (fun ( n  :  Prims.string ) -> RepeatedMember (n, FStar_Pervasives_Native.Some (c.ctag))) (repeats c.case_names))) cases) (app (map_l (fun ( g  :  Prims.string ) -> RepeatedTag (g)) (repeats (tags cases))) (concat_map (fun ( c  :  ccase<'num, 'flt, 't> ) ->  
-if (mem key c.case_names) then begin
+let union_faults = (fun ( key  :  Prims.string ) ( cases  :  Prims.list<ccase<'num, 'flt, 't>> ) -> (ListAlgebra.app (concat_map (fun ( c  :  ccase<'num, 'flt, 't> ) -> (map_l (fun ( n  :  Prims.string ) -> RepeatedMember (n, FStar_Pervasives_Native.Some (c.ctag))) (repeats c.case_names))) cases) (ListAlgebra.app (map_l (fun ( g  :  Prims.string ) -> RepeatedTag (g)) (repeats (tags cases))) (concat_map (fun ( c  :  ccase<'num, 'flt, 't> ) ->  
+if (ListAlgebra.mem key c.case_names) then begin
      (DiscriminatorAsMember (c.ctag, key))::[]
      end else begin
      []
@@ -1547,29 +1520,6 @@ let twin_shapes : Prims.list<ccase<Prims.int, Prims.bool, twin_shape>> = ((c_cas
 
 let twin_doc : WireDecode.jval<Prims.int, Prims.bool> = WireDecode.JObj (((("a"), (WireDecode.JStr ("x"))))::((("b"), (WireDecode.JArr ((WireDecode.JInt ((Prims.parse_int "1")))::(WireDecode.JStr ("y"))::[]))))::[])
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_record_round_trips : unit  ->  Prims.bool = (fun ( uu___  :  unit ) -> (match ((c_build twin_pt_fields)) with
 | Ok (c) -> begin
@@ -1631,7 +1581,7 @@ let twin_union_discriminator : unit  ->  Prims.bool = (fun ( uu___  :  unit ) ->
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "field-refuses-an-item-under-its-member-and-index"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field "b" (list_d int_d) twin_doc) (Error ({code = WrongKind; path = (Key ("b"))::(Index ((Prims.parse_int "1")))::[]}))))})::({tname = "the-item-refusal-resolves"; tholds = (fun ( uu___  :  unit ) -> (resolves_in twin_doc {code = WrongKind; path = (Key ("b"))::(Index ((Prims.parse_int "1")))::[]}))})::({tname = "missing-names-the-absent-member-and-resolves"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (field "c" str twin_doc) (Error ((missing "c")))) && (resolves_in twin_doc (missing "c"))))})::({tname = "missing-of-a-present-member-does-not-resolve"; tholds = (fun ( uu___  :  unit ) -> (not ((resolves_in twin_doc (missing "a")))))})::({tname = "at-walks-into-an-item"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (at ((Key ("b"))::(Index ((Prims.parse_int "0")))::[]) int_d twin_doc) (Ok ((Prims.parse_int "1")))))})::({tname = "record-round-trips"; tholds = twin_record_round_trips})::({tname = "record-collects-every-defect-undeclared-first"; tholds = twin_record_collects})::({tname = "union-writes-its-tag-first-and-reads-back"; tholds = twin_union_round_trips})::({tname = "union-refuses-an-unknown-tag-at-the-discriminator"; tholds = twin_union_unknown_tag})::({tname = "enum-refuses-a-repeated-spelling"; tholds = twin_enum_repeated})::({tname = "union-refuses-the-discriminator-as-a-member"; tholds = twin_union_discriminator})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "field-refuses-an-item-under-its-member-and-index"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field "b" (list_d int_d) twin_doc) (Error ({code = WrongKind; path = (Key ("b"))::(Index ((Prims.parse_int "1")))::[]}))))})::({Twin.tname = "the-item-refusal-resolves"; Twin.tholds = (fun ( uu___  :  unit ) -> (resolves_in twin_doc {code = WrongKind; path = (Key ("b"))::(Index ((Prims.parse_int "1")))::[]}))})::({Twin.tname = "missing-names-the-absent-member-and-resolves"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (field "c" str twin_doc) (Error ((missing "c")))) && (resolves_in twin_doc (missing "c"))))})::({Twin.tname = "missing-of-a-present-member-does-not-resolve"; Twin.tholds = (fun ( uu___  :  unit ) -> (not ((resolves_in twin_doc (missing "a")))))})::({Twin.tname = "at-walks-into-an-item"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (at ((Key ("b"))::(Index ((Prims.parse_int "0")))::[]) int_d twin_doc) (Ok ((Prims.parse_int "1")))))})::({Twin.tname = "record-round-trips"; Twin.tholds = twin_record_round_trips})::({Twin.tname = "record-collects-every-defect-undeclared-first"; Twin.tholds = twin_record_collects})::({Twin.tname = "union-writes-its-tag-first-and-reads-back"; Twin.tholds = twin_union_round_trips})::({Twin.tname = "union-refuses-an-unknown-tag-at-the-discriminator"; Twin.tholds = twin_union_unknown_tag})::({Twin.tname = "enum-refuses-a-repeated-spelling"; Twin.tholds = twin_enum_repeated})::({Twin.tname = "union-refuses-the-discriminator-as-a-member"; Twin.tholds = twin_union_discriminator})::[]
 
 
 

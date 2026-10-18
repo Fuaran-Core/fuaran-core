@@ -1410,24 +1410,6 @@ if (Prims.op_Equals n (Prims.parse_int "94")) then begin
 type text = Prims.list<uch>
 
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
-     end))
-
-
-let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     m
-     end
-| (x)::t -> begin
-     (x)::(app t m)
-     end))
-
-
 let rec rev_acc = (fun ( l  :  Prims.list<'a> ) ( acc  :  Prims.list<'a> ) -> (match (l) with
 | [] -> begin
      acc
@@ -1438,15 +1420,6 @@ let rec rev_acc = (fun ( l  :  Prims.list<'a> ) ( acc  :  Prims.list<'a> ) -> (m
 
 
 let rev = (fun ( l  :  Prims.list<'a> ) -> (rev_acc l []))
-
-
-let rec mem = (fun ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (y)::t -> begin
-     ((Prims.op_Equals x y) || (mem x t))
-     end))
 
 
 let rec assoc = (fun ( x  :  'k ) ( l  :  Prims.list<('k * 'v)> ) -> (match (l) with
@@ -1551,7 +1524,7 @@ let is_upper : uch  ->  Prims.bool = (fun ( c  :  uch ) -> (((Prims.parse_int "6
 
 let is_currency : text  ->  Prims.bool = (fun ( tok  :  text ) -> (match (tok) with
 | (LBr)::(a)::(b)::(c)::(RBr)::[] -> begin
-     ((((is_upper a) && (is_upper b)) && (is_upper c)) && (not ((mem tok arbitrary))))
+     ((((is_upper a) && (is_upper b)) && (is_upper c)) && (not ((ListAlgebra.mem tok arbitrary))))
      end
 | uu___ -> begin
      false
@@ -2152,11 +2125,11 @@ let rec digits : Prims.nat  ->  text = (fun ( n  :  Prims.nat ) ->
 if (n < (Prims.parse_int "10")) then begin
      ((digit_of n))::[]
      end else begin
-     (app (digits (n / (Prims.parse_int "10"))) (((digit_of (Prims.mod_f n (Prims.parse_int "10"))))::[]))
+     (ListAlgebra.app (digits (n / (Prims.parse_int "10"))) (((digit_of (Prims.mod_f n (Prims.parse_int "10"))))::[]))
      end)
 
 
-let atom_text : atom  ->  Prims.int  ->  text = (fun ( a  :  atom ) ( e  :  Prims.int ) -> (app a.prefix (app a.symbol ( 
+let atom_text : atom  ->  Prims.int  ->  text = (fun ( a  :  atom ) ( e  :  Prims.int ) -> (ListAlgebra.app a.prefix (ListAlgebra.app a.symbol ( 
 if (Prims.op_Equals (iabs e) (Prims.parse_int "1")) then begin
      []
      end else begin
@@ -2211,7 +2184,7 @@ let rec join_dot : Prims.list<text>  ->  text = (fun ( ts  :  Prims.list<text> )
      t
      end
 | uu___ -> begin
-     (app t ((Dot)::(join_dot rest)))
+     (ListAlgebra.app t ((Dot)::(join_dot rest)))
      end)
      end))
 
@@ -2221,7 +2194,7 @@ let rec slashes : Prims.list<text>  ->  text = (fun ( ts  :  Prims.list<text> ) 
      []
      end
 | (t)::rest -> begin
-     (Slash)::(app t (slashes rest))
+     (Slash)::(ListAlgebra.app t (slashes rest))
      end))
 
 
@@ -2236,7 +2209,7 @@ in (match (((num), (den))) with
      (D1)::[]
      end
 | uu___ -> begin
-     (app (join_dot (atom_texts num)) (slashes (atom_texts den)))
+     (ListAlgebra.app (join_dot (atom_texts num)) (slashes (atom_texts den)))
      end))))
 
 type expect =
@@ -2586,7 +2559,7 @@ let rec via_prefix : text  ->  Prims.nat  ->  Prims.list<(text * Prims.int)>  ->
 if (starts_with p tok) then begin
      (
 
-let r = (drop (len p) tok)
+let r = (drop (ListAlgebra.len p) tok)
 in (match ((try_atom r)) with
 | FStar_Pervasives_Native.Some (sym) -> begin
      (match ((find_atom sym)) with
@@ -2604,11 +2577,11 @@ if d.metric then begin
      end
 | FStar_Pervasives_Native.None -> begin
       
-if (mem r non_ratio) then begin
+if (ListAlgebra.mem r non_ratio) then begin
      FStar_Pervasives_Native.Some (Refused (NonRatioUnit (tok, pos)))
      end else begin
       
-if (mem r arbitrary) then begin
+if (ListAlgebra.mem r arbitrary) then begin
      FStar_Pervasives_Native.Some (Refused (ArbitraryUnit (tok, pos)))
      end else begin
       
@@ -2632,11 +2605,11 @@ let resolve : text  ->  Prims.nat  ->  result<atom, refusal> = (fun ( tok  :  te
      end
 | FStar_Pervasives_Native.None -> begin
       
-if (mem tok non_ratio) then begin
+if (ListAlgebra.mem tok non_ratio) then begin
      Refused (NonRatioUnit (tok, pos))
      end else begin
       
-if (mem tok arbitrary) then begin
+if (ListAlgebra.mem tok arbitrary) then begin
      Refused (ArbitraryUnit (tok, pos))
      end else begin
       
@@ -2750,7 +2723,7 @@ let rec read_sym : text  ->  Prims.nat  ->  text  ->  result<lexed, refusal> = (
 | (c)::t -> begin
       
 if ((((is_letter c) || (Prims.op_Equals c Under)) || (Prims.op_Equals c Apos)) || (Prims.op_Equals c Pct)) then begin
-     (read_sym t (pos + (Prims.parse_int "1")) (app acc ((c)::[])))
+     (read_sym t (pos + (Prims.parse_int "1")) (ListAlgebra.app acc ((c)::[])))
      end else begin
       
 if (Prims.op_Equals c LBr) then begin
@@ -2759,7 +2732,7 @@ if (Prims.op_Equals c LBr) then begin
      Refused (Malformed (s, pos, ExpCloseSymbol))
      end
 | FStar_Pervasives_Native.Some (r) -> begin
-     (read_sym r.rest ((pos + (Prims.parse_int "1")) + r.at) (app acc ((LBr)::r.tok)))
+     (read_sym r.rest ((pos + (Prims.parse_int "1")) + r.at) (ListAlgebra.app acc ((LBr)::r.tok)))
      end)
      end else begin
      Ok ({tok = acc; rest = s; at = pos})
@@ -2811,7 +2784,7 @@ in (match (uu___) with
      (
 
 let d2 = (span_digits t2)
-in {tok = (app d1.tok (app ((c)::[]) (app sg d2.tok))); rest = d2.rest; at = (Prims.parse_int "0")})
+in {tok = (ListAlgebra.app d1.tok (ListAlgebra.app ((c)::[]) (ListAlgebra.app sg d2.tok))); rest = d2.rest; at = (Prims.parse_int "0")})
      end))
      end else begin
      d1
@@ -3076,7 +3049,7 @@ if (Prims.op_Equals c LCur) then begin
      end)
      end else begin
      Refused (Malformed ((c)::[], pos,  
-if ((len stack) > (Prims.parse_int "1")) then begin
+if ((ListAlgebra.len stack) > (Prims.parse_int "1")) then begin
      ExpSepOrClose
      end else begin
      ExpSepOrEnd
@@ -3155,7 +3128,7 @@ let rec no_other : text  ->  Prims.bool = (fun ( t  :  text ) -> (match (t) with
      end))
 
 
-let tok_of : atom  ->  text = (fun ( a  :  atom ) -> (app a.prefix a.symbol))
+let tok_of : atom  ->  text = (fun ( a  :  atom ) -> (ListAlgebra.app a.prefix a.symbol))
 
 
 let admitted : atom  ->  Prims.bool = (fun ( a  :  atom ) -> ((((sym_token (tok_of a)) && (token_start (tok_of a))) && (no_other (tok_of a))) && (Prims.op_Equals (resolve (tok_of a) (Prims.parse_int "0")) (Ok (a)))))
@@ -3191,7 +3164,7 @@ if (e > (Prims.parse_int "0")) then begin
      Dot
      end else begin
      Slash
-     end)::(app (atom_text a e) (render_tail t))
+     end)::(ListAlgebra.app (atom_text a e) (render_tail t))
      end))
 
 
@@ -3274,29 +3247,6 @@ let rec distinct_keys : factors  ->  Prims.bool = (fun ( m  :  factors ) -> (mat
      ((not ((mem_key a t))) && (distinct_keys t))
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let hour : atom = {symbol = (Lh)::[]; prefix = []}
 
@@ -3316,7 +3266,7 @@ let km_per_h : uom = {factors = (((hour), ((Prims.parse_int "-1"))))::(((kilomet
 let m_per_s : uom = {factors = (((metre), ((Prims.parse_int "1"))))::(((second), ((Prims.parse_int "-1"))))::[]}
 
 
-let twins : Prims.list<twin> = ({tname = "parse-km-per-h"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse ((Lk)::(Lm)::(Slash)::(Lh)::[])) (Ok (km_per_h))))})::({tname = "render-km-per-h"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (render km_per_h) ((Lk)::(Lm)::(Slash)::(Lh)::[])))})::({tname = "render-dimensionless-is-one"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (render dimensionless) ((D1)::[])) && (Prims.op_Equals (parse ((D1)::[])) (Ok (dimensionless)))))})::({tname = "km-per-h-to-m-per-s-is-5-18"; tholds = (fun ( uu___  :  unit ) -> ((compatible km_per_h m_per_s) && (Prims.op_Equals (conversion_factor km_per_h m_per_s) (FStar_Pervasives_Native.Some (Ok ({rn = (Prims.parse_int "5"); rd = (Prims.parse_int "18")}))))))})::({tname = "prefix-not-allowed-on-min"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse ((Lk)::(Lm)::(Li)::(Ln)::[])) (Refused (PrefixNotAllowed ((Lk)::(Lm)::(Li)::(Ln)::[], (Prims.parse_int "0"))))))})::({tname = "mul-merges-and-orders"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (mul m_per_s km_per_h) (FStar_Pervasives_Native.Some ({factors = (((hour), ((Prims.parse_int "-1"))))::(((metre), ((Prims.parse_int "1"))))::(((kilometre), ((Prims.parse_int "1"))))::(((second), ((Prims.parse_int "-1"))))::[]}))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "parse-km-per-h"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse ((Lk)::(Lm)::(Slash)::(Lh)::[])) (Ok (km_per_h))))})::({Twin.tname = "render-km-per-h"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (render km_per_h) ((Lk)::(Lm)::(Slash)::(Lh)::[])))})::({Twin.tname = "render-dimensionless-is-one"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (render dimensionless) ((D1)::[])) && (Prims.op_Equals (parse ((D1)::[])) (Ok (dimensionless)))))})::({Twin.tname = "km-per-h-to-m-per-s-is-5-18"; Twin.tholds = (fun ( uu___  :  unit ) -> ((compatible km_per_h m_per_s) && (Prims.op_Equals (conversion_factor km_per_h m_per_s) (FStar_Pervasives_Native.Some (Ok ({rn = (Prims.parse_int "5"); rd = (Prims.parse_int "18")}))))))})::({Twin.tname = "prefix-not-allowed-on-min"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse ((Lk)::(Lm)::(Li)::(Ln)::[])) (Refused (PrefixNotAllowed ((Lk)::(Lm)::(Li)::(Ln)::[], (Prims.parse_int "0"))))))})::({Twin.tname = "mul-merges-and-orders"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (mul m_per_s km_per_h) (FStar_Pervasives_Native.Some ({factors = (((hour), ((Prims.parse_int "-1"))))::(((metre), ((Prims.parse_int "1"))))::(((kilometre), ((Prims.parse_int "1"))))::(((second), ((Prims.parse_int "-1"))))::[]}))))})::[]
 
 
 

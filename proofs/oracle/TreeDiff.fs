@@ -71,7 +71,7 @@ and pre_all : Prims.list<TreeOps.tree>  ->  Prims.list<TreeOps.tree> = (fun ( ts
      []
      end
 | (x)::r -> begin
-     (DagFold.app (pre x) (pre_all r))
+     (ListAlgebra.app (pre x) (pre_all r))
      end))
 
 
@@ -138,7 +138,7 @@ let rec parent_map : Prims.list<TreeOps.tree>  ->  Prims.list<(Prims.string * Pr
      []
      end
 | (p)::r -> begin
-     (DagFold.app (kid_pairs (TreeOps.tid_of p) (TreeOps.kids_of p)) (parent_map r))
+     (ListAlgebra.app (kid_pairs (TreeOps.tid_of p) (TreeOps.kids_of p)) (parent_map r))
      end))
 
 
@@ -178,7 +178,7 @@ let rec pass_inserts : Prims.list<(Prims.string * Prims.string)>  ->  Prims.list
 
 let k = (TreeOps.tid_of n)
 in  
-if (DagFold.mem k b_ids) then begin
+if (ListAlgebra.mem k b_ids) then begin
      (pass_inserts a_par b_ids r)
      end else begin
      (match ((lookup k a_par)) with
@@ -202,7 +202,7 @@ let rec moves_under : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list
 let ck = (TreeOps.tid_of c)
 in (
 
-let moved = ((DagFold.mem ck b_ids) && (match ((lookup ck b_par)) with
+let moved = ((ListAlgebra.mem ck b_ids) && (match ((lookup ck b_par)) with
 | FStar_Pervasives_Native.Some (bp) -> begin
      (Prims.op_Less_Greater bp pk)
      end
@@ -231,7 +231,7 @@ in (
 let a_kid_keys = (TreeOps.kid_ids (TreeOps.kids_of p))
 in (
 
-let unchanged = ((DagFold.mem pk b_ids) && (match ((lookup_kids pk b_kids)) with
+let unchanged = ((ListAlgebra.mem pk b_ids) && (match ((lookup_kids pk b_kids)) with
 | FStar_Pervasives_Native.Some (bk) -> begin
      (Prims.op_Equals bk a_kid_keys)
      end
@@ -245,7 +245,7 @@ in
 if unchanged then begin
      rest
      end else begin
-     (((DagFold.app (moves_under pk b_ids b_par (TreeOps.kids_of p)) (FStar_Pervasives_Native.fst rest))), ((pk)::(FStar_Pervasives_Native.snd rest)))
+     (((ListAlgebra.app (moves_under pk b_ids b_par (TreeOps.kids_of p)) (FStar_Pervasives_Native.fst rest))), ((pk)::(FStar_Pervasives_Native.snd rest)))
      end))))
      end))
 
@@ -259,13 +259,13 @@ let rec pass_removes : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * 
 
 let k = (TreeOps.tid_of n)
 in  
-if (DagFold.mem k a_ids) then begin
+if (ListAlgebra.mem k a_ids) then begin
      (pass_removes a_ids b_par r)
      end else begin
      (match ((lookup k b_par)) with
 | FStar_Pervasives_Native.Some (pid) -> begin
       
-if (DagFold.mem pid a_ids) then begin
+if (ListAlgebra.mem pid a_ids) then begin
      (TreeOps.RemoveNode (k))::(pass_removes a_ids b_par r)
      end else begin
      (pass_removes a_ids b_par r)
@@ -278,16 +278,16 @@ if (DagFold.mem pid a_ids) then begin
      end))
 
 
-let in_list : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> (DagFold.mem c l))
+let in_list : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> (ListAlgebra.mem c l))
 
 
-let new_pred : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> (not ((DagFold.mem c b_ids))))
+let new_pred : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> (not ((ListAlgebra.mem c b_ids))))
 
 
-let moved_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( bk  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> ((DagFold.mem c b_ids) && (not ((DagFold.mem c bk)))))
+let moved_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( bk  :  Prims.list<Prims.string> ) ( c  :  Prims.string ) -> ((ListAlgebra.mem c b_ids) && (not ((ListAlgebra.mem c bk)))))
 
 
-let settled_order : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( b_ids  :  Prims.list<Prims.string> ) ( bk  :  Prims.list<Prims.string> ) ( ak  :  Prims.list<Prims.string> ) -> (DagFold.app (DagFold.keep (in_list ak) bk) (DagFold.app (DagFold.keep (new_pred b_ids) ak) (DagFold.keep (moved_pred b_ids bk) ak))))
+let settled_order : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( b_ids  :  Prims.list<Prims.string> ) ( bk  :  Prims.list<Prims.string> ) ( ak  :  Prims.list<Prims.string> ) -> (ListAlgebra.app (DagFold.keep (in_list ak) bk) (ListAlgebra.app (DagFold.keep (new_pred b_ids) ak) (DagFold.keep (moved_pred b_ids bk) ak))))
 
 
 let rec pass_reorders : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.list<Prims.string>)>  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.op> = (fun ( b_ids  :  Prims.list<Prims.string> ) ( b_kids  :  Prims.list<(Prims.string * Prims.list<Prims.string>)> ) ( after  :  TreeOps.tree ) ( ps  :  Prims.list<Prims.string> ) -> (match (ps) with
@@ -354,7 +354,7 @@ let script_of : (Prims.list<TreeOps.op> * Prims.list<TreeOps.op> * Prims.list<Tr
 let uu___ = bl
 in (match (uu___) with
 | (p1, p2, p3, p4) -> begin
-     (DagFold.app p1 (DagFold.app p2 (DagFold.app p3 p4)))
+     (ListAlgebra.app p1 (ListAlgebra.app p2 (ListAlgebra.app p3 p4)))
      end)))
 
 
@@ -460,7 +460,7 @@ let insert_shape : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prim
      end
 | uu___ -> begin
      false
-     end) && (not ((DagFold.mem (TreeOps.tid_of n) b_ids)))) && (Prims.op_Equals (lookup (TreeOps.tid_of n) a_par) (FStar_Pervasives_Native.Some (p))))
+     end) && (not ((ListAlgebra.mem (TreeOps.tid_of n) b_ids)))) && (Prims.op_Equals (lookup (TreeOps.tid_of n) a_par) (FStar_Pervasives_Native.Some (p))))
      end
 | uu___ -> begin
      true
@@ -472,13 +472,13 @@ let rec is_after_child : Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.s
      false
      end
 | (n)::r -> begin
-     (((Prims.op_Equals (TreeOps.tid_of n) np) && (DagFold.mem x (TreeOps.kid_ids (TreeOps.kids_of n)))) || (is_after_child r x np))
+     (((Prims.op_Equals (TreeOps.tid_of n) np) && (ListAlgebra.mem x (TreeOps.kid_ids (TreeOps.kids_of n)))) || (is_after_child r x np))
      end))
 
 
 let move_shape : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.string)>  ->  Prims.list<TreeOps.tree>  ->  TreeOps.op  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( b_par  :  Prims.list<(Prims.string * Prims.string)> ) ( ns  :  Prims.list<TreeOps.tree> ) ( o  :  TreeOps.op ) -> (match (o) with
 | TreeOps.MoveNode (x, np) -> begin
-     (((DagFold.mem x b_ids) && (match ((lookup x b_par)) with
+     (((ListAlgebra.mem x b_ids) && (match ((lookup x b_par)) with
 | FStar_Pervasives_Native.Some (bp) -> begin
      (Prims.op_Less_Greater bp np)
      end
@@ -493,9 +493,9 @@ let move_shape : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.
 
 let remove_shape : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.string)>  ->  TreeOps.op  ->  Prims.bool = (fun ( a_ids  :  Prims.list<Prims.string> ) ( b_par  :  Prims.list<(Prims.string * Prims.string)> ) ( o  :  TreeOps.op ) -> (match (o) with
 | TreeOps.RemoveNode (x) -> begin
-     ((not ((DagFold.mem x a_ids))) && (match ((lookup x b_par)) with
+     ((not ((ListAlgebra.mem x a_ids))) && (match ((lookup x b_par)) with
 | FStar_Pervasives_Native.Some (pid) -> begin
-     (DagFold.mem pid a_ids)
+     (ListAlgebra.mem pid a_ids)
      end
 | FStar_Pervasives_Native.None -> begin
      false
@@ -529,7 +529,7 @@ let rec parent_accepts : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.
      false
      end
 | (n)::r -> begin
-     ((((Prims.op_Equals (TreeOps.tid_of n) np) && (DagFold.mem x (TreeOps.kid_ids (TreeOps.kids_of n)))) && (ch n)) || (parent_accepts ch r x np))
+     ((((Prims.op_Equals (TreeOps.tid_of n) np) && (ListAlgebra.mem x (TreeOps.kid_ids (TreeOps.kids_of n)))) && (ch n)) || (parent_accepts ch r x np))
      end))
 
 
@@ -557,7 +557,7 @@ let rec kid_holder : Prims.list<TreeOps.tree>  ->  Prims.string  ->  FStar_Perva
      end
 | (n)::r -> begin
       
-if (DagFold.mem x (TreeOps.kid_ids (TreeOps.kids_of n))) then begin
+if (ListAlgebra.mem x (TreeOps.kid_ids (TreeOps.kids_of n))) then begin
      FStar_Pervasives_Native.Some (n)
      end else begin
      (kid_holder r x)
@@ -581,30 +581,30 @@ if (Prims.op_Equals (TreeOps.tid_of n) k) then begin
 
 let side : TreeOps.tree  ->  TreeOps.tree  ->  Prims.bool  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( placed  :  Prims.bool ) ( q  :  Prims.string ) ( c  :  Prims.string ) ->  
 if placed then begin
-     (DagFold.mem c (Preservation.kids_at q a))
+     (ListAlgebra.mem c (Preservation.kids_at q a))
      end else begin
-     (DagFold.mem c (Preservation.kids_at q b))
+     (ListAlgebra.mem c (Preservation.kids_at q b))
      end)
 
 
 let kind_src : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( q  :  Prims.string ) ->  
-if (DagFold.mem q (TreeOps.ids b)) then begin
+if (ListAlgebra.mem q (TreeOps.ids b)) then begin
      (Preservation.kind_at q b)
      end else begin
      (Preservation.kind_at q a)
      end)
 
 
-let same_kids : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( q  :  Prims.string ) -> (((DagFold.mem q (TreeOps.ids a)) && (DagFold.mem q (TreeOps.ids b))) && (Prims.op_Equals (Preservation.kids_at q b) (Preservation.kids_at q a))))
+let same_kids : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( q  :  Prims.string ) -> (((ListAlgebra.mem q (TreeOps.ids a)) && (ListAlgebra.mem q (TreeOps.ids b))) && (Prims.op_Equals (Preservation.kids_at q b) (Preservation.kids_at q a))))
 
 
-let cond1 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> (((DagFold.mem c (TreeOps.ids a)) && (not ((DagFold.mem c (TreeOps.ids b))))) && (not ((DagFold.mem c (tids ns))))))
+let cond1 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> (((ListAlgebra.mem c (TreeOps.ids a)) && (not ((ListAlgebra.mem c (TreeOps.ids b))))) && (not ((ListAlgebra.mem c (tids ns))))))
 
 
-let new1 : Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> ((not ((DagFold.mem c b_ids))) && (not ((DagFold.mem c (tids ns))))))
+let new1 : Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b_ids  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> ((not ((ListAlgebra.mem c b_ids))) && (not ((ListAlgebra.mem c (tids ns))))))
 
 
-let cond2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> ((DagFold.mem c (TreeOps.ids a)) && ((not ((DagFold.mem c (TreeOps.ids b)))) || (not (((DagFold.mem c rest) || (match ((kid_holder ns c)) with
+let cond2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( c  :  Prims.string ) -> ((ListAlgebra.mem c (TreeOps.ids a)) && ((not ((ListAlgebra.mem c (TreeOps.ids b)))) || (not (((ListAlgebra.mem c rest) || (match ((kid_holder ns c)) with
 | FStar_Pervasives_Native.Some (v) -> begin
      true
      end
@@ -613,13 +613,13 @@ let cond2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Pr
      end)))))))
 
 
-let kept2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> ((DagFold.mem c (Preservation.kids_at q a)) || (not ((cond2 b a rest ns c)))))
+let kept2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> ((ListAlgebra.mem c (Preservation.kids_at q a)) || (not ((cond2 b a rest ns c)))))
 
 
-let moved2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> (((DagFold.mem c (TreeOps.ids b)) && (not ((DagFold.mem c (Preservation.kids_at q b))))) && (cond2 b a rest ns c)))
+let moved2 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string>  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( rest  :  Prims.list<Prims.string> ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> (((ListAlgebra.mem c (TreeOps.ids b)) && (not ((ListAlgebra.mem c (Preservation.kids_at q b))))) && (cond2 b a rest ns c)))
 
 
-let outside_sfx : TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( a  :  TreeOps.tree ) ( sfx  :  Prims.list<TreeOps.tree> ) ( y  :  Prims.string ) -> ((DagFold.mem y (TreeOps.ids a)) && (match ((kid_holder sfx y)) with
+let outside_sfx : TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.bool = (fun ( a  :  TreeOps.tree ) ( sfx  :  Prims.list<TreeOps.tree> ) ( y  :  Prims.string ) -> ((ListAlgebra.mem y (TreeOps.ids a)) && (match ((kid_holder sfx y)) with
 | FStar_Pervasives_Native.None -> begin
      true
      end
@@ -628,9 +628,9 @@ let outside_sfx : TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  
      end)))
 
 
-let top : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( y  :  Prims.string ) -> ((not ((DagFold.mem y (TreeOps.ids a)))) && (match ((lookup y (parent_map (pre b)))) with
+let top : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( y  :  Prims.string ) -> ((not ((ListAlgebra.mem y (TreeOps.ids a)))) && (match ((lookup y (parent_map (pre b)))) with
 | FStar_Pervasives_Native.Some (pid) -> begin
-     (DagFold.mem pid (TreeOps.ids a))
+     (ListAlgebra.mem pid (TreeOps.ids a))
      end
 | FStar_Pervasives_Native.None -> begin
      false
@@ -638,14 +638,14 @@ let top : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fu
 
 
 let side3 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) ->  
-if (DagFold.mem c (TreeOps.ids a)) then begin
-     (DagFold.mem c (Preservation.kids_at q a))
+if (ListAlgebra.mem c (TreeOps.ids a)) then begin
+     (ListAlgebra.mem c (Preservation.kids_at q a))
      end else begin
-     ((DagFold.mem c (Preservation.kids_at q b)) && ((not ((DagFold.mem q (TreeOps.ids a)))) || (DagFold.mem c (tids ns))))
+     ((ListAlgebra.mem c (Preservation.kids_at q b)) && ((not ((ListAlgebra.mem q (TreeOps.ids a)))) || (ListAlgebra.mem c (tids ns))))
      end)
 
 
-let kept3 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> ((DagFold.mem c (Preservation.kids_at q a)) || ((not ((DagFold.mem c (TreeOps.ids a)))) && (DagFold.mem c (tids ns)))))
+let kept3 : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<TreeOps.tree>  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( ns  :  Prims.list<TreeOps.tree> ) ( q  :  Prims.string ) ( c  :  Prims.string ) -> ((ListAlgebra.mem c (Preservation.kids_at q a)) || ((not ((ListAlgebra.mem c (TreeOps.ids a)))) && (ListAlgebra.mem c (tids ns)))))
 
 
 let predicted : TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( b  :  TreeOps.tree ) ( a  :  TreeOps.tree ) ( q  :  Prims.string ) -> (settled_order (TreeOps.ids b) (Preservation.kids_at q b) (Preservation.kids_at q a)))
@@ -719,13 +719,13 @@ let to_ops_contained_with : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.tree  ->
      DagFold.Error (e)
      end
 | DagFold.Ok (s) -> begin
-     DagFold.Ok ((DagFold.app (pass_updates_first ch before (pre after)) (DagFold.app s (pass_updates_last ch before (pre after)))))
+     DagFold.Ok ((ListAlgebra.app (pass_updates_first ch before (pre after)) (ListAlgebra.app s (pass_updates_last ch before (pre after)))))
      end)
      end))
 
 
 let recolour_kind : Prims.list<Prims.string>  ->  (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.tree  ->  Prims.string  ->  Prims.string  ->  Prims.string = (fun ( s  :  Prims.list<Prims.string> ) ( ch  :  TreeOps.tree  ->  Prims.bool ) ( a  :  TreeOps.tree ) ( i  :  Prims.string ) ( k0  :  Prims.string ) ->  
-if (DagFold.mem i s) then begin
+if (ListAlgebra.mem i s) then begin
      (match ((TreeOps.find_in i a)) with
 | FStar_Pervasives_Native.Some (an) -> begin
       
@@ -802,13 +802,13 @@ let own_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->
      end))
 
 
-let not_in : TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( a  :  TreeOps.tree ) ( x  :  Prims.string ) -> (not ((DagFold.mem x (TreeOps.ids a)))))
+let not_in : TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( a  :  TreeOps.tree ) ( x  :  Prims.string ) -> (not ((ListAlgebra.mem x (TreeOps.ids a)))))
 
 
-let changed_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((DagFold.mem x (TreeOps.ids a)) && (Prims.op_Less_Greater (own_at h cf enc x a) (own_at h cf enc x b))))
+let changed_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((ListAlgebra.mem x (TreeOps.ids a)) && (Prims.op_Less_Greater (own_at h cf enc x a) (own_at h cf enc x b))))
 
 
-let unchanged_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((DagFold.mem x (TreeOps.ids a)) && (Prims.op_Equals (own_at h cf enc x a) (own_at h cf enc x b))))
+let unchanged_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((ListAlgebra.mem x (TreeOps.ids a)) && (Prims.op_Equals (own_at h cf enc x a) (own_at h cf enc x b))))
 
 
 let d_added : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) -> (DagFold.keep (not_in a) (TreeOps.ids b)))
@@ -837,31 +837,8 @@ let dg_before : TreeOps.tree = TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x"
 
 let dg_after : TreeOps.tree = TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "z", []))::(TreeOps.TNode ("c", "y", []))::[])
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "to-ops-appends-with-no-trailing-reorder"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::(TreeOps.TNode ("b", "para", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::[]))))})::({tname = "to-ops-prepends-then-reorders"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("b", "para", []))::(TreeOps.TNode ("a", "sec", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::(TreeOps.ReorderChildren ("r", ("b")::("a")::[]))::[]))))})::({tname = "to-ops-contained-with-rewrites-the-container-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after) (DagFold.Ok ((TreeOps.UpdateNode (TreeOps.TNode ("p", "section", (TreeOps.TNode ("q", "para", []))::[])))::(TreeOps.InsertChild ("p", TreeOps.TNode ("q", "para", [])))::[]))))})::({tname = "to-ops-refuses-a-root-id-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", [])) (TreeOps.TNode ("s", "doc", []))) (DagFold.Error (RootIdMismatch ("r", "s")))))})::({tname = "dup-id-names-the-repeat"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dup_id (TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("a", "y", []))::[]))) (FStar_Pervasives_Native.Some ("a"))))})::({tname = "digest-diff-partitions-the-ids"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_after) (("c")::[])) && (Prims.op_Equals (d_removed dg_before dg_after) (("b")::[]))) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("a")::[]))) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("r")::[]))))})::({tname = "digest-diff-over-one-tree-is-all-unchanged"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_before) []) && (Prims.op_Equals (d_removed dg_before dg_before) [])) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) [])) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) (("r")::("a")::("b")::[]))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "to-ops-appends-with-no-trailing-reorder"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::(TreeOps.TNode ("b", "para", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::[]))))})::({Twin.tname = "to-ops-prepends-then-reorders"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("b", "para", []))::(TreeOps.TNode ("a", "sec", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::(TreeOps.ReorderChildren ("r", ("b")::("a")::[]))::[]))))})::({Twin.tname = "to-ops-contained-with-rewrites-the-container-first"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after) (DagFold.Ok ((TreeOps.UpdateNode (TreeOps.TNode ("p", "section", (TreeOps.TNode ("q", "para", []))::[])))::(TreeOps.InsertChild ("p", TreeOps.TNode ("q", "para", [])))::[]))))})::({Twin.tname = "to-ops-refuses-a-root-id-mismatch"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", [])) (TreeOps.TNode ("s", "doc", []))) (DagFold.Error (RootIdMismatch ("r", "s")))))})::({Twin.tname = "dup-id-names-the-repeat"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dup_id (TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("a", "y", []))::[]))) (FStar_Pervasives_Native.Some ("a"))))})::({Twin.tname = "digest-diff-partitions-the-ids"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_after) (("c")::[])) && (Prims.op_Equals (d_removed dg_before dg_after) (("b")::[]))) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("a")::[]))) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("r")::[]))))})::({Twin.tname = "digest-diff-over-one-tree-is-all-unchanged"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_before) []) && (Prims.op_Equals (d_removed dg_before dg_before) [])) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) [])) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) (("r")::("a")::("b")::[]))))})::[]
 
 
 
