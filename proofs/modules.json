@@ -541,8 +541,8 @@
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 3,
-      "fastestSeconds": 3,
-      "fastestPhase": "fuaran-core#303",
+      "fastestSeconds": 0.99,
+      "fastestPhase": "fuaran-core#504",
       "phase": "fuaran-core#303",
       "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the test project (`--emit-fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3."
     },
