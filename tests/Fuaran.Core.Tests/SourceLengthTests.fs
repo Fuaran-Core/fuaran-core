@@ -1,5 +1,5 @@
-/// No `.fs` file under `src/` is longer than 2,000 lines, except the files DECISIONS.md D125 and D141
-/// name.
+/// No `.fs` file under `src/` is longer than 2,000 lines, except the files DECISIONS.md D125
+/// names (D141.2 named a fourth, `Families.fs`, withdrawn by Phase 506 when it fell under the line).
 ///
 /// Phase 388 split the internal law files along their banners, and Phase 401 divided the four long
 /// multi-module files (`Wire.fs`, `Ops.fs`, `Idl.fs`, `Column.fs`) at their top-level module
@@ -19,7 +19,7 @@ open Expecto
 /// The line every `.fs` under `src/` stays at or under.
 let limit = 2000
 
-/// The files that stay whole over `limit` (DECISIONS.md D125, D141), repository-relative, each with
+/// The files that stay whole over `limit` (DECISIONS.md D125), repository-relative, each with
 /// the reason it is not divided.
 let exceptions: (string * string) list =
     [ "src/Fuaran.Core.Idl.Codegen/Diff.fs",
@@ -27,9 +27,7 @@ let exceptions: (string * string) list =
       "src/Fuaran.Core.Idl.Codegen/FStar.fs",
       "the public module `FStarTarget` holds its public types nested (`FStarTarget+Slot`, `FStarTarget+VectorModel`), and every section is written over them; dividing it renames them in api/ (D125)"
       "src/Fuaran.Core.OpStream.Dag/DagOpStream.fs",
-      "the public module `Dag` holds its public types nested, and F# compiles one module from one file; dividing it renames them in api/ (D125)"
-      "src/Fuaran.Core.Conformance/Families.fs",
-      "the public module `Families` holds its public types nested (`Families+LawFamily`, `Families+Roster`), and F# compiles one module from one file; dividing it renames them in api/ (D125's class, named by D141)" ]
+      "the public module `Dag` holds its public types nested, and F# compiles one module from one file; dividing it renames them in api/ (D125)" ]
 
 /// Every finding over `(path, lineCount)` pairs: a file over `limit` the exceptions do not name, an
 /// exception naming no file, and an exception naming a file at or under `limit`.

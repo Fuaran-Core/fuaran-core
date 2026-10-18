@@ -1905,7 +1905,7 @@ Phase 424 carries every downstream consumer of `Column.Cells` / `Column.create` 
 
 ## 2026-10-08 — D141: the long multi-module files are divided one module per file, the 2,000-line rule is a test, and `Families.fs` joins D125's exceptions as the same class
 
-**Status:** Live — D141.2's `Families.fs` exemption is to be withdrawn by Phase 506, when the file falls under the line
+**Status:** Live — D141.2's `Families.fs` exemption withdrawn in place by Phase 506
 
 **Recorded by Phase 401. `src/Fuaran.Core.Wire/`, `.Ops/`, `.Idl/`, `.Column/` and `.Query/` (files
 only; no `api/`, `api/wire/` or corpus byte moved), `tests/Fuaran.Core.Tests/SourceLengthTests.fs`.
@@ -1939,6 +1939,14 @@ module, which is under the line.
 name on any `.fs` under `src/` over 2,000 lines that the exception list does not name, on an entry
 naming a file that no longer exists, and on an entry naming a file at or under the line. Each entry
 carries its reason. A new exception is a ruling, recorded here, not an edit to the list.
+
+**Amended 2026-10-18 (Phase 506) — D141.2's `Families.fs` exemption is withdrawn.** The roster is one
+record per family with its operations folded in, and the commentary each row carried moved to
+`docs/families-history.md`; the file is 991 lines, under the line with room, so `Source.Length` names
+three exceptions, all D125's, and its exactness in both directions would refuse the entry if it stood.
+Withdrawn rather than left as a named exception to a rule the file no longer needs (the operator's
+2026-10-17 ruling on the redesign pass). The class D141.2 recognised still stands: a public module with
+nested public types is not divided, and a future file of that class over the line is a ruling here.
 
 ## 2026-10-08 — D140: `OpStream.Dag`'s append and merge family answers records, and the tuple rule is held over every package by reflection (applies D138.1; closes D138.8)
 
@@ -3001,7 +3009,7 @@ own, sequenced after the phases that edit those files.
 
 ## 2026-10-07 — D124: the two cross-runtime claims the suite did not measure are measured — the IDL sampler runs on `ConfRng`'s stream and is pinned in `ParityVectors`, the witness freeze reads no reflection under Fable, and D95's escaper guarantee is scoped to IDL-authored text
 
-**Status:** Amended-by D125
+**Status:** Amended-by D125 — amended in place by Phase 506: the Fable freeze law reads the pins, and `declaredWitnessFields` is removed
 
 **Recorded by Phase 387. `Fuaran.Core.Idl` (`Sample`, the `SourceLit` module doc) and
 `Fuaran.Core.Conformance` (`ParityVectors`, `SurfaceLaws`); rides the `0.36.0` draft (STABILITY.md,
@@ -3063,6 +3071,15 @@ same text as a category as the control that reaches no source line.
 *Not decided here.* Whether host source should become validatable — a declared allow-list of host
 expressions, or a separate signed support channel — is a change of trust boundary, not a correction of
 its description; nothing in the demand census asks for it.
+
+**Amended 2026-10-18 (Phase 506) — one freeze literal.** `declaredWitnessFields` was the sixteen pinned
+lists written a second time, so the Fable law compared the file with itself: its only failure was the
+two literals disagreeing. It is removed. Under Fable `witnessSurfaceLaws ()` runs
+`witnessDeclaredFieldsLaw` with each record's pin on both sides, and says so — the pins are the pins,
+which is all the second literal proved. The fact that the pins are what the records declare is held
+where reflection runs: `SurfaceLawsTests` ("every frozen pin is what reflection reads") over the
+shipped assemblies, and `OneDotZeroTests` against the committed `frozen-witness-fields.txt`. The fence
+this entry decided is unchanged: no reflection runs under Fable.
 
 ## 2026-10-07 — D123: "released" is a gate output — a tag's heading and its receiving-gate record are read by `verify.ps1`, which publish runs; `0.31.0` and `0.35.1` were released without a cited run, and the record says so
 

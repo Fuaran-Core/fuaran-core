@@ -987,7 +987,7 @@ operation clause reads the committed API baselines (`../api/*.txt`) as its censu
 line, and holds each to at least one of:
 
 - a `proved` or `tested` row in `../proofs.json` whose `evidence.operations` names it;
-- a law family whose operation roster (`Fuaran.Core.Families.operations`, shipped with the kit)
+- a law family whose record (`Fuaran.Core.Families.LawFamily.Operations`, shipped with the kit)
   lists it, a family's own entry point being mapped by its roster row; or
 - an entry in `coverage-exclusions.json`'s `operations` block, with a one-line reason and a class
   from that file's closed `operationClasses` vocabulary: `trivial`, `forward`, `obsolete`,
@@ -1020,7 +1020,7 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
-| `Fuaran.Core.Conformance` | 153 | 2 | 105 | 2 | 6 | 0 | 0 | 38 |
+| `Fuaran.Core.Conformance` | 151 | 2 | 105 | 2 | 6 | 0 | 0 | 36 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 41 | 64 | 5 | 0 | 0 | 0 | 32 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
@@ -1037,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 155 | 67 | 16 | 3 | 2 | 0 | 0 | 67 |
-| **Total** | 1221 | 314 | 421 | 30 | 13 | 0 | 3 | 440 |
+| **Total** | 1219 | 314 | 421 | 30 | 13 | 0 | 3 | 438 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

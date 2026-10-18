@@ -230,33 +230,27 @@ let witnessSurfaceLawTests =
                       (u.Reason.Trim())
                       (sprintf "%s is declared outside the freeze with no reason" u.Witness)
 
-          // Phase 387 (D124) — the Fable pipeline reads `declaredWitnessFields` instead of reflecting,
-          // so the list is only as good as its agreement with the records. THIS is the test that holds
-          // it: every frozen record, read by reflection from the shipped assemblies, declares exactly
-          // the committed list, by name and in order. A record that grows a field reddens here first;
-          // re-derive the list, and the freeze then reddens on both pipelines until the widening is
-          // made deliberately.
-          testCase "the committed declared-field list is what reflection reads, for every frozen record"
+          // Phase 506 (D124, E S7) — the Fable pipeline reads the pins themselves, so what holds the
+          // pins to the records is THIS test: every frozen record, read by reflection from the shipped
+          // assemblies, declares exactly its pinned fields, by name and in order. The other leg — the
+          // pins against the committed `frozen-witness-fields.txt` — is `OneDotZeroTests`' "the
+          // committed render of frozenWitnessFields is the live list", which reads the same file.
+          testCase "every frozen pin is what reflection reads, for every frozen record"
           <| fun _ ->
-              Expect.equal
-                  (Conformance.declaredWitnessFields |> List.map _.Record)
-                  (Conformance.frozenWitnessFields |> List.map _.Record)
-                  "the declared-field list covers exactly the frozen records, in pin order"
-
               let bare (t: System.Type) =
                   let n = t.Name
                   let tick = n.IndexOf '`'
                   if tick < 0 then n else n.Substring(0, tick)
 
-              for entry in Conformance.declaredWitnessFields do
-                  let name, declared = entry.Record, entry.Fields
+              Expect.isNonEmpty Conformance.frozenWitnessFields "the freeze pins records"
 
+              for pin in Conformance.frozenWitnessFields do
                   let t =
                       shippedPublicTypes.Value
-                      |> List.filter (fun t -> bare t = name && Microsoft.FSharp.Reflection.FSharpType.IsRecord t)
+                      |> List.filter (fun t -> bare t = pin.Record && Microsoft.FSharp.Reflection.FSharpType.IsRecord t)
                       |> function
                           | [ t ] -> t
-                          | ts -> failtestf "%s: expected one public record, found %d" name (List.length ts)
+                          | ts -> failtestf "%s: expected one public record, found %d" pin.Record (List.length ts)
 
                   let reflected =
                       Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
@@ -264,20 +258,16 @@ let witnessSurfaceLawTests =
                       |> Array.toList
 
                   Expect.equal
-                      declared
+                      pin.Fields
                       reflected
-                      (sprintf "%s: the committed declared-field list disagrees with the record — re-derive it" name)
+                      (sprintf "%s: the pin disagrees with the record it freezes" pin.Record)
 
           testCase "the reflection-free law agrees with the reflecting one, and fails on a widened list"
           <| fun _ ->
+              // Under Fable each record's law reads its pin as both sides (`witnessSurfaceLaws`).
               for pin in Conformance.frozenWitnessFields do
-                  let name, pinned = pin.Record, pin.Fields
-
-                  let declared =
-                      (Conformance.declaredWitnessFields |> List.find (fun d -> d.Record = name)).Fields
-
-                  let r = Conformance.witnessDeclaredFieldsLaw name pinned declared
-                  Expect.isTrue r.Passed (sprintf "%s: %s" name (defaultArg r.Counterexample r.Law))
+                  let r = Conformance.witnessDeclaredFieldsLaw pin.Record pin.Fields pin.Fields
+                  Expect.isTrue r.Passed (sprintf "%s: %s" pin.Record (defaultArg r.Counterexample r.Law))
 
               let widened =
                   Conformance.witnessDeclaredFieldsLaw

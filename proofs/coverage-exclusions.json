@@ -63,7 +63,7 @@
     "host-seam": "The operation is a boundary whose content a host supplies: an interface member, a tool's entry point, an export another language's host diffs. What Core owns at that boundary is certified where the host meets it.",
     "measured-elsewhere": "The operation has behaviour and no theorem or law family states its contract; tests stand in. The entry names the test file in `standIn`, and the clause holds that file to mentioning the operation (`<Owner>.<member>`) or the `through` token naming the measured operation it is reached by, so a stand-in cannot point at a file that never touches it."
   },
-  "$operationsComment": "Phase 335. The OPERATION clause of `Proofs.Coverage`: every public method or function in the committed API baselines (`../api/*.txt`, the `method` lines) maps to at least one of a `../proofs.json` row whose `evidence.operations` names it, a law family whose operation roster (`Fuaran.Core.Families.operations`) lists it, or an entry below with a class from `operationClasses` and a one-line reason. A law family's own entry point is mapped by its roster row. An operation is spelled `<Owner>.<member>` with the `Fuaran.Core.` prefix, generic arity and the compiler's `Module` suffix dropped and nested types joined by `.` (`Dag+ReachModule.ancestors` is `Dag.Reach.ancestors`). The baselines are the census, so a newly published operation reds the suite at the commit that adds it and names itself. The check runs both ways: an entry for an operation that is no longer published, or that has since gained a ladder row or a roster line, fails, as a member listed twice does. An entry is a recorded decision, not a pass: `measured-elsewhere` says no law states the contract, which is weaker than a theorem and says so.",
+  "$operationsComment": "Phase 335. The OPERATION clause of `Proofs.Coverage`: every public method or function in the committed API baselines (`../api/*.txt`, the `method` lines) maps to at least one of a `../proofs.json` row whose `evidence.operations` names it, a law family whose record lists it (`Fuaran.Core.Families.LawFamily.Operations`), or an entry below with a class from `operationClasses` and a one-line reason. A law family's own entry point is mapped by its roster row. An operation is spelled `<Owner>.<member>` with the `Fuaran.Core.` prefix, generic arity and the compiler's `Module` suffix dropped and nested types joined by `.` (`Dag+ReachModule.ancestors` is `Dag.Reach.ancestors`). The baselines are the census, so a newly published operation reds the suite at the commit that adds it and names itself. The check runs both ways: an entry for an operation that is no longer published, or that has since gained a ladder row or a roster line, fails, as a member listed twice does. An entry is a recorded decision, not a pass: `measured-elsewhere` says no law states the contract, which is weaker than a theorem and says so.",
   "operations": [
     {
       "members": [
@@ -290,7 +290,7 @@
         "Conformance.witnessDeclaredFieldsLaw"
       ],
       "class": "measured-elsewhere",
-      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests. witnessDeclaredFieldsLaw (Phase 387) is the reflection-free law the Fable pipeline runs over the committed declaredWitnessFields, which SurfaceLawsTests holds equal to reflection.",
+      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests. witnessDeclaredFieldsLaw (Phase 387) is the reflection-free law the Fable pipeline runs over each frozen pin (Phase 506); SurfaceLawsTests holds the pins equal to reflection.",
       "standIn": "tests/Fuaran.Core.Tests/SurfaceLawsTests.fs"
     },
     {
@@ -303,24 +303,6 @@
       "class": "measured-elsewhere",
       "reason": "Projections and renderings of the law-family roster; held to the tree by the roster tests and the generated `docs/conformance-families.*` approval.",
       "standIn": "tests/Fuaran.Core.Tests/KitRoster.fs"
-    },
-    {
-      "members": [
-        "Families.censusOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Projections of the roster; measured through the values they build (`Families.census`, `Families.refusalAudit`) and the roster lookups the suite performs.",
-      "through": "Families.census",
-      "standIn": "tests/Fuaran.Core.Tests/ReachTests.fs"
-    },
-    {
-      "members": [
-        "Families.refusalAuditOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Projection of the roster into the refusal audit; measured through `Families.refusalAudit`, which the vacuity suite reads.",
-      "through": "Families.refusalAudit",
-      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
     },
     {
       "members": [

@@ -1877,17 +1877,18 @@ let namingRuleTests =
 
               let plant entry =
                   { template with
-                      Id = "Conformance." + entry
-                      Entry = entry }
+                      Id = "Conformance." + entry }
 
               let defects =
                   namingDefects [ plant "plantedLaws"; plant "plantedLawsAtWith"; plant "orphanLawsWith" ] (fun _ _ ->
                       false)
 
-              for fragment in
-                  [ "plantedLaws takes"
-                    "plantedLawsAtWith: a double suffix"
-                    "orphanLawsWith is a configured form" ] do
-                  Expect.isTrue
-                      (defects |> List.exists (fun d -> d.Contains fragment))
-                      (sprintf "%s is named: %A" fragment defects) ]
+              // Each plant is named for its own defect and nothing else: the entry point a plant is
+              // read under is its `Id` (`Entry` is derived from it), so the findings are exactly these.
+              Expect.equal
+                  defects
+                  [ "Conformance.plantedLaws takes a witness capability and is spelled neither …At nor …With"
+                    "Conformance.plantedLawsAtWith: a double suffix — the configured form of an …At family is …With"
+                    "Conformance.plantedLawsAtWith is a configured form with no Conformance.plantedLawsAtAt beside it"
+                    "Conformance.orphanLawsWith is a configured form with no Conformance.orphanLawsAt beside it" ]
+                  "the plants are named, each for its own defect" ]
