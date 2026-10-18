@@ -77,11 +77,14 @@
    way: name the facts it uses, do not let the solver rediscover them.
 
    THE TWINS (the last section) are the extractor premise sampled at this model — see
-   `WireColumn.fst`'s twins section for what they are and why.
+   `Twin.fst` for what they are and why.
 
    Apache-2.0, like everything beside it.
 *)
 module Temporal
+
+open Twin
+open ListAlgebra
 
 #set-options "--ext context_pruning"
 
@@ -180,11 +183,6 @@ let civil_valid (c: civil) : Tot bool =
 (* ======================================================================================
    3. DIGITS AND TEXT (F#: `digitsAt`, `pad`, `string n`).
    ====================================================================================== *)
-
-let rec len (#a: Type) (l: list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
 
 (* F#: the digit character of `0`..`9`. *)
 let dec_ch (n: int) : Tot ch =
@@ -1817,16 +1815,10 @@ let try_instant_seconds (s: list ch) (second fraction: int)
   | None -> ()
 
 (* ======================================================================================
-   11. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireColumn.fst`'s
-       section of the same name for what the list is and why the kit refuses a model without one.
+   11. TWINS (Phase 309) — the extractor premise, sampled at this model. See `Twin.fst` for what
+       the list is and why the kit refuses a model without one.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 
 (* `2026-02-28` and `2026-02-28T12:34:56.5Z`, spelled in the alphabet. *)
 let twin_date : list ch =

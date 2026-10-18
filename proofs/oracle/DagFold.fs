@@ -1,61 +1,15 @@
 module DagFold
 
-let rec mem = (fun ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (y)::t -> begin
-     ((Prims.op_Equals x y) || (mem x t))
-     end))
-
-
-let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     m
-     end
-| (x)::t -> begin
-     (x)::(app t m)
-     end))
-
-
 let rec concat = (fun ( ls  :  Prims.list<Prims.list<'a>> ) -> (match (ls) with
 | [] -> begin
      []
      end
 | (l)::t -> begin
-     (app l (concat t))
+     (ListAlgebra.app l (concat t))
      end))
 
 
-let rec inter = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (match (x) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (mem h y) then begin
-     (h)::(inter t y)
-     end else begin
-     (inter t y)
-     end
-     end))
-
-
-let rec diff = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (match (x) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (mem h y) then begin
-     (diff t y)
-     end else begin
-     (h)::(diff t y)
-     end
-     end))
-
-
-let union = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (app x y))
+let union = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (ListAlgebra.app x y))
 
 
 let is_empty = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
@@ -67,7 +21,7 @@ let is_empty = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
      end))
 
 
-let disjoint = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (is_empty (inter x y)))
+let disjoint = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (is_empty (ListAlgebra.inter x y)))
 
 
 type slot = (Prims.string * Prims.string)
@@ -123,10 +77,10 @@ let rec nodes : Prims.list<slot>  ->  Prims.list<Prims.string> = (fun ( l  :  Pr
      end))
 
 
-let slot_clash : footprint  ->  footprint  ->  Prims.list<slot> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (inter a.slot_writes b.slot_writes) (union (inter a.slot_writes b.slot_reads) (inter a.slot_reads b.slot_writes))))
+let slot_clash : footprint  ->  footprint  ->  Prims.list<slot> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter a.slot_writes b.slot_writes) (union (ListAlgebra.inter a.slot_writes b.slot_reads) (ListAlgebra.inter a.slot_reads b.slot_writes))))
 
 
-let slots_against_node : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes))) (inter (nodes a.slot_reads) b.content_writes)))
+let slots_against_node : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes))) (ListAlgebra.inter (nodes a.slot_reads) b.content_writes)))
 
 
 let independent : footprint  ->  footprint  ->  Prims.bool = (fun ( a  :  footprint ) ( b  :  footprint ) -> (((((((((disjoint a.content_writes b.content_writes) && (disjoint a.content_writes b.reads)) && (disjoint b.content_writes a.reads)) && (disjoint a.structure_writes b.structure_writes)) && (not (((not ((is_empty a.unknown_parent_writes))) && (writes_structure b))))) && (not (((not ((is_empty b.unknown_parent_writes))) && (writes_structure a))))) && (is_empty (slot_clash a b))) && (is_empty (slots_against_node a b))) && (is_empty (slots_against_node b a))))
@@ -206,10 +160,10 @@ let __proj__Mkconflict__item__shape = (fun ( projectee  :  conflict<'op> ) -> (m
      end))
 
 
-let concurrent : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (union (inter fa.content_writes fb.content_writes) (union (inter fa.content_writes fb.reads) (inter fb.content_writes fa.reads))))
+let concurrent : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (union (ListAlgebra.inter fa.content_writes fb.content_writes) (union (ListAlgebra.inter fa.content_writes fb.reads) (ListAlgebra.inter fb.content_writes fa.reads))))
 
 
-let insert_clash : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (inter fa.structure_writes fb.structure_writes))
+let insert_clash : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (ListAlgebra.inter fa.structure_writes fb.structure_writes))
 
 
 let move_remove : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (union ( 
@@ -257,14 +211,14 @@ in (
 let c1 = (concurrent_or_slots fa fb)
 in (
 
-let c2 = (diff (insert_clash fa fb) c1)
+let c2 = (ListAlgebra.diff (insert_clash fa fb) c1)
 in (
 
-let c3 = (diff (diff (move_remove fa fb) c1) c2)
+let c3 = (ListAlgebra.diff (ListAlgebra.diff (move_remove fa fb) c1) c2)
 in (
 
 let c4 = (slot_clash fa fb)
-in (app (tag a b ConcurrentUpdate c1) (app (tag a b InsertPositionClash c2) (app (tag a b MoveVsRemove c3) (tag_slots a b c4)))))))))))
+in (ListAlgebra.app (tag a b ConcurrentUpdate c1) (ListAlgebra.app (tag a b InsertPositionClash c2) (ListAlgebra.app (tag a b MoveVsRemove c3) (tag_slots a b c4)))))))))))
 
 
 let rec conflicts_with = (fun ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( db  :  Prims.list<'op> ) -> (match (db) with
@@ -272,7 +226,7 @@ let rec conflicts_with = (fun ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( db  
      []
      end
 | (b)::t -> begin
-     (app (pair_conflicts fp a b) (conflicts_with fp a t))
+     (ListAlgebra.app (pair_conflicts fp a b) (conflicts_with fp a t))
      end))
 
 
@@ -281,7 +235,7 @@ let rec conflicts = (fun ( fp  :  'op  ->  footprint ) ( da  :  Prims.list<'op> 
      []
      end
 | (a)::t -> begin
-     (app (conflicts_with fp a db) (conflicts fp t db))
+     (ListAlgebra.app (conflicts_with fp a db) (conflicts fp t db))
      end))
 
 type outcome<'a, 'e> =
@@ -333,7 +287,7 @@ let rec lane_conflicts = (fun ( fp  :  'op  ->  footprint ) ( d  :  Prims.list<'
      []
      end
 | (e)::t -> begin
-     (app (conflicts fp d e) (lane_conflicts fp d t))
+     (ListAlgebra.app (conflicts fp d e) (lane_conflicts fp d t))
      end))
 
 
@@ -342,7 +296,7 @@ let rec all_conflicts = (fun ( fp  :  'op  ->  footprint ) ( ds  :  Prims.list<P
      []
      end
 | (d)::rest -> begin
-     (app (lane_conflicts fp d rest) (all_conflicts fp rest))
+     (ListAlgebra.app (lane_conflicts fp d rest) (all_conflicts fp rest))
      end))
 
 
@@ -482,24 +436,6 @@ let rec mem_u = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>> 
      ((ueq c d) || (mem_u c t))
      end))
 
-
-let rec rev = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     []
-     end
-| (x)::t -> begin
-     (app (rev t) ((x)::[]))
-     end))
-
-
-let rec distinct = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (x)::t -> begin
-     ((not ((mem x t))) && (distinct t))
-     end))
-
 type node<'op> = {nid : Prims.string; nparents : Prims.list<Prims.string>; nop : 'op}
 
 
@@ -589,7 +525,7 @@ let rec ops_of = (fun ( ns  :  Prims.list<node<'op>> ) -> (match (ns) with
      end))
 
 
-let distinct_ids = (fun ( d  :  dag<'op> ) -> (distinct (ids_of d.nodes)))
+let distinct_ids = (fun ( d  :  dag<'op> ) -> (ListAlgebra.distinct (ids_of d.nodes)))
 
 
 let rec chain_head_rev = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( rl  :  Prims.list<'op> ) -> (match (rl) with
@@ -613,10 +549,10 @@ in ({nid = (mint p actor o); nparents = (p)::[]; nop = o})::(chain_rev mint acto
      end))
 
 
-let lane_nodes = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (rev (chain_rev mint actor q (rev l))))
+let lane_nodes = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (ListAlgebra.rev (chain_rev mint actor q (ListAlgebra.rev l))))
 
 
-let lane_head = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (chain_head_rev mint actor q (rev l)))
+let lane_head = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (chain_head_rev mint actor q (ListAlgebra.rev l)))
 
 type lane<'op> = {lactor : Prims.string; lops : Prims.list<'op>}
 
@@ -638,7 +574,7 @@ let rec lanes_nodes = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  -
      []
      end
 | (ln)::t -> begin
-     (app (lane_nodes mint ln.lactor q ln.lops) (lanes_nodes mint q t))
+     (ListAlgebra.app (lane_nodes mint ln.lactor q ln.lops) (lanes_nodes mint q t))
      end))
 
 
@@ -681,7 +617,7 @@ and ancestors_all = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) (
      []
      end
 | (p)::t -> begin
-     (app (ancestors_of d fuel p) (ancestors_all d fuel t))
+     (ListAlgebra.app (ancestors_of d fuel p) (ancestors_all d fuel t))
      end))
 
 
@@ -721,7 +657,7 @@ let rec drop_by = (fun ( fuel  :  Prims.list<'a> ) ( l  :  Prims.list<'b> ) -> (
      end))
 
 
-let topo_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( head  :  Prims.string ) -> (rev (ancestors_of d fuel head)))
+let topo_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( head  :  Prims.string ) -> (ListAlgebra.rev (ancestors_of d fuel head)))
 
 
 let rec nodes_for = (fun ( d  :  dag<'op> ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
@@ -739,7 +675,7 @@ let rec nodes_for = (fun ( d  :  dag<'op> ) ( l  :  Prims.list<Prims.string> ) -
      end))
 
 
-let between = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (nodes_for d (diff (topo_of d fuel head) (ancestors_of d fuel base_id))))
+let between = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (nodes_for d (ListAlgebra.diff (topo_of d fuel head) (ancestors_of d fuel base_id))))
 
 
 let between_ops = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (ops_of (between d fuel base_id head)))
@@ -767,7 +703,7 @@ let rec before : Prims.string  ->  Prims.string  ->  Prims.list<Prims.string>  -
 | (h)::t -> begin
       
 if (Prims.op_Equals h x) then begin
-     (mem y t)
+     (ListAlgebra.mem y t)
      end else begin
       
 if (Prims.op_Equals h y) then begin
@@ -821,7 +757,7 @@ let rec parents_in : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  -> 
      end
 | (p)::t -> begin
       
-if (mem p closure) then begin
+if (ListAlgebra.mem p closure) then begin
      (p)::(parents_in t closure)
      end else begin
      (parents_in t closure)
@@ -834,7 +770,7 @@ let rec all_emitted : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->
      true
      end
 | (p)::t -> begin
-     ((mem p emitted) && (all_emitted t emitted))
+     ((ListAlgebra.mem p emitted) && (all_emitted t emitted))
      end))
 
 
@@ -888,15 +824,15 @@ let rec kahn = (fun ( pick  :  Prims.list<Prims.string>  ->  Prims.string ) ( fu
      (
 
 let id = (pick f)
-in (id)::(kahn pick fuel' (remove_id rest id) closure (app emitted ((id)::[]))))
+in (id)::(kahn pick fuel' (remove_id rest id) closure (ListAlgebra.app emitted ((id)::[]))))
      end)
      end))
 
 
-let lane_ids_distinct = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( bn  :  node<'op> ) ( ln  :  lane<'op> ) -> (distinct ((bn.nid)::(ids_of (lane_nodes mint ln.lactor bn.nid ln.lops)))))
+let lane_ids_distinct = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( bn  :  node<'op> ) ( ln  :  lane<'op> ) -> (ListAlgebra.distinct ((bn.nid)::(ids_of (lane_nodes mint ln.lactor bn.nid ln.lops)))))
 
 
-let between_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (nodes_for d (diff ord (ancestors_of d fuel base_id))))
+let between_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (nodes_for d (ListAlgebra.diff ord (ancestors_of d fuel base_id))))
 
 
 let between_ops_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (ops_of (between_ordered d fuel base_id ord)))
@@ -956,7 +892,7 @@ let rec all_before_or_emitted : Prims.list<Prims.string>  ->  Prims.string  ->  
      true
      end
 | (p)::t -> begin
-     (((mem p emitted) || (before p child ord)) && (all_before_or_emitted t child emitted ord))
+     (((ListAlgebra.mem p emitted) || (before p child ord)) && (all_before_or_emitted t child emitted ord))
      end))
 
 
@@ -978,7 +914,7 @@ let rec placed_follow_parents = (fun ( ns  :  Prims.list<node<'op>> ) ( closure 
      end
 | (n)::t -> begin
      (( 
-if (mem n.nid ord) then begin
+if (ListAlgebra.mem n.nid ord) then begin
      (all_before_or_emitted (parents_in n.nparents closure) n.nid emitted ord)
      end else begin
      true
@@ -991,14 +927,14 @@ let rec sub_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Pr
      true
      end
 | (x)::t -> begin
-     ((mem x m) && (sub_ids t m))
+     ((ListAlgebra.mem x m) && (sub_ids t m))
      end))
 
 
 let same_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( m  :  Prims.list<Prims.string> ) -> ((sub_ids l m) && (sub_ids m l)))
 
 
-let is_topo_enum = (fun ( ns  :  Prims.list<node<'op>> ) ( ord  :  Prims.list<Prims.string> ) -> (((distinct ord) && (same_ids ord (ids_of ns))) && (follows_parents_in ns (ids_of ns) ord)))
+let is_topo_enum = (fun ( ns  :  Prims.list<node<'op>> ) ( ord  :  Prims.list<Prims.string> ) -> (((ListAlgebra.distinct ord) && (same_ids ord (ids_of ns))) && (follows_parents_in ns (ids_of ns) ord)))
 
 
 let rec first_outside : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  found<Prims.string> = (fun ( ps  :  Prims.list<Prims.string> ) ( closure  :  Prims.list<Prims.string> ) -> (match (ps) with
@@ -1007,7 +943,7 @@ let rec first_outside : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  
      end
 | (p)::t -> begin
       
-if (mem p closure) then begin
+if (ListAlgebra.mem p closure) then begin
      (first_outside t closure)
      end else begin
      Found (p)
@@ -1174,7 +1110,7 @@ let rec closure_nodes = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prim
      end
 | (n)::t -> begin
       
-if (mem n.nid closure) then begin
+if (ListAlgebra.mem n.nid closure) then begin
      (n)::(closure_nodes t closure)
      end else begin
      (closure_nodes t closure)
@@ -1218,7 +1154,7 @@ let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( 
      end
 | (x)::t -> begin
       
-if (mem x t) then begin
+if (ListAlgebra.mem x t) then begin
      (dedup t)
      end else begin
      (x)::(dedup t)
@@ -1277,7 +1213,7 @@ if (better x best) then begin
      end))
 
 
-let merge_base = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) -> (match ((inter (ancestors_of d fuel left) (ancestors_of d fuel right))) with
+let merge_base = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) -> (match ((ListAlgebra.inter (ancestors_of d fuel left) (ancestors_of d fuel right))) with
 | [] -> begin
      Missing
      end
@@ -1292,7 +1228,7 @@ let rec owners : Prims.string  ->  Prims.list<Prims.list<Prims.string>>  ->  Pri
      end
 | (c)::t -> begin
      (( 
-if (mem x c) then begin
+if (ListAlgebra.mem x c) then begin
      (Prims.parse_int "1")
      end else begin
      (Prims.parse_int "0")
@@ -1314,13 +1250,13 @@ if (f x) then begin
      end))
 
 
-let shared_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) ( x  :  Prims.string ) -> ((not ((mem x base_c))) && ((owners x cs) >= (Prims.parse_int "2"))))
+let shared_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) ( x  :  Prims.string ) -> ((not ((ListAlgebra.mem x base_c))) && ((owners x cs) >= (Prims.parse_int "2"))))
 
 
 let shared_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (keep (shared_pred base_c cs) order))
 
 
-let excl_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (((not ((mem x base_c))) && (mem x c)) && (Prims.op_Equals (owners x cs_all) (Prims.parse_int "1"))))
+let excl_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (((not ((ListAlgebra.mem x base_c))) && (ListAlgebra.mem x c)) && (Prims.op_Equals (owners x cs_all) (Prims.parse_int "1"))))
 
 
 let excl_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( c  :  Prims.list<Prims.string> ) -> (keep (excl_pred base_c cs_all c) order))
@@ -1335,7 +1271,7 @@ let rec excl_lanes : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  -> 
      end))
 
 
-let reconcile_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (app (shared_ids order base_c cs) (concat (excl_lanes order base_c cs cs))))
+let reconcile_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (ListAlgebra.app (shared_ids order base_c cs) (concat (excl_lanes order base_c cs cs))))
 
 
 let rec ops_by = (fun ( opof  :  Prims.string  ->  'op ) ( ids  :  Prims.list<Prims.string> ) -> (match (ids) with
@@ -1551,7 +1487,7 @@ let slot_write_fp : slot  ->  footprint = (fun ( k  :  slot ) -> {reads = []; st
 let whole_node_write_fp : Prims.string  ->  footprint = (fun ( n  :  Prims.string ) -> {reads = (n)::[]; structure_writes = []; content_writes = (n)::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []})
 
 
-let common_anc = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) ( x  :  Prims.string ) -> ((mem x (ancestors_of d fuel left)) && (mem x (ancestors_of d fuel right))))
+let common_anc = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) ( x  :  Prims.string ) -> ((ListAlgebra.mem x (ancestors_of d fuel left)) && (ListAlgebra.mem x (ancestors_of d fuel right))))
 
 
 let rec map_list = (fun ( g  :  'a  ->  'b ) ( l  :  Prims.list<'a> ) -> (match (l) with
@@ -1580,7 +1516,7 @@ let rec heads_lane_sweep = (fun ( fp  :  'op  ->  footprint ) ( d  :  Prims.list
      []
      end
 | (e)::t -> begin
-     (app (conflicts_of_nodes fp d e) (heads_lane_sweep fp d t))
+     (ListAlgebra.app (conflicts_of_nodes fp d e) (heads_lane_sweep fp d t))
      end))
 
 
@@ -1589,7 +1525,7 @@ let rec heads_sweep = (fun ( fp  :  'op  ->  footprint ) ( ds  :  Prims.list<Pri
      []
      end
 | (d)::rest -> begin
-     (app (heads_lane_sweep fp d rest) (heads_sweep fp rest))
+     (ListAlgebra.app (heads_lane_sweep fp d rest) (heads_sweep fp rest))
      end))
 
 
@@ -1634,7 +1570,7 @@ let rec parent_bits : Prims.list<rslot>  ->  Prims.list<Prims.string>  ->  Prims
 | (p)::t -> begin
      (match ((slot_of r p)) with
 | Found (b) -> begin
-     (app b (parent_bits r t))
+     (ListAlgebra.app b (parent_bits r t))
      end
 | Missing -> begin
      (parent_bits r t)
@@ -1713,18 +1649,18 @@ let reach_reaches = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) (
 | Found (b) -> begin
      (match ((slot_of r anc)) with
 | Found (uu___) -> begin
-     (mem anc b)
+     (ListAlgebra.mem anc b)
      end
 | Missing -> begin
      false
      end)
      end
 | Missing -> begin
-     (mem anc (ancestors_of d fuel dsc))
+     (ListAlgebra.mem anc (ancestors_of d fuel dsc))
      end))
 
 
-let in_set : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (mem x c))
+let in_set : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (ListAlgebra.mem x c))
 
 
 let closure_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( x  :  Prims.string ) -> (closure_nodes d.nodes (ancestors_of d fuel x)))
@@ -1857,7 +1793,7 @@ let rec exists_parent : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.li
      false
      end
 | (p)::t -> begin
-     (((Prims.op_Equals p node1) || (mem p desc)) || (exists_parent t node1 desc))
+     (((Prims.op_Equals p node1) || (ListAlgebra.mem p desc)) || (exists_parent t node1 desc))
      end))
 
 
@@ -1902,12 +1838,12 @@ if (not ((sub_ids (ids_of cn) order))) then begin
      Error (CReplay (RCyclicHistory (head)))
      end else begin
       
-if (not ((mem cp.cnode order))) then begin
+if (not ((ListAlgebra.mem cp.cnode order))) then begin
      Error (CUnreached (head))
      end else begin
      (
 
-let delta = (diff order (ancestors_of d fuel cp.cnode))
+let delta = (ListAlgebra.diff order (ancestors_of d fuel cp.cnode))
 in (match ((above_go d cp.cnode [] delta)) with
 | Found (id) -> begin
      Error (CUncovered (id))
@@ -1921,7 +1857,7 @@ in (match ((above_go d cp.cnode [] delta)) with
      end))
 
 
-let out_of : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (not ((mem x a))))
+let out_of : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (not ((ListAlgebra.mem x a))))
 
 
 let checkpoint_from = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( seal  :  Prims.string  ->  'state  ->  Prims.string ) ( origin  :  checkpoint<'state> ) ( n  :  Prims.string ) ->  
@@ -1965,7 +1901,7 @@ let rec drop_nodes = (fun ( r  :  Prims.list<node<'op>> ) ( p  :  Prims.list<Pri
      end
 | (n)::t -> begin
       
-if (mem n.nid p) then begin
+if (ListAlgebra.mem n.nid p) then begin
      (drop_nodes t p)
      end else begin
      (n)::(drop_nodes t p)
@@ -1973,7 +1909,7 @@ if (mem n.nid p) then begin
      end))
 
 
-let pending : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( p  :  Prims.string ) ( c  :  Prims.list<Prims.string> ) ( e  :  Prims.list<Prims.string> ) -> ((mem p c) && (not ((mem p e)))))
+let pending : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( p  :  Prims.string ) ( c  :  Prims.list<Prims.string> ) ( e  :  Prims.list<Prims.string> ) -> ((ListAlgebra.mem p c) && (not ((ListAlgebra.mem p e)))))
 
 
 let truncate = (fun ( d  :  dag<'op> ) ( keep1  :  Prims.list<Prims.string> ) -> {nodes = (closure_nodes d.nodes keep1)})
@@ -1985,29 +1921,15 @@ let rec trunc_ok_nodes = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>
      end
 | (n)::t -> begin
      (( 
-if (mem n.nid (ancestors_of d fuel c)) then begin
-     ((not ((mem n.nid keep1))) || (mem n.nid (ancestors_of (truncate d keep1) fuel c)))
+if (ListAlgebra.mem n.nid (ancestors_of d fuel c)) then begin
+     ((not ((ListAlgebra.mem n.nid keep1))) || (ListAlgebra.mem n.nid (ancestors_of (truncate d keep1) fuel c)))
      end else begin
-     (mem n.nid keep1)
+     (ListAlgebra.mem n.nid keep1)
      end) && (trunc_ok_nodes d fuel c keep1 t))
      end))
 
 
-let truncation_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( c  :  Prims.string ) ( keep1  :  Prims.list<Prims.string> ) -> ((mem c keep1) && (trunc_ok_nodes d fuel c keep1 d.nodes)))
-
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
+let truncation_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( c  :  Prims.string ) ( keep1  :  Prims.list<Prims.string> ) -> ((ListAlgebra.mem c keep1) && (trunc_ok_nodes d fuel c keep1 d.nodes)))
 
 
 let rec all_ueq = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>> ) -> (match (cs) with
@@ -2019,22 +1941,13 @@ let rec all_ueq = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>
      end))
 
 
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
 let twin_lt : Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( x  :  Prims.string ) ( y  :  Prims.string ) -> ((((Prims.op_Equals x "a") && (not ((Prims.op_Equals y "a")))) || ((Prims.op_Equals x "b") && ((Prims.op_Equals y "c") || (Prims.op_Equals y "m")))) || ((Prims.op_Equals x "c") && (Prims.op_Equals y "m"))))
 
 
 let twin_dag : dag<Prims.string> = {nodes = ({nid = "m"; nparents = ("b")::("c")::[]; nop = "m"})::({nid = "c"; nparents = ("a")::[]; nop = "c"})::({nid = "b"; nparents = ("a")::[]; nop = "b"})::({nid = "a"; nparents = []; nop = "a"})::[]}
 
 
-let twin_fuel : Prims.list<node<Prims.string>> = (app twin_dag.nodes twin_dag.nodes)
+let twin_fuel : Prims.list<node<Prims.string>> = (ListAlgebra.app twin_dag.nodes twin_dag.nodes)
 
 
 let twin_bool_lt : Prims.bool  ->  Prims.bool  ->  Prims.bool = (fun ( p  :  Prims.bool ) ( q  :  Prims.bool ) -> ((not (p)) && q))
@@ -2051,13 +1964,13 @@ if (Prims.op_Equals o "x") then begin
 let twin_cc : dag<Prims.string> = {nodes = ({nid = "y"; nparents = ("b")::("c")::[]; nop = "y"})::({nid = "x"; nparents = ("b")::("c")::[]; nop = "x"})::({nid = "c"; nparents = ("a")::[]; nop = "c"})::({nid = "b"; nparents = ("a")::[]; nop = "b"})::({nid = "a"; nparents = []; nop = "a"})::[]}
 
 
-let twin_cc_fuel : Prims.list<node<Prims.string>> = (app twin_cc.nodes twin_cc.nodes)
+let twin_cc_fuel : Prims.list<node<Prims.string>> = (ListAlgebra.app twin_cc.nodes twin_cc.nodes)
 
 
 let twin_chain : dag<Prims.string> = {nodes = ({nid = "r"; nparents = ("q")::[]; nop = "r"})::({nid = "q"; nparents = ("p")::[]; nop = "q"})::({nid = "p"; nparents = []; nop = "p"})::[]}
 
 
-let twin_chain_fuel : Prims.list<node<Prims.string>> = (app twin_chain.nodes twin_chain.nodes)
+let twin_chain_fuel : Prims.list<node<Prims.string>> = (ListAlgebra.app twin_chain.nodes twin_chain.nodes)
 
 
 let twin_fp : Prims.string  ->  footprint = (fun ( uu___  :  Prims.string ) -> (whole_node_write_fp "n"))
@@ -2081,16 +1994,16 @@ let twin_excl : Prims.list<Prims.list<Prims.string>> = (excl_lanes (drain_order 
 let twin_heads_report : Prims.list<conflict<node<Prims.string>>> = (conflicts_of_heads twin_fp twin_dag (drain_order twin_lt twin_fuel twin_dag.nodes) (ancestors_of twin_dag twin_fuel "a") (((ancestors_of twin_dag twin_fuel "b"))::((ancestors_of twin_dag twin_fuel "c"))::[]))
 
 
-let twins : Prims.list<twin> = ({tname = "independent-disjoint-footprints"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({tname = "dependent-shared-structure-write"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::({tname = "independent-different-slots"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("thinking")))) true))})::({tname = "dependent-same-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("tier")))) false))})::({tname = "whole-node-write-refuses-a-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (whole_node_write_fp "n") (slot_write_fp (("n"), ("tier")))) false))})::({tname = "slot-clash-is-tagged-at-the-slot"; tholds = (fun ( uu___  :  unit ) -> (
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "independent-disjoint-footprints"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({Twin.tname = "dependent-shared-structure-write"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::({Twin.tname = "independent-different-slots"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("thinking")))) true))})::({Twin.tname = "dependent-same-slot"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("tier")))) false))})::({Twin.tname = "whole-node-write-refuses-a-slot"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (whole_node_write_fp "n") (slot_write_fp (("n"), ("tier")))) false))})::({Twin.tname = "slot-clash-is-tagged-at-the-slot"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let expected = {left = (("n"), ("tier")); right = (("n"), ("tier")); address = "n"; shape = SlotClash ("tier")}
 in (
 
 let cs = (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("tier")))
-in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({tname = "total-order-by-takes-the-key-before-the-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::({tname = "merge-base-of-a-criss-cross-is-a-maximal-common-ancestor"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "y") (Found ("c"))))})::({tname = "merge-base-of-disjoint-histories-refuses"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "zz") Missing))})::({tname = "conflicts-of-heads-is-the-lane-sweep-node-for-op"; tholds = (fun ( uu___  :  unit ) -> ((not ((Prims.op_Equals twin_heads_report []))) && (Prims.op_Equals (map_list (map_conflict node_op) twin_heads_report) (all_conflicts twin_fp (map_list (fun ( ids  :  Prims.list<Prims.string> ) -> (ops_of (nodes_for twin_dag ids))) twin_excl)))))})::({tname = "reach-index-answers-the-walk"; tholds = (fun ( uu___  :  unit ) -> (
+in ((mem_u expected cs) && (all_ueq expected cs)))))})::({Twin.tname = "different-slots-fold-clean"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({Twin.tname = "slot-writes-commute-at-every-slot"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({Twin.tname = "drain-orders-a-diamond-by-the-tie-break"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({Twin.tname = "drain-refuses-a-dangling-parent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({Twin.tname = "replay-to-folds-the-drained-closure"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({Twin.tname = "replay-to-refuses-an-unknown-head"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({Twin.tname = "add-node-refuses-a-differing-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({Twin.tname = "total-order-by-takes-the-key-before-the-id"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::({Twin.tname = "merge-base-of-a-criss-cross-is-a-maximal-common-ancestor"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "y") (Found ("c"))))})::({Twin.tname = "merge-base-of-disjoint-histories-refuses"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (merge_base twin_lt twin_cc twin_cc_fuel "x" "zz") Missing))})::({Twin.tname = "conflicts-of-heads-is-the-lane-sweep-node-for-op"; Twin.tholds = (fun ( uu___  :  unit ) -> ((not ((Prims.op_Equals twin_heads_report []))) && (Prims.op_Equals (map_list (map_conflict node_op) twin_heads_report) (all_conflicts twin_fp (map_list (fun ( ids  :  Prims.list<Prims.string> ) -> (ops_of (nodes_for twin_dag ids))) twin_excl)))))})::({Twin.tname = "reach-index-answers-the-walk"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let r = (reach_of_dag twin_lt twin_fuel twin_dag)
-in ((((Prims.op_Equals (reach_reaches twin_dag twin_fuel r "a" "m") true) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "b" "c") false)) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "zz" "m") false)) && (Prims.op_Equals (reach_ancestors twin_dag twin_fuel r "c") (("c")::("a")::[])))))})::({tname = "checkpoint-at-seals-the-node-it-folded"; tholds = (fun ( uu___  :  unit ) -> (twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")))})::({tname = "replay-from-a-checkpoint-is-replay-from-genesis"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m") (Ok ("abcm"))))})::({tname = "replay-from-refuses-a-branch-from-below-the-checkpoint"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m") (Error (CUncovered ("c")))))})::({tname = "truncation-keeps-the-replay"; tholds = (fun ( uu___  :  unit ) -> (
+in ((((Prims.op_Equals (reach_reaches twin_dag twin_fuel r "a" "m") true) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "b" "c") false)) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "zz" "m") false)) && (Prims.op_Equals (reach_ancestors twin_dag twin_fuel r "c") (("c")::("a")::[])))))})::({Twin.tname = "checkpoint-at-seals-the-node-it-folded"; Twin.tholds = (fun ( uu___  :  unit ) -> (twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")))})::({Twin.tname = "replay-from-a-checkpoint-is-replay-from-genesis"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m") (Ok ("abcm"))))})::({Twin.tname = "replay-from-refuses-a-branch-from-below-the-checkpoint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m") (Error (CUncovered ("c")))))})::({Twin.tname = "truncation-keeps-the-replay"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let cp = (seal_at twin_seal "q" "pq")
 in (((truncation_ok twin_chain twin_chain_fuel "q" (("q")::("r")::[])) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel (truncate twin_chain (("q")::("r")::[])) twin_chain_fuel cp "r") (Ok ("pqr")))) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel twin_chain twin_chain_fuel cp "r") (Ok ("pqr"))))))})::[]

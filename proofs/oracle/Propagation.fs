@@ -34,33 +34,6 @@ let __proj__Error__item___0 = (fun ( projectee  :  outcome<'a, 'e> ) -> (match (
      end))
 
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
-     end))
-
-
-let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     m
-     end
-| (h)::t -> begin
-     (h)::(app t m)
-     end))
-
-
-let rec mem : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( x  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| (h)::t -> begin
-     ((Prims.op_Equals x h) || (mem x t))
-     end))
-
-
 let rec assoc = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
 | [] -> begin
      FStar_Pervasives_Native.None
@@ -84,39 +57,16 @@ let rec has_key = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string *
      end))
 
 
-let rec distinct : Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (h)::t -> begin
-     ((not ((mem h t))) && (distinct t))
-     end))
-
-
 let rec subset : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (match (a) with
 | [] -> begin
      true
      end
 | (h)::t -> begin
-     ((mem h b) && (subset t b))
+     ((ListAlgebra.mem h b) && (subset t b))
      end))
 
 
-let rec diff : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (match (a) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (mem h b) then begin
-     (diff t b)
-     end else begin
-     (h)::(diff t b)
-     end
-     end))
-
-
-let union : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (app a (diff b a)))
+let union : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (ListAlgebra.app a (ListAlgebra.diff b a)))
 
 
 let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
@@ -125,7 +75,7 @@ let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( 
      end
 | (h)::t -> begin
       
-if (mem h t) then begin
+if (ListAlgebra.mem h t) then begin
      (dedup t)
      end else begin
      (h)::(dedup t)
@@ -150,7 +100,7 @@ let rec edge : dmap  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun (
      false
      end
 | ((k, reads))::t -> begin
-     (((Prims.op_Equals k n) && (mem r reads)) || (edge t n r))
+     (((Prims.op_Equals k n) && (ListAlgebra.mem r reads)) || (edge t n r))
      end))
 
 
@@ -168,7 +118,7 @@ let rec pairs : dmap  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( dep
      []
      end
 | ((node, reads))::t -> begin
-     (app (pairs_of node reads) (pairs t))
+     (ListAlgebra.app (pairs_of node reads) (pairs t))
      end))
 
 
@@ -248,7 +198,7 @@ let rec any_dep : dmap  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prim
      false
      end
 | (node)::t -> begin
-     ((mem x (dependents_of d node)) || (any_dep d t x))
+     ((ListAlgebra.mem x (dependents_of d node)) || (any_dep d t x))
      end))
 
 
@@ -257,7 +207,7 @@ let rec range : dmap  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) -> (mat
      []
      end
 | ((uu___, vs))::t -> begin
-     (app vs (range t))
+     (ListAlgebra.app vs (range t))
      end))
 
 
@@ -271,7 +221,7 @@ let rec grow : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> 
 let next = (next_of d frontier [])
 in (
 
-let fresh = (diff next acc)
+let fresh = (ListAlgebra.diff next acc)
 in (grow d fresh (union acc fresh))))
      end))
 
@@ -417,7 +367,7 @@ let rec first_undeclared : dmap  ->  Prims.string  ->  Prims.list<Prims.string> 
      end
 | (k)::t -> begin
       
-if (mem k (reads_of deps id)) then begin
+if (ListAlgebra.mem k (reads_of deps id)) then begin
      (first_undeclared deps id t)
      end else begin
      FStar_Pervasives_Native.Some (k)
@@ -428,7 +378,7 @@ if (mem k (reads_of deps id)) then begin
 let always : Prims.string  ->  Prims.bool = (fun ( uu___  :  Prims.string ) -> true)
 
 
-let in_set : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( s  :  Prims.list<Prims.string> ) ( id  :  Prims.string ) -> (mem id s))
+let in_set : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( s  :  Prims.list<Prims.string> ) ( id  :  Prims.string ) -> (ListAlgebra.mem id s))
 
 
 let reuse = (fun ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( id  :  Prims.string ) ->  
@@ -591,7 +541,7 @@ let rec keep : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims
      end
 | (h)::t -> begin
       
-if (mem h s) then begin
+if (ListAlgebra.mem h s) then begin
      (h)::(keep s t)
      end else begin
      (keep s t)
@@ -604,7 +554,7 @@ let rec meets : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prim
      false
      end
 | (h)::t -> begin
-     ((mem h s) || (meets s t))
+     ((ListAlgebra.mem h s) || (meets s t))
      end))
 
 
@@ -631,7 +581,7 @@ let rec keep_values = (fun ( s  :  Prims.list<Prims.string> ) ( l  :  Prims.list
      end
 | ((k, x))::t -> begin
       
-if (mem k s) then begin
+if (ListAlgebra.mem k s) then begin
      (((k), (x)))::(keep_values s t)
      end else begin
      (keep_values s t)
@@ -653,7 +603,7 @@ let rec concat_all : Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.
      []
      end
 | (g)::r -> begin
-     (app g (concat_all r))
+     (ListAlgebra.app g (concat_all r))
      end))
 
 
@@ -674,7 +624,7 @@ let rec reads_ok : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.stri
      true
      end
 | (r)::rest -> begin
-     ((((not ((has_key r deps))) || (mem r seen)) || (mem r cyc)) && (reads_ok deps cyc seen rest))
+     ((((not ((has_key r deps))) || (ListAlgebra.mem r seen)) || (ListAlgebra.mem r cyc)) && (reads_ok deps cyc seen rest))
      end))
 
 
@@ -692,37 +642,14 @@ let valid_topo : dmap  ->  topo_result  ->  Prims.bool = (fun ( deps  :  dmap ) 
 let cyc = (concat_all topo.cycles)
 in (
 
-let all = (app topo.order cyc)
-in (((distinct all) && (same_set all (keys deps))) && (ordered deps cyc [] topo.order)))))
-
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
+let all = (ListAlgebra.app topo.order cyc)
+in (((ListAlgebra.distinct all) && (same_set all (keys deps))) && (ordered deps cyc [] topo.order)))))
 
 
 let twin_deps : dmap = ((("b"), (("a")::[])))::((("c"), (("b")::[])))::[]
 
 
-let twins : Prims.list<twin> = ({tname = "dependents-inverts-the-edges"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({tname = "dirty-set-is-the-downstream-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({tname = "an-edge-has-a-direction"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::({tname = "the-certificate-accepts-a-dependency-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("b")::("c")::[]; cycles = []}) true))})::({tname = "the-certificate-refuses-a-reader-before-its-read"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("c")::("b")::[]; cycles = []}) false))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "dependents-inverts-the-edges"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({Twin.tname = "dirty-set-is-the-downstream-closure"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({Twin.tname = "an-edge-has-a-direction"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::({Twin.tname = "the-certificate-accepts-a-dependency-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("b")::("c")::[]; cycles = []}) true))})::({Twin.tname = "the-certificate-refuses-a-reader-before-its-read"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("c")::("b")::[]; cycles = []}) false))})::[]
 
 
 

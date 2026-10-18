@@ -115,6 +115,9 @@
 *)
 module ColumnRefinement
 
+open Twin
+open ListAlgebra
+
 #set-options "--ext context_pruning"
 
 open WireCanon
@@ -2340,8 +2343,8 @@ let same_mask_is_mask_equality (n: list unit) (a b: validity_rep)
   | Mask _, Mask _ -> ()
 
 (* ======================================================================================
-   8. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireColumn.fst`'s
-      section of the same name for what the list is and why the kit refuses a model without one.
+   8. TWINS (Phase 309) — the extractor premise, sampled at this model. See `Twin.fst` for what
+      the list is and why the kit refuses a model without one.
       The host here is the simplest the record admits — both number carriers `nat`, the text of a
       number empty, every float finite, every text a date — because what is sampled is the walks,
       not the host.
@@ -2355,12 +2358,6 @@ let twin_host : host nat nat = {
   zero_float = 0;
 }
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
   { tname = "to-cells-reads-the-mask";
     tholds = (fun () ->

@@ -50,6 +50,8 @@
 *)
 module DagPrimitives
 
+open Twin
+open ListAlgebra
 open DagFold
 
 (* ======================================================================================
@@ -1212,8 +1214,8 @@ let compaction_preserves_replay (#op:eqtype) (#state #rej:Type)
     truncation_preserves_replay apply lt kfuel d fuel kept cp h wh wh'
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model. See DagFold's TWINS block;
-   these fixtures reuse its DAGs and add one whose compaction keeps a band.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
 (* A chain a <- b <- c with `m` after `c` naming `a` as a side parent: compacting at `c` keeps the

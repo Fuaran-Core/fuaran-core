@@ -65,6 +65,30 @@
       "$note": "The second half of the same floor."
     },
     {
+      "source": "proofs/Twin.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/Twin.fst from the fuaran-core repository",
+      "$note": "SHARED (Phase 504) — the twin record and `twins_hold`, opened by every extracted model and by the instantiation template. Copied verbatim with any model below, checked FIRST (every extraction after it needs its checked file), registered in the adopter's own roster as `kind: shared`, and extracted beside the models."
+    },
+    {
+      "source": "proofs/ListAlgebra.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/ListAlgebra.fst from the fuaran-core repository",
+      "$note": "SHARED (Phase 504) — the Prims-only list algebra (`app`, `mem`, `len`, `rev`, `distinct`, `inter`, `diff`) the models open instead of each defining its own. Copied verbatim with any model below, after `Twin.fst`, which it opens; `kind: shared` in the adopter's roster."
+    },
+    {
+      "source": "proofs/kit/templates/check.ps1",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/check.ps1 from the fuaran-core repository",
+      "$note": "The CALLER template. Copied AND edited by the adopter, so the record is the adopter's own template copy, never its edited check.ps1. Since Phase 504 it enumerates no module: it reads the roster from `modules.json` (each entry's `kind` and `opens`), as this repository's check.ps1 does, so an adopter whose check.ps1 still carries a `$modules` literal re-copies this and moves the list into its modules.json."
+    },
+    {
+      "source": "proofs/kit/templates/modules.json",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/modules.json from the fuaran-core repository",
+      "$note": "The ROSTER and budget template. Copied AND edited. Since Phase 504 each entry carries `kind` (`extracted`, `proofOnly`, `generated` or `shared`) and `opens`, and the file is the leg's only roster."
+    },
+    {
       "source": "proofs/kit/templates/Instance.fst.template",
       "check": "fingerprint",
       "regen": "copy proofs/kit/templates/Instance.fst.template from the fuaran-core repository",
@@ -74,7 +98,7 @@
       "source": "proofs/DagFold.fst",
       "check": "fingerprint",
       "regen": "copy proofs/DagFold.fst from the fuaran-core repository",
-      "$note": "GENERIC — the fold theorem. Carries `fold_confluence` and `fold_confluence_halt` (and the DAG lift `fold_confluence_dag`), parametric over the operation, state and rejection types and over `apply` and `fp`. Asks the domain for `independence_diamond fp apply` (the `independence-diamond` row; the template's `{{DIAMOND}}` discharges it by proof, `Conformance.footprintLaws` samples it otherwise) and states `lanes_apply` in the `requires` (the `lanes-apply` row, sampled by `Conformance.concurrencyLaws`). The halt half asks for nothing. Opens nothing; the one file every instance needs."
+      "$note": "GENERIC — the fold theorem. Carries `fold_confluence` and `fold_confluence_halt` (and the DAG lift `fold_confluence_dag`), parametric over the operation, state and rejection types and over `apply` and `fp`. Asks the domain for `independence_diamond fp apply` (the `independence-diamond` row; the template's `{{DIAMOND}}` discharges it by proof, `Conformance.footprintLaws` samples it otherwise) and states `lanes_apply` in the `requires` (the `lanes-apply` row, sampled by `Conformance.concurrencyLaws`). The halt half asks for nothing. Opens only the two shared modules, `ListAlgebra.fst` and `Twin.fst` (Phase 504), which a copy brings with it; the one model every instance needs."
     },
     {
       "source": "proofs/TreeOps.fst",
@@ -104,13 +128,13 @@
       "source": "proofs/Chain.fst",
       "check": "fingerprint",
       "regen": "copy proofs/Chain.fst from the fuaran-core repository",
-      "$note": "GENERIC — chain integrity for the content-addressed DAG and the linear op stream (`intact_verifies` / `tamper_detected`, `intact_chain_verifies` / `chain_tamper_detected_verify`), parametric over the operation type, the hash `h`, the op codec `enc_op`, the parent comparator and `show`. Asks the domain for `op_codec_injective` (sampled by `Conformance.codecInjectivityLaws`) and takes `hash_injective` as the named premise (`content-id-determines-content`); `intact_verifies` also needs `steps_well_parented`. Opens nothing."
+      "$note": "GENERIC — chain integrity for the content-addressed DAG and the linear op stream (`intact_verifies` / `tamper_detected`, `intact_chain_verifies` / `chain_tamper_detected_verify`), parametric over the operation type, the hash `h`, the op codec `enc_op`, the parent comparator and `show`. Asks the domain for `op_codec_injective` (sampled by `Conformance.codecInjectivityLaws`) and takes `hash_injective` as the named premise (`content-id-determines-content`); `intact_verifies` also needs `steps_well_parented`. Opens only the shared `ListAlgebra.fst` and `Twin.fst` (Phase 504), which a copy brings with it."
     },
     {
       "source": "proofs/WireDecode.fst",
       "check": "fingerprint",
       "regen": "copy proofs/WireDecode.fst from the fuaran-core repository",
-      "$note": "GENERIC in its carriers — decoder totality and the Phase 102 read policy (`decode_total`, `decode_node_wf`, `decode_encode_roundtrip`, `lenient_agrees_off_policy`), parametric over the numeric carriers and the int-to-float coercion `to_flt`; the node decoder is at a REFERENCE vocabulary, so a domain with its own kinds re-states that half. Asks for nothing a kit law samples; its boundary assumption WAS `parser-null-absorption`, a model bridge, and Phase 190 proved it in `JsonParse.fst` — so an adopter inherits that bridge as a theorem rather than as a gap. Opens nothing."
+      "$note": "GENERIC in its carriers — decoder totality and the Phase 102 read policy (`decode_total`, `decode_node_wf`, `decode_encode_roundtrip`, `lenient_agrees_off_policy`), parametric over the numeric carriers and the int-to-float coercion `to_flt`; the node decoder is at a REFERENCE vocabulary, so a domain with its own kinds re-states that half. Asks for nothing a kit law samples; its boundary assumption WAS `parser-null-absorption`, a model bridge, and Phase 190 proved it in `JsonParse.fst` — so an adopter inherits that bridge as a theorem rather than as a gap. Opens only the shared `Twin.fst` (Phase 504), which a copy brings with it."
     },
     {
       "source": "proofs/Limits.fst",
@@ -128,7 +152,7 @@
       "source": "proofs/JsonParse.fst",
       "check": "fingerprint",
       "regen": "copy proofs/JsonParse.fst from the fuaran-core repository",
-      "$note": "GENERIC in one thing — parser totality, the exact depth bound, the int53 guard, error-kind exhaustiveness and the null-absorption bridge (`parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive`, `null_absorption_is_erasure`), parametric only in the float read-back `float_read`. Asks the domain for nothing beyond supplying that function; the `\\uXXXX` escape's value is symbolic by design. Opens nothing, and CLOSES `parser-null-absorption` — the boundary assumption `WireDecode.fst` carried (Phase 190)."
+      "$note": "GENERIC in one thing — parser totality, the exact depth bound, the int53 guard, error-kind exhaustiveness and the null-absorption bridge (`parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive`, `null_absorption_is_erasure`), parametric only in the float read-back `float_read`. Asks the domain for nothing beyond supplying that function; the `\\uXXXX` escape's value is symbolic by design. Opens only the shared `ListAlgebra.fst` and `Twin.fst` (Phase 504), and CLOSES `parser-null-absorption` — the boundary assumption `WireDecode.fst` carried (Phase 190)."
     }
   ],
   "records": [

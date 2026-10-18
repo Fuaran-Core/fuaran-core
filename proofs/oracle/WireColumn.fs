@@ -606,13 +606,13 @@ let tag : column_type  ->  Prims.list<WireCanon.ch> = (fun ( t  :  column_type )
      timestamp_tag
      end
 | TimestampType (Temporal.Milliseconds) -> begin
-     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))
+     (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))
      end
 | TimestampType (Temporal.Microseconds) -> begin
-     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))
+     (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))
      end
 | TimestampType (Temporal.Nanoseconds) -> begin
-     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))
+     (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))
      end
 | DecimalType -> begin
      (WireCanon.CHexCh (WireCanon.HDd))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CHexCh (WireCanon.HDc))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("m"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("l"))::[]
@@ -848,12 +848,12 @@ in FStar_Pervasives_Native.Some ({negative = (neg && (not (is_zero))); ip = ip';
      end))
 
 
-let render_parts : dparts  ->  Prims.list<WireCanon.ch> = (fun ( p  :  dparts ) -> (WireCanon.app ( 
+let render_parts : dparts  ->  Prims.list<WireCanon.ch> = (fun ( p  :  dparts ) -> (ListAlgebra.app ( 
 if p.negative then begin
      (WireCanon.CMinus)::[]
      end else begin
      []
-     end) (WireCanon.app ( 
+     end) (ListAlgebra.app ( 
 if (match (p.ip) with
 | [] -> begin
      true
@@ -917,7 +917,7 @@ let rec first_dup_go : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prim
      end
 | (n)::rest -> begin
       
-if (WireCanon.mem n seen) then begin
+if (ListAlgebra.mem n seen) then begin
      FStar_Pervasives_Native.Some (n)
      end else begin
      (first_dup_go ((n)::seen) rest)
@@ -934,7 +934,7 @@ let rec not_in : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list
      end
 | (n)::rest -> begin
       
-if (WireCanon.mem n against) then begin
+if (ListAlgebra.mem n against) then begin
      (not_in rest against)
      end else begin
      (n)::(not_in rest against)
@@ -2592,7 +2592,7 @@ let unit_text : FStar_Pervasives_Native.option<Unit.uom>  ->  FStar_Pervasives_N
      end))
 
 
-let field_json = (fun ( f  :  field ) -> WireCanon.JObj ((WireCanon.app ((((name_key), (WireCanon.JStr (f.fname))))::(((type_key), (WireCanon.JStr ((tag f.fty)))))::[]) (WireCanon.app (stated unit_key (unit_text f.funit)) (WireCanon.app (stated label_key f.flabel) (WireCanon.app (stated description_key f.fdesc) (match (f.fext) with
+let field_json = (fun ( f  :  field ) -> WireCanon.JObj ((ListAlgebra.app ((((name_key), (WireCanon.JStr (f.fname))))::(((type_key), (WireCanon.JStr ((tag f.fty)))))::[]) (ListAlgebra.app (stated unit_key (unit_text f.funit)) (ListAlgebra.app (stated label_key f.flabel) (ListAlgebra.app (stated description_key f.fdesc) (match (f.fext) with
 | [] -> begin
      []
      end
@@ -2831,7 +2831,7 @@ let rec ext_distinct : Prims.list<(Prims.list<WireCanon.ch> * Prims.list<WireCan
      true
      end
 | ((k, uu___))::t -> begin
-     ((not ((WireCanon.mem k (ext_keys t)))) && (ext_distinct t))
+     ((not ((ListAlgebra.mem k (ext_keys t)))) && (ext_distinct t))
      end))
 
 
@@ -2861,37 +2861,14 @@ let rec all_plain : Prims.list<field>  ->  Prims.bool = (fun ( fs  :  Prims.list
      ((not ((has_metadata f))) && (all_plain t))
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
-
-let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::({tname = "of-tag-reads-the-four-timestamp-tags"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (of_tag timestamp_tag) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Seconds)))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Microseconds))))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Nanoseconds))))))})::({tname = "widens-a-coarser-timestamp-into-a-finer-and-not-back"; tholds = (fun ( uu___  :  unit ) -> ((((widens (TimestampType (Temporal.Seconds)) (TimestampType (Temporal.Nanoseconds))) && (not ((widens (TimestampType (Temporal.Milliseconds)) (TimestampType (Temporal.Seconds)))))) && (widens (TimestampType (Temporal.Microseconds)) (TimestampType (Temporal.Microseconds)))) && (not ((widens (TimestampType (Temporal.Seconds)) DateType)))))})::({tname = "decode-cell-reads-a-timestamp-in-its-unit"; tholds = (fun ( uu___  :  unit ) -> (
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "try-canonical-trims-zeros"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({Twin.tname = "try-canonical-refuses-a-bare-point"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({Twin.tname = "of-tag-reads-int"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::({Twin.tname = "of-tag-reads-the-four-timestamp-tags"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (of_tag timestamp_tag) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Seconds)))) && (Prims.op_Equals (of_tag (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))) && (Prims.op_Equals (of_tag (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Microseconds))))) && (Prims.op_Equals (of_tag (ListAlgebra.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Nanoseconds))))))})::({Twin.tname = "widens-a-coarser-timestamp-into-a-finer-and-not-back"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((widens (TimestampType (Temporal.Seconds)) (TimestampType (Temporal.Nanoseconds))) && (not ((widens (TimestampType (Temporal.Milliseconds)) (TimestampType (Temporal.Seconds)))))) && (widens (TimestampType (Temporal.Microseconds)) (TimestampType (Temporal.Microseconds)))) && (not ((widens (TimestampType (Temporal.Seconds)) DateType)))))})::({Twin.tname = "decode-cell-reads-a-timestamp-in-its-unit"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let h = {to_float = (fun ( i  :  Prims.int ) -> i); int_text = (fun ( uu___1  :  Prims.int ) -> []); finite = (fun ( uu___1  :  Prims.int ) -> true); zero_int = (Prims.parse_int "0"); zero_float = (Prims.parse_int "0")}
 in (
 
 let t = (Temporal.instant_text Temporal.Milliseconds (Prims.parse_int "0") (Prims.parse_int "500"))
-in (((Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Milliseconds)) (WireCanon.JStr (t))) (Good (Timestamp (t)))) && (Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Seconds)) (WireCanon.JStr (t))) (Bad (MalformedShape)))) && (Prims.op_Equals (type_of (Timestamp (t))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))))))})::({tname = "field-json-plain-is-the-entry"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field_json (field_create ((WireCanon.CPlain ("x"))::[]) IntType)) (WireCanon.JObj ((((name_key), (WireCanon.JStr ((WireCanon.CPlain ("x"))::[]))))::(((type_key), (WireCanon.JStr ((tag IntType)))))::[]))))})::({tname = "decode-field-reads-a-unit-back"; tholds = (fun ( uu___  :  unit ) -> (
+in (((Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Milliseconds)) (WireCanon.JStr (t))) (Good (Timestamp (t)))) && (Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Seconds)) (WireCanon.JStr (t))) (Bad (MalformedShape)))) && (Prims.op_Equals (type_of (Timestamp (t))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))))))})::({Twin.tname = "field-json-plain-is-the-entry"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field_json (field_create ((WireCanon.CPlain ("x"))::[]) IntType)) (WireCanon.JObj ((((name_key), (WireCanon.JStr ((WireCanon.CPlain ("x"))::[]))))::(((type_key), (WireCanon.JStr ((tag IntType)))))::[]))))})::({Twin.tname = "decode-field-reads-a-unit-back"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let f = (with_label ((WireCanon.CPlain ("s"))::[]) (with_unit Unit.km_per_h (field_create ((WireCanon.CPlain ("v"))::[]) FloatType)))
 in (Prims.op_Equals (decode_field (field_json f)) (Good (f)))))})::[]

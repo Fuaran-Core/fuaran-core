@@ -96,7 +96,7 @@
    about a set is about membership.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `ColumnOps.fst` and
-   `Capability.fst`. The module is SELF-CONTAINED like them — it opens nothing, restates
+   `Capability.fst`. The module is SELF-CONTAINED like them — it opens no other model, restates
    `outcome` and the list helpers it needs, and extracts beside the other models into the same
    oracle assembly sharing only `Prims.fs` and the `option` shim. Every walk a lemma has to
    name is a NAMED function (`always`, `in_set`, `resolve_in`), never a lambda written twice.
@@ -104,6 +104,9 @@
    Apache-2.0, like everything beside it.
 *)
 module Propagation
+
+open Twin
+open ListAlgebra
 
 (* ======================================================================================
    0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
@@ -113,24 +116,6 @@ module Propagation
 type outcome (a e:Type) =
   | Ok    : a -> outcome a e
   | Error : e -> outcome a e
-
-(* F#: `List.length`. *)
-let rec len (#a:Type) (l:list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
-
-(* F#: `@`. *)
-let rec app (#a:Type) (l m:list a) : Tot (list a) =
-  match l with
-  | [] -> m
-  | h :: t -> h :: app t m
-
-(* F#: `Set.contains` / `List.contains`, over ids. *)
-let rec mem (x:string) (l:list string) : Tot bool =
-  match l with
-  | [] -> false
-  | h :: t -> x = h || mem x t
 
 (* F#: `Map.tryFind`, a finite map read as its association list. *)
 let rec assoc (#a:Type) (k:string) (l:list (string & a)) : Tot (option a) =
@@ -144,23 +129,11 @@ let rec has_key (#a:Type) (k:string) (l:list (string & a)) : Tot bool =
   | [] -> false
   | (k', _) :: t -> k = k' || has_key k t
 
-(* No id twice — the one fact about `sort`'s `Order` the agreement theorem needs. *)
-let rec distinct (l:list string) : Tot bool =
-  match l with
-  | [] -> true
-  | h :: t -> not (mem h t) && distinct t
-
 (* F#: `Set.isSubset`. *)
 let rec subset (a b:list string) : Tot bool =
   match a with
   | [] -> true
   | h :: t -> mem h b && subset t b
-
-(* F#: `Set.difference a b`. *)
-let rec diff (a b:list string) : Tot (list string) =
-  match a with
-  | [] -> []
-  | h :: t -> if mem h b then diff t b else h :: diff t b
 
 (* F#: `Set.union a b`, read as membership: `a`, then what `b` adds. *)
 let union (a b:list string) : Tot (list string) = app a (diff b a)
@@ -1647,27 +1620,10 @@ let evalfromwith_agrees_certified (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:
   evalfromwith_agrees evw0 evw1 t0 t1 deps changed topo out0 prior
 
 (* ======================================================================================
-   TWINS (Phase 309) — the extractor premise, sampled at this model.
-
-   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
-   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
-   compiles would pass every other step. Each fixture below applies this model's own functions to
-   a concrete input and compares the result with the value the model means there, and the
-   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
-   to `true` under the model's own semantics. The list is extracted with the rest of the model,
-   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
-   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
-   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
-   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
-   2c) refuses an extracted model that declares no twins.
+   TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
+   is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l:list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 let twin_deps : dmap = [ ("b", [ "a" ]); ("c", [ "b" ]) ]
 
 let twins : list twin = [

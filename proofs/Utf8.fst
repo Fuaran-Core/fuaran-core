@@ -57,14 +57,9 @@
 *)
 module Utf8
 
-(* ======================================================================================
-   0. Lists, self-contained (README, finding 2 — and so the module opens nothing).
-   ====================================================================================== *)
+open ListAlgebra
 
-let rec app (#a: Type) (l1 l2: list a) : Tot (list a) (decreases l1) =
-  match l1 with
-  | [] -> l2
-  | x :: t -> x :: app t l2
+(* Lists are `ListAlgebra`'s, the one module this opens (Phase 504; README, finding 2). *)
 
 (* ======================================================================================
    1. Units, and what makes a string of them a string of characters.

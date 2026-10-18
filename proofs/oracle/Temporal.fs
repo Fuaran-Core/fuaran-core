@@ -220,15 +220,6 @@ let is_day_in_range : Prims.int  ->  Prims.bool = (fun ( days  :  Prims.int ) ->
 let civil_valid : civil  ->  Prims.bool = (fun ( c  :  civil ) -> (((((Prims.parse_int "1") <= c.month) && (c.month <= (Prims.parse_int "12"))) && ((Prims.parse_int "1") <= c.day)) && (c.day <= (days_in c.year c.month))))
 
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
-     end))
-
-
 let dec_ch : Prims.int  ->  WireCanon.ch = (fun ( n  :  Prims.int ) -> (match (n) with
 | uu___ when (uu___ = (Prims.parse_int "0")) -> begin
      WireCanon.CHexCh (WireCanon.HD0)
@@ -302,7 +293,7 @@ let rec nat_text : Prims.nat  ->  Prims.list<WireCanon.ch> = (fun ( n  :  Prims.
 if (n < (Prims.parse_int "10")) then begin
      ((dec_ch n))::[]
      end else begin
-     (WireCanon.app (nat_text (n / (Prims.parse_int "10"))) (((dec_ch (Prims.mod_f n (Prims.parse_int "10"))))::[]))
+     (ListAlgebra.app (nat_text (n / (Prims.parse_int "10"))) (((dec_ch (Prims.mod_f n (Prims.parse_int "10"))))::[]))
      end)
 
 
@@ -326,10 +317,10 @@ let pad : Prims.nat  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( width 
 
 let s = (int_text n)
 in  
-if ((len s) >= width) then begin
+if ((ListAlgebra.len s) >= width) then begin
      s
      end else begin
-     (WireCanon.app (zeros (width - (len s))) s)
+     (ListAlgebra.app (zeros (width - (ListAlgebra.len s))) s)
      end))
 
 
@@ -409,7 +400,7 @@ let is_canonical_date : Prims.list<WireCanon.ch>  ->  Prims.bool = (fun ( s  :  
      end))
 
 
-let civil_text : civil  ->  Prims.list<WireCanon.ch> = (fun ( c  :  civil ) -> (WireCanon.app (pad (Prims.parse_int "4") c.year) ((WireCanon.CMinus)::(WireCanon.app (pad (Prims.parse_int "2") c.month) ((WireCanon.CMinus)::(pad (Prims.parse_int "2") c.day))))))
+let civil_text : civil  ->  Prims.list<WireCanon.ch> = (fun ( c  :  civil ) -> (ListAlgebra.app (pad (Prims.parse_int "4") c.year) ((WireCanon.CMinus)::(ListAlgebra.app (pad (Prims.parse_int "2") c.month) ((WireCanon.CMinus)::(pad (Prims.parse_int "2") c.day))))))
 
 
 let date_text : Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( days  :  Prims.int ) -> (civil_text (civil_of_days days)))
@@ -603,7 +594,7 @@ if (Prims.op_Equals fraction (Prims.parse_int "0")) then begin
      end)
 
 
-let clock_text : time_unit  ->  Prims.int  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( u  :  time_unit ) ( sod  :  Prims.int ) ( fraction  :  Prims.int ) -> (ch_T)::(WireCanon.app (pad (Prims.parse_int "2") (sod / (Prims.parse_int "3600"))) ((WireCanon.CColon)::(WireCanon.app (pad (Prims.parse_int "2") ((Prims.mod_f sod (Prims.parse_int "3600")) / (Prims.parse_int "60"))) ((WireCanon.CColon)::(WireCanon.app (pad (Prims.parse_int "2") (Prims.mod_f sod (Prims.parse_int "60"))) (WireCanon.app (fraction_text u fraction) ((ch_Z)::[]))))))))
+let clock_text : time_unit  ->  Prims.int  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( u  :  time_unit ) ( sod  :  Prims.int ) ( fraction  :  Prims.int ) -> (ch_T)::(ListAlgebra.app (pad (Prims.parse_int "2") (sod / (Prims.parse_int "3600"))) ((WireCanon.CColon)::(ListAlgebra.app (pad (Prims.parse_int "2") ((Prims.mod_f sod (Prims.parse_int "3600")) / (Prims.parse_int "60"))) ((WireCanon.CColon)::(ListAlgebra.app (pad (Prims.parse_int "2") (Prims.mod_f sod (Prims.parse_int "60"))) (ListAlgebra.app (fraction_text u fraction) ((ch_Z)::[]))))))))
 
 
 let instant_text : time_unit  ->  Prims.int  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( u  :  time_unit ) ( second  :  Prims.int ) ( fraction  :  Prims.int ) -> (
@@ -612,7 +603,7 @@ let day = (((second - min_second) / (Prims.parse_int "86400")) + min_day)
 in (
 
 let sod = (second - (day * (Prims.parse_int "86400")))
-in (WireCanon.app (date_text day) (clock_text u sod fraction)))))
+in (ListAlgebra.app (date_text day) (clock_text u sod fraction)))))
 
 
 let hexd_rank : WireCanon.hexd  ->  Prims.int = (fun ( d  :  WireCanon.hexd ) -> (match (d) with
@@ -806,7 +797,7 @@ let fraction_digits : Prims.list<WireCanon.ch>  ->  Prims.list<WireCanon.ch> = (
      []
      end
 | uu___ -> begin
-     (take ((len t) - (Prims.parse_int "1")) t)
+     (take ((ListAlgebra.len t) - (Prims.parse_int "1")) t)
      end)
      end
 | uu___ -> begin
@@ -1000,39 +991,16 @@ if (Prims.op_Equals fraction (Prims.parse_int "0")) then begin
      end)
 
 
-let prefix19 : civil  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( c  :  civil ) ( sod  :  Prims.int ) -> (WireCanon.app (civil_text c) ((ch_T)::(WireCanon.app (pad (Prims.parse_int "2") (sod / (Prims.parse_int "3600"))) ((WireCanon.CColon)::(WireCanon.app (pad (Prims.parse_int "2") ((Prims.mod_f sod (Prims.parse_int "3600")) / (Prims.parse_int "60"))) ((WireCanon.CColon)::(pad (Prims.parse_int "2") (Prims.mod_f sod (Prims.parse_int "60"))))))))))
-
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
+let prefix19 : civil  ->  Prims.int  ->  Prims.list<WireCanon.ch> = (fun ( c  :  civil ) ( sod  :  Prims.int ) -> (ListAlgebra.app (civil_text c) ((ch_T)::(ListAlgebra.app (pad (Prims.parse_int "2") (sod / (Prims.parse_int "3600"))) ((WireCanon.CColon)::(ListAlgebra.app (pad (Prims.parse_int "2") ((Prims.mod_f sod (Prims.parse_int "3600")) / (Prims.parse_int "60"))) ((WireCanon.CColon)::(pad (Prims.parse_int "2") (Prims.mod_f sod (Prims.parse_int "60"))))))))))
 
 
 let twin_date : Prims.list<WireCanon.ch> = (WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CHexCh (WireCanon.HD6))::(WireCanon.CMinus)::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CMinus)::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CHexCh (WireCanon.HD8))::[]
 
 
-let twin_instant : Prims.list<WireCanon.ch> = (WireCanon.app twin_date ((ch_T)::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CColon)::(WireCanon.CHexCh (WireCanon.HD3))::(WireCanon.CHexCh (WireCanon.HD4))::(WireCanon.CColon)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD6))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(ch_Z)::[]))
+let twin_instant : Prims.list<WireCanon.ch> = (ListAlgebra.app twin_date ((ch_T)::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CColon)::(WireCanon.CHexCh (WireCanon.HD3))::(WireCanon.CHexCh (WireCanon.HD4))::(WireCanon.CColon)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD6))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(ch_Z)::[]))
 
 
-let twins : Prims.list<twin> = ({tname = "days-of-civil-and-civil-of-days-invert-at-the-epoch"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (days_of_civil (Prims.parse_int "1970") (Prims.parse_int "1") (Prims.parse_int "1")) (Prims.parse_int "0")) && (Prims.op_Equals (civil_of_days (Prims.parse_int "0")) {year = (Prims.parse_int "1970"); month = (Prims.parse_int "1"); day = (Prims.parse_int "1")})))})::({tname = "date-text-reads-back"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (try_days twin_date) (FStar_Pervasives_Native.Some ((Prims.parse_int "20512")))) && (Prims.op_Equals (date_text (Prims.parse_int "20512")) twin_date)))})::({tname = "instant-text-reads-back-in-every-unit-at-least-as-fine"; tholds = (fun ( uu___  :  unit ) -> ((((((Prims.op_Equals (try_instant Milliseconds twin_instant) (FStar_Pervasives_Native.Some ((((Prims.parse_int "1772282096")), ((Prims.parse_int "500")))))) && (Prims.op_Equals (try_instant Nanoseconds twin_instant) (FStar_Pervasives_Native.Some ((((Prims.parse_int "1772282096")), ((Prims.parse_int "500000000"))))))) && (Prims.op_Equals (try_instant Seconds twin_instant) FStar_Pervasives_Native.None)) && (Prims.op_Equals (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "500")) twin_instant)) && (Prims.op_Equals (instant_text Nanoseconds (Prims.parse_int "1772282096") (Prims.parse_int "500000000")) twin_instant)) && (Prims.op_Equals (unit_of twin_instant) Milliseconds)))})::({tname = "compare-instants-is-chronological-not-ordinal"; tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (compare_instants twin_instant (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "0"))) (Prims.parse_int "1")) && (Prims.op_Equals (compare_instants (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "250")) twin_instant) (Prims.parse_int "-1"))) && (Prims.op_Equals (compare_instants twin_instant twin_instant) (Prims.parse_int "0"))))})::({tname = "pad-and-trim"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (pad (Prims.parse_int "3") (Prims.parse_int "7")) ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD7))::[])) && (Prims.op_Equals (pad (Prims.parse_int "2") (Prims.parse_int "123")) ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CHexCh (WireCanon.HD3))::[]))) && (Prims.op_Equals (pad (Prims.parse_int "4") (Prims.parse_int "-1")) ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CMinus)::(WireCanon.CHexCh (WireCanon.HD1))::[]))) && (Prims.op_Equals (trim_zeros ((WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::[])) ((WireCanon.CHexCh (WireCanon.HD5))::[]))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "days-of-civil-and-civil-of-days-invert-at-the-epoch"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (days_of_civil (Prims.parse_int "1970") (Prims.parse_int "1") (Prims.parse_int "1")) (Prims.parse_int "0")) && (Prims.op_Equals (civil_of_days (Prims.parse_int "0")) {year = (Prims.parse_int "1970"); month = (Prims.parse_int "1"); day = (Prims.parse_int "1")})))})::({Twin.tname = "date-text-reads-back"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (try_days twin_date) (FStar_Pervasives_Native.Some ((Prims.parse_int "20512")))) && (Prims.op_Equals (date_text (Prims.parse_int "20512")) twin_date)))})::({Twin.tname = "instant-text-reads-back-in-every-unit-at-least-as-fine"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((((Prims.op_Equals (try_instant Milliseconds twin_instant) (FStar_Pervasives_Native.Some ((((Prims.parse_int "1772282096")), ((Prims.parse_int "500")))))) && (Prims.op_Equals (try_instant Nanoseconds twin_instant) (FStar_Pervasives_Native.Some ((((Prims.parse_int "1772282096")), ((Prims.parse_int "500000000"))))))) && (Prims.op_Equals (try_instant Seconds twin_instant) FStar_Pervasives_Native.None)) && (Prims.op_Equals (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "500")) twin_instant)) && (Prims.op_Equals (instant_text Nanoseconds (Prims.parse_int "1772282096") (Prims.parse_int "500000000")) twin_instant)) && (Prims.op_Equals (unit_of twin_instant) Milliseconds)))})::({Twin.tname = "compare-instants-is-chronological-not-ordinal"; Twin.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (compare_instants twin_instant (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "0"))) (Prims.parse_int "1")) && (Prims.op_Equals (compare_instants (instant_text Milliseconds (Prims.parse_int "1772282096") (Prims.parse_int "250")) twin_instant) (Prims.parse_int "-1"))) && (Prims.op_Equals (compare_instants twin_instant twin_instant) (Prims.parse_int "0"))))})::({Twin.tname = "pad-and-trim"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (pad (Prims.parse_int "3") (Prims.parse_int "7")) ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD7))::[])) && (Prims.op_Equals (pad (Prims.parse_int "2") (Prims.parse_int "123")) ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CHexCh (WireCanon.HD2))::(WireCanon.CHexCh (WireCanon.HD3))::[]))) && (Prims.op_Equals (pad (Prims.parse_int "4") (Prims.parse_int "-1")) ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CMinus)::(WireCanon.CHexCh (WireCanon.HD1))::[]))) && (Prims.op_Equals (trim_zeros ((WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD0))::[])) ((WireCanon.CHexCh (WireCanon.HD5))::[]))))})::[]
 
 
 

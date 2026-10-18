@@ -72,6 +72,7 @@
 *)
 module TreeFrame
 
+open ListAlgebra
 open DagFold
 open TreeOps
 open Preservation

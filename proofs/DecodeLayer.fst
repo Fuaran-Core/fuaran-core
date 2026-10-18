@@ -87,6 +87,9 @@
 *)
 module DecodeLayer
 
+open Twin
+open ListAlgebra
+
 module W = WireDecode
 
 (* ======================================================================================
@@ -142,31 +145,13 @@ type result (a: Type0) (e: Type0) =
   | Ok    : v:a -> result a e
   | Error : err:e -> result a e
 
-(* ---- list helpers, self-contained so the extraction needs only `Prims` and `WireDecode` ---- *)
-
-(* F#: `@`. *)
-let rec app (#a: Type0) (l1 l2: list a) : Tot (list a) (decreases l1) =
-  match l1 with
-  | [] -> l2
-  | x :: t -> x :: app t l2
-
-(* F#: `List.contains`. *)
-let rec mem (#a: eqtype) (x: a) (l: list a) : Tot bool =
-  match l with
-  | [] -> false
-  | y :: t -> y = x || mem x t
+(* ---- list helpers, self-contained so the extraction needs only `Prims`, `ListAlgebra` and `WireDecode` ---- *)
 
 (* F#: `List.map`. *)
 let rec map_l (#a #b: Type0) (f: a -> b) (l: list a) : Tot (list b) =
   match l with
   | [] -> []
   | x :: t -> f x :: map_l f t
-
-(* F#: `List.length`. *)
-let rec len (#a: Type0) (l: list a) : Tot nat =
-  match l with
-  | [] -> 0
-  | _ :: t -> 1 + len t
 
 (* F#: `List.filter`. *)
 let rec filter_l (#a: Type0) (p: a -> bool) (l: list a) : Tot (list a) =
@@ -2236,12 +2221,6 @@ let twin_shapes : list (ccase int bool twin_shape) = [
 
 let twin_doc : W.jval int bool = W.JObj [ ("a", W.JStr "x"); ("b", W.JArr [ W.JInt 1; W.JStr "y" ]) ]
 
-noeq type twin = { tname : string; tholds : unit -> bool }
-
-let rec twins_hold (l: list twin) : Tot bool =
-  match l with
-  | [] -> true
-  | t :: r -> t.tholds () && twins_hold r
 
 
 (* Each fixture that matches is a named function: the F# backend lays a `match` inside a list

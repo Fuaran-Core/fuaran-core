@@ -196,7 +196,7 @@ let rec collect_scripts : Prims.list<proposal>  ->  Prims.list<TreeOps.op> = (fu
      []
      end
 | (p)::r -> begin
-     (DagFold.app p.script (collect_scripts r))
+     (ListAlgebra.app p.script (collect_scripts r))
      end))
 
 
@@ -204,8 +204,8 @@ let arbitrate_pinned : TreeOps.tree  ->  Prims.list<proposal>  ->  arbitration =
 | (acc_rev, rej_rev) -> begin
      (
 
-let accepted = (DagFold.rev acc_rev)
-in {accepted = accepted; merged = (collect_scripts accepted); rejected = (recite_all accepted (DagFold.rev rej_rev))})
+let accepted = (ListAlgebra.rev acc_rev)
+in {accepted = accepted; merged = (collect_scripts accepted); rejected = (recite_all accepted (ListAlgebra.rev rej_rev))})
      end))
 
 
@@ -298,15 +298,6 @@ if ((Prims.op_Equals a.pid id) && (not ((DagFold.independent fp (fp_of a))))) th
      end))
 
 
-let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
-| [] -> begin
-     (Prims.parse_int "0")
-     end
-| (uu___)::t -> begin
-     ((Prims.parse_int "1") + (len t))
-     end))
-
-
 let rec pids : Prims.list<proposal>  ->  Prims.list<Prims.int> = (fun ( l  :  Prims.list<proposal> ) -> (match (l) with
 | [] -> begin
      []
@@ -316,7 +307,7 @@ let rec pids : Prims.list<proposal>  ->  Prims.list<Prims.int> = (fun ( l  :  Pr
      end))
 
 
-let distinct_ids : Prims.list<proposal>  ->  Prims.bool = (fun ( ps  :  Prims.list<proposal> ) -> (DagFold.distinct (pids ps)))
+let distinct_ids : Prims.list<proposal>  ->  Prims.bool = (fun ( ps  :  Prims.list<proposal> ) -> (ListAlgebra.distinct (pids ps)))
 
 
 let rec sorted_ids : Prims.list<proposal>  ->  Prims.bool = (fun ( l  :  Prims.list<proposal> ) -> (match (l) with
@@ -366,29 +357,6 @@ let rec scripts_of : Prims.list<proposal>  ->  Prims.list<Prims.list<TreeOps.op>
      (p.script)::(scripts_of r)
      end))
 
-type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
-
-
-let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tname
-     end))
-
-
-let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
-| {tname = tname; tholds = tholds} -> begin
-     tholds
-     end))
-
-
-let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
-| [] -> begin
-     true
-     end
-| (t)::r -> begin
-     ((t.tholds ()) && (twins_hold r))
-     end))
-
 
 let twin_base : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("x", "sec", []))::(TreeOps.TNode ("y", "sec", []))::[])
 
@@ -402,7 +370,7 @@ let twin_p2 : proposal = {pid = (Prims.parse_int "2"); holder = "B"; script = (T
 let twin_p2x : proposal = {pid = (Prims.parse_int "2"); holder = "B"; script = (TreeOps.InsertChild ("x", TreeOps.TNode ("n2", "para", [])))::[]}
 
 
-let twins : Prims.list<twin> = ({tname = "arbitrate-pins-and-accepts-disjoint-proposals"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p2)::(twin_p1)::[])) {accepted = (twin_p1)::(twin_p2)::[]; merged = (TreeOps.InsertChild ("x", TreeOps.TNode ("n1", "para", [])))::(TreeOps.InsertChild ("y", TreeOps.TNode ("n2", "para", [])))::[]; rejected = []}))})::({tname = "arbitrate-rejects-an-interfering-proposal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p1)::(twin_p2x)::[])).rejected ((((twin_p2x), (Conflicts (((Prims.parse_int "1"))::[]))))::[])))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "arbitrate-pins-and-accepts-disjoint-proposals"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p2)::(twin_p1)::[])) {accepted = (twin_p1)::(twin_p2)::[]; merged = (TreeOps.InsertChild ("x", TreeOps.TNode ("n1", "para", [])))::(TreeOps.InsertChild ("y", TreeOps.TNode ("n2", "para", [])))::[]; rejected = []}))})::({Twin.tname = "arbitrate-rejects-an-interfering-proposal"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p1)::(twin_p2x)::[])).rejected ((((twin_p2x), (Conflicts (((Prims.parse_int "1"))::[]))))::[])))})::[]
 
 
 

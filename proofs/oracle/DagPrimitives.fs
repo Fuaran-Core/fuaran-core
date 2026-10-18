@@ -7,7 +7,7 @@ let rec parents_of_all = (fun ( d  :  DagFold.dag<'op> ) ( ids  :  Prims.list<Pr
 | (x)::t -> begin
      (match ((DagFold.lookup d.nodes x)) with
 | DagFold.Found (n) -> begin
-     (DagFold.app n.nparents (parents_of_all d t))
+     (ListAlgebra.app n.nparents (parents_of_all d t))
      end
 | DagFold.Missing -> begin
      (parents_of_all d t)
@@ -20,11 +20,11 @@ let rec all_in : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Pri
      true
      end
 | (x)::t -> begin
-     ((DagFold.mem x m) && (all_in t m))
+     ((ListAlgebra.mem x m) && (all_in t m))
      end))
 
 
-let not_in : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( below  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (not ((DagFold.mem x below))))
+let not_in : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( below  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (not ((ListAlgebra.mem x below))))
 
 
 let deepest_cands = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<DagFold.node<'op>> ) ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFold.node<'op>> ) ( common  :  Prims.list<Prims.string> ) -> (
@@ -53,7 +53,7 @@ let deepest = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( k
      end))
 
 
-let merge_base_now = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<DagFold.node<'op>> ) ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFold.node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) -> (match ((DagFold.inter (DagFold.ancestors_of d fuel left) (DagFold.ancestors_of d fuel right))) with
+let merge_base_now = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<DagFold.node<'op>> ) ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFold.node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) -> (match ((ListAlgebra.inter (DagFold.ancestors_of d fuel left) (DagFold.ancestors_of d fuel right))) with
 | [] -> begin
      DagFold.Missing
      end
@@ -68,7 +68,7 @@ let rec distinct_go : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->
      end
 | (x)::t -> begin
       
-if (DagFold.mem x seen) then begin
+if (ListAlgebra.mem x seen) then begin
      (distinct_go seen t)
      end else begin
      (x)::(distinct_go ((x)::seen) t)
@@ -81,7 +81,7 @@ let rec inter_all = (fun ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFol
      acc
      end
 | (x)::t -> begin
-     (inter_all d fuel (DagFold.inter acc (DagFold.ancestors_of d fuel x)) t)
+     (inter_all d fuel (ListAlgebra.inter acc (DagFold.ancestors_of d fuel x)) t)
      end))
 
 
@@ -105,7 +105,7 @@ let rec in_all = (fun ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFold.n
      true
      end
 | (h)::t -> begin
-     ((DagFold.mem x (DagFold.ancestors_of d fuel h)) && (in_all d fuel t x))
+     ((ListAlgebra.mem x (DagFold.ancestors_of d fuel h)) && (in_all d fuel t x))
      end))
 
 
@@ -157,7 +157,7 @@ let reach_merge_base = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.b
      (merge_base_now lt kfuel d fuel left right)
      end
 | DagFold.Found (br) -> begin
-     (match ((DagFold.inter bl br)) with
+     (match ((ListAlgebra.inter bl br)) with
 | [] -> begin
      DagFold.Missing
      end
@@ -207,7 +207,7 @@ let rec in_all_bits : Prims.list<DagFold.rslot>  ->  Prims.list<Prims.string>  -
 | (h)::t -> begin
      ((match ((DagFold.slot_of r h)) with
 | DagFold.Found (b) -> begin
-     (DagFold.mem x b)
+     (ListAlgebra.mem x b)
      end
 | DagFold.Missing -> begin
      false
@@ -300,7 +300,7 @@ let reach_try_topo_order = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Pri
      end))
 
 
-let head_not_base : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( bh  :  Prims.list<Prims.string> ) ( bb  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> ((DagFold.mem x bh) && (not ((DagFold.mem x bb)))))
+let head_not_base : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( bh  :  Prims.list<Prims.string> ) ( bb  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> ((ListAlgebra.mem x bh) && (not ((ListAlgebra.mem x bb)))))
 
 
 let reach_between = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<DagFold.node<'op>> ) ( d  :  DagFold.dag<'op> ) ( fuel  :  Prims.list<DagFold.node<'op>> ) ( r  :  Prims.list<DagFold.rslot> ) ( ord  :  Prims.list<Prims.string> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (match ((DagFold.slot_of r head)) with
@@ -330,7 +330,7 @@ let rec children_of = (fun ( ns  :  Prims.list<DagFold.node<'op>> ) ( p  :  Prim
      end
 | (n)::t -> begin
       
-if (DagFold.mem p n.nparents) then begin
+if (ListAlgebra.mem p n.nparents) then begin
      (n.nid)::(children_of t p)
      end else begin
      (children_of t p)
@@ -344,7 +344,7 @@ let rec fwd_go = (fun ( d  :  DagFold.dag<'op> ) ( within  :  Prims.string  ->  
      end
 | (id)::rest -> begin
       
-if ((DagFold.mem id acc) || (not ((within id)))) then begin
+if ((ListAlgebra.mem id acc) || (not ((within id)))) then begin
      (fwd_go d within fuel acc rest)
      end else begin
      (match (fuel) with
@@ -352,7 +352,7 @@ if ((DagFold.mem id acc) || (not ((within id)))) then begin
      DagFold.Missing
      end
 | (uu___)::f' -> begin
-     (fwd_go d within f' ((id)::acc) (DagFold.app (children_of d.nodes id) rest))
+     (fwd_go d within f' ((id)::acc) (ListAlgebra.app (children_of d.nodes id) rest))
      end)
      end
      end))
@@ -367,10 +367,10 @@ let any_id : Prims.string  ->  Prims.bool = (fun ( uu___  :  Prims.string ) -> t
 let not_eq : Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.string ) ( x  :  Prims.string ) -> (not ((Prims.op_Equals x c))))
 
 
-let uncovered : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( behind  :  Prims.list<Prims.string> ) ( later  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> ((not ((DagFold.mem x behind))) && (not ((DagFold.mem x later)))))
+let uncovered : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( behind  :  Prims.list<Prims.string> ) ( later  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> ((not ((ListAlgebra.mem x behind))) && (not ((ListAlgebra.mem x later)))))
 
 
-let side_parent : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.string ) ( behind  :  Prims.list<Prims.string> ) ( p  :  Prims.string ) -> ((not ((Prims.op_Equals p c))) && (DagFold.mem p behind)))
+let side_parent : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( c  :  Prims.string ) ( behind  :  Prims.list<Prims.string> ) ( p  :  Prims.string ) -> ((not ((Prims.op_Equals p c))) && (ListAlgebra.mem p behind)))
 
 type cut_result =
 | CutKeep of Prims.list<Prims.string>
@@ -441,7 +441,7 @@ in (match ((forward_from d (DagFold.in_set behind) d.nodes side)) with
      CutUnderfuelled
      end
 | DagFold.Found (band) -> begin
-     CutKeep ((DagFold.app band (DagFold.app later ((c)::[]))))
+     CutKeep ((ListAlgebra.app band (ListAlgebra.app later ((c)::[]))))
      end))
      end))
      end)))
@@ -450,7 +450,7 @@ in (match ((forward_from d (DagFold.in_set behind) d.nodes side)) with
 let twin_band : DagFold.dag<Prims.string> = {DagFold.nodes = ({DagFold.nid = "m"; DagFold.nparents = ("c")::("a")::[]; DagFold.nop = "m"})::({DagFold.nid = "c"; DagFold.nparents = ("b")::[]; DagFold.nop = "c"})::({DagFold.nid = "b"; DagFold.nparents = ("a")::[]; DagFold.nop = "b"})::({DagFold.nid = "a"; DagFold.nparents = []; DagFold.nop = "a"})::[]}
 
 
-let twin_band_fuel : Prims.list<DagFold.node<Prims.string>> = (DagFold.app twin_band.nodes twin_band.nodes)
+let twin_band_fuel : Prims.list<DagFold.node<Prims.string>> = (ListAlgebra.app twin_band.nodes twin_band.nodes)
 
 
 let twin_reach : Prims.list<DagFold.rslot> = (DagFold.reach_of_dag DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag)
@@ -468,7 +468,7 @@ let twin_kept : cut_result  ->  DagFold.dag<Prims.string>  ->  Prims.list<DagFol
      end))
 
 
-let twins : Prims.list<DagFold.twin> = ({DagFold.tname = "merge-base-now-of-a-criss-cross-is-the-modelled-one"; DagFold.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (merge_base_now DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel "x" "y") (DagFold.Found ("c"))) && (Prims.op_Equals (merge_base_now DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel "x" "zz") DagFold.Missing)))})::({DagFold.tname = "common-base-over-three-heads"; DagFold.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel (("x")::("y")::("x")::[])) (DagFold.Found ("c"))) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel (("b")::("c")::("m")::[])) (DagFold.Found ("a")))) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel []) DagFold.Missing)) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel (("x")::("zz")::[])) DagFold.Missing)))})::({DagFold.tname = "reach-merge-base-and-common-base-answer-the-dag"; DagFold.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "b" "c") (DagFold.Found ("a"))) && (Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "m" "c") (DagFold.Found ("c")))) && (Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "m" "zz") DagFold.Missing)) && (Prims.op_Equals (reach_common_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach (("b")::("c")::("m")::[])) (DagFold.Found ("a")))))})::({DagFold.tname = "reach-try-topo-order-is-the-closure-drain"; DagFold.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (reach_try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "m") (TopoOk (("a")::("b")::("c")::("m")::[]))) && (Prims.op_Equals (try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel "c") (TopoOk (("a")::("c")::[])))) && (Prims.op_Equals (reach_try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "c") (TopoOk (("a")::("c")::[])))))})::({DagFold.tname = "reach-between-is-the-delta"; DagFold.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (DagFold.ids_of (reach_between DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "b" "m")) (("c")::("m")::[])) && (Prims.op_Equals (DagFold.ids_of (DagFold.between_drained DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel "b" "m")) (("c")::("m")::[]))) && (Prims.op_Equals (DagFold.ids_of (reach_between DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "zz" "c")) (("a")::("c")::[]))))})::({DagFold.tname = "cut-keeps-what-follows-and-the-band"; DagFold.tholds = (fun ( uu___  :  unit ) -> ((twin_kept (cut_keep DagFold.twin_lt DagFold.twin_chain DagFold.twin_chain_fuel "q") DagFold.twin_chain DagFold.twin_chain_fuel "q" (("q")::("r")::[])) && (twin_kept (cut_keep DagFold.twin_lt twin_band twin_band_fuel "c") twin_band twin_band_fuel "c" (("a")::("b")::("c")::("m")::[]))))})::({DagFold.tname = "cut-refuses-an-uncovered-node"; DagFold.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (cut_keep DagFold.twin_lt DagFold.twin_dag DagFold.twin_fuel "b") (CutUncovered ("c"))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "merge-base-now-of-a-criss-cross-is-the-modelled-one"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (merge_base_now DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel "x" "y") (DagFold.Found ("c"))) && (Prims.op_Equals (merge_base_now DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel "x" "zz") DagFold.Missing)))})::({Twin.tname = "common-base-over-three-heads"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel (("x")::("y")::("x")::[])) (DagFold.Found ("c"))) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel (("b")::("c")::("m")::[])) (DagFold.Found ("a")))) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel []) DagFold.Missing)) && (Prims.op_Equals (common_base DagFold.twin_lt DagFold.twin_cc_fuel DagFold.twin_cc DagFold.twin_cc_fuel (("x")::("zz")::[])) DagFold.Missing)))})::({Twin.tname = "reach-merge-base-and-common-base-answer-the-dag"; Twin.tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "b" "c") (DagFold.Found ("a"))) && (Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "m" "c") (DagFold.Found ("c")))) && (Prims.op_Equals (reach_merge_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach "m" "zz") DagFold.Missing)) && (Prims.op_Equals (reach_common_base DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach (("b")::("c")::("m")::[])) (DagFold.Found ("a")))))})::({Twin.tname = "reach-try-topo-order-is-the-closure-drain"; Twin.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (reach_try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "m") (TopoOk (("a")::("b")::("c")::("m")::[]))) && (Prims.op_Equals (try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel "c") (TopoOk (("a")::("c")::[])))) && (Prims.op_Equals (reach_try_topo_order DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "c") (TopoOk (("a")::("c")::[])))))})::({Twin.tname = "reach-between-is-the-delta"; Twin.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (DagFold.ids_of (reach_between DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "b" "m")) (("c")::("m")::[])) && (Prims.op_Equals (DagFold.ids_of (DagFold.between_drained DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel "b" "m")) (("c")::("m")::[]))) && (Prims.op_Equals (DagFold.ids_of (reach_between DagFold.twin_lt DagFold.twin_fuel DagFold.twin_dag DagFold.twin_fuel twin_reach twin_order "zz" "c")) (("a")::("c")::[]))))})::({Twin.tname = "cut-keeps-what-follows-and-the-band"; Twin.tholds = (fun ( uu___  :  unit ) -> ((twin_kept (cut_keep DagFold.twin_lt DagFold.twin_chain DagFold.twin_chain_fuel "q") DagFold.twin_chain DagFold.twin_chain_fuel "q" (("q")::("r")::[])) && (twin_kept (cut_keep DagFold.twin_lt twin_band twin_band_fuel "c") twin_band twin_band_fuel "c" (("a")::("b")::("c")::("m")::[]))))})::({Twin.tname = "cut-refuses-an-uncovered-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (cut_keep DagFold.twin_lt DagFold.twin_dag DagFold.twin_fuel "b") (CutUncovered ("c"))))})::[]
 
 
 

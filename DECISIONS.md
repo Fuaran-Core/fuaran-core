@@ -4694,6 +4694,35 @@ extracted oracle. One twin module beside all the models was rejected: it would r
 so the Phase 328 cone selector would put every model into every cone and the saving it exists for
 would be gone. The kit's step 2c (`-Twins`) refuses an extracted model that declares none.
 
+**Amended 2026-10-18 (Phase 504) — the ruling stands for a module that references every model; a
+module every model OPENS is the other direction, and it lands.** The rejected design was a twin
+module that named every model's fixtures, so it had an edge TO every model and every model's change
+reached it. `proofs/Twin.fst` (the record and `twins_hold`) and `proofs/ListAlgebra.fst` (the Prims-only
+list algebra: `app`, `mem`, `len`, `rev`, `distinct`, `inter`, `diff`) have edges FROM the models and
+none to them, which is `oracle/Prims.fs`'s position. So the cone objection does not apply as it was
+stated, and what it costs instead is answered here. A change to a shared module puts every module in
+the cone, by `kind: shared` in `proofs/modules.json`, which the selector reads as a shared input, as it
+reads the prover pin. That is sound, because every model's check reads it, and it is rare: the
+two modules are the definitions the models agree on, and they move only when that agreement moves.
+A change to any MODEL still selects exactly as before, because nothing references a model through
+them. The fixtures stay in the model they sample; only the record and the evaluator moved, out of
+twenty-three copies, with DagPrimitives reading DagFold's. The algebra moved out of twelve models.
+Two families with the same names are NOT copies and stay: the accumulator reverse
+(`WireDecode` / `JsonParse` / `Unit`), which the generated vocabularies read from WireDecode by name,
+and the two `lookup`s, which are different functions. The shared modules are extracted and twinned
+like models, so the kit's TWIN step holds them as well, and they carry no ladder row. The per-module
+prover cost before and after the move is recorded in `proofs/modules.json`'s `sharedModulesCost`, by
+D156's method. Two findings are recorded there.
+
+- One module's cost moved and stayed moved: `DecimalText`'s two arithmetic lemmas. Defining the same
+  three functions locally again restores their speed, so the move itself is the cause. No lever paid,
+  and the module stays inside its budget.
+- The leg's total fell.
+
+The algebra module is `ListAlgebra`, not the `Prelude` the redesign pass proposed: the pinned prover's
+library ships `FStar.Prelude`, and F*'s implicit `FStar.` namespace shadows a module of that name
+(Warning 274).
+
 *Decided: the README's numbers are a projection.* The header count, the contract table and the
 contract prose's counts are generated from `proofs.json` (`CORE_APPROVE_LADDER=1`, the
 `Proofs.Ladder` family), because two hand-kept copies of one number disagree eventually — the header
