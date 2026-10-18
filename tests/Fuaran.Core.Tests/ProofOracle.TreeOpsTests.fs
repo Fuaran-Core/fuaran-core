@@ -957,4 +957,197 @@ let tests =
 
               Expect.isFalse
                   (TreeOps.ix_is_fresh_for (toModelTree after) (TreeOps.ix_build (toModelTree before)))
-                  "the model reads it as stale too" ]
+                  "the model reads it as stale too"
+
+          // ---- Phase 500: the base-aware footprint, production against the section 24 model ----
+          testCase
+              "the extracted base-aware footprint is production's Ops.footprintIn over the generated pool, script by script"
+          <| fun _ ->
+              // Every lane of every trial, as a script, at every state a prefix of the pool reaches
+              // — so the scripts routinely name nodes the state holds (the resolved arms), nodes it
+              // does not (the pure arm), and ops that do not apply (the state lost, the rest pure).
+              let mutable r = ConfRng.ofSeed 5000
+              let mutable diffs = []
+              let mutable compared = 0
+              let mutable resolved = 0
+              let mutable fellBack = 0
+
+              for _ in 1..30 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+                  let generated = List.concat lanes
+
+                  let states =
+                      generated
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+
+                  let scripts =
+                      lanes
+                      @ (generated |> List.map List.singleton)
+                      @ (drawnUpdatesAndBatches states generated |> List.map List.singleton)
+                      @ (treeRefusals
+                         |> List.map (fun o -> [ o; InsertChild("root", RNode.leaf "late" "para" "") ]))
+
+                  for script in scripts do
+                      for st in states do
+                          let prod = Ops.footprintIn nodew idw st script
+
+                          let model =
+                              TreeOps.fp_in_all (toModelTree st) (script |> List.map (toModelOpWith toModelTree))
+
+                          compared <- compared + 1
+
+                          let relocates =
+                              script
+                              |> List.exists (function
+                                  | RemoveNode _
+                                  | MoveNode _
+                                  | UpdateNode _ -> true
+                                  | _ -> false)
+
+                          if relocates then
+                              if Set.isEmpty prod.UnknownParentWrites then
+                                  resolved <- resolved + 1
+                              else
+                                  fellBack <- fellBack + 1
+
+                          if prodFpParts prod <> modelFpParts model then
+                              diffs <-
+                                  sprintf
+                                      "script %s at %s: production %A, model %A"
+                                      (script |> List.map treeW.Encode |> String.concat ";")
+                                      (prodTreeHash st)
+                                      (prodFpParts prod)
+                                      (modelFpParts model)
+                                  :: diffs
+
+              match diffs with
+              | d :: _ -> failtestf "the base-aware footprint oracle and production DISAGREE\n%s" d
+              | [] ->
+                  Expect.isGreaterThan compared 0 "scripts were compared"
+
+                  Expect.isGreaterThan
+                      resolved
+                      0
+                      (sprintf "the pool reached a script the base RESOLVED (resolved=%d fellBack=%d)" resolved fellBack)
+
+                  Expect.isGreaterThan
+                      fellBack
+                      0
+                      (sprintf "and one that fell back to the pure arm (resolved=%d fellBack=%d)" resolved fellBack)
+
+          testCase
+              "the base-aware differential is not production against itself: the model's PURE footprint disagrees with Ops.footprintIn"
+          <| fun _ ->
+              // The measurement can fail: handed the model's pure footprint — the function the
+              // base-aware one refines — the same comparison finds the removal whose subtree the
+              // base resolved.
+              let script = [ RemoveNode "a" ]
+              let prod = Ops.footprintIn nodew idw treeBase script
+              let pureModel = TreeOps.fp_all (script |> List.map (toModelOpWith toModelTree))
+
+              let model =
+                  TreeOps.fp_in_all (toModelTree treeBase) (script |> List.map (toModelOpWith toModelTree))
+
+              Expect.notEqual
+                  (prodFpParts prod)
+                  (modelFpParts pureModel)
+                  "the pure model footprint is not production's base-aware one"
+
+              Expect.equal (prodFpParts prod) (modelFpParts model) "the base-aware model footprint is"
+
+          testCase
+              "the extracted model keeps the in-place diamond its theorem proves, and the pure independence refuses the same pairs"
+          <| fun _ ->
+              // `FootprintIn.footprint_in_sound` over the in-place fragment, sampled on the extracted
+              // model: every pair of in-place scripts the base-aware footprint calls independent at a
+              // state commutes there; and `footprint_in_refines`: every pair the pure footprint frees,
+              // the base-aware one frees.
+              let mutable r = ConfRng.ofSeed 5001
+              let mutable independent = 0
+              let mutable freed = 0
+              let mutable pureFree = 0
+
+              let inPlace (op: SkeletonOp<RNode, string>) =
+                  match op with
+                  | RemoveNode _
+                  | MoveNode _ -> false
+                  | _ -> true
+
+              for _ in 1..40 do
+                  let lanes, r' = treeLaneGen.Lanes 2 r
+                  r <- r'
+                  let generated = List.concat lanes
+
+                  let states =
+                      generated
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+
+                  let ops =
+                      (generated @ drawnUpdatesAndBatches states generated) |> List.filter inPlace
+
+                  for st in states do
+                      let mt = toModelTree st
+
+                      for a in ops do
+                          for b in ops do
+                              let ma = toModelOpWith toModelTree a
+                              let mb = toModelOpWith toModelTree b
+                              let fa = TreeOps.op_fp_in mt ma
+                              let fb = TreeOps.op_fp_in mt mb
+                              let pureInd = DagFold.independent (TreeOps.op_fp ma) (TreeOps.op_fp mb)
+                              let baseInd = DagFold.independent fa fb
+
+                              if pureInd then
+                                  pureFree <- pureFree + 1
+
+                                  Expect.isTrue
+                                      baseInd
+                                      "a pair the pure footprint frees is refused by the base-aware one"
+
+                              match TreeOps.apply ma mt, TreeOps.apply mb mt with
+                              | DagFold.Ok ta, DagFold.Ok tb when baseInd ->
+                                  independent <- independent + 1
+
+                                  if not pureInd then
+                                      freed <- freed + 1
+
+                                  match TreeOps.apply mb ta, TreeOps.apply ma tb with
+                                  | DagFold.Ok x, DagFold.Ok y ->
+                                      Expect.equal
+                                          (modelTreeHash x)
+                                          (modelTreeHash y)
+                                          (sprintf
+                                              "the two orders of %s and %s differ"
+                                              (treeW.Encode a)
+                                              (treeW.Encode b))
+                                  | _ ->
+                                      failtestf
+                                          "an independent in-place pair failed to apply in one order: %s / %s"
+                                          (treeW.Encode a)
+                                          (treeW.Encode b)
+                              | _ -> ()
+
+              Expect.isGreaterThan independent 0 "the pool met an independent in-place pair"
+
+              Expect.isGreaterThan
+                  freed
+                  0
+                  (sprintf
+                      "and one only the base-aware footprint frees (independent=%d pureFree=%d)"
+                      independent
+                      pureFree)
+
+              Expect.isGreaterThan pureFree 0 "and a pure-independent pair" ]

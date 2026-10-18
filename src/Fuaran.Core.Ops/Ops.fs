@@ -1391,7 +1391,7 @@ module Ops =
         : Footprint =
         let key (i: 'Id) = idw.ToString i
         let keys (ids: 'Id list) = ids |> List.map key |> Set.ofList
-        let pure = footprintOver nodew idw carried introduced
+        let purely = footprintOver nodew idw carried introduced
 
         // the proper ancestors of `target`, root first, as keys — empty when absent or the root
         let ancestorKeys (target: 'Id) (t: 'Node) =
@@ -1408,7 +1408,7 @@ module Ops =
             let next = state |> Option.bind (fun t -> step op t |> Result.toOption)
 
             match state, op with
-            | None, _ -> pure [ op ], None
+            | None, _ -> purely [ op ], None
             | Some t, Batch inner ->
                 let fp, after =
                     inner
@@ -1427,7 +1427,7 @@ module Ops =
                         StructureWrites = Set.singleton p
                         ContentWrites = keys (subtree sub) },
                     next
-                | None -> pure [ op ], next
+                | None -> purely [ op ], next
             | Some t, MoveNode(target, newParent) ->
                 match sourceParent target t, Tree.exists nodew idw newParent t with
                 | Some(_, p), true ->
@@ -1438,7 +1438,7 @@ module Ops =
                         StructureWrites = Set.ofList [ p; np ]
                         ContentWrites = Set.singleton (key target) },
                     next
-                | _ -> pure [ op ], next
+                | _ -> purely [ op ], next
             | Some t, UpdateNode node when Tree.exists nodew idw (nodew.Id node) t ->
                 let target = key (nodew.Id node)
                 let incoming = keys (introduced node)
@@ -1447,7 +1447,7 @@ module Ops =
                     Reads = Set.add target incoming
                     ContentWrites = Set.add target incoming },
                 next
-            | Some _, _ -> pure [ op ], next
+            | Some _, _ -> purely [ op ], next
 
         ops
         |> List.fold

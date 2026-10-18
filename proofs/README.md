@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 374 claims — 271 proved across 34 models, 60 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 378 claims — 273 proved across 35 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -1020,7 +1020,7 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
-| `Fuaran.Core.Conformance` | 152 | 1 | 105 | 2 | 6 | 0 | 0 | 38 |
+| `Fuaran.Core.Conformance` | 153 | 2 | 105 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 41 | 64 | 5 | 0 | 0 | 0 | 32 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
@@ -1028,8 +1028,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
 | `Fuaran.Core.OpStream` | 126 | 28 | 54 | 3 | 1 | 0 | 2 | 38 |
-| `Fuaran.Core.OpStream.Dag` | 88 | 36 | 29 | 0 | 0 | 0 | 0 | 23 |
-| `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
+| `Fuaran.Core.OpStream.Dag` | 91 | 38 | 30 | 0 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Ops` | 76 | 28 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 25 | 7 | 6 | 0 | 0 | 0 | 0 | 12 |
 | `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
@@ -1037,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 155 | 67 | 16 | 3 | 2 | 0 | 0 | 67 |
-| **Total** | 1214 | 308 | 420 | 30 | 13 | 0 | 3 | 440 |
+| **Total** | 1221 | 314 | 421 | 30 | 13 | 0 | 3 | 440 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

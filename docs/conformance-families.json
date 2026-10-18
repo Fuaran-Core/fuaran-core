@@ -497,6 +497,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.footprintInLawsAt",
+      "module": "Conformance",
+      "entry": "footprintInLawsAt",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.footprintLaws",
       "module": "Conformance",
       "entry": "footprintLaws",

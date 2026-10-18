@@ -1531,6 +1531,80 @@ let collision_after : tree = TNode ("root", "doc", (TNode ("x", "k414100", [])):
 let repeated_twice : tree = TNode ("r", "doc", (TNode ("a", "sec", (TNode ("b", "leaf", []))::[]))::(TNode ("a", "sec", []))::[])
 
 
+let anc_of : Prims.string  ->  tree  ->  Prims.list<Prims.string> = (fun ( x  :  Prims.string ) ( t  :  tree ) -> (match ((ix_path_walk x t)) with
+| FStar_Pervasives_Native.Some (l) -> begin
+     (ix_init l)
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let leaf_fp_in : tree  ->  op  ->  DagFold.footprint = (fun ( t  :  tree ) ( o  :  op ) -> (match (o) with
+| RemoveNode (x) -> begin
+     (match ((((find_in x t)), ((parent_of x t)))) with
+| (FStar_Pervasives_Native.Some (sub), FStar_Pervasives_Native.Some (p)) -> begin
+     {DagFold.reads = (x)::(p)::[]; DagFold.structure_writes = (p)::[]; DagFold.content_writes = (ids sub); DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []}
+     end
+| (uu___, uu___1) -> begin
+     (op_fp o)
+     end)
+     end
+| MoveNode (x, np) -> begin
+     (match ((((find_in x t)), ((parent_of x t)))) with
+| (FStar_Pervasives_Native.Some (uu___), FStar_Pervasives_Native.Some (p)) -> begin
+      
+if (has_id np t) then begin
+     {DagFold.reads = (x)::(np)::(p)::(anc_of np t); DagFold.structure_writes = (p)::(np)::[]; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []}
+     end else begin
+     (op_fp o)
+     end
+     end
+| (uu___, uu___1) -> begin
+     (op_fp o)
+     end)
+     end
+| UpdateNode (n) -> begin
+     (
+
+let x = (tid_of n)
+in  
+if (has_id x t) then begin
+     {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []}
+     end else begin
+     (op_fp o)
+     end)
+     end
+| uu___ -> begin
+     (op_fp o)
+     end))
+
+
+let rec op_fp_in : tree  ->  op  ->  DagFold.footprint = (fun ( t  :  tree ) ( o  :  op ) -> (match (o) with
+| Batch (os) -> begin
+     (fp_in_all t os)
+     end
+| uu___ -> begin
+     (leaf_fp_in t o)
+     end))
+and fp_in_all : tree  ->  Prims.list<op>  ->  DagFold.footprint = (fun ( t  :  tree ) ( os  :  Prims.list<op> ) -> (match (os) with
+| [] -> begin
+     empty_fp
+     end
+| (o)::r -> begin
+     (
+
+let f = (op_fp_in t o)
+in (match ((apply o t)) with
+| DagFold.Ok (t') -> begin
+     (union_fp f (fp_in_all t' r))
+     end
+| DagFold.Error (uu___) -> begin
+     (union_fp f (fp_all r))
+     end))
+     end))
+
+
 let twin_tree : tree = TNode ("root", "doc", (TNode ("a", "sec", []))::[])
 
 

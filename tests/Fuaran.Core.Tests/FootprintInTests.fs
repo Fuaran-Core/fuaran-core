@@ -232,9 +232,9 @@ let arbitrateInTests =
         [ testCase "two in-place edits of different nodes coexist under arbitrateIn where arbitrate refuses the second"
           <| fun () ->
               let proposals = [ prop 1 [ upd "a1" "x'" ]; prop 2 [ upd "b1" "z'" ] ]
-              let pure = Arbitration.arbitrate nodew idw (sample ()) proposals
+              let plain = Arbitration.arbitrate nodew idw (sample ()) proposals
               let inBase = Arbitration.arbitrateIn nodew idw (sample ()) proposals
-              Expect.equal (pure.Accepted |> List.map _.Id) [ 1 ] "the pure partition accepts one"
+              Expect.equal (plain.Accepted |> List.map _.Id) [ 1 ] "the pure partition accepts one"
               Expect.equal (inBase.Accepted |> List.map _.Id) [ 1; 2 ] "the base-aware partition accepts both"
 
           testCase "an edit under a removed ancestor is still refused, citing the removal"
@@ -405,7 +405,7 @@ let private forgetful (t: RNode) (op: Op) : Footprint =
 [<Tests>]
 let lawTests =
     testList
-        "Conformance.footprintInLawsAt (Phase 500)"
+        "Conformance.footprintInLawsAt"
         [ testCase "the reference domain certifies the base-aware footprint green, with pairs only it frees"
           <| fun () ->
               let results =

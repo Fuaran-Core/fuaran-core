@@ -3949,6 +3949,83 @@ let repeated_ids_never_fresh ()
     assert_norm (ix_try_find "a" (ix_build repeated_twice) <> find_in "a" repeated_twice)
 
 (* ======================================================================================
+   24. THE BASE-AWARE FOOTPRINT (F#: `Ops.footprintIn`, Phase 500) — the pure footprint of
+       section 7 with every parent it could not name resolved against the tree the op applies
+       to. What it CHANGES, arm by arm, and what it keeps:
+
+         - `RemoveNode x`, present with a parent `p`: `p` is a KNOWN structure-write and a read,
+           and the content-write is `ids` of the subtree `x` roots — the destroyed set — in place
+           of `[x]`. No unknown-parent write.
+         - `MoveNode x np`, both present and `x` not the root: the source parent as for a
+           removal, the destination as before, `x` content-written, and the ANCESTORS of `np`
+           read — the cycle check reads them, so a concurrent move that puts one of them under
+           `x` is what makes this op refuse. No unknown-parent write.
+         - `UpdateNode n`, present: the target read and content-written, nothing else.
+         - `InsertChild` and `ReorderChildren`: the pure arm, verbatim — nothing to resolve.
+         - a target the tree does not hold: the pure arm, so the base-aware footprint is never
+           less conservative than the pure one where the tree is silent.
+
+       THE SCRIPT IS THREADED (`fp_in_all`). The second op of a script applies to the tree the
+       first leaves, so each op is footprinted at the state the ops before it reach, and from an
+       op that does not apply the rest of the script takes the pure footprint. A `Batch` is its
+       script, threaded from the state the batch applies to — exactly the state `apply_all`
+       threads.
+
+       `FootprintIn.fst` proves `footprint_in_sound` (a pair this footprint calls independent
+       commutes, in `wstep`'s shape) and `footprint_in_refines` (a pair `op_fp` calls independent,
+       this calls independent). Section 18's ceiling is untouched: it is about predicates over
+       the pure RECORD, and this is a different function of the op, not a different predicate.
+   ====================================================================================== *)
+
+(* The proper ancestors of `x`, root first — `ix_path_walk` with the target itself dropped
+   (F#: `Tree.path` minus its last id, as `footprintIn` reads it). Empty when `x` is absent or
+   the root. *)
+let anc_of (x:string) (t:tree) : Tot (list string) =
+  match ix_path_walk x t with
+  | Some l -> ix_init l
+  | None -> []
+
+(* The leaf arms (F#: `footprintInOver.ofOp` at a `Some` state, each non-batch case). *)
+let leaf_fp_in (t:tree) (o:op) : Tot footprint =
+  match o with
+  | RemoveNode x ->
+    (match find_in x t, parent_of x t with
+     | Some sub, Some p ->
+       { reads = [x; p]; structure_writes = [p]; content_writes = ids sub;
+         unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
+     | _, _ -> op_fp o)
+  | MoveNode x np ->
+    (match find_in x t, parent_of x t with
+     | Some _, Some p ->
+       if has_id np t then
+         { reads = x :: np :: p :: anc_of np t; structure_writes = [p; np];
+           content_writes = [x]; unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
+       else op_fp o
+     | _, _ -> op_fp o)
+  | UpdateNode n ->
+    let x = tid_of n in
+    if has_id x t then
+      { reads = [x]; structure_writes = []; content_writes = [x];
+        unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
+    else op_fp o
+  | _ -> op_fp o
+
+(* F#: `Ops.footprintIn w idw t ops` is `fp_in_all t ops`; `op_fp_in t o` is its reading of one
+   op, a `Batch` threaded from `t`. *)
+let rec op_fp_in (t:tree) (o:op) : Tot footprint (decreases o) =
+  match o with
+  | Batch os -> fp_in_all t os
+  | _ -> leaf_fp_in t o
+and fp_in_all (t:tree) (os:list op) : Tot footprint (decreases os) =
+  match os with
+  | [] -> empty_fp
+  | o :: r ->
+    let f = op_fp_in t o in
+    (match apply o t with
+     | Ok t' -> union_fp f (fp_in_all t' r)
+     | Error _ -> union_fp f (fp_all r))
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)

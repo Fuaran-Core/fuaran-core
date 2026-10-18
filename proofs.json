@@ -676,6 +676,95 @@
       }
     },
     {
+      "id": "footprint-in-refines",
+      "level": "proved",
+      "statement": "Every pair of operations the pure footprint (`Ops.footprint`) calls independent, the base-aware footprint (`Ops.footprintIn`) calls independent, at every tree — and the same for two scripts, each threaded from the base, which is what `Dag.conflictsIn` reads against `Dag.conflicts`. So a consumer that moves from the pure projection to the base-aware one loses no fold and no accepted proposal. Proved by the pure footprint's own elimination run the other way: a pure-independent pair either has no relocating side, where each base-aware footprint IS the pure one, or has one, where the other side is inert and its base-aware footprint is empty.",
+      "boundary": "Refinement of the VERDICT only: the base-aware footprint is not a subset of the pure one address for address (it names a source parent and a destroyed subtree the pure one cannot), and no claim is made about `Ops.interference`'s clause list beyond its emptiness. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).",
+      "claim": "Every pair of operations the pure footprint (`Ops.footprint`) calls independent, the base-aware footprint (`Ops.footprintIn`) calls independent, at every tree — and the same for two scripts, each threaded from the base, which is what `Dag.conflictsIn` reads against `Dag.conflicts`. So a consumer that moves from the pure projection to the base-aware one loses no fold and no accepted proposal. Proved by the pure footprint's own elimination run the other way: a pure-independent pair either has no relocating side, where each base-aware footprint IS the pure one, or has one, where the other side is inert and its base-aware footprint is empty. Refinement of the VERDICT only: the base-aware footprint is not a subset of the pure one address for address (it names a source parent and a destroyed subtree the pure one cannot), and no claim is made about `Ops.interference`'s clause list beyond its emptiness. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#500",
+      "evidence": {
+        "theorem": "footprint_in_refines",
+        "model": "proofs/FootprintIn.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "footprint_in_refines_scripts",
+          "inert_fp_in",
+          "no_reloc_fp_in"
+        ],
+        "operations": [
+          "Ops.footprintIn",
+          "Ops.independent"
+        ]
+      }
+    },
+    {
+      "id": "footprint-in-sound",
+      "level": "proved",
+      "statement": "For the skeleton-op tree algebra, two IN-PLACE operations — any nesting of `InsertChild`, `ReorderChildren`, `UpdateNode` and `Batch` — whose base-aware footprints at an id-unique tree are declared disjoint and which both apply there each apply after the other and reach the same tree, in the shape of the pure diamond (`wstep`); and each one's base-aware footprint at the tree the other leaves is its footprint at the base (`footprint_in_stable`), which is what lets a fold read every footprint once, at the base, and stand on it at every state it reaches. No pair is closed by a footprint clause: the six pairs that carry a rewrite — the pairs the pure footprint refused through its unknown-parent clause — are each a commutation proved on the tree (a rewrite beside a rewrite of another node, an insert whose subtree does not carry its target, or any reorder), and the diamond is lifted along a batch's script as the pure one is. The two acceptance cases are stated outright: two rewrites of different present nodes are independent wherever they sit (`two_updates_independent`), and a rewrite inside the subtree a concurrent removal destroys is refused (`update_under_removal_refused`).",
+      "boundary": "Over the in-place fragment ONLY: a `RemoveNode` or a `MoveNode` against anything but an inert batch is outside `in_place`, and the base-aware diamond for those pairs — the source parent named, the destroyed subtree content-written, the destination's ancestors read — is stated by the model and sampled by the oracle and the law family, not proved. Holds only for footprints declared disjoint, both operations applicable, and an id-unique tree (`tree-algebra-well-formed-states`). Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).",
+      "claim": "For the skeleton-op tree algebra, two IN-PLACE operations — any nesting of `InsertChild`, `ReorderChildren`, `UpdateNode` and `Batch` — whose base-aware footprints at an id-unique tree are declared disjoint and which both apply there each apply after the other and reach the same tree, in the shape of the pure diamond (`wstep`); and each one's base-aware footprint at the tree the other leaves is its footprint at the base (`footprint_in_stable`), which is what lets a fold read every footprint once, at the base, and stand on it at every state it reaches. No pair is closed by a footprint clause: the six pairs that carry a rewrite — the pairs the pure footprint refused through its unknown-parent clause — are each a commutation proved on the tree (a rewrite beside a rewrite of another node, an insert whose subtree does not carry its target, or any reorder), and the diamond is lifted along a batch's script as the pure one is. The two acceptance cases are stated outright: two rewrites of different present nodes are independent wherever they sit (`two_updates_independent`), and a rewrite inside the subtree a concurrent removal destroys is refused (`update_under_removal_refused`). Over the in-place fragment ONLY: a `RemoveNode` or a `MoveNode` against anything but an inert batch is outside `in_place`, and the base-aware diamond for those pairs — the source parent named, the destroyed subtree content-written, the destination's ancestors read — is stated by the model and sampled by the oracle and the law family, not proved. Holds only for footprints declared disjoint, both operations applicable, and an id-unique tree (`tree-algebra-well-formed-states`). Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#500",
+      "evidence": {
+        "theorem": "footprint_in_sound",
+        "model": "proofs/FootprintIn.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "footprint_in_sound_scripts",
+          "footprint_in_stable",
+          "two_updates_independent",
+          "update_under_removal_refused",
+          "in_place"
+        ],
+        "operations": [
+          "Ops.footprintIn",
+          "Ops.independent",
+          "Arbitration.arbitrateIn",
+          "Dag.reconcileManyIn"
+        ]
+      }
+    },
+    {
+      "id": "footprint-in-differential",
+      "level": "tested",
+      "statement": "The extracted base-aware footprint (`TreeOps.fp_in_all`, section 24) is production's `Ops.footprintIn` over the generated pool, script by script and at every state a prefix of the pool reaches: the same six address sets, with scripts the base resolved (no unknown-parent write left) and scripts that fell back to the pure arm both reached. The measurement can fail: the same comparison against the model's PURE footprint disagrees on a removal whose subtree the base resolved, so the differential compares production with the model and never with itself. The extracted model also keeps the in-place diamond its theorem proves and the refinement, sampled over the pool.",
+      "boundary": "Sampled over the generated pool only, never over all scripts; the keyed form `Ops.footprintInKeyed` is held to the unkeyed one on a domain with no keyed position by the suite and is not modelled.",
+      "claim": "The extracted base-aware footprint (`TreeOps.fp_in_all`, section 24) is production's `Ops.footprintIn` over the generated pool, script by script and at every state a prefix of the pool reaches: the same six address sets, with scripts the base resolved (no unknown-parent write left) and scripts that fell back to the pure arm both reached. The measurement can fail: the same comparison against the model's PURE footprint disagrees on a removal whose subtree the base resolved, so the differential compares production with the model and never with itself. The extracted model also keeps the in-place diamond its theorem proves and the refinement, sampled over the pool. Sampled over the generated pool only, never over all scripts; the keyed form `Ops.footprintInKeyed` is held to the unkeyed one on a domain with no keyed position by the suite and is not modelled.",
+      "phase": "fuaran-core#500",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/TreeOps.fst",
+        "cases": [
+          "the extracted base-aware footprint is production's Ops.footprintIn over the generated pool, script by script",
+          "the base-aware differential is not production against itself: the model's PURE footprint disagrees with Ops.footprintIn",
+          "the extracted model keeps the in-place diamond its theorem proves, and the pure independence refuses the same pairs"
+        ],
+        "operations": [
+          "Ops.footprintIn",
+          "Ops.footprintInKeyed"
+        ]
+      }
+    },
+    {
+      "id": "footprint-in-laws",
+      "level": "tested",
+      "statement": "`Conformance.footprintInLawsAt` certifies the base-aware footprint at a domain's own ops, state and generator: soundness (a pair `Dag.conflictsIn` reports clean from a state commutes under the domain's `Apply` from it), refinement (a pair the pure projection calls independent, the base-aware one calls independent) and determinism, guarded on a pair only the base-aware footprint frees — without which the sample has not exercised the precision the projection exists for. The reference tree domain certifies green; a footprint that forgets the removed subtree is red on soundness, and one coarser than the pure footprint is red on refinement.",
+      "boundary": "Sampled over the domain's generator only, never over all scripts; the relocating pairs the theorem does not cover are certified here by sample alone.",
+      "claim": "`Conformance.footprintInLawsAt` certifies the base-aware footprint at a domain's own ops, state and generator: soundness (a pair `Dag.conflictsIn` reports clean from a state commutes under the domain's `Apply` from it), refinement (a pair the pure projection calls independent, the base-aware one calls independent) and determinism, guarded on a pair only the base-aware footprint frees — without which the sample has not exercised the precision the projection exists for. The reference tree domain certifies green; a footprint that forgets the removed subtree is red on soundness, and one coarser than the pure footprint is red on refinement. Sampled over the domain's generator only, never over all scripts; the relocating pairs the theorem does not cover are certified here by sample alone.",
+      "phase": "fuaran-core#500",
+      "evidence": {
+        "family": "Conformance.footprintInLawsAt",
+        "cases": [
+          "the reference domain certifies the base-aware footprint green, with pairs only it frees",
+          "a footprint that forgets the removed subtree is red on soundness",
+          "a footprint coarser than the pure one is red on refinement"
+        ],
+        "operations": [
+          "Conformance.footprintInLawsAt",
+          "Dag.conflictsIn"
+        ]
+      }
+    },
+    {
       "id": "skeleton-fold-confluence",
       "level": "proved",
       "statement": "Fold confluence for the skeleton-op tree algebra with NO domain hypothesis remaining, over the WHOLE skeleton operation alphabet — batch included and nested to any depth: the same lanes reach the same tree however they arrive, a lane set that cannot fold halts with the same canonical report however it arrives, and none folds under one order and halts under another. The halt half is proved separately under no hypothesis at all — not the diamond, not id uniqueness, nothing about the apply engine.",

@@ -998,41 +998,41 @@ domains must not make. This is a contract/scope clarification, not a behaviour c
 `Ops.footprint : NodeWitness -> IdWitness -> SkeletonOp list -> Footprint` computes an op-script's
 read/write **footprint** — the node ids / structural positions it reads and writes — as a pure, total
 derivation *from the script* (the `paramsOf` precedent, Phase 77), and `Ops.independent : Footprint ->
-Footprint -> bool` is pairwise footprint disjointness. This is the structural basis for dispatch-time
-conflict refusal, computed leases (Phase 84), and proposal arbitration (Phase 85) — the coordination
-edge is *computed from the script*, never separately declared. Additive over `Ops.fs`: **no new witness
-field** (GP2), FSharp.Core-only + Fable-clean (GP3), no failure case (GP4 — a footprint is always a
-value). `Conformance.footprintLaws` certifies soundness (an independent pair commutes under `apply`,
-content-hash equal), monotonicity (a sub-script's footprint ⊆ its script's), and determinism.
+Footprint -> bool` is pairwise footprint disjointness: the structural basis for dispatch-time conflict
+refusal, computed leases (Phase 84) and proposal arbitration (Phase 85). Additive over `Ops.fs`: **no new
+witness field** (GP2), FSharp.Core-only + Fable-clean (GP3), no failure case (GP4). `Conformance.footprintLaws`
+certifies soundness (an independent pair commutes under `apply`), monotonicity and determinism.
 
 **Conservativity is the contract — it is over-approximating by design.** `footprint` records *more*
-potential collisions than a tree-aware analysis would, so `Ops.independent = true` is a **promise** (the
-two scripts provably commute), and `independent = false` is **always a safe answer, never a defect
-report**. A host may treat `false` as "serialise these two edits" without it implying either is wrong.
+collisions than a tree-aware analysis would, so `Ops.independent = true` is a **promise** (the scripts
+commute) and `false` is **always a safe answer, never a defect report** — "serialise these two edits".
 
-The **pinned over-approximations** (enumerated here and in the `Footprint` / `footprint` / `independent`
-doc-comments), each a place where an exact set is a *tree fact the pure script cannot name*:
+**The pinned over-approximations below are properties of the PURE form** — each a *tree fact the pure
+script cannot name* — and stay pinned for it: Phase 143 proved the unknown-parent clause necessary over
+the record for any footprint computed from the script alone. **Precision lives where the base is known
+(Phase 500).** `Ops.footprintIn` / `footprintInKeyed` compute the same record at the tree the script
+applies to, threaded op by op: a removal or a move names its source parent as a known structure-write, a
+removal content-writes the subtree it destroys (the set Phase 163 asked for), a move reads its destination's
+ancestors, an in-place `UpdateNode` reads and content-writes its target alone, and an absent target — or
+any op after one that does not apply — takes the pure arm. `Arbitration.arbitrateIn`, `Dag.conflictsIn` /
+`reconcileIn` / `reconcileManyIn` compose it; `Conformance.footprintInLawsAt` certifies it at a domain's
+own ops; the pure entries and their verdicts are unchanged. It refines the pure verdict (`FootprintIn.footprint_in_refines`: no pair the pure form frees is refused)
+and is sound over the in-place fragment (`footprint_in_sound`; the relocating pairs are sampled, not yet proved).
 
 - **A `RemoveNode` / `MoveNode` has an unknown source parent.** Removing or moving a node also rewrites
-  its *source* parent's child-list, but that parent — and every ancestor relationship — is a tree fact
-  the op does not carry. So such a target lands in `Footprint.UnknownParentWrites`, and an op that
-  removes/moves conservatively conflicts with **every** structural write in a concurrent script.
-  Disjoint-subtree independence is therefore **not proven** when either side removes or moves (proving
-  it needs the tree); a remove/move is independent only of a structure-free script — safe, deliberately coarse.
+  its *source* parent's child-list, a tree fact the op does not carry, so the target lands in
+  `Footprint.UnknownParentWrites` and conflicts with **every** structural write in a concurrent script.
 - **A `RemoveNode`'s content-write records only the target id, not its (tree-unknown) subtree.** Sound
-  for the skeleton five because *every* skeleton op is a structural write, so the unknown-parent rule
-  above already serialises a remove/move against any concurrent structural op. A domain that layers a
-  **pure in-place content-edit op** (an "update a node's payload" op, which the skeleton five have none
-  of) on top must fold the removed subtree into the footprint itself — it has the tree.
-- **The same-named-parent rule is pinned:** two ops that write the *same named* parent's child-list
-  (two positional inserts, an insert + a reorder, …) are **not** independent — they shift the same
-  siblings. Two structural writes on *distinct named* parents (with disjoint content) are independent.
+  for the skeleton five because *every* skeleton op is a structural write, so the rule above already
+  serialises a remove/move against any concurrent structural op; a domain that layers a **pure in-place
+  content-edit op** on top folds the removed subtree in itself — or folds with `footprintIn`, which does.
+- **The same-named-parent rule is pinned:** two ops that write the *same named* parent's child-list are
+  **not** independent — they shift the same siblings. Distinct named parents (disjoint content) are.
 - **A `ReorderChildren` reads every child it names; a `MoveNode` content-writes its target.** Each is kept — D162 (count zero): no recorded multi-lane ledger reaches either arm; reopen on the first that does.
 
-The `Footprint` record has six address sets (since Phase 340). `Reads`, `StructureWrites`, `ContentWrites`
-and `UnknownParentWrites`, keyed by the `IdWitness.ToString` form (no `comparison` demanded of `'Id`), feed
-`Ops.independent`'s six node clauses; `SlotReads` and `SlotWrites`, `(node, slot)` pairs no skeleton op
-fills, feed its three slot clauses (`SlotClash`, `LeftSlotsRightNode`, `RightSlotsLeftNode`). All grow additively within a major.
+The `Footprint` record has six address sets (since Phase 340): `Reads`, `StructureWrites`, `ContentWrites` and
+`UnknownParentWrites`, keyed by the `IdWitness.ToString` form (no `comparison` demanded of `'Id`), feed `Ops.independent`'s
+six node clauses; `SlotReads` / `SlotWrites`, `(node, slot)` pairs no skeleton op fills, feed its three slot clauses (`SlotClash`, `LeftSlotsRightNode`, `RightSlotsLeftNode`). All grow additively within a major.
 
 ## Branch merge: conflict enumeration + reconciliation (Phases 64, 83)
 

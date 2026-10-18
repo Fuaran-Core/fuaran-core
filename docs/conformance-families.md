@@ -63,7 +63,7 @@ The families that read the dataframe layer ship from `Fuaran.Compute.Conformance
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
 
-99 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+100 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -105,6 +105,7 @@ The families that read the dataframe layer ship from `Fuaran.Compute.Conformance
 | `Conformance.digestLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `none` |
 | `Conformance.dirtyPropagationLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `none` |
 | `Conformance.encoderInjectivityLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 200 | `guarded-reached` | `none` |
+| `Conformance.footprintInLawsAt` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `guarded-reached` | `none` |
 | `Conformance.footprintLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 | `guarded-reached` | `none` |
 | `Conformance.footprintLawsAt` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | `independence-diamond` | 900 | `guarded-reached` | `none` |
 | `Conformance.freshIdLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `none` |
