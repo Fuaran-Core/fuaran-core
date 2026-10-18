@@ -8,60 +8,38 @@ dotnet run --project tests/Fuaran.Core.Tests -- --emit-families
 ```
 
 _The machine-readable half is `conformance-families.json` beside it; `STABILITY.md`
-documents its shape._
+documents its shape. Why each row reads as it does is recorded, phase by phase, in
+`families-history.md`._
 
-A **law family** is a public entry point of this kit that answers with `LawResult list`.
-Running one at your own witness is how a domain certifies it conforms; this table is the
-enumeration of what there is to run, so a family cannot be quietly absent from a
-conformance census that quantifies over it. The enumeration is held to reflection over
-the shipped assemblies BY RETURN TYPE, so it cannot miss a family by how the family is
-named.
+A **law family** is a public entry point of this kit that answers with `LawResult list`; running
+one at your own witness is how a domain certifies it conforms. The table is held to reflection
+over the shipped assemblies BY RETURN TYPE, so it cannot miss a family by how it is named.
 
-**Base run / opt-in.** The five `base run` families are the ones `Conformance.certify` and
-`Conformance.certifyStream` are built from — a domain gets them by calling an aggregate.
-Every other family is opt-in — its `Why opt-in` cell says which reason — so a domain calls
-it deliberately, alongside its base run. Neither is a statement about importance: `reducer`
-is a base-run family only for stream-shaped domains, and `footprintLaws` is opt-in while
-discharging a ladder obligation.
+**Base run / opt-in.** `base run` families are the ones `Conformance.certify` and
+`Conformance.certifyStream` are built from; every other family is opt-in, for the reason its
+`Why opt-in` cell gives, and a domain calls it deliberately beside its base run.
 
-**Witness.** The witness and generator types the entry point takes, in parameter order. A
-family with none runs against the kit's own fixtures and needs nothing but a seed — or,
-for `no-witness-to-certify`, against the Core it was compiled against, and needs nothing.
+**Witness.** The witness, generator and sink types the entry point takes, in parameter order;
+a family with none runs against the kit's own fixtures, or the Core it was compiled against.
 
 **Discharges.** The claims-ladder obligations (`proofs.json` row ids) a green run of the
-family at your own witness discharges. Most families discharge none — they certify, they
-do not answer for an assumption this repository's proofs leave open.
+family at your own witness discharges.
 
-**Cases.** What a RUN measured, not what the roster declares: the subject-law assertions
-the family made at this repository's own reference witness. `vacuous` — never a number —
-means the run certified nothing, either because it asserted nothing at all or because a
-guarded dimension was starved, and the starved dimension is named in the cell. `vacuous`
-is the state a family passing green while exercising nothing used to render as, which is
-what this column exists to make impossible to read past. `unmeasured` means no run was
-handed to the renderer, which is a different fact and deliberately a different word. A
-green run carries its count on the pass path through `SampleAdequacy.cases`, and an
-aggregate's report reads the same way: `certify` and `certifyStream` return every law and
-every guard of the families they run, so `cases` over the report is their subject laws
-times the iterations, with every starved side named (Phase 245).
+**Cases.** What a RUN measured at this repository's reference witness: the subject-law
+assertions made. `vacuous` — never a number — means the run certified nothing (it asserted
+nothing, or a guarded dimension starved, named in the cell); `unmeasured` means no run was
+handed to the renderer, a different fact and a different word.
 
-**Adequacy.** How the family's green run is to be read. `unconditional` — every iteration
-builds every branch the laws distinguish, so a green run is a pass. `guarded-reached` — the
-family carries an adequacy guard and this run reached every guarded side. `guarded-starved`
-— the guard went red: the run tested nothing on a side a law is about, and the family is
-RED in `certify`'s verdict rather than silently green. `guarded-unmeasured` — a guarded
-family no run was handed for.
+**Adequacy.** `unconditional` — every iteration builds every branch the laws distinguish.
+`guarded-reached` — the run reached every guarded side. `guarded-starved` — the guard went red.
+`guarded-unmeasured` — a guarded family no run was handed for.
 
-**Refusal.** The refusable-family audit (Phase 220): where the family's refused outcomes
-come from. `none` — no law reads one. `built` — every refused case is constructed, so no
-run can miss it. `drawn-miss-is-red` — drawn, but a law demands the refused case, so a
-run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless
-the family is guarded, which is what the `Adequacy` cell beside it answers.
+**Refusal.** Where refused outcomes come from: `none`, `built` (no run can miss one),
+`drawn-miss-is-red` (a law demands one, so a run that misses it fails) or `drawn` (a run that
+misses one stays green unless the family is guarded).
 
-**Package.** The package a family ships from — the one reference a consumer adds to run it.
-The families that read the dataframe layer ship from `Fuaran.Compute.Conformance`
-(Phase 257, DECISIONS.md D68), which the compute repository produces since Phase 258
-(D66) and whose own generated census lists them; every family here ships from
-`Fuaran.Core.Conformance`.
+**Package.** The package a family ships from. The families that read the dataframe layer ship
+from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census lists them.
 
 100 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 

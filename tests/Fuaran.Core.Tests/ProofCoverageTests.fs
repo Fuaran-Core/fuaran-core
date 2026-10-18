@@ -699,7 +699,7 @@ let private expectOneFinding
 //  public operation by signature: every `method` line maps to at least one of
 //
 //    (a) a `proofs.json` row whose `evidence.operations` names it (a `proved` or `tested` row);
-//    (b) a law family whose operation roster (`Families.operations`) lists it — and a family's own
+//    (b) a law family whose record lists it (`LawFamily.Operations`) — and a family's own
 //        entry point is mapped by its roster row;
 //    (c) an entry in `proofs/coverage-exclusions.json`'s `operations` block, with a class from that
 //        file's closed `operationClasses` vocabulary and a one-line reason.
@@ -1180,7 +1180,7 @@ let private liveOperationInputs () : OperationInputs =
 
     { Census = census
       Ladder = liveLadderOperations ()
-      Rosters = Fuaran.Core.Families.operations |> List.map (fun r -> r.Family, r.Operations)
+      Rosters = Fuaran.Core.Families.families |> List.map (fun f -> f.Id, f.Operations)
       Families = KitRoster.ids |> Set.ofList
       Exclusions = exclusions
       Classes = operationClassesOf exclusionsDoc.RootElement

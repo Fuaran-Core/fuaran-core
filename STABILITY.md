@@ -96,7 +96,7 @@ before it:
 reads the committed API baselines (`api/*.txt`) as its census of public operations, so the commit that
 publishes a new method or function, and regenerates its baseline, reds the suite until the operation
 is mapped in the same commit: named by a `proofs.json` row's `evidence.operations`, listed on a law
-family's operation roster (`Families.operations`), or entered in `proofs/coverage-exclusions.json`'s
+family's record (`LawFamily.Operations`), or entered in `proofs/coverage-exclusions.json`'s
 `operations` block with a class (`trivial`, `forward`, `obsolete`, `host-seam`, `measured-elsewhere`)
 and a one-line reason. Removing or renaming an operation reds the stale direction until its line goes.
 The line is a record of what stands behind the operation, not a gate on its design; see
@@ -419,7 +419,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   existing wire changes. Changing the envelope keys, an `Unknown` carrier field, a `negotiate` outcome,
   or dropping preservation is a **major** bump; an additive kind/case is a **minor** bump an older
   consumer tolerates via `decodeTolerant`.
-- **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; a bump past `schema: 5` is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number).
+- **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; every bump is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number). **`schema: 6` (Phase 506):** every value is written by `Canon.render`, so members are in ordinal order (top level `families`, `kind`, `packages`, `schema`; each family `adequacy` … `witness`) where `schema: 5` wrote them in declaration order, each family is one line, and each family gains `spellings` (an array, empty on every row today). That reader parses by member name and was checked against the new bytes: it reads the same ids and `cases` and is unaffected.
 
 ### The Column and Query strand (first-class)
 
