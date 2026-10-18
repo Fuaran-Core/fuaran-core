@@ -391,6 +391,30 @@ let private envelopeRequiredProfileModel (el: WireCanon.jval<int, float>) =
     | Some p -> FStar_Pervasives_Native.Some(toModelProfile p)
     | None -> FStar_Pervasives_Native.None
 
+/// The corpus's declared `envelope-reject` rows, keyed by fixture (`envelope/<name>`, as the probe
+/// labels it) to the code and path each is answered with — read from the corpus `manifest.json`,
+/// the authority for what a fixture expects.
+let private envelopeRejects () : Map<string, string * string> =
+    match SiblingCorpus.resolve "envelope" with
+    | SiblingCorpus.Found root ->
+        use doc =
+            System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "manifest.json")))
+
+        let str (e: System.Text.Json.JsonElement) (name: string) =
+            match e.TryGetProperty name with
+            | true, v when v.ValueKind = System.Text.Json.JsonValueKind.String -> v.GetString()
+            | _ -> ""
+
+        [ for e in doc.RootElement.GetProperty("fixtures").EnumerateArray() do
+              if str e "kind" = "envelope-reject" then
+                  let input = str e "inputFile"
+
+                  yield
+                      Path.ChangeExtension(input, null).Replace('\\', '/'),
+                      (str e "expectedErrorCode", str e "expectedPath") ]
+        |> Map.ofList
+    | _ -> Map.empty
+
 /// One envelope fixture, asked of production and of the model. Four things are compared, and the
 /// last is the one §15.3 is about:
 ///   1. the NEGOTIATION — `Current` / `Behind` / `Foreign`, and the authored profile each carries;
@@ -398,9 +422,25 @@ let private envelopeRequiredProfileModel (el: WireCanon.jval<int, float>) =
 ///   3. the `requiredProfile` the unknown carries, which is what a degraded placeholder names;
 ///   4. the BYTES out of `reencode` + `Canon.render` — which for a `Foreign` fixture is not asked,
 ///      because a `Foreign` artifact is refused before any payload is decoded.
-let private envelopeProbe (label: string) (text: string) (diffs: string list) =
+///
+/// A fixture production REFUSES is compared on the refusal alone: the corpus must declare it an
+/// `envelope-reject` answered `FOREIGN_PROFILE` at `$.$profile` (WIRE_FORMAT §15.2, Phase 1938: a
+/// `$profile` that does not parse names no capability set), and production's refusal must be the
+/// profile's. The model negotiates parsed profiles only, so there is nothing further to ask it.
+/// Any other refusal is a defect, as before.
+let private envelopeProbe (rejects: Map<string, string * string>) (label: string) (text: string) (diffs: string list) =
     match Versioning.parse text with
-    | Result.Error m -> failtestf "the envelope fixture %s did not parse: %s" label m
+    | Result.Error m ->
+        match Map.tryFind label rejects with
+        | Some("FOREIGN_PROFILE", "$.$profile") when m.StartsWith "malformed profile" -> diffs
+        | declared ->
+            failtestf
+                "the envelope fixture %s did not parse: %s (the corpus declares it %s)"
+                label
+                m
+                (match declared with
+                 | Some(code, path) -> sprintf "a reject, %s at %s" code path
+                 | None -> "no reject")
     | Result.Ok env ->
         let consumer = Versioning.Profile.coreV1
         let expectedNeg = Versioning.negotiate consumer env.Profile
@@ -614,10 +654,11 @@ let tests =
           testCase "the versioning oracle agrees with production over every envelope/ fixture"
           <| fun _ ->
               let fixtures = JsonParseDiff.corpusTexts "envelope"
+              let rejects = envelopeRejects ()
 
               let diffs =
                   fixtures
-                  |> List.fold (fun acc (name, text) -> envelopeProbe (sprintf "envelope/%s" name) text acc) []
+                  |> List.fold (fun acc (name, text) -> envelopeProbe rejects (sprintf "envelope/%s" name) text acc) []
 
               Expect.isEmpty
                   diffs
