@@ -146,6 +146,21 @@
 # about. The threshold is seeded from a measured quiet pass and a measured contended one, in that
 # block, and re-seeding it is the same recorded act as bumping a budget.
 #
+# THE RUN VERDICT (Phase 522). Given -SummaryFile, the leg writes ONE record of the run there on EVERY
+# exit — green or red, at whatever step it stopped — and never otherwise changes what it prints or
+# returns. `kind: proofRunVerdict`; `verdict` is the class the exit code already encodes, named:
+# `green` (0), `refuted` (the prover's own code — a model, or an extraction, the prover rejected),
+# `aborted` ($ExitAbort), `apparatus` ($ExitApparatus), or `failed` (any other refusal: a host step,
+# the guard, the cache provenance, a cached read, the budget declaration, an unresolvable prover);
+# `exit` is the code the leg returns and `message` the red line it printed (null when green). Beside
+# them, what the run was: `strict`, `runs`, `prover` (the pin), `modules` (in check order), `hostStep`
+# (`ran`, or why not), `machine`, each run's `contention`, every module's `costs` against its budget,
+# the cost `findings` and the retried `aborts`. A caller that records a run — a strict baseline, a
+# workflow summary — reads this record and never the transcript, so one record carries a run's
+# verdict to every reader. The machine is described by what a reader comparing two records needs —
+# CI runner or local machine, the OS, processor count, total memory, a CI runner's name — and never
+# a local host name: a record may be committed to a public repository.
+#
 # Every prover invocation's whole output is also TEED to <WorkDir>/logs/, so a post-mortem reads
 # the classification's own evidence rather than a scrollback. And every run prints a PRE-FLIGHT
 # line — concurrent fstar process count, free physical memory — so a contended machine can be told
@@ -234,9 +249,8 @@ param(
     # holds, 1 naming every offending line when it does not. Checks no model, so the guard is
     # testable without a prover.
     [switch] $GuardOnly,
-    # Phase 399 — where a GREEN leg writes its run facts as JSON: the machine it ran on and each
-    # run's contention factor. Nothing is written on a red leg. The caller's strict baseline reads
-    # it, so the record says what kind of machine stands behind it.
+    # Phase 522 — where the leg writes its RUN VERDICT (the header's "THE RUN VERDICT"), on every
+    # exit, green or red. Omitted, nothing is written.
     [string] $SummaryFile
 )
 
@@ -294,14 +308,88 @@ function Remove-InvocationCache {
     }
 }
 
-function Fail([string] $message, [int] $code = 1) {
+# The RUN VERDICT (Phase 522; the header says what it holds). Written at most once, by whichever exit
+# path is taken first, and never able to change the verdict: a record that cannot be written says so
+# in yellow and the leg returns what it would have returned. Every collection it reads may not exist
+# yet — a refusal before the first run has no measurements — so each is read through `Get-Recorded`.
+$script:verdictWritten = $false
+$script:hostStepRan = $false
+
+function Get-Recorded([string] $name) {
+    $value = Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -eq $value) { return , @() }
+    # Enumerated by hand: `@()` over a generic List of ordered dictionaries throws "Argument types do
+    # not match" on PowerShell 7.
+    $items = foreach ($item in $value) { $item }
+    return , @($items)
+}
+
+function Get-MachineFacts {
+    $memory = $null
+    try {
+        if ($IsWindows) { $memory = '{0:N0} GB' -f ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB) }
+        elseif (Test-Path '/proc/meminfo') {
+            $kb = [regex]::Match((Get-Content '/proc/meminfo' -Raw), 'MemTotal:\s+(\d+)')
+            if ($kb.Success) { $memory = '{0:N0} GB' -f ([double]$kb.Groups[1].Value / 1MB) }
+        }
+    }
+    catch { $memory = $null }
+    [ordered]@{
+        kind       = if ($env:GITHUB_ACTIONS -eq 'true') { 'ci' } else { 'local' }
+        runner     = if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_NAME) { $env:RUNNER_NAME } else { $null }
+        os         = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+        processors = [Environment]::ProcessorCount
+        memory     = $memory
+    }
+}
+
+function Write-RunVerdict([string] $verdict, [int] $code, [string] $message) {
+    if (-not $SummaryFile -or $script:verdictWritten) { return }
+    $script:verdictWritten = $true
+    try {
+        $prover = $null
+        try { $prover = (Get-Content $PinFile -Raw | ConvertFrom-Json).fstar } catch { $prover = $null }
+        $hostStep = if ($SkipOracleHost) { 'skipped (-SkipOracleHost)' }
+        elseif ($HostFilters.Count -eq 0) { 'none declared' }
+        elseif ($script:hostStepRan) { 'ran' }
+        else { 'not reached' }
+        $record = [ordered]@{
+            kind       = 'proofRunVerdict'
+            verdict    = $verdict
+            exit       = $code
+            message    = if ($message) { $message } else { $null }
+            strict     = [bool]$Strict
+            runs       = $Runs
+            prover     = $prover
+            modules    = @($Modules)
+            hostStep   = $hostStep
+            machine    = Get-MachineFacts
+            contention = Get-Recorded 'runFacts'
+            costs      = Get-Recorded 'moduleCosts'
+            findings   = @((Get-Recorded 'costFindings') | ForEach-Object { [ordered]@{ run = $_.Run; text = $_.Text; label = $_.Label } })
+            aborts     = Get-Recorded 'abortFindings'
+        }
+        # Resolved through PowerShell, not [IO.Path]::GetFullPath: the .NET call reads the PROCESS's
+        # directory, which `Set-Location` above does not move.
+        [System.IO.File]::WriteAllText($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SummaryFile), ($record | ConvertTo-Json -Depth 6) + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
+    catch { Write-Host "==== proofs: the run verdict could not be written to ${SummaryFile}: $_" -ForegroundColor Yellow }
+}
+
+# `-Verdict` names the class when the code alone cannot: a refutation returns the PROVER's code, which
+# is 1 in practice, and so does every other refusal.
+function Fail([string] $message, [int] $code = 1, [string] $Verdict) {
     Remove-InvocationCache
     Write-Host "==== proofs: $message" -ForegroundColor Red
+    if (-not $Verdict) {
+        $Verdict = if ($code -eq $ExitAbort) { 'aborted' } elseif ($code -eq $ExitApparatus) { 'apparatus' } else { 'failed' }
+    }
+    Write-RunVerdict $Verdict $code $message
     exit $code
 }
 
 # A terminating error under $ErrorActionPreference = 'Stop' bypasses Fail; this does not.
-trap { Remove-InvocationCache; break }
+trap { Remove-InvocationCache; Write-RunVerdict 'failed' 1 "terminating error: $_"; break }
 
 if (-not (Test-Path $PinFile)) { Fail "the pin file '$PinFile' is missing — it declares the prover this leg is defined by" }
 $pin = Get-Content $PinFile -Raw | ConvertFrom-Json
@@ -1251,9 +1339,9 @@ function Assert-CacheProvenance([hashtable] $recorded, [string] $module, [int] $
     }
 }
 
-# Phase 399 — each run's contention facts, for -SummaryFile: the pre-flight snapshot and the factor
-# section 3c computes (or why it computed none). Collected whatever -SummaryFile says; written only
-# on a green leg.
+# Each run's contention facts — the pre-flight snapshot and the factor section 3c computes (or why it
+# computed none) — and every module's time against its budget, for the run verdict. Collected whatever
+# -SummaryFile says; written on every exit (Phase 522).
 $runFacts = [System.Collections.Generic.List[object]]::new()
 $moduleCosts = [System.Collections.Generic.List[object]]::new()
 
@@ -1297,7 +1385,7 @@ for ($run = 1; $run -le $Runs; $run++) {
                 # REFUTATION — the prover said something was wrong. Reported in the words the leg
                 # has always used, with the prover's own code, and never retried.
                 if (Test-ProverDiagnostic $checked.Lines) {
-                    Fail "$module.fst did NOT verify (run $run of $Runs)" (Get-RefutationExitCode $checked.ExitCode)
+                    Fail "$module.fst did NOT verify (run $run of $Runs)" (Get-RefutationExitCode $checked.ExitCode) -Verdict refuted
                 }
 
                 # ABORT — the prover exited non-zero having reported nothing. Whatever happened,
@@ -1322,7 +1410,7 @@ for ($run = 1; $run -le $Runs; $run++) {
             # copy of this kit. A diagnostic on a zero exit is a REFUTATION, never retried.
             if (Test-ProverDiagnostic $checked.Lines) {
                 Write-Host "==== proofs: $module.fst — the prover exited 0 but reported an error; see $($checked.LogPath)" -ForegroundColor Red
-                Fail "$module.fst did NOT verify (run $run of $Runs)" 1
+                Fail "$module.fst did NOT verify (run $run of $Runs)" 1 -Verdict refuted
             }
 
             $budget = if ($budgets.ContainsKey($module)) { $budgets[$module] } else { $null }
@@ -1491,7 +1579,7 @@ foreach ($module in $Modules) {
         }
 
         if ($extracted.ExitCode -ne 0) {
-            Fail "extraction of $module to F# failed" (Get-RefutationExitCode $extracted.ExitCode)
+            Fail "extraction of $module to F# failed" (Get-RefutationExitCode $extracted.ExitCode) -Verdict refuted
         }
 
         Fail "extraction produced no $module.fs under $out"
@@ -1554,6 +1642,7 @@ if (-not $SkipOracleHost -and $HostFilters.Count -gt 0) {
         Fail 'the caller declared host filters but no -HostProject / -HostProjectFile to run them in'
     }
     Push-Location $RepoRoot
+    $script:hostStepRan = $true
     try {
         dotnet build $HostProjectFile --nologo
         if ($LASTEXITCODE -ne 0) { Fail "the test project did not build — HOST step, $HostProjectFile, exit $LASTEXITCODE" $LASTEXITCODE }
@@ -1633,36 +1722,7 @@ if ($costFindings.Count -gt 0) {
 
 Remove-InvocationCache
 
-# Phase 399 — the run facts, for a caller that records the run. The machine is described by what a
-# reader comparing two records needs: whether it was a CI runner or a local machine, the OS, the
-# processor count and the total memory, and a CI runner's name. Never a local HOST name: the record
-# is committed, often to a public repository, and a host name says nothing a reader can compare.
-if ($SummaryFile) {
-    $memory = $null
-    try {
-        if ($IsWindows) { $memory = '{0:N0} GB' -f ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB) }
-        elseif (Test-Path '/proc/meminfo') {
-            $kb = [regex]::Match((Get-Content '/proc/meminfo' -Raw), 'MemTotal:\s+(\d+)')
-            if ($kb.Success) { $memory = '{0:N0} GB' -f ([double]$kb.Groups[1].Value / 1MB) }
-        }
-    }
-    catch { $memory = $null }
-    $summary = [ordered]@{
-        machine    = [ordered]@{
-            kind       = if ($env:GITHUB_ACTIONS -eq 'true') { 'ci' } else { 'local' }
-            runner     = if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_NAME) { $env:RUNNER_NAME } else { $null }
-            os         = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
-            processors = [Environment]::ProcessorCount
-            memory     = $memory
-        }
-        contention = @($runFacts)
-        costs      = @($moduleCosts)
-        findings   = @($costFindings | ForEach-Object { [ordered]@{ run = $_.Run; text = $_.Text; label = $_.Label } })
-    }
-    # Resolved through PowerShell, not [IO.Path]::GetFullPath: the .NET call reads the PROCESS's
-    # directory, which `Set-Location` above does not move.
-    [System.IO.File]::WriteAllText($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SummaryFile),($summary | ConvertTo-Json -Depth 6) + "`n", [System.Text.UTF8Encoding]::new($false))
-}
+Write-RunVerdict 'green' 0 $null
 
 Write-Host '==== proofs: green' -ForegroundColor Green
 exit 0

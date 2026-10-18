@@ -74,6 +74,11 @@ if ($Extract) { $legArgs.Extract = $true }
 if ($SkipOracleHost) { $legArgs.SkipOracleHost = $true }
 if ($Strict) { $legArgs.Strict = $true }
 if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
+# The run verdict: one JSON record of every run, green or red (the kit engine's header, "THE RUN
+# VERDICT"). Under the gitignored obj/, so a reader — a CI summary, a strict record you commit — reads
+# the record rather than the transcript.
+New-Item -ItemType Directory -Force (Join-Path $PSScriptRoot 'obj') | Out-Null
+$legArgs.SummaryFile = Join-Path $PSScriptRoot 'obj/last-run.json'
 
 # `&` and not `.`: a dot-sourced script's `exit` does NOT propagate to its caller, so a dot-source
 # here would print the kit's red line and then return 0 — a green leg over a failed proof. Measured

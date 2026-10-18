@@ -19,8 +19,9 @@ jobs:
       matrix:
         configuration: [Debug, Release]
     steps:
-      # The package-roster checks (Phases 199 and 205) read the repository's RELEASE TAGS and
-      # refuse an empty tag list on purpose — with none, their comparisons would pass vacuously.
+      # The package-roster checks (Phases 199 and 205) and the release record read the RELEASE TAGS in
+      # HEAD's history and refuse an empty list on purpose — with none, their comparisons would pass
+      # vacuously (CONTRIBUTING.md, "Prerequisites": tag, then gate).
       # The default checkout is depth 1 with no tags, so this job was red on every push from
       # Phase 199 onward while the same gate was green on any full clone. Fetch the history and
       # the tags; the repository is small and the job already spends minutes building.
@@ -88,9 +89,12 @@ jobs:
   # Phase 131 — the proof leg. proofs/DagFold.fst is checked by the PINNED F*/Z3 three times
   # from a cold cache (exit criterion 1: reproducible), the committed F# oracle is held to a fresh
   # extraction, and the Proofs.Oracle differential family runs the extracted model beside the
-  # production fold (exit criterion 2: agrees). The prover is cached by the pin file's hash, per
-  # OS, so a push that does not move the pin downloads nothing. The corpus is checked out for the
-  # family's ops/ leg, as in `verify`.
+  # production fold (exit criterion 2: agrees). Phase 499 — that family and the other three host
+  # families (Proofs.Vocabulary, Proofs.Ladder, Proofs.Coverage) are Expecto families, and the
+  # `verify` matrix runs the whole suite, so this job passes -SkipOracleHost exactly as
+  # `./verify.ps1 -Proofs` does: the families ran twice per push already, and this job ran them
+  # three more times. The prover is cached by the pin file's hash, per OS, so a push that does not
+  # move the pin downloads nothing.
   #
   # Phase 393 — on TWO operating systems. The pin carries a `windows` and a `linux` entry for the
   # same release, and the kit resolves the one for the runner's OS and refuses an OS with none by
@@ -112,18 +116,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
     steps:
+      # No corpus checkout: with -SkipOracleHost nothing in this job reads the corpus. The host
+      # families that do read it run in `verify`, which checks it out at the pin.
       - uses: actions/checkout@v4
-      # At the pin, as in `verify` (Phase 394).
-      - name: Read the corpus pin (copies.json `corpus`)
-        id: corpus-pin
-        shell: pwsh
-        run: ./.github/scripts/corpus-pin.ps1
-      - name: Check out the wire-format conformance corpus at the pin
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.corpus-pin.outputs.repository }}
-          ref: ${{ steps.corpus-pin.outputs.sha }}
-          path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -132,12 +127,7 @@ jobs:
         with:
           path: proofs/.fstar
           key: fstar-${{ runner.os }}-${{ hashFiles('proofs/fstar-pin.json') }}
-      - name: Proof leg (./proofs/check.ps1 -Runs 3)
+      # -SkipOracleHost: the `verify` matrix above already ran the four host families in this workflow.
+      - name: Proof leg (./proofs/check.ps1 -Runs 3 -SkipOracleHost)
         shell: pwsh
-        env:
-          # The host step's Proofs.Oracle pools over the corpus's ops/ and nodes/ are live-corpus
-          # legs (Phase 172): asked for by name. (The Proofs.Vocabulary generation diff reads the
-          # test project's own vocabularies since Phase 173 and needs no corpus.)
-          FUARAN_CORE_CORPUS_FRESHNESS: '1'
-          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
-        run: ./proofs/check.ps1 -Runs 3
+        run: ./proofs/check.ps1 -Runs 3 -SkipOracleHost

@@ -689,11 +689,11 @@ let private git (arguments: string) : Result<string, string> =
     ChildProcess.git (repoRoot ()) arguments
 
 let private newestTag () : Result<string, string> =
-    git "tag --list"
-    |> Result.bind (fun out ->
-        match PublicSurfaceTests.newestVersionTag (out.Split('\n') |> Array.toList) with
+    ChildProcess.Tags.released (repoRoot ())
+    |> Result.bind (fun tags ->
+        match ChildProcess.Tags.newest tags with
         | Some t -> Ok t
-        | None -> Error "this clone holds no `vX.Y.Z` tag")
+        | None -> Error "HEAD's history holds no `vX.Y.Z` tag")
 
 /// The class of `docs` against the package's baseline AS OF `tag`, in the words a header states.
 let internal statedClassAt (tag: string) (package: string) (docs: WireDoc list) : string =

@@ -251,14 +251,6 @@ let private standingMajor () : string * int =
         | Some m -> v, m
         | None -> failtestf "<Version> %s does not parse as MAJOR.MINOR.PATCH" v
 
-let private tags () : Result<string list, string> =
-    ChildProcess.git (repoRoot ()) "tag --list"
-    |> Result.map (fun out ->
-        out.Split('\n')
-        |> Array.toList
-        |> List.map _.Trim()
-        |> List.filter (fun l -> l <> ""))
-
 /// The four verdicts over the live tree, in law order.
 let private liveVerdicts () : string * (string * Verdict) list =
     let version, major = standingMajor ()
@@ -269,8 +261,8 @@ let private liveVerdicts () : string * (string * Verdict) list =
     let offenders = assemblies |> List.collect obsoleteMembers
 
     let tagList =
-        match tags () with
-        | Ok ts -> ts
+        match ChildProcess.Tags.released (repoRoot ()) with
+        | Ok ts -> Set.toList ts
         | Error _ -> []
 
     let majorTag = sprintf "v%d.0.0" major
@@ -283,7 +275,7 @@ let private liveVerdicts () : string * (string * Verdict) list =
             | Ok text -> Tagged(majorTag, text.Replace("\r\n", "\n"))
             | Error why -> Unreadable(majorTag, why)
 
-    let newest = PublicSurfaceTests.newestVersionTag tagList
+    let newest = ChildProcess.Tags.newest tagList
 
     let breaking =
         match newest with

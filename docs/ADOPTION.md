@@ -231,13 +231,11 @@ reaches one of settled, pending or refused. Then dispatch through the very path 
 
 ## The dataframe path
 
-`Fuaran.Core.DataFrame` (the `Transform` pipeline and its reference evaluator, the typed delta, the
-incremental seam), `Fuaran.Core.Column.Ops` (the columnar op algebra), `Fuaran.Core.DataFrame.Conformance`
-(the law families over them, `transformLaws` among them) and, until that repository's release that
-raises its pin to `0.33.0`, `Fuaran.Core.DataFrame.CSharp` (the dataframe half of the removed C#
-facade, step 2c) are produced by their own repository,
-[`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), from `0.33.0`,
-under the same package ids and the same namespaces (DECISIONS.md D66; Phase 258 removed them here).
+The compute packages (the `Transform` pipeline and its reference evaluator, the typed delta, the
+incremental seam, the columnar op algebra and the law families over them) are produced by their own
+repository, [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute);
+which package ids and namespaces they carry, from which version, is stated once, in the README's
+[Packages](../README.md#packages) section ("The compute strand is produced elsewhere").
 Adopting the dataframe path is adopting that repository's packages: its `docs/` carry the
 incremental-evaluation guide that used to be `docs/incremental-evaluation.md` here, and its
 `conformance/laws/transform-laws.json` is the transform law corpus. Everything above this section —

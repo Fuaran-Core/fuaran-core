@@ -6,7 +6,9 @@
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A clean proved row.",
+      "statement": "A clean proved row.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A clean proved row. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -17,7 +19,9 @@
     {
       "id": "fixture-vanished",
       "level": "proved",
-      "claim": "A proved row over a model file that no longer exists.",
+      "statement": "A proved row over a model file that no longer exists.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A proved row over a model file that no longer exists. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "psi",

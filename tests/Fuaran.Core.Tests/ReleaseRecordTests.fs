@@ -243,7 +243,7 @@ let internal releaseFaults
     let tagged =
         tags
         |> Set.toList
-        |> List.choose (fun t -> PackageRosterTests.releaseTagVersion t |> Option.map (fun v -> v, t))
+        |> List.choose (fun t -> ChildProcess.Tags.version t |> Option.map (fun v -> v, t))
         |> List.sortBy fst
 
     let perTag =
@@ -326,16 +326,6 @@ let internal releaseFaults
 let private repoRoot () : string =
     Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
 
-/// The release tags in HEAD's history. `--merged HEAD` includes a tag on HEAD itself, which is the
-/// release commit's own case in the publish workflow.
-let private mergedTags (root: string) : Result<Set<string>, string> =
-    ChildProcess.git root "tag --list --merged HEAD"
-    |> Result.map (fun out ->
-        out.Split('\n')
-        |> Array.map _.Trim()
-        |> Array.filter (fun l -> l <> "")
-        |> Set.ofArray)
-
 let private remedy =
     "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file and its index entry) and the README stamps in ONE commit, which is the commit the tag names."
 
@@ -389,7 +379,7 @@ let tests =
         [ test "every tag is headed released with its receiving-gate record, and every released heading has its tag" {
               let root = repoRoot ()
 
-              match mergedTags root with
+              match ChildProcess.Tags.released root with
               | Error why ->
                   printfn "Release-record check SKIPPED: %s" why
                   skiptestf "release-record check skipped — %s" why
@@ -397,7 +387,7 @@ let tests =
                   let covered =
                       tags
                       |> Set.toList
-                      |> List.choose PackageRosterTests.releaseTagVersion
+                      |> List.choose ChildProcess.Tags.version
                       |> List.filter (fun v -> v >= releaseRecordFloor)
 
                   Expect.isNonEmpty
@@ -426,7 +416,7 @@ let tests =
               // — `285751b`).
               let root = repoRoot ()
 
-              match mergedTags root with
+              match ChildProcess.Tags.released root with
               | Error why -> skiptestf "release-record plants skipped — %s" why
               | Ok tags ->
                   let ledger = ledgerDocs root
@@ -445,7 +435,7 @@ let tests =
                   let newest =
                       tags
                       |> Set.toList
-                      |> List.choose (fun t -> PackageRosterTests.releaseTagVersion t |> Option.map (fun v -> v, t))
+                      |> List.choose (fun t -> ChildProcess.Tags.version t |> Option.map (fun v -> v, t))
                       |> List.maxBy fst
                       |> snd
 

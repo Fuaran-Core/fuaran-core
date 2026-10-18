@@ -6,7 +6,9 @@
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "statement": "A clean proved row, so the every-module clause stays quiet.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -17,7 +19,9 @@
     {
       "id": "fixture-obligation",
       "level": "assumed",
-      "claim": "A domain obligation carrying no dischargedBy.",
+      "statement": "A domain obligation carrying no dischargedBy.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A domain obligation carrying no dischargedBy. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "domain-obligation",
       "evidence": {

@@ -15,7 +15,8 @@ name: publish-packages
 #      second build of the same sources.
 #
 # Phase 393 — a publish is gated by the PROOF LEG and checked against the registry:
-#   3. the `proofs` job runs the same `proofs/check.ps1 -Runs 3` the ci workflow runs, on the TAGGED
+#   3. the `proofs` job runs `proofs/check.ps1 -Runs 3`, the ci workflow's leg WITH its host step
+#      (ci passes -SkipOracleHost because its `verify` matrix runs those families), on the TAGGED
 #      commit, and `publish` `needs:` it — a refuted model, a drifted oracle or a red Proofs.Ladder /
 #      Proofs.Coverage family stops the tag before anything is packed. A job here rather than a
 #      Checks-API read of the commit's ci run (proofs/README.md, "Running it", says why): the verdict
@@ -62,7 +63,9 @@ jobs:
           }
           Write-Host "tag $($env:REF_NAME) names <Version> $version"
 
-  # The proof leg on the tagged commit — the ci workflow's `proofs` job, step for step. Windows
+  # The proof leg on the tagged commit — the ci workflow's `proofs` job, step for step, except that
+  # the host step runs here: the verdict this job hands `publish` is about the exact commit packed
+  # (item 3 above), and `publish`'s own verify runs only after this job is green. Windows
   # because that is the runner the leg was cut on; the pin carries a Linux entry too, so either
   # runner can run it (proofs/fstar-pin.json).
   proofs:

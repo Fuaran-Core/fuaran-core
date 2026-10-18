@@ -6,7 +6,9 @@
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "statement": "A clean proved row, so the every-module clause stays quiet.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -17,7 +19,9 @@
     {
       "id": "fixture-premise",
       "level": "assumed",
-      "claim": "An assumed row at a class the contract does not define.",
+      "statement": "An assumed row at a class the contract does not define.",
+      "boundary": "Fixture data: it covers nothing beyond this file.",
+      "claim": "An assumed row at a class the contract does not define. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "class": "inherited",
       "evidence": {

@@ -184,9 +184,9 @@ rather than arguable.
 
 ### What the gate prints, and what it does not claim
 
-The family prints the class of every baseline that has moved **since the newest `vX.Y.Z` tag** —
-the "ride or advance" line that entries in this document wrote by hand until now. A package whose
-baseline the newest tag does not carry is reported as a first snapshot rather than as unchanged.
+The family prints the class of every baseline moved **since the newest `vX.Y.Z` tag in HEAD's
+history** — the "ride or advance" line that entries in this document wrote by hand until now. A
+package whose baseline that tag does not carry is reported as a first snapshot, not as unchanged.
 
 **A tag cut before Phase 237 is read without field names, and the report says so.** Its baselines
 carry nameless union cases. Compared with today's named ones, they would report every carrying

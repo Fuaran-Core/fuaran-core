@@ -29,7 +29,10 @@ module Fuaran.Core.Tests.ProofCoverageTests
 //      least one `proved` row. A differential with no theorem beside it is a test pretending to be
 //      a rung. A `tested` row on a `Conformance.<law>` family is a LAW row, not a differential, and
 //      carries no model — the asymmetry is checked in both directions so neither kind can drift
-//      into the other.
+//      into the other. A `tested` row on a `Suite:<Module>.<list>` family (Phase 522: the family is
+//      closed by `Proofs.Ladder`'s tested-family-closed, so no prose family reaches this clause) is a
+//      suite row: it MAY name the model it is about, and a model it names is held exactly as a
+//      differential's is.
 //
 // Plus the count clause Phase 187 asked for: the row counts stated in PROSE in the contract
 // section of `proofs/README.md` are held to `proofs.json`. Phase 187 found them already stale and
@@ -373,6 +376,18 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
             let model = ev |> Option.bind (fun e -> strMember e "model")
 
             match family, model with
+            | Some f, Some m when f.StartsWith "Suite:" ->
+                let mn = moduleOfPath m
+
+                if not (Set.contains mn knownModules) then
+                    [ finding
+                          id
+                          "differential-paired"
+                          (sprintf "`evidence.model` names '%s', which is not a model the leg checks" m) ]
+                elif not (Set.contains mn provedModels) then
+                    [ finding id "differential-paired" (sprintf "is about '%s', which carries NO `proved` row" m) ]
+                else
+                    []
             | Some "Proofs.Oracle", None ->
                 [ finding
                       id
@@ -1507,6 +1522,22 @@ let proofCoverageTests =
                   "an unpaired differential"
                   fixtureBase
                   (fixtureLadder.Replace("\"model\": \"proofs/MA.fst\", \"cases\"", "\"cases\""))
+                  "differential-paired"
+                  "t2"
+
+          testCase "go-red: differential-paired — a suite row about a model that carries no theorem"
+          <| fun _ ->
+              expectOneFinding
+                  "a suite row with no theorem beside its model"
+                  { fixtureBase with
+                      Models =
+                          [ { Module = "MA"
+                              Packages = [ "Pkg.A" ] }
+                            { Module = "MB"
+                              Packages = [ "Pkg.A" ] } ] }
+                  (fixtureLadder
+                      .Replace("\"family\": \"Proofs.Oracle\"", "\"family\": \"Suite:FixtureTests.tests\"")
+                      .Replace("\"model\": \"proofs/MA.fst\", \"cases\"", "\"model\": \"proofs/MB.fst\", \"cases\""))
                   "differential-paired"
                   "t2"
 
