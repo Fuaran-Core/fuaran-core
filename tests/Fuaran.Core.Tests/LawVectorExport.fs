@@ -3,8 +3,10 @@ namespace Fuaran.Core.Tests
 // ============================================================================
 //  The host-neutral export of the law vectors this repository owns: the
 //  `capabilityLaws` vectors (`laws/capability-laws.json`, Phase 235), the
-//  exact decimal's documents (`laws/decimal-laws.json`, Phase 276) and the
-//  schema field's documents (`laws/field-laws.json`, Phase 427).
+//  exact decimal's documents (`laws/decimal-laws.json`, Phase 276), the
+//  schema field's documents (`laws/field-laws.json`, Phase 427) and the
+//  propagation vectors (`laws/propagation-laws.json`, Phase 538, rendered by
+//  `PropagationVectorExport`).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -819,10 +821,14 @@ module LawVectorExport =
     let fieldPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Fields.fileName)
 
+    let propagationPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, PropagationVectorExport.fileName)
+
     let emitted (corpusDir: string) : (string * string) list =
         [ capabilityPath corpusDir, Capabilities.render ()
           decimalPath corpusDir, Decimals.render ()
-          fieldPath corpusDir, Fields.render () ]
+          fieldPath corpusDir, Fields.render ()
+          propagationPath corpusDir, PropagationVectorExport.renderAt (kitVersion ()) ]
 
     // -----------------------------------------------------------------------
     //  Phase 394 — the corpus `laws/manifest.json` rows beside the files
@@ -848,6 +854,11 @@ module LawVectorExport =
         Path.Combine(familyDir corpusDir, manifestFileName)
 
     /// Each emitted family's row id in the corpus manifest, with the file that row names.
+    ///
+    /// `propagationLaws` (Phase 538) is emitted and not yet listed: the corpus indexes it in the commit
+    /// that first carries the file (fuaran#2328), and a row named here before the index holds it would
+    /// refuse every `--emit-laws <corpus dir>` and redden the asked manifest leg until then. That same
+    /// change-set appends `"propagationLaws", PropagationVectorExport.fileName` here.
     let manifestRows: (string * string) list =
         [ "capabilityLaws", Capabilities.fileName
           "decimal", Decimals.fileName

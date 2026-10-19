@@ -10,6 +10,48 @@ module internal PropagationLaws =
     // byte-identical to a full recompute (the Phase-34/62 discipline at the tree level). Plus a fixed cyclic
     // fixture: a reference cycle enumerates as data (Tarjan SCC), never a divergence (GP4).
 
+    /// One drawn case of the two driver families below — `dirtyPropagationLaws` and
+    /// `propagationEvalLaws` draw the same sample, so it is drawn in one place (Phase 538): a random DAG
+    /// over the ids `"0" .. "n-1"`, node `k` reading a random subset of `{0 .. k-1}` (acyclic by
+    /// construction — every edge points to a lower id), an intrinsic base value per node, and a change
+    /// of one node's base by `+1000`.
+    ///
+    /// **The draw order is a PUBLISHED interface.** `laws/propagation-laws.json` (Phase 538) is drawn
+    /// by calling this function from its declared seed, and its description states the order so a host
+    /// can reproduce the sample with its own `ConfRng`: one `intBelow 6` (`n` = that + 2); then, for
+    /// each node `k` ascending, one `intBelow 3` per `j < k` ascending (`0` means `k` reads `j`); then
+    /// one `intBelow 100` per node ascending (its base); then one `intBelow n` (the changed node).
+    /// Changing it changes that file, which is re-emitted in the same change-set (`--emit-laws`).
+    type DagDraw =
+        { Ids: string list
+          Deps: Map<string, Set<string>>
+          Base0: Map<string, int>
+          ChangedId: string
+          Base1: Map<string, int> }
+
+    let drawDag (rng: LawKit.Draws) : DagDraw =
+        let nNodes = rng.IntBelow 6 + 2
+        let ids = [ for k in 0 .. nNodes - 1 -> string k ]
+
+        let deps =
+            [ for k in 0 .. nNodes - 1 ->
+                  let reads =
+                      [ for j in 0 .. k - 1 do
+                            if rng.IntBelow 3 = 0 then
+                                string j ]
+
+                  string k, Set.ofList reads ]
+            |> Map.ofList
+
+        let base0 = [ for k in 0 .. nNodes - 1 -> string k, rng.IntBelow 100 ] |> Map.ofList
+        let changedId = string (rng.IntBelow nNodes)
+
+        { Ids = ids
+          Deps = deps
+          Base0 = base0
+          ChangedId = changedId
+          Base1 = Map.add changedId (Map.find changedId base0 + 1000) base0 }
+
     /// The dirty-propagation laws (Phase 68). Self-contained. Each iteration builds a random DAG (node `i`
     /// reads a random subset of nodes `j < i`, so acyclic by construction) + an intrinsic base value per
     /// node; a toy pull evaluator computes `value(n) = base(n) + Σ value(reads)`. It changes one node's base
@@ -62,33 +104,12 @@ module internal PropagationLaws =
             go (Set.singleton start) (Set.singleton start)
 
         LawKit.run runner iterations (fun rng _ at ->
-            let extra = rng.IntBelow 6
-            let nNodes = extra + 2
-            let ids = [ for k in 0 .. nNodes - 1 -> string k ]
-
-            // node k reads a random subset of {0 .. k-1} — acyclic by construction (edges point to lower ids).
-            let deps =
-                [ for k in 0 .. nNodes - 1 ->
-                      let reads =
-                          [ for j in 0 .. k - 1 do
-                                let coin = rng.IntBelow 3
-
-                                if coin = 0 then
-                                    string j ]
-
-                      string k, Set.ofList reads ]
-                |> Map.ofList
-
-            // an intrinsic base value per node, and a change to one node's base.
-            let base0 =
-                [ for k in 0 .. nNodes - 1 ->
-                      let v = rng.IntBelow 100
-                      string k, v ]
-                |> Map.ofList
-
-            let ck = rng.IntBelow nNodes
-            let changedId = string ck
-            let base1 = Map.add changedId (Map.find changedId base0 + 1000) base0
+            let { Ids = ids
+                  Deps = deps
+                  Base0 = base0
+                  ChangedId = changedId
+                  Base1 = base1 } =
+                drawDag rng
 
             // toy pull evaluator over the DAG, index order (reads point to lower ids ⇒ already computed).
             let evalWith (baseOf: Map<string, int>) : Map<string, int> =
@@ -251,31 +272,12 @@ module internal PropagationLaws =
                 Ok(Map.find id baseOf + declaredSum + leaked)
 
         LawKit.run runner iterations (fun rng _ at ->
-            let extra = rng.IntBelow 6
-            let nNodes = extra + 2
-            let ids = [ for k in 0 .. nNodes - 1 -> string k ]
-
-            let deps =
-                [ for k in 0 .. nNodes - 1 ->
-                      let reads =
-                          [ for j in 0 .. k - 1 do
-                                let coin = rng.IntBelow 3
-
-                                if coin = 0 then
-                                    string j ]
-
-                      string k, Set.ofList reads ]
-                |> Map.ofList
-
-            let base0 =
-                [ for k in 0 .. nNodes - 1 ->
-                      let v = rng.IntBelow 100
-                      string k, v ]
-                |> Map.ofList
-
-            let ck = rng.IntBelow nNodes
-            let changedId = string ck
-            let base1 = Map.add changedId (Map.find changedId base0 + 1000) base0
+            let { Ids = ids
+                  Deps = deps
+                  Base0 = base0
+                  ChangedId = changedId
+                  Base1 = base1 } =
+                drawDag rng
 
             match Propagation.eval (evalNodeWith base0 deps (ResizeArray())) deps with
             | Error e -> byteIdentical.Check(false, fun () -> at (sprintf "prior eval errored: %A" e))

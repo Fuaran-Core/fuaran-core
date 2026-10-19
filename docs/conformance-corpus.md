@@ -17,6 +17,8 @@ gate.
 conformance/
   laws/capability-laws.json    the capability-law vectors (`--emit-laws`, since Phase 235)
   laws/decimal-laws.json       the exact decimal's documents (`--emit-laws`, since Phase 276)
+  laws/field-laws.json         the schema field's documents (`--emit-laws`, since Phase 427)
+  laws/propagation-laws.json   the propagation vectors (`--emit-laws`, since Phase 538)
   apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
   refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, the decode-determinism rows (Phase 462), column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
@@ -29,13 +31,34 @@ conformance/
 ### Which law sets Core emits — all of them, and the UI tier emits none
 
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
-reimplementation against. Since Phase 276 that is **two** families under `laws/`, both written by
-the `--emit-laws` command from `tests/Fuaran.Core.Tests/LawVectorExport.fs`:
+reimplementation against. Since Phase 538 that is **four** families under `laws/`, all written by
+the `--emit-laws` command (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests/`):
 
 | Family | File | Shape |
 |---|---|---|
 | `capabilityLaws` | `laws/capability-laws.json` | a SELF-CONTAINED family — the `(input, expected verdict)` pairs the law draws from its seed |
 | `decimal` | `laws/decimal-laws.json` | AUTHORED documents — inputs chosen to reach every behaviour DECISIONS.md D72 pins, each answer computed by the kit; no seed |
+| `fieldLaws` | `laws/field-laws.json` | AUTHORED documents — the schema field's canonical bytes, decode and refusals (Phase 427); no seed |
+| `propagationLaws` | `laws/propagation-laws.json` | a DRAWN family — the cases `propagationEvalLaws` draws from its seed, by the families' own generator, each answer computed by calling `Fuaran.Core.Propagation` (Phase 538) |
+
+#### The `propagationLaws` family: what a host must reproduce
+
+A host that reimplements `Fuaran.Core.Propagation` certifies against `laws/propagation-laws.json`.
+Every input carries its graph as `deps` (each id to the ids it reads), so a vector replays without the
+draw; the file's description also states the draw, for a host that re-runs the families over the same
+sample. The evaluator is `value(n) = base(n) + Σ value(r)` over `n`'s declared reads, a read that
+resolves to nothing counting `0`. The four cases:
+
+| `case` | Input | A host must answer |
+|---|---|---|
+| `dirtySet` | `deps`, `changed` | the changed ids and every node that transitively reads one, sorted |
+| `evaluationOrder` | `deps` | the dependencies-first `order` and the cyclic groups (`cycles`, each sorted) — a cycle is data, never a divergence; a host whose sort breaks ties differently holds its own order to `validTopo`'s three clauses instead |
+| `evalFrom` | `deps`, `base`, `changed`, `changedBase` | the incremental re-evaluation over the prior `eval` of `base`: `values` (equal to a full evaluation of `changedBase`) and `recomputed`, exactly the dirty set — or `evalUnknownChange` naming a changed id the graph does not hold |
+| `undeclaredRead` | `deps`, `base`, `node`, `read` | `evalUndeclaredRead` naming the node and the read, from `eval` and from `evalFrom` alike, whether the read names a node of the graph or an id it does not hold |
+
+The corpus's first copy, its `laws/manifest.json` row and the producer record are the UI tier's corpus
+commit (fuaran#2328); `LawVectorExport.manifestRows` lists the row in that change-set, because a row
+named before the index holds it would refuse every `--emit-laws <corpus dir>` until then.
 
 #### The `decimal` family: what a host must reproduce
 
@@ -73,12 +96,12 @@ the UI tier's test project, against whatever Core version that repository pinned
 for Core behaviour was produced one repository and one pin away from Core, and a Core change that
 moved a capability vector (Phase 225 did) could not re-emit it in the same change-set. That exporter
 is retired; the UI tier now READS the corpus copy and certifies its pinned kit against it, as every
-other host does. A future law set Core is the reference for is added here, beside this one — the
-propagation law set fuaran#1764 plans is one — never as a second exporter in a host repository.
+other host does. A future law set Core is the reference for is added here, beside these — as the
+propagation set fuaran#1764 planned was (Phase 538) — never as a second exporter in a host repository.
 
 `laws/manifest.json` in the corpus, the index over every family in `laws/`, stays hand-curated as an
 INDEX: no exporter renders it, because it lists families this repository does not own and a
-wholesale renderer would drop them. But its rows for Core's two families repeat members DERIVED from
+wholesale renderer would drop them. But its rows for Core's families repeat members DERIVED from
 the files they name — `kitVersion`, `vectors`, and `seed` / `iterations` for the drawn family — and
 since Phase 394 `--emit-laws <corpus dir>` restamps exactly those members of exactly those rows in
 the same act that writes the files, so a `<Version>` move can no longer leave a row naming the

@@ -170,6 +170,13 @@
       "versionStamped": true
     },
     {
+      "path": "conformance/laws/propagation-laws.json",
+      "render": "--emit-laws",
+      "heldBy": "Exporters",
+      "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:laws/propagation-laws.json" ],
+      "versionStamped": true
+    },
+    {
       "path": "conformance/refusals/codec-refusals.json",
       "render": "--emit-refusals",
       "heldBy": "Exporters"
