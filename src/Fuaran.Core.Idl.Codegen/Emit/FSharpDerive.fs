@@ -567,8 +567,10 @@ module internal FSharpDerive =
 
         let slotT = if generic then "obj" else declT ctx typeName []
 
+        // Phase 540 — an upcast, not `box`: under nullness checking `box` answers `obj | null`, which
+        // the declared `obj` result refuses (FS3261), while a union value upcast is a non-null `obj`.
         let wrap (v: string) =
-            if generic then sprintf "box %s" v else v
+            if generic then sprintf "(%s :> obj)" v else v
 
         /// The pairs a field contributes, or `None` when it holds no slot of the type.
         let ofField (owner: string) (f: IdlField) : string option =
