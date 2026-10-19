@@ -9,13 +9,14 @@
     <WarningsAsErrors>$(WarningsAsErrors);FS3390</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Phase 396 - the ONE reading of the approval switches (CORE_APPROVE_*, FUARAN_REGEN). Registered first:
-         every family below that regenerates a committed artefact reads it, and it reads nothing here. -->
-    <Compile Include="Approval.fs" />
     <!-- Phase 502 - the suite's one child-process runner (both pipes, UTF-8 pinned), its one
          release-tag reader and its one repository-root resolver. Before every consumer, the
          climbing families among them; it references nothing here. -->
     <Compile Include="ChildProcess.fs" />
+    <!-- Phase 396 - the ONE reading of the approval switches (CORE_APPROVE_*, FUARAN_REGEN); since Phase 503
+         its stems are read from the projection registry (projections.json beside this project), located through
+         Repo.root, so it follows ChildProcess.fs. Every family below that regenerates a committed artefact reads it. -->
+    <Compile Include="Approval.fs" />
     <!-- Phase 386 - a Dag.T is built through Dag.ofNodes (the constructor is private); the fixtures'
          one spelling of it. Depends on nothing here. -->
     <Compile Include="DagOf.fs" />
@@ -339,6 +340,13 @@
          the render of the headings (CORE_APPROVE_DOCS=DECISIONS rewrites it). Reads Approval.fs and
          Snapshots.fs for the repository root, so it follows both; registered beside the roster. -->
     <Compile Include="DecisionsTests.fs" />
+    <!-- Phase 503 - the release ledger typed and read once (Ledger.fs: the slot files parsed into Slot, the
+         index rendered from them), and the ONE family over it (LedgerTests.fs: the shape, the release gesture of
+         D123, the draft sentences, the contract ceiling, the props record, the index held as a render). Reads
+         DecisionsTests.fs for the decision titles a no-run record must cite, PackageRosterTests.fs for the props
+         readers and ChildProcess.fs for the tags; ReadmeClaimsTests.fs and GateProbeTagTests.fs below read it. -->
+    <Compile Include="Ledger.fs" />
+    <Compile Include="LedgerTests.fs" />
     <!-- Phase 183 — the committed public-surface baseline per package: the renderer over IL
          metadata, the baseline diff, and the classifier that tells a record/union/interface
          widening from ordinary additive growth. Reads PackageRosterTests.fs above for the ONE
@@ -409,13 +417,6 @@
          Snapshots.fs; appended (append-only). -->
     <Compile Include="PackageDocsTests.fs" />
     <Compile Include="ReadmeClaimsTests.fs" />
-    <!-- Phase 392 — "released" is a gate output, read from the release ledger's slot files since
-         Phase 397: every tag at or above the entry floor is headed
-         `released … as v<v>` (DRAFT over a tag is red by name), every released heading has its tag,
-         the untagged standing version is headed DRAFT, and every released slot from 0.31.0 names its
-         receiving-gate run in a fixed grammar. Reads PackageRosterTests.fs, ChildProcess.fs and
-         Snapshots.fs; appended (append-only). -->
-    <Compile Include="ReleaseRecordTests.fs" />
 
     <!-- Phase 303 — every certification vocabulary's generated F# module is COMPILED: the score
          vocabulary's (field-less kinds emit as marker types) and the reference vocabulary's under its
@@ -494,7 +495,7 @@
          and PublicSurfaceTests.fs (the roster and the assembly locator). Appended (append-only). -->
     <Compile Include="CrossAssemblyInliningTests.fs" />
     <!-- Phase 402 - a disposable gate-probe tag (v0.0.0-gate-probe-<date>) is out of frame for every
-         tag-reading family. Reads PackageRosterTests.fs, ReleaseRecordTests.fs and
+         tag-reading family. Reads PackageRosterTests.fs, Ledger.fs and
          PublicSurfaceTests.fs. Appended (append-only). -->
     <Compile Include="GateProbeTagTests.fs" />
     <!-- Phase 386 - the OneDotZero family: what 1.0 promises, read off the major of <Version> -

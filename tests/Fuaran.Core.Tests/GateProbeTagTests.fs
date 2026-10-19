@@ -5,7 +5,7 @@
 /// publish run must be refused by the proof leg (RELEASING.md, "Exercising the release gates"). While
 /// that tag exists on the remote, every ci run fetches it (`fetch-tags: true`), so a family that read
 /// it as a release would go red — or worse, green over the wrong slot. Since Phase 499 the six
-/// tag-reading families (`ReleaseRecord`, `PackageRoster`, `ReadmeClaims`, the 1.0 laws and the
+/// tag-reading families (the release ledger's two halves, `ReadmeClaims`, the 1.0 laws and the
 /// public and wire surfaces' since-tag reports) read the release tags in HEAD's history through
 /// `ChildProcess.Tags.released`, parse one through `ChildProcess.Tags.version`, which admits `vX.Y.Z`
 /// and nothing else, and pick the newest through `ChildProcess.Tags.newest`. This family holds that
@@ -27,10 +27,9 @@ let private probe = "v0.0.0-gate-probe-20261007"
 
 let private released = set [ "v0.25.0"; "v0.31.0"; "v0.35.1"; "v0.35.2" ]
 
-/// The release ledger's slot files (Phase 397), `(path, text)`, newest first.
+/// The release ledger's slots (Phase 397), read once (`Ledger.read`, Phase 503), newest first.
 let private ledger () =
-    PackageRosterTests.ledgerFiles (Snapshots.repoFile "")
-    |> List.map (fun f -> f.Path, f.Text)
+    fst (Ledger.read (Snapshots.repoFile ""))
 
 /// Delete a scratch repository; git writes its objects read-only, which `Directory.Delete` refuses.
 let private deleteTree (dir: string) =
@@ -109,38 +108,31 @@ let tests =
                   "a listing carrying the probe tag reads as the released series alone"
           }
 
-          test "ReleaseRecord reads the same faults with the probe tag present" {
-              let docs = ledger ()
+          test "the release-record clauses read the same faults with the probe tag present" {
+              let slots = ledger ()
+
+              let decisions =
+                  match Ledger.decisionTitles (File.ReadAllText(Snapshots.repoFile "DECISIONS.md")) with
+                  | Ok m -> m
+                  | Error es -> failtestf "DECISIONS.md does not parse: %s" (String.concat "; " es)
 
               let faults tags =
-                  ReleaseRecordTests.releaseFaults
-                      PackageRosterTests.entryHeaderFloor
-                      ReleaseRecordTests.releaseRecordFloor
-                      ReleaseRecordTests.releasedWithoutCitedRun
-                      tags
-                      (Some "0.36.0")
-                      docs
+                  Ledger.releaseFaults Ledger.recordFloor decisions tags (Some "0.36.0") slots
 
               Expect.equal (faults (Set.add probe released)) (faults released) "the probe tag adds and removes nothing"
           }
 
-          test "PackageRoster's tag properties read the same with the probe tag present" {
-              let text =
-                  PackageRosterTests.ledgerText (PackageRosterTests.ledgerFiles (Snapshots.repoFile ""))
-
-              let lines = text.Split('\n') |> Array.toList
+          test "the ledger's shape and draft-sentence clauses read the same with the probe tag present" {
+              let slots = ledger ()
 
               Expect.equal
-                  (PackageRosterTests.tagsMissingEntryHeader
-                      PackageRosterTests.entryHeaderFloor
-                      (Set.add probe released)
-                      text)
-                  (PackageRosterTests.tagsMissingEntryHeader PackageRosterTests.entryHeaderFloor released text)
-                  "no entry header is demanded for the probe tag"
+                  (Ledger.shapeFaults (Set.add probe released) (Some "0.36.0") slots [])
+                  (Ledger.shapeFaults released (Some "0.36.0") slots [])
+                  "no slot file is demanded for the probe tag"
 
               Expect.equal
-                  (PackageRosterTests.staleDraftSentences (Set.add probe released) lines)
-                  (PackageRosterTests.staleDraftSentences released lines)
+                  (Ledger.staleDraftSentences (Set.add probe released) slots)
+                  (Ledger.staleDraftSentences released slots)
                   "no draft sentence is read as released by the probe tag"
           }
 

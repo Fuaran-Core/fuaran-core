@@ -1,6 +1,6 @@
 {
   "kind": "publicationBoundary",
-  "$comment": "The vocabulary no tracked file of this repository may carry, swept by PublicationBoundaryTests. This repository is public: a reader outside it can look up a public package, a public specification and a phase number, and cannot look up anything else, so a reference to a private neighbour (a project, a tool, a script, the operator command surface, the word for the wider ecosystem they live in) tells them a private layer exists and what it is called. Every rule is a case-insensitive .NET regular expression applied to one line at a time; the pattern is word-bounded wherever the term has an ordinary-English collision, because a sweep that cries wolf gets switched off. `example` is a line the rule must flag and is what the suite's go-red probes; a rule whose pattern does not match its own example fails the suite, so a rule can never be edited into silence. `carried` lists the knowingly-held exceptions: an exception is exempt only where its FILE and its TEXT both match, and one that matches nothing fails the suite, so an exception cannot outlive the line it was written for. The suite prints every carried exception on every run, including a green one. Phase citations (`Phase 294`, `fuaran-core#294`) are deliberately NOT banned: a number is not vocabulary, and it is what ties a change to its record. This file is the one tracked file the sweep skips, because it necessarily spells out every rule.",
+  "$comment": "The vocabulary no tracked file of this repository may carry, swept by PublicationBoundaryTests. This repository is public: a reader outside it can look up a public package, a public specification and a phase number, and cannot look up anything else, so a reference to a private neighbour (a project, a tool, a script, the operator command surface, the word for the wider ecosystem they live in) tells them a private layer exists and what it is called. Every rule is a case-insensitive .NET regular expression applied to one line at a time; the pattern is word-bounded wherever the term has an ordinary-English collision, because a sweep that cries wolf gets switched off. `example` is a line the rule must flag and is what the suite's go-red probes; a rule whose pattern does not match its own example fails the suite, so a rule can never be edited into silence. `carried` lists the knowingly-held exceptions: an exception is exempt only where one of its FILES (each named exactly, never a pattern) and its TEXT both match, and a file it names where it matches nothing fails the suite, so an exception cannot outlive the line it was written for. The suite prints every carried exception on every run, including a green one. Phase citations (`Phase 294`, `fuaran-core#294`) are deliberately NOT banned: a number is not vocabulary, and it is what ties a change to its record. This file is the one tracked file the sweep skips, because it necessarily spells out every rule.",
   "rules": [
     {
       "id": "strategy-project",
@@ -72,15 +72,13 @@
   "carried": [
     {
       "rule": "workspace-path",
-      "file": "copies.json",
-      "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures/",
-      "why": "a copy registry record names each consumer copy relative to the WORKSPACE root, which is the only root that can address a file in a different repository; the registry defines the field that way and records a parent-relative spelling as the worse alternative (it bakes the producer's own depth into every record), so the path cannot be rewritten here without either breaking or degrading the freshness sweep it exists for"
-    },
-    {
-      "rule": "workspace-path",
-      "file": "version-derives.json",
-      "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures:",
-      "why": "the version ledger names where a derived file's published copy lives as '<repo>:<path>', both relative to the workspace root and inside it, and refuses any other form; same constraint as copies.json"
+      "files": [
+        "tests/Fuaran.Core.Tests/projections.json",
+        "copies.json",
+        "version-derives.json"
+      ],
+      "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures",
+      "why": "a generated artefact's copy in another repository is named relative to the WORKSPACE root, the only root that can address a file in a different repository: the projection registry records each copy once as '<repo>:<path>', and its two renders spell it as their readers require (the version ledger reads '<repo>:<path>' and refuses any other form; the copy registry reads the joined workspace path and records a parent-relative spelling as the worse alternative, since it bakes the producer's own depth into every record). One text, true of the record and both renders, and of nothing else"
     }
   ]
 }

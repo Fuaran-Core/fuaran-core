@@ -5,7 +5,7 @@ the publish job logs in through, and what to do when a step is red. It deliberat
 restate the release sequence. That sequence (re-stamp the corpus, pack a candidate, run the
 receiving gate, write the release record, tag and push atomically) is a gate output, and it lives in
 exactly one place: [`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy), held there
-by the `Release record` test family (DECISIONS.md D123). Do that sequence first; this page starts at
+by the `Release ledger` test family (DECISIONS.md D123). Do that sequence first; this page starts at
 its last step, the `git push --atomic origin main v<v>`.
 
 The registry is [nuget.org](https://www.nuget.org/packages?q=Fuaran.Core), and every package

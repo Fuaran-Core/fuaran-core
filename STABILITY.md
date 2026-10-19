@@ -40,21 +40,21 @@ released.
 tag that has none (Phase 397, DECISIONS.md D130).** This document is the CONTRACT every version is
 held to; [`docs/releases/<version>.md`](docs/releases/README.md) is the LEDGER — a file per version
 slot, the released ones, the never-released ones and the standing draft alike — and
-`docs/releases/README.md` is its index, carrying each file's heading word for word. The `Package
-roster` family reads `git tag` and holds the ledger to the releases the repository actually made:
-every release tag has a file headed `released <date> as v<v>`, every file has its index entry, and
-every index entry has its file. Slots tagged before `0.25.0` predate the per-slot entries; their
+`docs/releases/README.md` is its index, RENDERED from each file's heading (Phase 503). The `Release
+ledger` family parses the slot files once, reads `git tag` and holds the ledger to the releases the
+repository made: every release tag has a file headed `released <date> as v<v>`, and the index is the
+render of the files (`CORE_APPROVE_DOCS=ledger-index` rewrites it). Slots tagged before `0.25.0` predate the per-slot entries; their
 files carry the tag, the note kept beside `<Version>` when they were cut and any section of this
 document that recorded them, and say so rather than writing an entry after the fact. This document
 is held to at most 1,500 lines, so a release's entry cannot drift back into it.
 
 **A version's entries go in its ledger file.** Opening a draft slot creates `docs/releases/<v>.md`
-headed `## <v> — DRAFT` and its index entry in the same commit; every change that rides the slot
+headed `## <v> — DRAFT` and its re-rendered index in the same commit; every change that rides the slot
 appends a self-contained `###` entry there. A change to the contract itself — a new surface class, a
 new stability-critical surface, a moved posture — is edited here, and its slot's entry says so.
 
 **"Released" is a gate output, not a heading's claim (Phase 392, DECISIONS.md D123).** The `Release
-record` family reads every tag in the checked-out history and holds four things, each red by name: a
+ledger` family reads every tag in the checked-out history and holds four things, each red by name: a
 tag's ledger file is headed `## <v> — released <yyyy-mm-dd> as `v<v>`` (a title may sit between
 the version and `released`), so a tagged version headed DRAFT fails; an entry headed `released` has its
 tag, so a heading turned before the tag fails; the untagged standing `<Version>` is headed
@@ -65,8 +65,8 @@ tag, so a heading turned before the tag fails; the untagged standing `<Version>`
     <folder>`; compile leg <n> packages green; value leg <m>/<m> vectors byte-identical.
 
 — naming the host commit the gate ran at, the invocation and both legs' counts. `0.31.0` and `0.35.1`
-were released without a cited run; their records say `none cited before the tag`, and the family admits
-that wording only for the versions D123 lists. The publish workflow runs `verify.ps1` before it packs,
+were released without a cited run; their records say `none cited before the tag` beside D123, and the
+family admits it only under a decision whose heading names the slot. The publish workflow runs `verify.ps1` before it packs,
 so a release gesture without the heading and the record is refused there; `Directory.Build.props`
 declares the ledger's index as the version's stability record (`<FuaranStabilityRecord>`) so a
 downstream version check reads the same DRAFT marker.
@@ -82,7 +82,7 @@ before it:
    host's candidate-only reference first, or the gate's membership check fails it by name.
 3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
 4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's
-   ledger file, turn its heading to `released <date> as `v<v>`` there and in the index, and regenerate the README's version stamps
+   ledger file, turn its heading to `released <date> as `v<v>``, re-render the index, and regenerate the README's version stamps
    (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1`
    set in the environment). The
    stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the

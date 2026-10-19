@@ -31,9 +31,9 @@
     <!-- Phase 392: the stability record of the <Version> above, declared beside it so a downstream
          version check can read each heading against the tags: a heading whose next word after the
          version is DRAFT (the default marker) over a tagged version is reported there, as the
-         `Release record` test family reports it here (STABILITY.md "Versioning policy"). Since
+         `Release ledger` test family reports it here (STABILITY.md "Versioning policy"). Since
          Phase 397 the record is the ledger's index, which carries every slot's heading word for
-         word; the `PackageRoster` family holds the index to the slot files. -->
+         word; since Phase 503 it is rendered from the slot files and that family holds it. -->
     <FuaranStabilityRecord>docs/releases/README.md</FuaranStabilityRecord>
   </PropertyGroup>
 

@@ -347,7 +347,7 @@ let internal stampFaults (standing: string option) (ledger: string) (readme: str
                 )
             else
                 None
-        elif (PackageRosterTests.entryHeaderNaming v ledger).IsNone then
+        elif (Ledger.entryHeaderNaming v ledger).IsNone then
             Some(sprintf "`%s` is stamped as arriving in %s, which no release-ledger entry header names" claim v)
         else
             None)
@@ -942,7 +942,7 @@ let tests =
               "a stamp naming an unreleased version names the DRAFT heading in the release ledger, and a released one an entry" {
               let root = Repo.root ()
               let readme = File.ReadAllText(readmePath ())
-              let ledger = PackageRosterTests.ledgerText (PackageRosterTests.ledgerFiles root)
+              let ledger = Ledger.text (fst (Ledger.read root))
               let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
 
               Expect.isNonEmpty ledger "the release ledger was read"
