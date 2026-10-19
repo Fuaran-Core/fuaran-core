@@ -157,6 +157,26 @@ let tests =
                   Expect.stringContains msg "listNotes" "enumerates the available tools"
               | Ok _ -> failtest "an unknown tool name was not refused"
 
+          testCase "tryRunTool refuses typed, and runTool's string is that refusal's sentence (Phase 510)"
+          <| fun _ ->
+              Expect.equal (AiSurface.tryRunTool witness "noteCount" state0) (Ok(JInt 1)) "known tool runs"
+              let names = witness.ReadTools |> List.map _.Name
+
+              Expect.equal
+                  (AiSurface.tryRunTool witness "outline" state0)
+                  (Error(AiSurface.ReadToolFailure.UnknownReadTool("outline", names)))
+                  "an unknown name is refused naming every served tool, in witness order"
+
+              Expect.equal
+                  (AiSurface.runTool witness "outline" state0)
+                  (Error("unknown read tool 'outline'; available: " + String.concat ", " names))
+                  "the string form's sentence is unchanged"
+
+              Expect.equal
+                  (AiSurface.ReadToolFailure.describe (AiSurface.ReadToolFailure.UnknownReadTool("x", [])))
+                  "unknown read tool 'x'; available: "
+                  "an empty witness names no tool"
+
           testCase "matchesAnchor: literal segments in order, wildcards free, case-insensitive"
           <| fun _ ->
               Expect.isTrue

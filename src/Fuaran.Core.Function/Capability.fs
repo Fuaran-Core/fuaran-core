@@ -269,8 +269,8 @@ module Capability =
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic invocation
-    /// under: the capability id + a hash of the canonical (addr-sorted) pre-image, built through
-    /// `Hash.canonicalFields` — two fields per binding (addr, value). So two invocations with the
+    /// under: the capability id + a hash of the canonical (addr-sorted) pre-image, built by
+    /// `Hash.keyedBy` (Phase 510) — two fields per binding (addr, value). So two invocations with the
     /// same args replay the same captured value, and the pre-image is INJECTIVE (Phase 225,
     /// `invocation_key_injective` in `proofs/Capability.fst`): distinct argument sets never share
     /// one, whatever their values contain. That two distinct pre-images hash apart is a property
@@ -287,14 +287,12 @@ module Capability =
             | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
             | None -> a, v
 
-        let canonical =
-            args
-            |> List.map spelled
-            |> List.sortBy fst
-            |> List.collect (fun (a, v) -> [ a; v ])
-            |> Hash.canonicalFields
-
-        c.Id + "#" + Hash.fnv1a canonical
+        // The capability grammar (D173): two fields per binding, addr-sorted, no shape prefix.
+        args
+        |> List.map spelled
+        |> List.sortBy fst
+        |> List.collect (fun (a, v) -> [ a; v ])
+        |> Hash.keyedBy c.Id
 
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
     /// dispatch: every arg must address a declared data hole, once (`DuplicateArg` otherwise, Phase

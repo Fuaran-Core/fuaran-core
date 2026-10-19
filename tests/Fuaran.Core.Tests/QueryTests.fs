@@ -951,6 +951,40 @@ let whereOrderByTests =
                   (Query.invocationKeyPage { shaped with Where = [] } shapedArgs (Some "t"))
                   "a page of a filtered declaration keys apart"
 
+          testCase "the query keys' bytes are pinned: no journal moved when they came to share Hash.keyedBy"
+          <| fun _ ->
+              // Recorded from the build before Phase 510 routed both keys through `Hash.keyedBy`
+              // (D173). A move here moves every journalled query capture: it is a breaking change to
+              // the journal, not a refactor.
+              let every =
+                  [ "s", Str "a\u0001b\u0010c"
+                    "i", Int 7
+                    "f", Float 1.5
+                    "b", Bool true
+                    "d", Date "2026-01-01"
+                    "t", Timestamp "2026-01-01T00:00:00Z"
+                    "m", Decimal "12.50"
+                    "n", Null ]
+
+              Expect.equal
+                  (Query.invocationKey sampleQuery [ "year", Int 2026; "region", Str "UK" ])
+                  "sales-by-region#cfb323a8"
+                  "unshaped"
+
+              Expect.equal (Query.invocationKey shaped shapedArgs) "shaped#05ad7cda" "filtered and ordered"
+
+              Expect.equal
+                  (Query.invocationKeyPage shaped shapedArgs (Some "tok-1"))
+                  "shaped#f968c101"
+                  "a page of a shaped declaration"
+
+              Expect.equal
+                  (Query.invocationKeyPage sampleQuery every (Some "p\u0001"))
+                  "sales-by-region#78d1824c"
+                  "every cell kind, behind a token that spells the separator"
+
+              Expect.equal (Query.invocationKey sampleQuery every) "sales-by-region#71c4e9e0" "every cell kind"
+
           testCase "the resolver receives the filter and the order, and refuses one it cannot honour by name"
           <| fun _ ->
               let reg =

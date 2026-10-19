@@ -888,9 +888,20 @@ module Query =
         | Decimal v -> "m", v
         | Null -> "n", ""
 
+    /// The query grammar (Phase 225, D173): the declaration's shape fields (`QueryShape.keyFields`),
+    /// then three fields per binding — name, cell tag, cell payload — name-sorted. The one body both
+    /// keys read, so the paged key is the unpaged one behind a page triple.
+    let private grammarFields (q: Query) (args: (string * Cell) list) : string list =
+        QueryShape.keyFields q.Where q.OrderBy
+        @ (args
+           |> List.sortBy fst
+           |> List.collect (fun (n, v) ->
+               let tag, payload = cellFields v
+               [ n; tag; payload ]))
+
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic query under:
-    /// the query id + a hash of the canonical (name-sorted) pre-image, built through
-    /// `Hash.canonicalFields` — three fields per binding (name, cell tag, cell payload). Same args
+    /// the query id + a hash of the canonical (name-sorted) pre-image, built by `Hash.keyedBy`
+    /// (Phase 510) — three fields per binding (name, cell tag, cell payload). Same args
     /// replay the same captured rows. The pre-image is INJECTIVE (Phase 225,
     /// `invocation_key_injective` in `proofs/Query.fst`): distinct argument sets never share one,
     /// whatever their string cells contain. That two distinct pre-images hash apart is a property
@@ -903,16 +914,7 @@ module Query =
     /// two declarations that filter or order differently key apart. A declaration with neither adds
     /// nothing, and its key is byte for byte the key it had before.
     let invocationKey (q: Query) (args: (string * Cell) list) : string =
-        let canonical =
-            QueryShape.keyFields q.Where q.OrderBy
-            @ (args
-               |> List.sortBy fst
-               |> List.collect (fun (n, v) ->
-                   let tag, payload = cellFields v
-                   [ n; tag; payload ]))
-            |> Hash.canonicalFields
-
-        q.Id + "#" + Hash.fnv1a canonical
+        Hash.keyedBy q.Id (grammarFields q args)
 
     /// The capture key of ONE PAGE of an invocation (Phase 316): `invocationKey`'s pre-image with
     /// the page token in front of it, so a paged `Network` query captured page by page replays each
@@ -920,7 +922,7 @@ module Query =
     /// query that does not page) adds nothing, so `invocationKeyPage q args None` IS
     /// `invocationKey q args`, byte for byte, and every journal keyed before paging reached the seam
     /// still replays. `Some token` adds three fields — an empty name, the tag `p` that no cell's tag
-    /// is, and the token — through the same `Hash.canonicalFields`, so the pre-image stays INJECTIVE
+    /// is, and the token — through the same `Hash.keyedBy`, so the pre-image stays INJECTIVE
     /// over the pair (`invocation_key_page_injective` in `proofs/Query.fst`): two (argument set,
     /// token) pairs share a pre-image only when they hold the same bindings AND the same token, so
     /// distinct tokens give distinct pre-images. That two distinct pre-images hash apart is a property
@@ -928,18 +930,7 @@ module Query =
     let invocationKeyPage (q: Query) (args: (string * Cell) list) (pageToken: string option) : string =
         match pageToken with
         | None -> invocationKey q args
-        | Some token ->
-            let canonical =
-                [ ""; "p"; token ]
-                @ QueryShape.keyFields q.Where q.OrderBy
-                @ (args
-                   |> List.sortBy fst
-                   |> List.collect (fun (n, v) ->
-                       let tag, payload = cellFields v
-                       [ n; tag; payload ]))
-                |> Hash.canonicalFields
-
-            q.Id + "#" + Hash.fnv1a canonical
+        | Some token -> Hash.keyedBy q.Id ([ ""; "p"; token ] @ grammarFields q args)
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
     /// fetch: every arg must address a declared param, once (`DuplicateParam`, Phase 307 — so the

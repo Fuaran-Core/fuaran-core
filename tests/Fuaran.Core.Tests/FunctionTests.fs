@@ -1904,6 +1904,85 @@ let validatedDeclarationTests =
               | Ok(_, c) -> Expect.equal c.Hits 0 "applyMemoComposed serves nothing from the cache either"
               | Error e -> failtestf "applyMemoComposed: %A" e
 
+          testCase
+              "the capability and pipeline keys' bytes are pinned: no journal moved when they came to share Hash.keyedBy"
+          <| fun _ ->
+              // Recorded from the build before Phase 510 routed the keys through `Hash.keyedBy` (D173).
+              let sg: Signature =
+                  { Name = "k"
+                    Holes = []
+                    Effect = Effect.pureDeterministic }
+
+              let cap = Capability.create "k" sg Server
+
+              Expect.equal
+                  (Capability.invocationKey cap [ "b", "2"; "a", "x\u0001y\u0010" ])
+                  "k#7c9a6e54"
+                  "values spelling the separator and the escape"
+
+              Expect.equal (Capability.invocationKey cap []) "k#811c9dc5" "no arguments"
+
+              Expect.equal
+                  (CapabilityPipeline.nodeInvocationKey (Source("s1", "data/ref\u0001", AnyString)))
+                  "source#s1#064f94ba"
+                  "a source"
+
+              Expect.equal
+                  (CapabilityPipeline.nodeInvocationKey (
+                      Invoke(
+                          "n1",
+                          "cap.x",
+                          AnyString,
+                          [ "b", FromNode "s1"
+                            "a", Literal "x\u0001y"
+                            "a2", Literal "\u0010"
+                            "a", Literal "" ]
+                      )
+                  ))
+                  "cap.x#n1#f7055500"
+                  "an invoke, its bindings ordered by their encoded pre-image"
+
+              Expect.equal
+                  (CapabilityPipeline.nodeInvocationKey (Invoke("n2", "c", AnyString, [])))
+                  "c#n2#cb29bce7"
+                  "an argument-less invoke"
+
+          testCase "dirtySet is Propagation's closure over the pipeline's FromNode edges (Phase 510)"
+          <| fun _ ->
+              let p: CapabilityPipeline =
+                  { Nodes =
+                      [ Source("s1", "r", AnyString)
+                        Source("s2", "r", AnyString)
+                        Invoke("a", "c", AnyString, [ "x", FromNode "s1"; "y", Literal "1" ])
+                        Invoke("b", "c", AnyString, [ "x", FromNode "a"; "y", FromNode "s2" ])
+                        Invoke("d", "c", AnyString, [ "x", FromNode "s2" ])
+                        // a repeated id carries the union of its nodes' edges, as the copy it replaced did
+                        Invoke("d", "c", AnyString, [ "x", FromNode "b" ]) ] }
+
+              let deps =
+                  Map.ofList
+                      [ "s1", Set.empty
+                        "s2", Set.empty
+                        "a", Set.singleton "s1"
+                        "b", Set.ofList [ "a"; "s2" ]
+                        "d", Set.ofList [ "s2"; "b" ] ]
+
+              for changed in
+                  [ Set.empty
+                    Set.singleton "s1"
+                    Set.singleton "s2"
+                    Set.ofList [ "a"; "ghost" ]
+                    Set.singleton "d" ] do
+                  Expect.equal
+                      (CapabilityPipeline.dirtySet changed p)
+                      (Propagation.dirtyFromChangedIds deps changed)
+                      (sprintf "changed %A" changed)
+
+              Expect.equal
+                  (CapabilityPipeline.dirtySet (Set.singleton "s1") p)
+                  (Set.ofList [ "s1"; "a"; "b"; "d" ])
+                  "s1 reaches a, b and, through b, the second d"
+
           testCase "the node kind leads the pipeline key: a Source and an Invoke never share one"
           <| fun _ ->
               let s = Source("source", "source", AnyString)

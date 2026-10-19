@@ -1018,7 +1018,7 @@ families credit are credited over nested batches as well as flat ones.
 <!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
+| `Fuaran.Core.AiSurface` | 24 | 0 | 11 | 1 | 0 | 0 | 0 | 12 |
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
 | `Fuaran.Core.Conformance` | 154 | 2 | 108 | 2 | 6 | 0 | 0 | 36 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
@@ -1031,13 +1031,13 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.OpStream.Dag` | 91 | 38 | 30 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 76 | 28 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
-| `Fuaran.Core.Propagation` | 25 | 7 | 6 | 0 | 0 | 0 | 0 | 12 |
+| `Fuaran.Core.Propagation` | 27 | 7 | 6 | 0 | 0 | 0 | 0 | 14 |
 | `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
-| `Fuaran.Core.Tree` | 65 | 17 | 8 | 1 | 2 | 0 | 0 | 37 |
+| `Fuaran.Core.Tree` | 66 | 17 | 8 | 1 | 2 | 0 | 0 | 38 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 157 | 67 | 16 | 3 | 2 | 0 | 0 | 69 |
-| **Total** | 1241 | 314 | 424 | 30 | 13 | 0 | 3 | 457 |
+| **Total** | 1246 | 314 | 424 | 30 | 13 | 0 | 3 | 462 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

@@ -30,6 +30,9 @@
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
     <!-- Phase 318: the seams' capturing dispatch journals through the keyed capture journal. -->
     <ProjectReference Include="..\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+    <!-- Phase 510 (DECISIONS D173): the pipeline's dirty set is Propagation's closure, not a copy of it.
+         Propagation references only Tree and Ops, both already here, so the edge adds one package. -->
+    <ProjectReference Include="..\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

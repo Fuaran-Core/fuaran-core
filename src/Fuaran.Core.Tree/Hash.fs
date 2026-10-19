@@ -153,6 +153,15 @@ module Hash =
     let canonicalFields (fields: string list) : string =
         fields |> List.map canonicalField |> String.concat ""
 
+    /// The ONE capture-key builder (Phase 510, DECISIONS.md D173): `prefix`, `#`, then the FNV-1a of
+    /// `fields`' canonical pre-image — `prefix + "#" + fnv1a (canonicalFields fields)`. The three
+    /// capture-key grammars (`Capability.invocationKey`, `Query.invocationKey` /
+    /// `Query.invocationKeyPage`, `CapabilityPipeline.nodeInvocationKey`) stay three, each a field list
+    /// it hands this builder, so no journalled key moved when they came to share it. Each is on the
+    /// roster above: the roster family counts a call of this builder as a call of the encoding.
+    let keyedBy (prefix: string) (fields: string list) : string =
+        prefix + "#" + fnv1a (canonicalFields fields)
+
     // ---------------------------------------------------------------------------------------------
     //  SHA-256 (FIPS 180-4) — the spine's ONE cryptographic digest.
     //

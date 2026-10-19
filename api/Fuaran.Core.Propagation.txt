@@ -6,6 +6,7 @@
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 attribute Fuaran.Core.Graph RequireQualifiedAccess
 attribute Fuaran.Core.Propagation+PropagationError RequireQualifiedAccess
+attribute Fuaran.Core.Propagation+Scope`1 RequireQualifiedAccess
 ctor Fuaran.Core.Propagation+EvalOutcome`1..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 ctor Fuaran.Core.Propagation+PartRead`1..ctor(!0, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<System.String>>)
 ctor Fuaran.Core.Propagation+Plan..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Fuaran.Core.Propagation+TopoResult, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>)
@@ -13,6 +14,9 @@ ctor Fuaran.Core.Propagation+TopoResult..ctor(Microsoft.FSharp.Collections.FShar
 field Fuaran.Core.Propagation+PropagationError+Tags.EvalNodeFailed : System.Int32 (literal)
 field Fuaran.Core.Propagation+PropagationError+Tags.EvalUndeclaredRead : System.Int32 (literal)
 field Fuaran.Core.Propagation+PropagationError+Tags.EvalUnknownChange : System.Int32 (literal)
+field Fuaran.Core.Propagation+Scope`1+Tags.For : System.Int32 (literal)
+field Fuaran.Core.Propagation+Scope`1+Tags.From : System.Int32 (literal)
+field Fuaran.Core.Propagation+Scope`1+Tags.Full : System.Int32 (literal)
 method Fuaran.Core.Graph.cycleThrough(System.String, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 method Fuaran.Core.Graph.dependents(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>
 method Fuaran.Core.Graph.sort(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Fuaran.Core.Propagation+TopoResult
@@ -29,6 +33,8 @@ method Fuaran.Core.Propagation.evalFromPlan`1(Microsoft.FSharp.Core.FSharpFunc`2
 method Fuaran.Core.Propagation.evalFromWithPlan`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !!0>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.Propagation+Plan) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
 method Fuaran.Core.Propagation.evalFromWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !!0>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
 method Fuaran.Core.Propagation.evalFrom`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !!0>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
+method Fuaran.Core.Propagation.evalScopedWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>>, Fuaran.Core.Propagation+Scope`1<!!0>, Fuaran.Core.Propagation+Plan) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
+method Fuaran.Core.Propagation.evalScoped`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>, Fuaran.Core.Propagation+Scope`1<!!0>, Fuaran.Core.Propagation+Plan) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
 method Fuaran.Core.Propagation.evalWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
 method Fuaran.Core.Propagation.eval`1(Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!!0>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Propagation+EvalOutcome`1<!!0>, Fuaran.Core.Propagation+PropagationError>
 method Fuaran.Core.Propagation.neededFor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
@@ -57,7 +63,14 @@ type Fuaran.Core.Propagation+PropagationError+EvalNodeFailed (type)
 type Fuaran.Core.Propagation+PropagationError+EvalUndeclaredRead (type)
 type Fuaran.Core.Propagation+PropagationError+EvalUnknownChange (type)
 type Fuaran.Core.Propagation+PropagationError+Tags (type)
+type Fuaran.Core.Propagation+Scope`1 (union)
+type Fuaran.Core.Propagation+Scope`1+For (type)
+type Fuaran.Core.Propagation+Scope`1+From (type)
+type Fuaran.Core.Propagation+Scope`1+Tags (type)
 type Fuaran.Core.Propagation+TopoResult (record)
 union-case Fuaran.Core.Propagation+PropagationError.NewEvalNodeFailed #1(node: System.String, message: System.String)
 union-case Fuaran.Core.Propagation+PropagationError.NewEvalUndeclaredRead #2(node: System.String, read: System.String)
 union-case Fuaran.Core.Propagation+PropagationError.NewEvalUnknownChange #0(ids: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.Propagation+Scope`1.Full #0()
+union-case Fuaran.Core.Propagation+Scope`1.NewFor #2(targets: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
+union-case Fuaran.Core.Propagation+Scope`1.NewFrom #1(prior: Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, changed: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)

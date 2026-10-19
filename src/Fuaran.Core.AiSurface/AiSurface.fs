@@ -476,19 +476,36 @@ module Proposals =
         : Result<'State, 'Rej> =
         ops |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok state)
 
-    /// The approver's own policy over the proposal's ops (Phase 298): the guidance
-    /// of the first op the policy DENIES `approver`, which `ApprovalDenied` carries.
-    let private approverRefusal
+    /// The one approval body (Phase 510, D173): `approve` is it with no guard, `approveGuarded` with
+    /// the registry's. The approver may not be the author (`SelfApproval`); the sequence's decision
+    /// for the approver, the join of `decide` over its ops with the first denial winning, must not be
+    /// a `Deny` (`ApprovalDenied`); a guard's dry run must pass (`OpNoLongerApplies`, nothing
+    /// applied); then the ops apply through the surface's reducer.
+    let private approveWith
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (decide: 'Op -> PolicyDecision)
+        (dryRun: ('Op list -> 'State -> Result<unit, 'Rej>) option)
         (approver: string)
-        (ops: 'Op list)
-        : RejectionGuidance option =
-        ops
-        |> List.tryPick (fun op ->
-            match w.Decide approver op with
-            | PolicyDecision.Deny g -> Some g
-            | PolicyDecision.Allow
-            | PolicyDecision.NeedsApproval -> None)
+        (at: string)
+        (id: int)
+        (q: ProposalQueue<'Op>)
+        (state: 'State)
+        : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
+        find id q
+        |> Result.bind (fun p ->
+            if p.Author = approver then
+                Error(SelfApproval(id, p.Author))
+            else
+                match PolicyDecision.all (p.Ops |> List.map decide) with
+                | PolicyDecision.Deny g -> Error(ApprovalDenied(id, g))
+                | _ ->
+                    match dryRun |> Option.map (fun run -> run p.Ops state) with
+                    | Some(Error rejection) -> Error(OpNoLongerApplies(id, rejection))
+                    | Some(Ok())
+                    | None ->
+                        match applyAll w p.Ops state with
+                        | Error rejection -> Error(OpNoLongerApplies(id, rejection))
+                        | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
 
     /// Approve a pending proposal: its ops apply through the domain reducer. On
     /// success the proposal is marked approved (dual attribution — the proposer
@@ -510,17 +527,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        find id q
-        |> Result.bind (fun p ->
-            if p.Author = approver then
-                Error(SelfApproval(id, p.Author))
-            else
-                match approverRefusal w approver p.Ops with
-                | Some g -> Error(ApprovalDenied(id, g))
-                | None ->
-                    match applyAll w p.Ops state with
-                    | Error rejection -> Error(OpNoLongerApplies(id, rejection))
-                    | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
+        approveWith w (w.Decide approver) None approver at id q state
 
     /// Reject a pending proposal with a reason. Recorded, never dropped — and
     /// the artifact is never touched (a denied proposal never mutates). The proposal id precedes the
@@ -547,6 +554,40 @@ module Proposals =
         /// Policy allowed it but the domain reducer rejected an op.
         | SubmitOpRejected of 'Rej
 
+    /// The one submission body (Phase 510, D173): `submit` is it with no guard, `submitGuarded` with
+    /// the registry's. The sequence's decision is the JOIN of `decide` over its ops: the most
+    /// restrictive wins, and of several denials the first (Phase 318). A `Deny` refuses it before
+    /// anything else; then a guard's dry run refuses a sequence one of whose ops would not apply
+    /// (`SubmitOpRejected`), before it is parked or applied; then it is parked (`NeedsApproval`) or
+    /// applied (`Allow`). With no guard nothing is dry-run, so a parked sequence is checked against
+    /// the state only when `approve` applies it.
+    let private submitWith
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (decide: 'Op -> PolicyDecision)
+        (dryRun: ('Op list -> 'State -> Result<unit, 'Rej>) option)
+        (author: string)
+        (at: string)
+        (intent: string option)
+        (ops: 'Op list)
+        (q: ProposalQueue<'Op>)
+        (state: 'State)
+        : SubmitOutcome<'State, 'Op, 'Rej> =
+        match PolicyDecision.all (ops |> List.map decide) with
+        | PolicyDecision.Deny g -> SubmitDenied g
+        | decision ->
+            match dryRun |> Option.map (fun run -> run ops state) with
+            | Some(Error rejection) -> SubmitOpRejected rejection
+            | Some(Ok())
+            | None ->
+                match decision with
+                | PolicyDecision.NeedsApproval ->
+                    let q', id = propose author at intent ops q
+                    SubmitProposed(q', id)
+                | _ ->
+                    match applyAll w ops state with
+                    | Ok next -> SubmitApplied next
+                    | Error rejection -> SubmitOpRejected rejection
+
     /// The composed gated co-authoring loop — the single entry point an
     /// agent-facing surface calls: decide every op, then apply | park | deny
     /// the sequence as a unit. A `Deny` anywhere refuses the whole sequence
@@ -562,18 +603,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        // Phase 318: the sequence's decision is the JOIN of its ops' decisions — the most
-        // restrictive wins, and of several denials the first — which is exactly the rule this
-        // function always applied by hand.
-        match PolicyDecision.all (ops |> List.map (w.Decide author)) with
-        | PolicyDecision.Deny g -> SubmitDenied g
-        | PolicyDecision.NeedsApproval ->
-            let q', id = propose author at intent ops q
-            SubmitProposed(q', id)
-        | PolicyDecision.Allow ->
-            match applyAll w ops state with
-            | Ok next -> SubmitApplied next
-            | Error rejection -> SubmitOpRejected rejection
+        submitWith w (w.Decide author) None author at intent ops q state
 
     /// The capabilities an op invokes, through the registry the actor acts through, joined with the
     /// domain's own decision for the op (Phase 318): `w.Decide actor op`
@@ -623,20 +653,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        match PolicyDecision.all (ops |> List.map (decideGuarded gw registry author)) with
-        | PolicyDecision.Deny g -> SubmitDenied g
-        | decision ->
-            match dryRunAll gw ops state with
-            | Error rejection -> SubmitOpRejected rejection
-            | Ok() ->
-                match decision with
-                | PolicyDecision.NeedsApproval ->
-                    let q', id = propose author at intent ops q
-                    SubmitProposed(q', id)
-                | _ ->
-                    match applyAll gw.Surface ops state with
-                    | Ok next -> SubmitApplied next
-                    | Error rejection -> SubmitOpRejected rejection
+        submitWith gw.Surface (decideGuarded gw registry author) (Some(dryRunAll gw)) author at intent ops q state
 
     /// `approve` behind the registry's gate and a dry run (Phase 318). The approver may not be the
     /// author (`SelfApproval`); every op's `decideGuarded` for the APPROVER through `registry` — the
@@ -652,20 +669,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        find id q
-        |> Result.bind (fun p ->
-            if p.Author = approver then
-                Error(SelfApproval(id, p.Author))
-            else
-                match PolicyDecision.all (p.Ops |> List.map (decideGuarded gw registry approver)) with
-                | PolicyDecision.Deny g -> Error(ApprovalDenied(id, g))
-                | _ ->
-                    match dryRunAll gw p.Ops state with
-                    | Error rejection -> Error(OpNoLongerApplies(id, rejection))
-                    | Ok() ->
-                        match applyAll gw.Surface p.Ops state with
-                        | Error rejection -> Error(OpNoLongerApplies(id, rejection))
-                        | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
+        approveWith gw.Surface (decideGuarded gw registry approver) (Some(dryRunAll gw)) approver at id q state
 
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of
@@ -735,11 +739,36 @@ module AiSurface =
     /// generalised: a host serves the descriptor with no serializer dependency.
     let catalogueJson (w: AiSurfaceWitness<'State, 'Op, 'Rej>) : string = Json.render (catalogue w)
 
-    /// Run a read tool by name — default-deny by shape: an unknown name is a
-    /// named error enumerating the available tools (GP5), never a silent miss.
-    let runTool (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (name: string) (state: 'State) : Result<JVal, string> =
+    /// Why `tryRunTool` refused (Phase 510, D173) — the seams' `NoSuch` shape: the name asked for
+    /// and every name the witness serves, in witness order (GP5).
+    [<RequireQualifiedAccess>]
+    type ReadToolFailure =
+        /// No read tool of the witness is named `name`; `available` is every tool name it serves.
+        | UnknownReadTool of name: string * available: string list
+
+    /// The rendering of a read-tool refusal.
+    [<RequireQualifiedAccess>]
+    module ReadToolFailure =
+
+        /// The sentence a read-tool refusal reads as: `runTool`'s string, word for word.
+        let describe (f: ReadToolFailure) : string =
+            match f with
+            | ReadToolFailure.UnknownReadTool(name, available) ->
+                "unknown read tool '" + name + "'; available: " + String.concat ", " available
+
+    /// Run a read tool by name, refusing typed (Phase 510): default-deny by shape, so an unknown
+    /// name is `UnknownReadTool` naming the tools the witness serves (GP5), never a silent miss.
+    let tryRunTool
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (name: string)
+        (state: 'State)
+        : Result<JVal, ReadToolFailure> =
         match w.ReadTools |> List.tryFind (fun t -> t.Name = name) with
         | Some t -> Ok(t.Run state)
-        | None ->
-            let known = w.ReadTools |> List.map _.Name |> String.concat ", "
-            Error("unknown read tool '" + name + "'; available: " + known)
+        | None -> Error(ReadToolFailure.UnknownReadTool(name, w.ReadTools |> List.map _.Name))
+
+    /// Run a read tool by name — default-deny by shape: an unknown name is a
+    /// named error enumerating the available tools (GP5), never a silent miss. `tryRunTool` with its
+    /// refusal as `ReadToolFailure.describe`'s sentence.
+    let runTool (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (name: string) (state: 'State) : Result<JVal, string> =
+        tryRunTool w name state |> Result.mapError ReadToolFailure.describe

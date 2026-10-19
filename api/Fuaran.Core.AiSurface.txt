@@ -4,6 +4,8 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.AiSurface+ReadToolFailure RequireQualifiedAccess
+attribute Fuaran.Core.AiSurface+ReadToolFailureModule RequireQualifiedAccess
 attribute Fuaran.Core.Proposals+ProposalStatus RequireQualifiedAccess
 attribute Fuaran.Core.Proposals+ProposeFailure RequireQualifiedAccess
 attribute Fuaran.Core.RejectionCodec RequireQualifiedAccess
@@ -27,9 +29,11 @@ field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitApplied : System.Int32 (l
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitDenied : System.Int32 (literal)
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitOpRejected : System.Int32 (literal)
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitProposed : System.Int32 (literal)
+method Fuaran.Core.AiSurface+ReadToolFailureModule.describe(Fuaran.Core.AiSurface+ReadToolFailure) : System.String
 method Fuaran.Core.AiSurface.catalogueJson`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>) : System.String
 method Fuaran.Core.AiSurface.catalogue`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>) : Fuaran.Core.JVal
 method Fuaran.Core.AiSurface.runTool`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
+method Fuaran.Core.AiSurface.tryRunTool`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.AiSurface+ReadToolFailure>
 method Fuaran.Core.PatternBank.literalSegments(System.String) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.PatternBank.matchesAnchor(System.String, System.String) : System.Boolean
 method Fuaran.Core.PatternBank.resolve`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.Intent) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!1>, System.String>>
@@ -79,6 +83,8 @@ record-field Fuaran.Core.ReadTool`1.Description #1 : System.String
 record-field Fuaran.Core.ReadTool`1.Name #0 : System.String
 record-field Fuaran.Core.ReadTool`1.Run #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.JVal>
 type Fuaran.Core.AiSurface (module)
+type Fuaran.Core.AiSurface+ReadToolFailure (union)
+type Fuaran.Core.AiSurface+ReadToolFailureModule (module)
 type Fuaran.Core.AiSurfaceWitness`3 (record)
 type Fuaran.Core.GuardedSurfaceWitness`3 (record)
 type Fuaran.Core.Intent (record)
@@ -109,6 +115,7 @@ type Fuaran.Core.Proposals+SubmitOutcome`3+SubmitProposed (type)
 type Fuaran.Core.Proposals+SubmitOutcome`3+Tags (type)
 type Fuaran.Core.ReadTool`1 (record)
 type Fuaran.Core.RejectionCodec (module)
+union-case Fuaran.Core.AiSurface+ReadToolFailure.NewUnknownReadTool #0(name: System.String, available: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewApprovalDenied #4(id: System.Int32, guidance: Fuaran.Core.RejectionGuidance)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewNotPending #1(id: System.Int32, status: Fuaran.Core.Proposals+ProposalStatus)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewOpNoLongerApplies #2(id: System.Int32, rejection: !0)

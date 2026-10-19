@@ -100,6 +100,32 @@
     },
     {
       "members": [
+        "Hash.keyedBy"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one capture-key builder (Phase 510, D173): the prefix, '#', and the FNV-1a of the canonical pre-image, held to that composition on fields spelling the separator and the escape, its body held to the encoding by the roster family; the injectivity it inherits is canonicalFields' theorem and the keys it builds are pinned byte for byte in QueryTests and FunctionTests.",
+      "standIn": "tests/Fuaran.Core.Tests/HashRosterTests.fs"
+    },
+    {
+      "members": [
+        "Propagation.evalScopedWith",
+        "Propagation.evalScoped"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one evaluator over a Scope (Phase 510, D173), of which the eight named entry points are spellings: each scope is held equal to the entry point it names, result and evaluation order, prior-blind and prior-aware, over a chain, a cycle, a dangling read and an unknown change; the theorems are the named forms' (`proofs/Propagation.fst`).",
+      "standIn": "tests/Fuaran.Core.Tests/PropagationTests.fs"
+    },
+    {
+      "members": [
+        "AiSurface.tryRunTool",
+        "AiSurface.ReadToolFailure.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The read-tool dispatch with its refusal typed (Phase 510, D173): a lookup over the witness's declared tools, the refusal naming every served name, and the string form's sentence pinned as its rendering.",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
         "AiSurface.catalogueJson"
       ],
       "class": "measured-elsewhere",

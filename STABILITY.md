@@ -566,10 +566,10 @@ Phase-53 effect-honesty gate on the dirty path).
 stale* — the dependency structure, the cycle enumeration, and the dirty `Set` — and returns it as data;
 the actual re-evaluation stays domain-side. The dependency relation is a per-call `readsOf` function, not
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
-/ `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias of
-`dirtyFromChangedIds` left at `0.37.0`) is
-FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the
-rest of the substrate.
+/ `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias left at `0.37.0`)
+is FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the rest of the
+substrate. Since `0.39.0` `Fuaran.Core.Function` depends on it (Phase 510, D173; additive, a package edge and no moved
+signature): the pipeline's dirty set IS `dirtyFromChangedIds`, so this package is in every `Function` consumer's graph.
 
 ### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `0.37.0`)
 

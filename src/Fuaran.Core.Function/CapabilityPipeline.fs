@@ -313,24 +313,24 @@ module CapabilityPipeline =
     /// differ in their first field whatever the ids say. Every key moves (a breaking change to the
     /// journalled keys, on the `0.35.0` draft); the other hosts' twins gain the field at their next
     /// raise.
+    ///
+    /// **The pipeline grammar (D173)**, built by `Hash.keyedBy`: the readable prefix, then the kind and
+    /// the ids, then for an `Invoke` one triple per binding, the triples ordered by their ENCODED
+    /// pre-image (as the bytes were before the builder, so no journalled key moved).
     let nodeInvocationKey (n: PipelineNode) : string =
         match n with
-        | Source(id, dref, _) -> "source#" + id + "#" + Hash.fnv1a (Hash.canonicalFields [ "source"; id; dref ])
+        | Source(id, dref, _) -> Hash.keyedBy ("source#" + id) [ "source"; id; dref ]
         | Invoke(id, capId, _, args) ->
             let bindings =
                 args
                 |> List.map (fun (a, s) ->
                     match s with
-                    | Literal v -> Hash.canonicalFields [ a; "L"; v ]
-                    | FromNode up -> Hash.canonicalFields [ a; "N"; up ])
-                |> List.sort
-                |> String.concat ""
+                    | Literal v -> [ a; "L"; v ]
+                    | FromNode up -> [ a; "N"; up ])
+                |> List.sortBy Hash.canonicalFields
+                |> List.concat
 
-            capId
-            + "#"
-            + id
-            + "#"
-            + Hash.fnv1a (Hash.canonicalFields [ "invoke"; capId; id ] + bindings)
+            Hash.keyedBy (capId + "#" + id) ([ "invoke"; capId; id ] @ bindings)
 
     // ---- wire codec ----
 
@@ -567,36 +567,18 @@ module CapabilityPipeline =
     /// The dirty set for a changed-input set: `changed` ∪ every node transitively downstream of it via
     /// `FromNode` edges (the reverse-reachability closure). Minimal — a node not reachable from any change
     /// is never included. Pure over the DAG's edge structure.
+    ///
+    /// **It is `Propagation.dirtyFromChangedIds` over the pipeline's dependency map (Phase 510, D173)**
+    /// — each node id to the upstream ids its `FromNode` edges name (a repeated id to the union of its
+    /// nodes' edges) — so the closure is the one `proofs/Propagation.fst` models, not a copy of it.
     let dirtySet (changed: Set<string>) (p: CapabilityPipeline) : Set<string> =
-        // dependents: for each `FromNode up` edge into a node, `up` gains that node as a dependent.
-        let dependents =
-            [ for n in p.Nodes do
-                  match n with
-                  | Invoke(id, _, _, args) ->
-                      for _, src in args do
-                          match src with
-                          | FromNode up -> up, id
-                          | Literal _ -> ()
-                  | Source _ -> () ]
-            |> List.groupBy fst
-            |> List.map (fun (k, vs) -> k, vs |> List.map snd |> Set.ofList)
+        let deps =
+            p.Nodes
+            |> List.groupBy nodeId
+            |> List.map (fun (id, ns) -> id, ns |> List.collect upstreams |> Set.ofList)
             |> Map.ofList
 
-        let rec grow (frontier: Set<string>) (acc: Set<string>) =
-            if Set.isEmpty frontier then
-                acc
-            else
-                let next =
-                    (Set.empty, frontier)
-                    ||> Set.fold (fun s node ->
-                        match Map.tryFind node dependents with
-                        | Some deps -> Set.union s deps
-                        | None -> s)
-
-                let fresh = Set.difference next acc
-                grow fresh (Set.union acc fresh)
-
-        grow changed changed
+        Propagation.dirtyFromChangedIds deps changed
 
     /// Incrementally re-evaluate a pipeline (Phase 62) given the PRIOR evaluation and the set of
     /// changed-input node ids: re-invoke only the nodes downstream-of-change (`dirtySet`), reusing each

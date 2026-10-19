@@ -224,6 +224,76 @@ let tests =
                   Expect.isFalse (Map.containsKey "p" outcome.Values) "cyclic node not evaluated"
               | Error e -> failtestf "eval errored: %A" e
 
+          testCase "each Scope is the entry point it names, prior-blind and prior-aware (Phase 510)"
+          <| fun _ ->
+              // A chain, a branch, a cycle, a dangling read and a node downstream of the cycle.
+              let deps =
+                  Map.ofList
+                      [ "s", Set.empty
+                        "a", Set.singleton "s"
+                        "b", Set.ofList [ "a"; "ghost" ]
+                        "c", Set.empty
+                        "p", Set.singleton "q"
+                        "q", Set.singleton "p"
+                        "t", Set.ofList [ "p"; "c" ] ]
+
+              let baseOf = Map.ofList [ "s", 1; "a", 2; "b", 3; "c", 4; "p", 5; "q", 6; "t", 7 ]
+
+              let blind (seen: ResizeArray<string>) (resolve: string -> int option) (id: string) =
+                  seen.Add id
+
+                  Ok(
+                      Map.find id baseOf
+                      + (Map.find id deps
+                         |> Set.fold (fun acc r -> acc + (resolve r |> Option.defaultValue 100)) 0)
+                  )
+
+              let aware (seen: ResizeArray<string>) resolve (prior: int option) id =
+                  blind seen resolve id
+                  |> Result.map (fun v -> v + 1000 * (prior |> Option.defaultValue 0))
+
+              let pl = Propagation.plan deps
+              let prior = Map.ofList [ "s", 9; "a", 9; "b", 9; "c", 9; "t", 9 ]
+
+              let same name (named: ResizeArray<string> -> _) (scoped: ResizeArray<string> -> _) =
+                  let n, s = ResizeArray(), ResizeArray()
+                  Expect.equal (scoped s) (named n) (name + ": the result")
+                  Expect.equal (List.ofSeq s) (List.ofSeq n) (name + ": the nodes evaluated, in order")
+
+              for changed in [ Set.empty; Set.singleton "s"; Set.ofList [ "c"; "q" ]; Set.singleton "ghost" ] do
+                  same "evalFrom" (fun r -> Propagation.evalFrom (blind r) prior changed deps) (fun r ->
+                      Propagation.evalScoped (blind r) (Propagation.Scope.From(prior, changed)) pl)
+
+                  same "evalFromPlan" (fun r -> Propagation.evalFromPlan (blind r) prior changed pl) (fun r ->
+                      Propagation.evalScoped (blind r) (Propagation.Scope.From(prior, changed)) pl)
+
+                  same "evalFromWith" (fun r -> Propagation.evalFromWith (aware r) prior changed deps) (fun r ->
+                      Propagation.evalScopedWith (aware r) (Propagation.Scope.From(prior, changed)) pl)
+
+                  same "evalFromWithPlan" (fun r -> Propagation.evalFromWithPlan (aware r) prior changed pl) (fun r ->
+                      Propagation.evalScopedWith (aware r) (Propagation.Scope.From(prior, changed)) pl)
+
+              Expect.equal
+                  (Propagation.evalScoped
+                      (blind (ResizeArray()))
+                      (Propagation.Scope.From(prior, Set.singleton "ghost"))
+                      pl)
+                  (Error(Propagation.PropagationError.EvalUnknownChange [ "ghost" ]))
+                  "an unknown change is refused through the scope as through evalFrom"
+
+              same "eval" (fun r -> Propagation.eval (blind r) deps) (fun r ->
+                  Propagation.evalScoped (blind r) Propagation.Scope.Full pl)
+
+              same "evalWith" (fun r -> Propagation.evalWith (aware r) deps) (fun r ->
+                  Propagation.evalScopedWith (aware r) Propagation.Scope.Full pl)
+
+              for targets in [ Set.empty; Set.singleton "b"; Set.ofList [ "t"; "ghost" ] ] do
+                  same "evalFor" (fun r -> Propagation.evalFor (blind r) targets deps) (fun r ->
+                      Propagation.evalScoped (blind r) (Propagation.Scope.For targets) pl)
+
+                  same "evalForWith" (fun r -> Propagation.evalForWith (aware r) targets deps) (fun r ->
+                      Propagation.evalScopedWith (aware r) (Propagation.Scope.For targets) pl)
+
           testCase "evalFrom names an out-of-graph change (EvalUnknownChange, Phase 69)"
           <| fun _ ->
               let deps = Map.ofList [ "a", Set.empty ]

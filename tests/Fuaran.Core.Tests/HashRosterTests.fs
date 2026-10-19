@@ -131,7 +131,26 @@ let private enclosingDefinition (lines: string[]) (i: int) : string option =
         name
         |> Option.map (fun n -> (modules |> List.map (fun (_, mn, _) -> mn)) @ [ n ] |> String.concat ".")
 
-let private callSite = Regex(@"\bcanonicalFields\b", RegexOptions.Compiled)
+/// A call of the encoding: `canonicalFields` itself, or `keyedBy` (Phase 510), the one capture-key
+/// builder, whose own body encodes through `canonicalFields` — which the family holds below, so this
+/// widening cannot admit a key that leaves the encoding.
+let private callSite =
+    Regex(@"\b(canonicalFields|keyedBy)\b", RegexOptions.Compiled)
+
+/// The body of `keyedBy` in `Hash.fs`: the lines after its `let`, up to the next line at its own
+/// indentation or less.
+let private keyedByBody () : string list =
+    let lines = File.ReadAllLines(hashFile ())
+
+    match lines |> Array.tryFindIndex (fun l -> l.TrimStart().StartsWith "let keyedBy") with
+    | None -> []
+    | Some i ->
+        let indent = indentOf lines[i]
+
+        lines[i + 1 ..]
+        |> Array.takeWhile (fun l -> l.Trim() = "" || indentOf l > indent)
+        |> Array.filter (fun l -> l.Trim() <> "")
+        |> Array.toList
 
 /// Every definition under `src/` (outside `Hash.fs`) that calls `canonicalFields`, with the file
 /// and line of one call, keyed by qualified name.
@@ -252,6 +271,29 @@ let tests =
                       "the roster names %A and no definition of that name under src/ calls Hash.canonicalFields — the key left the encoding, or the roster is stale (found: %A)"
                       missing
                       (found |> Map.toList |> List.map fst))
+
+          testCase "keyedBy, which the roster counts as a call of the encoding, encodes through canonicalFields"
+          <| fun _ ->
+              // Read: its body calls canonicalFields and joins on no bare separator.
+              let body = keyedByBody ()
+              Expect.isNonEmpty body "Hash.fs defines keyedBy"
+
+              Expect.isTrue
+                  (body
+                   |> List.exists (fun l -> Regex.IsMatch(l.Split("//")[0], @"\bcanonicalFields\b")))
+                  (sprintf "keyedBy's body does not call canonicalFields: %A" body)
+
+              Expect.isFalse
+                  (body |> List.exists (fun l -> bareJoin.IsMatch(l.Split("//")[0])))
+                  (sprintf "keyedBy's body joins on the bare separator: %A" body)
+
+              // Run: it IS the prefix, '#', and the FNV-1a of the canonical pre-image, on fields that
+              // spell the separator and the escape.
+              for prefix, fields in [ "k", []; "q#id", [ ""; "p"; "t" ]; "a\u0001", [ "x\u0001y"; "\u0010"; "" ] ] do
+                  Expect.equal
+                      (Fuaran.Core.Hash.keyedBy prefix fields)
+                      (prefix + "#" + Fuaran.Core.Hash.fnv1a (Fuaran.Core.Hash.canonicalFields fields))
+                      (sprintf "keyedBy %A %A" prefix fields)
 
           testCase "no definition under src/ joins fields on the bare separator"
           <| fun _ ->

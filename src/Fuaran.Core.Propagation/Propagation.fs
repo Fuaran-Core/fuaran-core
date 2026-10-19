@@ -636,15 +636,6 @@ module Propagation =
 
         go Map.empty topo.Order
 
-    /// The walk over `sort deps` — the full evaluators' order.
-    let private walkWith
-        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
-        (recompute: string -> bool)
-        (prior: Map<string, 'v>)
-        (deps: Map<string, Set<string>>)
-        : Result<EvalOutcome<'v>, PropagationError> =
-        walkTopo evalNode recompute prior deps (sort deps)
-
     /// The adapter every prior-blind entry point runs through (Phase 298): an evaluator that is never
     /// handed a prior, as the prior-aware shape the `With` forms take. `eval` and `evalFrom` ARE
     /// `evalWith` and `evalFromWith` over it, so the two families cannot drift apart.
@@ -678,13 +669,75 @@ module Propagation =
           Topo = sort deps
           Dependents = dependents deps }
 
+    /// WHAT an evaluation computes (Phase 510, DECISIONS.md D173) — the axis the eight entry points
+    /// spelled as names, as one value. The graph it runs over is the `Plan` handed beside it.
+    [<RequireQualifiedAccess>]
+    type Scope<'v> =
+        /// Every acyclic node, once, in dependency order — `eval`.
+        | Full
+        /// Push: recompute the dirty set of `changed` (`dirtyFromChangedIds`), reusing each clean
+        /// node's `prior` value — `evalFrom`. A changed id the map does not hold is
+        /// `EvalUnknownChange`.
+        | From of prior: Map<string, 'v> * changed: Set<string>
+        /// Pull: the targets and what they read (`neededFor`), and nothing else — `evalFor`.
+        | For of targets: Set<string>
+
+    /// `sort deps` restricted to the needed set: its order filtered, and the cyclic groups that meet
+    /// it (a group meeting a closed set lies inside it, since every member reads every other).
+    let private restrictTopo (needed: Set<string>) (topo: TopoResult) : TopoResult =
+        { Order = topo.Order |> List.filter (fun id -> Set.contains id needed)
+          Cycles = topo.Cycles |> List.filter (List.exists (fun id -> Set.contains id needed)) }
+
+    /// The one evaluator body every entry point runs (Phase 510): a scope over a graph given as its
+    /// map, its order and its dependents. The dependents are asked for only by `Scope.From`, so the
+    /// entry points that never push (`eval`, `evalFor` and their `With` forms) invert no map, as before.
+    let private scoped
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (scope: Scope<'v>)
+        (deps: Map<string, Set<string>>)
+        (topo: TopoResult)
+        (dependentsOf: unit -> Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        match scope with
+        | Scope.Full -> walkTopo evalNode (fun _ -> true) Map.empty deps topo
+        | Scope.From(prior, changed) ->
+            let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c deps))
+
+            if not (Set.isEmpty unknown) then
+                Error(PropagationError.EvalUnknownChange(Set.toList unknown))
+            else
+                let dirty = closureOver (dependentsOf ()) changed
+                walkTopo evalNode (fun id -> Set.contains id dirty) prior deps topo
+        | Scope.For targets ->
+            walkTopo evalNode (fun _ -> true) Map.empty deps (restrictTopo (neededFor deps targets) topo)
+
+    /// Evaluate a scope over a prepared plan, each RECOMPUTED node handed its own prior value (Phase
+    /// 510): `Scope.Full` is `evalWith`, `Scope.From` is `evalFromWithPlan`, `Scope.For` is
+    /// `evalForWith`, each to the byte, with every theorem and premise the named form states. The
+    /// eight named entry points forward here or to the same body.
+    let evalScopedWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (scope: Scope<'v>)
+        (p: Plan)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        scoped evalNode scope p.Deps p.Topo (fun () -> p.Dependents)
+
     /// The full evaluator over a prior-aware evaluator (Phase 250): `eval` with every node handed
     /// `None` as its prior. It is the reference `evalFromWith` is certified against.
     let evalWith
         (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        walkWith evalNode (fun _ -> true) Map.empty deps
+        scoped evalNode Scope.Full deps (sort deps) (fun () -> dependents deps)
+
+    /// `evalScopedWith` over an evaluator that ignores its prior (Phase 510): `Scope.Full` is
+    /// `eval`, `Scope.From` is `evalFromPlan`, `Scope.For` is `evalFor`.
+    let evalScoped
+        (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
+        (scope: Scope<'v>)
+        (p: Plan)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        evalScopedWith (priorBlind evalNode) scope p
 
     /// The reference full evaluator (Phase 69): evaluate every acyclic node once, in dependency order,
     /// threading the results; cyclic SCCs are returned in `EvalOutcome.Cyclic`. The evaluator the
@@ -708,13 +761,7 @@ module Propagation =
         (changed: Set<string>)
         (p: Plan)
         : Result<EvalOutcome<'v>, PropagationError> =
-        let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c p.Deps))
-
-        if not (Set.isEmpty unknown) then
-            Error(PropagationError.EvalUnknownChange(Set.toList unknown))
-        else
-            let dirty = closureOver p.Dependents changed
-            walkTopo evalNode (fun id -> Set.contains id dirty) prior p.Deps p.Topo
+        evalScopedWith evalNode (Scope.From(prior, changed)) p
 
     /// `evalFrom` over a prepared plan (Phase 298): `evalFromWithPlan` with an evaluator that ignores
     /// its prior.
@@ -803,12 +850,6 @@ module Propagation =
     // `proofs/Propagation.fst`) rather than an argument about two orders. The order is still derived
     // over the whole map — `sort` is cheap beside evaluation, and it is the evaluator that is pulled.
 
-    /// `sort deps` restricted to the needed set: its order filtered, and the cyclic groups that meet
-    /// it (a group meeting a closed set lies inside it, since every member reads every other).
-    let private restrictTopo (needed: Set<string>) (topo: TopoResult) : TopoResult =
-        { Order = topo.Order |> List.filter (fun id -> Set.contains id needed)
-          Cycles = topo.Cycles |> List.filter (List.exists (fun id -> Set.contains id needed)) }
-
     /// Demand-driven evaluation over a prior-aware evaluator (Phase 317): `evalWith` restricted to
     /// `neededFor deps targets` — every needed node is evaluated once, in dependency order, handed
     /// `None` as its prior, and no node outside the needed set is handed to `evalNode` at all.
@@ -825,8 +866,7 @@ module Propagation =
         (targets: Set<string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        let needed = neededFor deps targets
-        walkTopo evalNode (fun _ -> true) Map.empty deps (restrictTopo needed (sort deps))
+        scoped evalNode (Scope.For targets) deps (sort deps) (fun () -> dependents deps)
 
     /// Demand-driven evaluation (Phase 317): `eval` restricted to `neededFor deps targets` — the
     /// targets and everything upstream of them, evaluated once each in dependency order, and nothing
