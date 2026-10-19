@@ -1226,15 +1226,16 @@ module private Projected =
         | Ok s -> s
         | Error e -> failtestf "codegen refused: %s" (CodegenError.describe e)
 
-    /// Run a script under `dotnet fsi`: its exit code and both streams, or None without `dotnet`.
-    let runFsi (source: string) : (int * string * string) option =
+    /// Run a script under `dotnet fsi` with compiler `flags`: its exit code and both streams, or
+    /// None without `dotnet`.
+    let runFsiWith (flags: string) (source: string) : (int * string * string) option =
         let path =
             Path.Combine(Path.GetTempPath(), sprintf "fuaran-403-%s.fsx" (System.Guid.NewGuid().ToString("N")))
 
         File.WriteAllText(path, source)
 
         try
-            ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\""))
+            ChildProcess.run (ChildProcess.command "dotnet" ("fsi " + flags + "\"" + path + "\""))
             |> Result.toOption
             |> Option.map (fun p -> p.Exit, p.Stdout, p.Stderr)
         finally
@@ -1243,17 +1244,21 @@ module private Projected =
             with _ ->
                 ()
 
+    let runFsi = runFsiWith ""
+
     let dllRef (name: string) =
         "#r @\"" + Path.Combine(System.AppContext.BaseDirectory, name) + "\"\n"
 
-    /// A script compiling the emitted module ahead of `body`.
-    let script (moduleText: string) (body: string) =
+    /// A script compiling the emitted module `name` ahead of `body`.
+    let scriptOf (name: string) (moduleText: string) (body: string) =
         dllRef "Fuaran.Core.Wire.dll"
         + dllRef "Fuaran.Core.Tree.dll"
         + dllRef "Fuaran.Core.Validator.dll"
-        + moduleText.Replace("module Projected\n", "")
+        + moduleText.Replace("module " + name + "\n", "")
         + "\n\n"
         + body
+
+    let script = scriptOf "Projected"
 
     let derivations =
         [ Gen.Derivation.StructuralAccess
@@ -1847,3 +1852,111 @@ let typescriptAdmission =
                   | Ok _, Ok _ -> ()
                   | Error a, Error b -> Expect.equal b a (sprintf "%A: one refusal" request)
                   | _ -> failtestf "%A: F# admits %b, TypeScript admits %b" request (Result.isOk fs) (Result.isOk ts)) ]
+
+// ---------------------------------------------------------------------------
+// Phase 540 — the slot enumerator over a PARAMETERISED union compiles under nullness checking.
+// Its slots are listed at `obj`, and `box` answers `obj | null` once nullness is on, so a consumer
+// building with `<Nullable>enable</Nullable>` refused the emission (FS3261). The compiled leg runs
+// the emission under `dotnet fsi --checknulls+ --warnaserror+`, and runs the pre-540 spelling
+// through the same probe, which must FAIL there, so the probe can tell the fix from the defect.
+// ---------------------------------------------------------------------------
+
+module private NullChecked =
+    let field name ty opt =
+        { Name = name
+          Type = ty
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let case tag fields =
+        { Tag = tag
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    let kind tag fields =
+        { Tag = tag
+          Category = "c"
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    let binding t = TUnion("Binding", [ t ])
+
+    /// A binding union generic in its value, held directly, optionally, in a list, and on the envelope.
+    let idl: Idl =
+        { Enums = []
+          Unions =
+            [ { Name = "Binding"
+                Params = [ "T" ]
+                Cases =
+                  [ case "Lit" [ field "value" (TVar "T") Required ]
+                    case "Path" [ field "path" TStr Required ] ] } ]
+          Records = []
+          Kinds =
+            [ kind
+                  "Text"
+                  [ field "text" (binding TStr) Required
+                    field "size" (binding TInt) Optional
+                    field "all" (TList(binding TBool)) Required ]
+              kind "Leaf" [ field "x" TStr Required ] ]
+          Defaults = []
+          NodeFields = [ field "hidden" (binding TBool) Optional ]
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared }
+
+    let emitted () =
+        Projected.emitted (
+            Gen.fsharpModuleDerived
+                Gen.GenSupport.Empty
+                [ Gen.Derivation.KeyedPositions; Gen.Derivation.SlotsOf "Binding" ]
+                "NullChecked"
+                idl
+                [ "Text"; "Leaf" ]
+        )
+
+    let probe =
+        String.concat
+            "\n"
+            [ "let n: Node ="
+              "    { Id = \"t\""
+              "      Kind = NodeKind.Text { Text = Binding.Lit \"a\"; Size = Some(Binding.Path \"p\"); All = [ Binding.Lit true ] }"
+              "      Hidden = Some(Binding.Lit false) }"
+              "printfn \"slots\t%s\" (slotsOfBinding n |> List.map fst |> String.concat \",\")" ]
+
+    /// Compiled under nullness checking with every warning an error, as a strict consumer builds.
+    let compile (moduleText: string) =
+        Projected.runFsiWith "--checknulls+ --warnaserror+ " (Projected.scriptOf "NullChecked" moduleText probe)
+
+[<Tests>]
+let nullCheckedSlotTests =
+    testList
+        "Phase 540 - the slot enumerator compiles under nullness checking"
+        [ testCase "a parameterised union's slots are upcast to obj, never boxed" (fun _ ->
+              let src = NullChecked.emitted ()
+              Expect.stringContains src "[ \"text\", (s.Text :> obj) ]" "a direct slot"
+              Expect.stringContains src "Some __v -> [ \"size\", (__v :> obj) ]" "an optional slot"
+              Expect.stringContains src "List.map (fun __v -> \"all\", (__v :> obj))" "a list of slots"
+              Expect.isFalse (src.Contains "box ") "no box in the module")
+
+          testCase
+              "compiled with nullness checking and warnings as errors, it compiles and lists every slot; the boxed spelling does not"
+              (fun _ ->
+                  let src = NullChecked.emitted ()
+
+                  match NullChecked.compile src with
+                  | None -> skiptest "dotnet not on PATH - the nullness-checked compile is skipped"
+                  | Some(code, out, err) ->
+                      Expect.equal code 0 (sprintf "the emission compiles: %s" err)
+                      Expect.stringContains out "slots\ttext,size,all,hidden" "kind fields first, then the envelope's"
+
+                  // The pre-540 spelling, through the same probe: it emits, and it does not compile.
+                  let boxed =
+                      System.Text.RegularExpressions.Regex.Replace(src, @"\(([A-Za-z_.]+) :> obj\)", "box $1")
+
+                  Expect.isTrue (boxed.Contains "box s.Text") "the substitution reached the slots"
+
+                  match NullChecked.compile boxed with
+                  | None -> skiptest "dotnet not on PATH"
+                  | Some(code, _, err) ->
+                      Expect.notEqual code 0 "boxed slots under nullness checking"
+                      Expect.stringContains err "FS3261" "the nullness refusal, as recorded") ]
