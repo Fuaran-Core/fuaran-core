@@ -171,8 +171,6 @@ module InvokeError =
             + policy
             + "' requires an approval before this tool runs."
 
-    /// The refusal a registry's policy makes, in this seam's error (Phase 318): a `Deny`'s guidance
-    /// becomes `PolicyRefused` naming the gate, its message and its alternatives.
     /// A body's answer in the seam's outcome (Phase 388: the one projection every invoking path —
     /// `Capability.invoke`, `invokeTyped`, the registry's dispatch and `FunctionRegistry.dispatch` —
     /// settles through): `Ready` and `Pending` ride out unchanged, and `Failed m` is the typed
@@ -183,6 +181,8 @@ module InvokeError =
         | Pending -> Ok Pending
         | Failed m -> Error(BodyFailed m)
 
+    /// The refusal a registry's policy makes, in this seam's error (Phase 318): a `Deny`'s guidance
+    /// becomes `PolicyRefused` naming the gate, its message and its alternatives.
     let internal policyRefused (policy: string) (g: RejectionGuidance) : InvokeError =
         PolicyRefused(policy, g.Message, g.Alternatives)
 
@@ -472,49 +472,6 @@ module Capability =
         : Result<Deferred<'v>, InvokeError> =
         typeArgs c args |> Result.bind (fun typed -> InvokeError.settle (body typed))
 
-/// A dispatch journalled in the keyed capture journal (Phase 391; a positional triple before
-/// `0.37.0`): what `CapabilityRegistry.dispatchCaptured` and the `QueryRegistry.dispatch…Captured`
-/// verbs answer. `'e` is the seam's refusal — `InvokeError` for a capability, `QueryError` for a
-/// query.
-type CapturedDispatch<'v, 'e> =
-    {
-        /// Exactly what the un-journalled dispatch answers.
-        Outcome: Result<Deferred<'v>, 'e>
-        /// The invocation key and occurrence the attempt was journalled under — the ticket
-        /// `OpStream.settleEffectKeyed` settles a `Pending` answer with later. `None` when nothing
-        /// was journalled: a refusal before the body, or a deterministic declaration.
-        Ticket: (string * int) option
-        /// The journal, with the attempt and its settlement appended when one was journalled.
-        Journal: KeyedCapture list
-    }
-
-/// Why a replayed dispatch did not answer a value (Phase 391; a nested `Result` before `0.37.0`): the
-/// seam's own refusal, which a live dispatch would have answered too, or the journal's inability
-/// to answer the invocation.
-[<RequireQualifiedAccess>]
-type ReplayFailure<'e> =
-    /// The seam refused, exactly as the live dispatch refuses — an id it does not hold, arguments
-    /// that do not validate, a policy refusal — or the journal recorded the invocation's refusal,
-    /// which replays as the refusal it was answered live.
-    | Refused of 'e
-    /// The journal cannot answer the invocation — `NoCapture`, `Exhausted`, a label mismatch, an
-    /// undecodable value. Never answered by a live call.
-    | Unanswered of KeyedCaptureFault
-
-/// A dispatch replayed from the keyed capture journal (Phase 391; a nested `Result` and a pair
-/// before `0.37.0`): what `CapabilityRegistry.dispatchReplayed` and the
-/// `QueryRegistry.dispatchReplayed…` verbs answer.
-type ReplayedDispatch<'v, 'e> =
-    {
-        /// The replayed answer: a value as `Ready`, an attempt that never settled as `Pending`, or
-        /// the failure.
-        Outcome: Result<Deferred<'v>, ReplayFailure<'e>>
-        /// The replay cursor after this invocation — advanced past every journal record the replay
-        /// consumed (a recorded refusal included), unchanged when the seam refused before the
-        /// journal or the journal could not answer. Thread it into the next replay.
-        Cursor: Map<string, int>
-    }
-
 /// A typed capability registry — the discovery surface an agent enumerates (the compute analogue of
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
@@ -523,16 +480,15 @@ type ReplayedDispatch<'v, 'e> =
 /// policy are reachable only through this module's verbs, so `register` — and its admission gate —
 /// is the only way a capability gets in. While the record was public, `{ r with Capabilities =
 /// Map.add id c r.Capabilities }` admitted a capability no gate had seen, which is the default-deny
-/// promise broken by construction.
+/// promise broken by construction. Since Phase 509 it is a `Seam` over `Capability`, in this seam's
+/// vocabulary (`CapabilityRegistry.vocabulary`), and every verb below forwards to it.
 type CapabilityRegistry =
     private
         {
-            /// Keyed by `Capability.Id`; every member was admitted by `register`, so each is total.
-            Capabilities: Map<string, Capability>
-            /// The gates every dispatch runs after validation and before the body, and the observers a
-            /// refusal reaches (Phase 318). `RegistryPolicy.none` — no gate — in `empty`; only
-            /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
-            Policy: RegistryPolicy<Capability, (string * string) list>
+            /// The capabilities keyed by `Capability.Id` — each admitted by `register`, so each is
+            /// total — and the gates every dispatch runs after validation and before the body, with
+            /// the observers a refusal reaches (Phase 318).
+            Seam: Seam<Capability, (string * string) list, InvokeError>
         }
 
 /// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295; the
@@ -541,11 +497,39 @@ type CapabilityRegistry =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CapabilityRegistry =
 
+    /// The capability seam's vocabulary (Phase 509): `NoSuchCapability` / `DuplicateCapability`,
+    /// `Capability.admissionFault` as the registration gate, `Capability.validateArgs` before the
+    /// policy, and `PolicyRefused` / `ApprovalRequired` for its gates. `FunctionRegistry` answers in
+    /// it too.
+    let internal vocabulary: SeamVocabulary<Capability, (string * string) list, InvokeError> =
+        { Id = _.Id
+          NoSuch = fun id known -> NoSuchCapability(id, known)
+          Duplicate = DuplicateCapability
+          Admission = Capability.admissionFault
+          Validate = Capability.validateArgs
+          Refused = InvokeError.policyRefused
+          Approval = ApprovalRequired
+          Describe = InvokeError.describe }
+
+    /// How the capability seam journals (Phase 318): under `Capability.determinismTag` and
+    /// `Capability.invocationKey`, a body's `Failed m` recorded as `m` and replayed as `BodyFailed m`.
+    /// A body's answer settles through `InvokeError.settle`, whose only refusal is `BodyFailed`, so
+    /// `Record` reads no other case; one it were handed is recorded as its sentence.
+    let internal capture: SeamCapture<Capability, (string * string) list, InvokeError> =
+        { Label = Capability.determinismTag
+          Key = Capability.invocationKey
+          Record =
+            function
+            | BodyFailed m -> m
+            | e -> InvokeError.describe e
+          Read = BodyFailed }
+
     /// The registry with no capabilities: every dispatch through it is `NoSuchCapability` with an
     /// empty `known` list.
-    let empty: CapabilityRegistry =
-        { Capabilities = Map.empty
-          Policy = RegistryPolicy.none }
+    let empty: CapabilityRegistry = { Seam = Seam.create vocabulary }
+
+    let private lift (r: Result<Seam<Capability, (string * string) list, InvokeError>, InvokeError>) =
+        r |> Result.map (fun s -> { Seam = s })
 
     /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
     /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over no count
@@ -553,8 +537,7 @@ module CapabilityRegistry =
     /// WELL-FORMED one (Phase 307): a signature `Signature.validate` refuses — an empty or
     /// non-finite space, two holes at one address — is `IllFormedCapability`.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        KeyedRegistry.register DuplicateCapability Capability.admissionFault c.Id c r.Capabilities
-        |> Result.map (fun m -> { r with Capabilities = m })
+        Seam.register c r.Seam |> lift
 
     // ---- the policy gate (Phase 318) ----
 
@@ -562,15 +545,13 @@ module CapabilityRegistry =
     /// after the arguments validate and before the body, and the decision is the join over every
     /// gate — so adding one can only refuse more: an invocation `r` refused, the result refuses.
     let withGate (gate: PolicyGate<Capability, (string * string) list>) (r: CapabilityRegistry) : CapabilityRegistry =
-        { r with
-            Policy = RegistryPolicy.withGate gate r.Policy }
+        { Seam = Seam.withGate gate r.Seam }
 
     /// `r` with `observe` told of every invocation its policy refuses — a `Deny` or a
     /// `NeedsApproval` — before the refusal is returned. A refusal for any other reason (an unknown
     /// id, an argument out of space) is not a policy refusal and reaches no observer.
     let onDenied (observe: PolicyDenial<(string * string) list> -> unit) (r: CapabilityRegistry) : CapabilityRegistry =
-        { r with
-            Policy = RegistryPolicy.onDenied observe r.Policy }
+        { Seam = Seam.onDenied observe r.Seam }
 
     /// What the registry would decide for an invocation, without dispatching it (Phase 318) — the
     /// meeting point of default-deny by shape and the policy gate: an id the
@@ -578,31 +559,14 @@ module CapabilityRegistry =
     /// registered ids as its alternatives; an invocation whose arguments do not validate is a
     /// `Deny` with the validation refusal's sentence; otherwise the gates' join. No observer is told.
     let decide (r: CapabilityRegistry) (id: string) (args: (string * string) list) : PolicyDecision =
-        match Map.tryFind id r.Capabilities with
-        | None ->
-            let known = r.Capabilities |> Map.toList |> List.map fst
-            PolicyDecision.denyWith (InvokeError.describe (NoSuchCapability(id, known))) known
-        | Some c ->
-            match Capability.validateArgs c args with
-            | Error e -> PolicyDecision.deny (InvokeError.describe e)
-            | Ok() -> RegistryPolicy.decide r.Policy c args
-
-    /// The policy's admission of one validated invocation: `Ok ()`, or the typed refusal after the
-    /// observers were told.
-    let private admit
-        (r: CapabilityRegistry)
-        (c: Capability)
-        (args: (string * string) list)
-        : Result<unit, InvokeError> =
-        RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy c.Id c args
+        Seam.decide r.Seam id args
 
     /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
-    let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Map.tryFind id r.Capabilities
+    let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Seam.tryFind id r.Seam
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part
     /// of the contract (`capabilityLaws` certifies it).
-    let enumerate (r: CapabilityRegistry) : Capability list =
-        r.Capabilities |> Map.toList |> List.map snd
+    let enumerate (r: CapabilityRegistry) : Capability list = Seam.enumerate r.Seam
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered
     /// id is `NoSuchCapability`), validate the arguments, run the policy's gates (Phase 318 — a
@@ -617,28 +581,21 @@ module CapabilityRegistry =
         (args: (string * string) list)
         (body: Capability -> unit -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
-        match Map.tryFind id r.Capabilities with
-        | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
-        | Some c ->
-            Capability.validateArgs c args
-            |> Result.bind (fun () -> admit r c args)
-            |> Result.bind (fun () -> InvokeError.settle (body c ()))
+        Seam.dispatch r.Seam id args (fun c -> InvokeError.settle (body c ()))
 
     /// `dispatch`, with the body handed the resolved capability and the validated arguments, typed
-    /// (`Capability.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny and gated
-    /// the same (Phase 318: the gate runs after the arguments type, before the body).
+    /// (`Capability.typeArgs`, Phase 251). Additive beside `dispatch`; default-deny and gated the
+    /// same (Phase 318: the gate runs after the arguments validate, before the body). The arguments
+    /// are typed after the gate; an argument that validated always types (`Capability.typeArgs`).
     let dispatchWithArgs
         (r: CapabilityRegistry)
         (id: string)
         (args: (string * string) list)
         (body: Capability -> (string * ArgValue) list -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
-        match Map.tryFind id r.Capabilities with
-        | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
-        | Some c ->
+        Seam.dispatch r.Seam id args (fun c ->
             Capability.typeArgs c args
-            |> Result.bind (fun typed -> admit r c args |> Result.map (fun () -> typed))
-            |> Result.bind (fun typed -> InvokeError.settle (body c typed))
+            |> Result.bind (fun typed -> InvokeError.settle (body c typed)))
 
     // ---- invocation-keyed capture (Phase 318) ----
 
@@ -660,39 +617,7 @@ module CapabilityRegistry =
         (body: Capability -> unit -> Deferred<'v>)
         (journal: KeyedCapture list)
         : CapturedDispatch<'v, InvokeError> =
-        let unjournalled outcome =
-            { Outcome = outcome
-              Ticket = None
-              Journal = journal }
-
-        match Map.tryFind id r.Capabilities with
-        | None -> unjournalled (Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)))
-        | Some c ->
-            match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
-            | Error e -> unjournalled (Error e)
-            | Ok() ->
-                let det = Capability.determinismTag c
-
-                if det = OpStream.deterministicTag then
-                    unjournalled (InvokeError.settle (body c ()))
-                else
-                    let key = Capability.invocationKey c args
-                    let mutable answered = Pending
-
-                    let captured =
-                        OpStream.captureEffectKeyed
-                            hashFn
-                            encode
-                            det
-                            key
-                            (fun () ->
-                                answered <- body c ()
-                                Deferred.settled answered)
-                            journal
-
-                    { Outcome = InvokeError.settle answered
-                      Ticket = Some(key, captured.Occurrence)
-                      Journal = captured.Journal }
+        Seam.dispatchCaptured hashFn encode capture r.Seam id args (fun c -> InvokeError.settle (body c ())) journal
 
     /// REPLAY an invocation from the keyed capture journal instead of running its body (Phase 318) —
     /// so a `Network` capability's replay is exact. The id resolves, the arguments validate and the
@@ -714,41 +639,7 @@ module CapabilityRegistry =
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
         : ReplayedDispatch<'v, InvokeError> =
-        let refused e =
-            { Outcome = Error(ReplayFailure.Refused e)
-              Cursor = cursor }
-
-        match Map.tryFind id r.Capabilities with
-        | None -> refused (NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
-        | Some c ->
-            match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
-            | Error e -> refused e
-            | Ok() ->
-                let det = Capability.determinismTag c
-
-                if det = OpStream.deterministicTag then
-                    { Outcome = InvokeError.settle (body c ()) |> Result.mapError ReplayFailure.Refused
-                      Cursor = cursor }
-                else
-                    match
-                        OpStream.replayEffectKeyed
-                            decode
-                            det
-                            (Capability.invocationKey c args)
-                            (fun () -> None)
-                            cursor
-                            journal
-                    with
-                    | Error fault ->
-                        { Outcome = Error(ReplayFailure.Unanswered fault)
-                          Cursor = cursor }
-                    | Ok(answer, cursor') ->
-                        { Outcome =
-                            match answer with
-                            | Some(Ok v) -> Ok(Ready v)
-                            | Some(Error m) -> Error(ReplayFailure.Refused(BodyFailed m))
-                            | None -> Ok Pending
-                          Cursor = cursor' }
+        Seam.dispatchReplayed decode capture r.Seam id args (fun c -> InvokeError.settle (body c ())) cursor journal
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
@@ -756,38 +647,26 @@ module CapabilityRegistry =
     /// registry does not hold it, naming every id it does hold. Removing a capability just
     /// registered gives back the registry it was registered into.
     let unregister (id: string) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Capabilities
-        |> Result.map (fun m -> { r with Capabilities = m })
+        Seam.unregister id r.Seam |> lift
 
     /// Swap the capability registered under `c.Id` for `c` — the hot-reload verb. Refused
     /// `NoSuchCapability` when the id is not registered, and held to the admission gate `register`
     /// runs (`NonTotalCapability`, `IllFormedCapability`), so a replacement can admit nothing a
     /// registration would refuse. On a refusal the registry is unchanged.
     let replace (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        KeyedRegistry.replace
-            (fun id known -> NoSuchCapability(id, known))
-            Capability.admissionFault
-            c.Id
-            c
-            r.Capabilities
-        |> Result.map (fun m -> { r with Capabilities = m })
+        Seam.replace c r.Seam |> lift
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny is a
     /// `restrict` of the host's registry. An id in `keep` the registry does not hold is ignored, so
     /// the result enumerates a subset of what `r` enumerates and dispatches nothing `r` would refuse.
-    let restrict (keep: Set<string>) (r: CapabilityRegistry) : CapabilityRegistry =
-        { r with
-            Capabilities = KeyedRegistry.restrict keep r.Capabilities }
+    let restrict (keep: Set<string>) (r: CapabilityRegistry) : CapabilityRegistry = { Seam = Seam.restrict keep r.Seam }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateCapability` naming the
     /// first id, in id order, that both hold (no silent overwrite, as `register`). Associative. The
     /// union runs BOTH registries' gates and tells both registries' observers (Phase 318,
     /// `RegistryPolicy.combine`), so it refuses every invocation either registry's policy refused.
     let union (a: CapabilityRegistry) (b: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        KeyedRegistry.union DuplicateCapability a.Capabilities b.Capabilities
-        |> Result.map (fun m ->
-            { Capabilities = m
-              Policy = RegistryPolicy.combine a.Policy b.Policy })
+        Seam.union a.Seam b.Seam |> lift
 
 /// How a seam codec treats a member it does not know (Phase 251). `Lenient` — the default, and
 /// what every decoder without a policy argument does — ignores it, so a reader tolerates a writer
@@ -817,27 +696,10 @@ module CapabilityCodec =
     // changed: an optional `slotKind` that is present and not a string is refused, where it was
     // read as absent.
 
-    /// Two members of one object, combined.
-    let private both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> 'C) : Decoder<'C> =
-        a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
-
-    /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
-    let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
-        Decoder.tagDispatchWith what "$type" cases
-
-    /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
-    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
-        Decoder.str
-        |> Decoder.andThen (fun s ->
-            match cases |> List.tryFind (fun (k, _) -> k = s) with
-            | Some(_, v) -> Ok v
-            | None ->
-                Error(
-                    RootDecodeCode.UnknownTag,
-                    "one of "
-                    + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "),
-                    what + s
-                ))
+    // Phase 509: the combinators these readers share are Wire's — `Decoder.pair` (two members of
+    // one object), `Decoder.oneOfWith` (a string from a closed set, in this codec's sentence
+    // `<what><value>`), `Decoder.strings` — and the `"$type"` dispatch is `SeamCodec.dispatch`, the
+    // pipeline codec's too; each was written here, body for body.
 
     // ---- signature entry + signature ----
 
@@ -857,7 +719,10 @@ module CapabilityCodec =
             str "name"
             |> Result.bind (fun name ->
                 // Phase 295: the tag is one of `HoleKind.tags`; any other is refused.
-                Decoder.field "kind" (tagged "unknown hole kind: " (HoleKind.tags |> List.map (fun t -> t, t))) el
+                Decoder.field
+                    "kind"
+                    (Decoder.oneOfWith "unknown hole kind: " (HoleKind.tags |> List.map (fun t -> t, t)))
+                    el
                 |> Result.bind (fun kind ->
                     Decoder.field "required" Decoder.bool el
                     |> Result.bind (fun required ->
@@ -940,7 +805,7 @@ module CapabilityCodec =
         | Js -> "js"
 
     let private islandOf: Decoder<IslandKind> =
-        tagged "unknown island kind: " [ "pyodide", Pyodide; "fable", Fable; "js", Js ]
+        Decoder.oneOfWith "unknown island kind: " [ "pyodide", Pyodide; "fable", Fable; "js", Js ]
 
     let private placementJson (p: Placement) : JVal =
         match p with
@@ -951,7 +816,7 @@ module CapabilityCodec =
         | ClientIsland k -> Canon.typed "clientIsland" [ "island", JStr(islandTag k) ]
 
     let private placementOf: Decoder<Placement> =
-        dispatch
+        SeamCodec.dispatch
             "unknown placement: "
             [ "buildTime", Decoder.succeed BuildTime
               "server", Decoder.succeed Server
@@ -983,7 +848,7 @@ module CapabilityCodec =
 
     let private decodeJsonDetailed (el: JVal) : Result<Capability, DecodeError> =
         // Phase 307: a capability document says so — its `"$type"` is `capability`.
-        Decoder.field "$type" (tagged "not a capability declaration: " [ "capability", () ]) el
+        Decoder.field "$type" (Decoder.oneOfWith "not a capability declaration: " [ "capability", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "signature" signatureFieldsOf el
@@ -1063,7 +928,7 @@ module CapabilityCodec =
 
     let private invocationOf: Decoder<string * (string * string) list> =
         let arg =
-            both (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
+            Decoder.pair (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
 
         // Phase 307: one address, one argument — a repeated address is refused here as it is by
         // `validateArgs` (`DuplicateArg`), at the second occurrence. The refusal is raised through
@@ -1085,8 +950,10 @@ module CapabilityCodec =
 
             go Set.empty 0 args
 
-        both (Decoder.field "capabilityId" Decoder.str) (Decoder.field "args" (Decoder.list arg)) (fun cid args ->
-            cid, args)
+        Decoder.pair
+            (Decoder.field "capabilityId" Decoder.str)
+            (Decoder.field "args" (Decoder.list arg))
+            (fun cid args -> cid, args)
         |> Decoder.bind distinctArgs
 
     /// Read an invocation back as `(capabilityId, args)` in wire order, leniently; argument values are
@@ -1112,7 +979,7 @@ module CapabilityCodec =
     /// keeps its code and its path, under `value`. `deferredOf` is this over a sentence-answering
     /// reader; the query seam's typed result reader is this over `resultOf`.
     let internal deferredDecoder (payload: Decoder<'T>) : Decoder<Deferred<'T>> =
-        dispatch
+        SeamCodec.dispatch
             "unknown deferred kind: "
             [ "pending", Decoder.succeed Pending
               "ready", Decoder.field "value" payload |> Decoder.map Ready
@@ -1153,9 +1020,10 @@ module CapabilityCodec =
     let private faultOf: Decoder<DeclarationFault> =
         let str name = Decoder.field name Decoder.str
 
-        dispatch
+        SeamCodec.dispatch
             "unknown declaration fault: "
-            [ "emptySpace", both (str "addr") (Decoder.field "space" SpaceCodec.decoder) (fun a sp -> EmptySpace(a, sp))
+            [ "emptySpace",
+              Decoder.pair (str "addr") (Decoder.field "space" SpaceCodec.decoder) (fun a sp -> EmptySpace(a, sp))
               "nonFiniteBound", str "addr" |> Decoder.map NonFiniteBound
               "duplicateHoleAddr", str "addr" |> Decoder.map DuplicateHoleAddr
               "holeUnderSlot", str "node" |> Decoder.map HoleUnderSlot ]
@@ -1186,32 +1054,32 @@ module CapabilityCodec =
     let invokeErrorOf (el: JVal) : Result<InvokeError, string> =
         let str name = Decoder.field name Decoder.str
 
-        let strList name =
-            Decoder.field name (Decoder.list Decoder.str)
+        let strList name = Decoder.field name Decoder.strings
 
         let invokeError =
-            dispatch
+            SeamCodec.dispatch
                 "unknown invoke error: "
-                [ "noSuchCapability", both (str "id") (strList "known") (fun id known -> NoSuchCapability(id, known))
+                [ "noSuchCapability",
+                  Decoder.pair (str "id") (strList "known") (fun id known -> NoSuchCapability(id, known))
                   "duplicateCapability", str "id" |> Decoder.map DuplicateCapability
-                  "unknownArg", both (str "addr") (strList "declared") (fun addr d -> UnknownArg(addr, d))
+                  "unknownArg", Decoder.pair (str "addr") (strList "declared") (fun addr d -> UnknownArg(addr, d))
                   "argOutOfSpace",
                   str "addr"
                   |> Decoder.bind (fun addr ->
-                      both (Decoder.field "space" SpaceCodec.decoder) (str "got") (fun sp got ->
+                      Decoder.pair (Decoder.field "space" SpaceCodec.decoder) (str "got") (fun sp got ->
                           ArgOutOfSpace(addr, sp, got)))
                   "requiredArgsUnbound", strList "addrs" |> Decoder.map RequiredArgsUnbound
                   "uninvocableArg", str "addr" |> Decoder.map UninvocableArg
                   "bodyFailed", str "reason" |> Decoder.map BodyFailed
                   "nonTotalCapability",
-                  both (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs))
+                  Decoder.pair (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs))
                   "illFormedCapability",
-                  both (str "id") (Decoder.field "fault" faultOf) (fun id f -> IllFormedCapability(id, f))
+                  Decoder.pair (str "id") (Decoder.field "fault" faultOf) (fun id f -> IllFormedCapability(id, f))
                   "duplicateArg", str "addr" |> Decoder.map DuplicateArg
                   "policyRefused",
                   str "policy"
                   |> Decoder.bind (fun policy ->
-                      both (str "reason") (strList "allowed") (fun reason allowed ->
+                      Decoder.pair (str "reason") (strList "allowed") (fun reason allowed ->
                           PolicyRefused(policy, reason, allowed)))
                   "approvalRequired", str "policy" |> Decoder.map ApprovalRequired ]
 

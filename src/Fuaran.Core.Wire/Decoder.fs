@@ -46,6 +46,11 @@ module Decoder =
             | Ok v -> f v el
             | Error e -> Error e
 
+    /// Two decoders over the SAME value, their answers combined by `f` (Phase 509): `a` reads first,
+    /// and its refusal is answered without running `b`. The two-member read every case of a tagged
+    /// union with two payloads spells.
+    let pair (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> 'C) : Decoder<'C> = a |> bind (fun x -> b |> map (f x))
+
     /// Decode, then check or convert the answer. `f` refuses with the triple `fail` takes — a
     /// `RootDecodeCode`, what the position expected, and a sentence — and `andThen` raises it AT the
     /// value (Phase 453), so every refusal it answers resolves in the value it was handed. A check
@@ -217,6 +222,10 @@ module Decoder =
     /// Every item of an array decoded with `d`; the first refusal, under its item's index.
     let list (d: Decoder<'T>) : Decoder<'T list> = mapListIndexed (fun _ -> d)
 
+    /// An array of strings (Phase 509) — `list str`: a non-array is `WrongKind`, and so is an item
+    /// that is not a string, under its index.
+    let strings: Decoder<string list> = list str
+
     /// `list` with an item bound: more than `maxItems` items is `LimitExceeded` at the array,
     /// before any item is read.
     let boundedList (maxItems: int) (d: Decoder<'T>) : Decoder<'T list> =
@@ -312,6 +321,17 @@ module Decoder =
                             ("unknown value '" + s + "'; the known values are " + quoteAll known)
                     )
             | other -> Error(wrongKind "string" other)
+
+    /// `oneOf`, with a miss refused in the caller's own sentence (Phase 509; the seam codecs each
+    /// wrote it as `tagged` before): the refusal is the same `UnknownTag` at the value, its
+    /// expectation still naming every known spelling, and its message `what + <the value>` — as
+    /// `tagDispatchWith` is to `tagDispatch`. A value that is not a string is `str`'s `WrongKind`.
+    let oneOfWith (what: string) (cases: (string * 'T) list) : Decoder<'T> =
+        str
+        |> andThen (fun s ->
+            match cases |> List.tryFind (fun (k, _) -> k = s) with
+            | Some(_, v) -> Ok v
+            | None -> Error(RootDecodeCode.UnknownTag, "one of " + quoteAll (cases |> List.map fst), what + s))
 
     /// Dispatch on the string under the discriminator `key`: the case's decoder reads the SAME
     /// object. An absent or non-string discriminator is refused as such; an unknown tag is

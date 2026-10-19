@@ -67,6 +67,39 @@
   "operations": [
     {
       "members": [
+        "Seam.create",
+        "Seam.register",
+        "Seam.tryFind",
+        "Seam.enumerate",
+        "Seam.ids",
+        "Seam.unregister",
+        "Seam.replace",
+        "Seam.restrict",
+        "Seam.union",
+        "Seam.withGate",
+        "Seam.onDenied",
+        "Seam.decide",
+        "Seam.dispatch",
+        "Seam.dispatchCaptured",
+        "Seam.dispatchReplayed",
+        "Seam.Equals",
+        "Seam.GetHashCode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The published seam dispatch prologue (Phase 509, D172): the capability and query registries are each a Seam, so the policy and keyed-capture law families reach these through them; the toy seam in the stand-in calls each by name.",
+      "standIn": "tests/Fuaran.Core.Tests/RegistryLifecycleTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.oneOfWith",
+        "Decoder.pair"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The decoder helpers the seam codecs shared (Phase 509): oneOf in the caller's sentence and two members of one object (`Decoder.strings`, a value, is outside the operation census); the stand-in pins each refusal field for field.",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
+    },
+    {
+      "members": [
         "AiSurface.catalogueJson"
       ],
       "class": "measured-elsewhere",

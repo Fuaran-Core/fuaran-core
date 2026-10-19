@@ -382,8 +382,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   change to what either returns invalidates persisted data rather than breaking a compile.
   Which regime a call site is in is part of its meaning — a cache fingerprint quietly
   substituted for the crypto digest would still typecheck.
-- **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the
-  artifact-function witness.
+- **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the artifact-function witness.
 - **`SkeletonOp` carries no ordinal** (`0.2.0`, 2026-07-26). `InsertChild` and `MoveNode` are
   `(parent, node)` and `(target, newParent)`; both **append**, and `ReorderChildren` states order by
   naming ids. Placing a node anywhere but last is `Batch [InsertChild …; ReorderChildren …]`.
@@ -420,6 +419,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   or dropping preservation is a **major** bump; an additive kind/case is a **minor** bump an older
   consumer tolerates via `decodeTolerant`.
 - **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; every bump is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number). **`schema: 6` (Phase 506):** every value is written by `Canon.render`, so members are in ordinal order (top level `families`, `kind`, `packages`, `schema`; each family `adequacy` … `witness`) where `schema: 5` wrote them in declaration order, each family is one line, and each family gains `spellings` (an array; since Phase 507 six `…With` families list their pinned-default twins there, and those six ids leave the family list). That reader parses by member name and was checked against the new bytes: it reads the same ids and `cases` and is unaffected.
+- **`Seam<'Decl,'Args,'E>`** + `SeamVocabulary` / `SeamCapture` (Phase 509, `0.39.0`, DECISIONS.md D172) — the invocable seams' one dispatch prologue, which `CapabilityRegistry` and `QueryRegistry` are and a host's own registry builds on: every dispatch verb resolves, validates and admits through the policy before the body runs, and no public verb runs a declaration without admitting it. Adding a public verb that skips the admission, or a field to either record (a full-literal vocabulary is how an adopter builds one), is breaking.
 
 ### The Column and Query strand (first-class)
 

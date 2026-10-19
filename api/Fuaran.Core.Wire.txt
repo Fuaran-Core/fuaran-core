@@ -188,8 +188,10 @@ method Fuaran.Core.Decoder.members(Microsoft.FSharp.Collections.FSharpList`1<Sys
 method Fuaran.Core.Decoder.missing(System.String) : Fuaran.Core.DecodeError
 method Fuaran.Core.Decoder.obj(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.ofString`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
+method Fuaran.Core.Decoder.oneOfWith`1(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, !!0>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>
 method Fuaran.Core.Decoder.oneOf`1(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, !!0>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.optField`1(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Fuaran.Core.DecodeError>
+method Fuaran.Core.Decoder.pair`3(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.DecodeError>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!2>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!2, Fuaran.Core.DecodeError>>
 method Fuaran.Core.Decoder.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.parseWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.parseWithLimits(Fuaran.Core.JsonLimits, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
@@ -266,6 +268,7 @@ property Fuaran.Core.Codec.int : Fuaran.Core.Codec`1<System.Int32> { get }
 property Fuaran.Core.Codec.json : Fuaran.Core.Codec`1<Fuaran.Core.JVal> { get }
 property Fuaran.Core.Codec.string : Fuaran.Core.Codec`1<System.String> { get }
 property Fuaran.Core.DecodeErrorModule.codes : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeCode> { get }
+property Fuaran.Core.Decoder.strings : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.DecodeError>> { get }
 property Fuaran.Core.EncodingProfileModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfile> { get }
 property Fuaran.Core.EncodingProfileModule.current : Fuaran.Core.EncodingProfile { get }
 property Fuaran.Core.Versioning+ProfileModule.coreV1 : Fuaran.Core.Versioning+Profile { get }

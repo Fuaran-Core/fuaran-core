@@ -15,9 +15,6 @@ module QueryCodec =
     // spelled into this codec's `QueryError` envelope at the entry points, with the sentence it
     // has always carried.
 
-    /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
-    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> = QueryShape.tagged what cases
-
     let private colTypeOf: Decoder<ColumnType> = QueryShape.colTypeOf
 
     // The effect class is `EffectCodec`'s (Phase 295), the capability codec's reader and writer.
@@ -135,7 +132,7 @@ module QueryCodec =
     // that decodes is one `register` admits, and a refused one is refused with the registry's error.
 
     let internal queryOf (el: JVal) : Result<Query, DecodeError> =
-        Decoder.field "$type" (tagged "not a query declaration: " [ "query", () ]) el
+        Decoder.field "$type" (Decoder.oneOfWith "not a query declaration: " [ "query", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "params" (Decoder.list paramOf) el
@@ -193,7 +190,7 @@ module QueryCodec =
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
     let internal resultOf (el: JVal) : Result<QueryResult, DecodeError> =
-        Decoder.field "$type" (tagged "not a query result: " [ "queryResult", () ]) el
+        Decoder.field "$type" (Decoder.oneOfWith "not a query result: " [ "queryResult", () ]) el
         |> Result.bind (fun () -> Decoder.field "rows" Decoder.json el)
         |> Result.bind (fun rowsEl ->
             match ColumnCodec.decodeJson rowsEl with

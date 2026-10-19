@@ -129,8 +129,8 @@ module CapabilityLookup =
     /// A capability registry as a lookup, carrying the registry's policy.
     let ofRegistry (r: CapabilityRegistry) : CapabilityLookup =
         { TryFind = fun id -> CapabilityRegistry.tryFind id r
-          Known = r.Capabilities |> Map.toList |> List.map fst
-          Policy = r.Policy }
+          Known = Seam.ids r.Seam
+          Policy = r.Seam.Policy }
 
     /// A function registry as a lookup: each entry's capability, by its id, and the registry's policy.
     let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
@@ -356,17 +356,13 @@ module CapabilityPipeline =
                              | SpaceFault.NonFinite -> "value-space bound is not a finite number")
                     ))
 
-    /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
-    let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
-        Decoder.tagDispatchWith what "$type" cases
-
     let private argSrcToJ (s: ArgSource) : JVal =
         match s with
         | Literal v -> Canon.typed "literal" [ "value", JStr v ]
         | FromNode n -> Canon.typed "fromNode" [ "node", JStr n ]
 
     let private argSrcFromJ: Decoder<ArgSource> =
-        dispatch
+        SeamCodec.dispatch
             "unknown arg source: "
             [ "literal", Decoder.field "value" Decoder.str |> Decoder.map Literal
               "fromNode", Decoder.field "node" Decoder.str |> Decoder.map FromNode ]
@@ -411,7 +407,7 @@ module CapabilityPipeline =
                         Decoder.field "args" (Decoder.list argFromJ) el
                         |> Result.map (fun args -> Invoke(id, capId, ty, args)))))
 
-        dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
+        SeamCodec.dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
 
     /// Encode a pipeline to its canonical wire string. Total; a pipeline whose output spaces carry
     /// a non-finite bound writes bytes `decode` refuses — `tryEncode` refuses it instead.

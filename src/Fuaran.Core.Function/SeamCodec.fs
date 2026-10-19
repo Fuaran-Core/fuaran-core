@@ -18,6 +18,11 @@ module internal SeamCodec =
         | Some(JStr t) -> Some t
         | _ -> None
 
+    /// Dispatch on `"$type"`; an unknown tag keeps the codec's sentence `<what><tag>`
+    /// (`Decoder.tagDispatchWith`) — the capability and pipeline codecs' one spelling of it (Phase 509).
+    let dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
+        Decoder.tagDispatchWith what "$type" cases
+
     /// The first member of `el` outside `known`, as a refusal naming it, the object it is in
     /// (`where`), and the members read.
     let members (where: string) (known: string list) : Decoder<unit> =

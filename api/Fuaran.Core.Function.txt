@@ -10,6 +10,7 @@ attribute Fuaran.Core.PolicyDecision RequireQualifiedAccess
 attribute Fuaran.Core.ReadPolicy RequireQualifiedAccess
 attribute Fuaran.Core.RegistryPolicy`2 NoComparison
 attribute Fuaran.Core.ReplayFailure`1 RequireQualifiedAccess
+attribute Fuaran.Core.Seam`3 NoComparison
 attribute Fuaran.Core.SpaceFault RequireQualifiedAccess
 ctor Fuaran.Core.ArtifactWitness`2..ctor(Fuaran.Core.NodeWitness`2<!0, !1>, Fuaran.Core.IdWitness`1<!1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.HoleDecl>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.EffectClass>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>)
 ctor Fuaran.Core.Capability..ctor(System.String, Fuaran.Core.Signature, Fuaran.Core.Placement)
@@ -28,6 +29,8 @@ ctor Fuaran.Core.PackedFunction..ctor(System.String, System.String, System.Strin
 ctor Fuaran.Core.PolicyDenial`1..ctor(System.String, System.String, !0, Fuaran.Core.PolicyDecision)
 ctor Fuaran.Core.PolicyGate`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>)
 ctor Fuaran.Core.ReplayedDispatch`2..ctor(Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!0>, Fuaran.Core.ReplayFailure`1<!1>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Int32>)
+ctor Fuaran.Core.SeamCapture`3..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!2, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>)
+ctor Fuaran.Core.SeamVocabulary`3..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, !2>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpOption`1<!2>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.RejectionGuidance, !2>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!2, System.String>)
 ctor Fuaran.Core.SigEntry..ctor(System.String, System.String, Fuaran.Core.HoleKind, System.Boolean)
 ctor Fuaran.Core.Signature..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SigEntry>, Fuaran.Core.EffectClass)
 ctor Fuaran.Core.SignatureQuery..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SigEntry>)
@@ -258,6 +261,23 @@ method Fuaran.Core.RegistryPolicyModule.onDenied`2(Microsoft.FSharp.Core.FSharpF
 method Fuaran.Core.RegistryPolicyModule.withGate`2(Fuaran.Core.PolicyGate`2<!!0, !!1>, Fuaran.Core.RegistryPolicy`2<!!0, !!1>) : Fuaran.Core.RegistryPolicy`2<!!0, !!1>
 method Fuaran.Core.RegistryPolicy`2.Equals(System.Object) : System.Boolean
 method Fuaran.Core.RegistryPolicy`2.GetHashCode() : System.Int32
+method Fuaran.Core.SeamModule.create`3(Fuaran.Core.SeamVocabulary`3<!!0, !!1, !!2>) : Fuaran.Core.Seam`3<!!0, !!1, !!2>
+method Fuaran.Core.SeamModule.decide`3(Fuaran.Core.Seam`3<!!0, !!1, !!2>, System.String, !!1) : Fuaran.Core.PolicyDecision
+method Fuaran.Core.SeamModule.dispatchCaptured`4(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.SeamCapture`3<!!1, !!2, !!3>, Fuaran.Core.Seam`3<!!1, !!2, !!3>, System.String, !!2, Microsoft.FSharp.Core.FSharpFunc`2<!!1, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, !!3>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : Fuaran.Core.CapturedDispatch`2<!!0, !!3>
+method Fuaran.Core.SeamModule.dispatchReplayed`4(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.SeamCapture`3<!!1, !!2, !!3>, Fuaran.Core.Seam`3<!!1, !!2, !!3>, System.String, !!2, Microsoft.FSharp.Core.FSharpFunc`2<!!1, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, !!3>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Int32>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : Fuaran.Core.ReplayedDispatch`2<!!0, !!3>
+method Fuaran.Core.SeamModule.dispatch`4(Fuaran.Core.Seam`3<!!0, !!1, !!2>, System.String, !!1, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!3>, !!2>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!3>, !!2>
+method Fuaran.Core.SeamModule.enumerate`3(Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
+method Fuaran.Core.SeamModule.ids`3(Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.SeamModule.onDenied`3(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.PolicyDenial`1<!!0>, Microsoft.FSharp.Core.Unit>, Fuaran.Core.Seam`3<!!1, !!0, !!2>) : Fuaran.Core.Seam`3<!!1, !!0, !!2>
+method Fuaran.Core.SeamModule.register`3(!!0, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Seam`3<!!0, !!1, !!2>, !!2>
+method Fuaran.Core.SeamModule.replace`3(!!0, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Seam`3<!!0, !!1, !!2>, !!2>
+method Fuaran.Core.SeamModule.restrict`3(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Fuaran.Core.Seam`3<!!0, !!1, !!2>
+method Fuaran.Core.SeamModule.tryFind`3(System.String, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Core.FSharpOption`1<!!0>
+method Fuaran.Core.SeamModule.union`3(Fuaran.Core.Seam`3<!!0, !!1, !!2>, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Seam`3<!!0, !!1, !!2>, !!2>
+method Fuaran.Core.SeamModule.unregister`3(System.String, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Seam`3<!!0, !!1, !!2>, !!2>
+method Fuaran.Core.SeamModule.withGate`3(Fuaran.Core.PolicyGate`2<!!0, !!1>, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Fuaran.Core.Seam`3<!!0, !!1, !!2>
+method Fuaran.Core.Seam`3.Equals(System.Object) : System.Boolean
+method Fuaran.Core.Seam`3.GetHashCode() : System.Int32
 method Fuaran.Core.SignatureModule.validate(Fuaran.Core.Signature) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.DeclarationFault>
 method Fuaran.Core.Space.canonical(Fuaran.Core.ValueSpace, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Space.describe(Fuaran.Core.ValueSpace) : System.String
@@ -331,6 +351,18 @@ record-field Fuaran.Core.PolicyGate`2.Decide #1 : Microsoft.FSharp.Core.FSharpFu
 record-field Fuaran.Core.PolicyGate`2.Policy #0 : System.String
 record-field Fuaran.Core.ReplayedDispatch`2.Cursor #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Int32>
 record-field Fuaran.Core.ReplayedDispatch`2.Outcome #0 : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!0>, Fuaran.Core.ReplayFailure`1<!1>>
+record-field Fuaran.Core.SeamCapture`3.Key #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, System.String>>
+record-field Fuaran.Core.SeamCapture`3.Label #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.SeamCapture`3.Read #3 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>
+record-field Fuaran.Core.SeamCapture`3.Record #2 : Microsoft.FSharp.Core.FSharpFunc`2<!2, System.String>
+record-field Fuaran.Core.SeamVocabulary`3.Admission #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpOption`1<!2>>
+record-field Fuaran.Core.SeamVocabulary`3.Approval #6 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>
+record-field Fuaran.Core.SeamVocabulary`3.Describe #7 : Microsoft.FSharp.Core.FSharpFunc`2<!2, System.String>
+record-field Fuaran.Core.SeamVocabulary`3.Duplicate #2 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, !2>
+record-field Fuaran.Core.SeamVocabulary`3.Id #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.SeamVocabulary`3.NoSuch #1 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, !2>>
+record-field Fuaran.Core.SeamVocabulary`3.Refused #5 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.RejectionGuidance, !2>>
+record-field Fuaran.Core.SeamVocabulary`3.Validate #4 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, !2>>>
 record-field Fuaran.Core.SigEntry.Addr #0 : System.String
 record-field Fuaran.Core.SigEntry.Kind #2 : Fuaran.Core.HoleKind
 record-field Fuaran.Core.SigEntry.Name #1 : System.String
@@ -488,6 +520,10 @@ type Fuaran.Core.ReplayFailure`1+Refused (type)
 type Fuaran.Core.ReplayFailure`1+Tags (type)
 type Fuaran.Core.ReplayFailure`1+Unanswered (type)
 type Fuaran.Core.ReplayedDispatch`2 (record)
+type Fuaran.Core.SeamCapture`3 (record)
+type Fuaran.Core.SeamModule (module)
+type Fuaran.Core.SeamVocabulary`3 (record)
+type Fuaran.Core.Seam`3 (record)
 type Fuaran.Core.SigEntry (record)
 type Fuaran.Core.Signature (record)
 type Fuaran.Core.SignatureModule (module)

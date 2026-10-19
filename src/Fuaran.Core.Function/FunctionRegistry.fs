@@ -156,7 +156,7 @@ module FunctionRegistry =
     /// it, so `findBySignature` can never return an entry `tryFind` no longer resolves; removing an
     /// entry just registered gives back the registry it was registered into.
     let unregister (id: string) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
-        KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Entries
+        KeyedRegistry.unregister CapabilityRegistry.vocabulary.NoSuch id r.Entries
         |> Result.map (ofEntries r.Policy)
 
     /// Swap the entry registered under `e.Capability.Id` for `e` — the hot-reload verb, which may
@@ -165,7 +165,7 @@ module FunctionRegistry =
     /// unchanged.
     let replace (e: FunctionEntry) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         KeyedRegistry.replace
-            (fun id known -> NoSuchCapability(id, known))
+            CapabilityRegistry.vocabulary.NoSuch
             (fun (e: FunctionEntry) -> Capability.admissionFault e.Capability)
             e.Capability.Id
             e
@@ -203,12 +203,7 @@ module FunctionRegistry =
     /// `CapabilityRegistry.decide`: an unknown id and an invalid argument set are denials, otherwise
     /// the gates' join. No observer is told.
     let decide (r: FunctionRegistry) (id: string) (args: (string * string) list) : PolicyDecision =
-        match Map.tryFind id r.Entries with
-        | None -> PolicyDecision.denyWith (InvokeError.describe (NoSuchCapability(id, ids r))) (ids r)
-        | Some e ->
-            match Capability.validateArgs e.Capability args with
-            | Error err -> PolicyDecision.deny (InvokeError.describe err)
-            | Ok() -> RegistryPolicy.decide r.Policy e.Capability args
+        KeyedRegistry.decide CapabilityRegistry.vocabulary _.Capability r.Policy id args r.Entries
 
     /// Is a required slot constraint satisfied by an available slot? An unconstrained required slot
     /// (`None`) accepts any available slot; a constrained one needs the same kind.
@@ -273,7 +268,7 @@ module FunctionRegistry =
         let candidateIds =
             match query.ResultType with
             | Some t -> r.ByResult |> Map.tryFind t |> Option.defaultValue Set.empty |> Set.toList
-            | None -> r.Entries |> Map.toList |> List.map fst
+            | None -> ids r
 
         candidateIds
         |> List.sort
@@ -295,15 +290,16 @@ module FunctionRegistry =
         (args: (string * string) list)
         (body: FunctionEntry -> unit -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
-        match Map.tryFind id r.Entries with
-        | None -> Error(NoSuchCapability(id, ids r))
-        | Some e ->
-            // Phase 318: validate, then the policy's gates, then the body — `Capability.invoke`
-            // exactly when no gate runs.
-            Capability.validateArgs e.Capability args
-            |> Result.bind (fun () ->
-                RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy id e.Capability args)
-            |> Result.bind (fun () -> InvokeError.settle (body e ()))
+        // Phase 318: validate, then the policy's gates, then the body — `Capability.invoke` exactly
+        // when no gate runs; the capability seam's prologue, over the entry's capability (Phase 509).
+        KeyedRegistry.dispatch
+            CapabilityRegistry.vocabulary
+            _.Capability
+            r.Policy
+            id
+            args
+            (fun e -> InvokeError.settle (body e ()))
+            r.Entries
 
     /// Narrow a registered function's signature under a new id (Phase 50; `partiallyApply` before
     /// `0.37.0`, renamed by Phase 391 because it binds no value: it narrows the signature and binds

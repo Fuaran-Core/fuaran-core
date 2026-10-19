@@ -3,9 +3,10 @@ namespace Fuaran.Core
 open System.Runtime.CompilerServices
 
 /// The members this package reads from `Fuaran.Core.Function`'s internals (through that package's
-/// `InternalsVisibleTo`) — the strict-read helpers of `SeamCodec`, the keyed-map algebra of
-/// `KeyedRegistry` and the policy's `RegistryPolicy.admit` — behind the one boundary every such read
-/// crosses.
+/// `InternalsVisibleTo`) — the strict-read helpers of `SeamCodec` — behind the one boundary every such
+/// read crosses. The registry reads none since Phase 509: `QueryRegistry` is a `Seam`, a public
+/// surface whose verbs are themselves `NoInlining`, so the keyed-map algebra and the policy's
+/// admission it used to reach through forwarders here are no longer crossed at all.
 ///
 /// **Why each is `NoInlining` (DECISIONS.md D129).** The F# optimiser inlines a public function's body
 /// into the assembly that CALLS it, and it does not know that a member another assembly shares only
@@ -42,58 +43,3 @@ module internal FunctionInternals =
         /// `SeamCodec.each`: check every element of an array.
         [<MethodImpl(MethodImplOptions.NoInlining)>]
         let each (check: Decoder<unit>) (el: JVal) : Result<unit, DecodeError> = SeamCodec.each check el
-
-    /// The keyed-map algebra, `KeyedRegistry`'s, and the policy's admission.
-    module Registry =
-
-        /// `KeyedRegistry.register`.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let register
-            (duplicate: string -> 'E)
-            (admit: 'V -> 'E option)
-            (id: string)
-            (v: 'V)
-            (m: Map<string, 'V>)
-            : Result<Map<string, 'V>, 'E> =
-            KeyedRegistry.register duplicate admit id v m
-
-        /// `KeyedRegistry.unregister`.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let unregister
-            (unknown: string -> string list -> 'E)
-            (id: string)
-            (m: Map<string, 'V>)
-            : Result<Map<string, 'V>, 'E> =
-            KeyedRegistry.unregister unknown id m
-
-        /// `KeyedRegistry.replace`.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let replace
-            (unknown: string -> string list -> 'E)
-            (admit: 'V -> 'E option)
-            (id: string)
-            (v: 'V)
-            (m: Map<string, 'V>)
-            : Result<Map<string, 'V>, 'E> =
-            KeyedRegistry.replace unknown admit id v m
-
-        /// `KeyedRegistry.restrict`.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let restrict (keep: Set<string>) (m: Map<string, 'V>) : Map<string, 'V> = KeyedRegistry.restrict keep m
-
-        /// `KeyedRegistry.union`.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let union (duplicate: string -> 'E) (a: Map<string, 'V>) (b: Map<string, 'V>) : Result<Map<string, 'V>, 'E> =
-            KeyedRegistry.union duplicate a b
-
-        /// `RegistryPolicy.admit`: run the gates for one invocation.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let admit
-            (refused: string -> RejectionGuidance -> 'E)
-            (approval: string -> 'E)
-            (p: RegistryPolicy<'Decl, 'Args>)
-            (id: string)
-            (decl: 'Decl)
-            (args: 'Args)
-            : Result<unit, 'E> =
-            RegistryPolicy.admit refused approval p id decl args

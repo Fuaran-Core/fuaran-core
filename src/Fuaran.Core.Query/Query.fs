@@ -274,24 +274,9 @@ type ResolveFault =
 /// reader refuse the same declarations with the same error.
 module internal QueryShape =
 
-    /// A string from a closed set; a miss is `UnknownTag`, in the query codec's sentence
-    /// `<what><value>`.
-    let tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
-        Decoder.str
-        |> Decoder.andThen (fun s ->
-            match cases |> List.tryFind (fun (k, _) -> k = s) with
-            | Some(_, v) -> Ok v
-            | None ->
-                Error(
-                    RootDecodeCode.UnknownTag,
-                    "one of "
-                    + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "),
-                    what + s
-                ))
-
     /// A column type, spelled by `ColumnType.tag`.
     let colTypeOf: Decoder<ColumnType> =
-        tagged "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
+        Decoder.oneOfWith "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
 
     /// A predicate's wire tag.
     let tag (p: ColumnPredicate) : string =
@@ -475,7 +460,7 @@ module internal QueryShape =
         |> Decoder.bind (fun c ->
             Decoder.field
                 "direction"
-                (tagged
+                (Decoder.oneOfWith
                     "unknown sort direction: "
                     [ "ascending", SortDirection.Ascending; "descending", SortDirection.Descending ])
             |> Decoder.map (fun d -> { Column = c; Direction = d }))
@@ -719,10 +704,8 @@ module QueryError =
 /// the published spellings are `QueryCodec.queryErrorJson` / `queryErrorOf` and their text forms.
 module internal QueryErrorWire =
 
-    // `tagged` and `colTypeOf` are `QueryShape`'s since Phase 398, which reads the shape below this
-    // module; the codecs above read them from there.
-    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> = QueryShape.tagged what cases
-
+    // `colTypeOf` is `QueryShape`'s since Phase 398, which reads the shape below this module; a
+    // string from a closed set is Wire's `Decoder.oneOfWith` since Phase 509 (`tagged`, before).
     let private colTypeOf: Decoder<ColumnType> = QueryShape.colTypeOf
 
     let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
@@ -731,7 +714,9 @@ module internal QueryErrorWire =
     let private decodeErrorOf: Decoder<DecodeError> =
         Decoder.field
             "code"
-            (tagged "unknown decode code: " (DecodeError.codes |> List.map (fun c -> DecodeError.codeName c, c)))
+            (Decoder.oneOfWith
+                "unknown decode code: "
+                (DecodeError.codes |> List.map (fun c -> DecodeError.codeName c, c)))
         |> Decoder.bind (fun code ->
             Decoder.field "path" (fun el ->
                 match DecodePath.ofJson el with
@@ -800,46 +785,44 @@ module internal QueryErrorWire =
     let decoder: Decoder<QueryError> =
         let str name = Decoder.field name Decoder.str
 
-        let strList name =
-            Decoder.field name (Decoder.list Decoder.str)
-
-        let both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> QueryError) : Decoder<QueryError> =
-            a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
+        let strList name = Decoder.field name Decoder.strings
 
         let cases =
-            [ "noSuchQuery", both (str "id") (strList "known") (fun id known -> NoSuchQuery(id, known))
+            [ "noSuchQuery", Decoder.pair (str "id") (strList "known") (fun id known -> NoSuchQuery(id, known))
               "duplicateQuery", str "id" |> Decoder.map DuplicateQuery
-              "unknownParam", both (str "name") (strList "declared") (fun name d -> UnknownParam(name, d))
+              "unknownParam", Decoder.pair (str "name") (strList "declared") (fun name d -> UnknownParam(name, d))
               "paramTypeMismatch",
               str "name"
               |> Decoder.bind (fun name ->
-                  both (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
+                  Decoder.pair (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
                       ParamTypeMismatch(name, exp, got)))
               "requiredParamsUnbound", strList "names" |> Decoder.map RequiredParamsUnbound
               "sourceNotResolved", str "ref" |> Decoder.map SourceNotResolved
-              "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
+              "executionFailed", Decoder.pair (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
               "timeout", Decoder.succeed Timeout
               "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
               "duplicateParam", str "name" |> Decoder.map DuplicateParam
               "queryPolicyRefused",
               str "policy"
               |> Decoder.bind (fun policy ->
-                  both (str "reason") (strList "allowed") (fun reason allowed ->
+                  Decoder.pair (str "reason") (strList "allowed") (fun reason allowed ->
                       QueryPolicyRefused(policy, reason, allowed)))
               "queryApprovalRequired", str "policy" |> Decoder.map QueryApprovalRequired
               "unreadableArgs", Decoder.field "error" decodeErrorOf |> Decoder.map UnreadableArgs
-              "unknownColumn", both (str "name") (strList "declared") (fun name d -> UnknownColumn(name, d))
+              "unknownColumn", Decoder.pair (str "name") (strList "declared") (fun name d -> UnknownColumn(name, d))
               "predicateTypeMismatch",
               str "column"
               |> Decoder.bind (fun column ->
-                  both (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
+                  Decoder.pair (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
                       PredicateTypeMismatch(column, exp, got)))
               "predicateNotApplicable",
-              Decoder.field "predicate" (tagged "unknown predicate: " (QueryShape.tags |> List.map (fun t -> t, t)))
+              Decoder.field
+                  "predicate"
+                  (Decoder.oneOfWith "unknown predicate: " (QueryShape.tags |> List.map (fun t -> t, t)))
               |> Decoder.bind (fun predicate ->
-                  both (str "column") (Decoder.field "columnType" colTypeOf) (fun column ty ->
+                  Decoder.pair (str "column") (Decoder.field "columnType" colTypeOf) (fun column ty ->
                       PredicateNotApplicable(predicate, column, ty)))
-              "illFormedLiteral", both (str "column") (str "reason") (fun c r -> IllFormedLiteral(c, r))
+              "illFormedLiteral", Decoder.pair (str "column") (str "reason") (fun c r -> IllFormedLiteral(c, r))
               "duplicateSortColumn", str "column" |> Decoder.map DuplicateSortColumn
               "predicateNotHonoured",
               Decoder.field "predicate" QueryShape.predicateDecoder

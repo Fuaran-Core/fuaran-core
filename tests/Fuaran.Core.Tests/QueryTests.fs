@@ -1046,3 +1046,59 @@ let whereOrderByTests =
                       | other -> failtestf "not a Phase 398 refusal: %A" other
 
                   Expect.stringContains sentence ("'" + column + "'") "names the column" ]
+
+// ---------------------------------------------------------------------------
+// Phase 509 — the decoder helpers the seam codecs share are Wire's: `Decoder.oneOfWith` (each codec
+// wrote it as `tagged`), `Decoder.pair` and `Decoder.strings`. The refusal a codec's closed-set read
+// answers is pinned field for field, so the move re-homed bodies and moved no sentence.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let decoderHelperTests =
+    testList
+        "Decoder helpers (Phase 509)"
+        [ testCase "oneOfWith answers the codec's sentence over oneOf's code and expectation"
+          <| fun _ ->
+              let d = Decoder.oneOfWith "unknown column type: " [ "int", 1; "string", 2 ]
+              Expect.equal (d (JStr "string")) (Ok 2) "a known value"
+
+              Expect.equal
+                  (d (JStr "blob"))
+                  (Error
+                      { Code = DecodeCode.UnknownTag
+                        Path = []
+                        Expected = "one of 'int', 'string'"
+                        Message = "unknown column type: blob" })
+                  "a miss is UnknownTag at the value, in the caller's sentence"
+
+              Expect.equal
+                  (d (JStr "blob") |> Result.mapError _.Expected)
+                  (Decoder.oneOf [ "int", 1; "string", 2 ] (JStr "blob")
+                   |> Result.mapError _.Expected)
+                  "the expectation is oneOf's"
+
+              Expect.equal
+                  (d (JInt 3) |> Result.mapError _.Code)
+                  (Error DecodeCode.WrongKind)
+                  "a value that is not a string is WrongKind"
+
+          testCase "pair reads both members of one object, the first refusal first; strings reads a string array"
+          <| fun _ ->
+              let doc = JObj [ "id", JStr "q"; "known", JArr [ JStr "a"; JStr "b" ] ]
+
+              let d =
+                  Decoder.pair (Decoder.field "id" Decoder.str) (Decoder.field "known" Decoder.strings) (fun i k ->
+                      i, k)
+
+              Expect.equal (d doc) (Ok("q", [ "a"; "b" ])) "both members"
+
+              Expect.equal
+                  (d (JObj [ "known", JInt 1 ]) |> Result.mapError _.Path)
+                  (Error [ PathSegment.Key "id" ])
+                  "the first decoder's refusal is answered without the second"
+
+              Expect.equal
+                  (Decoder.strings (JArr [ JStr "a"; JInt 1 ])
+                   |> Result.mapError (fun e -> e.Code, e.Path))
+                  (Error(DecodeCode.WrongKind, [ PathSegment.Index 1 ]))
+                  "an item that is not a string, under its index" ]
