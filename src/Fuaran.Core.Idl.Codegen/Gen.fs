@@ -179,6 +179,10 @@ module Gen =
         /// over them: per kind `decode<Tag>Spec` (the first defect) and `decode<Tag>SpecAll`
         /// (every defect), per node `decodeNodeJson`, `decodeNodeJsonAll` and `decodeNodeAll`.
         /// A collecting decoder's first defect is its short-circuiting twin's defect.
+        /// Phase 541 — every nested position is read through a `CollectingDecoders` record
+        /// (`collectingDecoders` is the generated one), and `decode<Tag>SpecAllWith`,
+        /// `decodeNodeJsonAllWith` and `decodeNodeAllWith` take a host's copy, so a host decoder
+        /// at a type applies at every depth (DECISIONS.md D175).
         | SpecDecoders
 
     let private toRequest (d: Derivation) : FSharpDerive.Request option =

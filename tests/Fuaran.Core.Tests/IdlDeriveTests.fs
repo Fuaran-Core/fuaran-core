@@ -1960,3 +1960,206 @@ let nullCheckedSlotTests =
                   | Some(code, _, err) ->
                       Expect.notEqual code 0 "boxed slots under nullness checking"
                       Expect.stringContains err "FS3261" "the nullness refusal, as recorded") ]
+
+// ---------------------------------------------------------------------------
+// Phase 541 — the overridable collecting decoders. A host hands `decode*AllWith` a
+// `CollectingDecoders` record copied from `collectingDecoders` with one type overridden, and its
+// decoder is the one applied at that type at EVERY depth — through a node list, a record list, a
+// node field, a union's own recursion. Before 541 every nested position read the generator's
+// private decoder, so an override could reach the root and nothing beneath it.
+// ---------------------------------------------------------------------------
+
+module private Overrides =
+    let note (id: string) : Node<obj> =
+        { Id = id
+          Kind =
+            NodeKind.Note
+                { Text = "n"
+                  Priority = Priority.Normal }
+          Annotation = None }
+
+    let section (id: string) (children: Node<obj> list) : Node<obj> =
+        { Id = id
+          Kind =
+            NodeKind.Section
+                { Title = "t"
+                  Children = children
+                  Owner = None
+                  Estimate = None }
+          Annotation = None }
+
+    /// root (Section) > children[0] (Choice) > branches[0].body (Section) > children[0] (Note
+    /// `x-deep`); the choice's rule nests `Equals` under `AllOf` and `Not`.
+    let tree: Node<obj> =
+        section
+            "root"
+            [ { Id = "choice"
+                Kind =
+                  NodeKind.Choice
+                      { Branches =
+                          [ { Label = "b"
+                              Body = section "inner" [ note "x-deep" ] } ]
+                        Otherwise = note "other"
+                        Rule = Rule.AllOf [ Rule.Not(Rule.Equals("k", "v")) ] }
+                Annotation = None } ]
+
+    let json () : JVal =
+        match Decoder.parse (encodeNode tree) with
+        | Ok j -> j
+        | Error e -> failwithf "the fixture parses: %A" e
+
+    /// A policy over the generated structure: every `Equals` value upper-cased.
+    let upper: CollectingDecoders =
+        { collectingDecoders with
+            Rule =
+                fun self j ->
+                    collectingDecoders.Rule self j
+                    |> Result.map (function
+                        | Rule.Equals(k, v) -> Rule.Equals(k, v.ToUpperInvariant())
+                        | r -> r) }
+
+    let refusal: DecodeError =
+        { Code = DecodeCode.OutOfRange
+          Path = []
+          Expected = "an id the host admits"
+          Message = "an x- id is the host's" }
+
+    /// A policy over the generated structure: a node whose id starts `x-` is refused.
+    let refuseX: CollectingDecoders =
+        { collectingDecoders with
+            Node =
+                fun self j ->
+                    match collectingDecoders.Node self j with
+                    | Ok n when n.Id.StartsWith("x-", System.StringComparison.Ordinal) -> Error [ refusal ]
+                    | r -> r }
+
+    /// A policy over a kind spec: every note's text replaced.
+    let renamed: CollectingDecoders =
+        { collectingDecoders with
+            NoteSpec =
+                fun self j ->
+                    collectingDecoders.NoteSpec self j
+                    |> Result.map (fun s -> { s with Text = "host" }) }
+
+    let choiceRule (n: Node<obj>) =
+        match n.Kind with
+        | NodeKind.Section s ->
+            match s.Children with
+            | [ { Kind = NodeKind.Choice c } ] -> Some c.Rule
+            | _ -> None
+        | _ -> None
+
+    let rec noteTexts (n: Node<obj>) : string list =
+        [ match n.Kind with
+          | NodeKind.Note s -> yield s.Text
+          | _ -> ()
+          for c in children n do
+              yield! noteTexts c ]
+
+    /// The emitted module of a vocabulary with the structural access and the collecting decoders
+    /// requested. A `TFn` placeholder is the vocabulary author's text, spliced verbatim (Phase 460),
+    /// and the derivations vocabulary's boxes its closure's result, which nullness checking refuses;
+    /// it is upcast here so the compile below judges the emitter's text and nothing else.
+    let emitted (name: string) (idl: Idl) =
+        Projected
+            .emitted(
+                Gen.fsharpModuleDerived
+                    Gen.GenSupport.Empty
+                    [ Gen.Derivation.StructuralAccess; Gen.Derivation.SpecDecoders ]
+                    name
+                    idl
+                    (idl.Kinds |> List.map _.Tag)
+            )
+            .Replace("box \"<closure>\"", "(\"<closure>\" :> obj)")
+
+    let strict = "--checknulls+ --warnaserror+ "
+
+    /// A decode result as comparable data: a node holds closures, so it compares by its encoding.
+    let render (r: Result<Node<obj>, DecodeError list>) = r |> Result.map encodeNode
+
+[<Tests>]
+let collectingOverrideTests =
+    testList
+        "Phase 541 - the collecting decoders take host decoders at the types a host overrides"
+        [ testCase "an override at a union is applied at depth, and the no-override entry is unchanged" (fun _ ->
+              let j = Overrides.json ()
+              let expected = Rule.AllOf [ Rule.Not(Rule.Equals("k", "V")) ]
+
+              match decodeNodeJsonAllWith Overrides.upper j, decodeNodeJsonAll j with
+              | Ok overridden, Ok plain ->
+                  Expect.equal (Overrides.choiceRule overridden) (Some expected) "Equals under AllOf > Not"
+
+                  Expect.equal
+                      (encodeNode plain)
+                      (encodeNode Overrides.tree)
+                      "decodeNodeJsonAll is the no-override case"
+              | r -> failtestf "both decode: %A" r)
+
+          testCase "an override at the node is applied to a node four positions down, at its path" (fun _ ->
+              match decodeNodeJsonAllWith Overrides.refuseX (Overrides.json ()) with
+              | Error [ e ] ->
+                  Expect.equal e.Message Overrides.refusal.Message "the host's defect"
+
+                  Expect.equal
+                      e.Path
+                      [ PathSegment.Key "kind"
+                        PathSegment.Key "children"
+                        PathSegment.Index 0
+                        PathSegment.Key "kind"
+                        PathSegment.Key "branches"
+                        PathSegment.Index 0
+                        PathSegment.Key "body"
+                        PathSegment.Key "kind"
+                        PathSegment.Key "children"
+                        PathSegment.Index 0 ]
+                      "the defect sits at the nested node"
+              | r -> failtestf "one defect, at depth: %A" r)
+
+          testCase "an override at a kind spec is applied wherever a node holds that kind" (fun _ ->
+              match decodeNodeJsonAllWith Overrides.renamed (Overrides.json ()) with
+              | Ok n -> Expect.equal (Overrides.noteTexts n |> List.distinct) [ "host" ] "every note, at every depth"
+              | Error e -> failtestf "decodes: %A" e)
+
+          testCase "the generated record reproduces every no-override entry, clean and defective" (fun _ ->
+              let clean = encodeNode Overrides.tree
+
+              let broken =
+                  clean.Replace("\"title\":\"t\"", "\"title\":1").Replace("\"label\":\"b\"", "\"label\":2")
+
+              Expect.notEqual broken clean "the fixture is broken"
+
+              for text in [ clean; broken ] do
+                  Expect.equal
+                      (Overrides.render (decodeNodeAllWith collectingDecoders text))
+                      (Overrides.render (decodeNodeAll text))
+                      "decodeNodeAll"
+
+              match Decoder.parse broken with
+              | Ok j ->
+                  Expect.equal
+                      (Overrides.render (decodeNodeJsonAllWith collectingDecoders j))
+                      (Overrides.render (decodeNodeJsonAll j))
+                      "decodeNodeJsonAll"
+
+                  match decodeNodeJsonAll j with
+                  | Error es -> Expect.isGreaterThan es.Length 1 "every defect of the broken text"
+                  | Ok _ -> failtest "the broken text is refused"
+              | Error e -> failtestf "parses: %A" e)
+
+          testCase
+              "the emission compiles under nullness checking with warnings as errors, generic unions included"
+              (fun _ ->
+                  for name, idl in [ "Overridable", DeriveIdl.deriveIdl; "NullChecked", NullChecked.idl ] do
+                      let src = Overrides.emitted name idl
+                      Expect.stringContains src "type CollectingDecoders =" (name + ": the record")
+
+                      Expect.stringContains
+                          src
+                          "let decodeNodeJsonAllWith (decoders: CollectingDecoders)"
+                          (name + ": the entry")
+
+                      match Projected.runFsiWith Overrides.strict (Projected.scriptOf name src "printfn \"ok\"") with
+                      | None -> skiptest "dotnet not on PATH - the nullness-checked compile is skipped"
+                      | Some(code, out, err) ->
+                          Expect.equal code 0 (sprintf "%s compiles: %s" name err)
+                          Expect.stringContains out "ok" (name + " ran")) ]
