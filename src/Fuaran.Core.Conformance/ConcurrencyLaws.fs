@@ -26,7 +26,7 @@ module internal ConcurrencyLaws =
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let hashOf = Tree.encodeHash nodew encode
@@ -58,7 +58,7 @@ module internal ConcurrencyLaws =
             && Set.isSubset s.SlotReads f.SlotReads
             && Set.isSubset s.SlotWrites f.SlotWrites
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
@@ -116,10 +116,9 @@ module internal ConcurrencyLaws =
                 ))
 
         LawKit.results [ soundness; monotonicity; determinism ]
-        @ [ SampleAdequacy.reached
-                "Conformance.footprintLaws"
+        @ [ LawKit.guard
+                runner
                 "script-pair independence and op kind"
-                seed
                 ([ "independent pair", independentPairs; spread.Demand ] @ kinds.Demands) ]
 
     /// The footprint soundness law at a DOMAIN'S OWN ops (Phase 249) — Phase 78's soundness law
@@ -162,7 +161,7 @@ module internal ConcurrencyLaws =
         (footprintOf: 'Op -> Footprint)
         (hashState: 'State -> string)
         (gen: StreamGen<'Op, 'State>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let soundness =
@@ -228,7 +227,7 @@ module internal ConcurrencyLaws =
         let render (ops: 'Op list) =
             "[" + (ops |> List.map sw.Encode |> String.concat "; ") + "]"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let _, state = thread rng (rng.IntBelow 5) gen.State0
             let a, _ = thread rng (rng.IntBelow 3 + 1) state
             let b, _ = thread rng (rng.IntBelow 3 + 1) state
@@ -333,10 +332,9 @@ module internal ConcurrencyLaws =
                 "script-pair independence and slot granularity"
 
         LawKit.results [ soundness; determinism; slotNamed ]
-        @ [ SampleAdequacy.reachedBeside
-                "Conformance.footprintLawsAt"
+        @ [ LawKit.guardBeside
+                runner
                 dimension
-                seed
                 ([ "independent pair", independentPairs; "interfering pair", interferingPairs ]
                  @ slotDemands)
                 [ "refused draw", refusedDraws ] ]
@@ -368,7 +366,7 @@ module internal ConcurrencyLaws =
         (footprintIn: 'State -> 'Op -> Footprint)
         (hashState: 'State -> string)
         (gen: StreamGen<'Op, 'State>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let soundness =
@@ -414,7 +412,7 @@ module internal ConcurrencyLaws =
         let render (ops: 'Op list) =
             "[" + (ops |> List.map sw.Encode |> String.concat "; ") + "]"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let _, state = thread rng (rng.IntBelow 5) gen.State0
             let a, _ = thread rng (rng.IntBelow 3 + 1) state
             let b, _ = thread rng (rng.IntBelow 3 + 1) state
@@ -475,10 +473,9 @@ module internal ConcurrencyLaws =
                     interferingPairs <- interferingPairs + 1)
 
         LawKit.results [ soundness; refinement; determinism ]
-        @ [ SampleAdequacy.reachedBeside
-                "Conformance.footprintInLawsAt"
+        @ [ LawKit.guardBeside
+                runner
                 "script-pair independence and base-aware precision"
-                seed
                 [ "independent pair", independentPairs
                   "pure-independent pair", pureIndependentPairs
                   "freed pair (refused by the pure footprint, admitted by the base-aware one)", freedPairs
@@ -506,7 +503,7 @@ module internal ConcurrencyLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
@@ -526,7 +523,7 @@ module internal ConcurrencyLaws =
         // Phase 297 — the kind of every DRAWN op, folded into the guard below.
         let kinds = LawKit.OpKindTally()
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
@@ -575,10 +572,9 @@ module internal ConcurrencyLaws =
                     ))
 
         LawKit.results [ symmetry; determinism; agreement ]
-        @ [ SampleAdequacy.reached
-                "Conformance.mergeConflictLaws"
+        @ [ LawKit.guard
+                runner
                 "op-pair interference and op kind"
-                seed
                 ([ "reported pair", reportedPairs; "unreported pair", unreportedPairs ]
                  @ kinds.Demands) ]
 
@@ -621,7 +617,7 @@ module internal ConcurrencyLaws =
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
@@ -721,7 +717,7 @@ module internal ConcurrencyLaws =
 
             head, d
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let tree = rng.Draw gen.Tree
             let a0 = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b0 = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
@@ -922,23 +918,20 @@ module internal ConcurrencyLaws =
                 ))
 
         LawKit.results [ clean; sharedOnce; cross; conflicted; determinism ]
-        @ [ SampleAdequacy.reached
-                "Conformance.reconcileLawsWith"
+        @ [ LawKit.guard
+                runner
                 "reconcile outcome"
-                seed
                 [ "clean disjoint fold", cleanFolds; "conflicted fold", conflictedFolds ]
-            SampleAdequacy.reached
-                "Conformance.reconcileLawsWith"
+            LawKit.guard
+                runner
                 "reconcile shape"
-                seed
                 [ "disjoint", disjoint
                   "fast-forward", fastForward
                   "duplicate head", duplicateHead
                   "criss-cross", crissCross ]
-            SampleAdequacy.reached
-                "Conformance.reconcileLawsWith"
+            LawKit.guard
+                runner
                 "delta-pair independence and op kind"
-                seed
                 ([ "independent delta pair", independentDeltas; spread.Demand ] @ kinds.Demands) ]
 
 
@@ -948,10 +941,10 @@ module internal ConcurrencyLaws =
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        reconcileLawsWith nodew idw gen encode OpStream.defaultHash seed iterations
+        reconcileLawsWith nodew idw gen encode OpStream.defaultHash runner iterations
 
     // ---- confluence / interleaving law (Phase 80) ----
     // The coordination claim the agent-fleet substrate rests on: op-scripts `Ops.independent`
@@ -1017,7 +1010,7 @@ module internal ConcurrencyLaws =
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
         (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let hashOf = Tree.encodeHash nodew encode
@@ -1042,7 +1035,7 @@ module internal ConcurrencyLaws =
         // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
         let spread = LawKit.EncodeSpread(nodew, encode)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
@@ -1118,10 +1111,9 @@ module internal ConcurrencyLaws =
                             ))
 
         LawKit.results [ totality; confluence ]
-        @ [ SampleAdequacy.reached
-                "Conformance.concurrencyLawsWith"
+        @ [ LawKit.guard
+                runner
                 "independent pair (coverage) and op kind"
-                seed
                 ([ "independent pair", independentPairs; spread.Demand ] @ kinds.Demands) ]
 
     /// The confluence / interleaving laws (Phase 80) pinned to the real `Ops.footprint` — the shape
@@ -1132,10 +1124,10 @@ module internal ConcurrencyLaws =
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        concurrencyLawsWith nodew idw gen encode (Ops.footprint nodew idw) seed iterations
+        concurrencyLawsWith nodew idw gen encode (Ops.footprint nodew idw) runner iterations
 
     // ---- proposal arbitration (Phase 85) ----
     // The teeth on `Arbitration.arbitrate`: a deterministic, total partition of N op-script
@@ -1171,7 +1163,7 @@ module internal ConcurrencyLaws =
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let hashOf = Tree.encodeHash nodew encode
@@ -1216,7 +1208,7 @@ module internal ConcurrencyLaws =
               Holder = sprintf "agent-%d" id
               Ops = ops }
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             spread.NoteTree tree
             let extra = rng.IntBelow 4
@@ -1377,15 +1369,14 @@ module internal ConcurrencyLaws =
             uniqueness.Fail(
                 sprintf
                     "seed=%d: %d iterations produced no applicable self-interfering proposal to twin — the observability half never ran"
-                    seed
+                    runner.Seed
                     iterations
             )
 
         LawKit.results [ permutation; partition; independence; actionability; confluence; uniqueness ]
-        @ [ SampleAdequacy.reached
-                "Conformance.arbitrationLaws"
+        @ [ LawKit.guard
+                runner
                 "arbitration bucket and op kind"
-                seed
                 ([ "accepted proposal", acceptedSeen
                    "rejected proposal", rejectedSeen
                    "conflicts rejection", conflictsSeen

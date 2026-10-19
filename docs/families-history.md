@@ -47,3 +47,4 @@ current statement, and this page is the archaeology behind it.
 - **Phase 498** — the export's outside reader is recorded, and a `schema` bump becomes a recorded contract move.
 - **Phase 500** — the base-aware footprint family, guarded on the pair only the base-aware footprint frees.
 - **Phase 506** — one record per family: `Takes` and `Election` replace the witness names and the opt-in pair, the operation roster folds into `Operations`, `Spellings` is added, and the export is written by `Canon.render` (`schema: 6`); this page takes the row commentary.
+- **Phase 507** — six pinned-default twins (`reconcileLaws`, `concurrencyLaws`, `snapshotLaws`, `keyedArbitrationLawsAt`, `columnOwnershipLaws`, `laneFoldLawsAt`) become `Spellings` of their `…With` row; `propagationEvaluatorLawsWith` becomes `propagationPriorLawsAt` and `codecLaws` (now taking `Takes.Codec`, so `NeedsWitnessCapability`) becomes `codecLawsAt`, each old name an obsolete forward on its own row.

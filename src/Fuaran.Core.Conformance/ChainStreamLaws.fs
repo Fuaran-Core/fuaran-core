@@ -19,7 +19,7 @@ module internal ChainStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let verify = LawKit.LawCell "verifyChain accepts an intact chain"
@@ -38,7 +38,7 @@ module internal ChainStreamLaws =
         let mutable accepted = 0
         let mutable tampered = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // a rejected op just doesn't extend the chain — `buildChain` counts the ones that did
             let state, recs, acceptedHere = LawKit.buildChain hashFn sw gen rng
             accepted <- accepted + acceptedHere
@@ -91,8 +91,8 @@ module internal ChainStreamLaws =
                     ))
 
         LawKit.results [ verify; replay; tamper; jsonl ]
-        @ [ SampleAdequacy.reached "Conformance.streamLaws" "accepted op" seed [ "accepted", accepted ]
-            SampleAdequacy.reached "Conformance.streamLaws" "tampered chain" seed [ "tampered", tampered ] ]
+        @ [ LawKit.guard runner "accepted op" [ "accepted", accepted ]
+            LawKit.guard runner "tampered chain" [ "tampered", tampered ] ]
 
     /// Domain-reducer laws (Phase 254) — certify a domain's *own* reducer
     /// `apply : 'Op -> 'State -> Result<'State, 'Rej>` (Doc's `DocOp` apply, Calc's, …), not
@@ -105,7 +105,7 @@ module internal ChainStreamLaws =
         (apply: 'Op -> 'State -> Result<'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (namesAlternatives: ('Rej -> bool) option)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let totality = LawKit.LawCell "reducer totality (never throws)"
@@ -120,7 +120,7 @@ module internal ChainStreamLaws =
         let mutable acceptedN = 0
         let mutable refusedN = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let mutable state = gen.State0
             let mutable accepted = []
 
@@ -163,8 +163,8 @@ module internal ChainStreamLaws =
            | None -> [])
         // Phase 220 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
         // are unchanged for every caller that reads them by index.
-        @ [ SampleAdequacy.reached "Conformance.reducer" "accepted op" seed [ "accepted", acceptedN ]
-            SampleAdequacy.reached "Conformance.reducer" "refused op" seed [ "refused", refusedN ] ]
+        @ [ LawKit.guard runner "accepted op" [ "accepted", acceptedN ]
+            LawKit.guard runner "refused op" [ "refused", refusedN ] ]
 
     // ---- opt-in surfaces: snapshot / compaction + the op-DAG (Phase 07) ----
     // `streamLaws` exercises only the linear append/verify/replay path. These certify the two
@@ -185,7 +185,7 @@ module internal ChainStreamLaws =
         (stateEncode: 'State -> string)
         (hashFn: HashFn)
         (cfg: StreamConfig)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let bounded =
@@ -198,7 +198,7 @@ module internal ChainStreamLaws =
         // 302). A census-visible guard NAMING the starved arm is a later widening: it adds a result,
         // which every count-pinning reader of this family sees.
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let mutable state = gen.State0
             let mutable recs = OpStream.empty
 
@@ -242,10 +242,10 @@ module internal ChainStreamLaws =
         (gen: StreamGen<'Op, 'State>)
         (stateEncode: 'State -> string)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        snapshotLawsWith sw gen stateEncode hashFn OpStream.canonicalConfig seed iterations
+        snapshotLawsWith sw gen stateEncode hashFn OpStream.canonicalConfig runner iterations
 
     /// The configured-stream laws (Phase 349): the `…With` stream operations — each the bare form
     /// with its `StreamConfig` (the payload pre-image and the genesis) a parameter beside its
@@ -281,7 +281,7 @@ module internal ChainStreamLaws =
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
         (cfg: StreamConfig)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let described =
@@ -310,7 +310,7 @@ module internal ChainStreamLaws =
         let otherHash: HashFn = fun prev payload -> hashFn prev payload + "'"
         let actor = Human "conf"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let ops = [ for _ in 1 .. rng.IntBelow 7 -> rng.Draw gen.Op ]
 
             // ---- the fold of appendWith, and the chain it builds ----
@@ -528,7 +528,7 @@ module internal ChainStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let matchLaw = LawKit.LawCell "appendIf with the true head ≡ append"
@@ -552,7 +552,7 @@ module internal ChainStreamLaws =
         // that refuses often enough leaves the race law with nothing to serialise.
         let mutable races = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // Build a random base chain (as streamLaws does) — the CAS is exercised against its head.
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
 
@@ -618,9 +618,9 @@ module internal ChainStreamLaws =
         // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
         // are unchanged. A StreamGen that never draws a refused op leaves `match ≡ append`
         // certified on the accept path alone, and green.
-        @ [ SampleAdequacy.reached "Conformance.casLaws" "accepted op" seed [ "accepted", accepted ]
-            SampleAdequacy.reached "Conformance.casLaws" "refused op" seed [ "refused", refused ]
-            SampleAdequacy.reached "Conformance.casLaws" "race arm" seed [ "both apply", races ] ]
+        @ [ LawKit.guard runner "accepted op" [ "accepted", accepted ]
+            LawKit.guard runner "refused op" [ "refused", refused ]
+            LawKit.guard runner "race arm" [ "both apply", races ] ]
 
     // ---- idempotent append (Phase 82) ----
     // The at-least-once claim the agent retry loop rests on: a re-sent invocation key converges
@@ -650,7 +650,7 @@ module internal ChainStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let freshLaw =
@@ -683,7 +683,7 @@ module internal ChainStreamLaws =
         // green. Since Phase 302 the fresh-key arms are also MEASURED: they redraw (bounded) until
         // the key is fresh, and the guard demands they were built on at least half their attempts.
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // Build a base chain THROUGH appendIdempotent, threading (state, records, index) — a
             // generated op whose key is already seen (or whose apply rejects) extends nothing,
             // which is itself the primitive under test. Rebuild parity is checked at every step.
@@ -829,17 +829,12 @@ module internal ChainStreamLaws =
         // and of the true-head CAS arm certified by nothing, and green.
         // Phase 302 — the thresholds are fractions: the fresh arms must be BUILT on at least half of
         // their attempts, and each outcome must be at least one in twenty of the arms built.
-        @ [ SampleAdequacy.reachedFraction
-                "Conformance.idempotencyLaws"
+        @ [ LawKit.guardFraction
+                runner
                 "accepted fresh op"
-                seed
                 [ "accepted", accepted, freshBuilt, 20
                   "fresh-key arm built", freshBuilt, freshAttempts, 2 ]
-            SampleAdequacy.reachedFraction
-                "Conformance.idempotencyLaws"
-                "refused fresh op"
-                seed
-                [ "refused", refused, freshBuilt, 20 ] ]
+            LawKit.guardFraction runner "refused fresh op" [ "refused", refused, freshBuilt, 20 ] ]
 
     /// **Every reason this library MINTS is a named case** (Phase 125) — the law that makes
     /// `ChainBreakReason.Unrecognised` an honest arm rather than a hedge.
@@ -861,7 +856,7 @@ module internal ChainStreamLaws =
     /// the identity on the named cases, and an unknown string lands in `Unrecognised` VERBATIM
     /// rather than being swept into the nearest-looking case — which is the defect the consumer's
     /// pre-typed form had, and the reason this type is worth its breaking change.
-    let chainBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
+    let chainBreakReasonLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         // The kit's own int-op witness: the claim is about THIS library's walkers, not about a
         // host's, so there is no caller witness to take.
         let sw = LawKit.intWitness
@@ -922,7 +917,7 @@ module internal ChainStreamLaws =
 
                 None
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // ---- a sound op chain of four records ----
             let mutable state = 0
             let mutable recs = OpStream.empty

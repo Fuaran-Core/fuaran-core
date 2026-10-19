@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.CodecLawsTests
 
-// Phase 442 — `Conformance.codecLaws`, the family that samples at a domain's own codec the premises
+// Phase 442 — `Conformance.codecLawsAt` (`codecLaws` until Phase 507), the family that samples at a domain's own codec the premises
 // Phase 436 proved the `Codec` blocks under.
 //
 // Held here: the family green at the reference witness (a declaration that uses every block a domain
@@ -178,17 +178,17 @@ let private refusingWith (refusal: JVal -> DecodeError) : Codec<int> =
 [<Tests>]
 let tests =
     testList
-        "Conformance.codecLaws (Phase 442)"
+        "Conformance.codecLawsAt (Phase 442; Phase 507)"
         [ testCase "green at the reference witness"
-          <| fun _ -> green "reference" (Conformance.codecLaws referenceCodec referenceGen seed iterations)
+          <| fun _ -> green "reference" (Conformance.codecLawsAt referenceCodec referenceGen seed iterations)
 
           testCase "green at Core's own leaf codecs — each an ofDecoder codec whose reader reads its writer"
           <| fun _ ->
-              green "Codec.int" (Conformance.codecLaws Codec.int intGen seed iterations)
+              green "Codec.int" (Conformance.codecLawsAt Codec.int intGen seed iterations)
 
               green
                   "Codec.float"
-                  (Conformance.codecLaws
+                  (Conformance.codecLawsAt
                       Codec.float
                       (fun r ->
                           let n, r = drawInt -100000 100000 r
@@ -196,12 +196,12 @@ let tests =
                       seed
                       iterations)
 
-              green "Codec.string" (Conformance.codecLaws Codec.string (ConfRng.choose texts) seed iterations)
-              green "Codec.bool" (Conformance.codecLaws Codec.bool (ConfRng.choose [ true; false ]) seed iterations)
+              green "Codec.string" (Conformance.codecLawsAt Codec.string (ConfRng.choose texts) seed iterations)
+              green "Codec.bool" (Conformance.codecLawsAt Codec.bool (ConfRng.choose [ true; false ]) seed iterations)
 
               green
                   "Codec.list Codec.int"
-                  (Conformance.codecLaws
+                  (Conformance.codecLawsAt
                       (Codec.list Codec.int)
                       (fun r ->
                           let a, r = intGen r
@@ -214,7 +214,7 @@ let tests =
           <| fun _ ->
               let skewed = Codec.int |> Codec.map (fun n -> n + 1) id
 
-              redIn "map" [ inverse; text ] (Conformance.codecLaws skewed intGen seed iterations)
+              redIn "map" [ inverse; text ] (Conformance.codecLawsAt skewed intGen seed iterations)
 
           testCase "go-red: a refine whose check refuses a value its back writes"
           <| fun _ ->
@@ -222,7 +222,7 @@ let tests =
                   Codec.int
                   |> Codec.refine "positive" (fun n -> if n > 0 then Ok n else Error "not positive") id
 
-              let results = Conformance.codecLaws positive intGen seed iterations
+              let results = Conformance.codecLawsAt positive intGen seed iterations
               redIn "refine" [ reads; text ] results
 
               let cx =
@@ -244,7 +244,7 @@ let tests =
                         Tags = t
                         Note = None })
 
-              redIn "record" [ inverse; text ] (Conformance.codecLaws dropsNote referenceGen seed iterations)
+              redIn "record" [ inverse; text ] (Conformance.codecLawsAt dropsNote referenceGen seed iterations)
 
           testCase "go-red: a union case whose inject does not invert its project"
           <| fun _ ->
@@ -254,7 +254,7 @@ let tests =
                   let item, r = referenceGen r
                   item.Shape, r
 
-              redIn "union" [ inverse; text ] (Conformance.codecLaws wrongCase shapes seed iterations)
+              redIn "union" [ inverse; text ] (Conformance.codecLawsAt wrongCase shapes seed iterations)
 
           testCase "go-red: a union no case of which recognises a drawn value"
           <| fun _ ->
@@ -272,7 +272,7 @@ let tests =
                   )
 
               let results =
-                  Conformance.codecLaws circlesOnly (fun r -> Rect(1, 2), r) seed iterations
+                  Conformance.codecLawsAt circlesOnly (fun r -> Rect(1, 2), r) seed iterations
 
               Expect.contains
                   (reds results)
@@ -282,7 +282,7 @@ let tests =
           testCase "go-red: a make reader that does not read back its writer"
           <| fun _ ->
               let forgetful = Codec.make JInt (fun _ -> Ok 0) (JObj [])
-              redIn "make" [ inverse; text ] (Conformance.codecLaws forgetful intGen seed iterations)
+              redIn "make" [ inverse; text ] (Conformance.codecLawsAt forgetful intGen seed iterations)
 
           testCase "go-red: a reader that reads at the value level and not through the canonical text"
           <| fun _ ->
@@ -297,7 +297,7 @@ let tests =
                           | other -> Error [ Decoder.wrongKind "a float token" other ])
                       (JObj [])
 
-              redIn "text" [ text ] (Conformance.codecLaws floatOnly intGen seed iterations)
+              redIn "text" [ text ] (Conformance.codecLawsAt floatOnly intGen seed iterations)
 
           testCase "go-red: a refusal that points nowhere — a path the document does not hold"
           <| fun _ ->
@@ -305,19 +305,19 @@ let tests =
                   refusingWith (fun other ->
                       DecodeError.under (PathSegment.Key "nowhere") (Decoder.wrongKind "integer" other))
 
-              redIn "path" [ refusals ] (Conformance.codecLaws nowhere intGen seed iterations)
+              redIn "path" [ refusals ] (Conformance.codecLawsAt nowhere intGen seed iterations)
 
           testCase "go-red: a refusal with an unsound code — MissingField at the root, InvalidJson over a parsed value"
           <| fun _ ->
               let missingAtRoot =
                   refusingWith (fun _ -> DecodeError.make DecodeCode.MissingField "an integer" "missing")
 
-              redIn "MissingField" [ refusals ] (Conformance.codecLaws missingAtRoot intGen seed iterations)
+              redIn "MissingField" [ refusals ] (Conformance.codecLawsAt missingAtRoot intGen seed iterations)
 
               let invalidJson =
                   refusingWith (fun _ -> DecodeError.make DecodeCode.InvalidJson "an integer" "not JSON")
 
-              redIn "InvalidJson" [ refusals ] (Conformance.codecLaws invalidJson intGen seed iterations)
+              redIn "InvalidJson" [ refusals ] (Conformance.codecLawsAt invalidJson intGen seed iterations)
 
           testCase "go-red: a collecting reader that refuses with no defect"
           <| fun _ ->
@@ -330,7 +330,7 @@ let tests =
                           | _ -> Error [])
                       (JObj [])
 
-              redIn "empty refusal" [ refusals ] (Conformance.codecLaws silent intGen seed iterations)
+              redIn "empty refusal" [ refusals ] (Conformance.codecLawsAt silent intGen seed iterations)
 
           testCase "vacuity: a codec that refuses no mutation starves the refusal arm, by name"
           <| fun _ ->
@@ -338,7 +338,7 @@ let tests =
                   let n, r = intGen r
                   JInt n, r
 
-              let results = Conformance.codecLaws Codec.json gen seed iterations
+              let results = Conformance.codecLawsAt Codec.json gen seed iterations
               redIn "json" [] results
               let starved = reds results
               Expect.equal (List.length starved) 1 "only the guard is red"
@@ -346,13 +346,13 @@ let tests =
 
           testCase "vacuity: a generator that draws one value starves the span, by name"
           <| fun _ ->
-              let results = Conformance.codecLaws Codec.int (fun r -> 7, r) seed iterations
+              let results = Conformance.codecLawsAt Codec.int (fun r -> 7, r) seed iterations
               let starved = reds results
               Expect.equal (List.length starved) 1 "only the span guard is red"
               Expect.stringContains starved.Head "distinct written values" "and it names the measure"
 
           testCase "vacuity: no iterations is no evidence, and every subject cell says so"
           <| fun _ ->
-              let results = Conformance.codecLaws referenceCodec referenceGen seed 0
+              let results = Conformance.codecLawsAt referenceCodec referenceGen seed 0
 
               redIn "zero" [ written; reads; inverse; text ] results ]

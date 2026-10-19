@@ -38,7 +38,7 @@ module internal QuerySeamLaws =
     /// writes neither; and a resolver that cannot honour the predicate or the order is refused
     /// `PredicateNotHonoured` / `OrderNotHonoured` naming it, live and on replay. Counted once per
     /// iteration.
-    let queryLaws (seed: int) (iterations: int) : LawResult list =
+    let queryLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell
                 "param-validation accepts in-type + rejects type-mismatch / unknown params / a required param bound to Null"
@@ -99,7 +99,7 @@ module internal QuerySeamLaws =
             | Ok u -> u
             | Error e -> failwithf "the kit's unit kg did not parse: %A" e
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let nRows = rng.IntBelow 5
 
             let nField =
@@ -697,12 +697,10 @@ module internal QuerySeamLaws =
     /// resolver — each of which the domain's generator must reach.
     ///
     /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsAt` is the capability one.
-    /// `family` labels the guard, as there.
     let queryLawsAt
-        (family: string)
         (w: QuerySeamWitness)
         (resolver: (string * Cell) list -> Query -> Deferred<QueryResult>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let known = QueryRegistry.enumerate w.Queries |> List.map _.Id
@@ -717,7 +715,7 @@ module internal QuerySeamLaws =
             LawKit.LawCell
                 "a settled query result is bound to its declaration (Rows.Schema = ResultSchema, and Table.validate accepts the rows)"
 
-        LawKit.run iterations (seed + 7919) (fun rng _ at ->
+        LawKit.run (runner.Fork 7919) iterations (fun rng _ at ->
             let id, args = rng.Draw w.GenQuery
 
             match QueryRegistry.tryFind id w.Queries with
@@ -764,8 +762,7 @@ module internal QuerySeamLaws =
                   Dispatch = w.Dispatch
                   Gen = w.GenQuery
                   Rendering =
-                    { Family = family
-                      Laws =
+                    { Laws =
                         "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
                         "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)",
                         "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
@@ -777,7 +774,7 @@ module internal QuerySeamLaws =
                             | ExecutionFailed(m, _) -> Some m
                             | _ -> None
                       BodyFailed = fun m -> ExecutionFailed(m, []) } }
-                seed
+                runner
                 iterations
 
         (seam |> List.filter (isGuard >> not))

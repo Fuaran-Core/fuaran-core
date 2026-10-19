@@ -16,7 +16,7 @@ module internal PipelineSeamLaws =
     ///    projects `Ready`→`Ok`, `Failed`→`Error`;
     ///  - **replay interplay** — a `Ready` value (the realized result) journals through the Phase 27
     ///    capture seam and replays **byte-identically** even when the live source would now differ.
-    let deferredLaws (seed: int) (iterations: int) : LawResult list =
+    let deferredLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let roundtrip =
             LawKit.LawCell "Deferred round-trips the wire for Pending / Ready / Failed"
 
@@ -42,7 +42,7 @@ module internal PipelineSeamLaws =
 
         let hashFn = OpStream.defaultHash
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let v = rng.IntBelow 1000
 
             let cases = [ Pending; Ready v; Failed("err" + string v) ]
@@ -87,7 +87,7 @@ module internal PipelineSeamLaws =
     /// (a well-typed pipeline passes; an `int`-arg fed a `string` producer is a named `EdgeTypeMismatch`);
     /// **wire round-trip** (`encode`→`decode` is identity); and **per-node replay** (a node's realized
     /// value, journalled under `nodeInvocationKey`, replays byte-identically via the Phase-27 seam).
-    let capabilityPipelineLaws (seed: int) (iterations: int) : LawResult list =
+    let capabilityPipelineLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let typecheck =
             LawKit.LawCell
                 "pipeline type-check accepts a well-typed DAG + names an ill-typed edge (PipelineError.EdgeTypeMismatch)"
@@ -162,7 +162,7 @@ module internal PipelineSeamLaws =
                     [ Invoke("n1", "prod", AnyString, [])
                       Invoke("n2", "cons", IntRange(0, 100), [ "x", FromNode "n1" ]) ] }
 
-            LawKit.run iterations seed (fun rng _ at ->
+            LawKit.run runner iterations (fun rng _ at ->
                 let v = rng.IntBelow 100
 
                 (match CapabilityPipeline.typeCheck reg good, CapabilityPipeline.typeCheck reg bad with
@@ -304,13 +304,9 @@ module internal PipelineSeamLaws =
     ///
     /// **Vacuity.** The default-deny arms are built per `Invoke` node, so a generator whose pipelines
     /// carry none builds nothing; the guard counts the `Invoke` nodes reached.
-    ///
-    /// `family` labels the guard — `Conformance.capabilityPipelineLawsAt`, or the obsolete `…With`
-    /// forward's own id for one draft.
     let capabilityPipelineLawsAt
-        (family: string)
         (w: CapabilityPipelineWitness)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let composes =
@@ -340,7 +336,7 @@ module internal PipelineSeamLaws =
 
         let strayArg = "__no_such_hole__"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let p = rng.Draw w.GenPipeline
 
             (match CapabilityPipeline.decode (CapabilityPipeline.encode p) with
@@ -408,7 +404,7 @@ module internal PipelineSeamLaws =
                             )))
 
         LawKit.results [ composes; roundtrip; keys; deny ]
-        @ [ SampleAdequacy.reached family "built default-deny arm" seed [ "invoke node", invokeNodes ] ]
+        @ [ LawKit.guard runner "built default-deny arm" [ "invoke node", invokeNodes ] ]
 
     // ---- incremental capability-pipeline evaluation (Phase 62) ----
     // The teeth on `CapabilityPipeline.evalFrom`: the incremental path re-invokes only the
@@ -427,7 +423,7 @@ module internal PipelineSeamLaws =
     ///    reused, never re-run);
     ///  - **effect-honesty on the dirty path** — a clean node takes its prior value and is not re-invoked;
     ///    a dirty node is re-invoked and takes the fresh value (never a stale prior on the dirty path).
-    let capabilityPipelineIncrementalLaws (seed: int) (iterations: int) : LawResult list =
+    let capabilityPipelineIncrementalLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let byteIdentical =
             LawKit.LawCell "evalFrom is byte-identical to a full eval over the changed inputs (every change-set)"
 
@@ -489,7 +485,7 @@ module internal PipelineSeamLaws =
 
                     Ok(sum + 1)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let s1v0 = rng.IntBelow 1000
             let s2v0 = rng.IntBelow 1000
             let s1v1 = rng.IntBelow 1000
@@ -569,8 +565,4 @@ module internal PipelineSeamLaws =
                 | Error e -> honesty.Check(false, fun () -> at (sprintf "evalFrom errored: %A" e)))
 
         LawKit.results [ byteIdentical; minimal; honesty ]
-        @ [ SampleAdequacy.reached
-                "Conformance.capabilityPipelineIncrementalLaws"
-                "node reuse"
-                seed
-                [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+        @ [ LawKit.guard runner "node reuse" [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]

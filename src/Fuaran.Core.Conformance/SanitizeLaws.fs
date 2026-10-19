@@ -299,7 +299,7 @@ module internal SanitizeLaws =
     /// Every iteration draws a uniform splice of fragments and a cut-and-interpose splice of a
     /// forbidden name; the first also runs every pinned vector. Every arm is
     /// built on every iteration, so the family carries no guard.
-    let sanitizeLaws (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
+    let sanitizeLaws (w: SanitizeWitness) (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let urlFloor =
             LawKit.LawCell "an accepted URL passes the floor and is never longer than its input"
 
@@ -424,7 +424,7 @@ module internal SanitizeLaws =
                 fun () -> at (sprintf "sanitizeAttributes %A kept %A, expected %A" input kept expected)
             )
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             if i = 0 then
                 for u in refusedUrls do
                     urlFixed.Check(

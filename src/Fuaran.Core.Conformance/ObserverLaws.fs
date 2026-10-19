@@ -21,7 +21,7 @@ module internal ObserverLaws =
     let observerLaws<'Input, 'Flag when 'Input: equality and 'Flag: equality>
         (w: ObserverWitness<'Input, 'Flag>)
         (genInput: ConfRng.T -> 'Input * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let derived =
@@ -31,7 +31,7 @@ module internal ObserverLaws =
         let cyclic =
             LawKit.LawCell "a cyclic parent declaration terminates (each ring member walked once)"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // ---- every emission is the derivation of its input ----
             let n = 2 + rng.IntBelow 5
             let ids = [ for k in 0 .. n - 1 -> "n" + string k ]

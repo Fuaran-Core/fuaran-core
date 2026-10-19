@@ -34,7 +34,7 @@ module internal ValidityTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -121,7 +121,7 @@ module internal ValidityTreeLaws =
                     | Error _ -> acc)
                 (Ops.skeletonRoot nodew t)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let drawn = rng.Draw gen.Tree
             let start = pruned drawn
 
@@ -278,10 +278,9 @@ module internal ValidityTreeLaws =
               diffRefuses
               arbitration
               validator ]
-        @ [ SampleAdequacy.reached
-                "Conformance.containmentLaws"
+        @ [ LawKit.guard
+                runner
                 "grammar refusal"
-                seed
                 [ "accepted op", accepted
                   "IllegalChild", refused
                   "illegal drawn tree", illegalDrawn ] ]
@@ -306,16 +305,12 @@ module internal ValidityTreeLaws =
     ///
     /// `'Node` and `'Id` need equality. Opt-in: it needs the `RefWitness` a domain with references
     /// declares.
-    ///
-    /// `family` is the roster id the guard is labelled with — `Conformance.referenceLawsAt`, or the
-    /// bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let referenceLawsAt
-        (family: string)
         (refw: RefWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -507,7 +502,7 @@ module internal ValidityTreeLaws =
             | Batch inner -> inner |> List.collect written
             | _ -> []
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let mutable cur = rng.Draw gen.Tree
             checkDefects at cur
 
@@ -586,10 +581,9 @@ module internal ValidityTreeLaws =
             | [] -> ())
 
         LawKit.results [ exact; forwardExact; families; agreement; preservation; footprintReads; race ]
-        @ [ SampleAdequacy.reached
-                family
+        @ [ LawKit.guard
+                runner
                 "reference arm"
-                seed
                 [ "accepted remove", removes
                   "StillReferenced", stillReferenced
                   "race built", races ] ]
@@ -661,7 +655,7 @@ module internal ValidityTreeLaws =
         (idw: IdWitness<'Id>)
         (encode: 'Node -> string)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let key (n: 'Node) = idw.ToString(nodew.Id n)
@@ -695,7 +689,7 @@ module internal ValidityTreeLaws =
         let mutable removed = 0
         let mutable updated = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             for before, after in pairsOf nodew idw gen rng do
                 if after <> before then
                     nonIdentity <- nonIdentity + 1
@@ -789,10 +783,9 @@ module internal ValidityTreeLaws =
                 | _ -> ())
 
         LawKit.results [ perNode; identity; partition; changedIsOwn; merkle; agreesWithChanges ]
-        @ [ SampleAdequacy.reached
-                "Conformance.digestLaws"
+        @ [ LawKit.guard
+                runner
                 "pair shape"
-                seed
                 [ "non-identity pair", nonIdentity
                   "added id", added
                   "removed id", removed
@@ -814,7 +807,7 @@ module internal ValidityTreeLaws =
         (idw: IdWitness<'Id>)
         (encode: 'Node -> string)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let key (i: 'Id) = idw.ToString i
@@ -852,7 +845,7 @@ module internal ValidityTreeLaws =
         let mutable updated = 0
         let mutable reordered = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             for before, after in pairsOf nodew idw gen rng do
                 if after <> before then
                     nonIdentity <- nonIdentity + 1
@@ -1007,10 +1000,9 @@ module internal ValidityTreeLaws =
                     ))
 
         LawKit.results [ identity; canonical; inserts; moves; updates; removes; reorders; landing ]
-        @ [ SampleAdequacy.reached
-                "Conformance.changeLaws"
+        @ [ LawKit.guard
+                runner
                 "pair shape"
-                seed
                 [ "non-identity pair", nonIdentity
                   "added id", added
                   "removed id", removed
@@ -1033,7 +1025,7 @@ module internal ValidityTreeLaws =
         (idw: IdWitness<'Id>)
         (reg: Validator.RuleRegistry<'Node, 'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let identityOf (d: Defect<'Id>) =
@@ -1059,7 +1051,7 @@ module internal ValidityTreeLaws =
         let mutable introducedN = 0
         let mutable blockedN = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let pairs = pairsOf nodew idw gen rng
             let before = fst (List.head pairs)
             let candidate = snd (List.head pairs)
@@ -1131,8 +1123,4 @@ module internal ValidityTreeLaws =
             ))
 
         LawKit.results [ self; exact; policies; composed; encoding ]
-        @ [ SampleAdequacy.reached
-                "Conformance.introducedLaws"
-                "gate arm"
-                seed
-                [ "introduced defect", introducedN; "blocked verdict", blockedN ] ]
+        @ [ LawKit.guard runner "gate arm" [ "introduced defect", introducedN; "blocked verdict", blockedN ] ]

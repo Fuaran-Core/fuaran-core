@@ -65,7 +65,7 @@ module internal IntegrityLaws =
     /// mantissa, either sign), the subnormals, and the integral range from 2^53 to 2^57, where the
     /// layout's integer-shaped tokens past 2^53 live — and every run asserts the edges besides, so
     /// the largest finite, the smallest subnormal and the neighbours of 2^53 are reached by any seed.
-    let canonicalFloatLaws (seed: int) (iterations: int) : LawResult list =
+    let canonicalFloatLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let determinism =
             LawKit.LawCell "canonicalFloat is deterministic (same float ⇒ same string)"
 
@@ -147,7 +147,7 @@ module internal IntegrityLaws =
 
         let signed (rng: LawKit.Draws) (f: float) : float = if rng.IntBelow 2 = 0 then f else -f
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let a = rng.IntBelow 2000000
             let b = rng.IntBelow 1000
             // a spread of finite magnitudes, positive and negative.
@@ -169,7 +169,7 @@ module internal IntegrityLaws =
             assertOne at "integral past 2^53" (signed rng ((pow2 52 + m) * pow2 (e - 52))))
 
         for f in canonicalFloatEdges do
-            assertOne (fun msg -> "seed=" + string seed + " edge: " + msg) "edge" f
+            assertOne (fun msg -> "seed=" + string runner.Seed + " edge: " + msg) "edge" f
 
         // stable, distinct non-finite tokens (fixed text, not host-/locale-specific).
         let nan = Canon.canonicalFloat System.Double.NaN
@@ -183,7 +183,12 @@ module internal IntegrityLaws =
             && nan <> pinf
             && pinf <> ninf,
             fun () ->
-                sprintf "seed=%d: non-finite tokens not stable/distinct (nan=%s pinf=%s ninf=%s)" seed nan pinf ninf
+                sprintf
+                    "seed=%d: non-finite tokens not stable/distinct (nan=%s pinf=%s ninf=%s)"
+                    runner.Seed
+                    nan
+                    pinf
+                    ninf
         )
 
         LawKit.results [ determinism; roundtrip; fixedPoint; nonFinite ]
@@ -206,15 +211,11 @@ module internal IntegrityLaws =
     /// law passes green; the guard beside it counts the distinct trees the draw produced and how
     /// many of them were compared against a prior distinct tree, and is red when no distinct pair
     /// was ever compared. The search stops at the first collision, as it always did.
-    ///
-    /// `family` is the roster id the guard is labelled with — `Conformance.encoderInjectivityLawsAt`, or
-    /// the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let encoderInjectivityLawsAt
-        (family: string)
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (gen: ConfRng.T -> 'Node * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let collision =
@@ -227,7 +228,7 @@ module internal IntegrityLaws =
         let mutable distinct = 0
         let mutable compared = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             if not collision.Failed then
                 let tree = rng.Draw gen
                 let h = Tree.encodeHash w.Tree encode tree
@@ -254,7 +255,7 @@ module internal IntegrityLaws =
                     seen <- Map.add h tree seen)
 
         LawKit.results [ collision ]
-        @ [ SampleAdequacy.reached family "distinct tree" seed [ "seen", distinct; "compared", compared ] ]
+        @ [ LawKit.guard runner "distinct tree" [ "seen", distinct; "compared", compared ] ]
 
     // ---- op-codec injectivity (Phase 145) ----
     // The fourth premise of the content-id theorem, and the one that is a DOMAIN's rather than this
@@ -286,7 +287,7 @@ module internal IntegrityLaws =
     let codecInjectivityLaws
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let collision =
@@ -303,7 +304,7 @@ module internal IntegrityLaws =
         let mutable seen = Map.empty<string, 'Op>
         let mutable distinct = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let op = rng.Draw gen.Op
             let enc = w.Encode op
 
@@ -358,7 +359,7 @@ module internal IntegrityLaws =
             fun () ->
                 sprintf
                     "seed=%d: the draw produced %d distinct encoding(s) over %d iterations — a collision search over one value compares nothing; widen the generator"
-                    seed
+                    runner.Seed
                     distinct
                     iterations
         )
@@ -407,16 +408,12 @@ module internal IntegrityLaws =
     /// than green. Adopting the kit still never forces a sink on a host: a host with none runs
     /// `noAttestationVacuityLaws` instead.
     /// Opt-in like `snapshotLaws` / `dagLaws`. `'State` needs equality (replay-equivalence).
-    ///
-    /// `family` is the roster id the guard is labelled with — `Conformance.attestationLawsAt`, or the
-    /// bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let attestationLawsAt
-        (family: string)
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (sink: IAttestationSink)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         // The four laws that run only where the sink signed read through the guard below (Phase 297):
@@ -462,7 +459,7 @@ module internal IntegrityLaws =
         // never builds; it is counted beside the other three.
         let mutable prefixMoved = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
 
             // checkpoint round-trip: a signed head verifies against its own chain (vacuous under noAttestation).
@@ -567,10 +564,9 @@ module internal IntegrityLaws =
         // has its own family (`noAttestationVacuityLaws`), which is what a host with no sink
         // should be running. Phase 297 folds the op-tamper count into the same guard (the
         // family's result count is pinned) rather than emitting a second one.
-        @ [ SampleAdequacy.reached
-                family
+        @ [ LawKit.guard
+                runner
                 "signing outcome and op tamper"
-                seed
                 [ "signed", signed
                   "falsified", falsified
                   "op-tampered", opTampered
@@ -587,7 +583,7 @@ module internal IntegrityLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let noSign = LawKit.LawCell "noAttestation issues no attestation (Sign ⇒ None)"
@@ -596,7 +592,7 @@ module internal IntegrityLaws =
         let unchanged =
             LawKit.LawCell "attesting leaves the un-attested chain unchanged (read-only side-band)"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let _, recs, _ = LawKit.buildChain hashFn sw gen rng
 
             noSign.Check(
@@ -659,7 +655,7 @@ module internal IntegrityLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let chainHashes (rs: OpRecord<'Op> list) = rs |> List.map _.Hash
@@ -701,7 +697,7 @@ module internal IntegrityLaws =
         let mutable reMints = 0
         let mutable distinguished = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // build the chain twice from the same start: same start ⇒ identical chain (determinism).
             // The cursor is left where the FIRST build left it, as it always was.
             let start = rng.State
@@ -856,10 +852,9 @@ module internal IntegrityLaws =
                 ))
 
         LawKit.results [ determinism; parity; tamper; opTamper; reMint; distinguish ]
-        @ [ SampleAdequacy.reached
-                "Conformance.hashFnLaws"
+        @ [ LawKit.guard
+                runner
                 "tamper arm"
-                seed
                 [ "reorder", reorders
                   "drop", drops
                   "bit-flip", flips
@@ -889,7 +884,7 @@ module internal IntegrityLaws =
     /// `budget` below two is a refused argument — the family answers a red law naming it, beside the two
     /// laws reported never reached, and hashes nothing. The resistance law's evidence is one assertion
     /// per pre-image the crypto stand-in hashed, so a search that hashed nothing cannot read green.
-    let hashFnAdversarialLaws (cryptoHf: HashFn) (budget: int) (seed: int) : LawResult list =
+    let hashFnAdversarialLaws (cryptoHf: HashFn) (budget: int) (runner: LawKit.Runner) : LawResult list =
         let resist =
             LawKit.LawCell "a collision-resistant HashFn resists a re-hashed forgery (no in-budget pre-image collision)"
 
@@ -904,7 +899,7 @@ module internal IntegrityLaws =
                 Some(
                     sprintf
                         "seed=%d: budget=%d is refused — a collision needs two pre-images, so no pre-image was hashed and neither law below was run"
-                        seed
+                        runner.Seed
                         budget
                 ) }
             :: LawKit.results [ resist; admit ]
@@ -918,7 +913,7 @@ module internal IntegrityLaws =
                     if k >= budget then
                         None, k
                     else
-                        let payload = "forge-" + string (seed + k)
+                        let payload = "forge-" + string (runner.Seed + k)
                         let h = hf "" payload
 
                         match Map.tryFind h seen with
@@ -938,7 +933,7 @@ module internal IntegrityLaws =
                      fun () ->
                          sprintf
                              "seed=%d: the crypto stand-in collided in-budget (%s / %s) — too weak for the posture"
-                             seed
+                             runner.Seed
                              a
                              b
                  ))
@@ -948,7 +943,7 @@ module internal IntegrityLaws =
              | Some(a, b), _ ->
                  admit.Check(
                      false,
-                     fun () -> sprintf "seed=%d: an FNV-1a 'collision' did not check out (%s / %s)" seed a b
+                     fun () -> sprintf "seed=%d: an FNV-1a 'collision' did not check out (%s / %s)" runner.Seed a b
                  )
              | None, _ ->
                  admit.Check(
@@ -956,7 +951,7 @@ module internal IntegrityLaws =
                      fun () ->
                          sprintf
                              "seed=%d: no FNV-1a collision within budget=%d — the default may have silently widened (posture regression)"
-                             seed
+                             runner.Seed
                              budget
                  ))
 
@@ -987,7 +982,7 @@ module internal IntegrityLaws =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let lifted = OpStream.Attributed.liftWitness w
@@ -1006,7 +1001,7 @@ module internal IntegrityLaws =
 
         let mutable reattributed = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let mutable innerState = gen.State0
             let mutable innerRecs = OpStream.empty
             let mutable attrState = gen.State0
@@ -1072,7 +1067,7 @@ module internal IntegrityLaws =
                 roundTripCx.Check(false, fun () -> at (sprintf "attributed JSONL round-trip ≠ original (%A)" other)))
 
         LawKit.results [ replayCx; tamperCx; roundTripCx ]
-        @ [ SampleAdequacy.reached "Conformance.attributedLaws" "tampered chain" seed [ "re-attributed", reattributed ] ]
+        @ [ LawKit.guard runner "tampered chain" [ "re-attributed", reattributed ] ]
 
     // ---- construct-then-encode (Phase 126) ----
     // Every family above that touches a codec certifies `decode` and `encode` against each other.

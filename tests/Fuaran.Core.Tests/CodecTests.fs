@@ -510,22 +510,24 @@ let tests =
                 <| fun () ->
                     let v1s = vectors |> List.map (fun (_, _, v1, _) -> v1)
                     let v2s = vectors |> List.map (fun (_, _, _, v2) -> v2)
-                    Expect.isTrue (passed (EncodingProfileVectors.storedCodecLaws "v1" note v1s)) "v1"
-                    Expect.isTrue (passed (EncodingProfileVectors.storedCodecLaws "v2" note v2s)) "v2"
+                    Expect.isTrue (passed (EncodingProfileVectors.storedCodecLawsAt "v1" note v1s)) "v1"
+                    Expect.isTrue (passed (EncodingProfileVectors.storedCodecLawsAt "v2" note v2s)) "v2"
                     // Phase 390 — an empty store certifies nothing, so it is red by name, never green over nothing.
                     Expect.equal
-                        (EncodingProfileVectors.storedCodecLaws "v2" note [] |> failing)
+                        (EncodingProfileVectors.storedCodecLawsAt "v2" note [] |> failing)
                         [ "stored codec: the store holds at least one text" ]
                         "an empty store"
 
                     Expect.isTrue
-                        (passed (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":[1,\"x\\u000a\"]}" ]))
+                        (passed (
+                            EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [ "{\"a\":[1,\"x\\u000a\"]}" ]
+                        ))
                         "the identity codec over canonical text"
 
                 testCase "a store read under the wrong profile reds exactly the recompute law, naming the text"
                 <| fun () ->
                     let v1s = vectors |> List.map (fun (_, _, v1, _) -> v1)
-                    let laws = EncodingProfileVectors.storedCodecLaws "v2" note v1s
+                    let laws = EncodingProfileVectors.storedCodecLawsAt "v2" note v1s
 
                     Expect.equal
                         (failing laws)
@@ -538,14 +540,14 @@ let tests =
                 testCase "an unknown declaration, a defect and a non-canonical spelling each red their law"
                 <| fun () ->
                     Expect.equal
-                        (EncodingProfileVectors.storedCodecLaws "v3" note [ "{}" ]
+                        (EncodingProfileVectors.storedCodecLawsAt "v3" note [ "{}" ]
                          |> failing
                          |> List.length)
                         4
                         "an unknown profile evaluates nothing"
 
                     Expect.equal
-                        (EncodingProfileVectors.storedCodecLaws "v2" note [ "{\"id\":1}" ]
+                        (EncodingProfileVectors.storedCodecLawsAt "v2" note [ "{\"id\":1}" ]
                          |> failing
                          |> List.head)
                         "stored codec: every stored text reads through the codec with no defect"
@@ -555,7 +557,7 @@ let tests =
                         """{"id":"n2", "text":"plain","tags":[],"shape":{"kind":"rect","w":3,"h":4},"level":"low"}"""
 
                     Expect.equal
-                        (EncodingProfileVectors.storedCodecLaws "v2" note [ spaced ] |> failing)
+                        (EncodingProfileVectors.storedCodecLawsAt "v2" note [ spaced ] |> failing)
                         [ "stored codec: every stored text is the codec's canonical text of its value under the declared profile, byte for byte" ]
                         "whitespace" ] ]
 

@@ -24,7 +24,7 @@ module internal PropagationLaws =
     ///
     /// A final fixed law certifies **cycle-as-data**: a 3-cycle enumerates as a `Cycles` SCC and
     /// `cycleThrough` returns a path — `sort` terminates, never diverges.
-    let dirtyPropagationLaws (seed: int) (iterations: int) : LawResult list =
+    let dirtyPropagationLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let soundMinimal =
             LawKit.LawCell "dirtyFromChangedIds equals the independent reads-reachability closure (sound + minimal)"
 
@@ -61,7 +61,7 @@ module internal PropagationLaws =
 
             go (Set.singleton start) (Set.singleton start)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let extra = rng.IntBelow 6
             let nNodes = extra + 2
             let ids = [ for k in 0 .. nNodes - 1 -> string k ]
@@ -173,11 +173,7 @@ module internal PropagationLaws =
         cycle.Check(cycleOk, fun () -> sprintf "cycles=%A through-b=%A" cyclesResult.Cycles throughB)
 
         LawKit.results [ soundMinimal; frontier; byteIdentity; cycle ]
-        @ [ SampleAdequacy.reached
-                "Conformance.dirtyPropagationLaws"
-                "dirty frontier"
-                seed
-                [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+        @ [ LawKit.guard runner "dirty frontier" [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
 
     // ---- tree-level incremental recompute driver (Phase 69) ----
     // The teeth on `Propagation.evalFrom`: over random acyclic DAGs + a toy pull evaluator, the incremental
@@ -190,7 +186,7 @@ module internal PropagationLaws =
     /// certifies: **byte-identity** (`evalFrom (eval old) changed` equals a full `eval` over the new bases);
     /// **minimality** (`evalFrom` invokes `evalNode` on exactly the dirty set); **unknown-change envelope**
     /// (a `changed` id absent from the graph is `EvalUnknownChange`, never a throw).
-    let propagationEvalLaws (seed: int) (iterations: int) : LawResult list =
+    let propagationEvalLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let byteIdentical =
             LawKit.LawCell "evalFrom is byte-identical to a full eval over the changed inputs (every change)"
         // The three laws below are asserted only once the prior model has evaluated — the arm the
@@ -254,7 +250,7 @@ module internal PropagationLaws =
 
                 Ok(Map.find id baseOf + declaredSum + leaked)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let extra = rng.IntBelow 6
             let nNodes = extra + 2
             let ids = [ for k in 0 .. nNodes - 1 -> string k ]
@@ -370,15 +366,10 @@ module internal PropagationLaws =
                 | Some why -> undeclaredRefused.Check(false, fun () -> why))
 
         LawKit.results [ byteIdentical; minimal; unknownChange; undeclaredRefused ]
-        @ [ SampleAdequacy.reached
-                "Conformance.propagationEvalLaws"
-                "node reuse"
-                seed
-                [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
-            SampleAdequacy.reached
-                "Conformance.propagationEvalLaws"
+        @ [ LawKit.guard runner "node reuse" [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
+            LawKit.guard
+                runner
                 "undeclared read"
-                seed
                 [ "read of a real node", refusedRealNode
                   "read of an id the map does not hold", refusedAbsentId ] ]
 
@@ -439,13 +430,9 @@ module internal PropagationLaws =
     ///
     /// **Opt-in, not folded into `certify`** — the `keyedChildrenLaws` shape. `certify` takes a tree
     /// witness, and a domain that does not evaluate incrementally has nothing for this family to say.
-    ///
-    /// `family` is the roster id the guard is labelled with — `Conformance.propagationEvaluatorLawsAt`,
-    /// or the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let propagationEvaluatorLawsAt
-        (family: string)
         (evw: EvaluatorWitness<'Model, 'V>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let purity =
@@ -496,7 +483,7 @@ module internal PropagationLaws =
                 Some(
                     sprintf
                         "seed=%d iter=%d: %s — two full evaluations of the %s model over one map disagree: %A, then %A"
-                        seed
+                        runner.Seed
                         i
                         evw.Surface
                         which
@@ -518,7 +505,7 @@ module internal PropagationLaws =
                     |> Option.map (fun ((id, a), (_, b)) ->
                         sprintf
                             "seed=%d iter=%d: %s — node %s of the %s model, handed the same answers, gave %A (asking %A) and then %A (asking %A) %s"
-                            seed
+                            runner.Seed
                             i
                             evw.Surface
                             id
@@ -558,7 +545,7 @@ module internal PropagationLaws =
                 Some(
                     sprintf
                         "seed=%d iter=%d: %s — node %s is not in the change set %A, but the edit moved the reads it DECLARES from %A to %A"
-                        seed
+                        runner.Seed
                         i
                         evw.Surface
                         id
@@ -577,7 +564,7 @@ module internal PropagationLaws =
                     Some(
                         sprintf
                             "seed=%d iter=%d: %s — the change set names %A, which the dependency map does not hold; evalFrom refuses such a change as EvalUnknownChange, so it cannot be replayed incrementally"
-                            seed
+                            runner.Seed
                             i
                             evw.Surface
                             unknown
@@ -593,7 +580,7 @@ module internal PropagationLaws =
                             Some(
                                 sprintf
                                     "seed=%d iter=%d: %s — node %s is not in the change set %A, but under %s the prior evaluator gave %A (asking %A) and the edited one %A (asking %A); a change set that omits a node the edit moved makes evalFrom reuse a stale value there"
-                                    seed
+                                    runner.Seed
                                     i
                                     evw.Surface
                                     id
@@ -655,7 +642,7 @@ module internal PropagationLaws =
                 Some(
                     sprintf
                         "seed=%d iter=%d: %s — node %s of the %s model asked for %s, which its declared reads %A do not hold"
-                        seed
+                        runner.Seed
                         i
                         evw.Surface
                         id
@@ -667,7 +654,7 @@ module internal PropagationLaws =
                 Some(
                     sprintf
                         "seed=%d iter=%d: %s — node %s reads %A, which the edit removed, but the change set %A does not name it"
-                        seed
+                        runner.Seed
                         i
                         evw.Surface
                         id
@@ -676,7 +663,7 @@ module internal PropagationLaws =
                 )
             | [], None -> honestyDefectCore i ev0 ev1 deps0 deps1 changed answerSets
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let m0 = rng.Draw evw.Model
             let m1, changed = rng.Draw(evw.Change m0)
             let deps0 = evw.Deps m0
@@ -818,10 +805,9 @@ module internal PropagationLaws =
             | _ -> ())
 
         LawKit.results [ purity; honesty; agreement ]
-        @ [ SampleAdequacy.reachedBeside
-                family
+        @ [ LawKit.guardBeside
+                runner
                 "evaluator edit"
-                seed
                 [ "change reaching a reader", readerReached
                   "clean node reused from prior", cleanReused
                   "failing evaluator", failed ]
@@ -834,9 +820,12 @@ module internal PropagationLaws =
     // handed. Like the others it is about the evaluator, a parameter of the model, so it is checked here
     // at the evaluator a domain actually runs.
 
-    /// The evaluator-contract laws for a PRIOR-AWARE evaluator (Phase 250): `propagationEvaluatorLaws`
-    /// over the domain's reference evaluator (`evw.EvalNode`), and then three laws about the
-    /// prior-aware one (`evalNodeWith`) the domain hands `Propagation.evalWith` / `evalFromWith`.
+    /// The evaluator-contract laws for a PRIOR-AWARE evaluator (Phase 250): three laws about the
+    /// prior-aware one (`evalNodeWith`) the domain hands `Propagation.evalWith` / `evalFromWith`. The
+    /// public family (`Conformance.propagationPriorLawsAt`, Phase 507 — `propagationEvaluatorLawsWith`
+    /// until then) runs `propagationEvaluatorLawsAt` over the domain's reference evaluator
+    /// (`evw.EvalNode`) first and these after it: a different law SET, so a stem of its own rather
+    /// than a `…With`, which names one pinned parameter (D127).
     ///
     /// - **The prior-blind reading is the reference.** Handed no prior, the prior-aware evaluator
     ///   returns what the reference returns and asks for the same reads, at every node of the prior
@@ -862,15 +851,12 @@ module internal PropagationLaws =
     /// **Vacuity.** The guard counts, over the edits that reached the agreement law, a RECOMPUTED node
     /// that was handed a prior (so the prior path was taken, not only the priming one) and a clean
     /// node reused from the prior. A domain whose every edit moves the map reaches neither.
-    let propagationEvaluatorLawsWith
+    let propagationPriorLawsAt
         (evw: EvaluatorWitness<'Model, 'V>)
         (evalNodeWith: 'Model -> (string -> 'V option) -> 'V option -> string -> Result<'V, string>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let reference =
-            propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLawsAt" evw seed iterations
-
         let blind =
             LawKit.LawCell
                 "handed no prior, the prior-aware evaluator is the reference evaluator, and evalWith of it is eval of the reference (prior-blind reading)"
@@ -918,7 +904,7 @@ module internal PropagationLaws =
                 Some(
                     sprintf
                         "seed=%d iter=%d: %s — over the %s model, evalWith of the prior-aware evaluator returned %A and eval of the reference %A"
-                        seed
+                        runner.Seed
                         i
                         evw.Surface
                         which
@@ -937,7 +923,7 @@ module internal PropagationLaws =
                         Some(
                             sprintf
                                 "seed=%d iter=%d: %s — node %s of the %s model, handed no prior, gave %A (asking %A) where the reference gave %A (asking %A)"
-                                seed
+                                runner.Seed
                                 i
                                 evw.Surface
                                 id
@@ -950,7 +936,7 @@ module internal PropagationLaws =
                     else
                         None)
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let m0 = rng.Draw evw.Model
             let m1, changed = rng.Draw(evw.Change m0)
             let deps0 = evw.Deps m0
@@ -1100,12 +1086,10 @@ module internal PropagationLaws =
                     )
             | _ -> ())
 
-        reference
-        @ LawKit.results [ blind; discipline; agreement ]
-        @ [ SampleAdequacy.reachedBeside
-                "Conformance.propagationEvaluatorLawsWith"
+        LawKit.results [ blind; discipline; agreement ]
+        @ [ LawKit.guardBeside
+                runner
                 "prior-aware edit"
-                seed
                 [ "recomputed node handed a prior", priorHanded
                   "clean node reused from prior", cleanReused ]
                 [ "moved-map edit replayed from its survivors", movedMap ] ]

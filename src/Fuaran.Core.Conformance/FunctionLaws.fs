@@ -27,7 +27,7 @@ module internal FunctionLaws =
         (wb: ArtifactWitness<'B, 'IdB>)
         (embed: 'B -> 'A)
         (draw: ConfRng.T -> CompositionSample<'A, 'B> * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let nested = LawKit.LawCell "apply ∘ composeAcross = the nested application"
@@ -41,7 +41,7 @@ module internal FunctionLaws =
         let effectJoin =
             LawKit.LawCell "composed effect = componentwise join of the parts' (Fork 3)"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let s = rng.Draw draw
 
             let argMap = s.OuterArgs |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList
@@ -472,7 +472,7 @@ module internal FunctionLaws =
         (broken: 'Node)
         (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let soundLaw =
@@ -486,15 +486,19 @@ module internal FunctionLaws =
 
         // Each report is one verification run over the whole sample, so each law is asserted once,
         // over that run — the evidence is the run having been made, not an iteration.
-        let soundReport = verifyFunction w sound reg genParams seed iterations
-        let brokenReport = verifyFunction w broken reg genParams seed iterations
-        let brokenAgain = verifyFunction w broken reg genParams seed iterations
+        let soundReport = verifyFunction w sound reg genParams runner.Seed iterations
+        let brokenReport = verifyFunction w broken reg genParams runner.Seed iterations
+        let brokenAgain = verifyFunction w broken reg genParams runner.Seed iterations
 
         (match soundReport.Verified, soundReport.Counterexample with
          | false, Some cx ->
              soundLaw.Check(
                  false,
-                 fun () -> sprintf "seed=%d: a sound function failed verification — %s" seed (renderCounterexample w cx)
+                 fun () ->
+                     sprintf
+                         "seed=%d: a sound function failed verification — %s"
+                         runner.Seed
+                         (renderCounterexample w cx)
              )
          | _ -> soundLaw.Saw())
 
@@ -502,17 +506,17 @@ module internal FunctionLaws =
          | false, Some cx ->
              brokenLaw.Check(
                  not (System.String.IsNullOrWhiteSpace(renderCounterexample w cx)),
-                 fun () -> sprintf "seed=%d: the broken function's counterexample was empty (not readable)" seed
+                 fun () -> sprintf "seed=%d: the broken function's counterexample was empty (not readable)" runner.Seed
              )
          | _ ->
              brokenLaw.Check(
                  false,
-                 fun () -> sprintf "seed=%d: a broken function verified clean (no counterexample surfaced)" seed
+                 fun () -> sprintf "seed=%d: a broken function verified clean (no counterexample surfaced)" runner.Seed
              ))
 
         detLaw.Check(
             (brokenReport = brokenAgain),
-            fun () -> sprintf "seed=%d: verification was not deterministic (same seed ⇒ different report)" seed
+            fun () -> sprintf "seed=%d: verification was not deterministic (same seed ⇒ different report)" runner.Seed
         )
 
         LawKit.results [ soundLaw; brokenLaw; detLaw ]
@@ -545,7 +549,7 @@ module internal FunctionLaws =
         (encode: 'Node -> string)
         (draw: ConfRng.T -> MemoSample<'Node> * ConfRng.T)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let equalsDirect =
@@ -563,7 +567,7 @@ module internal FunctionLaws =
         let separatorMiss =
             LawKit.LawCell "a value spelling the separator and the next binding misses (the memo key is injective)"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let s = rng.Draw draw
 
             // ---- 5. (Phase 290) a value spelling the separator and the next binding MISSES ----
@@ -763,11 +767,11 @@ module internal FunctionLaws =
         (encodeA: 'A -> string)
         (encodeB: 'B -> string)
         (draw: ConfRng.T -> CompositionSample<'A, 'B> * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         // The composeAcross half — over the genuinely-distinct (wa, wb, embed) triple.
-        let composition = compositionLaws wa wb embed draw seed iterations
+        let composition = compositionLaws wa wb embed draw runner iterations
 
         // The applyMemo half — an independent stream so the pilot stays deterministic per seed.
         let subMemo =
@@ -776,11 +780,11 @@ module internal FunctionLaws =
         let composedMemo =
             LawKit.LawCell "applyMemo over the cross-witness-composed function equals direct apply (re-apply is a hit)"
 
-        // The cursor is seeded from `seed + 101` (the independent stream); the counterexamples
-        // are stamped with the caller's `seed`, as they always were, so the runner's own stamp
-        // is set aside for one built over `seed`.
-        LawKit.run iterations (seed + 101) (fun rng i _ ->
-            let at = LawKit.failAt seed i
+        // The cursor is the independent stream `Fork 101`; the counterexamples are stamped with
+        // the caller's seed, as they always were, so the forked runner's own stamp is set aside
+        // for one built over `runner.Seed`.
+        LawKit.run (runner.Fork 101) iterations (fun rng i _ ->
+            let at = LawKit.failAt runner.Seed i
             let s = rng.Draw draw
 
             // ---- a pure cross-witness sub-function memoises (miss then hit) ----
@@ -856,7 +860,7 @@ module internal FunctionLaws =
         (mkBroken: DeterminismSource -> 'Node)
         (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         // Every determinism set over the three factors — the empty set (`Deterministic`), each factor
@@ -880,7 +884,8 @@ module internal FunctionLaws =
         // evidence is the run having been made, not an iteration.
 
         // a stochastic (Random) sound function verifies on structure across the sampled param space.
-        (let rep = verifyFunction w (mkSound Effect.random) reg genParams seed iterations
+        (let rep =
+            verifyFunction w (mkSound Effect.random) reg genParams runner.Seed iterations
 
          stochasticVerifies.Check(
              rep.Verified,
@@ -890,25 +895,28 @@ module internal FunctionLaws =
                      | Some cx -> renderCounterexample w cx
                      | None -> "(no counterexample)"
 
-                 sprintf "seed=%d: a stochastic-effect sound function failed structural verification — %s" seed why
+                 sprintf
+                     "seed=%d: a stochastic-effect sound function failed structural verification — %s"
+                     runner.Seed
+                     why
          ))
 
         // the structural verdict is effect-class-agnostic: sound verifies under every axis; broken
         // verifies under none. Verify keys on structure, not the determinism class.
         (let soundVerdicts =
             axes
-            |> List.map (fun d -> (verifyFunction w (mkSound d) reg genParams seed iterations).Verified)
+            |> List.map (fun d -> (verifyFunction w (mkSound d) reg genParams runner.Seed iterations).Verified)
 
          let brokenVerdicts =
              axes
-             |> List.map (fun d -> (verifyFunction w (mkBroken d) reg genParams seed iterations).Verified)
+             |> List.map (fun d -> (verifyFunction w (mkBroken d) reg genParams runner.Seed iterations).Verified)
 
          effectAgnostic.Check(
              (soundVerdicts |> List.forall id) && (brokenVerdicts |> List.forall not),
              fun () ->
                  sprintf
                      "seed=%d: the structural verdict varied with the effect class (sound=%A broken=%A)"
-                     seed
+                     runner.Seed
                      soundVerdicts
                      brokenVerdicts
          ))
@@ -941,7 +949,7 @@ module internal FunctionLaws =
         (encode: 'Node -> string)
         (underDeclaredFn: 'Node)
         (underDeclaredArgs: Map<string, Arg<'Node>>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let gateLaw =
@@ -962,14 +970,14 @@ module internal FunctionLaws =
             fun () ->
                 sprintf
                     "seed=%d: fixture is not a genuine under-declared case (declaredMemoisable=%b observedMemoisable=%b)"
-                    seed
+                    runner.Seed
                     declaredMemoisable
                     observedMemoisable
         )
 
         // bypass behaviour: apply = applyMemo, nothing cached, never served on re-apply. Nothing is
         // drawn, so the counterexample carries the seed alone, as it always did.
-        LawKit.run iterations seed (fun _ _ _ ->
+        LawKit.run runner iterations (fun _ _ _ ->
             match
                 Function.apply w underDeclaredArgs underDeclaredFn,
                 Function.applyMemo w encode underDeclaredArgs underDeclaredFn Memo.empty
@@ -991,7 +999,7 @@ module internal FunctionLaws =
                         fun () ->
                             sprintf
                                 "seed=%d: under-declared fn not bypassed (entries=%d/%d hits=%d/%d bypasses=%d/%d)"
-                                seed
+                                runner.Seed
                                 (Map.count c1.Entries)
                                 (Map.count c2.Entries)
                                 c1.Hits
@@ -1002,7 +1010,7 @@ module internal FunctionLaws =
                 | Error e ->
                     bypassLaw.Check(
                         false,
-                        fun () -> sprintf "seed=%d: re-apply of the under-declared fn errored: %A" seed e
+                        fun () -> sprintf "seed=%d: re-apply of the under-declared fn errored: %A" runner.Seed e
                     )
             | other ->
                 bypassLaw.Check(
@@ -1010,7 +1018,7 @@ module internal FunctionLaws =
                     fun () ->
                         sprintf
                             "seed=%d: apply / applyMemo of the under-declared fn disagreed or errored: %A"
-                            seed
+                            runner.Seed
                             other
                 ))
 

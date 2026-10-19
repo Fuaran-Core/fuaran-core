@@ -89,7 +89,7 @@ The kit ships two kinds of family, and you run both the same way — **every ent
   every domain has, or one asking for a stronger promise than the base contract.
 - **Vector families** are enumerated: a runner over a fixed table (`WireNullTolerance`,
   `StringEscapeVectors`, `EncodingProfileVectors`, `ParityVectors`) or over YOUR store, walked whole
-  (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`, `EncodingProfileVectors.storedCodecLaws`).
+  (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`, `EncodingProfileVectors.storedCodecLawsAt`).
   Each answers `laws ()` over its committed corpus, and `lawsWith` over a vector set you hand it.
   Their vector-shaped entries (`run`, `check`, `lines ()`) stay for the hosts in other languages that
   diff them; `laws` is how the kit, and you, read them.
@@ -119,8 +119,10 @@ unreachable run cannot pass as an adopted one.
 kit's own fixtures); every family that takes a witness capability your domain supplies is spelled
 `…At` (`keyedApplyLawsAt`, `memoLawsAt`, `FoldConfluence.laneFoldLawsAt`, …); and `…With` is the
 `…At` family — or a bare one — with one more parameter, last before the seed
-(`propagationEvaluatorLawsWith`'s prior-aware evaluator, `keyedArbitrationLawsWith`'s footprint and
-admission pair, `laneFoldLawsWith`'s `HashFn`, `lawsWith`'s vector set). There is no `…AtWith`. Phase
+(`keyedArbitrationLawsWith`'s footprint and admission pair, `laneFoldLawsWith`'s `HashFn`, `lawsWith`'s
+vector set); the form without it is the same family at the default, one census cell under the `…With`
+id, which lists it in `spellings`. A family that adds laws has a stem of its own
+(`propagationPriorLawsAt`, `propagationEvaluatorLawsWith` until Phase 507). There is no `…AtWith`. Phase
 390 brought every witness-taking family under the rule; the bare spellings it replaced
 (`keyedChildrenLaws`, `referenceLaws`, `propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`,
 `sanitizeLaws`, `attestationLaws`, `compositionLaws`, `compositionPilot`, `memoLaws`,
