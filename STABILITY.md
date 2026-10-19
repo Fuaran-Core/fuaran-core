@@ -1018,7 +1018,7 @@ ancestors, an in-place `UpdateNode` reads and content-writes its target alone, a
 any op after one that does not apply — takes the pure arm. `Arbitration.arbitrateIn`, `Dag.conflictsIn` /
 `reconcileIn` / `reconcileManyIn` compose it; `Conformance.footprintInLawsAt` certifies it at a domain's
 own ops; the pure entries and their verdicts are unchanged. It refines the pure verdict (`FootprintIn.footprint_in_refines`: no pair the pure form frees is refused)
-and is sound over every operation, moves included (`footprint_in_sound`, the five move pairs proved in-phase).
+and is sound over every operation, moves included (`footprint_in_sound`, the five move pairs proved in-phase). **The write gate reads the same location of each op (Phase 512, `0.39.0`, internal):** `WriteGate.targetsOf` is exactly `footprintIn`'s structure and content writes less a source parent the op does not itself name (an allowance on the target covers it, D138), each op located ONCE (an internal per-op view) for the engine's checks and edit, the gate, the grammar's created pairs and the inverse; `FootprintTests` holds the agreement over every op of the reference tree, and a change to either side alone is breaking for it.
 
 - **A `RemoveNode` / `MoveNode` has an unknown source parent.** Removing or moving a node also rewrites
   its *source* parent's child-list, a tree fact the op does not carry, so the target lands in

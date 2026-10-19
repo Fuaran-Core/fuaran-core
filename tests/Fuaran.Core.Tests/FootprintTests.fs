@@ -452,3 +452,73 @@ let interferenceTests =
 
               // independent scripts explain nothing.
               Expect.isEmpty (Ops.interference (fp [ ins "a" "x" ]) (fp [ ins "b" "y" ])) "disjoint inserts" ]
+
+// Phase 512 — the write gate and the base-aware footprint read ONE view of each op, so they agree
+// by construction: what the gate decides on is exactly what `footprintIn` records as written, less
+// the source parent of a removal or a move, which an allowance on the target covers (D138). Every
+// non-batch op over the sample tree's ids, at the tree it applies to.
+
+[<Tests>]
+let gateFootprintAgreementTests =
+    testList
+        "Phase 512 - the gate and the base-aware footprint read one view"
+        [ testCase "the gate's targets are footprintIn's writes, less a source parent the op does not name"
+          <| fun _ ->
+              let t = sample ()
+
+              let applicable =
+                  OpsTests.everyOp t
+                  |> List.filter (fun op -> Result.isOk (Ops.apply nodew idw op t))
+
+              // the probe reaches every op kind, so the agreement is not vacuous on any arm
+              for kind in [ "InsertChild"; "RemoveNode"; "MoveNode"; "ReorderChildren"; "UpdateNode" ] do
+                  Expect.isTrue
+                      (applicable |> List.exists (fun op -> (sprintf "%A" op).StartsWith kind))
+                      (sprintf "an applicable %s is probed" kind)
+
+              for op in applicable do
+                  let fp = Ops.footprintIn nodew idw t [ op ]
+                  let targets = WriteGate.targetsOf nodew idw op t
+
+                  // the source parent the op does not itself name (a move within one parent names it
+                  // as the destination, and the gate decides on it there)
+                  let unnamedSource =
+                      match op with
+                      | RemoveNode x
+                      | MoveNode(x, _) ->
+                          Tree.parentOf nodew idw x t
+                          |> Option.map _.Id
+                          |> Option.filter (fun p -> not ((Ops.footprint nodew idw [ op ]).StructureWrites.Contains p))
+                          |> Option.toList
+                      | _ -> []
+
+                  let written =
+                      Set.difference (Set.union fp.StructureWrites fp.ContentWrites) (Set.ofList unnamedSource)
+
+                  Expect.equal targets written (sprintf "%A" op)
+
+          testCase "a batch is judged op by op where each lands: its targets are the union of its steps'"
+          <| fun _ ->
+              let t = sample ()
+              // the move brings b1 under a; the removal then destroys a with b1 inside it
+              let ops = [ MoveNode("b1", "a"); RemoveNode "a" ]
+              let afterMove = Ops.apply nodew idw ops.Head t |> Result.defaultValue t
+
+              let expected =
+                  Set.union (WriteGate.targetsOf nodew idw ops[0] t) (WriteGate.targetsOf nodew idw ops[1] afterMove)
+
+              Expect.equal (WriteGate.targetsOf nodew idw (Batch ops) t) expected "threaded, not read at the base"
+              Expect.contains (WriteGate.targetsOf nodew idw (Batch ops) t) "b1" "b1 is destroyed by the second step"
+
+          testCase "a batch stops at the first op that does not apply, keeping that op's targets"
+          <| fun _ ->
+              let t = sample ()
+              let ops = Batch [ RemoveNode "a1"; RemoveNode "a1"; RemoveNode "b" ]
+              let targets = WriteGate.targetsOf nodew idw ops t
+              Expect.contains targets "a1" "the refused step's own target is named"
+              Expect.isFalse (targets.Contains "b") "no step after the refusal is judged"
+
+              Expect.equal
+                  (WriteGate.decide (WriteGate.lockOnly [ "b" ]) nodew idw ops t)
+                  (Ok())
+                  "the gate leaves the refusal to the reducer" ]

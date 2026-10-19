@@ -86,27 +86,55 @@ type ScriptRejection<'Node, 'Id> =
         Tree: 'Node
     }
 
+/// How the engine sees a tree for one op (Phase 512): the witness it EDITS through, the one it
+/// LOCATES through, the keyed positions when the domain declares them, and the id witness — the
+/// quadruple every validator threaded as four parameters. Internal; the redesign's public `Scope`.
+[<NoEquality; NoComparison>]
+type internal OpScope<'Node, 'Id> =
+    { Edit: NodeWitness<'Node, 'Id>
+      Locate: NodeWitness<'Node, 'Id>
+      Keyed: ('Node -> 'Node list) option
+      Ids: IdWitness<'Id> }
+
+/// What one non-batch op finds in one tree (Phase 512), located ONCE: the engine checks and edits
+/// from it, and the base-aware footprint, the write gate, the grammar and the inverse read it rather
+/// than walk the tree again. A field is `None` where the tree does not hold what it names. What an op
+/// NAMES, tree-blind, is the pure footprint (`Ops.footprint`, pinned by the `ops/` vectors).
+[<NoEquality; NoComparison>]
+type internal OpView<'Node, 'Id> =
+    {
+        Op: SkeletonOp<'Node, 'Id>
+        /// An insert's or a reorder's parent; a remove's, a move's or an update's target (subtree).
+        Located: 'Node option
+        /// A move's new parent.
+        Destination: 'Node option
+        /// The node whose STRUCTURAL child list holds a remove's or a move's target.
+        SourceParent: 'Node option
+        /// The keyed position holding a remove's or a move's target when it has no structural
+        /// parent: the holder and the target's index in its `KeyedChildren` (keyed scope only).
+        KeyedPosition: ('Node * int) option
+    }
+
+/// The one script runner's account of a run (Phase 512): the steps taken, what each produced, the
+/// tree reached, and the refusal that stopped it.
+[<NoEquality; NoComparison>]
+type internal ScriptRun<'Node, 'Out, 'E> =
+    { Applied: int
+      Outs: 'Out list
+      Tree: 'Node
+      Refused: 'E option }
+
 /// The generic apply engine over the skeleton ops. Total: every failure is a typed
 /// `Rejection` envelope. Generic over the `NodeWitness` / `IdWitness` — no domain
 /// `NodeKind` is ever in scope.
 module Ops =
 
     // ---- validation (Phase 246) ----
-    // The structural checks each op must pass, factored out of `apply` so the dry-run
-    // `canApply` and the mutating `apply` share one source of validation truth and can
-    // never diverge. The three index/structure ops validate without building a tree;
-    // `MoveNode` and `Batch` are order-dependent (a later step sees an earlier step's
-    // tree), so their validation simulates through `apply` — the rejection returned is
-    // exactly the one `apply` would produce.
-
-    // ---- the two witnesses every clause below reads (Phase 286) ----
-    // `w` is the STRUCTURAL witness: what a node's children are for an edit — what an insert appends
-    // to, a remove filters, a reorder permutes, an update keeps. `t` is the witness the engine
-    // LOCATES through — which nodes exist, where they are, which ids a graft collides with — and the
-    // one it rebuilds ancestors through. The unkeyed forms pass `t = w`, so every clause reads
-    // exactly what it read before Phase 286; `applyContainedKeyed` passes `Tree.traversal w keyw`,
-    // and `keyed` carries the domain's `KeyedChildren` for the two questions only the keyed engine
-    // asks (which node holds a keyed position, and what an `UpdateNode` payload carries into one).
+    // One check per op, shared by the dry-run `canApply` and the mutating `apply`, so the two can
+    // never diverge; only a `Batch` is order-dependent and simulates through `apply`. The witnesses
+    // the checks read are an `OpScope` (Phase 512): `Edit` is what a node's children are for an
+    // edit, `Locate` what the engine finds nodes through (`Tree.traversal` under the keyed engine,
+    // Phase 286), and `Keyed` the domain's keyed positions, read only by the keyed engine.
 
     /// The first id in `node`'s subtree (preorder) that breaks uniqueness — one already carried by
     /// `root`, or one the subtree repeats within itself. `None` when the graft is clean.
@@ -191,11 +219,98 @@ module Ops =
         | Some offender -> Error(NotAContainer(w.Id offender, w.KindTag offender))
         | None -> Ok()
 
+    // ---- the scope and the per-op view (Phase 512) ----
+    // The engine's checks, the base-aware footprint, the gate, the grammar and the inverse each
+    // located the op in the tree for themselves; they now read one `OpView`.
+
+    /// The plain scope: locate through the edit witness, no keyed position.
+    let internal plainScope (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : OpScope<'Node, 'Id> =
+        { Edit = w
+          Locate = w
+          Keyed = None
+          Ids = idw }
+
+    /// The keyed scope (Phase 286's engine): locate through `Tree.traversal`, edit through `nodew`.
+    let internal keyedScope
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        : OpScope<'Node, 'Id> =
+        { Edit = nodew
+          Locate = Tree.traversal nodew keyw
+          Keyed = Some keyw.KeyedChildren
+          Ids = idw }
+
+    /// The node whose STRUCTURAL child list holds `target`, over every node the locate walk reaches:
+    /// `Tree.parentOf w` in the plain scope, and below keyed positions too in the keyed one.
+    let internal structuralParentOf (s: OpScope<'Node, 'Id>) (target: 'Id) (root: 'Node) : 'Node option =
+        Tree.preorder s.Locate root
+        |> List.tryFind (fun n -> s.Edit.Children n |> List.exists (fun c -> s.Ids.Equals (s.Edit.Id c) target))
+
+    /// What `op` finds in `root` (Phase 512) — one match on the op, one locate. It refuses nothing.
+    let internal view (s: OpScope<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) (root: 'Node) : OpView<'Node, 'Id> =
+        let find (i: 'Id) = Tree.tryFind s.Locate s.Ids i root
+
+        let blank =
+            { Op = op
+              Located = None
+              Destination = None
+              SourceParent = None
+              KeyedPosition = None }
+
+        // a remove's or a move's target: its structural parent, else the keyed position holding it
+        let relocated (target: 'Id) =
+            match find target with
+            | None -> blank
+            | Some sub ->
+                let parent = structuralParentOf s target root
+
+                let keyed =
+                    match parent, s.Keyed with
+                    | None, Some keyedOf ->
+                        Tree.preorder s.Locate root
+                        |> List.tryPick (fun n ->
+                            keyedOf n
+                            |> List.tryFindIndex (fun c -> s.Ids.Equals (s.Edit.Id c) target)
+                            |> Option.map (fun i -> n, i))
+                    | _ -> None
+
+                { blank with
+                    Located = Some sub
+                    SourceParent = parent
+                    KeyedPosition = keyed }
+
+        match op with
+        | InsertChild(parent, _)
+        | ReorderChildren(parent, _) -> { blank with Located = find parent }
+        | UpdateNode node ->
+            { blank with
+                Located = find (s.Edit.Id node) }
+        | RemoveNode target -> relocated target
+        | MoveNode(target, newParent) ->
+            { relocated target with
+                Destination = find newParent }
+        | Batch _ -> blank
+
+    /// The ids of the subtree a `RemoveNode` destroys, read through `ids` from the located target.
+    let internal destroyedBy (ids: 'Node -> 'Id list) (v: OpView<'Node, 'Id>) : 'Id list =
+        match v.Op, v.Located with
+        | RemoveNode _, Some sub -> ids sub
+        | _ -> []
+
+    /// The nodes an `InsertChild` brings in, preorder over the edit witness: the graft the grammar
+    /// reads its created pairs from and the index re-indexes. Tree-blind.
+    let internal grafted (w: NodeWitness<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) : 'Node list =
+        match op with
+        | InsertChild(_, node) -> Tree.preorder w node
+        | _ -> []
+
+    // ---- the engine: check what the view found, then edit through it ----
+
     let private validateInsert
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (s: OpScope<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
         (parent: 'Id)
         (node: 'Node)
         (root: 'Node)
@@ -203,135 +318,18 @@ module Ops =
         // `Tree.ids` is preorder, so its head is the inserted node's OWN id: the widened scan
         // subsumes the pre-137 root-id check and keeps its precedence over `UnknownNode` rather
         // than quietly reordering the envelope a caller already handles.
-        match firstDuplicateId t idw node root with
+        match firstDuplicateId s.Locate s.Ids node root with
         | Some d -> Error(DuplicateId d)
         | None ->
-            // one walk locates the parent (Phase 298; an `exists` walk then a `tryFind` walk, with
-            // a `None` arm after the existence check that could not be reached, before)
-            match Tree.tryFind t idw parent root with
-            | None -> Error(UnknownNode(parent, Tree.ids t root))
-            | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
+            match v.Located with
+            | None -> Error(UnknownNode(parent, Tree.ids s.Locate root))
+            | Some p when not (canHold p) -> Error(NotAContainer(parent, s.Edit.KindTag p))
             // Phase 161 — the graft's own interior, checked LAST. The ordering is D38's: no
             // operation that was REFUSED before this phase changes its class, because every
             // earlier clause still fires first. Only operations that were ACCEPTED can now be
             // refused, which is what makes this a widening rather than a re-shuffling — and it
             // is what keeps Phase 137's built-collision conformance arm reaching `DuplicateId`.
-            | Some _ -> validateGraftContainment canHold w t node
-
-    /// The node whose STRUCTURAL child list holds `target`, searched over every node `t` reaches.
-    /// With `t = w` this is `Tree.parentOf w`, word for word; over the keyed walk it also finds a
-    /// structural parent that is itself held below a keyed position.
-    let private structuralParentOf
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (target: 'Id)
-        (root: 'Node)
-        : 'Node option =
-        Tree.preorder t root
-        |> List.tryFind (fun n -> w.Children n |> List.exists (fun c -> idw.Equals (w.Id c) target))
-
-    /// The node holding `target` directly in one of its KEYED positions, when `target` has no
-    /// structural parent (Phase 286). Always `None` for the unkeyed forms (`keyed = None`), which
-    /// therefore never pay for the search.
-    let private keyedHolderOf
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
-        (target: 'Id)
-        (root: 'Node)
-        : 'Node option =
-        match keyed with
-        | None -> None
-        | Some keyedOf ->
-            match structuralParentOf w t idw target root with
-            | Some _ -> None
-            | None ->
-                Tree.preorder t root
-                |> List.tryFind (fun n -> keyedOf n |> List.exists (fun c -> idw.Equals (w.Id c) target))
-
-    let private validateRemove
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
-        (target: 'Id)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        if idw.Equals (w.Id root) target then
-            Error CannotRemoveRoot
-        elif not (Tree.exists t idw target root) then
-            Error(UnknownNode(target, Tree.ids t root))
-        else
-            match keyedHolderOf w t keyed idw target root with
-            | Some holder -> Error(KeyedPosition(target, w.Id holder))
-            | None -> Ok()
-
-    let private validateReorder
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (parent: 'Id)
-        (order: 'Id list)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        match Tree.tryFind t idw parent root with
-        | None -> Error(UnknownNode(parent, Tree.ids t root))
-        | Some p ->
-            let current = w.Children p |> List.map w.Id
-
-            let key xs =
-                xs |> List.map idw.ToString |> List.sort
-
-            if key current <> key order then
-                Error(ReorderMismatch(parent, current, order))
-            else
-                Ok()
-
-    /// `MoveNode`'s checks, without building a tree (Phase 298) — what `canApply (MoveNode _)` now
-    /// asks instead of simulating the move through `apply`. In the order the apply path has always
-    /// refused in: moving the root (`CannotRemoveRoot`); an absent target, then an absent new
-    /// parent (`UnknownNode`, enumerating the ids the walk reaches); a new parent that cannot hold
-    /// children (`NotAContainer`); a new parent that is the target or below it
-    /// (`WouldNestUnderSelf`); and a target held directly in a keyed position (`KeyedPosition`, the
-    /// remove half's refusal). On success it hands back the subtree being moved, which the apply
-    /// arm grafts.
-    let private validateMove
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
-        (target: 'Id)
-        (newParent: 'Id)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        if idw.Equals (w.Id root) target then
-            Error CannotRemoveRoot
-        else
-            match Tree.tryFind t idw target root with
-            | None -> Error(UnknownNode(target, Tree.ids t root))
-            | Some sub ->
-                match Tree.tryFind t idw newParent root with
-                | None -> Error(UnknownNode(newParent, Tree.ids t root))
-                | Some np when not (canHold np) -> Error(NotAContainer(newParent, w.KindTag np))
-                | Some _ ->
-                    // newParent must not be the target itself nor any of its descendants.
-                    let below = Tree.ids t sub |> List.map idw.ToString |> Set.ofList
-
-                    if below.Contains(idw.ToString newParent) then
-                        let relation =
-                            if idw.ToString newParent = idw.ToString target then
-                                NestRelation.Self
-                            else
-                                NestRelation.Descendant
-
-                        Error(WouldNestUnderSelf(target, relation))
-                    else
-                        match keyedHolderOf w t keyed idw target root with
-                        | Some holder -> Error(KeyedPosition(target, w.Id holder))
-                        | None -> Ok sub
+            | Some _ -> validateGraftContainment canHold s.Edit s.Locate node
 
     /// The node an `UpdateNode` leaves behind (Phase 250): the payload's own content over the
     /// children `existing` already holds. The payload's children are never read. Its keyed
@@ -355,16 +353,16 @@ module Ops =
     /// holds no keyed node skips both, which is why a domain with no keyed position is unaffected.
     let private validateUpdate
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
+        (s: OpScope<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
         (node: 'Node)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
+        let w = s.Edit
+        let t = s.Locate
         let target = w.Id node
 
-        match Tree.tryFind t idw target root with
+        match v.Located with
         | None -> Error(UnknownNode(target, Tree.ids t root))
         | Some existing ->
             let result = updated w existing node
@@ -372,7 +370,7 @@ module Ops =
             if not (List.isEmpty (w.Children result)) && not (canHold result) then
                 Error(NotAContainer(target, w.KindTag result))
             else
-                match keyed with
+                match s.Keyed with
                 | None -> Ok()
                 | Some keyedOf ->
                     match keyedOf node with
@@ -385,107 +383,216 @@ module Ops =
                             { t with
                                 Children =
                                     fun n ->
-                                        if idw.Equals (w.Id n) target then
+                                        if s.Ids.Equals (w.Id n) target then
                                             w.Children n
                                         else
                                             t.Children n }
 
-                        match Tree.firstRepeatedId idw (Tree.ids kept root) (incoming |> List.collect (Tree.ids t)) with
+                        match
+                            Tree.firstRepeatedId s.Ids (Tree.ids kept root) (incoming |> List.collect (Tree.ids t))
+                        with
                         | Some d -> Error(DuplicateId d)
                         | None ->
                             match incoming |> List.tryPick (firstUncontainedOver t canHold w) with
                             | Some offender -> Error(NotAContainer(w.Id offender, w.KindTag offender))
                             | None -> Ok()
 
-    /// The shared apply engine, parameterised by a container capability `canHold`
-    /// (Phase 251). `apply` passes `(fun _ -> true)` — every node can hold children, so the
-    /// behaviour is exactly as before; `applyContained` passes the domain predicate so an
-    /// `InsertChild`/`MoveNode` under a leaf is a typed `NotAContainer` instead of a silent
-    /// no-op (the F1 adoption finding). Since Phase 286 it also takes the witness it LOCATES
-    /// through (`t`) and, for the keyed engine, the domain's keyed children (`keyed`); see the
-    /// section head above.
+    /// Would the step `v` describes be accepted against `root`? One dispatch over the view (Phase
+    /// 512), read by `apply` before it edits and by `canApply` instead of editing; nothing here walks
+    /// the tree to find a node the view located. A `Batch` view has nothing to check: the runner
+    /// checks its steps one by one.
+    let private check
+        (canHold: 'Node -> bool)
+        (s: OpScope<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
+        (root: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        let unknown (i: 'Id) =
+            Error(UnknownNode(i, Tree.ids s.Locate root))
+
+        let isRoot (i: 'Id) = s.Ids.Equals (s.Edit.Id root) i
+        // the nesting check compares string keys, as it always has
+        let same (a: 'Id) (b: 'Id) = s.Ids.ToString a = s.Ids.ToString b
+
+        match v.Op with
+        | InsertChild(parent, node) -> validateInsert canHold s v parent node root
+        | UpdateNode node -> validateUpdate canHold s v node root
+        | RemoveNode target when isRoot target -> Error CannotRemoveRoot
+        | RemoveNode target ->
+            match v.Located, v.KeyedPosition with
+            | None, _ -> unknown target
+            | Some _, Some(holder, _) -> Error(KeyedPosition(target, s.Edit.Id holder))
+            | Some _, None -> Ok()
+        | ReorderChildren(parent, order) ->
+            match v.Located with
+            | None -> unknown parent
+            | Some p ->
+                let current = s.Edit.Children p |> List.map s.Edit.Id
+
+                let key xs =
+                    xs |> List.map s.Ids.ToString |> List.sort
+
+                if key current <> key order then
+                    Error(ReorderMismatch(parent, current, order))
+                else
+                    Ok()
+        // A move's checks, no tree built (Phase 298), in the order the apply path has always refused
+        // in: the root (`CannotRemoveRoot`); an absent target, then an absent new parent
+        // (`UnknownNode`); a new parent that cannot hold children (`NotAContainer`); a new parent
+        // that is the target or below it (`WouldNestUnderSelf`); a target held directly in a keyed
+        // position (`KeyedPosition`, the remove half's refusal).
+        | MoveNode(target, _) when isRoot target -> Error CannotRemoveRoot
+        | MoveNode(target, newParent) ->
+            match v.Located, v.Destination with
+            | None, _ -> unknown target
+            | Some _, None -> unknown newParent
+            | Some _, Some np when not (canHold np) -> Error(NotAContainer(newParent, s.Edit.KindTag np))
+            | Some sub, Some _ when Tree.ids s.Locate sub |> List.exists (fun i -> same i newParent) ->
+                let relation =
+                    if same newParent target then
+                        NestRelation.Self
+                    else
+                        NestRelation.Descendant
+
+                Error(WouldNestUnderSelf(target, relation))
+            | Some _, Some _ ->
+                match v.KeyedPosition with
+                | Some(holder, _) -> Error(KeyedPosition(target, s.Edit.Id holder))
+                | None -> Ok()
+        | Batch _ -> Ok()
+
+    /// The edit of a step `check` accepted, through the nodes the view located. The `UnknownNode`
+    /// fallback is unreachable for a view of `root` itself, and total rather than a throw (GP4).
+    let private edit (s: OpScope<'Node, 'Id>) (v: OpView<'Node, 'Id>) (root: 'Node) : Result<'Node, Rejection<'Id>> =
+        let w = s.Edit
+        let eq = s.Ids.Equals
+
+        let at (id: 'Id) (f: 'Node -> 'Node) (tree: 'Node) =
+            Tree.updateNode s.Locate s.Ids id f tree
+            |> Option.map Ok
+            |> Option.defaultValue (Error(UnknownNode(id, Tree.ids s.Locate tree)))
+
+        let detach (target: 'Id) (tree: 'Node) =
+            match v.SourceParent with
+            | None -> Error(UnknownNode(target, Tree.ids s.Locate tree))
+            | Some p ->
+                at
+                    (w.Id p)
+                    (fun p -> w.ReplaceChildren p (w.Children p |> List.filter (fun c -> not (eq (w.Id c) target))))
+                    tree
+
+        match v.Op with
+        | InsertChild(parent, node) -> at parent (fun p -> w.ReplaceChildren p (w.Children p @ [ node ])) root
+        | RemoveNode target -> detach target root
+        | ReorderChildren(parent, order) ->
+            // the permutation is computed from the parent `updateNode` hands over, so the parent
+            // is located once (Phase 298)
+            let permute (p: 'Node) =
+                let byId =
+                    w.Children p |> List.map (fun c -> s.Ids.ToString(w.Id c), c) |> Map.ofList
+
+                w.ReplaceChildren p (order |> List.map (fun i -> byId[s.Ids.ToString i]))
+
+            at parent permute root
+        | MoveNode(target, newParent) ->
+            // remove, then graft the subtree the view located. newParent is not below the target
+            // (`validateMove`), so the removal leaves it in the tree for the graft.
+            match v.Located with
+            | None -> Error(UnknownNode(target, Tree.ids s.Locate root))
+            | Some sub ->
+                detach target root
+                |> Result.bind (at newParent (fun np -> w.ReplaceChildren np (w.Children np @ [ sub ])))
+        | UpdateNode node -> at (w.Id node) (fun existing -> updated w existing node) root
+        | Batch _ -> Ok root
+
+    /// One step of the engine over a view already located: check, then edit.
+    let internal applyView
+        (canHold: 'Node -> bool)
+        (s: OpScope<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        check canHold s v root |> Result.bind (fun () -> edit s v root)
+
+    // ---- the one script runner (Phase 512) ----
+    // Ten loops spelled one fold. `run` is it; `batch` reads it all-or-nothing, `script` first
+    // refusal wins with the prefix kept, and a reader collecting each step's output reads `run`.
+
+    /// Thread `step` through `ops` from `root`: each step sees the tree the steps before it left, and
+    /// the first refusal stops the run. Total; iterative over the script.
+    let internal run
+        (step: 'Node -> 'Op -> Result<'Node * 'Out, 'E>)
+        (ops: 'Op list)
+        (root: 'Node)
+        : ScriptRun<'Node, 'Out, 'E> =
+        let rec go i (outs: 'Out list) node =
+            function
+            | [] ->
+                { Applied = i
+                  Outs = List.rev outs
+                  Tree = node
+                  Refused = None }
+            | o :: rest ->
+                match step node o with
+                | Ok(next, out) -> go (i + 1) (out :: outs) next rest
+                | Error e ->
+                    { Applied = i
+                      Outs = List.rev outs
+                      Tree = node
+                      Refused = Some e }
+
+        go 0 [] root ops
+
+    /// All-or-nothing: the tree every step reached, or the first refusal alone (`Batch`'s contract).
+    let internal batch (step: 'Node -> 'Op -> Result<'Node, 'E>) (ops: 'Op list) (root: 'Node) : Result<'Node, 'E> =
+        let r = run (fun node o -> step node o |> Result.map (fun n -> n, ())) ops root
+
+        match r.Refused with
+        | None -> Ok r.Tree
+        | Some e -> Error e
+
+    /// First refusal wins and the prefix is kept: the tree every step reached, or the
+    /// `ScriptRejection` naming how many applied, why the next was refused and the tree it was
+    /// offered against (`applyAllWith`'s contract, Phase 391).
+    let internal script
+        (step: 'Node -> SkeletonOp<'Node, 'Id> -> Result<'Node, Rejection<'Id>>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
+        let r = run (fun node o -> step node o |> Result.map (fun n -> n, ())) ops root
+
+        match r.Refused with
+        | None -> Ok r.Tree
+        | Some e ->
+            Error
+                { Applied = r.Applied
+                  Rejection = e
+                  Tree = r.Tree }
+
+    /// The shared apply engine (Phase 251) over a scope (Phase 512) and a container capability:
+    /// `apply` passes the plain scope and `fun _ -> true`, `applyContained` the domain's `canHold`,
+    /// `applyContainedKeyed` the keyed scope. A `Batch` is the runner's all-or-nothing form.
     let rec private applyWith
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
+        (s: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
-
-        let allIds () = Tree.ids t root
-        let eq = idw.Equals
-
         match op with
-        | InsertChild(parent, node) ->
-            validateInsert canHold w t idw parent node root
-            |> Result.bind (fun () ->
-                Tree.updateNode t idw parent (fun p -> w.ReplaceChildren p (w.Children p @ [ node ])) root
-                |> Option.map Ok
-                |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
+        | Batch ops -> batch (fun node o -> applyWith canHold s o node) ops root
+        | _ -> applyView canHold s (view s op root) root
 
-        | RemoveNode target ->
-            validateRemove w t keyed idw target root
-            |> Result.bind (fun () ->
-                match structuralParentOf w t idw target root with
-                | None -> Error(UnknownNode(target, allIds ()))
-                | Some p ->
-                    Tree.updateNode
-                        t
-                        idw
-                        (w.Id p)
-                        (fun p ->
-                            w.ReplaceChildren p (w.Children p |> List.filter (fun c -> not (eq (w.Id c) target))))
-                        root
-                    |> Option.map Ok
-                    |> Option.defaultValue (Error(UnknownNode(target, allIds ()))))
-
-        | ReorderChildren(parent, order) ->
-            validateReorder w t idw parent order root
-            |> Result.bind (fun () ->
-                // the permutation is computed from the parent `updateNode` hands over, so the parent
-                // is located once (Phase 298; a second `tryFind` walk with an unreachable `None` arm,
-                // before)
-                let permute (p: 'Node) =
-                    let byId = w.Children p |> List.map (fun c -> idw.ToString(w.Id c), c) |> Map.ofList
-                    w.ReplaceChildren p (order |> List.map (fun i -> byId[idw.ToString i]))
-
-                Tree.updateNode t idw parent permute root
-                |> Option.map Ok
-                |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
-
-        | MoveNode(target, newParent) ->
-            // every refusal is `validateMove`'s (Phase 298); after it, remove then graft. newParent
-            // is not below the target, so the removal leaves it in the tree for the graft.
-            validateMove canHold w t keyed idw target newParent root
-            |> Result.bind (fun sub ->
-                applyWith canHold w t keyed idw (RemoveNode target) root
-                |> Result.bind (fun removed ->
-                    Tree.updateNode t idw newParent (fun np -> w.ReplaceChildren np (w.Children np @ [ sub ])) removed
-                    |> Option.map Ok
-                    |> Option.defaultValue (Error(UnknownNode(newParent, Tree.ids t removed)))))
-
-        | Batch ops ->
-            // all-or-nothing: thread the tree; abort (leaving the original) on first failure.
-            let rec go node =
-                function
-                | [] -> Ok node
-                | o :: rest ->
-                    match applyWith canHold w t keyed idw o node with
-                    | Ok node' -> go node' rest
-                    | Error e -> Error e
-
-            go root ops
-
-        | UpdateNode node ->
-            let target = w.Id node
-
-            validateUpdate canHold w t keyed idw node root
-            |> Result.bind (fun () ->
-                Tree.updateNode t idw target (fun existing -> updated w existing node) root
-                |> Option.map Ok
-                |> Option.defaultValue (Error(UnknownNode(target, allIds ()))))
+    /// A script's dry run in the `canApplyAll` shape: the 0-based position of the first refused op
+    /// and its envelope, or `Ok ()`. The tree is threaded (each step is checked against the tree
+    /// the steps before it leave) and discarded.
+    let private dryRun
+        (engine: SkeletonOp<'Node, 'Id> -> 'Node -> Result<'Node, Rejection<'Id>>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        match script (fun node o -> engine o node) ops root with
+        | Ok _ -> Ok()
+        | Error r -> Error(r.Applied, r.Rejection)
 
     /// Apply one skeleton op. Every node is treated as able to hold children.
     let apply
@@ -494,7 +601,7 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
-        applyWith (fun _ -> true) w w None idw op root
+        applyWith (fun _ -> true) (plainScope w idw) op root
 
     /// Container-aware apply (Phase 251): an `InsertChild`/`MoveNode` whose (new) parent
     /// `canHold` rejects is a typed `NotAContainer`, not a silent no-op. Domains with closed
@@ -522,7 +629,7 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
-        applyWith canHold w w None idw op root
+        applyWith canHold (plainScope w idw) op root
 
     /// `applyContained` over the keyed walk (Phase 286): the domain declares its keyed positions
     /// once, in `keyw`, and the engine's own refusals see them.
@@ -552,25 +659,17 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
-        applyWith canHold nodew (Tree.traversal nodew keyw) (Some keyw.KeyedChildren) idw op root
+        applyWith canHold (keyedScope keyw nodew idw) op root
 
     let private canApplyWith
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (t: NodeWitness<'Node, 'Id>)
-        (keyed: ('Node -> 'Node list) option)
-        (idw: IdWitness<'Id>)
+        (s: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
         match op with
-        | InsertChild(parent, node) -> validateInsert canHold w t idw parent node root
-        | RemoveNode target -> validateRemove w t keyed idw target root
-        | ReorderChildren(parent, order) -> validateReorder w t idw parent order root
-        | UpdateNode node -> validateUpdate canHold w t keyed idw node root
-        // Phase 298 — the move's own checks, no tree built (it simulated through `apply` before)
-        | MoveNode(target, newParent) -> validateMove canHold w t keyed idw target newParent root |> Result.map ignore
-        | Batch _ -> applyWith canHold w t keyed idw op root |> Result.map ignore
+        | Batch _ -> applyWith canHold s op root |> Result.map ignore
+        | _ -> check canHold s (view s op root) root
 
     /// Dry-run validation (Phase 246): would `op` be accepted against `root`? Returns the
     /// exact `Rejection` `apply` would, but builds **no** new tree for the index/structure
@@ -584,7 +683,7 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        canApplyWith (fun _ -> true) w w None idw op root
+        canApplyWith (fun _ -> true) (plainScope w idw) op root
 
     /// Container-aware dry-run (Phase 251) — the `canApply` mirror of `applyContained`.
     let canApplyContained
@@ -594,7 +693,7 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        canApplyWith canHold w w None idw op root
+        canApplyWith canHold (plainScope w idw) op root
 
     /// Keyed dry-run (Phase 286) — the `canApply` mirror of `applyContainedKeyed`: the same
     /// rejection it would return, without building the tree for the index/structure ops.
@@ -606,7 +705,7 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        canApplyWith canHold nodew (Tree.traversal nodew keyw) (Some keyw.KeyedChildren) idw op root
+        canApplyWith canHold (keyedScope keyw nodew idw) op root
 
     /// Apply a sequence non-atomically under a container capability (Phase 160) — the
     /// sequence-level `applyContained`, threading `applyWith canHold` so every step sees the
@@ -626,19 +725,8 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        let rec go i node =
-            function
-            | [] -> Ok node
-            | o :: rest ->
-                match applyWith canHold w w None idw o node with
-                | Ok node' -> go (i + 1) node' rest
-                | Error e ->
-                    Error
-                        { Applied = i
-                          Rejection = e
-                          Tree = node }
-
-        go 0 root ops
+        let s = plainScope w idw
+        script (fun node o -> applyWith canHold s o node) ops root
 
     /// Dry-run a sequence under a container capability (Phase 160) — the `canApplyAll` mirror of
     /// `applyAllWith`, and the pre-flight a container-aware executor needs: it reports the same
@@ -654,15 +742,7 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<unit, int * Rejection<'Id>> =
-        let rec go i node =
-            function
-            | [] -> Ok()
-            | o :: rest ->
-                match applyWith canHold w w None idw o node with
-                | Ok node' -> go (i + 1) node' rest
-                | Error e -> Error(i, e)
-
-        go 0 root ops
+        dryRun (applyWith canHold (plainScope w idw)) ops root
 
     /// Apply a sequence non-atomically, threading the tree. Every node is treated as able to hold
     /// children, so this is `applyAllWith (fun _ -> true)` and its behaviour is exactly what it
@@ -705,17 +785,7 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<unit, int * Rejection<'Id>> =
-        let t = Tree.traversal nodew keyw
-
-        let rec go i node =
-            function
-            | [] -> Ok()
-            | o :: rest ->
-                match applyWith canHold nodew t (Some keyw.KeyedChildren) idw o node with
-                | Ok node' -> go (i + 1) node' rest
-                | Error e -> Error(i, e)
-
-        go 0 root ops
+        dryRun (applyWith canHold (keyedScope keyw nodew idw)) ops root
 
     // ---- the index, maintained through an edit (Phase 317) ----
     // `Tree.Index.build` is O(n) and `isFreshFor` reports staleness after every op, so a consumer
@@ -794,7 +864,7 @@ module Ops =
                     match (if exists st pk then kidsOf st pk else None) with
                     | None -> None
                     | Some ks ->
-                        let graft = Tree.preorder w node
+                        let graft = grafted w op
 
                         Some
                             { st with
@@ -886,15 +956,8 @@ module Ops =
                         None
 
                 | Batch ops ->
-                    let rec go (s: Track<'Node, 'Id>) =
-                        function
-                        | [] -> Some s
-                        | o :: rest ->
-                            match step s o with
-                            | Some s' -> go s' rest
-                            | None -> None
-
-                    go st ops
+                    (Some st, ops)
+                    ||> List.fold (fun acc o -> acc |> Option.bind (fun s -> step s o))
 
             let start =
                 { Kids = Map.empty
@@ -1002,47 +1065,52 @@ module Ops =
 
         match op with
         | Batch ops ->
-            // Thread `pre` through the forward ops; invert each against the state it saw.
-            // Prepending accumulates the inverses in reverse forward order — exactly the
-            // order the undo batch must run.
-            let rec go acc state =
-                function
-                | [] -> Ok(Batch acc)
-                | o :: rest ->
-                    match invert w idw o state with
-                    | Error e -> Error e
-                    | Ok inv ->
-                        match apply w idw o state with
-                        | Ok state' -> go (inv :: acc) state' rest
-                        | Error e -> Error e
+            // Thread `pre` through the forward ops; invert each against the state it saw. The
+            // runner collects the inverses in forward order, and the undo batch runs them reversed.
+            let r = run (inverting w idw) ops pre
 
-            go [] pre ops
+            match r.Refused with
+            | Some e -> Error e
+            | None -> Ok(Batch(List.rev r.Outs))
 
         | _ ->
-            // A single op is invertible iff it would apply to `pre`.
-            match canApply w idw op pre with
+            // A single op is invertible iff it would apply to `pre`; its inverse is read from the
+            // view `check` accepted (Phase 512), so the pre-state reads are the nodes it located.
+            let s = plainScope w idw
+            let v = view s op pre
+
+            match check (fun _ -> true) s v pre with
             | Error e -> Error e
             | Ok() ->
-                match op with
-                | InsertChild(_, node) -> Ok(RemoveNode(w.Id node))
-                | RemoveNode target ->
-                    let parent = Tree.parentOf w idw target pre |> Option.get
-                    let sub = Tree.tryFind w idw target pre |> Option.get
+                match op, v.Located, v.SourceParent with
+                | InsertChild(_, node), _, _ -> Ok(RemoveNode(w.Id node))
+                | RemoveNode target, Some sub, Some parent ->
                     Ok(restoring parent target (InsertChild(w.Id parent, sub)))
-                | MoveNode(target, _) ->
-                    let parent = Tree.parentOf w idw target pre |> Option.get
-                    Ok(restoring parent target (MoveNode(target, w.Id parent)))
-                | ReorderChildren(parent, _) ->
-                    let p = Tree.tryFind w idw parent pre |> Option.get
-                    Ok(ReorderChildren(parent, p |> w.Children |> List.map w.Id))
+                | MoveNode(target, _), _, Some parent -> Ok(restoring parent target (MoveNode(target, w.Id parent)))
+                | ReorderChildren(parent, _), Some p, _ -> Ok(ReorderChildren(parent, orderIn p))
                 // The pre-state node's CONTENT restores the content; the inverse carries it as a
                 // shell (`ReplaceChildren old []`, Phase 305), because `UpdateNode` never reads its
                 // payload's children — the children the tree holds when the undo runs are kept —
                 // and an undo stack that stored the whole pre-state subtree per edit held, and
                 // never read, a copy of everything below the node.
-                | UpdateNode node ->
-                    Ok(UpdateNode(w.ReplaceChildren (Tree.tryFind w idw (w.Id node) pre |> Option.get) []))
-                | Batch _ -> Ok op // unreachable (handled above) — keeps the match total
+                | UpdateNode _, Some existing, _ -> Ok(UpdateNode(w.ReplaceChildren existing []))
+                // unreachable after `check` (the view located every node read above): total
+                // refusals where the five `Option.get` this replaced would have thrown (GP4)
+                | RemoveNode target, _, _
+                | MoveNode(target, _), _, _ -> Error(UnknownNode(target, Tree.ids w pre))
+                | ReorderChildren(parent, _), _, _ -> Error(UnknownNode(parent, Tree.ids w pre))
+                | UpdateNode node, _, _ -> Error(UnknownNode(w.Id node, Tree.ids w pre))
+                | Batch _, _, _ -> Ok op // handled above
+
+    /// One step of an inverse script: the inverse of `o` against `state`, and the state `o` leaves.
+    and private inverting
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (state: 'Node)
+        (o: SkeletonOp<'Node, 'Id>)
+        : Result<'Node * SkeletonOp<'Node, 'Id>, Rejection<'Id>> =
+        invert w idw o state
+        |> Result.bind (fun inv -> apply w idw o state |> Result.map (fun next -> next, inv))
 
     /// The script-level inverse (Phase 305): the inverses of `ops`, each derived against the state
     /// the forward op saw, in REVERSE order — so `applyAll (invertAll w idw ops pre) (applyAll w idw
@@ -1063,18 +1131,11 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (pre: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, int * Rejection<'Id>> =
-        let rec go i acc state =
-            function
-            | [] -> Ok acc
-            | o :: rest ->
-                match invert w idw o state with
-                | Error e -> Error(i, e)
-                | Ok inv ->
-                    match apply w idw o state with
-                    | Ok state' -> go (i + 1) (inv :: acc) state' rest
-                    | Error e -> Error(i, e)
+        let r = run (inverting w idw) ops pre
 
-        go 0 [] pre ops
+        match r.Refused with
+        | Some e -> Error(r.Applied, e)
+        | None -> Ok(List.rev r.Outs)
 
     /// Normalise an op script (Phase 23): a conservative, structural peephole that collapses the
     /// redundancy classes it can prove safe *without the tree*, leaving everything else untouched.
@@ -1200,16 +1261,9 @@ module Ops =
     // both, so freeing the safe pair frees the fatal one. That is (2) being load-bearing for (1)
     // and (1) being load-bearing for (2), each proved rather than asserted.
     //
-    // So the last two clauses of `independent` below are NECESSARY, not a placeholder. Tightening
-    // them needs a footprint that can NAME the difference — a fifth address kind carrying the
-    // relocation's kind, or a destroyed-subtree set the pure script cannot compute — which is a
-    // change to the record, not to a clause. `relocation_move_pair_also_fails` adds the second
-    // reason: two moves nesting into each other's subtrees reject each other with
-    // `WouldNestUnderSelf`, and no record could free that pair at all.
-
-    let private emptyFootprint = Footprint.empty
-
-    let private unionFootprint (a: Footprint) (b: Footprint) : Footprint = Footprint.union a b
+    // So the last two clauses of `independent` below are NECESSARY for a footprint of the script
+    // alone. The tightening needs the tree — the destroyed subtree, the source parent, a move's
+    // destination ancestors — and is `footprintIn` (Phase 500, D166), below, where the base is known.
 
     // The one fold behind `footprint` and `footprintKeyed` (Phase 247). `carried` reads the ids an
     // inserted subtree carries; `introduced` the ids an `UpdateNode` payload brings in beyond its own
@@ -1241,34 +1295,23 @@ module Ops =
                 // set is unchanged: the validator's other half (is the subtree unique WITHIN ITSELF?) is
                 // internal to the op and reads no tree state, so it adds nothing to the footprint and
                 // creates no new collision between concurrent scripts.
-                { emptyFootprint with
+                { Footprint.empty with
                     Reads = Set.add (key parent) inserted
                     StructureWrites = Set.singleton (key parent)
                     ContentWrites = inserted }
-            | RemoveNode target ->
-                // the node is destroyed (content-write on the target) and its unknown source parent's
-                // child-list is rewritten (the pinned over-approximation).
-                { emptyFootprint with
-                    Reads = Set.singleton (key target)
-                    ContentWrites = Set.singleton (key target)
-                    UnknownParentWrites = Set.singleton (key target) }
-            | MoveNode(target, newParent) ->
-                // relocation: the destination child-list is a known structure-write; the target is
-                // content-written (it moves); the source parent's child-list is the unknown over-approx.
-                { emptyFootprint with
-                    Reads = Set.ofList [ key target; key newParent ]
-                    StructureWrites = Set.singleton (key newParent)
-                    ContentWrites = Set.singleton (key target)
-                    UnknownParentWrites = Set.singleton (key target) }
+            // the node destroyed, or relocated under a known destination; the source parent's child
+            // list is the pinned unknown-parent write. The public builders ARE these clauses (Phase 512).
+            | RemoveNode target -> Footprint.removeNode (key target)
+            | MoveNode(target, newParent) -> Footprint.moveTo (key target) (key newParent)
             | ReorderChildren(parent, order) ->
                 // the parent's child-list order is rewritten (known structure-write); the named children
                 // are read (their positions are permuted, their content is not touched).
                 let named = order |> List.map key |> Set.ofList
 
-                { emptyFootprint with
+                { Footprint.empty with
                     Reads = Set.add (key parent) named
                     StructureWrites = Set.singleton (key parent) }
-            | Batch inner -> List.fold (fun acc o -> unionFootprint acc (ofOp o)) emptyFootprint inner
+            | Batch inner -> List.fold (fun acc o -> Footprint.union acc (ofOp o)) Footprint.empty inner
             | UpdateNode node ->
                 // Phase 250 — an in-place rewrite. The node is read (it must exist) and its content
                 // is written. It is ALSO an unknown-parent write, and that is required rather than
@@ -1289,12 +1332,12 @@ module Ops =
                 // Phase 340 — and it is a WHOLE-node write, never a slot write: the payload is the
                 // node entire, and a pure script cannot say which part of it changed. A domain that
                 // rewrites a field by name lowers its own op with `Footprint.slotEdit`.
-                { emptyFootprint with
+                { Footprint.empty with
                     Reads = Set.add target incoming
                     ContentWrites = Set.add target incoming
                     UnknownParentWrites = Set.singleton target }
 
-        List.fold (fun acc op -> unionFootprint acc (ofOp op)) emptyFootprint ops
+        List.fold (fun acc op -> Footprint.union acc (ofOp op)) Footprint.empty ops
 
     /// The read/write footprint of an op-script (Phase 78) — a pure, total derivation over the skeleton
     /// five through the node/id witnesses (the `NodeWitness` reads the ids out of an inserted `'Node`
@@ -1379,106 +1422,100 @@ module Ops =
     // in-place edit beside the removal of its ancestor is not (its target is in the removed set);
     // and no pair the pure footprint frees is refused here (`FootprintIn.footprint_in_refines`).
 
+    /// The base-aware arm of one non-batch op, read from its view of the state (Phase 512): `None`
+    /// where the pure arm stands (see above).
+    let private resolvedFootprint
+        (s: OpScope<'Node, 'Id>)
+        (ids: 'Node -> 'Id list)
+        (introduced: 'Node -> 'Id list)
+        (v: OpView<'Node, 'Id>)
+        (t: 'Node)
+        : Footprint option =
+        let key (i: 'Id) = s.Ids.ToString i
+        let keys (xs: 'Id list) = xs |> List.map key |> Set.ofList
+
+        // the proper ancestors of `target`, root first, as keys — empty when absent or the root
+        let ancestorKeys (target: 'Id) =
+            match Tree.path s.Locate s.Ids target t with
+            | Some path -> path |> List.take (List.length path - 1) |> keys
+            | None -> Set.empty
+
+        match v.Op, v.Located, v.SourceParent, v.Destination with
+        | RemoveNode target, Some _, Some parent, _ ->
+            let p = key (s.Edit.Id parent)
+
+            Some
+                { Footprint.empty with
+                    Reads = Set.ofList [ key target; p ]
+                    StructureWrites = Set.singleton p
+                    ContentWrites = keys (destroyedBy ids v) }
+        | MoveNode(target, newParent), Some _, Some parent, Some _ ->
+            let p = key (s.Edit.Id parent)
+            let np = key newParent
+
+            Some
+                { Footprint.empty with
+                    Reads = Set.unionMany [ Set.ofList [ key target; np; p ]; ancestorKeys newParent ]
+                    StructureWrites = Set.ofList [ p; np ]
+                    ContentWrites = Set.singleton (key target) }
+        | UpdateNode node, Some _, _, _ ->
+            let target = key (s.Edit.Id node)
+            let incoming = keys (introduced node)
+
+            Some
+                { Footprint.empty with
+                    Reads = Set.add target incoming
+                    ContentWrites = Set.add target incoming }
+        | _ -> None
+
+    // The resolution LOCATES through the structural walk in both forms (a node held in, or below, a
+    // keyed position is absent to it and takes the pure arm), and the script is threaded through
+    // `engine`, which the unkeyed form hands the very view the resolution read.
     let private footprintInOver
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
-        (step: SkeletonOp<'Node, 'Id> -> 'Node -> Result<'Node, Rejection<'Id>>)
-        (subtree: 'Node -> 'Id list)
-        (carried: 'Node -> 'Id list)
+        (engine: OpView<'Node, 'Id> -> 'Node -> Result<'Node, Rejection<'Id>>)
+        (ids: 'Node -> 'Id list)
         (introduced: 'Node -> 'Id list)
         (baseTree: 'Node)
         (ops: SkeletonOp<'Node, 'Id> list)
         : Footprint =
-        let key (i: 'Id) = idw.ToString i
-        let keys (ids: 'Id list) = ids |> List.map key |> Set.ofList
-        let purely = footprintOver nodew idw carried introduced
-
-        // the proper ancestors of `target`, root first, as keys — empty when absent or the root
-        let ancestorKeys (target: 'Id) (t: 'Node) =
-            match Tree.path nodew idw target t with
-            | Some ids -> ids |> List.take (List.length ids - 1) |> keys
-            | None -> Set.empty
-
-        let sourceParent (target: 'Id) (t: 'Node) =
-            match Tree.tryFind nodew idw target t with
-            | Some sub -> Tree.parentOf nodew idw target t |> Option.map (fun p -> sub, key (nodew.Id p))
-            | None -> None
+        let s = plainScope nodew idw
+        let purely = footprintOver nodew idw ids introduced
 
         let rec ofOp (state: 'Node option) (op: SkeletonOp<'Node, 'Id>) : Footprint * 'Node option =
-            let next = state |> Option.bind (fun t -> step op t |> Result.toOption)
-
             match state, op with
             | None, _ -> purely [ op ], None
             | Some t, Batch inner ->
-                let fp, after =
-                    inner
-                    |> List.fold
-                        (fun (acc, st) o ->
-                            let f, st' = ofOp st o
-                            unionFootprint acc f, st')
-                        (emptyFootprint, Some t)
+                inner
+                |> List.fold
+                    (fun (acc, st) o ->
+                        let f, st' = ofOp st o
+                        Footprint.union acc f, st')
+                    (Footprint.empty, Some t)
+            | Some t, _ ->
+                let v = view s op t
 
-                fp, after
-            | Some t, RemoveNode target ->
-                match sourceParent target t with
-                | Some(sub, p) ->
-                    { emptyFootprint with
-                        Reads = Set.ofList [ key target; p ]
-                        StructureWrites = Set.singleton p
-                        ContentWrites = keys (subtree sub) },
-                    next
-                | None -> purely [ op ], next
-            | Some t, MoveNode(target, newParent) ->
-                match sourceParent target t, Tree.exists nodew idw newParent t with
-                | Some(_, p), true ->
-                    let np = key newParent
+                resolvedFootprint s ids introduced v t |> Option.defaultValue (purely [ op ]),
+                engine v t |> Result.toOption
 
-                    { emptyFootprint with
-                        Reads = Set.unionMany [ Set.ofList [ key target; np; p ]; ancestorKeys newParent t ]
-                        StructureWrites = Set.ofList [ p; np ]
-                        ContentWrites = Set.singleton (key target) },
-                    next
-                | _ -> purely [ op ], next
-            | Some t, UpdateNode node when Tree.exists nodew idw (nodew.Id node) t ->
-                let target = key (nodew.Id node)
-                let incoming = keys (introduced node)
-
-                { emptyFootprint with
-                    Reads = Set.add target incoming
-                    ContentWrites = Set.add target incoming },
-                next
-            | Some _, _ -> purely [ op ], next
-
-        ops
-        |> List.fold
-            (fun (acc, st) op ->
-                let f, st' = ofOp st op
-                unionFootprint acc f, st')
-            (emptyFootprint, Some baseTree)
-        |> fst
+        // the script is the batch of its ops, threaded the same way
+        ofOp (Some baseTree) (Batch ops) |> fst
 
     /// The footprint of an op-script at the tree it applies to (Phase 500) — `footprint`'s address
-    /// kinds with every parent the pure form could not name resolved against `baseTree`: a removal or a
-    /// move names its source parent as a known structure-write (and reads it), a removal
-    /// content-writes the whole subtree it destroys, a move reads its destination's ancestors, and an
-    /// in-place `UpdateNode` reads and content-writes its target and nothing else. No arm records an
-    /// unknown-parent write while its target is in the tree; an op whose target is absent — or any
-    /// op after one that does not apply, since the script is threaded through `apply` — takes the
-    /// pure arm, so this is never less conservative than `footprint` where the tree is silent.
-    ///
-    /// Total, no throws (GP4), mints no ids, never mutates `base`. Sound where the pure footprint is
-    /// sound and strictly more precise (`FootprintIn.footprint_in_sound`, `footprint_in_refines`,
-    /// `Conformance.footprintInLawsAt`): two scripts both applicable at `base` whose footprints here
-    /// are `independent` commute under `apply`, and every pair `footprint` calls independent this
-    /// calls independent too. `Arbitration.arbitrateIn` and `Dag.conflictsIn` / `reconcileIn` are
-    /// the entries that hold the base and compose it.
+    /// kinds with every parent the pure form could not name resolved against `baseTree`, arm by arm
+    /// as the section head states; an absent target, and every op after one that does not apply,
+    /// takes the pure arm. Total, no throws (GP4), mints no ids, never mutates `base`. Sound where
+    /// the pure footprint is sound and strictly more precise (`FootprintIn.footprint_in_sound`,
+    /// `footprint_in_refines`, `Conformance.footprintInLawsAt`). `Arbitration.arbitrateIn` and
+    /// `Dag.conflictsIn` / `reconcileIn` are the entries that hold the base and compose it.
     let footprintIn
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (baseTree: 'Node)
         (ops: SkeletonOp<'Node, 'Id> list)
         : Footprint =
-        footprintInOver w idw (apply w idw) (Tree.ids w) (Tree.ids w) (fun _ -> []) baseTree ops
+        footprintInOver w idw (applyView (fun _ -> true) (plainScope w idw)) (Tree.ids w) (fun _ -> []) baseTree ops
 
     /// `footprintIn` over the keyed walk (Phase 500), as `footprintKeyed` is to `footprint`: the ids
     /// an insert authors and a removal destroys are the graft's and the subtree's keyed walks
@@ -1497,8 +1534,7 @@ module Ops =
         footprintInOver
             nodew
             idw
-            (applyContainedKeyed keyw (fun _ -> true) nodew idw)
-            (Tree.idsKeyed nodew keyw)
+            (fun v t -> applyContainedKeyed keyw (fun _ -> true) nodew idw v.Op t)
             (Tree.idsKeyed nodew keyw)
             (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
             baseTree
@@ -1671,51 +1707,51 @@ module Ops =
         let pk = w.KindTag parent
         IllegalChild(w.Id child, w.KindTag child, w.Id parent, pk, allowedChildren pk |> Option.defaultValue [])
 
-    /// The grammar clause of one accepted non-batch step: the parent→child pairs the step CREATES,
-    /// checked in a fixed order. An insert creates its node under the parent, then every pair inside
-    /// the graft (preorder); a move creates the moved node under its new parent — the pairs inside
-    /// the moved subtree already stood in the tree, and refusing the move for them would be an
-    /// invariant-repair gate rather than a check of the move (D38's reasoning for `NotAContainer`);
-    /// an in-place rewrite can change the node's kind, so it creates the node under its parent and
-    /// each of its kept children under it. Removes and reorders create none.
-    let private grammarRefusal
-        (allowedChildren: string -> string list option)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (before: 'Node)
-        (after: 'Node)
-        : Rejection<'Id> option =
-        let legal (parent: 'Node) (child: 'Node) =
-            isLegalChild allowedChildren (w.KindTag parent) (w.KindTag child)
+    /// The parent→child pairs one non-batch step CREATES, read from its view of the tree before it
+    /// (Phase 512), in a fixed order: an insert's node under its parent, then every pair inside the
+    /// graft (preorder); a move's node under its new parent (the pairs inside the moved subtree
+    /// already stood — D38's reasoning for `NotAContainer`); an in-place rewrite under its parent,
+    /// then each kept child under it, since a rewrite can change the kind. Removes and reorders none.
+    let private createdPairs (s: OpScope<'Node, 'Id>) (v: OpView<'Node, 'Id>) (before: 'Node) : ('Node * 'Node) list =
+        let w = s.Edit
 
-        match op with
-        | InsertChild(parent, node) ->
-            match Tree.tryFind w idw parent before with
-            | Some p when not (legal p node) -> Some(illegalChild allowedChildren w p node)
-            | _ ->
-                illegalChildren allowedChildren w node
-                |> List.tryHead
-                |> Option.map (fun (p, c) -> illegalChild allowedChildren w p c)
-        | MoveNode(target, newParent) ->
-            match Tree.tryFind w idw newParent before, Tree.tryFind w idw target before with
-            | Some np, Some t when not (legal np t) -> Some(illegalChild allowedChildren w np t)
-            | _ -> None
+        let under (parent: 'Node option) (child: 'Node) =
+            parent |> Option.map (fun p -> p, child) |> Option.toList
+
+        match v.Op with
+        | InsertChild(_, node) ->
+            under v.Located node
+            @ (grafted w v.Op
+               |> List.collect (fun p -> w.Children p |> List.map (fun c -> p, c)))
+        | MoveNode _ ->
+            match v.Destination, v.Located with
+            | Some np, Some moved -> [ np, moved ]
+            | _ -> []
         | UpdateNode node ->
-            let target = w.Id node
+            match v.Located with
+            | None -> []
+            | Some existing ->
+                let rewritten = updated w existing node
 
-            match Tree.tryFind w idw target after with
-            | None -> None
-            | Some rewritten ->
-                match Tree.parentOf w idw target after with
-                | Some p when not (legal p rewritten) -> Some(illegalChild allowedChildren w p rewritten)
-                | _ ->
-                    w.Children rewritten
-                    |> List.tryFind (fun c -> not (legal rewritten c))
-                    |> Option.map (illegalChild allowedChildren w rewritten)
+                under (structuralParentOf s (w.Id node) before) rewritten
+                @ (w.Children rewritten |> List.map (fun c -> rewritten, c))
         | RemoveNode _
         | ReorderChildren _
-        | Batch _ -> None
+        | Batch _ -> []
+
+    /// The grammar clause of one accepted non-batch step: the first pair it creates whose child the
+    /// grammar does not let its parent hold.
+    let private grammarRefusal
+        (allowedChildren: string -> string list option)
+        (s: OpScope<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
+        (before: 'Node)
+        : Rejection<'Id> option =
+        let w = s.Edit
+
+        createdPairs s v before
+        |> List.tryFind (fun (p, c) -> not (isLegalChild allowedChildren (w.KindTag p) (w.KindTag c)))
+        |> Option.map (fun (p, c) -> illegalChild allowedChildren w p c)
 
     /// The reference clause of one accepted non-batch step: the ids the tree declared before the step
     /// and no longer declares after it are ORPHANED, and a node of the resulting tree that refers to
@@ -1759,10 +1795,11 @@ module Ops =
         | Batch _ -> None
 
     /// The wrapped engine: `applyContained` decides each non-batch step, and `check` — handed the
-    /// step, the tree before it and the tree after it — runs only on a step it accepted. A `Batch` is
-    /// threaded through this same function, all-or-nothing, exactly as the engine threads one.
+    /// step's view, the tree before it and the tree after it — runs only on a step it accepted. The
+    /// view is located once, for the engine and the clause alike. A `Batch` is the runner's
+    /// all-or-nothing form over this same function, exactly as the engine threads one.
     let rec private applyChecked
-        (check: SkeletonOp<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+        (check: OpView<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -1770,49 +1807,31 @@ module Ops =
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
         match op with
-        | Batch ops ->
-            let rec go node =
-                function
-                | [] -> Ok node
-                | o :: rest ->
-                    match applyChecked check canHold w idw o node with
-                    | Ok node' -> go node' rest
-                    | Error e -> Error e
-
-            go root ops
+        | Batch ops -> batch (fun node o -> applyChecked check canHold w idw o node) ops root
         | _ ->
-            match applyContained canHold w idw op root with
-            | Error e -> Error e
-            | Ok after ->
-                match check op root after with
-                | Some r -> Error r
-                | None -> Ok after
+            let s = plainScope w idw
+            let v = view s op root
 
-    /// The sequence form of `applyChecked`: first refusal wins, `applyAllWith`'s `ScriptRejection`.
+            applyView canHold s v root
+            |> Result.bind (fun after ->
+                match check v root after with
+                | Some r -> Error r
+                | None -> Ok after)
+
+    /// The sequence form of `applyChecked`: the runner's script, `applyAllWith`'s `ScriptRejection`.
     let private applyAllChecked
-        (check: SkeletonOp<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+        (check: OpView<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        let rec go i node =
-            function
-            | [] -> Ok node
-            | o :: rest ->
-                match applyChecked check canHold w idw o node with
-                | Ok node' -> go (i + 1) node' rest
-                | Error e ->
-                    Error
-                        { Applied = i
-                          Rejection = e
-                          Tree = node }
-
-        go 0 root ops
+        script (fun node o -> applyChecked check canHold w idw o node) ops root
 
     let private grammarCheck allowedChildren (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) =
-        fun op before after -> grammarRefusal allowedChildren w idw op before after
+        let s = plainScope w idw
+        fun v before (_: 'Node) -> grammarRefusal allowedChildren s v before
 
     let private referenceCheck
         (refw: RefWitness<'Node, 'Id>)
@@ -1820,10 +1839,12 @@ module Ops =
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         =
-        fun op before after ->
-            match grammarRefusal allowedChildren w idw op before after with
+        let s = plainScope w idw
+
+        fun (v: OpView<'Node, 'Id>) before after ->
+            match grammarRefusal allowedChildren s v before with
             | Some r -> Some r
-            | None -> referenceRefusal refw w idw op before after
+            | None -> referenceRefusal refw w idw v.Op before after
 
     /// Grammar-aware apply (Phase 313) — `applyContained` with the domain's containment grammar
     /// beside `canHold`. Every step the container-aware engine refuses is refused with the same
@@ -1878,9 +1899,7 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<unit, int * Rejection<'Id>> =
-        match applyAllGrammar allowedChildren canHold w idw ops root with
-        | Ok _ -> Ok()
-        | Error r -> Error(r.Applied, r.Rejection)
+        dryRun (applyGrammar allowedChildren canHold w idw) ops root
 
     /// Reference-aware apply (Phase 313) — `applyGrammar` under a `RefWitness` as well: a
     /// `RemoveNode` or `UpdateNode` it accepts is then refused with `StillReferenced` when the tree
@@ -1935,9 +1954,7 @@ module Ops =
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
         : Result<unit, int * Rejection<'Id>> =
-        match applyAllReferenced refw allowedChildren canHold w idw ops root with
-        | Ok _ -> Ok()
-        | Error r -> Error(r.Applied, r.Rejection)
+        dryRun (applyReferenced refw allowedChildren canHold w idw) ops root
 
     /// `footprint` under a `RefWitness` (Phase 313): every id the script writes a reference to is
     /// READ — the references every node of an inserted subtree carries, and those of an `UpdateNode`
