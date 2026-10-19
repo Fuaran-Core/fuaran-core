@@ -3,7 +3,6 @@ namespace Fuaran.Core.Idl.Emit
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Emit.Core
-open Fuaran.Core.Idl.Emit.Reach
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpDefaults
 
@@ -222,10 +221,11 @@ module internal TypeScriptDeclarations =
     ///
     /// Phase 505 — this is the file UNSTAMPED, so a caller that adds to it (the derivations)
     /// stamps the text it actually emits; [[typescriptDeclarations]] is it under its [[Stamp]].
-    let typescriptDeclarationsBody (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
+    let typescriptDeclarationsBody (decl: Decl) : Result<string, CodegenError> =
+        // Phase 511 — the declaration graph is the resolution's.
+        let idl, kinds, enums, unions, records =
+            decl.Idl, decl.Kinds, decl.Enums, decl.Unions, decl.Records
 
-        let enums, unions, records = referenced idl kinds
         let disc = tsDiscKey idl.Wire.Discriminator
         let tsType = tsDeclType
 
@@ -288,21 +288,23 @@ module internal TypeScriptDeclarations =
                 objectType [ disc + ": " + SourceLit.tsString k.Tag ] k.Fields
                 |> Result.map (fun o -> "export type " + k.Tag + "Spec = " + o + ";"))
 
-        let envelope = objectType [ "id: string" ] idl.NodeFields
+        let envelope = objectType [ "id: string" ] decl.Envelope.Members
         let specs = kinds |> List.map (fun k -> k.Tag + "Spec")
 
         let nodeDecl =
             envelope
             |> Result.map (fun env ->
-                match idl.Wire.NodeEnvelope with
-                | NodeEnvelopeShape.NestedKind ->
+                match decl.Envelope.Kind with
+                | KindPlacement.NestedUnder key ->
                     "export type NodeKind = "
                     + orNever specs
                     + ";\n"
                     + "export type Node = "
                     + env.Substring(0, env.Length - 2)
-                    + "; kind: NodeKind };"
-                | NodeEnvelopeShape.FlatKind ->
+                    + "; "
+                    + key
+                    + ": NodeKind };"
+                | KindPlacement.Merged ->
                     "export type Node = "
                     + orNever (specs |> List.map (fun s -> "(" + s + " & " + env + ")"))
                     + ";")
@@ -312,9 +314,9 @@ module internal TypeScriptDeclarations =
         // far from its cause. Refused here, naming it.
         let fixedNames =
             [ "Node"; refusalTypeName ]
-            @ (match idl.Wire.NodeEnvelope with
-               | NodeEnvelopeShape.NestedKind -> [ "NodeKind" ]
-               | NodeEnvelopeShape.FlatKind -> [])
+            @ (match decl.Envelope.Kind with
+               | KindPlacement.NestedUnder _ -> [ "NodeKind" ]
+               | KindPlacement.Merged -> [])
             @ specs
 
         let clash =
@@ -355,5 +357,5 @@ module internal TypeScriptDeclarations =
         Stamp.generated (CommentStyle.Line "//") "TypeScript declarations" [ idl ] body
 
     /// The declarations [[typescriptDeclarationsBody]] emits, under their stamp.
-    let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        typescriptDeclarationsBody idl kindTags |> Result.map (tsDeclarationsStamp idl)
+    let typescriptDeclarations (decl: Decl) : Result<string, CodegenError> =
+        typescriptDeclarationsBody decl |> Result.map (tsDeclarationsStamp decl.Idl)

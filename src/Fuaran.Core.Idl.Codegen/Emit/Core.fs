@@ -305,32 +305,6 @@ module internal Core =
     let oneOf (names: string list) : string =
         "one of " + (names |> List.map (fun n -> "'" + n + "'") |> String.concat ", ")
 
-    /// Whether any hosted slot in the vocabulary satisfies `pick`.
-    let private declaresHostedWhere (pick: HostedCodec -> bool) (idl: Idl) : bool =
-        let rec has (t: IdlType) =
-            match t with
-            | THosted h -> pick h
-            | TList inner
-            | TMap inner -> has inner
-            | TUnion(_, args) -> args |> List.exists has
-            | _ -> false
-
-        [ idl.NodeFields
-          yield! idl.Kinds |> List.map _.Fields
-          yield! idl.Ops |> List.map _.Fields
-          yield! idl.Records |> List.map _.Fields
-          yield! idl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields) ]
-        |> List.exists (List.exists (fun f -> has f.Type))
-
-    /// Whether any hosted slot in the vocabulary declares a FORMAT — the condition the
-    /// F# and TypeScript decoder preludes emit their `dFormat` helper on, so a vocabulary
-    /// that declares none emits byte-for-byte what it did.
-    let declaresHostedFormat (idl: Idl) : bool = declaresHostedWhere _.Format.IsSome idl
-
-    /// Whether the vocabulary declares any hosted slot — the condition the F# decoder prelude
-    /// emits `dHosted` on (Phase 337), the lift of a host codec's sentence-refusal.
-    let declaresHosted (idl: Idl) : bool = declaresHostedWhere (fun _ -> true) idl
-
     /// Phase 195 — the typed refusal for a DECLARED transparent union case that does not
     /// carry exactly one field. A transparent case is on the wire BARE, so its single field
     /// IS the encoding; a case with none or several has no unambiguous bare form.
@@ -450,65 +424,13 @@ module internal Core =
     // that does". Computing it is what lets the generated declarations BE the
     // authoring types instead of a `'Msg`-erased projection of them.
     //
+    // The set itself is computed once per resolution (`Decl.msgCarrying`, Phase 511).
+    //
     // `Binding<'T>` is deliberately NOT in the set on the real UI IDL: the tier
     // obj-erases exactly where a `'Msg` parameter would be inconvenient
     // (`LocalBinding.OnCommit: 'T -> obj`, `Action.Call`'s `onResult: obj -> 'Msg`),
     // so the parameter stays confined to the kinds that genuinely dispatch.
     // -----------------------------------------------------------------------
-
-    /// The type names emitted generic in `'Msg` — union names, record names,
-    /// `<Tag>Spec` names, plus `NodeKind` / `Node` when any kind qualifies.
-    let internal msgCarrying (idl: Idl) : Set<string> =
-        let rec mentions (seen: Set<string>) (t: IdlType) =
-            match t with
-            | TFn s -> s.FSharp.Contains "'Msg"
-            | TList inner -> mentions seen inner
-            | TMap vt -> mentions seen vt
-            | TNode -> seen.Contains "Node"
-            | TUnion(n, args) -> seen.Contains n || args |> List.exists (mentions seen)
-            | TRecord n -> seen.Contains n
-            | _ -> false
-
-        let step (seen: Set<string>) =
-            let fieldsMention (fs: IdlField list) =
-                fs |> List.exists (fun f -> mentions seen f.Type)
-
-            let unions =
-                idl.Unions
-                |> List.filter (fun u -> u.Cases |> List.exists (fun c -> fieldsMention c.Fields))
-                |> List.map _.Name
-
-            let records =
-                idl.Records |> List.filter (fun r -> fieldsMention r.Fields) |> List.map _.Name
-
-            let kinds =
-                idl.Kinds
-                |> List.filter (fun k -> fieldsMention k.Fields)
-                |> List.map (fun k -> k.Tag + "Spec")
-
-            // `NodeKind` wraps every spec, and `Node` wraps `NodeKind` — so one
-            // dispatching kind makes the whole tree generic. That is the point.
-            let tree =
-                if
-                    idl.Kinds
-                    |> List.exists (fun k -> Set.contains (k.Tag + "Spec") (Set.ofList kinds))
-                then
-                    [ "NodeKind"; "Node" ]
-                else
-                    []
-
-            Set.unionMany
-                [ seen
-                  Set.ofList unions
-                  Set.ofList records
-                  Set.ofList kinds
-                  Set.ofList tree ]
-
-        let rec fix (seen: Set<string>) =
-            let next = step seen
-            if next = seen then seen else fix next
-
-        fix Set.empty
 
     /// The `<…>` parameter list for a declaration, with `'Msg` appended when the
     /// type is msg-carrying. Declared params come first so an existing
@@ -609,22 +531,3 @@ module internal Core =
           AccessorSplice: string option
           CaseRefines: Map<string, string>
           KindProjections: Map<string, Projection> }
-
-    // -----------------------------------------------------------------------
-    // Phase 293 — ONE name-to-declaration index. Every backend used to walk `idl.Unions` with
-    // `List.tryFind` at its own call sites; the finders below are the one spelling, and the
-    // index is what a walk builds once when it looks up by name in a loop.
-    // -----------------------------------------------------------------------
-
-    type IdlIndex =
-        { Kinds: Map<string, IdlKind>
-          Unions: Map<string, IdlUnion>
-          Enums: Map<string, IdlEnum>
-          Records: Map<string, IdlRecord> }
-
-    module IdlIndex =
-        let ofIdl (idl: Idl) : IdlIndex =
-            { Kinds = idl.Kinds |> List.map (fun k -> k.Tag, k) |> Map.ofList
-              Unions = idl.Unions |> List.map (fun u -> u.Name, u) |> Map.ofList
-              Enums = idl.Enums |> List.map (fun e -> e.Name, e) |> Map.ofList
-              Records = idl.Records |> List.map (fun r -> r.Name, r) |> Map.ofList }

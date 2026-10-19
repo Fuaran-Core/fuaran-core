@@ -511,10 +511,11 @@ let sourceLitTests =
                         // Phase 293 — the emitters live under `Emit/` behind the `Gen.fs` facade.
                         [ "src/Fuaran.Core.Idl.Codegen/Gen.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/Core.fs"
-                          "src/Fuaran.Core.Idl.Codegen/Emit/Reach.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/Decl.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/Annotations.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/FSharpTypes.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/FSharpDefaults.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/FSharpDerive.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/FSharpCodec.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/JsonSchema.fs"
                           // Phase 388 — the TypeScript backend is three files.

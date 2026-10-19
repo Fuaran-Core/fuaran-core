@@ -35,20 +35,6 @@ module internal FSharpDerive =
         | DefaultRecords
         | VocabularyConstants
 
-    /// What a derivation reads: the vocabulary, the msg-carrying set, and the declarations the
-    /// module emits (the selected kinds and what they reach).
-    type Ctx =
-        {
-            Idl: Idl
-            Msg: Set<string>
-            Kinds: IdlKind list
-            Unions: IdlUnion list
-            Records: IdlRecord list
-            /// Kind tag → the declared host projection of that kind (Phase 945); every derivation
-            /// that reads a kind's fields reads a projected kind's through [[recordFields]].
-            Projections: Map<string, Projection>
-        }
-
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
 
@@ -101,44 +87,6 @@ module internal FSharpDerive =
             else
                 Ok [])
 
-    /// Every declared record's field types name declarations this module emits — a type the
-    /// module does not declare is one no derived member could walk, and would emit source that
-    /// does not compile. Checked whatever is requested; it changes no byte of an admitted module.
-    let recordFieldsDeclared (ctx: Ctx) : Result<unit, CodegenError> =
-        let declared =
-            Set.unionMany
-                [ ctx.Unions |> List.map _.Name |> Set.ofList
-                  ctx.Records |> List.map _.Name |> Set.ofList
-                  ctx.Idl.Enums |> List.map _.Name |> Set.ofList ]
-
-        let rec names (t: IdlType) : string list =
-            match t with
-            | TEnum n
-            | TRecord n -> [ n ]
-            | TUnion(n, args) -> n :: List.collect names args
-            | TList i
-            | TMap i -> names i
-            | _ -> []
-
-        let undeclaredIn =
-            ctx.Projections
-            |> Map.toList
-            |> List.collect (fun (tag, p) ->
-                p.RecordFields
-                |> Option.defaultValue []
-                |> List.collect (fun f ->
-                    names f.Type
-                    |> List.filter (fun n -> not (declared.Contains n))
-                    |> List.map (fun n -> tag, f.Name, n)))
-
-        match undeclaredIn with
-        | [] -> Ok()
-        | (tag, field, n) :: _ ->
-            refuse
-                (sprintf "the projected record field '%s.%s' at the undeclared type '%s'" tag field n)
-                "a projected record's declared fields name declarations the module emits, so every derivation over them can walk what they hold"
-                "declare the field at a type the selected kinds reach, or correct the name"
-
     /// A STRUCTURAL child position: a node or node list a kind always carries. An optional node is
     /// a keyed position — it is not an ordered list a structural edit may rebuild — and so is a
     /// node held anywhere deeper (inside a record, a union case, a list of either, a map).
@@ -148,16 +96,13 @@ module internal FSharpDerive =
         | (Required | OmitDefault _), TList TNode -> Some(pascal f.Name, true)
         | _ -> None
 
-    let private nodeT (ctx: Ctx) = "Node" + declParams ctx.Msg "Node" []
+    let private nodeT (ctx: Decl) = "Node" + declParams ctx.Msg "Node" []
 
     /// The host type text of a declared record / union name in this module.
-    let private declT (ctx: Ctx) (name: string) (ps: string list) = name + declParams ctx.Msg name ps
+    let private declT (ctx: Decl) (name: string) (ps: string list) = name + declParams ctx.Msg name ps
 
-    let private unionParams (ctx: Ctx) (name: string) =
-        ctx.Unions
-        |> List.tryFind (fun u -> u.Name = name)
-        |> Option.map _.Params
-        |> Option.defaultValue []
+    let private unionParams (ctx: Decl) (name: string) =
+        Decl.tryUnion ctx name |> Option.map _.Params |> Option.defaultValue []
 
     /// The union-case pattern binding every field positionally: `U.Tag(__f0, __f1)`, or `U.Tag`.
     let private casePattern (u: IdlUnion) (c: IdlUnionCase) =
@@ -168,50 +113,6 @@ module internal FSharpDerive =
     // -----------------------------------------------------------------------
     // Node positions — the keyed walk (emission 2).
     // -----------------------------------------------------------------------
-
-    /// The record / union names that hold a node at any depth (not through a type argument —
-    /// a node held through one is refused where it is met). Host-neutral: the TypeScript
-    /// emitter reads it too (Phase 380).
-    let nodeHolders (ctx: Ctx) : Set<string> =
-        let rec holds (hs: Set<string>) (t: IdlType) =
-            match t with
-            | TNode -> true
-            | TList i
-            | TMap i -> holds hs i
-            | TRecord n -> hs.Contains n
-            | TUnion(n, args) -> hs.Contains n || List.exists (holds hs) args
-            | _ -> false
-
-        let step (hs: Set<string>) =
-            let us =
-                ctx.Unions
-                |> List.filter (fun u ->
-                    u.Cases
-                    |> List.exists (fun c -> c.Fields |> List.exists (fun f -> holds hs f.Type)))
-                |> List.map _.Name
-
-            let rs =
-                ctx.Records
-                |> List.filter (fun r -> r.Fields |> List.exists (fun f -> holds hs f.Type))
-                |> List.map _.Name
-
-            Set.unionMany [ hs; Set.ofList us; Set.ofList rs ]
-
-        let rec fix hs =
-            let next = step hs
-            if next = hs then hs else fix next
-
-        fix Set.empty
-
-    /// Whether a value of type `t` holds a node, given the [[nodeHolders]] set.
-    let rec holdsIn (hs: Set<string>) (t: IdlType) =
-        match t with
-        | TNode -> true
-        | TList i
-        | TMap i -> holdsIn hs i
-        | TRecord n -> hs.Contains n
-        | TUnion(n, args) -> hs.Contains n || List.exists (holdsIn hs) args
-        | _ -> false
 
     let private throughArgument (u: string) : Result<'a, CodegenError> =
         refuse
@@ -232,7 +133,7 @@ module internal FSharpDerive =
             collect hs i x (d + 1)
             |> Result.map (fun b -> sprintf "(%s |> Map.toList |> List.collect (fun (_, %s) -> %s))" e x b)
         | TRecord n -> Ok(sprintf "nodesIn%s %s" n e)
-        | TUnion(n, args) when args |> List.exists (holdsIn hs) -> throughArgument n
+        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
         | TUnion(n, _) -> Ok(sprintf "nodesIn%s %s" n e)
         | _ -> Ok "[]"
 
@@ -251,7 +152,7 @@ module internal FSharpDerive =
             |> Result.map (fun b ->
                 sprintf "(%s |> Map.toList |> List.map (fun (__k%d, %s) -> __k%d, %s) |> Map.ofList)" e d x d b)
         | TRecord n -> Ok(sprintf "mapNodesIn%s f %s" n e)
-        | TUnion(n, args) when args |> List.exists (holdsIn hs) -> throughArgument n
+        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
         | TUnion(n, _) -> Ok(sprintf "mapNodesIn%s f %s" n e)
         | _ -> Ok e
 
@@ -277,11 +178,11 @@ module internal FSharpDerive =
 
     /// The keyed walk: per-declaration node listers and rebuilders, the node-level
     /// `keyedChildren` / `withKeyedChildren`, the generated full walk, and the `KeyedWitness`.
-    let keyedDecl (ctx: Ctx) : Result<string, CodegenError> =
-        let hs = nodeHolders ctx
+    let keyedDecl (ctx: Decl) : Result<string, CodegenError> =
+        let hs = ctx.NodeHolders
         let node = nodeT ctx
 
-        let holdsF (f: IdlField) = holdsIn hs f.Type
+        let holdsF (f: IdlField) = Decl.holdsIn hs f.Type
 
         let recordHelpers (r: IdlRecord) =
             let t = declT ctx r.Name []
@@ -550,7 +451,7 @@ module internal FSharpDerive =
     // Emission 3 — the typed slot enumerator.
     // -----------------------------------------------------------------------
 
-    let slotsDecl (ctx: Ctx) (typeName: string) : Result<string, CodegenError> =
+    let slotsDecl (ctx: Decl) (typeName: string) : Result<string, CodegenError> =
         let isT (t: IdlType) =
             match t with
             | TEnum n
@@ -567,8 +468,10 @@ module internal FSharpDerive =
 
         let slotT = if generic then "obj" else declT ctx typeName []
 
+        // Phase 540 — an upcast, not `box`: under nullness checking `box` answers `obj | null`, which
+        // the declared `obj` result refuses (FS3261), while a union value upcast is a non-null `obj`.
         let wrap (v: string) =
-            if generic then sprintf "box %s" v else v
+            if generic then sprintf "(%s :> obj)" v else v
 
         /// The pairs a field contributes, or `None` when it holds no slot of the type.
         let ofField (owner: string) (f: IdlField) : string option =
@@ -597,7 +500,7 @@ module internal FSharpDerive =
                     refuse
                         (sprintf "a slot enumerator over '%s' through the projected kind '%s'" typeName k.Tag)
                         undeclaredRecord
-                        (declareRecord (sprintf "do not request SlotsOf \"%s\"" typeName)))
+                        (declareRecord (sprintf "do not request SlotsOf %s" (SourceLit.fsString typeName))))
                 |> Result.map (fun fs ->
                     match fs |> List.choose (ofField "s") with
                     | [] -> None
@@ -706,7 +609,7 @@ module internal FSharpDerive =
 
     /// Map a value of a declared host SIGNATURE (a `TFn` slot) over the message parameter.
     let rec private mapSig
-        (ctx: Ctx)
+        (ctx: Decl)
         (where: string)
         (text: string)
         (e: string)
@@ -756,7 +659,7 @@ module internal FSharpDerive =
                     else
                         refuseSig ()
 
-    let rec private mentionsMsg (ctx: Ctx) (t: IdlType) =
+    let rec private mentionsMsg (ctx: Decl) (t: IdlType) =
         match t with
         | TFn s -> mentionsMsgText s.FSharp
         | TList i
@@ -767,7 +670,7 @@ module internal FSharpDerive =
         | _ -> false
 
     let rec private mapMsgE
-        (ctx: Ctx)
+        (ctx: Decl)
         (where: string)
         (t: IdlType)
         (e: string)
@@ -796,14 +699,14 @@ module internal FSharpDerive =
             | TFn s -> mapSig ctx where s.FSharp e d
             | _ -> Ok e
 
-    let private mapMsgField (ctx: Ctx) (where: string) (f: IdlField) (e: string) =
+    let private mapMsgField (ctx: Decl) (where: string) (f: IdlField) (e: string) =
         match f.Opt with
         | Optional when mentionsMsg ctx f.Type ->
             mapMsgE ctx where f.Type "__o" 0
             |> Result.map (fun b -> sprintf "Option.map (fun __o -> %s) %s" b e)
         | _ -> mapMsgE ctx where f.Type e 0
 
-    let mapMsgDecl (ctx: Ctx) : Result<string, CodegenError> =
+    let mapMsgDecl (ctx: Decl) : Result<string, CodegenError> =
         if not (ctx.Msg.Contains "Node") then
             refuse
                 "a message map over a vocabulary whose node carries no message parameter"
@@ -923,64 +826,8 @@ module internal FSharpDerive =
     // module named after the union (`Rule.fold`, `Rule.owner`).
     // -----------------------------------------------------------------------
 
-    /// Whether `t` reaches the union `target` at any depth, through any declaration.
-    let reaches (ctx: Ctx) (target: string) (t: IdlType) : bool =
-        let rec go (seen: Set<string>) (t: IdlType) =
-            match t with
-            | TUnion(n, args) ->
-                n = target
-                || List.exists (go seen) args
-                || (not (seen.Contains n)
-                    && (ctx.Unions
-                        |> List.tryFind (fun u -> u.Name = n)
-                        |> Option.exists (fun u ->
-                            u.Cases
-                            |> List.exists (fun c -> c.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))))
-            | TRecord n ->
-                not (seen.Contains n)
-                && (ctx.Records
-                    |> List.tryFind (fun r -> r.Name = n)
-                    |> Option.exists (fun r -> r.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))
-            | TList i
-            | TMap i -> go seen i
-            | _ -> false
-
-        go Set.empty t
-
-    /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
-    /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
-    /// type arguments, or through another union). `seen` is the records already entered.
-    /// Host-neutral: the TypeScript fold reads the same analysis (Phase 380).
-    let rec foldSelfIn (ctx: Ctx) (u: IdlUnion) (seen: Set<string>) (t: IdlType) : Result<bool, CodegenError> =
-        match t with
-        | TUnion(n, args) when n = u.Name ->
-            if args = (u.Params |> List.map TVar) then
-                Ok true
-            else
-                refuse
-                    (sprintf "a fold over '%s', which recurses at other type arguments" u.Name)
-                    "the fold visits nested values of the union's own instantiation"
-                    "recurse at the declared type parameters, or do not request the fold"
-        | TUnion(n, _) when reaches ctx u.Name t ->
-            refuse
-                (sprintf "a fold over '%s', which recurses through the union '%s'" u.Name n)
-                "the fold descends lists, options, maps and records, and a recursion through another union would leave the nested values it holds unvisited"
-                "recurse through a list, an option, a map or a record, or do not request the fold"
-        | TList i
-        | TMap i -> foldSelfIn ctx u seen i
-        | TRecord n when not (seen.Contains n) ->
-            ctx.Records
-            |> List.tryFind (fun r -> r.Name = n)
-            |> Option.map (fun r ->
-                r.Fields
-                |> List.map (fun f -> foldSelfIn ctx u (seen.Add n) f.Type)
-                |> sequenceR
-                |> Result.map (List.exists id))
-            |> Option.defaultValue (Ok false)
-        | _ -> Ok false
-
-    let private foldDecl (ctx: Ctx) (u: IdlUnion) : Result<string, CodegenError> =
-        let selfIn = foldSelfIn ctx u
+    let private foldDecl (ctx: Decl) (u: IdlUnion) : Result<string, CodegenError> =
+        let selfIn = Decl.foldSelfIn ctx u
 
         let ut = declT ctx u.Name u.Params
 
@@ -998,8 +845,7 @@ module internal FSharpDerive =
                 |> Result.map (fun b -> sprintf "(%s |> Map.toList |> List.fold (fun %s (_, %s) -> %s) %s)" e s x b st)
             | TRecord n ->
                 let fs =
-                    ctx.Records
-                    |> List.tryFind (fun r -> r.Name = n)
+                    Decl.tryRecord ctx n
                     |> Option.map _.Fields
                     |> Option.defaultValue []
                     |> List.filter (fun f ->
@@ -1081,7 +927,7 @@ module internal FSharpDerive =
                     + "        match v with\n"
                     + String.concat "\n" (arms @ wild)))
 
-    let private projectionDecl (ctx: Ctx) (u: IdlUnion) (field: string) : Result<string, CodegenError> =
+    let private projectionDecl (ctx: Decl) (u: IdlUnion) (field: string) : Result<string, CodegenError> =
         let fsType = fsTypeIn ctx.Msg
 
         let hostType (f: IdlField) =
@@ -1146,7 +992,7 @@ module internal FSharpDerive =
                     ))
 
     /// One module per union named in a Fold or Projections request, holding all of them.
-    let unionModulesDecl (ctx: Ctx) (requests: Request list) : Result<string list, CodegenError> =
+    let unionModulesDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
         let named =
             requests
             |> List.choose (fun r ->
@@ -1158,7 +1004,7 @@ module internal FSharpDerive =
 
         named
         |> List.map (fun name ->
-            match ctx.Unions |> List.tryFind (fun u -> u.Name = name) with
+            match Decl.tryUnion ctx name with
             | None ->
                 refuse
                     (sprintf "a fold or projection over '%s'" name)
@@ -1195,7 +1041,7 @@ module internal FSharpDerive =
     // Emission 7 — default records as values.
     // -----------------------------------------------------------------------
 
-    let defaultRecordsDecl (ctx: Ctx) : Result<string, CodegenError> =
+    let defaultRecordsDecl (ctx: Decl) : Result<string, CodegenError> =
         let defaultFor (tag: string) (field: string) =
             ctx.Idl.Defaults
             |> List.tryPick (fun d ->
@@ -1246,7 +1092,7 @@ module internal FSharpDerive =
     // Emission 8 — the vocabulary constants.
     // -----------------------------------------------------------------------
 
-    let constantsDecl (ctx: Ctx) : string =
+    let constantsDecl (ctx: Decl) : string =
         let setLit (xs: string list) =
             match xs with
             | [] -> "Set.empty"
@@ -1290,7 +1136,7 @@ module internal FSharpDerive =
 
     /// Every requested derivation after the module's existing members, in a fixed order: keyed
     /// walk, slot enumerators, message map, default records, constants, then the union modules.
-    let derivedDecl (ctx: Ctx) (requests: Request list) : Result<string list, CodegenError> =
+    let derivedDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
         let has r = List.contains r requests
 
         let slots =

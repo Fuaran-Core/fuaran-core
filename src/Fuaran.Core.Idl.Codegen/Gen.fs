@@ -117,11 +117,12 @@ module Gen =
           CaseRefines = sup.CaseRefines
           KindProjections = sup.KindProjections |> Map.map (fun _ p -> toProjection p) }
 
-    /// Which declarations are generic in `'Msg` — see `Core.msgCarrying`.
-    let internal msgCarrying (idl: Idl) : Set<string> = Core.msgCarrying idl
+    /// Which declarations are generic in `'Msg` — see `Decl.msgCarrying`.
+    let internal msgCarrying (idl: Idl) : Set<string> = Decl.msgCarrying idl
 
     /// The F# type declarations for a whole vocabulary, from the one type emitter (Phase 293).
-    let fsharpTypes (idl: Idl) : Result<string, CodegenError> = FSharpTypes.fsharpTypes idl
+    let fsharpTypes (idl: Idl) : Result<string, CodegenError> =
+        FSharpTypes.fsharpTypes (Decl.declared idl)
 
     /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
     /// drawing in the enums/unions they transitively reference, under the declared support.
@@ -132,7 +133,8 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        FSharpCodec.fsharpModuleWith (toSupport sup) moduleName idl kindTags
+        let sup = toSupport sup
+        FSharpCodec.fsharpModuleWith sup moduleName (Decl.resolve idl sup.KindProjections kindTags)
 
     /// Phase 374 — a STRUCTURAL DERIVATION the F# module emits on request: a member that follows
     /// mechanically from what the generator already knows about every kind (which fields hold
@@ -203,13 +205,14 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
+        let sup = toSupport sup
+
         FSharpCodec.fsharpModuleDerived
-            (toSupport sup)
+            sup
             (derivations |> List.choose toRequest)
             (derivations |> List.contains Derivation.SpecDecoders)
             moduleName
-            idl
-            kindTags
+            (Decl.resolve idl sup.KindProjections kindTags)
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
@@ -217,7 +220,8 @@ module Gen =
         fsharpModuleWith GenSupport.Empty moduleName idl kindTags
 
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
-    let jsonSchema (idl: Idl) : Result<string, CodegenError> = JsonSchema.jsonSchema idl
+    let jsonSchema (idl: Idl) : Result<string, CodegenError> =
+        JsonSchema.jsonSchema (Decl.declared idl)
 
     /// A TypeScript value literal for an IDL value under the given wire shape.
     let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
@@ -225,13 +229,14 @@ module Gen =
 
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScriptCodec.typescriptModule idl kindTags
+        TypeScriptCodec.typescriptModule (Decl.resolve idl Map.empty kindTags)
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
     /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
     /// further `export` naming them. The empty list emits exactly what `typescriptModule` does. A
-    /// request is admitted exactly when the F# path admits it, and refused with the F# path's
-    /// error. `MapMsg` emits nothing here: this host holds a handler slot as its sentinel's `null`
+    /// request is admitted by the one derivation admission the F# path performs, over this host's
+    /// resolution — which declares no host projections, because a projection is F# source — and
+    /// refused with that admission's error (Phase 511). `MapMsg` emits nothing here: this host holds a handler slot as its sentinel's `null`
     /// and carries no message type, so there is nothing to map.
     let typescriptModuleDerived
         (derivations: Derivation list)
@@ -241,8 +246,7 @@ module Gen =
         TypeScriptDerived.typescriptModuleDerived
             (derivations |> List.choose toRequest)
             (derivations |> List.contains Derivation.SpecDecoders)
-            idl
-            kindTags
+            (Decl.resolve idl Map.empty kindTags)
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
@@ -250,7 +254,7 @@ module Gen =
 
     /// The TypeScript type declarations for the named kinds.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScriptDeclarations.typescriptDeclarations idl kindTags
+        TypeScriptDeclarations.typescriptDeclarations (Decl.resolve idl Map.empty kindTags)
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
     /// `typescriptModuleDerived` exports under the same requests, so the derived module and its
@@ -266,8 +270,7 @@ module Gen =
         TypeScriptDerived.typescriptDeclarationsDerived
             (derivations |> List.choose toRequest)
             (derivations |> List.contains Derivation.SpecDecoders)
-            idl
-            kindTags
+            (Decl.resolve idl Map.empty kindTags)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.
