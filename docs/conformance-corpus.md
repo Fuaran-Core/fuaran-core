@@ -7,7 +7,7 @@ gate.
 
 | Question | Who answers it | Where |
 |---|---|---|
-| **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read | `tests/Fuaran.Core.Tests/LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracle.PreservationTests.fs` |
+| **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read; every committed file is held to its exporter row's render by one reading (Phase 508) | `tests/Fuaran.Core.Tests/Exporters.fs` (freshness); `LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracle.PreservationTests.fs` (the oracle) |
 | **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (warn-first, on every workspace sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
 | **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
 
@@ -118,6 +118,50 @@ dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply
 dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>
 dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
 ```
+
+Since Phase 508 every family is one row of ONE exporter table (`tests/Fuaran.Core.Tests/Exporters.fs`),
+and the verb is `--emit <family>` — `laws`, `apply`, `refusals`, `decode`, `escape`, `encoding` or
+`families`. The `--emit-<family>` spellings above are kept as aliases of it, because `copies.json`, the
+projection registry and the corpus's own producer record quote them.
+
+### The exporter table (Phase 508)
+
+One table, one writer, one manifest schema, one freshness reading:
+
+- **A row** names the family, the directory its files live in when no target is named
+  (`conformance/`, or `docs/` for the roster's two artefacts), every file it writes with the text it
+  renders, and — only where writing is more than writing those texts — its own writer: `laws` restamps
+  the corpus's shared `laws/manifest.json` rows (Phase 394), and `apply` merges its row into the corpus's
+  shared `apply/manifest.json` beside other producers' rows.
+- **The writer** is `CorpusFile.render` (internal to `Fuaran.Core.Conformance` until its first outside adopter publishes it, D171): a header member per line, then one
+  array member with an item per line, LF endings and a trailing newline. Every key, string and number,
+  and every compact item, goes through `Canon.render`, so a file escapes by the spine's one string rule.
+  An item is either a spaced object or array in author order (`CorpusCell.Row`, `CorpusCell.List`: the
+  vectors of `laws/` and `apply/`, every manifest row) or a value in `Canon.render`'s compact form
+  (`CorpusCell.Value`: the vectors of `refusals/` and `decode/`, the lines of `escape/` and
+  `encoding/`). No exporter writes JSON of its own. The hand writer the `laws/` and `apply/` files were
+  written with until then spelled `\n`, `\t`, `\b`, `\f` and `\r` short where the spine writes `\u00xx`;
+  no committed vector carries a control character, so moving onto the one writer moved no byte of any
+  file the corpus copies.
+- **The manifest schema** is `CorpusManifest` — a version, a description, and one `CorpusManifestRow` per
+  family (`id`, `kind`, `file`, `vectors`, `adoption`, `description`, in that order, the adoption a spaced
+  object in roster order). `apply/`, `refusals/` and `decode/` all write it; the latter two wrote their
+  adoption map in `Canon.render`'s compact sorted form until Phase 508, and moved onto the apply
+  manifest's shape (neither file is copied into the corpus). The corpus's `laws/manifest.json` is not a
+  self-enumerated manifest: it indexes families other producers own and is restamped, never rendered.
+- **The freshness reading** is `CorpusFile.firstDifference`: a committed file is fresh when it equals its
+  row's render once CRLF is read as LF, and a stale one is named by its first differing line, with the
+  command that rewrites it. The `families` row reads both texts through the copy registry's fingerprint
+  first, as its two files always were. `Exporters.tests` holds every row's committed files to it; each
+  family's own tests keep the ORACLE question — is what the file records still true of the code? — and
+  no longer compare bytes.
+
+A new family is one row. The four host-compliance phases that were parked behind this table land on it:
+fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on the
+rows it stamps, written by the same writer; #479 (the chain, DAG, merge and diff vector families) is
+rows; #481 (the limits vector family) is one row; and #484 (each host declares its compliance and Core
+validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaces
+the `adoption` member's value in `CorpusManifestRow`, in one place, for every manifest at once.
 
 A flag rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
 into it on every run would dirty a shared clone. Note the name — the UI language repository's

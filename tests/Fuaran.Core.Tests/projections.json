@@ -138,76 +138,76 @@
     {
       "path": "conformance/laws/capability-laws.json",
       "render": "--emit-laws",
-      "heldBy": "LawVectorTests",
+      "heldBy": "Exporters",
       "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:laws/capability-laws.json" ],
       "versionStamped": true
     },
     {
       "path": "conformance/apply/skeleton-apply.json",
       "render": "--emit-apply",
-      "heldBy": "ApplyVectorTests",
+      "heldBy": "Exporters",
       "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:apply/skeleton-apply.json" ],
       "versionStamped": true
     },
     {
       "path": "conformance/apply/manifest.json",
       "render": "--emit-apply",
-      "heldBy": "ApplyVectorTests",
+      "heldBy": "Exporters",
       "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:apply/manifest.json" ]
     },
     {
       "path": "conformance/laws/decimal-laws.json",
       "render": "--emit-laws",
-      "heldBy": "LawVectorTests",
+      "heldBy": "Exporters",
       "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:laws/decimal-laws.json" ],
       "versionStamped": true
     },
     {
       "path": "conformance/laws/field-laws.json",
       "render": "--emit-laws",
-      "heldBy": "LawVectorTests",
+      "heldBy": "Exporters",
       "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:laws/field-laws.json" ],
       "versionStamped": true
     },
     {
       "path": "conformance/refusals/codec-refusals.json",
       "render": "--emit-refusals",
-      "heldBy": "RefusalVectorTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "conformance/refusals/manifest.json",
       "render": "--emit-refusals",
-      "heldBy": "RefusalVectorTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "conformance/decode/decode-rejects.json",
       "render": "--emit-decode",
-      "heldBy": "DecodeLayerTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "conformance/decode/manifest.json",
       "render": "--emit-decode",
-      "heldBy": "DecodeLayerTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "conformance/escape/string-escape.json",
       "render": "--emit-escape",
-      "heldBy": "StringEscapeTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "conformance/encoding/encoding-profiles.json",
       "render": "--emit-encoding",
-      "heldBy": "EncodingProfileTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "docs/conformance-families.md",
       "render": "--emit-families",
-      "heldBy": "ConformanceFamiliesTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "docs/conformance-families.json",
       "render": "--emit-families",
-      "heldBy": "ConformanceFamiliesTests"
+      "heldBy": "Exporters"
     },
     {
       "path": "proofs/Vocabulary.fst",

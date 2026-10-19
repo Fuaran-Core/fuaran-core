@@ -510,6 +510,9 @@
          (append-only). -->
     <Compile Include="UnitTests.fs" />
     <Compile Include="IdlStampTests.fs" />
+    <!-- Phase 508 - the exporter table: one row per emitted family, the one writer and the one
+         freshness reading; Program.fs dispatches the emit verb over it. Appended (append-only). -->
+    <Compile Include="Exporters.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

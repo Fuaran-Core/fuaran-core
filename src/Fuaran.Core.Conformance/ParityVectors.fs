@@ -1114,16 +1114,53 @@ let sanitiseSweep: (string * string) list =
            "idlSanitize/url/" + label,
            exactly (renderUrl expected) (renderUrl (Fuaran.Core.Idl.Sanitize.sanitizeUrl input))))
 
-/// `lines`, over rows the caller names — the rendering `lawsWith`'s format law holds.
-let private linesOf (rows: (string * string) list) : string list =
-    rows |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)
+/// Printable ASCII — the module's own promise: a console-encoding difference must never read as a
+/// value divergence.
+let private printable (s: string) =
+    s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
+
+/// A label a `VEC` line can split on: non-empty and carrying no space.
+let private splittable (label: string) = label <> "" && not (label.Contains " ")
+
+/// A sanitiser-sweep row (`idlSanitize/…`) reads `ok`: the floor produced the committed output.
+let private sanitiserOk (label: string, value: string) =
+    not (label.StartsWith "idlSanitize/") || value = "ok"
+
+/// The table over one shape (Phase 508): a row is `(label, value)`, its line `VEC <label> <value>`,
+/// and its checks the ones a single row can answer — printable ASCII, a splittable label, a sanitiser
+/// row reading `ok`. Uniqueness is a property of the table and not of a row, so the table's laws are
+/// pooled (`lawsWith`) rather than one per row; `run` and `check` are the generic verbs.
+let internal family: VectorFamily<string * string> =
+    { Label = "parity vectors"
+      Corpus = vectors @ hashSweep @ sanitiseSweep
+      Name = fst
+      Check =
+        fun ((label, value) as row) ->
+            [ (if printable label && printable value then
+                   VectorKit.pass (label + " / printable ASCII")
+               else
+                   VectorKit.fail (label + " / printable ASCII") "a character outside printable ASCII")
+              (if splittable label then
+                   VectorKit.pass (label + " / label")
+               else
+                   VectorKit.fail (label + " / label") "the label is empty or carries a space")
+              (if sanitiserOk row then
+                   VectorKit.pass (label + " / sanitiser")
+               else
+                   VectorKit.fail (label + " / sanitiser") ("reads " + value)) ]
+      Line = fun (k, v) -> sprintf "VEC %s %s" k v }
+
+/// Every row's row-local checks, named (Phase 508).
+let internal run () : Corpus.Outcome list = VectorFamily.run family
+
+/// The table as a single verdict — `Ok` or the first failing row-local check, named.
+let internal check () : Result<unit, string> = VectorFamily.check family
 
 /// Every vector as the line a runner compares: `VEC <label> <value>` — the named table first, then
 /// the hash sweep, then the sanitiser sweep. Order is part of the comparison. The `VEC ` prefix is
 /// what lets a runner filter out anything a runtime writes around the program; a label never
 /// contains a space, so the line splits on its first one.
-let lines () : string list =
-    linesOf (vectors @ hashSweep @ sanitiseSweep)
+let lines () : string list = VectorFamily.lines family
 
 /// The table as `LawResult`s over rows the caller hands it (Phase 390; `laws ()` is this over the
 /// named table and both sweeps, in `lines` order). The VALUES are pinned elsewhere — against
@@ -1153,9 +1190,6 @@ let lawsWith (rows: (string * string) list) : LawResult list =
     let format =
         LawKit.LawCell "parity vectors: lines renders each row as VEC <label> <value>, in row order"
 
-    let printable (s: string) =
-        s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
-
     let mutable seen = Set.empty
 
     for label, value in rows do
@@ -1167,18 +1201,15 @@ let lawsWith (rows: (string * string) list) : LawResult list =
         )
 
         labels.Check(
-            label <> "" && not (label.Contains " ") && not (Set.contains label seen),
+            splittable label && not (Set.contains label seen),
             fun () -> sprintf "the label %A is empty, carries a space, or repeats" label
         )
 
         seen <- Set.add label seen
 
-        sanitiser.Check(
-            not (label.StartsWith "idlSanitize/") || value = "ok",
-            fun () -> sprintf "%s reads %s" label value
-        )
+        sanitiser.Check(sanitiserOk (label, value), fun () -> sprintf "%s reads %s" label value)
 
-    let rendered = linesOf rows
+    let rendered = VectorFamily.lines (VectorFamily.over rows family)
 
     format.Check(
         rendered.Length = rows.Length
@@ -1191,5 +1222,4 @@ let lawsWith (rows: (string * string) list) : LawResult list =
 
 /// The whole table as `LawResult`s — `lawsWith` over the named table, the hash sweep and the
 /// sanitiser sweep, the rows `lines ()` renders. A fixed table: every run evaluates every row.
-let laws () : LawResult list =
-    lawsWith (vectors @ hashSweep @ sanitiseSweep)
+let laws () : LawResult list = lawsWith family.Corpus

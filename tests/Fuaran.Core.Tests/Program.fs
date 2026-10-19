@@ -50,12 +50,26 @@ module private SkipReport =
         | "" -> ()
         | path -> File.WriteAllText(path, line)
 
-/// Where an exporter writes: the directory named after the flag, else this repository's
-/// committed `conformance/` (Phase 172). A following flag is not a directory.
-let private emitTarget (rest: string list) : string =
-    match rest with
-    | dir :: _ when not (dir.StartsWith "--") -> dir
-    | _ -> OwnedConformance.root ()
+/// `--emit <family> [<dir>]` over the exporter table: write the row's files and name each one.
+let private emit (family: string) (rest: string list) : int =
+    match Exporters.tryFind family with
+    | None ->
+        eprintfn
+            "--emit: no family `%s` (the table holds: %s)"
+            family
+            (Exporters.table |> List.map _.Family |> String.concat ", ")
+
+        1
+    | Some e ->
+        let dir =
+            match rest with
+            | dir :: _ when not (dir.StartsWith "--") -> Some dir
+            | _ -> None
+
+        for path in Exporters.write e dir do
+            printfn "Wrote %s" path
+
+        0
 
 [<EntryPoint>]
 let main argv =
@@ -73,93 +87,27 @@ let main argv =
     // third argument is the corpus manifest, read solely for the §11.0 host
     // roster once it carries one — until then the declared roster is used and the
     // report says so.
-    // Write every law set Core is the reference for — (Phase 235, moved from
-    // the UI tier) the capabilityLaws vectors and (Phase 276) the exact
-    // decimal's documents; the transform-parity vectors left with the compute
-    // strand in Phase 258:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws [<dir>]
-    // With no argument (Phase 172) the target is THIS repository's committed
-    // `conformance/` — the source of truth the default suite certifies against.
-    // With a directory it writes there instead, which is how the shared corpus's
-    // declared copy is refreshed (`copies.json` quotes that form). Deliberately a
-    // flag rather than a test side-effect: the corpus is a separate repository,
-    // and a suite that wrote into it on every run would dirty a shared clone; the
-    // suite COMPARES and names this command.
-    | "--emit-laws" :: rest ->
-        let dir = emitTarget rest
-        LawVectorExport.write dir
-
-        for path, _ in LawVectorExport.emitted dir do
-            printfn "Wrote %s" path
-
-        0
-    // Phase 139 — write the `apply/` family (the skeleton-op apply contract: one
-    // vector per validator clause per op, Batch atomicity, the id-collision
-    // shapes); same target rule as `--emit-laws`:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply [<dir>]
-    // A flag rather than a test side-effect, for the reason `--emit-laws` above
-    // is one. Note the name: the UI language repo's `--emit-corpus` renders THAT
-    // domain's node vectors and knows nothing about this engine; the apply
-    // semantics are Core's, so Core emits them.
-    | "--emit-apply" :: rest ->
-        let dir = emitTarget rest
-        ApplyVectorExport.write dir
-        printfn "Wrote %s" (ApplyVectorExport.vectorsPath dir)
-        printfn "Wrote %s" (ApplyVectorExport.manifestPath dir)
-        0
-    // Phase 299 — write the `refusals/` family (the codec refusal vectors: the JSON number grammar,
-    // well-formed UTF-16 strings, and the columnar codec's cell-type, canonical-text, duplicate-name
-    // and ragged-table refusals); same target rule as `--emit-laws`:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-refusals [<dir>]
-    | "--emit-refusals" :: rest ->
-        let dir = emitTarget rest
-        RefusalVectorTests.RefusalCorpus.write dir
-        printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.vectorsPath dir)
-        printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.manifestPath dir)
-        0
-    // Phase 310 — write the `decode/` family (the decode reject vectors: every decode code at the path
-    // it names, over a shape grammar each host reads with its own combinators); same target rule as
-    // `--emit-laws`:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-decode [<dir>]
-    | "--emit-decode" :: rest ->
-        let dir = emitTarget rest
-        DecodeLayerTests.DecodeRejectCorpus.write dir
-        printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.vectorsPath dir)
-        printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.manifestPath dir)
-        0
-    // Phase 349 — write the `escape/` file (the string-escape table as the lines a host in another
-    // language diffs against); same target rule as `--emit-laws`:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-escape [<dir>]
-    | "--emit-escape" :: rest ->
-        let dir = emitTarget rest
-        StringEscapeTests.EscapeCorpus.write dir
-        printfn "Wrote %s" (StringEscapeTests.EscapeCorpus.path dir)
-        0
-    // Phase 360 — write the `encoding/` file (the encoding-profile table: what each profile renders and
-    // folds, the V1 column measured against the published 0.30.0 binaries); same target rule:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-encoding [<dir>]
-    | "--emit-encoding" :: rest ->
-        let dir = emitTarget rest
-        EncodingProfileTests.EncodingCorpus.write dir
-        printfn "Wrote %s" (EncodingProfileTests.EncodingCorpus.path dir)
-        0
-    // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
-    // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`
-    // an offline projection reads):
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-families [<dir>]
-    // With no argument the target is THIS repository's committed `docs/`. A flag rather than a
-    // test side-effect for the `--emit-laws` reason above; the suite COMPARES both files against
-    // what the roster renders and names this command.
-    | "--emit-families" :: rest ->
-        let dir =
-            match rest with
-            | d :: _ when not (d.StartsWith "--") -> d
-            | _ -> ConformanceFamiliesTests.Export.root ()
-
-        ConformanceFamiliesTests.Export.write dir
-        printfn "Wrote %s" (ConformanceFamiliesTests.Export.markdownPath dir)
-        printfn "Wrote %s" (ConformanceFamiliesTests.Export.jsonPath dir)
-        0
+    // Phase 508 — write one emitted family's committed files, dispatched over the exporter table
+    // (`Exporters.table`, one row per family: laws, apply, refusals, decode, escape, encoding,
+    // families):
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit <family> [<dir>]
+    // With no directory a row writes into its own root — THIS repository's committed
+    // `conformance/` (Phase 172), or `docs/` for the roster's two artefacts — the source of truth
+    // the default suite certifies against. With one it writes there instead, which is how the shared
+    // corpus's declared copy is refreshed (`copies.json` quotes that form). Deliberately a flag
+    // rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
+    // into it on every run would dirty a shared clone; the suite COMPARES (`Exporters.tests`) and
+    // names this command.
+    | "--emit" :: family :: rest -> emit family rest
+    // The `--emit-<family>` spellings each family had before the table, kept as aliases because
+    // `copies.json`, `projections.json` and the shared corpus's own producer record quote them.
+    | "--emit-laws" :: rest -> emit "laws" rest
+    | "--emit-apply" :: rest -> emit "apply" rest
+    | "--emit-refusals" :: rest -> emit "refusals" rest
+    | "--emit-decode" :: rest -> emit "decode" rest
+    | "--emit-escape" :: rest -> emit "escape" rest
+    | "--emit-encoding" :: rest -> emit "encoding" rest
+    | "--emit-families" :: rest -> emit "families" rest
     | "--idl-diff" :: oldPath :: newPath :: rest ->
         let read (p: string) = System.IO.File.ReadAllText p
 

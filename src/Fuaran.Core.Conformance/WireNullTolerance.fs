@@ -198,39 +198,37 @@ module WireNullTolerance =
         | Claim.Rejected(s, t) -> checkRejected v s t
         | Claim.UnaffectedByPolicy -> checkUnaffected v
 
-    /// Run a vector set.
-    let run (vs: Vector list) : Corpus.Outcome list = vs |> List.map runVector
+    /// The family over one shape (Phase 508): one check per vector, and the vector as the line
+    /// `name<TAB>json` — the input both read policies take. `laws`, `lawsWith`, `run` and `check` are
+    /// the generic verbs over it.
+    let internal family: VectorFamily<Vector> =
+        { Label = "wire null tolerance"
+          Corpus = vectors
+          Name = _.Name
+          Check = fun v -> [ runVector v ]
+          Line = fun v -> v.Name + "\t" + v.Json }
 
-    /// The family as law verdicts (Phase 297): one law per vector, named by the vector, its failure
-    /// detail the counterexample. `check` and `run` answer in the corpus's own shape; this answers in
-    /// the kit's, so the family is enumerated by the roster and measured by the census like every
-    /// other (`WireNullTolerance.laws`). The corpus is fixed, so every run evaluates every vector —
-    /// there is no sample that could miss one.
+    /// Run a vector set.
+    let run (vs: Vector list) : Corpus.Outcome list =
+        VectorFamily.run (VectorFamily.over vs family)
+
+    /// The family as law verdicts (Phase 297): one law per vector, named by the vector
+    /// (`wire null tolerance: <Name>`), its failing check the counterexample. `check` and `run` answer
+    /// in the corpus's own shape; this answers in the kit's, so the family is enumerated by the roster
+    /// and measured by the census like every other (`WireNullTolerance.laws`). The corpus is fixed, so
+    /// every run evaluates every vector — there is no sample that could miss one.
     ///
     /// `lawsWith` is the same laws over a vector set the caller hands it (Phase 390) — the committed
     /// corpus, a host's own additions, or none. One law per vector, then the corpus law, whose
     /// evidence is one assertion per vector evaluated: a run handed no vectors is red by that law's
     /// name (`wire null tolerance: the corpus evaluated at least one vector`), never green over
-    /// nothing. `laws ()` is `lawsWith vectors`.
+    /// nothing. `laws ()` is `lawsWith vectors`. Both are `VectorFamily.laws` over `family` since
+    /// Phase 508.
     let lawsWith (vs: Vector list) : LawResult list =
-        let corpus = corpusCell "wire null tolerance"
-
-        let perVector =
-            vs
-            |> List.map (fun v ->
-                let outcome = runVector v
-                corpus.Saw()
-                let law = LawKit.LawCell("wire null tolerance: " + v.Name)
-                law.Check(outcome.Passed, (fun () -> outcome.Detail))
-                law.Result)
-
-        perVector @ [ corpus.Result ]
+        VectorFamily.laws (VectorFamily.over vs family)
 
     /// The family over the committed corpus — `lawsWith vectors`.
     let laws () : LawResult list = lawsWith vectors
 
     /// The whole family as a single verdict — `Ok` or the first failing vector, named.
-    let check () : Result<unit, string> =
-        match run vectors |> List.filter (fun o -> not o.Passed) with
-        | [] -> Ok()
-        | first :: _ -> Error(first.Name + ": " + first.Detail)
+    let check () : Result<unit, string> = VectorFamily.check family

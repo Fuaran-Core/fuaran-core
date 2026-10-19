@@ -425,7 +425,7 @@ module DecodeRejectCorpus =
         |> Result.bind (shapeDecoder defs (parse vec.Shape))
         |> Result.mapError (fun e -> e.Code, e.Path)
 
-    let private line (vec: Vector) : string =
+    let private line (vec: Vector) : CorpusCell =
         let result =
             match outcome vec with
             | Error(code, path) ->
@@ -442,7 +442,7 @@ module DecodeRejectCorpus =
             | Some l -> [ "limits", limitsJson l ]
             | None -> []
 
-        Canon.render (
+        CorpusCell.Value(
             JObj(
                 [ "name", JStr vec.Name; "shape", parse vec.Shape; "input", JStr vec.Input ]
                 @ limits
@@ -456,47 +456,27 @@ module DecodeRejectCorpus =
 
     /// The vectors file, rendered: a header, then one canonical line per vector.
     let render () : string =
-        let sb = StringBuilder()
+        CorpusFile.render
+            { Head = [ "family", CorpusFile.str familyId; "description", CorpusFile.str description ]
+              Items = "vectors"
+              Rows = vectors |> List.map line }
 
-        sb
-            .Append("{\n  \"family\": \"")
-            .Append(familyId)
-            .Append("\",\n  \"description\": \"")
-            .Append(description)
-            .Append("\",\n  \"vectors\": [\n")
-        |> ignore
-
-        vectors
-        |> List.iteri (fun i vec ->
-            sb.Append("    ").Append(line vec).Append(if i < List.length vectors - 1 then ",\n" else "\n")
-            |> ignore)
-
-        sb.Append("  ]\n}\n").ToString()
+    /// The family index as the one manifest schema (`CorpusManifest`, Phase 508).
+    let internal manifest () : CorpusManifest =
+        { Version = 1
+          Description =
+            "Decode reject corpus (Phase 310). SELF-ENUMERATED, as the refusals/ and apply/ families are: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count."
+          Families =
+            [ { Id = familyId
+                Kind = "decode-rejects"
+                File = vectorsFileName
+                Vectors = List.length vectors
+                Adoption = RefusalVectorTests.RefusalCorpus.hostRoster |> List.map (fun h -> h, "proposed")
+                Description =
+                  "The wire-level decode error contract: every decode code, at the path it names, over a shape grammar each host reads with its own combinators." } ] }
 
     let renderManifest () : string =
-        let adoption =
-            RefusalVectorTests.RefusalCorpus.hostRoster
-            |> List.map (fun h -> h, JStr "proposed")
-            |> JObj
-            |> Canon.render
-
-        String.concat
-            ""
-            [ "{\n"
-              "  \"version\": 1,\n"
-              "  \"description\": \"Decode reject corpus (Phase 310). SELF-ENUMERATED, as the refusals/ and apply/ families are: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count.\",\n"
-              "  \"families\": [\n"
-              "    { \"id\": \""
-              familyId
-              "\", \"kind\": \"decode-rejects\", \"file\": \""
-              vectorsFileName
-              "\", \"vectors\": "
-              string (List.length vectors)
-              ", \"adoption\": "
-              adoption
-              ", \"description\": \"The wire-level decode error contract: every decode code, at the path it names, over a shape grammar each host reads with its own combinators.\" }\n"
-              "  ]\n"
-              "}\n" ]
+        CorpusFile.render (CorpusFile.manifest (manifest ()))
 
     let vectorsPath (dir: string) =
         Path.Combine(dir, familyDirName, vectorsFileName)
@@ -504,10 +484,6 @@ module DecodeRejectCorpus =
     let manifestPath (dir: string) =
         Path.Combine(dir, familyDirName, manifestFileName)
 
-    let write (dir: string) : unit =
-        Directory.CreateDirectory(Path.Combine(dir, familyDirName)) |> ignore
-        File.WriteAllText(vectorsPath dir, render ())
-        File.WriteAllText(manifestPath dir, renderManifest ())
 
 // ---- codec fixtures for the refusal law ----
 
@@ -1256,23 +1232,4 @@ let tests =
                           JsonLimit.DocumentBytes ] do
                         Expect.isTrue (breached.Contains l) (sprintf "a vector breaches %s" (JsonLimit.name l))
 
-                    Expect.isGreaterThanOrEqual acceptedUnder 5 "a vector at each bound is accepted"
-
-                testCase "the committed conformance/decode/ artefacts are the ones this kit renders"
-                <| fun _ ->
-                    let root = OwnedConformance.root ()
-
-                    let check (path: string) (fresh: string) =
-                        Expect.isTrue
-                            (System.IO.File.Exists path)
-                            (sprintf "%s exists — run `--emit-decode` (no argument) and commit conformance/" path)
-
-                        Expect.equal
-                            ((System.IO.File.ReadAllText path).Replace("\r\n", "\n"))
-                            fresh
-                            (sprintf
-                                "the committed %s is not what this kit renders — re-run `--emit-decode` (no argument) and commit conformance/"
-                                path)
-
-                    check (DecodeRejectCorpus.vectorsPath root) (DecodeRejectCorpus.render ())
-                    check (DecodeRejectCorpus.manifestPath root) (DecodeRejectCorpus.renderManifest ()) ] ]
+                    Expect.isGreaterThanOrEqual acceptedUnder 5 "a vector at each bound is accepted" ] ]

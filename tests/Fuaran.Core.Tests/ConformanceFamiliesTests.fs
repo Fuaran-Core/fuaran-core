@@ -213,12 +213,6 @@ module Export =
     /// compares them against cannot be rendered from different runs.
     let cases () = ConformanceVacuityTests.cases ()
 
-    let write (dir: string) =
-        Directory.CreateDirectory dir |> ignore
-        let measured = cases ()
-        File.WriteAllText(markdownPath dir, KitRoster.toMarkdownWith measured)
-        File.WriteAllText(jsonPath dir, KitRoster.toJsonWith measured)
-
 // ---------------------------------------------------------------------------
 
 [<Tests>]
@@ -394,36 +388,6 @@ let familiesTests =
                   (sprintf "these roster families have no census row (SampleAdequacy.census): %A" missing)
 
               Expect.isEmpty phantom (sprintf "these census rows name no roster family: %A" phantom)
-
-          testCase "the generated docs/conformance-families.md is what the roster renders"
-          <| fun _ ->
-              let path = Export.markdownPath (Export.root ())
-
-              Expect.isTrue
-                  (File.Exists path)
-                  (sprintf
-                      "this repository carries no %s — run `dotnet run --project tests/Fuaran.Core.Tests -- --emit-families` and commit the result"
-                      path)
-
-              Expect.equal
-                  (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (KitRoster.toMarkdownWith (Export.cases ())))
-                  "the committed docs/conformance-families.md is not what the roster renders — re-run `--emit-families` and commit it"
-
-          testCase "the generated docs/conformance-families.json is what the roster renders"
-          <| fun _ ->
-              let path = Export.jsonPath (Export.root ())
-
-              Expect.isTrue
-                  (File.Exists path)
-                  (sprintf
-                      "this repository carries no %s — run `dotnet run --project tests/Fuaran.Core.Tests -- --emit-families` and commit the result"
-                      path)
-
-              Expect.equal
-                  (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (KitRoster.toJsonWith (Export.cases ())))
-                  "the committed docs/conformance-families.json is not what the roster renders — re-run `--emit-families` and commit it"
 
           testCase "the JSON export is the canonical rendering, one family per line"
           <| fun _ ->

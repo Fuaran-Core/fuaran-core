@@ -706,7 +706,8 @@ let tests =
               Expect.equal once (LawVectorExport.Capabilities.render ()) "two renders produce the same bytes"
               Expect.isFalse (once.Contains "\r") "no CR may reach a corpus byte-compared across three OSes"
 
-          testCase "the committed conformance/laws/capability-laws.json is the one this kit renders"
+          testCase
+              "the committed conformance/laws/capability-laws.json agrees with this kit (its freshness is the exporter table\'s)"
           <| fun _ ->
               let path = LawVectorExport.capabilityPath (OwnedConformance.root ())
 
@@ -726,11 +727,6 @@ let tests =
                       Expect.isEmpty
                           failures
                           (sprintf "the committed capability vectors disagree with this kit: %A" failures)
-
-                  Expect.equal
-                      committed
-                      (LawVectorExport.Capabilities.render ())
-                      "the committed conformance/laws/capability-laws.json is not what this kit renders — re-run `--emit-laws` (no argument) and commit conformance/"
 
           testCase
               "the corpus copy of laws/capability-laws.json is this renderer's output byte for byte, but for the invocation keys fuaran#1860 re-syncs"
@@ -850,7 +846,7 @@ let tests =
               let verdicts case =
                   vectors
                   |> List.filter (fun v -> v.Case = case)
-                  |> List.map (fun v -> v.Expected |> List.head |> snd)
+                  |> List.map (fun v -> v.Expected |> List.head |> snd |> CorpusFile.renderCell)
                   |> List.distinct
                   |> List.sort
 
@@ -903,7 +899,8 @@ let tests =
                   (sprintf "\"kitVersion\": \"%s\"" (LawVectorExport.kitVersion ()))
                   "stamped with this kit's version"
 
-          testCase "the committed conformance/laws/decimal-laws.json is the one this kit renders"
+          testCase
+              "the committed conformance/laws/decimal-laws.json agrees with this kit (its freshness is the exporter table\'s)"
           <| fun _ ->
               let path = LawVectorExport.decimalPath (OwnedConformance.root ())
 
@@ -921,11 +918,6 @@ let tests =
                       Expect.isEmpty
                           (vectors |> List.choose checkDecimalVector)
                           "the committed decimal vectors agree with this kit"
-
-                  Expect.equal
-                      committed
-                      (LawVectorExport.Decimals.render ())
-                      "the committed conformance/laws/decimal-laws.json is not what this kit renders — re-run `--emit-laws` (no argument) and commit conformance/"
 
           testCase "the corpus copy of laws/decimal-laws.json is this renderer's output"
           <| fun _ ->
@@ -989,7 +981,11 @@ let tests =
               let verdicts (case: string) =
                   vectors
                   |> List.filter (fun v -> v.Case = case)
-                  |> List.map (fun v -> v.Expected |> List.find (fun (k, _) -> k = "verdict") |> snd)
+                  |> List.map (fun v ->
+                      v.Expected
+                      |> List.find (fun (k, _) -> k = "verdict")
+                      |> snd
+                      |> CorpusFile.renderCell)
                   |> List.distinct
                   |> List.sort
 
@@ -998,7 +994,11 @@ let tests =
               let compats =
                   vectors
                   |> List.filter (fun v -> v.Case = "classify")
-                  |> List.map (fun v -> v.Expected |> List.find (fun (k, _) -> k = "compat") |> snd)
+                  |> List.map (fun v ->
+                      v.Expected
+                      |> List.find (fun (k, _) -> k = "compat")
+                      |> snd
+                      |> CorpusFile.renderCell)
                   |> List.distinct
                   |> List.sort
 
@@ -1009,7 +1009,8 @@ let tests =
                    |> List.exists (fun v ->
                        v.Case = "delta"
                        && (v.Expected
-                           |> List.exists (fun (k, s) -> k = "canonical" && s.Contains "amended"))))
+                           |> List.exists (fun (k, s) ->
+                               k = "canonical" && (CorpusFile.renderCell s).Contains "amended"))))
                   "a delta vector carries the amended member"
 
               Expect.isTrue
@@ -1017,7 +1018,8 @@ let tests =
                    |> List.exists (fun v ->
                        v.Case = "delta"
                        && (v.Expected
-                           |> List.exists (fun (k, s) -> k = "canonical" && not (s.Contains "amended")))))
+                           |> List.exists (fun (k, s) ->
+                               k = "canonical" && not ((CorpusFile.renderCell s).Contains "amended")))))
                   "and one does not, so the pre-427 delta bytes are pinned"
 
           testCase "the field checker names a perturbed vector — the oracle leg can go red"
@@ -1042,7 +1044,8 @@ let tests =
               Expect.equal once (LawVectorExport.Fields.render ()) "two renders produce the same bytes"
               Expect.isFalse (once.Contains "\r") "no CR may reach a corpus byte-compared across three OSes"
 
-          testCase "the committed conformance/laws/field-laws.json is the one this kit renders"
+          testCase
+              "the committed conformance/laws/field-laws.json agrees with this kit (its freshness is the exporter table\'s)"
           <| fun _ ->
               let path = LawVectorExport.fieldPath (OwnedConformance.root ())
 
@@ -1060,11 +1063,6 @@ let tests =
                       Expect.isEmpty
                           (vectors |> List.choose checkFieldVector)
                           "the committed field vectors agree with this kit"
-
-                  Expect.equal
-                      committed
-                      (LawVectorExport.Fields.render ())
-                      "the committed conformance/laws/field-laws.json is not what this kit renders — re-run `--emit-laws` (no argument) and commit conformance/"
 
           testCase "the corpus copy of laws/field-laws.json is this renderer's output"
           <| fun _ ->

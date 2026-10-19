@@ -59,31 +59,17 @@ module EscapeCorpus =
 
     /// The file, rendered: a header, then one JSON string per line of the table.
     let render () : string =
-        let lines = StringEscapeVectors.lines ()
-
-        let body =
-            lines
-            |> List.mapi (fun i l ->
-                "    \""
-                + Json.escape l
-                + "\""
-                + (if i < List.length lines - 1 then ",\n" else "\n"))
-            |> String.concat ""
-
-        "{\n  \"family\": \"stringEscape\",\n  \"description\": \""
-        + Json.escape description
-        + "\",\n  \"format\": \"name<TAB>spelling<TAB>pre-image\",\n  \"lines\": [\n"
-        + body
-        + "  ]\n}\n"
+        CorpusFile.render
+            { Head =
+                [ "family", CorpusFile.str "stringEscape"
+                  "description", CorpusFile.str description
+                  "format", CorpusFile.str "name<TAB>spelling<TAB>pre-image" ]
+              Items = "lines"
+              Rows = StringEscapeVectors.lines () |> List.map CorpusFile.str }
 
     let path (dir: string) =
         System.IO.Path.Combine(dir, familyDirName, fileName)
 
-    let write (dir: string) : unit =
-        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, familyDirName))
-        |> ignore
-
-        System.IO.File.WriteAllText(path dir, render ())
 
 /// Phase 365 — the escape's fast path scans for the first escapable character and copies clean runs
 /// whole. These are the inputs whose run boundaries it can get wrong, checked on every copy of the
@@ -233,22 +219,10 @@ let tests =
                   Json.escapeInto sb s
                   Expect.equal (sb.ToString()) ("prefix|" + Json.escape s) (sprintf "%A" s)
 
-          testCase "the committed conformance/escape/ file is what this kit renders, and parses back to the lines"
+          testCase
+              "the rendered conformance/escape/ file parses back to the lines (its freshness is the exporter table's)"
           <| fun _ ->
-              let file = EscapeCorpus.path (OwnedConformance.root ())
-
-              Expect.isTrue
-                  (System.IO.File.Exists file)
-                  (sprintf "%s exists — run `--emit-escape` (no argument) and commit conformance/" file)
-
-              let committed = (System.IO.File.ReadAllText file).Replace("\r\n", "\n")
-
-              Expect.equal
-                  committed
-                  (EscapeCorpus.render ())
-                  "the committed escape file is not what this kit renders — re-run `--emit-escape` (no argument) and commit conformance/"
-
-              match Json.parse committed with
+              match Json.parse (EscapeCorpus.render ()) with
               | Ok(JObj members) ->
                   match members |> List.tryFind (fun (k, _) -> k = "lines") with
                   | Some(_, JArr items) ->

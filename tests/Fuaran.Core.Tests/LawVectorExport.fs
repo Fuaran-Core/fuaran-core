@@ -29,42 +29,24 @@ module LawVectorExport =
     let familyDirName = "laws"
 
     // -----------------------------------------------------------------------
-    //  a small deterministic JSON renderer
+    //  the cells the files are written in
     // -----------------------------------------------------------------------
-    //  Hand-rolled rather than `Utf8JsonWriter`, for two reasons, both about the artefact being an
-    //  ORACLE rather than merely valid JSON. The writer's indented mode emits
-    //  `Environment.NewLine`, so the same run would produce different bytes on Windows and Linux.
-    //  And its default string encoder escapes every character outside a conservative HTML-safe set
-    //  — backticks, `+`, apostrophes and em-dashes all become `\uXXXX` — which is a
-    //  framework-version-dependent choice this corpus should not inherit. The escaper below is the
-    //  JSON minimum and nothing more: the two structural characters, the named short escapes, and
-    //  the control range. Everything else is written as itself, in UTF-8.
+    //  These files are ORACLES, so their bytes are the interface five hosts read. Since Phase 508 they
+    //  are written by the one writer every conformance file goes through, `CorpusFile.render`, which
+    //  escapes through `Canon.render` — the spine's one string rule — and lays a file out a header
+    //  member and an item per line, LF endings whatever the platform. The hand-rolled renderer these
+    //  files were written with before it spelled the short escapes (`\n`, `\t`, …) where the spine
+    //  spells `\u000a`; no committed vector carries a control character, so the move changed no byte,
+    //  and the file-for-file comparison against the committed corpus is what says so. The four
+    //  helpers below build cells and write nothing.
 
-    let private jstr (s: string) : string =
-        let sb = StringBuilder()
-        sb.Append('"') |> ignore
+    let private jstr (s: string) : CorpusCell = CorpusFile.str s
 
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | '\b' -> sb.Append("\\b") |> ignore
-            | '\f' -> sb.Append("\\f") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
-            | c when c < ' ' -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
+    let private jint (n: int) : CorpusCell = CorpusFile.num n
 
-        sb.Append('"') |> ignore
-        sb.ToString()
+    let private jobj (members: (string * CorpusCell) list) : CorpusCell = CorpusCell.Row members
 
-    let private jint (n: int) : string = string n
-
-    let private jobj (members: (string * string) list) : string =
-        "{ "
-        + (members |> List.map (fun (k, v) -> jstr k + ": " + v) |> String.concat ", ")
-        + " }"
+    let private jarr (items: CorpusCell list) : CorpusCell = CorpusCell.List items
 
     /// The pinned kit's version, read from the assembly rather than a literal: the version decides
     /// what the reference answers, so a file naming it from a literal could describe a kit that is
@@ -82,13 +64,13 @@ module LawVectorExport =
     // -----------------------------------------------------------------------
 
     /// A single exported vector: what a host is given, and what the reference actually answered.
-    type Vector =
+    type internal Vector =
         { Id: string
           Case: string
-          Input: (string * string) list
-          Expected: (string * string) list }
+          Input: (string * CorpusCell) list
+          Expected: (string * CorpusCell) list }
 
-    let private renderVector (v: Vector) : string =
+    let private renderVector (v: Vector) : CorpusCell =
         jobj
             [ "id", jstr v.Id
               "case", jstr v.Case
@@ -180,9 +162,7 @@ module LawVectorExport =
                         Cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide)
                         CapB = Capability.create ("cap-a" + string i) sg BuildTime } ]
 
-        let private jarr (items: string list) : string = "[" + String.concat ", " items + "]"
-
-        let private argsJson (args: (string * string) list) : string =
+        let private argsJson (args: (string * string) list) : CorpusCell =
             args
             |> List.map (fun (addr, value) -> jobj [ "addr", jstr addr; "value", jstr value ])
             |> jarr
@@ -190,7 +170,7 @@ module LawVectorExport =
         /// The verdict the kit gave, in host-neutral words. A refusal outside the two the law
         /// distinguishes renders as `unexpected`; `LawVectorTests` fails on it, so it can never
         /// reach the corpus.
-        let private verdictOf (r: Result<unit, InvokeError>) : (string * string) list =
+        let private verdictOf (r: Result<unit, InvokeError>) : (string * CorpusCell) list =
             match r with
             | Ok() -> [ "verdict", jstr "accept" ]
             | Error(ArgOutOfSpace(addr, _, _)) ->
@@ -200,7 +180,7 @@ module LawVectorExport =
 
         /// Every vector for one drawn iteration — the four properties `capabilityLaws` certifies,
         /// each as an independently runnable case.
-        let vectorsFor (d: Draw) : Vector list =
+        let internal vectorsFor (d: Draw) : Vector list =
             let inSpace = string d.Lo
             let outOfSpace = string (d.Hi + 1)
             let declaration = CapabilityCodec.encode d.Cap
@@ -254,7 +234,7 @@ module LawVectorExport =
                 Input = [ "declarations", jarr [ jstr declaration; jstr (CapabilityCodec.encode d.CapB) ] ]
                 Expected = [ "ids", jarr (registryIds |> List.map jstr) ] } ]
 
-        let allVectors () : Vector list = draws () |> List.collect vectorsFor
+        let internal allVectors () : Vector list = draws () |> List.collect vectorsFor
 
         let private description =
             "The (input, expected) pairs Fuaran.Core.Conformance.capabilityLaws draws from `seed` over "
@@ -272,26 +252,15 @@ module LawVectorExport =
         /// Rendered with an explicit `kitVersion` so the byte-identity pin can render the file at the
         /// version a published copy was stamped with; `render ()` stamps this kit's own version.
         let renderAt (stamp: string) : string =
-            let sb = StringBuilder()
-            let line (s: string) = sb.Append(s).Append('\n') |> ignore
-
-            line "{"
-            line ("  \"family\": " + jstr "capabilityLaws" + ",")
-            line ("  \"kitVersion\": " + jstr stamp + ",")
-            line ("  \"seed\": " + jint seed + ",")
-            line ("  \"iterations\": " + jint iterations + ",")
-            line ("  \"description\": " + jstr description + ",")
-            line "  \"vectors\": ["
-
-            let rendered = allVectors () |> List.map renderVector
-            let last = List.length rendered - 1
-
-            rendered
-            |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
-
-            line "  ]"
-            line "}"
-            sb.ToString()
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr "capabilityLaws"
+                      "kitVersion", jstr stamp
+                      "seed", jint seed
+                      "iterations", jint iterations
+                      "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
 
         let render () : string = renderAt (kitVersion ())
 
@@ -313,15 +282,13 @@ module LawVectorExport =
 
         let fileName = "decimal-laws.json"
 
-        let private jarr (items: string list) : string = "[" + String.concat ", " items + "]"
-
-        let private accept (members: (string * string) list) = ("verdict", jstr "accept") :: members
+        let private accept (members: (string * CorpusCell) list) = ("verdict", jstr "accept") :: members
 
         let private reject (error: string) =
             [ "verdict", jstr "reject"; "error", jstr error ]
 
         /// A cell as the documents write it.
-        let private cellJson (c: Cell) : string =
+        let private cellJson (c: Cell) : CorpusCell =
             match c with
             | Null -> jobj [ "kind", jstr "null" ]
             | Int i -> jobj [ "kind", jstr "int"; "text", jstr (string i) ]
@@ -496,7 +463,7 @@ module LawVectorExport =
 
         // ---- the vectors, computed by calling the kit ----
 
-        let allVectors () : Vector list =
+        let internal allVectors () : Vector list =
             [ for name, text in canonicalInputs ->
                   { Id = "canonical-" + name
                     Case = "canonical"
@@ -576,24 +543,13 @@ module LawVectorExport =
 
         /// Rendered with an explicit `kitVersion`, as `Capabilities.renderAt` is.
         let renderAt (stamp: string) : string =
-            let sb = StringBuilder()
-            let line (s: string) = sb.Append(s).Append('\n') |> ignore
-
-            line "{"
-            line ("  \"family\": " + jstr "decimal" + ",")
-            line ("  \"kitVersion\": " + jstr stamp + ",")
-            line ("  \"description\": " + jstr description + ",")
-            line "  \"vectors\": ["
-
-            let rendered = allVectors () |> List.map renderVector
-            let last = List.length rendered - 1
-
-            rendered
-            |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
-
-            line "  ]"
-            line "}"
-            sb.ToString()
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr "decimal"
+                      "kitVersion", jstr stamp
+                      "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
 
         let render () : string = renderAt (kitVersion ())
 
@@ -613,7 +569,7 @@ module LawVectorExport =
 
         let fileName = "field-laws.json"
 
-        let private accept (members: (string * string) list) = ("verdict", jstr "accept") :: members
+        let private accept (members: (string * CorpusCell) list) = ("verdict", jstr "accept") :: members
 
         let private reject (error: string) =
             [ "verdict", jstr "reject"; "error", jstr error ]
@@ -639,6 +595,10 @@ module LawVectorExport =
         /// reads a schema in, so a vector's input needs no second schema notation.
         let schemaText (s: Schema) : string =
             Canon.render (JArr(s |> List.map ColumnCodec.fieldJson))
+
+        /// `schemaText`'s value as a cell: the schema as a compact canonical array.
+        let private schemaCell (s: Schema) : CorpusCell =
+            CorpusCell.Value(JArr(s |> List.map ColumnCodec.fieldJson))
 
         /// The zero-row document over `schema`: every column present and empty, so the entries are
         /// the whole of what the bytes say.
@@ -755,7 +715,7 @@ module LawVectorExport =
 
         // ---- the vectors, computed by calling the kit ----
 
-        let allVectors () : Vector list =
+        let internal allVectors () : Vector list =
             [ for name, f in encodeInputs ->
                   let members =
                       [ "name", jstr f.Name; "type", jstr (ColumnType.tag f.Type) ]
@@ -786,28 +746,28 @@ module LawVectorExport =
               for name, schema in fingerprintInputs ->
                   { Id = "fingerprint-" + name
                     Case = "fingerprint"
-                    Input = [ "schema", schemaText schema ]
+                    Input = [ "schema", schemaCell schema ]
                     Expected = accept [ "fingerprint", jstr (Schema.fingerprint schema) ] }
               for name, old, target in deltaInputs ->
                   let delta = Schema.diff old target
 
                   { Id = "delta-" + name
                     Case = "delta"
-                    Input = [ "old", schemaText old; "target", schemaText target ]
+                    Input = [ "old", schemaCell old; "target", schemaCell target ]
                     Expected =
                       match Schema.patch old delta with
                       | Ok patched ->
                           accept
                               [ "canonical", jstr (SchemaDeltaCodec.encode delta)
-                                "patched", schemaText patched ]
+                                "patched", schemaCell patched ]
                       | Error e -> failwithf "the delta %s did not replay: %A" name e }
               for name, old, target, deps in classifyInputs ->
                   { Id = "classify-" + name
                     Case = "classify"
                     Input =
-                      [ "old", schemaText old
-                        "target", schemaText target
-                        "dependsOn", "[" + (deps |> List.map jstr |> String.concat ", ") + "]" ]
+                      [ "old", schemaCell old
+                        "target", schemaCell target
+                        "dependsOn", jarr (List.map jstr deps) ]
                     Expected = accept [ "compat", jstr (compatTag (Schema.classify deps (Schema.diff old target))) ] } ]
 
         let private description =
@@ -831,24 +791,13 @@ module LawVectorExport =
 
         /// Rendered with an explicit `kitVersion`, as `Decimals.renderAt` is.
         let renderAt (stamp: string) : string =
-            let sb = StringBuilder()
-            let line (s: string) = sb.Append(s).Append('\n') |> ignore
-
-            line "{"
-            line ("  \"family\": " + jstr "fieldLaws" + ",")
-            line ("  \"kitVersion\": " + jstr stamp + ",")
-            line ("  \"description\": " + jstr description + ",")
-            line "  \"vectors\": ["
-
-            let rendered = allVectors () |> List.map renderVector
-            let last = List.length rendered - 1
-
-            rendered
-            |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
-
-            line "  ]"
-            line "}"
-            sb.ToString()
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr "fieldLaws"
+                      "kitVersion", jstr stamp
+                      "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
 
         let render () : string = renderAt (kitVersion ())
 
@@ -927,11 +876,7 @@ module LawVectorExport =
             | _ -> Error "the law file declares no string `kitVersion` and `vectors` array"
         | Ok _ -> Error "the law file is not a JSON object"
 
-    let private renderMember (value: JVal) : string =
-        match value with
-        | JStr s -> jstr s
-        | JInt n -> jint n
-        | other -> Json.render other
+    let private renderMember (value: JVal) : string = Canon.render value
 
     let private rowLine (id: string) =
         System.Text.RegularExpressions.Regex(

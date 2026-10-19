@@ -60,16 +60,7 @@ module EncodingProfileVectors =
     /// Every value the table renders, oldest escaping rule first: the 32 control characters (the
     /// three `V1` spells short, and the 29 the profiles agree on), then the composite cases.
     let vectors: Vector list =
-        [ for c in 0..0x1F do
-              let v2 = sprintf "\\u%04x" c
-
-              let v1 =
-                  match c with
-                  | 0x0A -> "\\n"
-                  | 0x0D -> "\\r"
-                  | 0x09 -> "\\t"
-                  | _ -> v2
-
+        [ for c, v2, v1 in controlCharacters do
               { Name = sprintf "U+%04X in a string" c
                 Value = JStr(string (char c))
                 V1 = quoted v1
@@ -366,31 +357,53 @@ module EncodingProfileVectors =
                   | Error _, Error _, Error _ when not (Canonical.isCanonical p (Canonical.write p value)) -> pass name
                   | w, j, c -> fail name (sprintf "Canonical.tryWrite %A; Json.tryRender %A; Canon.tryRender %A" w j c) ]
 
+    /// One row of the family (Phase 508): a value the profiles render, or an actor they fold.
+    type internal Entry =
+        /// A value vector, checked by `runVector`.
+        | Rendered of Vector
+        /// An actor vector, checked under each profile's encoding, chain payload and node id.
+        | Folded of ActorVector
+
+    let private entries (vs: Vector list) (actors: ActorVector list) : Entry list =
+        List.map Rendered vs @ List.map Folded actors
+
+    /// The capture line `lines` ends with: owned by no vector, it is the profiles' own pre-image.
+    let private captureLine =
+        "capture: effect TAB, determinism LF\t"
+        + capturePreimage EncodingProfile.V1
+        + "\t"
+        + capturePreimage EncodingProfile.V2
+
+    /// The family over one shape (Phase 508): the value vectors then the actor vectors, each line
+    /// `name<TAB>V1<TAB>V2` (`actor: name<TAB>V1<TAB>V2` for an actor). The checks no vector owns —
+    /// `runShared` — and the capture line are the family's own and ride beside the generic verbs.
+    let internal family: VectorFamily<Entry> =
+        { Label = "encoding profile"
+          Corpus = entries vectors actorVectors
+          Name =
+            function
+            | Rendered v -> v.Name
+            | Folded a -> "actor " + a.Name
+          Check =
+            function
+            | Rendered v -> runVector v
+            | Folded a -> runActor a
+          Line =
+            function
+            | Rendered v -> v.Name + "\t" + v.V1 + "\t" + v.V2
+            | Folded a -> "actor: " + a.Name + "\t" + a.V1 + "\t" + a.V2 }
+
     /// Run the whole family.
-    let run () : Corpus.Outcome list =
-        (vectors |> List.collect runVector)
-        @ (actorVectors |> List.collect runActor)
-        @ runShared ()
+    let run () : Corpus.Outcome list = VectorFamily.run family @ runShared ()
 
     /// The whole family as a single verdict — `Ok` or the first failing check, named.
-    let check () : Result<unit, string> =
-        match run () |> List.filter (fun o -> not o.Passed) with
-        | [] -> Ok()
-        | first :: _ -> Error(first.Name + ": " + first.Detail)
-
-    /// `lines`, over a table the caller names — the rendering `lawsWith`'s format law holds.
-    let private linesOf (vs: Vector list) (actors: ActorVector list) : string list =
-        [ for v in vs -> v.Name + "\t" + v.V1 + "\t" + v.V2 ]
-        @ [ for a in actors -> "actor: " + a.Name + "\t" + a.V1 + "\t" + a.V2 ]
-        @ [ "capture: effect TAB, determinism LF\t"
-            + capturePreimage EncodingProfile.V1
-            + "\t"
-            + capturePreimage EncodingProfile.V2 ]
+    let check () : Result<unit, string> = VectorFamily.firstFailure (run ())
 
     /// The table as lines a host in another language can diff: `name<TAB>V1<TAB>V2` per value
     /// vector, then `actor: name<TAB>V1<TAB>V2` per actor, then `capture<TAB>V1<TAB>V2` — the bytes
     /// each profile renders or folds, as the TABLE states them. Deterministic; no seed.
-    let lines () : string list = linesOf vectors actorVectors
+    let lines () : string list =
+        VectorFamily.lines family @ [ captureLine ]
 
     /// The family as `LawResult`s over a table the caller hands it (Phase 390; `laws ()` is this over
     /// the committed `vectors` and `actorVectors`): one law per value vector, per actor vector and for
@@ -399,13 +412,14 @@ module EncodingProfileVectors =
     /// law, whose evidence is one assertion per vector evaluated, so a run handed no vectors is red by
     /// name (`encoding profile: the corpus evaluated at least one vector`). The shared checks run on
     /// every call — they are the profiles' own, not the table's — and are not counted as a vector.
+    /// `VectorFamily.lawsWith` over `family` since Phase 508.
     let lawsWith (vs: Vector list) (actors: ActorVector list) : LawResult list =
-        let corpus = corpusCell "encoding profile"
+        let table = VectorFamily.over (entries vs actors) family
 
         let format =
             LawKit.LawCell "lines () renders the table as name, V1 and V2, tab-separated, in table order, one line each"
 
-        let rendered = linesOf vs actors
+        let rendered = VectorFamily.lines table @ [ captureLine ]
 
         let wellFormed (l: string) =
             l.Split('\t').Length = 3 && not (l.Contains "\n") && not (l.Contains "\r")
@@ -419,22 +433,16 @@ module EncodingProfileVectors =
                 | None -> sprintf "lines () rendered %d lines" rendered.Length
         )
 
-        let perVector =
-            (vs
-             |> List.map (fun v -> verdict corpus ("encoding profile: " + v.Name) (runVector v)))
-            @ (actors
-               |> List.map (fun a -> verdict corpus ("encoding profile: actor " + a.Name) (runActor a)))
-
         let shared =
             let cell = LawKit.LawCell "encoding profile: the shared checks"
 
-            match runShared () |> List.tryFind (fun o -> not o.Passed) with
-            | Some o -> cell.Check(false, (fun () -> o.Name + ": " + o.Detail))
-            | None -> cell.Saw()
+            match VectorFamily.firstFailure (runShared ()) with
+            | Error e -> cell.Check(false, (fun () -> e))
+            | Ok() -> cell.Saw()
 
             cell.Result
 
-        perVector @ [ shared; format.Result; corpus.Result ]
+        VectorFamily.lawsWith [ shared; format.Result ] table
 
     /// The family as `LawResult`s, on the `StringEscapeVectors.laws` precedent — `lawsWith vectors
     /// actorVectors`. The committed rendering is `conformance/encoding/encoding-profiles.json`.

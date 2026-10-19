@@ -49,16 +49,7 @@ module StringEscapeVectors =
     /// and the backslash, and one plain-text control showing that a solidus, a non-ASCII
     /// character and an astral one pass through unescaped.
     let vectors: Vector list =
-        [ for c in 0..0x1F do
-              let escaped = sprintf "\\u%04x" c
-
-              let legacy =
-                  match c with
-                  | 0x0A -> "\\n"
-                  | 0x0D -> "\\r"
-                  | 0x09 -> "\\t"
-                  | _ -> escaped
-
+        [ for c, escaped, legacy in controlCharacters do
               { Name = sprintf "U+%04X" c
                 Input = string (char c)
                 Escaped = escaped
@@ -181,26 +172,46 @@ module StringEscapeVectors =
               (payload encoded)
               (OpStream.canonicalConfig.Payload 0 actor "{}") ]
 
+    /// One row of the family (Phase 508): a character the rule escapes, or a named actor.
+    type internal Entry =
+        /// A character vector, checked by `runVector`.
+        | Character of Vector
+        /// A named actor with its exact `Actor.encode` bytes, checked by `runActor`.
+        | NamedActor of name: string * actor: Actor * encoded: string
+
+    let private entries (vs: Vector list) (actors: (string * Actor * string) list) : Entry list =
+        List.map Character vs @ List.map NamedActor actors
+
+    /// The family over one shape (Phase 508): the character vectors then the named actors, each line
+    /// `name<TAB>escaped<TAB>Actor.encode (Human input)` for a character and
+    /// `name<TAB>encoded<TAB>chain payload` for an actor.
+    let internal family: VectorFamily<Entry> =
+        { Label = "string escape"
+          Corpus = entries vectors actorVectors
+          Name =
+            function
+            | Character v -> v.Name
+            | NamedActor(name, _, _) -> name
+          Check =
+            function
+            | Character v -> runVector v
+            | NamedActor(name, actor, encoded) -> runActor (name, actor, encoded)
+          Line =
+            function
+            | Character v -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
+            | NamedActor(name, actor, encoded) ->
+                name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" }
+
     /// Run the whole family.
-    let run () : Corpus.Outcome list =
-        (vectors |> List.collect runVector) @ (actorVectors |> List.collect runActor)
+    let run () : Corpus.Outcome list = VectorFamily.run family
 
     /// The whole family as a single verdict — `Ok` or the first failing check, named.
-    let check () : Result<unit, string> =
-        match run () |> List.filter (fun o -> not o.Passed) with
-        | [] -> Ok()
-        | first :: _ -> Error(first.Name + ": " + first.Detail)
-
-    /// `lines`, over a table the caller names — the rendering `lawsWith`'s format law holds.
-    let private linesOf (vs: Vector list) (actors: (string * Actor * string) list) : string list =
-        [ for v in vs -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
-          for name, actor, encoded in actors ->
-              name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" ]
+    let check () : Result<unit, string> = VectorFamily.check family
 
     /// The table as lines a host in another language, or the same package under another
     /// pipeline, can diff: `name<TAB>escaped<TAB>Actor.encode (Human input)` per character vector,
     /// then `name<TAB>encoded<TAB>chain payload` per named actor. Deterministic; no seed.
-    let lines () : string list = linesOf vectors actorVectors
+    let lines () : string list = VectorFamily.lines family
 
     /// The family as `LawResult`s over a table the caller hands it (Phase 390; `laws ()` is this over
     /// the committed `vectors` and `actorVectors`): one law per character vector and per named actor,
@@ -211,9 +222,9 @@ module StringEscapeVectors =
     /// assertion per vector evaluated, so a run handed no vectors is red by name (`string escape: the
     /// corpus evaluated at least one vector`). The format law is stated from the TABLE, not by calling
     /// the escapers, so a renderer that drifted from the table is caught even where the escapers still
-    /// agree with it.
+    /// agree with it. `VectorFamily.lawsWith` over `family` since Phase 508.
     let lawsWith (vs: Vector list) (actors: (string * Actor * string) list) : LawResult list =
-        let corpus = corpusCell "string escape"
+        let table = VectorFamily.over (entries vs actors) family
 
         let expected =
             [ for v in vs ->
@@ -226,7 +237,7 @@ module StringEscapeVectors =
                   + "}"
               for name, _, encoded in actors -> name + "\t" + encoded + "\t" + payload encoded ]
 
-        let rendered = linesOf vs actors
+        let rendered = VectorFamily.lines table
 
         let format =
             LawKit.LawCell
@@ -250,13 +261,7 @@ module StringEscapeVectors =
                         expected.Length
         )
 
-        let perVector =
-            (vs
-             |> List.map (fun v -> verdict corpus ("string escape: " + v.Name) (runVector v)))
-            @ (actors
-               |> List.map (fun ((name, _, _) as a) -> verdict corpus ("string escape: " + name) (runActor a)))
-
-        perVector @ [ format.Result; corpus.Result ]
+        VectorFamily.lawsWith [ format.Result ] table
 
     /// The family as `LawResult`s (Phase 349), rostered as `StringEscapeVectors.laws` on the
     /// `WireNullTolerance.laws` precedent — `lawsWith vectors actorVectors`. The corpus is fixed, so

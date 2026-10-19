@@ -230,59 +230,44 @@ module RefusalCorpus =
             | Error(NotJson e) -> Error("NotJson/" + caseName (box e.Kind))
             | Error e -> Error(caseName (box e))
 
-    let private line (v: Vector) : string =
+    let private line (v: Vector) : CorpusCell =
         let result =
             match outcome v with
             | Error cls -> [ "refusal", JStr cls ]
             | Ok canonical -> [ "canonical", JStr canonical ]
 
-        Canon.render (JObj([ "name", JStr v.Name; "codec", JStr v.Codec; "input", JStr v.Input ] @ result))
+        CorpusCell.Value(JObj([ "name", JStr v.Name; "codec", JStr v.Codec; "input", JStr v.Input ] @ result))
 
     /// The vectors file, rendered: a header, then one canonical line per vector.
     let render () : string =
-        let sb = StringBuilder()
-
-        sb
-            .Append("{\n  \"family\": \"")
-            .Append(familyId)
-            .Append("\",\n  \"description\": \"")
-            .Append(
-                "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. Every `json` vector binds every JSON decode entry point, not one parser (Phase 462). A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome."
-            )
-            .Append("\",\n  \"vectors\": [\n")
-        |> ignore
-
-        vectors
-        |> List.iteri (fun i v ->
-            sb.Append("    ").Append(line v).Append(if i < List.length vectors - 1 then ",\n" else "\n")
-            |> ignore)
-
-        sb.Append("  ]\n}\n").ToString()
+        CorpusFile.render
+            { Head =
+                [ "family", CorpusFile.str familyId
+                  "description",
+                  CorpusFile.str
+                      "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. Every `json` vector binds every JSON decode entry point, not one parser (Phase 462). A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome." ]
+              Items = "vectors"
+              Rows = vectors |> List.map line }
 
     /// The hosts adoption is recorded for — the codec twins that certify against the shared corpus.
     let hostRoster = [ "fuaran"; "fuaran-ts"; "fuaran-py"; "fuaran-go"; "fuaran-rs" ]
 
-    let renderManifest () : string =
-        let adoption =
-            hostRoster |> List.map (fun h -> h, JStr "proposed") |> JObj |> Canon.render
+    /// The family index as the one manifest schema (`CorpusManifest`, Phase 508).
+    let internal manifest () : CorpusManifest =
+        { Version = 1
+          Description =
+            "Codec refusal corpus (Phase 299). SELF-ENUMERATED: not indexed by the corpus root manifest.json, which indexes the canonical wire-format codec families only (the apply/ precedent). `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. The shared corpus takes its copy at the hosts' next pin raise. This manifest is authoritative for the vector count."
+          Families =
+            [ { Id = familyId
+                Kind = "codec-refusals"
+                File = vectorsFileName
+                Vectors = List.length vectors
+                Adoption = hostRoster |> List.map (fun h -> h, "proposed")
+                Description =
+                  "The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of." } ] }
 
-        String.concat
-            ""
-            [ "{\n"
-              "  \"version\": 1,\n"
-              "  \"description\": \"Codec refusal corpus (Phase 299). SELF-ENUMERATED: not indexed by the corpus root manifest.json, which indexes the canonical wire-format codec families only (the apply/ precedent). `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. The shared corpus takes its copy at the hosts' next pin raise. This manifest is authoritative for the vector count.\",\n"
-              "  \"families\": [\n"
-              "    { \"id\": \""
-              familyId
-              "\", \"kind\": \"codec-refusals\", \"file\": \""
-              vectorsFileName
-              "\", \"vectors\": "
-              string (List.length vectors)
-              ", \"adoption\": "
-              adoption
-              ", \"description\": \"The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of.\" }\n"
-              "  ]\n"
-              "}\n" ]
+    let renderManifest () : string =
+        CorpusFile.render (CorpusFile.manifest (manifest ()))
 
     let vectorsPath (dir: string) =
         Path.Combine(dir, familyDirName, vectorsFileName)
@@ -290,10 +275,6 @@ module RefusalCorpus =
     let manifestPath (dir: string) =
         Path.Combine(dir, familyDirName, manifestFileName)
 
-    let write (dir: string) : unit =
-        Directory.CreateDirectory(Path.Combine(dir, familyDirName)) |> ignore
-        File.WriteAllText(vectorsPath dir, render ())
-        File.WriteAllText(manifestPath dir, renderManifest ())
 
 [<Tests>]
 let tests =
@@ -386,25 +367,6 @@ let tests =
                   Expect.equal e.Kind DuplicateMember "kind"
                   Expect.equal e.Position 13 "at the second \"a\""
               | Ok v -> failtestf "accepted %A" v
-
-          testCase "the committed conformance/refusals/ artefacts are the ones this kit renders"
-          <| fun _ ->
-              let root = OwnedConformance.root ()
-
-              let check (path: string) (fresh: string) =
-                  Expect.isTrue
-                      (System.IO.File.Exists path)
-                      (sprintf "%s exists — run `--emit-refusals` (no argument) and commit conformance/" path)
-
-                  Expect.equal
-                      ((System.IO.File.ReadAllText path).Replace("\r\n", "\n"))
-                      fresh
-                      (sprintf
-                          "the committed %s is not what this kit renders — re-run `--emit-refusals` (no argument) and commit conformance/"
-                          path)
-
-              check (RefusalCorpus.vectorsPath root) (RefusalCorpus.render ())
-              check (RefusalCorpus.manifestPath root) (RefusalCorpus.renderManifest ())
 
           // The amendment's culture leg: the corpus answers the same under a culture whose negative
           // sign is not U+002D, because the parser's integer reader is the invariant one.

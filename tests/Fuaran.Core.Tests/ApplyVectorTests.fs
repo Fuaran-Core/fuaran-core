@@ -195,23 +195,12 @@ let tests =
                       "the corpus is byte-compared across three operating systems — no CR may reach it"
 
           testCase
-              "the committed conformance/apply artefacts are the ones this kit renders, and each vector is true of this engine"
+              "each committed conformance/apply vector is true of this engine (its freshness is the exporter table's)"
           <| fun _ ->
               // Phase 172: the family is AUTHORED here — `conformance/apply/` at this repository's
-              // root — and the shared corpus carries a declared copy of both files. Oracle and
-              // freshness are asked of the committed files in this checkout; no corpus needed.
+              // root — and the shared corpus carries a declared copy of both files. The oracle is
+              // asked of the committed file in this checkout; no corpus needed.
               let root = OwnedConformance.root ()
-
-              let pairs =
-                  [ ApplyVectorExport.vectorsPath root, ApplyVectorExport.renderVectors
-                    ApplyVectorExport.manifestPath root, ApplyVectorExport.renderManifest ]
-
-              for path, _ in pairs do
-                  if not (File.Exists path) then
-                      failtestf
-                          "this repository carries no %s at '%s' — re-run `--emit-apply` (no argument writes into conformance/) and commit the result"
-                          (Path.GetFileName path)
-                          path
 
               // First the ORACLE question — is what the file records still true of this
               // engine? — because that is the failure a host would suffer.
@@ -223,16 +212,6 @@ let tests =
                   let failures = vectors |> List.choose ApplyVectorExport.checkVector
 
                   Expect.isEmpty failures (sprintf "the committed vectors disagree with this engine: %A" failures)
-
-              // Then the FRESHNESS question. Distinct from the above: a rendering change (a new
-              // vector, a reworded description) leaves every vector true and the file stale.
-              for path, render in pairs do
-                  Expect.equal
-                      (File.ReadAllText path)
-                      (render ())
-                      (sprintf
-                          "the committed conformance/apply/%s is not what this kit renders — re-run `--emit-apply` (no argument) and commit conformance/"
-                          (Path.GetFileName path))
 
           testCase "the corpus copy of apply/ is fresh (opt-in: FUARAN_CORE_CORPUS_FRESHNESS)"
           <| fun _ ->

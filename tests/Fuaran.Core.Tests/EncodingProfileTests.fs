@@ -76,31 +76,17 @@ module EncodingCorpus =
 
     /// The file, rendered: a header, then one JSON string per line of the table.
     let render () : string =
-        let lines = EncodingProfileVectors.lines ()
-
-        let body =
-            lines
-            |> List.mapi (fun i l ->
-                "    \""
-                + Json.escape l
-                + "\""
-                + (if i < List.length lines - 1 then ",\n" else "\n"))
-            |> String.concat ""
-
-        "{\n  \"family\": \"encodingProfile\",\n  \"description\": \""
-        + Json.escape description
-        + "\",\n  \"format\": \"name<TAB>v1<TAB>v2\",\n  \"lines\": [\n"
-        + body
-        + "  ]\n}\n"
+        CorpusFile.render
+            { Head =
+                [ "family", CorpusFile.str "encodingProfile"
+                  "description", CorpusFile.str description
+                  "format", CorpusFile.str "name<TAB>v1<TAB>v2" ]
+              Items = "lines"
+              Rows = EncodingProfileVectors.lines () |> List.map CorpusFile.str }
 
     let path (dir: string) =
         System.IO.Path.Combine(dir, familyDirName, fileName)
 
-    let write (dir: string) : unit =
-        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, familyDirName))
-        |> ignore
-
-        System.IO.File.WriteAllText(path dir, render ())
 
 let private allGreen (what: string) (laws: LawResult list) =
     match laws |> List.tryFind (fun l -> not l.Passed) with
@@ -216,22 +202,10 @@ let tests =
                   (EncodingProfileVectors.runVector row |> List.exists (fun o -> not o.Passed))
                   "a V1 column that is not 0.30.0's bytes is caught"
 
-          testCase "the committed conformance/encoding/ file is what this kit renders, and parses back to the lines"
+          testCase
+              "the rendered conformance/encoding/ file parses back to the lines (its freshness is the exporter table's)"
           <| fun _ ->
-              let file = EncodingCorpus.path (OwnedConformance.root ())
-
-              Expect.isTrue
-                  (System.IO.File.Exists file)
-                  (sprintf "%s exists — run `--emit-encoding` (no argument) and commit conformance/" file)
-
-              let committed = (System.IO.File.ReadAllText file).Replace("\r\n", "\n")
-
-              Expect.equal
-                  committed
-                  (EncodingCorpus.render ())
-                  "the committed encoding file is not what this kit renders — re-run `--emit-encoding` (no argument) and commit conformance/"
-
-              match Json.parse committed with
+              match Json.parse (EncodingCorpus.render ()) with
               | Ok(JObj members) ->
                   match members |> List.tryFind (fun (k, _) -> k = "lines") with
                   | Some(_, JArr items) ->

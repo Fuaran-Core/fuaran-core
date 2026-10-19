@@ -406,37 +406,13 @@ module ApplyVectorExport =
     // -----------------------------------------------------------------------
     //  the rendered artefact
     // -----------------------------------------------------------------------
-    //  Hand-rolled for the reasons the sibling law-vector exporter records: an indented
-    //  `Utf8JsonWriter` emits `Environment.NewLine`, so the same run would produce different bytes
-    //  on Windows and Linux, and its default escaper rewrites characters this corpus should not
-    //  inherit a framework's opinion about. The escaper below is the JSON minimum.
+    //  Written by the one writer every conformance file goes through, `CorpusFile.render` (Phase 508):
+    //  `Canon.render` escapes every string, and the layout is a header member and an item per line
+    //  with LF endings whatever the platform. The two helpers build cells and write nothing.
 
-    let private jstr (s: string) : string =
-        let sb = StringBuilder()
-        sb.Append('"') |> ignore
+    let private jstr (s: string) : CorpusCell = CorpusFile.str s
 
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | '\b' -> sb.Append("\\b") |> ignore
-            | '\f' -> sb.Append("\\f") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
-            | c when c < ' ' -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
-
-        sb.Append('"') |> ignore
-        sb.ToString()
-
-    let private jobj (members: (string * string) list) : string =
-        match members with
-        | [] -> "{}"
-        | _ ->
-            "{ "
-            + (members |> List.map (fun (k, v) -> jstr k + ": " + v) |> String.concat ", ")
-            + " }"
+    let private jobj (members: (string * CorpusCell) list) : CorpusCell = CorpusCell.Row members
 
     /// The digest convention already used everywhere else: `sha256:` + lowercase hex,
     /// over the canonical result bytes exactly as they appear in `expected.tree`.
@@ -445,7 +421,7 @@ module ApplyVectorExport =
 
     /// What the reference answered, in the terms a host compares against. Computed by CALLING
     /// `Ops.apply`; nothing here restates what it ought to say.
-    let private expectedOf (c: Case) : string =
+    let private expectedOf (c: Case) : CorpusCell =
         match Ops.apply nodew idw c.Op c.Tree with
         | Ok result ->
             let bytes = encodeTree result
@@ -475,7 +451,7 @@ module ApplyVectorExport =
         | Batch _ -> "Batch"
         | UpdateNode _ -> "UpdateNode"
 
-    let private renderVector (c: Case) : string =
+    let private renderVector (c: Case) : CorpusCell =
         jobj
             [ "id", jstr c.Id
               "case", jstr (caseTag c.Op)
@@ -512,23 +488,10 @@ module ApplyVectorExport =
         + "reference recomputes every expectation on each run."
 
     let renderVectors () : string =
-        let sb = StringBuilder()
-        let line (s: string) = sb.Append(s).Append('\n') |> ignore
-
-        line "{"
-        line ("  \"family\": " + jstr familyId + ",")
-        line ("  \"description\": " + jstr description + ",")
-        line "  \"vectors\": ["
-
-        let rendered = cases () |> List.map renderVector
-        let last = List.length rendered - 1
-
-        rendered
-        |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
-
-        line "  ]"
-        line "}"
-        sb.ToString()
+        CorpusFile.render
+            { Head = [ "family", jstr familyId; "description", jstr description ]
+              Items = "vectors"
+              Rows = cases () |> List.map renderVector }
 
     /// The family index. EMITTED rather than hand-kept, unlike the `laws/` one — that index spans
     /// families its writer does not know about, so a wholesale renderer there would drop whatever it
@@ -536,11 +499,10 @@ module ApplyVectorExport =
     /// `conformance/apply/` it is the whole manifest, and in a corpus copy `write` merges the row
     /// beside any sibling producer's rows (`mergeManifest`), so emitting it is what stops the vector
     /// count drifting from the file it counts without touching what another producer indexed.
-    let renderManifest () : string =
-        let sb = StringBuilder()
-        let line (s: string) = sb.Append(s).Append('\n') |> ignore
-
-        let indexDescription =
+    /// The family index as the one manifest schema (`CorpusManifest`).
+    let internal manifest () : CorpusManifest =
+        { Version = 1
+          Description =
             "Fuaran apply-engine conformance corpus. SELF-ENUMERATED: this family is deliberately "
             + "not indexed by the corpus root manifest.json, which indexes the canonical "
             + "wire-format codec families only — the laws/, dag/, merge-conformance/ and "
@@ -548,35 +510,19 @@ module ApplyVectorExport =
             + "reads `proposed` reports the family BY NAME rather than skipping it silently, and "
             + "flips its own entry to `adopted` in the change-set that lands its leg. This "
             + "manifest is authoritative for the vector count; do not restate one in prose."
+          Families =
+            [ { Id = familyId
+                Kind = "apply-vectors"
+                File = vectorsFileName
+                Vectors = List.length (cases ())
+                Adoption = ("fuaran", "adopted") :: (hostRoster |> List.map (fun h -> h, "proposed"))
+                Description =
+                  "The skeleton-op apply contract over the witness surface: accept with the "
+                  + "result's canonical bytes and hash, or reject with the class, per validator "
+                  + "clause per op, plus Batch atomicity and the id-collision shapes." } ] }
 
-        line "{"
-        line "  \"version\": 1,"
-        line ("  \"description\": " + jstr indexDescription + ",")
-        line "  \"families\": ["
-
-        line (
-            "    "
-            + jobj
-                [ "id", jstr familyId
-                  "kind", jstr "apply-vectors"
-                  "file", jstr vectorsFileName
-                  "vectors", string (List.length (cases ()))
-                  "adoption",
-                  jobj (
-                      ("fuaran", jstr "adopted")
-                      :: (hostRoster |> List.map (fun h -> h, jstr "proposed"))
-                  )
-                  "description",
-                  jstr (
-                      "The skeleton-op apply contract over the witness surface: accept with the "
-                      + "result's canonical bytes and hash, or reject with the class, per validator "
-                      + "clause per op, plus Batch atomicity and the id-collision shapes."
-                  ) ]
-        )
-
-        line "  ]"
-        line "}"
-        sb.ToString()
+    let renderManifest () : string =
+        CorpusFile.render (CorpusFile.manifest (manifest ()))
 
     // -----------------------------------------------------------------------
     //  writing
@@ -597,7 +543,7 @@ module ApplyVectorExport =
     /// This family's one manifest row, as `renderManifest` spells it.
     let private ownRowLine () : string =
         renderManifest().Split('\n')
-        |> Array.find (fun l -> l.StartsWith(rowPrefix + jstr familyId))
+        |> Array.find (fun l -> l.StartsWith(rowPrefix + Canon.render (JStr familyId)))
 
     /// The manifest beside a corpus copy is SHARED: a sibling producer's family (the wire specification's
     /// `limitsApply`, since 2026-10-07) sits beside this one, so the copy's manifest is never
@@ -614,7 +560,9 @@ module ApplyVectorExport =
         else
             let foreign =
                 lines
-                |> Array.filter (fun l -> l.StartsWith rowPrefix && not (l.StartsWith(rowPrefix + jstr familyId)))
+                |> Array.filter (fun l ->
+                    l.StartsWith rowPrefix
+                    && not (l.StartsWith(rowPrefix + Canon.render (JStr familyId))))
                 |> Array.map (fun l -> l.TrimEnd().TrimEnd(','))
                 |> Array.toList
 
