@@ -1463,3 +1463,387 @@ let projectedKindTests =
               let full = snap Projected.support
               Expect.notEqual (snap (Projected.supportWith None (Some Projected.recordFields))) full "the map"
               Expect.notEqual (snap (Projected.supportWith (Some Projected.gateMap) None)) full "the record fields") ]
+
+// ---------------------------------------------------------------------------
+// Phase 511 — the laws of `Decl`, the ONE resolution every emitter reads. The emitters' bytes
+// are held by the drift guards; these hold the resolution itself, over every certification
+// vocabulary this suite carries, so a change to the walk that happens to leave today's fixtures
+// unmoved is still caught by the property it breaks.
+// ---------------------------------------------------------------------------
+
+module private DeclLaws =
+    open Fuaran.Core.Idl.Emit
+
+    let field name ty opt =
+        { Name = name
+          Type = ty
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let case tag fields =
+        { Tag = tag
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    /// A vocabulary whose node ENVELOPE is the only root of a record and an enum — reached from
+    /// no kind — so a resolution that forgot the envelope as a root would drop them.
+    let enveloped: Idl =
+        { MiniIdl.miniIdl with
+            Enums = MiniIdl.miniIdl.Enums @ [ Declare.enumOf "Tone" [ "Quiet"; "Loud" ] ]
+            Records =
+                MiniIdl.miniIdl.Records
+                @ [ { Name = "Style"
+                      Fields = [ field "tone" (TEnum "Tone") Required ] } ]
+            NodeFields = [ field "style" (TRecord "Style") Optional ] }
+
+    /// Every vocabulary the suite carries ahead of this file, named.
+    let vocabularies () : (string * Idl) list =
+        let vectors, _, _ = DecodeVectorsIdl.current ()
+
+        [ "mini", MiniIdl.miniIdl
+          "derive", DeriveIdl.deriveIdl
+          "reference", ReferenceIdl.refIdl
+          "value-coverage", ReferenceIdl.valueCoverageIdl
+          "unsorted-coverage", ReferenceIdl.unsortedCoverageIdl
+          "score", ScoreDomainSpike.scoreIdl
+          "second-domain", SecondDomainSpike.docIdl
+          "doc-annotated", IdlDocAnnotationTests.docIdl
+          "refusal-corners", RefusalCornersIdl.idl
+          "decode-vectors", vectors
+          "projected", Projected.idl
+          "enveloped", enveloped ]
+
+    let tagsOf (idl: Idl) = idl.Kinds |> List.map _.Tag
+
+    let all (idl: Idl) = Decl.resolve idl Map.empty (tagsOf idl)
+
+    /// The names a type mentions STRUCTURALLY (not through signature or hosted text).
+    let rec named (t: IdlType) : string list =
+        match t with
+        | TEnum n
+        | TRecord n -> [ n ]
+        | TUnion(n, args) -> n :: List.collect named args
+        | TList i
+        | TMap i -> named i
+        | THosted h -> h.Wire |> Option.map named |> Option.defaultValue []
+        | _ -> []
+
+    /// An independent reference walk — a breadth-first closure over names, scanning signature and
+    /// hosted text for declared names as the reach rule states — so the resolution's reach is
+    /// checked against a second spelling of the rule, not against itself.
+    let referenceReach (idl: Idl) (kinds: IdlKind list) : Set<string> =
+        let declaredNames =
+            (idl.Enums |> List.map _.Name)
+            @ (idl.Unions |> List.map _.Name)
+            @ (idl.Records |> List.map _.Name)
+
+        let textNames (text: string) =
+            declaredNames |> List.filter (fun n -> text.Contains n)
+
+        let rec mentions (t: IdlType) : string list =
+            match t with
+            | TFn sg -> textNames sg.FSharp
+            | THosted h ->
+                (h.Wire |> Option.map mentions |> Option.defaultValue [])
+                @ textNames (h.FSharp + " " + h.Encode + " " + h.Decode)
+            | TUnion(n, args) -> n :: List.collect mentions args
+            | TList i
+            | TMap i -> mentions i
+            | TEnum n
+            | TRecord n -> [ n ]
+            | _ -> []
+
+        let fieldsOfName (n: string) : IdlField list =
+            match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+            | Some u -> u.Cases |> List.collect _.Fields
+            | None ->
+                match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+                | Some r -> r.Fields
+                | None -> []
+
+        let roots =
+            (kinds |> List.collect _.Fields) @ idl.NodeFields
+            |> List.collect (fun f -> mentions f.Type)
+
+        let rec close (seen: Set<string>) (frontier: string list) =
+            match frontier with
+            | [] -> seen
+            | n :: rest when seen.Contains n -> close seen rest
+            | n :: rest ->
+                let next = fieldsOfName n |> List.collect (fun f -> mentions f.Type)
+                close (seen.Add n) (rest @ next)
+
+        close Set.empty roots
+
+    let reachedNames (d: Decl) =
+        Set.unionMany
+            [ d.Enums |> List.map _.Name |> Set.ofList
+              d.Unions |> List.map _.Name |> Set.ofList
+              d.Records |> List.map _.Name |> Set.ofList ]
+
+    /// A generic union whose recursion GROWS its argument: no finite instantiation set.
+    let growing: Idl =
+        { MiniIdl.miniIdl with
+            Unions =
+                [ { Name = "Grow"
+                    Params = [ "T" ]
+                    Cases =
+                      [ case "Leaf" [ field "value" (TVar "T") Required ]
+                        case "Deeper" [ field "next" (TUnion("Grow", [ TList(TVar "T") ])) Required ] ] } ]
+            Kinds =
+                [ { Tag = "Holder"
+                    Category = "x"
+                    Fields = [ field "g" (TUnion("Grow", [ TStr ])) Required ]
+                    Annotations = Annotations.Empty } ]
+            Records = []
+            Enums = []
+            NodeFields = [] }
+
+    /// Every type application of a generic union inside `t`.
+    let rec applications (t: IdlType) : IdlType list =
+        match t with
+        | TUnion(_, args) when not args.IsEmpty -> t :: List.collect applications args
+        | TUnion(_, args) -> List.collect applications args
+        | TList x
+        | TMap x -> applications x
+        | _ -> []
+
+open Fuaran.Core.Idl.Emit
+
+[<Tests>]
+let declLaws =
+    let each (name: string) (law: Idl -> unit) =
+        testCase name (fun () ->
+            for (vocabulary, idl) in DeclLaws.vocabularies () do
+                try
+                    law idl
+                with ex ->
+                    failtestf "[%s] %s" vocabulary ex.Message)
+
+    testList
+        "Phase 511 — the laws of the one resolution (Decl)"
+        [ each "reach is exactly the reference walk's closure from the selected kinds and the envelope" (fun idl ->
+              let d = DeclLaws.all idl
+              Expect.equal (DeclLaws.reachedNames d) (DeclLaws.referenceReach idl d.Kinds) "reach")
+
+          each "reach is closed: every declared name a reached declaration mentions is reached" (fun idl ->
+              let d = DeclLaws.all idl
+              let reached = DeclLaws.reachedNames d
+
+              let declared =
+                  Set.unionMany
+                      [ idl.Enums |> List.map _.Name |> Set.ofList
+                        idl.Unions |> List.map _.Name |> Set.ofList
+                        idl.Records |> List.map _.Name |> Set.ofList ]
+
+              let fieldLists =
+                  (d.Kinds |> List.map _.Fields)
+                  @ [ idl.NodeFields ]
+                  @ (d.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields))
+                  @ (d.Records |> List.map _.Fields)
+
+              for fs in fieldLists do
+                  for f in fs do
+                      for n in DeclLaws.named f.Type do
+                          if declared.Contains n then
+                              Expect.isTrue (reached.Contains n) (sprintf "'%s' (field '%s') is reached" n f.Name))
+
+          each "the reached declarations are in DECLARATION order, the kinds in the caller's order" (fun idl ->
+              let d = DeclLaws.all idl
+              let names = DeclLaws.reachedNames d
+              Expect.equal d.Enums (idl.Enums |> List.filter (fun e -> names.Contains e.Name)) "enums"
+              Expect.equal d.Unions (idl.Unions |> List.filter (fun u -> names.Contains u.Name)) "unions"
+              Expect.equal d.Records (idl.Records |> List.filter (fun r -> names.Contains r.Name)) "records"
+              let reversed = DeclLaws.tagsOf idl |> List.rev
+              let r = Decl.resolve idl Map.empty (reversed @ [ "NoSuchKind" ])
+
+              Expect.equal
+                  (r.Kinds |> List.map _.Tag)
+                  reversed
+                  "kinds in the caller's order; an unknown tag selects nothing")
+
+          each "reach is monotone in the selection: one kind reaches a subset of all of them" (fun idl ->
+              let whole = DeclLaws.reachedNames (DeclLaws.all idl)
+
+              for tag in DeclLaws.tagsOf idl do
+                  let one = DeclLaws.reachedNames (Decl.resolve idl Map.empty [ tag ])
+                  Expect.isTrue (Set.isSubset one whole) (sprintf "kind '%s'" tag))
+
+          each "the whole-vocabulary resolution holds every declaration, in declaration order" (fun idl ->
+              let d = Decl.declared idl
+              Expect.equal d.Enums idl.Enums "enums"
+              Expect.equal d.Unions idl.Unions "unions"
+              Expect.equal d.Records idl.Records "records"
+              Expect.equal d.Kinds idl.Kinds "kinds"
+              Expect.isTrue d.Projections.IsEmpty "no host projections")
+
+          each "the node holders are the least fixpoint over the reached declarations" (fun idl ->
+              let d = DeclLaws.all idl
+              let hs = d.NodeHolders
+              Expect.isTrue (Set.isSubset hs (DeclLaws.reachedNames d)) "only reached declarations hold"
+
+              for u in d.Unions do
+                  let holds =
+                      u.Cases
+                      |> List.exists (fun c -> c.Fields |> List.exists (fun f -> Decl.holdsIn hs f.Type))
+
+                  Expect.equal (hs.Contains u.Name) holds (sprintf "union '%s'" u.Name)
+
+              for r in d.Records do
+                  let holds = r.Fields |> List.exists (fun f -> Decl.holdsIn hs f.Type)
+                  Expect.equal (hs.Contains r.Name) holds (sprintf "record '%s'" r.Name))
+
+          each "the message parameter reaches the tree all at once: Node, NodeKind and a dispatching spec" (fun idl ->
+              let d = DeclLaws.all idl
+              let specs = idl.Kinds |> List.exists (fun k -> d.Msg.Contains(k.Tag + "Spec"))
+              Expect.equal (d.Msg.Contains "Node") specs "Node"
+              Expect.equal (d.Msg.Contains "NodeKind") specs "NodeKind")
+
+          each "wire equality goes only to a non-generic declaration holding a host-only closure" (fun idl ->
+              let d = DeclLaws.all idl
+
+              let closure (f: IdlField) =
+                  f.Opt = HostOnly
+                  && (match f.Type with
+                      | TFn s -> s.FSharp.Contains "->"
+                      | _ -> false)
+
+              for key in d.EqualityCapable do
+                  let fields, generic =
+                      if key = "Node" then
+                          idl.NodeFields, d.Msg.Contains "Node"
+                      elif key.StartsWith "R:" then
+                          (idl.Records |> List.find (fun r -> r.Name = key.Substring 2)).Fields,
+                          d.Msg.Contains(key.Substring 2)
+                      else
+                          (idl.Kinds |> List.find (fun k -> k.Tag = key.Substring 2)).Fields,
+                          d.Msg.Contains(key.Substring 2 + "Spec")
+
+                  Expect.isFalse generic (sprintf "'%s' is generic in the message" key)
+                  Expect.isTrue (fields |> List.exists closure) (sprintf "'%s' holds a host-only closure" key))
+
+          each "a host projection changes no reach and withdraws only its own kind from wire equality" (fun idl ->
+              let plain = DeclLaws.all idl
+
+              let projection: Fuaran.Core.Idl.Emit.Core.Projection =
+                  { SpecDecl = ""
+                    Encoder = ""
+                    Decoder = ""
+                    Mk = None
+                    MapMsg = None
+                    RecordFields = None }
+
+              for k in idl.Kinds do
+                  let projected =
+                      Decl.resolve idl (Map.ofList [ k.Tag, projection ]) (DeclLaws.tagsOf idl)
+
+                  Expect.equal (DeclLaws.reachedNames projected) (DeclLaws.reachedNames plain) "reach"
+                  Expect.equal projected.NodeHolders plain.NodeHolders "node holders"
+                  Expect.equal projected.Msg plain.Msg "msg"
+                  Expect.isFalse (projected.EqualityCapable.Contains("S:" + k.Tag)) "the projected kind")
+
+          each "the envelope layout is the declared shape: the kind under 'kind', or merged" (fun idl ->
+              let d = DeclLaws.all idl
+              Expect.equal d.Envelope.Members idl.NodeFields "the envelope members"
+
+              match idl.Wire.NodeEnvelope, d.Envelope.Kind with
+              | NodeEnvelopeShape.NestedKind, KindPlacement.NestedUnder "kind"
+              | NodeEnvelopeShape.FlatKind, KindPlacement.Merged -> ()
+              | shape, placement -> failtestf "%A placed as %A" shape placement)
+
+          each
+              "a case is bare exactly when it is the declared transparent case, printable bare only with one field"
+              (fun idl ->
+                  let d = DeclLaws.all idl
+
+                  for u in d.Unions do
+                      for c in u.Cases do
+                          match Decl.caseLayout d u c, Decl.transparentTag d u with
+                          | CaseLayout.Tagged, Some t -> Expect.notEqual t c.Tag (sprintf "%s.%s" u.Name c.Tag)
+                          | CaseLayout.Tagged, None -> ()
+                          | CaseLayout.Bare(Ok f), Some t ->
+                              Expect.equal t c.Tag "the transparent tag"
+                              Expect.equal [ f ] c.Fields "its one field"
+                          | CaseLayout.Bare(Error _), Some t ->
+                              Expect.equal t c.Tag "the transparent tag"
+                              Expect.notEqual c.Fields.Length 1 "refused only off one field"
+                          | layout, None -> failtestf "%s.%s laid out %A with no transparent case" u.Name c.Tag layout)
+
+          each "the instantiations are closed, unique and ordered by instance name" (fun idl ->
+              match Decl.instantiations idl with
+              | Error e -> failtestf "refused: %s" (CodegenError.describe e)
+              | Ok insts ->
+                  let names = insts |> List.map _.Name
+                  Expect.equal names (List.sort names) "ordered"
+                  Expect.equal names (List.distinct names) "unique"
+
+                  let generic (n: string) =
+                      idl.Unions |> List.exists (fun u -> u.Name = n && not u.Params.IsEmpty)
+
+                  for i in insts do
+                      Expect.isNonEmpty i.Union.Params (sprintf "'%s' is of a generic union" i.Name)
+
+                      for c in i.Union.Cases do
+                          for f in c.Fields do
+                              if f.Opt <> HostOnly then
+                                  for a in DeclLaws.applications (TypeParams.substitute i.Subst f.Type) do
+                                      match a with
+                                      | TUnion(n, _) when generic n ->
+                                          Expect.contains names (Decl.instName a) (sprintf "'%s' reaches it" i.Name)
+                                      | _ -> ())
+
+          testCase "a recursion that grows its type argument has no finite instantiation set, and says so" (fun () ->
+              match Decl.instantiations DeclLaws.growing with
+              | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
+                  Expect.stringContains construct "did not close" "the bound, named"
+              | other -> failtestf "expected the bounded refusal, got %A" other)
+
+          testCase "an instance name is a declaration's own name, with its arguments mangled after it" (fun () ->
+              Expect.equal (Decl.instName (TUnion("Binding", []))) "Binding" "non-generic"
+              Expect.equal (Decl.instName (TUnion("Binding", [ TFloat ]))) "Binding_float" "generic"
+
+              Expect.equal
+                  (Decl.instName (TUnion("Binding", [ TList(TRecord "SelectOption") ])))
+                  "Binding_list_SelectOption"
+                  "nested")
+
+          each "the resolution is a function of its inputs" (fun idl ->
+              Expect.equal (DeclLaws.all idl) (DeclLaws.all idl) "two resolutions agree") ]
+
+// ---------------------------------------------------------------------------
+// Phase 511 (S12) — the TypeScript backend's derivation admission is the F# path's admission over
+// a resolution with NO host projections: a projection is F# source, and the TypeScript host
+// declares none. So a projection that makes the F# path refuse a derivation (a projected kind
+// whose record declares no fields, under a wire that holds a node) leaves the TypeScript backend
+// admitting it, by rule rather than by accident; and without the projection the two agree.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let typescriptAdmission =
+    testList
+        "Phase 511 — TypeScript derivation admission (S12)"
+        [ testCase "a projection that refuses the F# keyed walk does not reach the TypeScript backend" (fun () ->
+              let request = [ Gen.Derivation.KeyedPositions ]
+
+              let construct, _ =
+                  Projected.refusal (Projected.derive (Projected.supportWith None None) request Projected.idl)
+
+              Expect.stringContains construct "projected kind 'Gate'" "the F# path refuses over the projection"
+
+              match Gen.typescriptModuleDerived request Projected.idl Projected.tags with
+              | Ok text -> Expect.stringContains text "keyedChildren" "the TypeScript backend admits it"
+              | Error e -> failtestf "the TypeScript backend refused: %s" (CodegenError.describe e))
+
+          testCase "without the projection, the two backends admit and refuse alike" (fun () ->
+              for request in
+                  [ [ Gen.Derivation.KeyedPositions ]
+                    [ Gen.Derivation.Fold "Trigger" ]
+                    [ Gen.Derivation.StructuralAccess ]
+                    [ Gen.Derivation.DefaultRecords ] ] do
+                  let fs = Projected.derive Gen.GenSupport.Empty request Projected.idl
+                  let ts = Gen.typescriptModuleDerived request Projected.idl Projected.tags
+
+                  match fs, ts with
+                  | Ok _, Ok _ -> ()
+                  | Error a, Error b -> Expect.equal b a (sprintf "%A: one refusal" request)
+                  | _ -> failtestf "%A: F# admits %b, TypeScript admits %b" request (Result.isOk fs) (Result.isOk ts)) ]

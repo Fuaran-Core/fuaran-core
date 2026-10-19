@@ -420,6 +420,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   consumer tolerates via `decodeTolerant`.
 - **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; every bump is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number). **`schema: 6` (Phase 506):** every value is written by `Canon.render`, so members are in ordinal order (top level `families`, `kind`, `packages`, `schema`; each family `adequacy` … `witness`) where `schema: 5` wrote them in declaration order, each family is one line, and each family gains `spellings` (an array; since Phase 507 six `…With` families list their pinned-default twins there, and those six ids leave the family list). That reader parses by member name and was checked against the new bytes: it reads the same ids and `cases` and is unaffected.
 - **`Seam<'Decl,'Args,'E>`** + `SeamVocabulary` / `SeamCapture` (Phase 509, `0.39.0`, DECISIONS.md D172) — the invocable seams' one dispatch prologue, which `CapabilityRegistry` and `QueryRegistry` are and a host's own registry builds on: every dispatch verb resolves, validates and admits through the policy before the body runs, and no public verb runs a declaration without admitting it. Adding a public verb that skips the admission, or a field to either record (a full-literal vocabulary is how an adopter builds one), is breaking.
+- **The generated layer is printed from ONE resolution** (Phase 511, `0.39.0`, DECISIONS.md D174) — every emitter reads the internal `Decl` (`Decl.resolve`): what a kind selection reaches, the message, wire-equality and node-holder sets, the generic instantiations and the node envelope's layout. Reached declarations print in declaration order and selected kinds in the caller's order; a change to either order, or to what the walk reaches, moves every committed generated artefact and is breaking for a consumer's drift guard. The drift guards and `IdlDeriveTests`' `Decl` laws hold it.
 
 ### The Column and Query strand (first-class)
 
@@ -597,9 +598,9 @@ columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse
 `Fuaran.Core.*` is nineteen packable assemblies. Between them it grants `InternalsVisibleTo` in
 exactly five declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
 `Fuaran.Core.ContentAddress`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to
-`Fuaran.Core.Idl` and `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the two
-further declarations, `Fuaran.Core.Idl.Cli` and `Fuaran.Core.Conformance` to the test project, grant
-nothing a consumer reaches.
+`Fuaran.Core.Idl` and `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the three
+further declarations, `Fuaran.Core.Idl.Cli`, `Fuaran.Core.Conformance` and (Phase 511) `Fuaran.Core.Idl.Codegen`
+to the test project, grant nothing a consumer reaches.
 Everywhere else a function one Core package needs from another has to be public — `internal` cannot
 express it. Three members are exactly that and nothing else: no caller outside these packages, no test, and until
 `0.19.0` no document saying why they were public. A reading that classifies surface by caller count
@@ -1154,8 +1155,7 @@ ships, and REQUIRES the value leg.
 
 `Fuaran.Core.Idl` joined the surface at `0.8.0` — it was the one `src/` package absent from it, which
 made its portability an unprovable claim rather than a certified one. What had blocked it was not the
-model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97)
-removed the obstacle rather than working around it.
+model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97) removed the obstacle rather than working around it.
 
 **Since Phase 185 the surface is CHECKED for every packable package, not asserted over them — and
 since Phase 217 that half stays here, because it needs no Fable.**

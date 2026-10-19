@@ -217,12 +217,9 @@ module internal FSharpDefaults =
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`fsDefaultLit` — GP4/GP5).
-    let defaultsDecl
-        (projections: Map<string, Projection>)
-        (msg: Set<string>)
-        (idl: Idl)
-        (kinds: IdlKind list)
-        : Result<string, CodegenError> =
+    let defaultsDecl (decl: Decl) : Result<string, CodegenError> =
+        let projections, msg, idl, kinds = decl.Projections, decl.Msg, decl.Idl, decl.Kinds
+
         let nodeArgs = declParams msg "Node" []
         let fsType = fsTypeIn msg
 

@@ -3,7 +3,6 @@ namespace Fuaran.Core.Idl.Emit
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Emit.Core
-open Fuaran.Core.Idl.Emit.Reach
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpDefaults
 
@@ -310,44 +309,30 @@ module internal TypeScriptCodec =
             | HostOnly
             | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
 
-    /// One field of a spec encoder — a `[key, enc]` pair, or `null` (filtered) for
-    /// an absent optional.
-    /// `recv` is the bound JS variable — `s` for a spec/record encoder, `n` for the
-    /// node envelope (Phase 690), mirroring [[specPieceOf]] on the F# side.
+    /// Phase 511 — THE TYPESCRIPT PRESENCE RULE: one field's encoder piece, a `[key, enc]` pair
+    /// or `null` (filtered) where the field is absent — Required always; Optional omitted when
+    /// `undefined`; HostOnly never on the wire; OmitDefault omitted at its default. `src` is the
+    /// JS expression the value is read from (`s.f` in a spec or record encoder, `n.f` on the node
+    /// envelope, `v.f` in a union case) — the only thing the call sites differ in. Phase 317's
+    /// generative conformance once caught the union-case copy ignoring presence entirely; one
+    /// rule is what keeps that from recurring.
+    let tsPresencePiece (idl: Idl) (disc: string) (src: string) (f: IdlField) : Result<string, CodegenError> =
+        tsEncApplied src f.Type
+        |> Result.bind (fun enc ->
+            let pair = "[" + SourceLit.tsString f.Name + ", " + enc + "]"
+
+            match f.Opt with
+            | Required -> Ok pair
+            | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
+            | HostOnly -> Ok "null"
+            | OmitDefault d ->
+                tsIsDefault idl disc src f.Type d
+                |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")"))
+
+    /// A field read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
+    /// node envelope), under [[tsPresencePiece]] — the F# side's `specPieceOf`.
     let tsSpecPieceOf (idl: Idl) (disc: string) (recv: string) (f: IdlField) : Result<string, CodegenError> =
-        let src = recv + "." + f.Name
-
-        tsEncApplied src f.Type
-        |> Result.bind (fun enc ->
-            let pair = "[" + SourceLit.tsString f.Name + ", " + enc + "]"
-
-            match f.Opt with
-            | Required -> Ok pair
-            | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
-            | HostOnly -> Ok "null"
-            | OmitDefault d ->
-                tsIsDefault idl disc src f.Type d
-                |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")"))
-
-    /// A union CASE field, honouring the same presence rules as a spec field.
-    /// Phase 317 generative conformance caught this ignoring `f.Opt` entirely:
-    /// TS emitted every optional union-case field unconditionally while F# omitted
-    /// it, so `LayoutMode.Grid` without `templateColumns` diverged (and threw in
-    /// the escaper). No fixed fixture carried that shape.
-    let tsCasePair (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
-        let src = "v." + f.Name
-
-        tsEncApplied src f.Type
-        |> Result.bind (fun enc ->
-            let pair = "[" + SourceLit.tsString f.Name + ", " + enc + "]"
-
-            match f.Opt with
-            | Required -> Ok pair
-            | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
-            | HostOnly -> Ok "null"
-            | OmitDefault d ->
-                tsIsDefault idl disc src f.Type d
-                |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")"))
+        tsPresencePiece idl disc (recv + "." + f.Name) f
 
     // -----------------------------------------------------------------------
     // Phase 113 — declared annotations in the TypeScript backend.
@@ -420,7 +405,9 @@ module internal TypeScriptCodec =
          | ls -> (ls |> String.concat "\n") + "\n")
         + tsFieldAnnotationHeader k.Tag k.Fields
 
-    let tsUnionEncoder (idl: Idl) (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
+    let tsUnionEncoder (decl: Decl) (disc: string) (u: IdlUnion) =
+        let idl = decl.Idl
+
         let argList =
             match u.Params with
             | [] -> "v"
@@ -432,17 +419,15 @@ module internal TypeScriptCodec =
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            (match TransparentUnion.tag tokens u with
-             | Some ttag when ttag = c.Tag ->
-                 // Transparent case: return the single field's value bare (no `typed(...)`).
-                 match c.Fields with
-                 | [ f ] ->
-                     tsEncApplied ("v." + f.Name) f.Type
-                     |> Result.map (fun enc -> "    case " + SourceLit.tsString c.Tag + ": return " + enc + ";")
-                 | _ -> Error(transparentArity u.Name c.Tag)
-             | _ ->
+            (match Decl.caseLayout decl u c with
+             // Transparent case: return the single field's value bare (no `typed(...)`).
+             | CaseLayout.Bare(Ok f) ->
+                 tsEncApplied ("v." + f.Name) f.Type
+                 |> Result.map (fun enc -> "    case " + SourceLit.tsString c.Tag + ": return " + enc + ";")
+             | CaseLayout.Bare(Error e) -> Error e
+             | CaseLayout.Tagged ->
                  c.Fields
-                 |> List.map (tsCasePair idl disc)
+                 |> List.map (fun f -> tsPresencePiece idl disc ("v." + f.Name) f)
                  |> concatR ", "
                  |> Result.map (fun pairs ->
                      "    case "
@@ -660,7 +645,9 @@ module internal TypeScriptCodec =
         + cases
         + "]);"
 
-    let tsUnionDecoder (idl: Idl) (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
+    let tsUnionDecoder (decl: Decl) (disc: string) (u: IdlUnion) =
+        let idl = decl.Idl
+
         let argList =
             match u.Params with
             | [] -> "j"
@@ -696,7 +683,7 @@ module internal TypeScriptCodec =
         // A transparent union also accepts its single-field case bare, and re-wraps
         // it so the encoder can flatten it back to the same bytes.
         let untagged =
-            match TransparentUnion.tag tokens u with
+            match Decl.transparentTag decl u with
             | Some ttag ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
                 | Some({ Fields = [ f ] }) ->
@@ -1143,10 +1130,10 @@ const dFormat = (format, v) => {
     ///
     /// Phase 505 — this is the module UNSTAMPED, so a caller that appends to it (the derivations)
     /// stamps the text it actually emits; [[typescriptModule]] is it under its [[Stamp]].
-    let typescriptModuleBody (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
-
-        let _, unions, _ = referenced idl kinds
+    let typescriptModuleBody (decl: Decl) : Result<string, CodegenError> =
+        // Phase 511 — the declaration graph is the resolution's (this body used to walk it twice).
+        let idl, kinds, enums, unions, records =
+            decl.Idl, decl.Kinds, decl.Enums, decl.Unions, decl.Records
 
         // Runtime prelude — escaping mirrors Fuaran.Core.Canon.escape (WIRE_FORMAT §2
         // rule 6: only " and \ and control chars as \u00xx — NO \n/\r/\t shortcuts),
@@ -1298,7 +1285,7 @@ const plain = (pairs) =>
   '{' + pairs.filter((p) => p !== null).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';""")
 
         let disc = idl.Wire.Discriminator
-        let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+        let flat = decl.Envelope.Kind = KindPlacement.Merged
 
         // Phase 111 — a TJson value under declared order is carried in its
         // authored order (the map encoder, a different receiver, stays sorted).
@@ -1309,7 +1296,8 @@ const plain = (pairs) =>
                 prelude.Replace("const keys = Object.keys(v).sort();", "const keys = Object.keys(v);")
 
         let kindDispatch =
-            if not flat then
+            match decl.Envelope.Kind with
+            | KindPlacement.NestedUnder key ->
                 let arms =
                     kinds
                     |> List.map (fun k -> "    case " + SourceLit.tsString k.Tag + ": return enc" + k.Tag + "Spec(k);")
@@ -1320,13 +1308,13 @@ const plain = (pairs) =>
                 // this is `id` then `kind`, i.e. exactly the previous hand-built literal.
                 // Phase 111 — declared order keeps the construction order instead:
                 // id, kind, then the envelope as declared.
-                idl.NodeFields
+                decl.Envelope.Members
                 |> List.map (fun f -> tsSpecPieceOf idl disc "n" f |> Result.map (fun p -> f.Name, p))
                 |> sequenceR
                 |> Result.map (fun envelopePairs ->
                     let nodePairsUnsorted =
                         ("id", "[\"id\", encStr(n.id)]")
-                        :: ("kind", "[\"kind\", encKind(n.kind)]")
+                        :: (key, "[" + SourceLit.tsString key + ", encKind(n.kind)]")
                         :: envelopePairs
 
                     let nodePairs =
@@ -1345,7 +1333,7 @@ const plain = (pairs) =>
                     + "\n  }\n}\n\nfunction encodeNode(n) {\n  return plain(["
                     + nodePairs
                     + "]);\n}")
-            else
+            | KindPlacement.Merged ->
                 // Phase 109 — the FLAT shape: the in-memory node IS the flat wire
                 // object, so the kind pairs are read from the node itself and
                 // `typed` merges the discriminator, the id, the kind fields and the
@@ -1363,7 +1351,7 @@ const plain = (pairs) =>
                     |> String.concat "\n"
 
                 let envelopeConcat =
-                    match idl.NodeFields with
+                    match decl.Envelope.Members with
                     | [] -> Ok ""
                     | fields ->
                         fields
@@ -1383,8 +1371,6 @@ const plain = (pairs) =>
                     + envelope
                     + ");\n}")
 
-        let enums, _, records = referenced idl kinds
-
         let kindDecodeDispatch =
             let arms =
                 kinds
@@ -1401,7 +1387,7 @@ const plain = (pairs) =>
                 + ");\n  }\n}\n\n"
 
             let envelopeDecoded =
-                idl.NodeFields
+                decl.Envelope.Members
                 |> List.map (fun f ->
                     tsDecField idl disc f
                     |> Result.map (fun e -> ", " + SourceLit.tsKey f.Name + ": " + e))
@@ -1437,17 +1423,14 @@ const plain = (pairs) =>
 
         [ [ Ok prelude ]
           records |> List.map (tsRecordEncoder idl disc)
-          unions |> List.map (tsUnionEncoder idl disc idl.Harden)
+          unions |> List.map (tsUnionEncoder decl disc)
           kinds |> List.map (tsSpecEncoder idl disc flat)
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
-          :: (if declaresHostedFormat idl then
-                  [ Ok tsFormatHelper ]
-              else
-                  [])
+          :: (if decl.HostedFormat then [ Ok tsFormatHelper ] else [])
           enums |> List.map (tsEnumDecoder >> Ok)
           records |> List.map (tsRecordDecoder idl disc)
-          unions |> List.map (tsUnionDecoder idl disc idl.Harden)
+          unions |> List.map (tsUnionDecoder decl disc)
           kinds |> List.map (tsSpecDecoder idl disc)
           [ kindDecodeDispatch ]
           [ Ok "export { encodeNode, decodeNode };" ] ]
@@ -1463,5 +1446,5 @@ const plain = (pairs) =>
         Stamp.generated (CommentStyle.Line "//") "TypeScript module" [ idl ] body
 
     /// The module [[typescriptModuleBody]] emits, under its stamp.
-    let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        typescriptModuleBody idl kindTags |> Result.map (tsModuleStamp idl)
+    let typescriptModule (decl: Decl) : Result<string, CodegenError> =
+        typescriptModuleBody decl |> Result.map (tsModuleStamp decl.Idl)

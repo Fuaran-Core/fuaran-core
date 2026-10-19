@@ -99,135 +99,8 @@ module internal FSharpTypes =
     /// a caller that consumed the string directly, and `Result.defaultWith` over
     /// [[CodegenError.describe]] is the one-line adaptation for a caller that would rather
     /// keep failing loudly.
-    /// Phase 252 — which generated RECORD-SHAPED declarations take custom WIRE equality:
-    /// keys `"R:<record>"`, `"S:<kind tag>"` (a kind's spec record) and `"Node"`.
-    ///
-    /// A [[Optionality.HostOnly]] field is a closure, so the record holding it has no
-    /// structural equality, and neither does anything that holds THAT — the generated `Node`
-    /// included, which is what every tree-algebra conformance family compares. A host-only
-    /// field is by definition invisible on the wire, so the record's wire-observable identity
-    /// is its OTHER fields, and equality over them is exactly what the wire can tell apart.
-    /// That is what these declarations get (DECISIONS, Phase 252).
-    ///
-    /// A declaration qualifies when it holds a host-only CLOSURE (a host-only field whose
-    /// declared type is a function; a host-only data field compares already), is not generic in `'Msg`
-    /// (its equality would need a constraint the generated layer cannot state), and every
-    /// one of its wire fields is itself equality-capable — scalars, enums, JSON, the erased
-    /// `unit` sentinels, and records / unions / nodes built of those or of a declaration that
-    /// qualifies. A wire-visible closure (`TFn`) or a hosted host type (whose equality the
-    /// IDL cannot see) disqualifies the declaration rather than emitting source that does not
-    /// compile; such a vocabulary keeps the shape it had. The set is a fixpoint, because
-    /// qualifying is mutually dependent across a recursive type group.
-    let wireEqualityKeys (idl: Idl) (msg: Set<string>) (kinds: IdlKind list) (projected: Set<string>) : Set<string> =
-        let fieldsOf (key: string) : IdlField list option =
-            if key = "Node" then
-                Some idl.NodeFields
-            elif key.StartsWith "R:" then
-                idl.Records
-                |> List.tryFind (fun r -> r.Name = key.Substring 2)
-                |> Option.map _.Fields
-            // A PROJECTED kind's record is verbatim host source, so nothing here can say what it
-            // compares — it neither qualifies nor counts as capable.
-            elif key.StartsWith "S:" && not (projected.Contains(key.Substring 2)) then
-                kinds |> List.tryFind (fun k -> k.Tag = key.Substring 2) |> Option.map _.Fields
-            else
-                None
-
-        // A host-only field whose declared host type is a FUNCTION — the one kind of host-only
-        // field that removes structural equality. A host-only DATA field (`Motion option`)
-        // compares structurally already, and a declaration holding only such fields keeps the
-        // equality it has.
-        let hostOnlyClosure (f: IdlField) =
-            f.Opt = HostOnly
-            && (match f.Type with
-                | TFn s -> s.FSharp.Contains "->"
-                | _ -> false)
-
-        let generic (key: string) =
-            if key = "Node" then msg.Contains "Node"
-            elif key.StartsWith "R:" then msg.Contains(key.Substring 2)
-            else msg.Contains(key.Substring 2 + "Spec")
-
-        let candidates =
-            [ "Node"
-              yield! idl.Records |> List.map (fun r -> "R:" + r.Name)
-              yield! kinds |> List.map (fun k -> "S:" + k.Tag) ]
-            |> List.filter (fun key ->
-                not (generic key)
-                && (fieldsOf key |> Option.exists (List.exists hostOnlyClosure)))
-            |> Set.ofList
-
-        let rec capable (granted: Set<string>) (visiting: Set<string>) (t: IdlType) : bool =
-            match t with
-            | TStr
-            | TInt
-            | TBool
-            | TFloat
-            | TEnum _
-            | TJson
-            | TClosure
-            | TOpaque
-            | TVar _ -> true
-            | TList inner
-            | TMap inner -> capable granted visiting inner
-            | TRecord n -> declCapable granted visiting ("R:" + n)
-            | TNode -> declCapable granted visiting "Node"
-            | TUnion(n, args) ->
-                args |> List.forall (capable granted visiting)
-                && (match CodegenLookup.tryUnion idl n with
-                    | Some u when not (msg.Contains n) && not (Set.contains ("U:" + n) visiting) ->
-                        u.Cases
-                        |> List.forall (fun c ->
-                            c.Fields
-                            |> List.forall (fun f ->
-                                not (hostOnlyClosure f)
-                                && (f.Opt = HostOnly || capable granted (Set.add ("U:" + n) visiting) f.Type)))
-                    | Some u when Set.contains ("U:" + n) visiting -> true
-                    | _ -> false)
-            | TFn _
-            | THosted _
-            | TKind
-            | TOp -> false
-
-        and declCapable (granted: Set<string>) (visiting: Set<string>) (key: string) : bool =
-            if Set.contains key granted || Set.contains key visiting then
-                true
-            else
-                let visiting = Set.add key visiting
-
-                let own =
-                    match fieldsOf key with
-                    | Some fs ->
-                        fs
-                        |> List.forall (fun f ->
-                            not (hostOnlyClosure f) && (f.Opt = HostOnly || capable granted visiting f.Type))
-                    | None -> false
-
-                // The node's equality also reaches every kind it can carry.
-                own
-                && (key <> "Node"
-                    || kinds |> List.forall (fun k -> declCapable granted visiting ("S:" + k.Tag)))
-
-        let wireFieldsCapable (granted: Set<string>) (key: string) =
-            let own =
-                fieldsOf key
-                |> Option.defaultValue []
-                |> List.filter (fun f -> f.Opt <> HostOnly)
-                |> List.forall (fun f -> capable granted (Set.singleton key) f.Type)
-
-            own
-            && (key <> "Node"
-                || kinds
-                   |> List.forall (fun k -> declCapable granted (Set.singleton key) ("S:" + k.Tag)))
-
-        let rec fixpoint (granted: Set<string>) =
-            let next = granted |> Set.filter (wireFieldsCapable granted)
-            if next = granted then granted else fixpoint next
-
-        fixpoint candidates
-
     /// Phase 252 — the custom-equality members for a qualifying declaration (see
-    /// [[wireEqualityKeys]]): `Equals` and `GetHashCode` over its WIRE fields, in declared
+    /// `Decl.EqualityCapable`): `Equals` and `GetHashCode` over its WIRE fields, in declared
     /// order. `typeName` is the generated type, `wireFields` the fields' F# names.
     let wireEqualityMembers (typeName: string) (wireFields: string list) : string =
         let equals =
@@ -270,14 +143,12 @@ module internal FSharpTypes =
     let typeGroup
         (doc: string -> string -> string)
         (docOpt: string -> string option)
-        (projections: Map<string, Projection>)
         (typeSplice: string option)
-        (idl: Idl)
-        (kinds: IdlKind list)
-        (unions: IdlUnion list)
-        (records: IdlRecord list)
+        (decl: Decl)
         : Result<string, CodegenError> =
-        let msg = msgCarrying idl
+        let idl, kinds, unions, records = decl.Idl, decl.Kinds, decl.Unions, decl.Records
+        let projections = decl.Projections
+        let msg = decl.Msg
         let nodeArgs = declParams msg "Node" []
         let kindArgs = declParams msg "NodeKind" []
 
@@ -302,8 +173,7 @@ module internal FSharpTypes =
 
         // Phase 252 — the declarations that take wire equality, and the attribute + members
         // each gets. Empty for every vocabulary without a host-only field.
-        let wireEq =
-            wireEqualityKeys idl msg kinds (projections |> Map.toList |> List.map fst |> Set.ofList)
+        let wireEq = decl.EqualityCapable
 
         let eqAttr key =
             if Set.contains key wireEq then
@@ -451,10 +321,10 @@ module internal FSharpTypes =
     /// support (Phase 293). Before this phase a second, older emitter rendered the same
     /// declarations differently (no `RequireQualifiedAccess`, no records, no `Node`, no
     /// recursion group); there is one now, and this is its projection.
-    let fsharpTypes (idl: Idl) : Result<string, CodegenError> =
+    let fsharpTypes (decl: Decl) : Result<string, CodegenError> =
         let noDoc (_: string) (_: string) = ""
         let noDocOpt (_: string) : string option = None
-        let enums = idl.Enums |> List.map (rqaEnum noDoc) |> String.concat "\n\n"
+        let enums = decl.Enums |> List.map (rqaEnum noDoc) |> String.concat "\n\n"
 
-        typeGroup noDoc noDocOpt Map.empty None idl idl.Kinds idl.Unions idl.Records
+        typeGroup noDoc noDocOpt None decl
         |> Result.map (fun group -> (if enums = "" then group else enums + "\n\n" + group) |> normalizeEol)

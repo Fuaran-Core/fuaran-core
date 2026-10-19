@@ -29,8 +29,11 @@
          lookup NoInlining (DECISIONS.md D129); first, so every emitter can call it. -->
     <Compile Include="Lookup.fs" />
     <Compile Include="Emit/Core.fs" />
-    <Compile Include="Emit/Reach.fs" />
     <Compile Include="Emit/Annotations.fs" />
+    <!-- Phase 511 - the ONE resolution every emitter reads (`Decl.resolve`): reach, the msg,
+         equality and node-holder analyses, the generic instantiations, the envelope layout.
+         After Annotations (it reads `emitsObsolete` once), ahead of every emitter. -->
+    <Compile Include="Emit/Decl.fs" />
     <Compile Include="Emit/FSharpTypes.fs" />
     <Compile Include="Emit/FSharpDefaults.fs" />
     <Compile Include="Emit/FSharpDerive.fs" />
@@ -56,6 +59,10 @@
          Reads the shared CodegenError channel declared in Codegen.fs, so after it;
          appended last (append-only registration). It emits nothing any host builds. -->
     <Compile Include="FStar.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 511 - the suite states the laws of the internal `Decl` resolution directly. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />

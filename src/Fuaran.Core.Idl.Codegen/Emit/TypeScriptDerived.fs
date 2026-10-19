@@ -3,7 +3,6 @@ namespace Fuaran.Core.Idl.Emit
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Emit.Core
-open Fuaran.Core.Idl.Emit.Reach
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpDefaults
 
@@ -17,8 +16,8 @@ module internal TypeScriptDerived =
     // Phase 380 — the STRUCTURAL DERIVATIONS (Phase 374) and the COLLECTING DECODERS (Phase 377)
     // in the TypeScript host. Every derivation is opt-in exactly as on the F# side, and is stated
     // over the SAME analysis rather than a second one: which positions are structural children
-    // (`FSharpDerive.structuralField`), which declarations hold a node (`FSharpDerive.nodeHolders`),
-    // which fields a fold descends (`FSharpDerive.foldSelfIn`), when a defect is a leaf's
+    // (`FSharpDerive.structuralField`), which declarations hold a node (`Decl.NodeHolders`),
+    // which fields a fold descends (`Decl.foldSelfIn`), when a defect is a leaf's
     // (`FSharpCodec.collectsOver`). ADMISSIBILITY IS THE F# PATH'S: the requests are run through
     // the F# derivation first and its refusal is this path's refusal, so the two hosts accept and
     // refuse the same requests with the same typed error.
@@ -138,9 +137,9 @@ module internal TypeScriptDerived =
     /// `keyedChildren` / `withKeyedChildren` (arity-preserving), the full walk, and `keyedWitness`
     /// (Core's `KeyedWitness` members). Every node position that is not a structural child: an
     /// optional node, a node in a record, a union case, a list or a map, and the node envelope.
-    let private tsKeyedDecl (disc: string) (flat: bool) (ctx: FSharpDerive.Ctx) : string * string list =
-        let hs = FSharpDerive.nodeHolders ctx
-        let holdsF (f: IdlField) = FSharpDerive.holdsIn hs f.Type
+    let private tsKeyedDecl (disc: string) (flat: bool) (ctx: Decl) : string * string list =
+        let hs = ctx.NodeHolders
+        let holdsF (f: IdlField) = Decl.holdsIn hs f.Type
 
         // A node held through a generic union's type argument never reaches here: the F# analysis
         // refused it first.
@@ -352,12 +351,7 @@ module internal TypeScriptDerived =
 
     /// Emission 3 — `slotsOf<T>(n)`: every `[field name, value]` pair the node holds at the declared
     /// type `T` (directly, optional or in a list), kind fields first, then the envelope's.
-    let private tsSlotsDecl
-        (disc: string)
-        (flat: bool)
-        (ctx: FSharpDerive.Ctx)
-        (typeName: string)
-        : string * string list =
+    let private tsSlotsDecl (disc: string) (flat: bool) (ctx: Decl) (typeName: string) : string * string list =
         let isT (t: IdlType) =
             match t with
             | TEnum n
@@ -405,10 +399,7 @@ module internal TypeScriptDerived =
     /// exported under the union's name (`Rule.fold`, `Trigger.owner`), as the F# host's `module`
     /// is. The object is declared as `<Union>$` and exported `as <Union>`, so a union named like a
     /// global the module reads (`Map`, `Object`, `Error`) shadows nothing inside the module.
-    let private tsUnionModulesDecl
-        (ctx: FSharpDerive.Ctx)
-        (requests: FSharpDerive.Request list)
-        : (string * string list) list =
+    let private tsUnionModulesDecl (ctx: Decl) (requests: FSharpDerive.Request list) : (string * string list) list =
         let disc = ctx.Idl.Wire.Discriminator
 
         let named =
@@ -420,8 +411,7 @@ module internal TypeScriptDerived =
                 | _ -> None)
             |> List.distinct
 
-        let recursesIn (u: IdlUnion) (seen: Set<string>) (t: IdlType) =
-            FSharpDerive.foldSelfIn ctx u seen t = Ok true
+        let recursesIn (u: IdlUnion) (seen: Set<string>) (t: IdlType) = Decl.foldSelfIn ctx u seen t = Ok true
 
         let foldMember (u: IdlUnion) =
             let self = u.Name + "$"
@@ -443,8 +433,7 @@ module internal TypeScriptDerived =
                         st
                 | TRecord n ->
                     let fs =
-                        ctx.Records
-                        |> List.tryFind (fun r -> r.Name = n)
+                        Decl.tryRecord ctx n
                         |> Option.map _.Fields
                         |> Option.defaultValue []
                         |> List.filter (fun f -> recursesIn u (Set.singleton n) f.Type)
@@ -518,7 +507,7 @@ module internal TypeScriptDerived =
             |> String.concat "\n"
 
         named
-        |> List.choose (fun name -> ctx.Unions |> List.tryFind (fun u -> u.Name = name))
+        |> List.choose (fun name -> Decl.tryUnion ctx name)
         |> List.map (fun u ->
             let folds = requests |> List.contains (FSharpDerive.Request.Fold u.Name)
 
@@ -547,7 +536,7 @@ module internal TypeScriptDerived =
     let private tsDefaultRecordsDecl
         (idl: Idl)
         (disc: string)
-        (ctx: FSharpDerive.Ctx)
+        (ctx: Decl)
         : Result<string * string list, CodegenError> =
         let defaultFor (tag: string) (field: string) =
             idl.Defaults
@@ -624,7 +613,7 @@ module internal TypeScriptDerived =
     /// Emission 8 — `kindCategories`, `kindFieldNames`, `opFieldNames` as `Map`s of `Set`s and
     /// `envelopeFieldNames` as a `Set`, each in Ordinal order (the order the F# host's `Map` and
     /// `Set` iterate in).
-    let private tsConstantsDecl (ctx: FSharpDerive.Ctx) : string * string list =
+    let private tsConstantsDecl (ctx: Decl) : string * string list =
         let ordinal (xs: string list) =
             xs
             |> List.distinct
@@ -741,7 +730,9 @@ module internal TypeScriptDerived =
                 + literal
                 + ";")
 
-    let private tsColUnion (idl: Idl) (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
+    let private tsColUnion (decl: Decl) (disc: string) (u: IdlUnion) =
+        let idl = decl.Idl
+
         let argList =
             match u.Params with
             | [] -> "j"
@@ -768,7 +759,7 @@ module internal TypeScriptDerived =
 
         // A transparent union reads its single-field case bare, collecting through it.
         let untagged =
-            match TransparentUnion.tag tokens u with
+            match Decl.transparentTag decl u with
             | Some ttag ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
                 | Some({ Fields = [ f ] }) ->
@@ -881,14 +872,9 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
     /// object, per node `decodeNodeJson` / `decodeNodeJsonAll` over a parsed value and
     /// `decodeNodeAll` over text — each answering `decodeNode`'s `{ ok, value }` / `{ ok, error }`,
     /// the collecting ones `{ ok: false, errors }`.
-    let private tsCollectingDecl
-        (idl: Idl)
-        (disc: string)
-        (flat: bool)
-        (kinds: IdlKind list)
-        (unions: IdlUnion list)
-        (records: IdlRecord list)
-        : Result<string * string list, CodegenError> =
+    let private tsCollectingDecl (decl: Decl) (disc: string) : Result<string * string list, CodegenError> =
+        let idl, kinds, unions, records = decl.Idl, decl.Kinds, decl.Unions, decl.Records
+
         let colKind =
             "function colKind(j) {\n  if (!isObj(j)) return dFail('WrongKind', 'object', 'expected a kind object');\n  switch (dTag(j)) {\n"
             + (kinds
@@ -901,11 +887,14 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
             + ");\n  }\n}"
 
         let colNode =
-            idl.NodeFields
+            decl.Envelope.Members
             |> List.map (tsColField idl disc)
             |> sequenceR
             |> Result.map (fun envelope ->
-                let kindRead = if flat then "colKind(j)" else "cReq('kind', fs, colKind)"
+                let kindRead =
+                    match decl.Envelope.Kind with
+                    | KindPlacement.NestedUnder key -> "cReq(" + SourceLit.tsStringSingle key + ", fs, colKind)"
+                    | KindPlacement.Merged -> "colKind(j)"
 
                 let reads =
                     [ "dReq('id', fs, dStr)"; kindRead ] @ envelope
@@ -913,15 +902,15 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
                     |> String.concat ", "
 
                 let envelopeAssigns =
-                    idl.NodeFields
+                    decl.Envelope.Members
                     |> List.mapi (fun i f -> sprintf ", %s: v[%d]" (SourceLit.tsKey f.Name) (i + 2))
                     |> String.concat ""
 
                 let build =
-                    if flat then
-                        "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
-                    else
-                        "{ id: v[0], kind: v[1]" + envelopeAssigns + " }"
+                    match decl.Envelope.Kind with
+                    | KindPlacement.NestedUnder key ->
+                        "{ id: v[0], " + SourceLit.tsKey key + ": v[1]" + envelopeAssigns + " }"
+                    | KindPlacement.Merged -> "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
 
                 "function colNode(j) {\n  const fs = dObj(j);\n  const v = cAll(["
                 + reads
@@ -935,7 +924,7 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
 
         let group =
             [ Ok colKind; colNode ]
-            @ (unions |> List.map (tsColUnion idl disc idl.Harden))
+            @ (unions |> List.map (tsColUnion decl disc))
             @ (records |> List.map (fun r -> objectDecoder r.Name [] r.Fields))
             @ (kinds
                |> List.map (fun k ->
@@ -1029,7 +1018,7 @@ const cEveryOf = (read) => {
 
     /// `SlotsOf T` — the pairs hold a `T`; a generic union's instantiations differ field by field,
     /// so its pairs hold `unknown`, the F# host's `obj`, for the same reason.
-    let private slotsDecls (ctx: FSharpDerive.Ctx) (typeName: string) : string list =
+    let private slotsDecls (ctx: Decl) (typeName: string) : string list =
         let generic =
             ctx.Unions
             |> List.exists (fun u -> u.Name = typeName && not (List.isEmpty u.Params))
@@ -1133,26 +1122,14 @@ const cEveryOf = (read) => {
     let private tsDerivedParts
         (requests: FSharpDerive.Request list)
         (decoders: bool)
-        (idl: Idl)
-        (kindTags: string list)
+        (ctx: Decl)
         : Result<DerivedPart list option, CodegenError> =
         if List.isEmpty requests && not decoders then
             Ok None
         else
-            let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
-
-            let _, unions, records = referenced idl kinds
-            let msg = msgCarrying idl
+            let idl, kinds = ctx.Idl, ctx.Kinds
             let disc = idl.Wire.Discriminator
-            let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
-
-            let ctx: FSharpDerive.Ctx =
-                { Idl = idl
-                  Msg = msg
-                  Kinds = kinds
-                  Unions = unions
-                  Records = records
-                  Projections = Map.empty }
+            let flat = ctx.Envelope.Kind = KindPlacement.Merged
 
             let has r = List.contains r requests
 
@@ -1160,14 +1137,9 @@ const cEveryOf = (read) => {
                 has FSharpDerive.Request.StructuralAccess
                 || has FSharpDerive.Request.KeyedPositions
 
-            // The F# path decides admissibility: its structural witness (which refuses a kind
-            // mixing a node list with other children) and its derivations, texts discarded.
-            let admitted =
-                (if publicAccess then
-                     FSharpCodec.witnessDecl true Map.empty msg kinds |> Result.map ignore
-                 else
-                     Ok())
-                |> Result.bind (fun () -> FSharpDerive.derivedDecl ctx requests |> Result.map ignore)
+            // Phase 511 (S12) — admission is the one derivation admission, over this host's
+            // resolution: no host projections, because a projection is F# source.
+            let admitted = FSharpCodec.admitDerivations ctx requests
 
             let slots =
                 requests
@@ -1192,7 +1164,7 @@ const cEveryOf = (read) => {
                         | FSharpDerive.Request.Projections(n, _) -> Some n
                         | _ -> None)
                     |> List.distinct
-                    |> List.choose (fun name -> ctx.Unions |> List.tryFind (fun u -> u.Name = name))
+                    |> List.choose (fun name -> Decl.tryUnion ctx name)
 
                 let fieldsOf (u: IdlUnion) =
                     requests
@@ -1235,7 +1207,7 @@ const cEveryOf = (read) => {
                        [])
                   unionModules ()
                   (if decoders then
-                       [ tsCollectingDecl idl disc flat kinds unions records
+                       [ tsCollectingDecl ctx disc
                          |> Result.map (fun emitted -> part emitted (collectingDecls kinds)) ]
                    else
                        []) ]
@@ -1249,12 +1221,13 @@ const cEveryOf = (read) => {
     let typescriptModuleDerived
         (requests: FSharpDerive.Request list)
         (decoders: bool)
-        (idl: Idl)
-        (kindTags: string list)
+        (decl: Decl)
         : Result<string, CodegenError> =
-        typescriptModuleBody idl kindTags
+        let idl = decl.Idl
+
+        typescriptModuleBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders idl kindTags
+            tsDerivedParts requests decoders decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsModuleStamp idl baseText
@@ -1281,12 +1254,13 @@ const cEveryOf = (read) => {
     let typescriptDeclarationsDerived
         (requests: FSharpDerive.Request list)
         (decoders: bool)
-        (idl: Idl)
-        (kindTags: string list)
+        (decl: Decl)
         : Result<string, CodegenError> =
-        typescriptDeclarationsBody idl kindTags
+        let idl = decl.Idl
+
+        typescriptDeclarationsBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders idl kindTags
+            tsDerivedParts requests decoders decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsDeclarationsStamp idl baseText
