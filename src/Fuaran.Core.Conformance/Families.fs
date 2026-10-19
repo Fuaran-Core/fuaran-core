@@ -113,6 +113,8 @@ module Families =
         | SanitizeWitness
         /// The attestation sink, `IAttestationSink`.
         | IAttestationSink
+        /// The domain's own codec, `Codec` (Phase 507).
+        | Codec
 
         /// The type's name, without its generic arity — the name a signature, the export's
         /// `witness` member and `STABILITY.md` use.
@@ -137,6 +139,7 @@ module Families =
             | QuerySeamWitness -> "QuerySeamWitness"
             | SanitizeWitness -> "SanitizeWitness"
             | IAttestationSink -> "IAttestationSink"
+            | Codec -> "Codec"
 
     /// Who runs a family: an aggregate, or a domain that elects it for a stated reason.
     type Election =
@@ -170,8 +173,10 @@ module Families =
             /// of the proof leg's operation coverage. An operation the family merely CALLS as harness
             /// is not listed.
             Operations: string list
-            /// Further entry points that run this family with one parameter pinned to its default —
-            /// one family, one census cell, several names. Empty on every row today.
+            /// Further entry points that run this family with one parameter pinned to its default,
+            /// each spelled as a roster key (`<Module>.<Entry>`) — one family, one census cell, one
+            /// reference run, several names (Phase 507). Each stays a public entry point answering
+            /// `LawResult list`, so reflection finds it; the roster reads it as this family's.
             Spellings: string list
         }
 
@@ -208,6 +213,19 @@ module Families =
         // One row per family: `(id, takes, election, discharges)`, its adequacy class, its refusal
         // verdict, and its operations as ONE space-separated string (no operation name holds a
         // space). Each position has its own type, so a row cannot shift a field into its neighbour.
+        // The pinned-default spellings (Phase 507), keyed by the family they spell: the bare or `…At`
+        // entry point that IS the `…With` form with its parameter at the default. A `…With` that runs
+        // another family and adds laws is a different law set and carries a stem of its own instead.
+        let spellingsOf (id: string) : string list =
+            match id with
+            | "Conformance.reconcileLawsWith" -> [ "Conformance.reconcileLaws" ]
+            | "Conformance.concurrencyLawsWith" -> [ "Conformance.concurrencyLaws" ]
+            | "Conformance.snapshotLawsWith" -> [ "Conformance.snapshotLaws" ]
+            | "Conformance.keyedArbitrationLawsWith" -> [ "Conformance.keyedArbitrationLawsAt" ]
+            | "Conformance.columnOwnershipLawsWith" -> [ "Conformance.columnOwnershipLaws" ]
+            | "FoldConfluence.laneFoldLawsWith" -> [ "FoldConfluence.laneFoldLawsAt" ]
+            | _ -> []
+
         let row ((id, takes, election, discharges), adequacy, refusal, operations: string) =
             { Id = id
               Takes = takes
@@ -216,7 +234,7 @@ module Families =
               Refusal = refusal
               Discharges = discharges
               Operations = operations.Split ' ' |> Array.filter (fun s -> s <> "") |> List.ofArray
-              Spellings = [] }
+              Spellings = spellingsOf id }
 
         let verdict population why = { Population = population; Why = why }
         let none = verdict NoRefusal
@@ -271,10 +289,6 @@ module Families =
           Guarded [ "op-pair interference" ],
           none "conflicts is a report list, never a refused outcome",
           "Dag.conflicts"
-          ("Conformance.reconcileLaws", tree, stronger, []),
-          Guarded [ "reconcile outcome; delta-pair independence (delegates to reconcileLawsWith)" ],
-          drawn "delegates to reconcileLawsWith",
-          ""
           ("Conformance.reconcileLawsWith", tree, stronger, []),
           Guarded [ "reconcile outcome"; "reconcile shape"; "delta-pair independence" ],
           drawn "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome",
@@ -293,10 +307,6 @@ module Families =
           none
               "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law",
           "Ops.footprintIn Dag.conflictsIn Dag.reconcileIn"
-          ("Conformance.concurrencyLaws", tree, stronger, []),
-          Guarded [ "independent pair (delegates to concurrencyLawsWith)" ],
-          none "delegates to concurrencyLawsWith",
-          ""
           ("Conformance.concurrencyLawsWith", tree, stronger, []),
           Guarded [ "independent pair (its own Phase 80 vacuity guard)" ],
           none "a drawn refusal is skipped; an applyAll Error only fails a law",
@@ -306,10 +316,6 @@ module Families =
           drawn
               "Inapplicable comes from the kit's corruption roll and Conflicts from drawn scripts; guarded on arbitration bucket",
           "Arbitration.arbitrate Arbitration.arbitrateWith Arbitration.duplicateIds"
-          ("Conformance.snapshotLaws", stream, stronger, []),
-          Unconditional "delegates to snapshotLawsWith",
-          none "delegates to snapshotLawsWith",
-          ""
           ("Conformance.snapshotLawsWith", stream, stronger, []),
           Unconditional
               "each iteration takes a snapshot and replays across it; a run whose chains are too short to cut one reds both laws as never reached",
@@ -487,15 +493,11 @@ module Families =
           built
               "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms",
           "Ops.applyContainedKeyed Ops.canApplyContainedKeyed Tree.wellFormedKeyed Tree.idsKeyed Tree.keyedIds Tree.traversal"
-          ("Conformance.keyedArbitrationLawsAt", Takes.KeyedWitness :: tree, capability, []),
-          Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ],
-          drawn "delegates to keyedArbitrationLawsWith",
-          "Ops.footprintKeyed Ops.canApplyAllKeyed"
           ("Conformance.keyedArbitrationLawsWith", Takes.KeyedWitness :: tree, capability, []),
           Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ],
           drawn
               "the container-illegal proposal and the keyed-id clash are built and must be refused; Inapplicable also comes from the kit's corruption roll and Conflicts from drawn scripts, so the guard covers the arbitration bucket",
-          ""
+          "Ops.footprintKeyed Ops.canApplyAllKeyed"
           ("Conformance.propagationEvaluatorLawsAt",
            [ Takes.EvaluatorWitness ],
            capability,
@@ -503,16 +505,19 @@ module Families =
           Guarded [ "evaluator edit" ],
           drawn "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit",
           ""
-          ("Conformance.propagationEvaluatorLawsWith",
-           [ Takes.EvaluatorWitness ],
-           capability,
-           [ "propagation-prior-blind" ]),
+          ("Conformance.propagationPriorLawsAt", [ Takes.EvaluatorWitness ], capability, [ "propagation-prior-blind" ]),
           Guarded
               [ "evaluator edit (delegates to propagationEvaluatorLawsAt)"
                 "prior-aware edit" ],
           drawn
               "runs propagationEvaluatorLawsAt first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit",
           "Propagation.evalWith Propagation.evalFromWith Propagation.sort"
+          ("Conformance.propagationEvaluatorLawsWith", [ Takes.EvaluatorWitness ], capability, []),
+          Guarded
+              [ "evaluator edit (delegates to propagationEvaluatorLawsAt)"
+                "prior-aware edit" ],
+          drawn "the obsolete forward of propagationPriorLawsAt (Phase 507); the same laws, labelled with its own id",
+          ""
           ("Conformance.captureReplayLaws", [], seam, []),
           Guarded [ "tampered" ],
           drawn
@@ -580,16 +585,11 @@ module Families =
               "each iteration builds a NaN pair, a signed-zero pair and a pair differing only under an absent row, beside the drawn pair",
           none "equality and the reads answer values; no refusal path exists to reach",
           "Cell.compare ColumnData.Equals ColumnData.GetHashCode Vector.Equals Vector.GetHashCode Column.cell Column.isPresent Column.length Column.validity Column.mask Column.ofCells Column.toCells Column.ofInts Column.ofFloats Column.ofBools Column.ofStrs Column.ofDates Column.ofTimestamps Column.ofDecimals Column.tryInts Column.tryFloats Column.tryBools Column.tryStrs Column.tryDates Column.tryTimestamps Column.tryDecimals Validity.ofVector Validity.ofArray Validity.ofList Validity.isPresent Validity.toMask Validity.presentCount Vector.empty Vector.length Vector.isEmpty Vector.item Vector.tryItem Vector.ofArray Vector.adopt Vector.ofList Vector.ofSeq Vector.init Vector.toArray Vector.toList Vector.iter Vector.iteri Vector.fold Vector.map Vector.mapi Vector.exists Vector.tryFindIndex Vector.slice Vector.Unsafe.borrow"
-          ("Conformance.columnOwnershipLaws", [], seam, []),
-          Unconditional
-              "each iteration builds a column of every type and two columns sharing one backing array and one mask array, and fingerprints every element of each",
-          none "the law compares digests taken before and after the operation; no refusal path exists to reach",
-          "Vector.adopt Vector.slice Vector.Unsafe.borrow"
           ("Conformance.columnOwnershipLawsWith", [], seam, []),
           Unconditional
-              "one assertion per column the caller's draw builds, over every element; a draw that builds none takes no evidence and reds as never reached",
+              "one assertion per column the caller's draw builds, over every element; a draw that builds none takes no evidence and reds as never reached (the default draw builds a column of every type and two columns sharing one backing array and one mask array)",
           none "the law compares digests taken before and after the operation; no refusal path exists to reach",
-          ""
+          "Vector.adopt Vector.slice Vector.Unsafe.borrow"
           ("Conformance.deferredLaws", [], seam, []),
           Unconditional "each iteration round-trips Pending, Ready and Failed",
           built "the fixed Failed case must yield Error",
@@ -636,10 +636,17 @@ module Families =
           built
               "the refused URLs, the rejected attribute keys and values and the dangerous markdown are fixed vectors the first iteration always runs",
           "Idl.Sanitize.isAllowedAttributeKey Idl.Sanitize.isSafeAttributeValue Idl.Sanitize.sanitizeAttributes Idl.Sanitize.sanitizeUrl Idl.Sanitize.sanitizeUrlOrBlank Idl.Sanitize.scrubMarkdown"
-          ("Conformance.codecLaws", [], seam, [ "decode-layer-refusal-premises"; "decode-layer-round-trip-premises" ]),
+          ("Conformance.codecLawsAt",
+           [ Takes.Codec ],
+           capability,
+           [ "decode-layer-refusal-premises"; "decode-layer-round-trip-premises" ]),
           Guarded [ "mutation outcome"; "distinct written values" ],
           drawn
               "the refusal law reads the codec's refusals of mutations built from each drawn value, and a codec that refuses none holds it over nothing; guarded on mutation outcome",
+          ""
+          ("Conformance.codecLaws", [ Takes.Codec ], capability, []),
+          Guarded [ "mutation outcome"; "distinct written values" ],
+          drawn "the obsolete forward of codecLawsAt (Phase 507); the same laws, labelled with its own id",
           ""
           ("StringEscapeVectors.laws", [], seam, []),
           Unconditional
@@ -651,12 +658,16 @@ module Families =
               "a fixed vector corpus: every run evaluates every value, actor and capture vector under both profiles and the rendered table, so there is no sample that could miss one",
           none "every vector is an accepted rendering; no refused outcome is read",
           "Json.renderWith Json.escapeWith EncodingProfile.name EncodingProfile.tryParse OpStream.profileName OpStream.tryProfile OpStream.encodeActorWith OpStream.configFor Dag.nodeIdWith EncodingProfileVectors.lines Canonical.write Canonical.tryWrite Canonical.isCanonical"
-          ("EncodingProfileVectors.storedCodecLaws", [], seam, []),
+          ("EncodingProfileVectors.storedCodecLawsAt", [ Takes.Codec ], capability, []),
           Unconditional
               "the consumer's own stored texts, walked whole: every text is read, re-rendered under the declared profile and under every other, so there is no sample that could miss one",
           none
               "reads a stored corpus; a defect in a stored text is a red law about that store, not a sampled refused outcome",
           "Canonical.read Codec.read Codec.write"
+          ("EncodingProfileVectors.storedCodecLaws", [ Takes.Codec ], capability, []),
+          Unconditional "the obsolete forward of storedCodecLawsAt (Phase 507); the same laws over the same store",
+          none "the obsolete forward of storedCodecLawsAt; its refusal verdict is that family's",
+          ""
           ("StoredIdentity.linearLaws", [ Takes.StreamWitness ], seam, []),
           Unconditional
               "the consumer's own stored chain, walked whole: every record is recomputed and every hash round-trips, so there is no sample that could miss one",
@@ -702,15 +713,11 @@ module Families =
           Unconditional "the handed rows, walked whole: every row is evaluated, and the corpus law reds a set with none",
           none "every row is a computed value; no refused outcome is read",
           ""
-          ("FoldConfluence.laneFoldLawsAt", [ Takes.StreamWitness; Takes.LaneGen ], capability, []),
-          Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ],
-          drawn "delegates to laneFoldLawsWith",
-          "FoldConfluence.foldOnce Dag.reconcileMany"
           ("FoldConfluence.laneFoldLawsWith", [ Takes.StreamWitness; Takes.LaneGen ], capability, []),
           Guarded [ "lane-fold outcome" ],
           drawn
               "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome, with rejected lane sets counted beside it (Phase 245)",
-          "" ]
+          "FoldConfluence.foldOnce Dag.reconcileMany" ]
         |> List.map row
 
     /// The roster's keys, sorted — the enumeration a census, a ladder or a projection quantifies

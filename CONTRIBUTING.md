@@ -15,7 +15,7 @@ named beside them, and a leg whose prerequisite is absent is **skipped by name**
 |---|---|---|
 | The .NET SDK pinned in [`global.json`](global.json) | everything | nothing builds |
 | PowerShell 7 (`pwsh`) | `run.ps1`, `verify.ps1`, `proofs/check.ps1` | the launchers do not run |
-| A **full clone with tags** (`git clone`, then `git fetch --tags` in a shallow or tag-less one; CI uses `fetch-depth: 0`) | the legs that read the release tags in HEAD's history (`ReleaseRecord`, the STABILITY per-tag and draft-slot checks, the README's per-release claims, the public and wire since-tag class reports) | those legs **skip by name**, all of them: a clone holding no `vX.Y.Z` tag (a fork, or a clone made without tags) reads as "no released tag", which says nothing about your change. A clone that holds release tags while HEAD's history contains none of them **fails** the `ReleaseRecord` check and the two package-roster tag checks, because they would otherwise pass vacuously. No checkout of this repository's history can be in that state, so it means the tag reader is broken |
+| A **full clone with tags** (`git clone`, then `git fetch --tags` in a shallow or tag-less one; CI uses `fetch-depth: 0`) | the legs that read the release tags in HEAD's history (the `Release ledger` family's tag clauses, the README's per-release claims, the public and wire since-tag class reports) | those legs **skip by name**, all of them: a clone holding no `vX.Y.Z` tag (a fork, or a clone made without tags) reads as "no released tag", which says nothing about your change. A clone that holds release tags while HEAD's history contains none of them **fails** the `Release ledger` family's release-record and draft-sentence checks, because they would otherwise pass vacuously. No checkout of this repository's history can be in that state, so it means the tag reader is broken |
 | `git` on `PATH` | the working-copy line-ending and main-tree anchoring legs | those legs skip |
 | `node` on `PATH`, and `FUARAN_CORE_TSC` naming a TypeScript compiler | the executed TypeScript legs of the IDL suites (round trip, byte identity, type-check) | those legs skip |
 | The shared conformance corpus, **pinned** by [`copies.json`](copies.json) (`corpus.sha`) | the copy-freshness legs and the proof-oracle differentials that read the corpus's fixtures | unasked: the legs report NOT CHECKED or skip. Asked for (`FUARAN_CORE_CORPUS_FRESHNESS`, as CI does): an absent or off-pin corpus **fails** |
@@ -54,20 +54,21 @@ variable that names a clone kept elsewhere.
 
 ## Regenerating a committed artefact
 
-Several files are projections the suite holds to what the code renders today: the public-surface
-baselines (`api/`), the wire baselines (`api/wire/`), the generated F# modules under
-`tests/Fuaran.Core.Tests/`, the README's version stamps, the proofs README's tables, the
-doc-comment ratchet and the index at the head of `DECISIONS.md`. Each is rewritten by an environment switch, and all of them are read by ONE rule
-(`tests/Fuaran.Core.Tests/Approval.fs`):
+Several files are projections the suite holds to what the code renders today, and
+[`tests/Fuaran.Core.Tests/projections.json`](tests/Fuaran.Core.Tests/projections.json) lists every one:
+the test runner's verb that writes it, the environment switch that rewrites it from inside the suite,
+the family that holds it, and the copies other repositories carry. A new generated artefact is one row
+there. The switches are read by ONE rule (`tests/Fuaran.Core.Tests/Approval.fs`), and the table below is
+rendered from the registry (`CORE_APPROVE_DOCS=CONTRIBUTING` rewrites it):
 
 | Switch | Governs | A filter value is |
 |---|---|---|
 | `CORE_APPROVE_API` | `api/<package>.txt` | a package id |
 | `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
-| `CORE_APPROVE_LADDER` | the two generated blocks of `proofs/README.md` | `ladder` or `operations` |
-| `CORE_APPROVE_README` | the README's version stamps | `README` |
-| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json` and the index of `DECISIONS.md` | `doc-coverage` or `DECISIONS` |
-| `FUARAN_REGEN` | the generated F# modules and `snapshots/spike.json` | the file name without its extension |
+| `CORE_APPROVE_LADDER` | `proofs/README.md` | `ladder` or `operations` |
+| `CORE_APPROVE_README` | `README.md` | `README` |
+| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json`, `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md` | `doc-coverage`, `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies` or `CONTRIBUTING` |
+| `FUARAN_REGEN` | `tests/Fuaran.Core.Tests/MiniGenerated.fs`, `tests/Fuaran.Core.Tests/DocGenerated.fs`, `tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs`, `tests/Fuaran.Core.Tests/DeriveGenerated.fs`, `tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs`, `tests/Fuaran.Core.Tests/snapshots/spike.json` | `MiniGenerated`, `DocGenerated`, `DocAnnotatedGenerated`, `DeriveGenerated`, `SpecDecodersGenerated` or `spike` |
 
 Absent, empty, `0` or `false` is no. `1` or `true` rewrites every file the switch governs. Any other
 value is a filter, a comma-separated list: `CORE_APPROVE_API=Fuaran.Core.Wire` rewrites that one

@@ -45,7 +45,6 @@ module internal KeyedArbitrationLaws =
     /// keyed clash to build; each such arm is VACUOUS BY DECLARATION and the guard line says so,
     /// while the partition and landing laws are asserted all the same. `'Node` needs equality.
     let keyedArbitrationLawsWith
-        (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -53,7 +52,7 @@ module internal KeyedArbitrationLaws =
         (encode: 'Node -> string)
         (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
         (canApplyOf: SkeletonOp<'Node, 'Id> list -> 'Node -> Result<unit, int * Rejection<'Id>>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -115,7 +114,7 @@ module internal KeyedArbitrationLaws =
                 (fun acc op -> acc |> Result.bind (Ops.applyContainedKeyed keyw canHold nodew idw op))
                 (Ok start)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let walk = Tree.preorder t tree
 
@@ -369,10 +368,9 @@ module internal KeyedArbitrationLaws =
                 "arbitration bucket and op kind (no container capability and no keyed position, so both built arms are vacuous BY DECLARATION)"
 
         LawKit.results cells
-        @ [ SampleAdequacy.reached
-                family
+        @ [ LawKit.guard
+                runner
                 dimension
-                seed
                 ([ "accepted proposal", acceptedSeen
                    "rejected proposal", rejectedSeen
                    "conflicts rejection", conflictsSeen ]

@@ -86,19 +86,28 @@ let private shipped () : Map<string, MethodInfo> =
     Map.ofList found
 
 /// The witness and generator types an entry point demands, in parameter order: every parameter
-/// whose type name ends in `Witness`, `Gen` or `Sink`. A function parameter, a seed and a corpus
-/// are not witnesses, and the three suffixes are the kit's own vocabulary for the ones that are.
+/// whose type name ends in `Witness`, `Gen` or `Sink`, and the domain's `Codec` (Phase 507). A
+/// function parameter, a seed and a corpus are not witnesses, and the three suffixes and the one
+/// name are the kit's own vocabulary for the ones that are.
 let private witnessOf (m: MethodInfo) : string list =
     let bare (t: Type) =
         let n = t.Name
         if n.Contains "`" then n.Substring(0, n.IndexOf '`') else n
 
+    // The wire's `Codec<'T>` is a namespace-level type; `Corpus.Codec`, the corpus harness's record of
+    // functions, is nested in a module and is no witness.
+    let isDomainCodec (t: Type) =
+        bare t = "Codec" && isNull t.DeclaringType && t.Namespace = "Fuaran.Core"
+
     m.GetParameters()
-    |> Array.map (fun p -> bare p.ParameterType)
-    |> Array.filter (fun n ->
+    |> Array.filter (fun p ->
+        let n = bare p.ParameterType
+
         n.EndsWith("Witness", StringComparison.Ordinal)
         || n.EndsWith("Gen", StringComparison.Ordinal)
-        || n.EndsWith("Sink", StringComparison.Ordinal))
+        || n.EndsWith("Sink", StringComparison.Ordinal)
+        || isDomainCodec p.ParameterType)
+    |> Array.map (fun p -> bare p.ParameterType)
     |> Array.toList
     |> List.distinct
 
@@ -223,8 +232,15 @@ let familiesTests =
               // The half a declaration structurally cannot do for itself, and the reason this
               // module exists: quantified over the ASSEMBLY and over the RETURN TYPE, so neither a
               // new module nor a name that does not end in `Laws` can hide a family.
+              //
+              // Phase 507 — a family's pinned-default SPELLINGS are entry points of that family, so
+              // they count as rostered: one family, one census cell, several names, each still a
+              // public entry point reflection finds (which is what a consumer's census enumerates).
+              let rostered =
+                  KitRoster.families |> List.collect (fun f -> f.Id :: f.Spellings) |> Set.ofList
+
               let missing, phantom =
-                  compareRoster (Set.ofList KitRoster.ids) (shipped () |> Map.toList |> List.map fst |> Set.ofList)
+                  compareRoster rostered (shipped () |> Map.toList |> List.map fst |> Set.ofList)
 
               Expect.isEmpty
                   missing
@@ -252,8 +268,11 @@ let familiesTests =
 
           testCase "the roster carries no duplicate id, and every field is populated"
           <| fun _ ->
+              // An id and every spelling are one name space (Phase 507): a spelling that is also a
+              // row, or two families claiming one spelling, would give an entry point two cells.
               let dupes =
-                  KitRoster.ids
+                  KitRoster.families
+                  |> List.collect (fun f -> f.Id :: f.Spellings)
                   |> List.countBy id
                   |> List.filter (fun (_, n) -> n > 1)
                   |> List.map fst
@@ -272,13 +291,15 @@ let familiesTests =
               let ship = shipped ()
 
               for f in KitRoster.families do
-                  match Map.tryFind f.Id ship with
-                  | None -> failtestf "%s is not a shipped entry point" f.Id
-                  | Some m ->
-                      Expect.equal
-                          f.Witness
-                          (witnessOf m)
-                          (sprintf "%s declares a witness list its signature does not take" f.Id)
+                  // A spelling pins a parameter that is not a witness, so it takes the family's.
+                  for entry in f.Id :: f.Spellings do
+                      match Map.tryFind entry ship with
+                      | None -> failtestf "%s is not a shipped entry point" entry
+                      | Some m ->
+                          Expect.equal
+                              f.Witness
+                              (witnessOf m)
+                              (sprintf "%s declares a witness list its signature does not take" entry)
 
           testCase "a family's opt-in reason is checkable where the roster's own data decides it"
           <| fun _ ->

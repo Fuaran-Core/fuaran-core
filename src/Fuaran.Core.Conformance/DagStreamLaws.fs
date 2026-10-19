@@ -21,7 +21,7 @@ module internal DagStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let verify = LawKit.LawCell "verifyDag accepts an intact DAG"
@@ -56,7 +56,7 @@ module internal DagStreamLaws =
         // reached" rather than green (Phase 302). A census-visible guard naming the starved arm is
         // a later widening (see `snapshotLawsWith`).
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // a fork+merge DAG: genesis g; a, b both children of g; merge m of (a, b)
             let op0 = rng.Draw gen.Op
             let opA = rng.Draw gen.Op
@@ -281,10 +281,9 @@ module internal DagStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let family = "Conformance.reachLaws"
         let dimension = "DAG shape"
         let ancestorsCell = LawKit.LawCell "Reach.ancestors equals Dag.ancestorsOf"
 
@@ -399,7 +398,7 @@ module internal DagStreamLaws =
                     )
                 )
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             // ---- grow a DAG through the indexed forms, a step at a time ----
             let mutable reach = Dag.Reach.ofDag Dag.empty
             let mutable nodes: string list = []
@@ -578,10 +577,9 @@ module internal DagStreamLaws =
               reconcileCell
               extensionCell
               cyclicCell ]
-        @ [ SampleAdequacy.reachedBeside
-                family
+        @ [ LawKit.guardBeside
+                runner
                 dimension
-                seed
                 [ "lane merge", merged ]
                 [ "no lane merge", unmerged
                   "reconcile folded", folded
@@ -630,10 +628,9 @@ module internal DagStreamLaws =
         (gen: StreamGen<'Op, 'State>)
         (stateEncode: 'State -> string)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let family = "Conformance.checkpointLaws"
         let dimension = "DAG shape"
 
         let takeCell =
@@ -684,7 +681,7 @@ module internal DagStreamLaws =
         let rendered (r: Result<Dag.Checkpoint<'State> * Dag.T<'Op>, Dag.CheckpointFault<'Rej>>) =
             r |> Result.map (fun (cp, d) -> cp, d.Nodes |> Map.toList |> List.map fst)
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             // ---- grow a DAG on a kit-drawn shape ----
             let mutable dag: Dag.T<'Op> = Dag.empty
             let mutable nodes: string list = []
@@ -1033,10 +1030,9 @@ module internal DagStreamLaws =
               tamperCell
               livesCell
               laneCell ]
-        @ [ SampleAdequacy.reachedBeside
-                family
+        @ [ LawKit.guardBeside
+                runner
                 dimension
-                seed
                 [ "covered replay over a lane merge", coveredMerge
                   "uncovered refusal", uncovered
                   "compaction keeping history above its checkpoint", compactedAbove
@@ -1089,10 +1085,9 @@ module internal DagStreamLaws =
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let family = "Conformance.laneLaws"
         let dimension = "lane shape"
 
         let loadCell =
@@ -1143,7 +1138,7 @@ module internal DagStreamLaws =
         let renderLoad (r: Result<Dag.Loaded<'Op>, StreamLoadFault<Dag.LaneBreak>>) =
             r |> Result.map render |> Result.mapError (sprintf "%A")
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             // ---- draw a lane store ----
             let laneIds = [ for k in 0 .. 1 + rng.IntBelow 3 -> "lane-" + string k ]
             let mutable store: Dag.Loaded<'Op> = { Dag = Dag.empty; LaneOf = Map.empty }
@@ -1488,10 +1483,9 @@ module internal DagStreamLaws =
               rehashCell
               verifyCell
               pruneCell ]
-        @ [ SampleAdequacy.reachedBeside
-                family
+        @ [ LawKit.guardBeside
+                runner
                 dimension
-                seed
                 [ "cross-lane merge", crossMerged
                   "two or more heads", manyHeads
                   "fork handed to one lane", forked
@@ -1523,7 +1517,7 @@ module internal DagStreamLaws =
     /// than being swept into the nearer-looking case. `toString` is also what keeps
     /// `Dag.fromJsonlVerified`'s error bytes unchanged across this type's introduction, so the round
     /// trip is a compatibility claim and not only a tidiness one.
-    let dagBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
+    let dagBreakReasonLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         // The kit's own int-op witness: the claim is about THIS library's walker, not about a
         // host's, so there is no caller witness to take.
         let sw = LawKit.intWitness
@@ -1579,7 +1573,7 @@ module internal DagStreamLaws =
 
                 None
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // ---- a sound DAG: genesis, two children, a merge — every node shape the walker meets ----
             let op0 = rng.IntBelow 50
             let opA = rng.IntBelow 50

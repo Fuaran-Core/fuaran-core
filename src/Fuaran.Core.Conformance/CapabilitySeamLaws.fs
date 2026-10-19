@@ -43,7 +43,7 @@ module internal CapabilitySeamLaws =
     /// `deferredLaws` round-trips all three cases at an `int` payload. Restating it here would
     /// duplicate a law rather than mirror one. What is mirrored is the part `queryLaws` could only
     /// state about ITS seam: the three outcomes, and the unreachable fourth.
-    let capabilityLaws (seed: int) (iterations: int) : LawResult list =
+    let capabilityLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell "arg-validation accepts in-space + rejects out-of-space / unknown args"
 
@@ -97,7 +97,7 @@ module internal CapabilitySeamLaws =
                   |> List.map snd
                   |> Set.ofList ]
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let lo = rng.IntBelow 50
             let span = rng.IntBelow 50
             let hi = lo + span + 1
@@ -417,12 +417,10 @@ module internal CapabilitySeamLaws =
     /// so rather than reporting green. A thrown `body` or `Dispatch` is a failure of the first law.
     ///
     /// The capability instance of `LawKit.seamLaws` (Phase 297); `queryLawsAt` is the query one.
-    /// `family` is the roster id the guard is labelled with — `Conformance.capabilityLawsAt`.
     let capabilityLawsAt
-        (family: string)
         (w: CapabilitySeamWitness<'v>)
         (body: (string * string) list -> Capability -> Deferred<'v>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let known = CapabilityRegistry.enumerate w.Registry |> List.map _.Id
@@ -438,8 +436,7 @@ module internal CapabilitySeamLaws =
               Dispatch = fun id args body -> w.Dispatch id args (fun c () -> body c)
               Gen = w.GenCall
               Rendering =
-                { Family = family
-                  Laws =
+                { Laws =
                     "capability dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
                     "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)",
                     "the domain's host agrees with its registry (reaches the body iff admitted; refuses with the registry's error)"
@@ -451,5 +448,5 @@ module internal CapabilitySeamLaws =
                         | BodyFailed m -> Some m
                         | _ -> None
                   BodyFailed = BodyFailed } }
-            seed
+            runner
             iterations

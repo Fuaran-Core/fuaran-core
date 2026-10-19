@@ -455,7 +455,10 @@ module EncodingProfileVectors =
     ///     profiles differ in (D120) — so a store that carries one is shown to depend on its
     ///     declaration, and a store that carries none is shown not to. A profile added later states
     ///     its own difference here.
-    let storedCodecLaws (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
+    ///
+    /// Spelled `…At` since Phase 507: the family takes the domain's own `Codec<'T>`, a witness
+    /// capability the base contract does not demand (D127; `Families.Takes.Codec`).
+    let storedCodecLawsAt (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
         let known =
             LawKit.LawCell "stored codec: the store declares an encoding profile this Core knows"
 
@@ -543,3 +546,9 @@ module EncodingProfileVectors =
           recomputes.Result
           control.Result
           VectorKit.storeCell "stored codec: " "text" (List.length stored) ]
+
+    /// Forward — `storedCodecLawsAt` under the name it carried until Phase 507. Kept as a roster row
+    /// under its own id until the next breaking cut.
+    [<System.Obsolete("Use EncodingProfileVectors.storedCodecLawsAt — the same laws, spelled …At because the family takes the domain's codec (Phase 507); this forward goes at the next breaking cut.")>]
+    let storedCodecLaws (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
+        storedCodecLawsAt declared codec stored

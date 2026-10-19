@@ -24,7 +24,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
@@ -62,7 +62,7 @@ module internal AlgebraTreeLaws =
                         (idw.ToString b)
             )
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let tree = rng.Draw gen.Tree
 
             match Tree.preorder nodew tree |> List.filter canHold with
@@ -120,7 +120,7 @@ module internal AlgebraTreeLaws =
 
             for a in ids do
                 for b in ids do
-                    askBoth (sprintf "seed=%d iter=%d (drawn)" seed i) a b
+                    askBoth (sprintf "seed=%d iter=%d (drawn)" runner.Seed i) a b
 
             // BUILT: perturb each drawn id's string — the string itself (the ⇐ direction: an id
             // `Equals` keeps apart that `ToString` renders alike), its upper- and lower-case forms
@@ -140,7 +140,7 @@ module internal AlgebraTreeLaws =
                          with _ ->
                              None)
                     with
-                    | Some p -> askBoth (sprintf "seed=%d iter=%d (built from %s)" seed i s) id p
+                    | Some p -> askBoth (sprintf "seed=%d iter=%d (built from %s)" runner.Seed i s) id p
                     | None -> ())
 
         LawKit.results [ rcRoundTrip; idPreserved; kindStable; idRoundTrip; identitiesAgree ]
@@ -167,7 +167,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
@@ -210,7 +210,7 @@ module internal AlgebraTreeLaws =
 
             scan Set.empty (Tree.ids nodew t)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let op = rng.Draw(LawKit.genOp nodew idw gen tree)
             kinds.Note op
@@ -410,12 +410,8 @@ module internal AlgebraTreeLaws =
             // it rather than appended, so a reader that pins this family's result count sees no new
             // result): a run that missed a kind certified the laws over a narrower algebra than the
             // one the engine ships.
-            SampleAdequacy.reached
-                "Conformance.opAlgebra"
-                "accepted op and op kind"
-                seed
-                ([ "accepted", accepted ] @ kinds.Demands)
-            SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ] ]
+            LawKit.guard runner "accepted op and op kind" ([ "accepted", accepted ] @ kinds.Demands)
+            LawKit.guard runner "refused op" [ "refused", refused ] ]
 
     /// The structural-diff laws (Phase 03) — certify `Diff.toOps` against a domain's own
     /// witness. Build a random `before`, derive `after` by applying a random valid op sequence,
@@ -428,7 +424,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
@@ -447,7 +443,7 @@ module internal AlgebraTreeLaws =
         // the family is `Guarded` and counts the pairs that actually differ.
         let mutable nonIdentity = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let before = rng.Draw gen.Tree
 
             // derive `after` by applying a few random valid ops (rejected ops are skipped)
@@ -497,7 +493,7 @@ module internal AlgebraTreeLaws =
                 | None -> survivor.Saw())
 
         LawKit.results [ reconstruction; applyability; survivor ]
-        @ [ SampleAdequacy.reached "Conformance.diffLaws" "non-identity pair" seed [ "non-identity pair", nonIdentity ] ]
+        @ [ LawKit.guard runner "non-identity pair" [ "non-identity pair", nonIdentity ] ]
 
     /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOpsContained` certified
     /// through the container-aware sequence surface, with the witness's own `canHold`.
@@ -542,7 +538,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
@@ -648,7 +644,7 @@ module internal AlgebraTreeLaws =
                 refusal.Check(false, fun () -> at "`after` nests under a non-container and the diff did not refuse")
             | _ -> refusal.Saw()
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let before = rng.Draw gen.Tree
 
             // derive `after` with the container-aware engine, so the pair is one the witness's own
@@ -721,18 +717,13 @@ module internal AlgebraTreeLaws =
             // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A witness whose
             // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
             // refusal IFF; that is now reported as the guard, not as a pass.
-            SampleAdequacy.reached "Conformance.diffContainedLaws" "container-valid pair" seed [ "accepted", accepted ]
+            LawKit.guard runner "container-valid pair" [ "accepted", accepted ]
             // Phase 302 — the correspondence law skips a refusal it cannot ask (a root offender, a
             // host refused once the graft is cut), so `refused` alone can be met while no graft was
             // ever built. The built grafts are COUNTED beside it rather than demanded: a predicate
             // that refuses every node makes every offender the root, so the law is unaskable at that
             // witness by construction, not starved by its generator.
-            SampleAdequacy.reachedBeside
-                "Conformance.diffContainedLaws"
-                "refused pair"
-                seed
-                [ "refused", refused ]
-                [ "graft built", grafted ] ]
+            LawKit.guardBeside runner "refused pair" [ "refused", refused ] [ "graft built", grafted ] ]
 
     /// The op-script normalisation laws (Phase 23) — the teeth on `Ops.normalize`. Build a random
     /// *applyable* script (apply random ops, keep the accepted ones), then check: **preservation**
@@ -743,7 +734,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let preservation =
@@ -758,7 +749,7 @@ module internal AlgebraTreeLaws =
         // witness still accepts. The family is `Guarded` and counts the scripts that MOVE the tree.
         let mutable nonIdentity = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
 
             // collect an applyable script: thread random ops, keep the accepted ones
@@ -780,11 +771,7 @@ module internal AlgebraTreeLaws =
             nonGrowth.Check(List.length normd <= List.length accepted, fun () -> at "normalize lengthened the script"))
 
         LawKit.results [ preservation; idempotence; nonGrowth ]
-        @ [ SampleAdequacy.reached
-                "Conformance.normalizeLaws"
-                "non-identity script"
-                seed
-                [ "non-identity script", nonIdentity ] ]
+        @ [ LawKit.guard runner "non-identity script" [ "non-identity script", nonIdentity ] ]
 
     /// The body of `containerLaws`, under a predicate the domain actually declared. Private so the
     /// census's reflection over public `…Laws` entry points sees one family rather than two.
@@ -793,7 +780,7 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let blind =
@@ -831,7 +818,7 @@ module internal AlgebraTreeLaws =
         let keysOf (n: 'Node) =
             Tree.ids nodew n |> List.map idw.ToString
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let treeKeys = keysOf tree |> Set.ofList
 
@@ -963,10 +950,9 @@ module internal AlgebraTreeLaws =
                     ))
 
         LawKit.results [ blind; preservation; graftRefusal ]
-        @ [ SampleAdequacy.reached
-                "Conformance.containerLaws"
+        @ [ LawKit.guard
+                runner
                 "built arm"
-                seed
                 [ "child perturbation", perturbations
                   "invariant probe", probes
                   "interior graft", grafts ] ]
@@ -1019,11 +1005,11 @@ module internal AlgebraTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         match gen.CanHold with
-        | Some canHold -> containerLawsOver canHold nodew idw gen seed iterations
+        | Some canHold -> containerLawsOver canHold nodew idw gen runner iterations
         | None ->
             let declared =
                 LawKit.LawCell "the domain declares a container predicate (OpGen.CanHold)"
@@ -1032,7 +1018,7 @@ module internal AlgebraTreeLaws =
                 false,
                 fun () ->
                     "seed="
-                    + string seed
+                    + string runner.Seed
                     + ": OpGen.CanHold is None, so there is no container capability to certify — a domain without one has nothing for this family to say, and answering with a green report would look like certification of a claim nobody made"
             )
 
@@ -1083,16 +1069,12 @@ module internal AlgebraTreeLaws =
     /// `OpGen`, and a domain with no keyed positions has nothing for this family to say; folding
     /// it in would add laws that cannot fail for most domains, and would make `certify`'s law
     /// count depend on a witness it does not take.
-    ///
-    /// `family` is the roster id the guard is labelled with — `Conformance.keyedChildrenLawsAt`, or
-    /// the bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let keyedChildrenLawsAt
-        (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let accepted =
@@ -1154,7 +1136,7 @@ module internal AlgebraTreeLaws =
                 Some rebuilt
             | _ -> None
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let nodes = Tree.preorder nodew tree
             declaredKeyed <- declaredKeyed + List.length (keyedKeys tree)
@@ -1253,17 +1235,14 @@ module internal AlgebraTreeLaws =
             // like three laws certified. The three cells are covered by the built-arm guard, so with
             // no evidence they read through this line rather than reporting "never reached".
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
-            @ [ { Law =
-                    SampleAdequacy.lawPrefix family
-                    + "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
-                  Passed = true
-                  Counterexample = None } ]
+            @ [ LawKit.declared
+                    runner
+                    "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION" ]
         else
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
-            @ [ SampleAdequacy.reached
-                    family
+            @ [ LawKit.guard
+                    runner
                     "built arm"
-                    seed
                     [ "clean full walk", cleanWalks
                       "keyed id in the witness surface", surfaceBuilds
                       "one id in two keyed positions", keyedBuilds ] ]

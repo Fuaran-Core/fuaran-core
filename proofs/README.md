@@ -762,7 +762,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `capability-key-renderers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLawsAt` |
-| `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationEvaluatorLawsWith` |
+| `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationPriorLawsAt` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
 | `utf8-model-is-the-encoder` | `model-bridge` | `permanent` |
@@ -777,8 +777,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `propagation-evaluator-total` | `premise` | — |
 | `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
 | `column-vector-is-its-contents` | `model-bridge` | `permanent` |
-| `decode-layer-round-trip-premises` | `domain-obligation` | `Conformance.codecLaws` |
-| `decode-layer-refusal-premises` | `domain-obligation` | `Conformance.codecLaws` |
+| `decode-layer-round-trip-premises` | `domain-obligation` | `Conformance.codecLawsAt` |
+| `decode-layer-refusal-premises` | `domain-obligation` | `Conformance.codecLawsAt` |
 | `decode-layer-model-bridge` | `model-bridge` | `permanent` |
 | `index-node-is-its-record` | `model-bridge` | `permanent` |
 | `op-stream-load-premises` | `domain-obligation` | `Conformance.streamLaws` |
@@ -1020,7 +1020,7 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
-| `Fuaran.Core.Conformance` | 151 | 2 | 105 | 2 | 6 | 0 | 0 | 36 |
+| `Fuaran.Core.Conformance` | 154 | 2 | 108 | 2 | 6 | 0 | 0 | 36 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 41 | 64 | 5 | 0 | 0 | 0 | 32 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
@@ -1037,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 155 | 67 | 16 | 3 | 2 | 0 | 0 | 67 |
-| **Total** | 1219 | 314 | 421 | 30 | 13 | 0 | 3 | 438 |
+| **Total** | 1222 | 314 | 424 | 30 | 13 | 0 | 3 | 438 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7144,7 +7144,7 @@ record invariant in a later model should start there.
    `ofDecoder` reader, or a raw function used as a decoder, is sound (`fail`'s code left this row with
    Phase 443, `andThen`'s function with Phase 453). Both were filed as premises
    because no family of the `Conformance` roster sampled them at a domain's codec; since Phase 442
-   both are `domain-obligation` rows discharged by `Conformance.codecLaws`, which samples each at the
+   both are `domain-obligation` rows discharged by `Conformance.codecLawsAt`, which samples each at the
    domain's own `Codec<'T>` — round trip at the value and through the canonical text, and every
    refusal of a mutated written document resolving with a sound code.
    **`decode-layer-model-bridge`** — the dropped prose and schema, the host range predicate, the

@@ -53,7 +53,7 @@ module internal PlacementTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -81,7 +81,7 @@ module internal PlacementTreeLaws =
         let mutable within = 0
         let mutable nonFinal = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let keyOf (n: 'Node) = idw.ToString(nodew.Id n)
             let treeKeys = Tree.ids nodew tree |> List.map idw.ToString |> Set.ofList
@@ -325,10 +325,9 @@ module internal PlacementTreeLaws =
                 | None -> ())
 
         LawKit.results [ lands; bare; asEngine; byName ]
-        @ [ SampleAdequacy.reached
-                "Conformance.placementLaws"
+        @ [ LawKit.guard
+                runner
                 "placement arm"
-                seed
                 [ "place", placed
                   "move across parents", across
                   "move within a parent", within
@@ -349,7 +348,7 @@ module internal PlacementTreeLaws =
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -380,7 +379,7 @@ module internal PlacementTreeLaws =
         let mutable filled = 0
         let mutable repeated = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let nodes = Tree.preorder nodew tree
 
@@ -462,10 +461,9 @@ module internal PlacementTreeLaws =
                 | _ -> ())
 
         LawKit.results [ roundTrip; contained; shape; duplicate ]
-        @ [ SampleAdequacy.reached
-                "Conformance.loweringLaws"
+        @ [ LawKit.guard
+                runner
                 "lowered tree"
-                seed
                 [ "well-formed tree", lowered
                   "tree in the containment invariant", inInvariant
                   "filled shell below the root", filled
@@ -491,7 +489,7 @@ module internal PlacementTreeLaws =
         (gen: OpGen<'Node, 'Id>)
         (setId: 'Id -> 'Node -> 'Node)
         (mint: 'Id -> Set<string> -> 'Id)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -529,7 +527,7 @@ module internal PlacementTreeLaws =
         let keys (t: 'Node) =
             Tree.ids nodew t |> List.map idw.ToString
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let nodes = Tree.preorder nodew tree
             let treeKeys = keys tree |> Set.ofList
@@ -710,8 +708,4 @@ module internal PlacementTreeLaws =
                         ))
 
         LawKit.results [ setIdLawful; absent; deterministic; identity; repairs; faithful; clones ]
-        @ [ SampleAdequacy.reached
-                "Conformance.freshIdLaws"
-                "built arm"
-                seed
-                [ "repeated id built", repaired; "clone placed", cloned ] ]
+        @ [ LawKit.guard runner "built arm" [ "repeated id built", repaired; "clone placed", cloned ] ]

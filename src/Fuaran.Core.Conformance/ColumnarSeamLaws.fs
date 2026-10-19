@@ -16,7 +16,7 @@ module internal ColumnarSeamLaws =
     /// it certifies the pinned NA-skip semantics of `Column.aggregate`: `Count` equals the
     /// present-cell count, and `Sum` over a null-bearing column equals `Sum` over its present-only
     /// projection.
-    let aggregateNullSkipLaws (seed: int) (iterations: int) : LawResult list =
+    let aggregateNullSkipLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let nullSkip =
             LawKit.LawCell "Column.aggregate skips Null cells (Count = present count; Sum ignores nulls)"
         // Phase 276 — the present cells the laws were reached by, per numeric column type. A
@@ -26,7 +26,7 @@ module internal ColumnarSeamLaws =
         let mutable floatCells = 0
         let mutable decimalCells = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // Phase 276 — the column type is drawn from all three numeric types; until then a
             // decimal column was never drawn, and the guard below says so for any run that misses one.
             let kind = rng.IntBelow 3
@@ -83,10 +83,9 @@ module internal ColumnarSeamLaws =
                 nullSkip.Check(false, fun () -> at (sprintf "the drawn cells did not build a column (%A / %A)" a b)))
 
         LawKit.results [ nullSkip ]
-        @ [ SampleAdequacy.reached
-                "Conformance.aggregateNullSkipLaws"
+        @ [ LawKit.guard
+                runner
                 "column type"
-                seed
                 [ "int cell", intCells; "float cell", floatCells; "decimal cell", decimalCells ] ]
 
     // ---- columnar validator (Phase 37) ----
@@ -99,7 +98,7 @@ module internal ColumnarSeamLaws =
     /// **determinism** (`validate` and its `canonicalCodes` projection are identical on a re-run of the
     /// same table); and **soundness** (the count of `COL-NOTNULL` defects equals the number of null cells
     /// in the non-null column, and `COL-INRANGE` equals the number of out-of-range cells).
-    let columnarValidatorLaws (seed: int) (iterations: int) : LawResult list =
+    let columnarValidatorLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let determinism =
             LawKit.LawCell "columnar validate is deterministic + byte-canonical (same table ⇒ same defects)"
 
@@ -126,7 +125,7 @@ module internal ColumnarSeamLaws =
             | Ok r -> r
             | Error e -> invalidOp (sprintf "the kit's column registry repeats a rule id: %A" e)
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let nRows = rng.IntBelow 6
 
             // column a: int straying out of [0,100], with ~1/5 nulls
@@ -250,21 +249,9 @@ module internal ColumnarSeamLaws =
         @ [
             // Phase 223 — `Guarded ["null cell"; "out-of-range cell"]`, after the subject laws. The
             // stratified roll reaches both at three iterations; a shorter run reports the guard.
-            SampleAdequacy.reached
-                "Conformance.columnarValidatorLaws"
-                "injected null"
-                seed
-                [ "null cell", nullsInjected ]
-            SampleAdequacy.reached
-                "Conformance.columnarValidatorLaws"
-                "injected out-of-range value"
-                seed
-                [ "out-of-range cell", outOfRangeInjected ]
-            SampleAdequacy.reached
-                "Conformance.columnarValidatorLaws"
-                "column type"
-                seed
-                [ "int cell", intCells; "decimal cell", decimalCells ] ]
+            LawKit.guard runner "injected null" [ "null cell", nullsInjected ]
+            LawKit.guard runner "injected out-of-range value" [ "out-of-range cell", outOfRangeInjected ]
+            LawKit.guard runner "column type" [ "int cell", intCells; "decimal cell", decimalCells ] ]
 
     // ---- the typed column (Phase 417) ----
     // The column holds one typed `Vector` per column behind `ColumnData`, and three things about
@@ -314,7 +301,7 @@ module internal ColumnarSeamLaws =
     ///    what indexing answers, over the drawn vector — and over a drawn bool vector (Phase 431),
     ///    which under Fable is packed a byte a row: every read answers a boolean, `=` against `true`
     ///    included, and its borrow reads as the same booleans by truthiness.
-    let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
+    let columnVectorLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let equality =
             LawKit.LawCell "column equality is cell equality under Cell.compare, and equal columns hash equal"
 
@@ -323,7 +310,7 @@ module internal ColumnarSeamLaws =
 
         let reads = LawKit.LawCell "every Vector read agrees with the indexer"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let n = 1 + rng.IntBelow 6
             let maskA = Array.init n (fun _ -> rng.IntBelow 4 <> 0)
 
@@ -716,14 +703,14 @@ module internal ColumnarSeamLaws =
     let columnOwnershipLawsWith
         (operation: Column list -> unit)
         (draw: ConfRng.T -> Column list * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let untouched =
             LawKit.LawCell
                 "the operation writes into no column it is handed: every column's values and mask hash after it as they did when it was built"
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let columns = rng.Draw draw
             let before = List.map fingerprint columns
             operation columns
@@ -769,7 +756,7 @@ module internal ColumnarSeamLaws =
     /// float columns that are ADJACENT VIEWS of one backing array, their masks adjacent views of one
     /// mask array held as a `Mask` whatever the draw — so a write that runs past one column's range
     /// lands in its neighbour's, and a write through either is one the other's holder sees.
-    let private ownershipSample (r: ConfRng.T) : Column list * ConfRng.T =
+    let ownershipSample (r: ConfRng.T) : Column list * ConfRng.T =
         let rng = LawKit.Draws 0
         rng.State <- r
         let n = 1 + rng.IntBelow 6
@@ -813,5 +800,9 @@ module internal ColumnarSeamLaws =
     /// and two columns sharing one backing array and one mask array — with `operation` the
     /// consumer's pipeline, handed the columns as a list. `columnOwnershipLawsWith` is the same law
     /// over columns the consumer draws itself, for a pipeline that wants a schema of its own.
-    let columnOwnershipLaws (operation: Column list -> unit) (seed: int) (iterations: int) : LawResult list =
-        columnOwnershipLawsWith operation ownershipSample seed iterations
+    let columnOwnershipLaws
+        (operation: Column list -> unit)
+        (runner: LawKit.Runner)
+        (iterations: int)
+        : LawResult list =
+        columnOwnershipLawsWith operation ownershipSample runner iterations

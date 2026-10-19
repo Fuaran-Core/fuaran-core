@@ -31,7 +31,10 @@ open Expecto
 //  * A carried exception is exempt only where its FILE and its TEXT both match, and one that matches
 //    nothing FAILS. An allowlist by file would let the next reference through on the strength of a
 //    decision that was about something else; an exception that outlives its line is a hole with a
-//    comment beside it. The carried set is PRINTED on every run, green or not.
+//    comment beside it. The carried set is PRINTED on every run, green or not. Since Phase 503 an
+//    exception may name SEVERAL files, each exactly (no pattern), for one text that is true of all of
+//    them (a record and its renders): it holds only in the files it names, and a file it names that
+//    holds nothing is reported stale on its own.
 //  * The swept set must contain the files whose absence would make a green meaningless (the
 //    workflow files, the package properties): a sweep over an empty or mis-rooted list is a pass
 //    by construction.
@@ -49,10 +52,11 @@ type Rule =
       Say: string
       Example: string }
 
-/// A knowingly-held exception: exempt only where the rule, the file AND the text all match.
+/// A knowingly-held exception: exempt only where the rule, one of its files AND the text all match.
+/// Each file is named exactly; the reason is one that is true of every file named.
 type Carried =
     { Rule: string
-      File: string
+      Files: string list
       Text: string
       Why: string }
 
@@ -124,12 +128,34 @@ let parseBoundary (text: string) : Result<Boundary, string> =
             | _, _, Error e, _
             | _, _, _, Error e -> Error e
 
+        let files (e: JsonElement) : Result<string list, string> =
+            match e.TryGetProperty "files" with
+            | true, v when v.ValueKind = JsonValueKind.Array ->
+                let fs =
+                    v.EnumerateArray()
+                    |> Seq.map (fun x ->
+                        if x.ValueKind = JsonValueKind.String then
+                            x.GetString()
+                        else
+                            "")
+                    |> Seq.toList
+
+                if fs.IsEmpty then
+                    Error "a carried exception names no file"
+                elif fs |> List.exists (fun f -> f = "" || f.IndexOfAny [| '*'; '?'; '[' |] >= 0) then
+                    Error "a carried exception's files are exact repository paths, never empty or a pattern"
+                elif (List.distinct fs).Length <> fs.Length then
+                    Error "a carried exception names one file twice"
+                else
+                    Ok fs
+            | _ -> Error "a carried exception has no `files` array"
+
         let carried (e: JsonElement) : Result<Carried, string> =
-            match str e "rule", str e "file", str e "text", str e "why" with
+            match str e "rule", files e, str e "text", str e "why" with
             | Ok r, Ok f, Ok t, Ok w ->
                 Ok
                     { Rule = r
-                      File = f
+                      Files = f
                       Text = t
                       Why = w }
             | Error e, _, _, _
@@ -177,12 +203,13 @@ let sweepText (rules: Rule list) (file: string) (text: string) : Hit list =
 
 let private isCarriedBy (c: Carried) (h: Hit) =
     c.Rule = h.Rule
-    && c.File = h.File
+    && List.contains h.File c.Files
     && h.Text.Contains(c.Text, StringComparison.Ordinal)
 
 /// Sweep `files` (repository-relative path, text). Returns the violations, the hits a carried
-/// exception holds, and the carried exceptions that held nothing (stale).
-let sweepFiles (b: Boundary) (files: (string * string) list) : Hit list * Hit list * Carried list =
+/// exception holds, and each file of a carried exception that held nothing there (stale), as
+/// `(exception, file)`.
+let sweepFiles (b: Boundary) (files: (string * string) list) : Hit list * Hit list * (Carried * string) list =
     let hits =
         files
         |> List.filter (fun (path, _) -> path <> boundaryFile)
@@ -193,8 +220,10 @@ let sweepFiles (b: Boundary) (files: (string * string) list) : Hit list * Hit li
         |> List.partition (fun h -> b.Carried |> List.exists (fun c -> isCarriedBy c h))
 
     let stale =
-        b.Carried
-        |> List.filter (fun c -> not (hits |> List.exists (fun h -> isCarriedBy c h)))
+        [ for c in b.Carried do
+              for f in c.Files do
+                  if not (hits |> List.exists (fun h -> h.File = f && isCarriedBy c h)) then
+                      yield c, f ]
 
     violations, held, stale
 
@@ -336,7 +365,7 @@ let publicationBoundaryTests =
               printfn "carried exceptions (knowingly held):"
 
               for c in b.Carried do
-                  printfn "  [%s] %s  %s" c.Rule c.File c.Text
+                  printfn "  [%s] %s  %s" c.Rule (String.concat ", " c.Files) c.Text
                   printfn "      why: %s" c.Why
 
               for h in held do
@@ -347,7 +376,7 @@ let publicationBoundaryTests =
                   (sprintf
                       "a carried exception matched nothing — delete it, it is a hole with a comment beside it:\n%s"
                       (stale
-                       |> List.map (fun c -> sprintf "  [%s] %s  %s" c.Rule c.File c.Text)
+                       |> List.map (fun (c, f) -> sprintf "  [%s] %s  %s" c.Rule f c.Text)
                        |> String.concat "\n"))
 
               Expect.isEmpty
@@ -384,8 +413,8 @@ let publicationBoundaryTests =
 
               Expect.equal
                   stale.Length
-                  live.Value.Carried.Length
-                  "every carried exception is stale over a tree that carries none"
+                  (live.Value.Carried |> List.sumBy _.Files.Length)
+                  "every file of every carried exception is stale over a tree that carries none"
 
           testCase "a phase citation is vocabulary-free: a number is not a name"
           <| fun _ ->
@@ -407,25 +436,83 @@ let publicationBoundaryTests =
               let carriedLine = sprintf "x %s y %s" c.Text rule.Example
               let otherLine = rule.Example
 
+              let file = c.Files.Head
+
               let violations, held, _ =
                   sweepFiles
                       b
-                      [ c.File, carriedLine + "\n" + otherLine + "\n"
+                      [ file, carriedLine + "\n" + otherLine + "\n"
                         "docs/elsewhere.md", carriedLine + "\n" ]
 
               Expect.equal held.Length 1 "the carried line in the carried file is held"
-              Expect.equal held.Head.File c.File "in the carried file"
+              Expect.equal held.Head.File file "in the carried file"
 
               Expect.equal
                   (violations |> List.map (fun h -> h.File, h.Line) |> List.sort)
-                  [ c.File, 2; "docs/elsewhere.md", 1 ]
+                  (List.sort [ file, 2; "docs/elsewhere.md", 1 ])
                   "a new hit in the carried file and the same text elsewhere both still fail"
+
+          testCase
+              "go-red: a several-file exception holds in each file it names and nowhere else, planted in the live tree"
+          <| fun _ ->
+              // Phase 503. The live tree is swept, the carried text planted (in memory) into a tracked
+              // file the exception does NOT name, the plant reported by name, and the tree restored
+              // (the unplanted set) green again: naming several files widened nothing.
+              let b = live.Value
+              let c = b.Carried |> List.maxBy _.Files.Length
+              Expect.isGreaterThan c.Files.Length 1 "the live boundary carries a several-file exception"
+              let _, files = sweptSet repoRoot
+
+              let unnamed = files |> List.map fst |> List.find (fun f -> f = "README.md")
+
+              Expect.isFalse (List.contains unnamed c.Files) "the plant's file is not one the exception names"
+
+              let rule = b.Rules |> List.find (fun r -> r.Id = c.Rule)
+              let plant = sprintf "x %s y" c.Text
+
+              Expect.isTrue (rule.Pattern.IsMatch plant) "the planted line is one the rule flags"
+
+              let planted =
+                  files
+                  |> List.map (fun (p, text) ->
+                      if p = unnamed then
+                          p, text + "\n" + plant + "\n"
+                      else
+                          p, text)
+
+              let violations, held, stale = sweepFiles b planted
+
+              Expect.equal
+                  (violations |> List.map _.File)
+                  [ unnamed ]
+                  "the carried text in a file the exception does not name is a violation"
+
+              Expect.isEmpty stale "and every named file still holds its line"
+
+              for f in c.Files do
+                  Expect.exists held (fun h -> h.File = f) (sprintf "%s, a named file, is held" f)
+
+              let restored, _, _ = sweepFiles b files
+              Expect.isEmpty restored "restored, the live tree is green again"
+
+              let _, _, oneStale =
+                  sweepFiles b (files |> List.filter (fun (p, _) -> p <> List.last c.Files))
+
+              Expect.equal
+                  (oneStale |> List.map snd)
+                  [ List.last c.Files ]
+                  "a named file that holds nothing is reported stale on its own"
 
           testCase "go-red: a carried exception that matches nothing is reported stale"
           <| fun _ ->
               let b = live.Value
               let _, _, stale = sweepFiles b cleanBaseline
-              Expect.equal stale b.Carried "over a tree with none of the carried text, every exception is stale"
+
+              Expect.equal
+                  stale
+                  [ for c in b.Carried do
+                        for f in c.Files -> c, f ]
+                  "over a tree with none of the carried text, every exception is stale in every file it names"
 
           testCase "go-red: the boundary file refuses a rule that cannot fire, a bad pattern and an empty rule set"
           <| fun _ ->
@@ -450,7 +537,16 @@ let publicationBoundaryTests =
 
               expectError
                   "a carried exception naming an unknown rule"
-                  """{ "rules": [ { "id": "r", "pattern": "a", "say": "s", "example": "a" } ], "carried": [ { "rule": "q", "file": "f", "text": "t", "why": "w" } ] }"""
+                  """{ "rules": [ { "id": "r", "pattern": "a", "say": "s", "example": "a" } ], "carried": [ { "rule": "q", "files": [ "f" ], "text": "t", "why": "w" } ] }"""
+
+              let carrying (files: string) =
+                  sprintf
+                      """{ "rules": [ { "id": "r", "pattern": "a", "say": "s", "example": "a" } ], "carried": [ { "rule": "r", "files": %s, "text": "t", "why": "w" } ] }"""
+                      files
+
+              expectError "a carried exception naming a file pattern" (carrying """[ "docs/*.md" ]""")
+              expectError "a carried exception naming no file" (carrying "[]")
+              expectError "a carried exception naming one file twice" (carrying """[ "a.md", "a.md" ]""")
 
               expectError
                   "two rules sharing an id"
