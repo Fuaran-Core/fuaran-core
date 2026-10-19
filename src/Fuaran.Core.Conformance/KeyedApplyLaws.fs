@@ -40,16 +40,12 @@ module internal KeyedApplyLaws =
     /// **A witness that declares NO keyed position passes the keyed arms VACUOUSLY and the report
     /// says so**, in `keyedChildrenLaws`' words — while the identity law, which needs no
     /// declaration, is asserted all the same.
-    ///
-    /// `family` is the roster id the guards are labelled with — `Conformance.keyedApplyLawsAt`, or the
-    /// bare spelling for the obsolete forward that keeps its own id until `0.37.0` (Phase 390).
     let keyedApplyLawsAt
-        (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let canHold = LawKit.canHoldOf gen
@@ -135,7 +131,7 @@ module internal KeyedApplyLaws =
             else
                 None
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let keyedNodes = Tree.preorder t tree
             let surfaceNodes = Tree.preorder nodew tree
@@ -344,17 +340,15 @@ module internal KeyedApplyLaws =
             // the witness. The identity law needs no declaration and was asserted on every
             // iteration, so the op-kind guard still reads it.
             LawKit.results cells
-            @ [ SampleAdequacy.reached
-                    family
+            @ [ LawKit.guard
+                    runner
                     "op kind (the witness declares NO keyed position, so the keyed laws are vacuous BY DECLARATION)"
-                    seed
                     kinds.Demands ]
         else
             LawKit.results cells
-            @ [ SampleAdequacy.reached
-                    family
+            @ [ LawKit.guard
+                    runner
                     "built arm and op kind"
-                    seed
                     ([ "node holding a keyed position", keyedHolders
                        "keyed holder that can hold children", keyedContainers
                        "clean insert", cleanInserts

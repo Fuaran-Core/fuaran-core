@@ -58,6 +58,7 @@ type Run =
       Results: LawResult list }
 
 let private run id iterations results =
+    LawKit.FamilyId id,
     { Id = id
       Iterations = iterations
       Results = results }
@@ -127,584 +128,582 @@ let private observerWitness =
               if x % 2 = 0 then
                   "even" ])
 
-/// Every law family the kit ships, run once. Evaluated at most once per process: several of these
-/// are three-hundred-iteration property runs.
-let private runs =
+/// Every law family the kit ships, run once, keyed by its id (Phase 507: a map, so a family has
+/// exactly one reference run, and the completeness test below walks the roster through it). A
+/// family's pinned-default spellings are not keys: their family's run is theirs, and
+/// `spellingTests` holds each spelling equal to its family at the default. Evaluated at most once
+/// per process: several of these are three-hundred-iteration property runs.
+let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
     lazy
-        ([
-           // ---- the base run ----
-           run "Conformance.witnessLaws" 100 (Conformance.witnessLaws nodew idw ConformanceTests.opGen 7 100)
-           run "Conformance.opAlgebra" 200 (Conformance.opAlgebra nodew idw ConformanceTests.opGen 999 200)
-           run "Conformance.diffLaws" 200 (Conformance.diffLaws nodew idw ConformanceTests.opGen 4242 200)
-           run
-               "Conformance.streamLaws"
-               200
-               (Conformance.streamLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
-           run
-               "Conformance.reducer"
-               200
-               (Conformance.reducer ConformanceTests.sw.Apply ConformanceTests.streamGen None 314 200)
+        (let declared =
+            [
+              // ---- the base run ----
+              run "Conformance.witnessLaws" 100 (Conformance.witnessLaws nodew idw ConformanceTests.opGen 7 100)
+              run "Conformance.opAlgebra" 200 (Conformance.opAlgebra nodew idw ConformanceTests.opGen 999 200)
+              run "Conformance.diffLaws" 200 (Conformance.diffLaws nodew idw ConformanceTests.opGen 4242 200)
+              run
+                  "Conformance.streamLaws"
+                  200
+                  (Conformance.streamLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
+              run
+                  "Conformance.reducer"
+                  200
+                  (Conformance.reducer ConformanceTests.sw.Apply ConformanceTests.streamGen None 314 200)
 
-           // ---- tree-shaped opt-ins ----
-           run
-               "Conformance.diffContainedLaws"
-               200
-               (Conformance.diffContainedLaws nodew idw ConformanceTests.containedGen 4242 200)
-           run "Conformance.normalizeLaws" 200 (Conformance.normalizeLaws nodew idw ConformanceTests.opGen 1234 200)
-           run
-               "Conformance.containerLaws"
-               200
-               (Conformance.containerLaws nodew idw ContainedOpsTests.containerGen 1610 200)
-           // Phase 312 — the placement algebra, tree lowering and fresh ids, at the contained
-           // reference generator (a leaf kind, so every container clause is live).
-           run
-               "Conformance.placementLaws"
-               200
-               (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
-           run "Conformance.loweringLaws" 200 (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
-           // Phase 314 — the digest maps, the change classification and the defect-set gate, at
-           // the reference encoder and registry; the kit's own second draw supplies the independent
-           // pairs that reach a changed kind, a removed region and a moved survivor.
-           run
-               "Conformance.digestLaws"
-               200
-               (Conformance.digestLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
-           run
-               "Conformance.changeLaws"
-               200
-               (Conformance.changeLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
-           run
-               "Conformance.introducedLaws"
-               200
-               (Conformance.introducedLaws nodew idw DigestTests.registry ConformanceTests.opGen 314 200)
-           // Phase 313 — the structural-integrity families at the reference grammar and the
-           // reference `RefWitness`, whose generators draw both sides of each refusal.
-           run
-               "Conformance.containmentLaws"
-               200
-               (Conformance.containmentLaws
-                   StructuralIntegrityTests.grammar
-                   nodew
-                   idw
-                   StructuralIntegrityTests.grammarGen
-                   313
-                   200)
-           run
-               "Conformance.referenceLawsAt"
-               200
-               (Conformance.referenceLawsAt
-                   StructuralIntegrityTests.refw
-                   nodew
-                   idw
-                   StructuralIntegrityTests.refGen
-                   313
-                   200)
-           run
-               "Conformance.freshIdLaws"
-               200
-               (Conformance.freshIdLaws
-                   nodew
-                   idw
-                   ConformanceTests.containedGen
-                   (fun i (n: RNode) -> { n with Id = i })
-                   (FreshIds.derived idw)
-                   312
-                   200)
-           run
-               "Conformance.mergeConflictLaws"
-               300
-               (Conformance.mergeConflictLaws nodew idw ConformanceTests.opGen 7171 300)
-           run
-               "Conformance.reconcileLaws"
-               300
-               (Conformance.reconcileLaws nodew idw ConformanceTests.opGen encNode 5353 300)
-           run
-               "Conformance.reconcileLawsWith"
-               300
-               (Conformance.reconcileLawsWith nodew idw ConformanceTests.opGen encNode OpStream.defaultHash 5353 300)
-           run
-               "Conformance.footprintLaws"
-               300
-               (Conformance.footprintLaws nodew idw ConformanceTests.opGen encNode 4242 300)
-           // Phase 249 — the same soundness law at the keyed reference's own stream witness.
-           run
-               "Conformance.footprintLawsAt"
-               300
-               (Conformance.footprintLawsAt
-                   FootprintLawsAtTests.keyedW
-                   FootprintLawsAtTests.keyedFootprint
-                   FootprintLawsAtTests.keyedHash
-                   FootprintLawsAtTests.keyedGen
-                   2490
-                   300)
-           // Phase 500 — the base-aware projection at the reference tree's own stream witness.
-           run
-               "Conformance.footprintInLawsAt"
-               300
-               (Conformance.footprintInLawsAt
-                   FoldFixtures.treeW
-                   FootprintInTests.footprintOf
-                   FootprintInTests.footprintIn
-                   FootprintInTests.treeHash
-                   FootprintInTests.treeGen
-                   5000
-                   300)
-           run
-               "Conformance.concurrencyLaws"
-               300
-               (Conformance.concurrencyLaws nodew idw ConformanceTests.opGen encNode 8080 300)
-           run
-               "Conformance.concurrencyLawsWith"
-               300
-               (Conformance.concurrencyLawsWith nodew idw ConformanceTests.opGen encNode honestFootprint 8080 300)
-           run
-               "Conformance.arbitrationLaws"
-               300
-               (Conformance.arbitrationLaws nodew idw ConformanceTests.opGen encNode 8585 300)
-           run
-               "Conformance.keyedChildrenLawsAt"
-               200
-               (Conformance.keyedChildrenLawsAt
-                   ConformanceTests.keyw
-                   ConformanceTests.knodew
-                   idw
-                   ConformanceTests.kGen
-                   1890
-                   200)
-           run
-               "Conformance.keyedApplyLawsAt"
-               300
-               (Conformance.keyedApplyLawsAt
-                   ConformanceTests.keyw
-                   ConformanceTests.knodew
-                   idw
-                   KeyedApplyTests.deepGen
-                   2860
-                   300)
-           // Phase 247 — arbitration over containers and keyed positions, both built arms reached.
-           run
-               "Conformance.keyedArbitrationLawsAt"
-               200
-               (Conformance.keyedArbitrationLawsAt
-                   ConformanceTests.keyw
-                   ConformanceTests.knodew
-                   idw
-                   KeyedArbitrationTests.containedKGen
-                   KeyedArbitrationTests.encK
-                   2470
-                   200)
-           run
-               "Conformance.keyedArbitrationLawsWith"
-               200
-               (Conformance.keyedArbitrationLawsWith
-                   ConformanceTests.keyw
-                   ConformanceTests.knodew
-                   idw
-                   KeyedArbitrationTests.containedKGen
-                   KeyedArbitrationTests.encK
-                   (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
-                   (Ops.canApplyAllKeyed ConformanceTests.keyw (fun n -> n.Kind <> "para") ConformanceTests.knodew idw)
-                   2470
-                   200)
+              // ---- tree-shaped opt-ins ----
+              run
+                  "Conformance.diffContainedLaws"
+                  200
+                  (Conformance.diffContainedLaws nodew idw ConformanceTests.containedGen 4242 200)
+              run "Conformance.normalizeLaws" 200 (Conformance.normalizeLaws nodew idw ConformanceTests.opGen 1234 200)
+              run
+                  "Conformance.containerLaws"
+                  200
+                  (Conformance.containerLaws nodew idw ContainedOpsTests.containerGen 1610 200)
+              // Phase 312 — the placement algebra, tree lowering and fresh ids, at the contained
+              // reference generator (a leaf kind, so every container clause is live).
+              run
+                  "Conformance.placementLaws"
+                  200
+                  (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
+              run
+                  "Conformance.loweringLaws"
+                  200
+                  (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
+              // Phase 314 — the digest maps, the change classification and the defect-set gate, at
+              // the reference encoder and registry; the kit's own second draw supplies the independent
+              // pairs that reach a changed kind, a removed region and a moved survivor.
+              run
+                  "Conformance.digestLaws"
+                  200
+                  (Conformance.digestLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+              run
+                  "Conformance.changeLaws"
+                  200
+                  (Conformance.changeLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+              run
+                  "Conformance.introducedLaws"
+                  200
+                  (Conformance.introducedLaws nodew idw DigestTests.registry ConformanceTests.opGen 314 200)
+              // Phase 313 — the structural-integrity families at the reference grammar and the
+              // reference `RefWitness`, whose generators draw both sides of each refusal.
+              run
+                  "Conformance.containmentLaws"
+                  200
+                  (Conformance.containmentLaws
+                      StructuralIntegrityTests.grammar
+                      nodew
+                      idw
+                      StructuralIntegrityTests.grammarGen
+                      313
+                      200)
+              run
+                  "Conformance.referenceLawsAt"
+                  200
+                  (Conformance.referenceLawsAt
+                      StructuralIntegrityTests.refw
+                      nodew
+                      idw
+                      StructuralIntegrityTests.refGen
+                      313
+                      200)
+              run
+                  "Conformance.freshIdLaws"
+                  200
+                  (Conformance.freshIdLaws
+                      nodew
+                      idw
+                      ConformanceTests.containedGen
+                      (fun i (n: RNode) -> { n with Id = i })
+                      (FreshIds.derived idw)
+                      312
+                      200)
+              run
+                  "Conformance.mergeConflictLaws"
+                  300
+                  (Conformance.mergeConflictLaws nodew idw ConformanceTests.opGen 7171 300)
+              run
+                  "Conformance.reconcileLawsWith"
+                  300
+                  (Conformance.reconcileLawsWith nodew idw ConformanceTests.opGen encNode OpStream.defaultHash 5353 300)
+              run
+                  "Conformance.footprintLaws"
+                  300
+                  (Conformance.footprintLaws nodew idw ConformanceTests.opGen encNode 4242 300)
+              // Phase 249 — the same soundness law at the keyed reference's own stream witness.
+              run
+                  "Conformance.footprintLawsAt"
+                  300
+                  (Conformance.footprintLawsAt
+                      FootprintLawsAtTests.keyedW
+                      FootprintLawsAtTests.keyedFootprint
+                      FootprintLawsAtTests.keyedHash
+                      FootprintLawsAtTests.keyedGen
+                      2490
+                      300)
+              // Phase 500 — the base-aware projection at the reference tree's own stream witness.
+              run
+                  "Conformance.footprintInLawsAt"
+                  300
+                  (Conformance.footprintInLawsAt
+                      FoldFixtures.treeW
+                      FootprintInTests.footprintOf
+                      FootprintInTests.footprintIn
+                      FootprintInTests.treeHash
+                      FootprintInTests.treeGen
+                      5000
+                      300)
+              run
+                  "Conformance.concurrencyLawsWith"
+                  300
+                  (Conformance.concurrencyLawsWith nodew idw ConformanceTests.opGen encNode honestFootprint 8080 300)
+              run
+                  "Conformance.arbitrationLaws"
+                  300
+                  (Conformance.arbitrationLaws nodew idw ConformanceTests.opGen encNode 8585 300)
+              run
+                  "Conformance.keyedChildrenLawsAt"
+                  200
+                  (Conformance.keyedChildrenLawsAt
+                      ConformanceTests.keyw
+                      ConformanceTests.knodew
+                      idw
+                      ConformanceTests.kGen
+                      1890
+                      200)
+              run
+                  "Conformance.keyedApplyLawsAt"
+                  300
+                  (Conformance.keyedApplyLawsAt
+                      ConformanceTests.keyw
+                      ConformanceTests.knodew
+                      idw
+                      KeyedApplyTests.deepGen
+                      2860
+                      300)
+              // Phase 247 — arbitration over containers and keyed positions, both built arms reached.
+              run
+                  "Conformance.keyedArbitrationLawsWith"
+                  200
+                  (Conformance.keyedArbitrationLawsWith
+                      ConformanceTests.keyw
+                      ConformanceTests.knodew
+                      idw
+                      KeyedArbitrationTests.containedKGen
+                      KeyedArbitrationTests.encK
+                      (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
+                      (Ops.canApplyAllKeyed
+                          ConformanceTests.keyw
+                          (fun n -> n.Kind <> "para")
+                          ConformanceTests.knodew
+                          idw)
+                      2470
+                      200)
 
-           // ---- stream-shaped opt-ins ----
-           run
-               "Conformance.snapshotLaws"
-               100
-               (Conformance.snapshotLaws
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   string
-                   OpStream.defaultHash
-                   321
-                   100)
-           run
-               "Conformance.snapshotLawsWith"
-               100
-               (Conformance.snapshotLawsWith
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   string
-                   OpStream.sha256Hash
-                   secondConfig
-                   321
-                   100)
-           // Phase 349 — the `…With` operations at the second config and a non-default hash.
-           run
-               "Conformance.streamConfigLaws"
-               100
-               (Conformance.streamConfigLaws
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   OpStream.sha256Hash
-                   secondConfig
-                   349
-                   100)
-           run
-               "Conformance.dagLaws"
-               100
-               (Conformance.dagLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 99 100)
-           run
-               "Conformance.reachLaws"
-               100
-               (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
-           run
-               "Conformance.checkpointLaws"
-               100
-               (Conformance.checkpointLaws
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   (fun (s: int) -> string s)
-                   OpStream.defaultHash
-                   288
-                   100)
-           run
-               "Conformance.laneLaws"
-               100
-               (Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 311 100)
-           run
-               "Conformance.casLaws"
-               200
-               (Conformance.casLaws
-                   ConformanceTests.sw
-                   ConformanceTests.stratifiedStreamGen
-                   OpStream.defaultHash
-                   4242
-                   200)
-           run
-               "Conformance.idempotencyLaws"
-               200
-               (Conformance.idempotencyLaws
-                   ConformanceTests.sw.Encode
-                   ConformanceTests.sw
-                   ConformanceTests.stratifiedStreamGen
-                   OpStream.defaultHash
-                   8282
-                   200)
-           run
-               "Conformance.hashFnLaws"
-               200
-               (Conformance.hashFnLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
-           run
-               "Conformance.attributedLaws"
-               200
-               (Conformance.attributedLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
-           run
-               "Conformance.codecInjectivityLaws"
-               200
-               (Conformance.codecInjectivityLaws ConformanceTests.sw ConformanceTests.streamGen 1450 200)
-           run
-               "Conformance.noAttestationVacuityLaws"
-               200
-               (Conformance.noAttestationVacuityLaws
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   OpStream.defaultHash
-                   4242
-                   200)
-           run
-               "Conformance.attestationLawsAt"
-               200
-               (Conformance.attestationLawsAt
-                   ConformanceTests.sw
-                   ConformanceTests.streamGen
-                   sink
-                   OpStream.defaultHash
-                   4242
-                   200)
+              // ---- stream-shaped opt-ins ----
+              run
+                  "Conformance.snapshotLawsWith"
+                  100
+                  (Conformance.snapshotLawsWith
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      string
+                      OpStream.sha256Hash
+                      secondConfig
+                      321
+                      100)
+              // Phase 349 — the `…With` operations at the second config and a non-default hash.
+              run
+                  "Conformance.streamConfigLaws"
+                  100
+                  (Conformance.streamConfigLaws
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      OpStream.sha256Hash
+                      secondConfig
+                      349
+                      100)
+              run
+                  "Conformance.dagLaws"
+                  100
+                  (Conformance.dagLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 99 100)
+              run
+                  "Conformance.reachLaws"
+                  100
+                  (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
+              run
+                  "Conformance.checkpointLaws"
+                  100
+                  (Conformance.checkpointLaws
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      (fun (s: int) -> string s)
+                      OpStream.defaultHash
+                      288
+                      100)
+              run
+                  "Conformance.laneLaws"
+                  100
+                  (Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 311 100)
+              run
+                  "Conformance.casLaws"
+                  200
+                  (Conformance.casLaws
+                      ConformanceTests.sw
+                      ConformanceTests.stratifiedStreamGen
+                      OpStream.defaultHash
+                      4242
+                      200)
+              run
+                  "Conformance.idempotencyLaws"
+                  200
+                  (Conformance.idempotencyLaws
+                      ConformanceTests.sw.Encode
+                      ConformanceTests.sw
+                      ConformanceTests.stratifiedStreamGen
+                      OpStream.defaultHash
+                      8282
+                      200)
+              run
+                  "Conformance.hashFnLaws"
+                  200
+                  (Conformance.hashFnLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
+              run
+                  "Conformance.attributedLaws"
+                  200
+                  (Conformance.attributedLaws
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      OpStream.defaultHash
+                      4242
+                      200)
+              run
+                  "Conformance.codecInjectivityLaws"
+                  200
+                  (Conformance.codecInjectivityLaws ConformanceTests.sw ConformanceTests.streamGen 1450 200)
+              run
+                  "Conformance.noAttestationVacuityLaws"
+                  200
+                  (Conformance.noAttestationVacuityLaws
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      OpStream.defaultHash
+                      4242
+                      200)
+              run
+                  "Conformance.attestationLawsAt"
+                  200
+                  (Conformance.attestationLawsAt
+                      ConformanceTests.sw
+                      ConformanceTests.streamGen
+                      sink
+                      OpStream.defaultHash
+                      4242
+                      200)
 
 
-           // ---- artifact-witness opt-ins ----
-           run
-               "Conformance.compositionLawsAt"
-               200
-               (Conformance.compositionLawsAt artw artw id ConformanceTests.genComposition 4242 200)
-           run
-               "Conformance.compositionPilotAt"
-               200
-               (Conformance.compositionPilotAt
-                   artw
-                   artw2
-                   embedToR
-                   encNode
-                   encNode2
-                   ConformanceTests.genComposition2
-                   4242
-                   200)
-           run
-               "Conformance.memoLawsAt"
-               200
-               (Conformance.memoLawsAt artw encNode ConformanceTests.genMemo OpStream.defaultHash 4242 200)
-           run
-               "Conformance.memoSoundnessLawsAt"
-               50
-               (let underDeclared =
-                   { RNode.node
-                         "ud"
-                         "template"
-                         [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
-                               Eff =
-                                   { Host = Pure
-                                     Determinism = Effect.clock } } ] with
-                       Eff = Effect.pureDeterministic }
+              // ---- artifact-witness opt-ins ----
+              run
+                  "Conformance.compositionLawsAt"
+                  200
+                  (Conformance.compositionLawsAt artw artw id ConformanceTests.genComposition 4242 200)
+              run
+                  "Conformance.compositionPilotAt"
+                  200
+                  (Conformance.compositionPilotAt
+                      artw
+                      artw2
+                      embedToR
+                      encNode
+                      encNode2
+                      ConformanceTests.genComposition2
+                      4242
+                      200)
+              run
+                  "Conformance.memoLawsAt"
+                  200
+                  (Conformance.memoLawsAt artw encNode ConformanceTests.genMemo OpStream.defaultHash 4242 200)
+              run
+                  "Conformance.memoSoundnessLawsAt"
+                  50
+                  (let underDeclared =
+                      { RNode.node
+                            "ud"
+                            "template"
+                            [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
+                                  Eff =
+                                      { Host = Pure
+                                        Determinism = Effect.clock } } ] with
+                          Eff = Effect.pureDeterministic }
 
-                let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]
+                   let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]
 
-                Conformance.memoSoundnessLawsAt artw encNode underDeclared underDeclaredArgs 4242 50)
-           run
-               "Conformance.functionVerifyLawsAt"
-               200
-               (Conformance.functionVerifyLawsAt
-                   artw
-                   (ConformanceTests.tplCount (0, 5))
-                   (ConformanceTests.tplCount (0, 10))
-                   ConformanceTests.countReg
-                   ConformanceTests.genParamsFor
-                   777
-                   200)
-           run
-               "Conformance.verifyHonestyLawsAt"
-               200
-               (let mkSoundDet (d: DeterminismSource) =
-                   { ConformanceTests.tplCount (0, 5) with
-                       Eff = { Host = Pure; Determinism = d } }
+                   Conformance.memoSoundnessLawsAt artw encNode underDeclared underDeclaredArgs 4242 50)
+              run
+                  "Conformance.functionVerifyLawsAt"
+                  200
+                  (Conformance.functionVerifyLawsAt
+                      artw
+                      (ConformanceTests.tplCount (0, 5))
+                      (ConformanceTests.tplCount (0, 10))
+                      ConformanceTests.countReg
+                      ConformanceTests.genParamsFor
+                      777
+                      200)
+              run
+                  "Conformance.verifyHonestyLawsAt"
+                  200
+                  (let mkSoundDet (d: DeterminismSource) =
+                      { ConformanceTests.tplCount (0, 5) with
+                          Eff = { Host = Pure; Determinism = d } }
 
-                let mkBrokenDet (d: DeterminismSource) =
-                    { ConformanceTests.tplCount (0, 10) with
-                        Eff = { Host = Pure; Determinism = d } }
+                   let mkBrokenDet (d: DeterminismSource) =
+                       { ConformanceTests.tplCount (0, 10) with
+                           Eff = { Host = Pure; Determinism = d } }
 
-                Conformance.verifyHonestyLawsAt
-                    artw
-                    mkSoundDet
-                    mkBrokenDet
-                    ConformanceTests.countReg
-                    ConformanceTests.genParamsFor
-                    777
-                    200)
-           run
-               "Conformance.encoderInjectivityLawsAt"
-               200
-               (Conformance.encoderInjectivityLawsAt artw encNode ConformanceTests.genTree 4242 200)
+                   Conformance.verifyHonestyLawsAt
+                       artw
+                       mkSoundDet
+                       mkBrokenDet
+                       ConformanceTests.countReg
+                       ConformanceTests.genParamsFor
+                       777
+                       200)
+              run
+                  "Conformance.encoderInjectivityLawsAt"
+                  200
+                  (Conformance.encoderInjectivityLawsAt artw encNode ConformanceTests.genTree 4242 200)
 
 
-           // ---- the remaining witnessed opt-ins ----
-           run
-               "Conformance.projectionLawsAt"
-               200
-               (Conformance.projectionLawsAt
-                   ProjectionTests.pw
-                   ProjectionTests.applyOps
-                   ProjectionTests.wireEncode
-                   ProjectionTests.genTree
-                   42
-                   200)
-           // Phase 298 — the observer family at a reference witness: an int metric, two flags.
-           run
-               "Conformance.observerLawsAt"
-               200
-               (Conformance.observerLawsAt observerWitness (ConfRng.intBelow 10) 42 200)
-           run
-               "Conformance.aiSurfaceLawsAt"
-               200
-               (Conformance.aiSurfaceLawsAt
-                   AiSurfaceTests.policedWitness
-                   AiSurfaceTests.genNoteOp
-                   AiSurfaceTests.state0
-                   1234
-                   200)
-           // Phase 297 — the obsolete forwards the naming rule left for one draft, under their own ids.
-           run
-               "Conformance.aiSurfaceKitPolicyLawsAt"
-               200
-               (Conformance.aiSurfaceKitPolicyLawsAt
-                   AiSurfaceTests.witness
-                   AiSurfaceTests.genNoteOp
-                   AiSurfaceTests.state0
-                   1234
-                   200)
-           // Phase 246 — the seam families at the reference domain's seam (`…At` since Phase 297, with
-           // the obsolete `…With` forwards beside them for one draft).
-           run
-               "Conformance.capabilityLawsAt"
-               300
-               (Conformance.capabilityLawsAt
-                   WitnessTakingFamiliesTests.capabilityWitness
-                   WitnessTakingFamiliesTests.capabilityBody
-                   2460
-                   300)
-           run
-               "Conformance.queryLawsAt"
-               300
-               (Conformance.queryLawsAt
-                   WitnessTakingFamiliesTests.queryWitness
-                   WitnessTakingFamiliesTests.queryResolver
-                   2461
-                   300)
-           run
-               "Conformance.capabilityPipelineLawsAt"
-               200
-               (Conformance.capabilityPipelineLawsAt WitnessTakingFamiliesTests.pipelineWitness 2462 200)
+              // ---- the remaining witnessed opt-ins ----
+              run
+                  "Conformance.projectionLawsAt"
+                  200
+                  (Conformance.projectionLawsAt
+                      ProjectionTests.pw
+                      ProjectionTests.applyOps
+                      ProjectionTests.wireEncode
+                      ProjectionTests.genTree
+                      42
+                      200)
+              // Phase 298 — the observer family at a reference witness: an int metric, two flags.
+              run
+                  "Conformance.observerLawsAt"
+                  200
+                  (Conformance.observerLawsAt observerWitness (ConfRng.intBelow 10) 42 200)
+              run
+                  "Conformance.aiSurfaceLawsAt"
+                  200
+                  (Conformance.aiSurfaceLawsAt
+                      AiSurfaceTests.policedWitness
+                      AiSurfaceTests.genNoteOp
+                      AiSurfaceTests.state0
+                      1234
+                      200)
+              // Phase 297 — the obsolete forwards the naming rule left for one draft, under their own ids.
+              run
+                  "Conformance.aiSurfaceKitPolicyLawsAt"
+                  200
+                  (Conformance.aiSurfaceKitPolicyLawsAt
+                      AiSurfaceTests.witness
+                      AiSurfaceTests.genNoteOp
+                      AiSurfaceTests.state0
+                      1234
+                      200)
+              // Phase 246 — the seam families at the reference domain's seam (`…At` since Phase 297, with
+              // the obsolete `…With` forwards beside them for one draft).
+              run
+                  "Conformance.capabilityLawsAt"
+                  300
+                  (Conformance.capabilityLawsAt
+                      WitnessTakingFamiliesTests.capabilityWitness
+                      WitnessTakingFamiliesTests.capabilityBody
+                      2460
+                      300)
+              run
+                  "Conformance.queryLawsAt"
+                  300
+                  (Conformance.queryLawsAt
+                      WitnessTakingFamiliesTests.queryWitness
+                      WitnessTakingFamiliesTests.queryResolver
+                      2461
+                      300)
+              run
+                  "Conformance.capabilityPipelineLawsAt"
+                  200
+                  (Conformance.capabilityPipelineLawsAt WitnessTakingFamiliesTests.pipelineWitness 2462 200)
 
-           // ---- the fixture-only families: the kit supplies its own sample ----
-           run
-               "Conformance.captureReplayLaws"
-               200
-               (let encInt (n: int) = Json.render (JInt n)
+              // ---- the fixture-only families: the kit supplies its own sample ----
+              run
+                  "Conformance.captureReplayLaws"
+                  200
+                  (let encInt (n: int) = Json.render (JInt n)
 
-                let decInt (s: string) =
-                    Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
+                   let decInt (s: string) =
+                       Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
 
-                Conformance.captureReplayLaws encInt decInt ConfRng.next OpStream.defaultHash 31337 200)
-           run
-               "Conformance.constructThenEncodeLaws"
-               (List.length ConstructThenEncodeTests.corpus)
-               (Conformance.constructThenEncodeLaws
-                   "reference"
-                   ConstructThenEncodeTests.codec
-                   (Some ConstructThenEncodeTests.honest)
-                   ConstructThenEncodeTests.corpus)
-           run
-               "Conformance.hashFnAdversarialLaws"
-               500000
-               (Conformance.hashFnAdversarialLaws ConformanceTests.wideHash 500000 4242)
-           run "Conformance.capabilityLaws" 200 (Conformance.capabilityLaws 4242 200)
-           run "Conformance.queryLaws" 200 (Conformance.queryLaws 4242 200)
-           run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
-           // Phase 318 — the policy gate, the write gate and the keyed capture journal.
-           run "Conformance.policyLaws" 200 (Conformance.policyLaws 4242 200)
-           run "Conformance.keyedCaptureLaws" 200 (Conformance.keyedCaptureLaws 4242 200)
-           run "Conformance.writeGateLaws" 300 (Conformance.writeGateLaws nodew idw ConformanceTests.opGen 4242 300)
-           run
-               "Conformance.policyLawsAt"
-               300
-               (Conformance.policyLawsAt
-                   PolicyGateTests.guarded
-                   PolicyGateTests.noteRegistry
-                   AiSurfaceTests.state0
-                   AiSurfaceTests.genNoteOp
-                   PolicyGateTests.actors
-                   PolicyGateTests.privileged
-                   4242
-                   300)
-           run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
-           run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
-           run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
-           run "Conformance.columnVectorLaws" 200 (Conformance.columnVectorLaws 4242 200)
-           // Phase 418 — the ownership law, with Core's own column reads as the operation.
-           run
-               "Conformance.columnOwnershipLaws"
-               200
-               (Conformance.columnOwnershipLaws ColumnTests.coreColumnReads 4242 200)
-           run
-               "Conformance.columnOwnershipLawsWith"
-               200
-               (Conformance.columnOwnershipLawsWith ColumnTests.coreColumnReads ColumnTests.ownershipDraw 4242 200)
-           run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
-           run "Conformance.capabilityPipelineLaws" 200 (Conformance.capabilityPipelineLaws 4242 200)
-           run
-               "Conformance.capabilityPipelineIncrementalLaws"
-               200
-               (Conformance.capabilityPipelineIncrementalLaws 4242 200)
-           run "Conformance.dirtyPropagationLaws" 200 (Conformance.dirtyPropagationLaws 4242 200)
-           run "Conformance.propagationEvalLaws" 200 (Conformance.propagationEvalLaws 4242 200)
-           run
-               "Conformance.propagationEvaluatorLawsAt"
-               200
-               (Conformance.propagationEvaluatorLawsAt ConformanceTests.sheetw 2110 200)
-           run
-               "Conformance.propagationEvaluatorLawsWith"
-               120
-               (Conformance.propagationEvaluatorLawsWith
-                   PropagationCompositionTests.evaluatorWitness
-                   PropagationCompositionTests.withPrior
-                   2500
-                   120)
-           run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
-           run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
-           run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)
-           // Phase 232 — no seed and no iteration count: the one run reads every record it pins.
-           run "Conformance.witnessSurfaceLaws" 1 (Conformance.witnessSurfaceLaws ())
+                   Conformance.captureReplayLaws encInt decInt ConfRng.next OpStream.defaultHash 31337 200)
+              run
+                  "Conformance.constructThenEncodeLaws"
+                  (List.length ConstructThenEncodeTests.corpus)
+                  (Conformance.constructThenEncodeLaws
+                      "reference"
+                      ConstructThenEncodeTests.codec
+                      (Some ConstructThenEncodeTests.honest)
+                      ConstructThenEncodeTests.corpus)
+              run
+                  "Conformance.hashFnAdversarialLaws"
+                  500000
+                  (Conformance.hashFnAdversarialLaws ConformanceTests.wideHash 500000 4242)
+              run "Conformance.capabilityLaws" 200 (Conformance.capabilityLaws 4242 200)
+              run "Conformance.queryLaws" 200 (Conformance.queryLaws 4242 200)
+              run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
+              // Phase 318 — the policy gate, the write gate and the keyed capture journal.
+              run "Conformance.policyLaws" 200 (Conformance.policyLaws 4242 200)
+              run "Conformance.keyedCaptureLaws" 200 (Conformance.keyedCaptureLaws 4242 200)
+              run "Conformance.writeGateLaws" 300 (Conformance.writeGateLaws nodew idw ConformanceTests.opGen 4242 300)
+              run
+                  "Conformance.policyLawsAt"
+                  300
+                  (Conformance.policyLawsAt
+                      PolicyGateTests.guarded
+                      PolicyGateTests.noteRegistry
+                      AiSurfaceTests.state0
+                      AiSurfaceTests.genNoteOp
+                      PolicyGateTests.actors
+                      PolicyGateTests.privileged
+                      4242
+                      300)
+              run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
+              run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
+              run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
+              run "Conformance.columnVectorLaws" 200 (Conformance.columnVectorLaws 4242 200)
+              // Phase 418 — the ownership law, with Core's own column reads as the operation.
+              run
+                  "Conformance.columnOwnershipLawsWith"
+                  200
+                  (Conformance.columnOwnershipLawsWith ColumnTests.coreColumnReads ColumnTests.ownershipDraw 4242 200)
+              run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
+              run "Conformance.capabilityPipelineLaws" 200 (Conformance.capabilityPipelineLaws 4242 200)
+              run
+                  "Conformance.capabilityPipelineIncrementalLaws"
+                  200
+                  (Conformance.capabilityPipelineIncrementalLaws 4242 200)
+              run "Conformance.dirtyPropagationLaws" 200 (Conformance.dirtyPropagationLaws 4242 200)
+              run "Conformance.propagationEvalLaws" 200 (Conformance.propagationEvalLaws 4242 200)
+              run
+                  "Conformance.propagationEvaluatorLawsAt"
+                  200
+                  (Conformance.propagationEvaluatorLawsAt ConformanceTests.sheetw 2110 200)
+              run
+                  "Conformance.propagationPriorLawsAt"
+                  120
+                  (Conformance.propagationPriorLawsAt
+                      PropagationCompositionTests.evaluatorWitness
+                      PropagationCompositionTests.withPrior
+                      2500
+                      120)
+              // Phase 507 — the obsolete forward is a roster row of its own, measured under its own id.
+              run
+                  "Conformance.propagationEvaluatorLawsWith"
+                  120
+                  (Conformance.propagationEvaluatorLawsWith
+                      PropagationCompositionTests.evaluatorWitness
+                      PropagationCompositionTests.withPrior
+                      2500
+                      120)
+              run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
+              run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
+              run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)
+              // Phase 232 — no seed and no iteration count: the one run reads every record it pins.
+              run "Conformance.witnessSurfaceLaws" 1 (Conformance.witnessSurfaceLaws ())
 
-           // ---- the families outside `Conformance` ----
-           run
-               "FoldConfluence.laneFoldLawsAt"
-               120
-               (FoldConfluence.laneFoldLawsAt
-                   FoldFixtures.treeW
-                   FoldFixtures.treeFootprint
-                   FoldFixtures.treeHash
-                   FoldFixtures.treeLaneGen
-                   3
-                   1000
-                   120)
-           run
-               "FoldConfluence.laneFoldLawsWith"
-               120
-               (FoldConfluence.laneFoldLawsWith
-                   FoldFixtures.treeW
-                   FoldFixtures.treeFootprint
-                   FoldFixtures.treeHash
-                   FoldFixtures.treeLaneGen
-                   3
-                   OpStream.defaultHash
-                   1000
-                   120)
+              // ---- the families outside `Conformance` ----
+              run
+                  "FoldConfluence.laneFoldLawsWith"
+                  120
+                  (FoldConfluence.laneFoldLawsWith
+                      FoldFixtures.treeW
+                      FoldFixtures.treeFootprint
+                      FoldFixtures.treeHash
+                      FoldFixtures.treeLaneGen
+                      3
+                      OpStream.defaultHash
+                      1000
+                      120)
 
-           // Phase 297 — the null-tolerant read vectors: a fixed corpus, one law per vector, so the
-           // one run is the whole sample.
-           run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
-           run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
-           run "Conformance.sanitizeLawsAt" 200 (Conformance.sanitizeLawsAt SanitizeWitness.core 349 200)
-           // Phase 442 — the codec family at the reference declaration (CodecLawsTests).
-           run
-               "Conformance.codecLaws"
-               200
-               (Conformance.codecLaws CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
-           // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
-           // each at a store the ordinary append wrote: the store, walked whole, is the sample.
-           run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
-           // Phase 390 — each vector family's `…With` over its committed corpus, and the cross-pipeline
-           // value table: the table, walked whole, is the sample.
-           run "WireNullTolerance.lawsWith" 1 (WireNullTolerance.lawsWith WireNullTolerance.vectors)
-           run
-               "StringEscapeVectors.lawsWith"
-               1
-               (StringEscapeVectors.lawsWith StringEscapeVectors.vectors StringEscapeVectors.actorVectors)
-           run
-               "EncodingProfileVectors.lawsWith"
-               1
-               (EncodingProfileVectors.lawsWith EncodingProfileVectors.vectors EncodingProfileVectors.actorVectors)
-           run "ParityVectors.laws" 1 (ParityVectors.laws ())
-           run "ParityVectors.lawsWith" 1 (ParityVectors.lawsWith ParityVectors.vectors)
-           // Phase 379 — the stored-codec family at a two-text store written under `v2` through the
-           // identity codec, one text carrying a line feed so the positive control has a text to move.
-           run
-               "EncodingProfileVectors.storedCodecLaws"
-               2
-               (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
-           run
-               "StoredIdentity.linearLaws"
-               3
-               (StoredIdentity.linearLaws
-                   "v2"
-                   OpStream.defaultHash
-                   storedIdentityWitness
-                   storedIdentityWitness
-                   storedIdentityLinear)
-           run
-               "StoredIdentity.dagLaws"
-               3
-               (StoredIdentity.dagLaws
-                   "v2"
-                   OpStream.defaultHash
-                   storedIdentityWitness
-                   storedIdentityWitness
-                   storedIdentityDag)
-           run
-               "StoredIdentity.captureLaws"
-               2
-               (StoredIdentity.captureLaws "v2" OpStream.defaultHash storedIdentityCaptures) ]
-        : Run list)
+              // Phase 297 — the null-tolerant read vectors: a fixed corpus, one law per vector, so the
+              // one run is the whole sample.
+              run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
+              run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
+              run "Conformance.sanitizeLawsAt" 200 (Conformance.sanitizeLawsAt SanitizeWitness.core 349 200)
+              // Phase 442 — the codec family at the reference declaration (CodecLawsTests).
+              run
+                  "Conformance.codecLawsAt"
+                  200
+                  (Conformance.codecLawsAt CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
+              // Phase 507 — the obsolete forward, measured under its own id.
+              run
+                  "Conformance.codecLaws"
+                  200
+                  (Conformance.codecLaws CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
+              // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
+              // each at a store the ordinary append wrote: the store, walked whole, is the sample.
+              run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
+              // Phase 390 — each vector family's `…With` over its committed corpus, and the cross-pipeline
+              // value table: the table, walked whole, is the sample.
+              run "WireNullTolerance.lawsWith" 1 (WireNullTolerance.lawsWith WireNullTolerance.vectors)
+              run
+                  "StringEscapeVectors.lawsWith"
+                  1
+                  (StringEscapeVectors.lawsWith StringEscapeVectors.vectors StringEscapeVectors.actorVectors)
+              run
+                  "EncodingProfileVectors.lawsWith"
+                  1
+                  (EncodingProfileVectors.lawsWith EncodingProfileVectors.vectors EncodingProfileVectors.actorVectors)
+              run "ParityVectors.laws" 1 (ParityVectors.laws ())
+              run "ParityVectors.lawsWith" 1 (ParityVectors.lawsWith ParityVectors.vectors)
+              // Phase 379 — the stored-codec family at a two-text store written under `v2` through the
+              // identity codec, one text carrying a line feed so the positive control has a text to move.
+              run
+                  "EncodingProfileVectors.storedCodecLawsAt"
+                  2
+                  (EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
+              // Phase 507 — the obsolete forward, measured under its own id.
+              run
+                  "EncodingProfileVectors.storedCodecLaws"
+                  2
+                  (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
+              run
+                  "StoredIdentity.linearLaws"
+                  3
+                  (StoredIdentity.linearLaws
+                      "v2"
+                      OpStream.defaultHash
+                      storedIdentityWitness
+                      storedIdentityWitness
+                      storedIdentityLinear)
+              run
+                  "StoredIdentity.dagLaws"
+                  3
+                  (StoredIdentity.dagLaws
+                      "v2"
+                      OpStream.defaultHash
+                      storedIdentityWitness
+                      storedIdentityWitness
+                      storedIdentityDag)
+              run
+                  "StoredIdentity.captureLaws"
+                  2
+                  (StoredIdentity.captureLaws "v2" OpStream.defaultHash storedIdentityCaptures) ]
+
+         match declared |> List.countBy fst |> List.filter (fun (_, n) -> n > 1) with
+         | [] -> Map.ofList declared
+         | twice -> failwithf "a family has more than one reference run: %A" (List.map fst twice))
+
+/// The reference runs, in id order.
+let private allRuns () : Run list =
+    runs.Value |> Map.toList |> List.map snd
 
 /// The family's own adequacy class, which is what decides how its run is read. Looked up rather
 /// than passed, because the census is the single declaration and this file must not become a
@@ -779,7 +778,7 @@ let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results
 /// The measured census: one `CaseCount` per family, in roster order. This is what the generated
 /// `docs/conformance-families.{md,json}` render their `cases` column from.
 let cases () : (string * CaseCount) list =
-    runs.Value
+    allRuns ()
     |> List.map (fun r -> r.Id, SampleAdequacy.cases r.Id (classOf r.Id) r.Iterations r.Results)
     |> List.sortBy fst
 
@@ -839,12 +838,22 @@ let vacuityTests =
               // Both directions, for the reason the roster's own completeness check runs both: a
               // missing run is a family measured by nobody, and a run naming nothing is a census
               // cell for a family that no longer exists.
-              let ran = runs.Value |> List.map _.Id |> Set.ofList
-              let rostered = Set.ofList KitRoster.ids
+              //
+              // Phase 507 — the roster is walked THROUGH the map: every family's run is looked up by
+              // its id, so a family with no run is a missing key, named.
+              let unrun =
+                  [ for f in KitRoster.families do
+                        match Map.tryFind (LawKit.FamilyId f.Id) runs.Value with
+                        | Some r when r.Id = f.Id -> ()
+                        | Some r -> yield sprintf "%s (keyed, but the run says %s)" f.Id r.Id
+                        | None -> yield f.Id ]
 
               Expect.isEmpty
-                  (Set.difference rostered ran |> Set.toList)
+                  unrun
                   "these law families have no reference run in ConformanceVacuityTests — add one in the commit that ships the family, or its census cell reads `unmeasured` forever"
+
+              let ran = allRuns () |> List.map _.Id |> Set.ofList
+              let rostered = Set.ofList KitRoster.ids
 
               Expect.isEmpty (Set.difference ran rostered |> Set.toList) "these reference runs name no roster family"
 
@@ -854,7 +863,7 @@ let vacuityTests =
               // is not this file's finding to report (the owning suite reports it properly); it is
               // the reason to stop trusting the census.
               let failed =
-                  [ for r in runs.Value do
+                  [ for r in allRuns () do
                         for l in r.Results do
                             if not l.Passed then
                                 yield sprintf "%s — %s: %A" r.Id l.Law l.Counterexample ]
@@ -998,7 +1007,7 @@ let vacuityTests =
               let ids = Set.ofList KitRoster.ids
 
               let defects =
-                  [ for r in runs.Value do
+                  [ for r in allRuns () do
                         yield! guardDefects ids r.Id (classOf r.Id) r.Results ]
 
               Expect.isEmpty
@@ -1385,7 +1394,7 @@ let private guardDimensions () : string list =
     let reached = "the sample reached every "
     let spans = "the sample spans the "
 
-    [ for r in runs.Value do
+    [ for r in allRuns () do
           for law in r.Results do
               if law.Law.StartsWith SampleAdequacy.guardOpening then
                   let at = law.Law.IndexOf "): "
@@ -1688,6 +1697,9 @@ let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
       "ParityVectors.laws", corpus, (fun () -> ParityVectors.lawsWith [])
       "ParityVectors.lawsWith", corpus, (fun () -> ParityVectors.lawsWith [])
       // The stored families' sample is the store a consumer hands them: an empty store is the zero.
+      "EncodingProfileVectors.storedCodecLawsAt",
+      "the store holds at least one text",
+      (fun () -> EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [])
       "EncodingProfileVectors.storedCodecLaws",
       "the store holds at least one text",
       (fun () -> EncodingProfileVectors.storedCodecLaws "v2" Codec.json [])
@@ -1830,7 +1842,9 @@ module ObsoleteDecoy =
 /// Every way a roster breaks the rule, named. Pure over its inputs so the go-red below can plant one.
 let private namingDefects (families: Families.LawFamily list) (obsolete: string -> string -> bool) : string list =
     let live = families |> List.filter (fun f -> not (obsolete f.Module f.Entry))
-    let ids = families |> List.map _.Id |> set
+    // A pinned-default spelling is an entry point of the family (Phase 507), so an `…At` spelling
+    // stands beside its `…With` exactly as an `…At` row did.
+    let ids = families |> List.collect (fun f -> f.Id :: f.Spellings) |> set
 
     [ for f in live do
           let witnessTaking = f.Reason = Some Families.NeedsWitnessCapability
@@ -1892,3 +1906,106 @@ let namingRuleTests =
                     "Conformance.plantedLawsAtWith is a configured form with no Conformance.plantedLawsAtAt beside it"
                     "Conformance.orphanLawsWith is a configured form with no Conformance.orphanLawsAt beside it" ]
                   "the plants are named, each for its own defect" ]
+
+// ---------------------------------------------------------------------------
+//  the pinned-default spellings (Phase 507)
+// ---------------------------------------------------------------------------
+
+/// Each pinned-default spelling the roster declares, run beside its family called with the pinned
+/// parameter at its default, at one seed and size. The roster reads a spelling as its family's (one
+/// census cell, one reference run); that reading is only honest if the two answer alike, which is
+/// what this holds.
+let private spellingPairs: (string * string * Lazy<LawResult list * LawResult list>) list =
+    [ "Conformance.reconcileLaws",
+      "Conformance.reconcileLawsWith",
+      lazy
+          (Conformance.reconcileLaws nodew idw ConformanceTests.opGen encNode 5353 60,
+           Conformance.reconcileLawsWith nodew idw ConformanceTests.opGen encNode OpStream.defaultHash 5353 60)
+      "Conformance.concurrencyLaws",
+      "Conformance.concurrencyLawsWith",
+      lazy
+          (Conformance.concurrencyLaws nodew idw ConformanceTests.opGen encNode 8080 60,
+           Conformance.concurrencyLawsWith nodew idw ConformanceTests.opGen encNode honestFootprint 8080 60)
+      "Conformance.keyedArbitrationLawsAt",
+      "Conformance.keyedArbitrationLawsWith",
+      lazy
+          (Conformance.keyedArbitrationLawsAt
+              ConformanceTests.keyw
+              ConformanceTests.knodew
+              idw
+              KeyedArbitrationTests.containedKGen
+              KeyedArbitrationTests.encK
+              2470
+              60,
+           Conformance.keyedArbitrationLawsWith
+               ConformanceTests.keyw
+               ConformanceTests.knodew
+               idw
+               KeyedArbitrationTests.containedKGen
+               KeyedArbitrationTests.encK
+               (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
+               (Ops.canApplyAllKeyed
+                   ConformanceTests.keyw
+                   (LawKit.canHoldOf KeyedArbitrationTests.containedKGen)
+                   ConformanceTests.knodew
+                   idw)
+               2470
+               60)
+      "Conformance.snapshotLaws",
+      "Conformance.snapshotLawsWith",
+      lazy
+          (Conformance.snapshotLaws ConformanceTests.sw ConformanceTests.streamGen string OpStream.defaultHash 321 40,
+           Conformance.snapshotLawsWith
+               ConformanceTests.sw
+               ConformanceTests.streamGen
+               string
+               OpStream.defaultHash
+               OpStream.canonicalConfig
+               321
+               40)
+      "Conformance.columnOwnershipLaws",
+      "Conformance.columnOwnershipLawsWith",
+      lazy
+          (Conformance.columnOwnershipLaws ColumnTests.coreColumnReads 4242 40,
+           Conformance.columnOwnershipLawsWith ColumnTests.coreColumnReads ColumnarSeamLaws.ownershipSample 4242 40)
+      "FoldConfluence.laneFoldLawsAt",
+      "FoldConfluence.laneFoldLawsWith",
+      lazy
+          (FoldConfluence.laneFoldLawsAt
+              FoldFixtures.treeW
+              FoldFixtures.treeFootprint
+              FoldFixtures.treeHash
+              FoldFixtures.treeLaneGen
+              3
+              1000
+              40,
+           FoldConfluence.laneFoldLawsWith
+               FoldFixtures.treeW
+               FoldFixtures.treeFootprint
+               FoldFixtures.treeHash
+               FoldFixtures.treeLaneGen
+               3
+               OpStream.defaultHash
+               1000
+               40) ]
+
+[<Tests>]
+let spellingTests =
+    testList
+        "Conformance.Spellings (Phase 507)"
+        [ testCase "the pairs here are exactly the roster's spellings"
+          <| fun _ ->
+              let declared =
+                  [ for f in KitRoster.families do
+                        for sp in f.Spellings -> sp, f.Id ]
+                  |> Set.ofList
+
+              let paired = spellingPairs |> List.map (fun (sp, f, _) -> sp, f) |> Set.ofList
+              Expect.equal paired declared "every declared spelling is held below, under the family that declares it"
+
+          testCase "a spelling answers exactly as its family at the pinned default — results and guard labels"
+          <| fun _ ->
+              for spelling, family, pair in spellingPairs do
+                  let viaSpelling, viaFamily = pair.Value
+                  Expect.isNonEmpty viaFamily (sprintf "%s answered nothing" family)
+                  Expect.equal viaSpelling viaFamily (sprintf "%s is not %s at its default" spelling family) ]

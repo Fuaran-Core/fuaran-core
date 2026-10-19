@@ -50,7 +50,7 @@ module internal SurfaceLaws =
         (applyOps: 'Op list -> Result<'Node, string>)
         (wireEncode: 'Node -> string)
         (gen: ConfRng.T -> 'Node * ConfRng.T)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let roundTrip =
@@ -67,7 +67,7 @@ module internal SurfaceLaws =
         // digest-stability witness across draws: id string -> (digest, content cell)
         let mutable seen = Map.empty<string, string * string>
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let tree = rng.Draw gen
             let whole = Projection.project pw Scope.Whole tree
 
@@ -183,12 +183,11 @@ module internal SurfaceLaws =
     /// exercised at this domain. `aiSurfaceLawsUnderKitPolicy` is the old behaviour, named for what it
     /// does; it certifies the plumbing and says nothing about the domain's policy.
     let private aiSurfaceRun
-        (family: string)
         (kitPolicy: bool)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let completeness =
@@ -230,19 +229,23 @@ module internal SurfaceLaws =
             for t in w.ReadTools do
                 readTools.Check(
                     (t.Run state0 = t.Run state0),
-                    fun () -> sprintf "seed=%d: read tool '%s' is not deterministic" seed t.Name
+                    fun () -> sprintf "seed=%d: read tool '%s' is not deterministic" runner.Seed t.Name
                 )
          with ex ->
-             readTools.Check(false, fun () -> sprintf "seed=%d: a read tool threw: %s" seed ex.Message))
+             readTools.Check(false, fun () -> sprintf "seed=%d: a read tool threw: %s" runner.Seed ex.Message))
 
         if w.ReadTools |> List.forall (fun t -> t.Name <> "__no_such_tool__") then
             match AiSurface.runTool w "__no_such_tool__" state0 with
             | Ok _ ->
-                readTools.Check(false, fun () -> sprintf "seed=%d: an unknown read-tool name was not refused" seed)
+                readTools.Check(
+                    false,
+                    fun () -> sprintf "seed=%d: an unknown read-tool name was not refused" runner.Seed
+                )
             | Error msg ->
                 readTools.Check(
                     (w.ReadTools |> List.forall (fun t -> msg.Contains t.Name)),
-                    fun () -> sprintf "seed=%d: the unknown-tool refusal does not enumerate the available tools" seed
+                    fun () ->
+                        sprintf "seed=%d: the unknown-tool refusal does not enumerate the available tools" runner.Seed
                 )
 
         // ---- Phase 298: no catch-all anchor (bank-fixed — checked once) ----
@@ -257,7 +260,7 @@ module internal SurfaceLaws =
                     fun () ->
                         sprintf
                             "seed=%d: pattern '%s' anchor '%s' has no literal segment — it matches every intent"
-                            seed
+                            runner.Seed
                             card.Name
                             anchor
                 )
@@ -277,7 +280,7 @@ module internal SurfaceLaws =
 
             sb.ToString()
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let op = rng.Draw genOp
 
             // ---- catalogue completeness: emitted direction ----
@@ -499,7 +502,7 @@ module internal SurfaceLaws =
             fun () ->
                 sprintf
                     "seed=%d: catalogued kinds never emitted by the generator: %s"
-                    seed
+                    runner.Seed
                     (missing |> Set.toList |> String.concat ", ")
         )
 
@@ -507,35 +510,27 @@ module internal SurfaceLaws =
         // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator that
         // draws no op the reducer rejects leaves the guidance law and the rejected-parity arms
         // certified by nothing; one that draws nothing applicable leaves the applied-parity arms so.
-        @ [ SampleAdequacy.reached family "accepted op" seed [ "accepted", accepted ]
-            SampleAdequacy.reached family "rejected op" seed [ "refused", refused ] ]
+        @ [ LawKit.guard runner "accepted op" [ "accepted", accepted ]
+            LawKit.guard runner "rejected op" [ "refused", refused ] ]
         // Phase 246 — under the domain's policy, the decisions it reached. The kit's roll reaches all
         // three by construction, so the kit-policy form carries no such line.
         @ (if kitPolicy then
                []
            else
-               [ SampleAdequacy.reached
-                     family
-                     "policy decision"
-                     seed
-                     [ "allowed", allowed; "parked", parked; "denied", denied ] ])
+               [ LawKit.guard runner "policy decision" [ "allowed", allowed; "parked", parked; "denied", denied ] ])
 
     /// The AI-surface laws (Phase 59) at the domain's OWN policy — see `aiSurfaceRun` above for the
     /// four laws. Since `0.32.0` (Phase 246) the decision each drawn op meets is the witness's
     /// `Decide`, and the family is starved unless that policy allows, parks and denies something the
     /// generator draws. `aiSurfaceKitPolicyLawsAt` is the pre-`0.32.0` behaviour.
-    ///
-    /// `family` labels the guards — `Conformance.aiSurfaceLawsAt`, or the obsolete bare name's own
-    /// id for one draft (Phase 297's naming rule: the domain-witness form is `…At`).
     let aiSurfaceLawsAt
-        (family: string)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        aiSurfaceRun family false w genOp state0 seed iterations
+        aiSurfaceRun false w genOp state0 runner iterations
 
     /// The AI-surface laws with the KIT'S policy swapped in for the domain's (Phase 246 names it;
     /// it is `aiSurfaceLaws` as it stood before `0.32.0`). Per draw the kit rolls `Allow`,
@@ -544,17 +539,15 @@ module internal SurfaceLaws =
     /// only for totality. A policy that allows every write passes it. Run it beside `aiSurfaceLawsAt`
     /// when the plumbing is the question, never instead of it.
     ///
-    /// Phase 390: `aiSurfaceKitPolicyLawsAt` (the kit-policy family, at the domain's witness); `family`
-    /// labels the guards, or the obsolete `aiSurfaceLawsUnderKitPolicy` id until `0.37.0`.
+    /// Phase 390: `aiSurfaceKitPolicyLawsAt` (the kit-policy family, at the domain's witness).
     let aiSurfaceKitPolicyLawsAt
-        (family: string)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        aiSurfaceRun family true w genOp state0 seed iterations
+        aiSurfaceRun true w genOp state0 runner iterations
 
     // ---- Phase 232 — the witness-record field freeze, held by a law --------------------------------
     //

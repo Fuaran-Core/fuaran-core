@@ -391,6 +391,10 @@ module FoldConfluence =
         (seed: int)
         (iterations: int)
         : LawResult list =
+        // This module is the public facade of its two families, so the id is spelled here, beside
+        // the entry point it names, as `Conformance` spells its own.
+        let runner = LawKit.Runner(LawKit.FamilyId "FoldConfluence.laneFoldLawsWith", seed)
+
         let foldLaw =
             LawKit.LawCell(
                 "lane-fold determinism (every arrival order of a folding lane set folds to one state hash)",
@@ -504,7 +508,7 @@ outcomes:
                     | LaneHalted _ -> haltLaw.Check(false, msg)
                     | _ -> foldLaw.Check(false, msg)
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let lanes = rng.Draw(gen.Lanes laneCount)
 
             if not (List.isEmpty lanes) then
@@ -526,11 +530,11 @@ outcomes:
         // clean fold nor a halt, so a sample made mostly of rejections must say so, and a domain
         // whose reducer never rejects must not be starved for it.
         //
-        // Phase 297 — the guard carries the family's roster id, as every guard in the kit does.
-        @ [ SampleAdequacy.reachedBeside
-                "FoldConfluence.laneFoldLawsWith"
+        // Phase 297 — the guard carries the family's roster id, as every guard in the kit does; since
+        // Phase 507 the runner carries it.
+        @ [ LawKit.guardBeside
+                runner
                 "lane-fold outcome"
-                seed
                 [ "folded", folded; "halted", halted ]
                 // Phase 300 — the two shared-history shapes are counted beside the outcomes: they are
                 // drawn by construction from every lane set with enough lanes, so reported, not demanded.

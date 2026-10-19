@@ -26,7 +26,7 @@ module internal CaptureStreamLaws =
         (decode: string -> Result<'v, string>)
         (draw: ConfRng.T -> 'v * ConfRng.T)
         (hashFn: HashFn)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let exact =
@@ -50,7 +50,7 @@ module internal CaptureStreamLaws =
         // replaces — a `draw` that keeps yielding the same value never tampers.
         let mutable tampered = 0
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             // record a non-deterministic session: 1..5 effects, each a fresh draw, journalled.
             let k = rng.IntBelow 5
             let mutable captures = []
@@ -146,7 +146,7 @@ module internal CaptureStreamLaws =
         // multi-identity guard (Phase 40): a journal of two distinct effect identities replays
         // correctly in record order, but a replay that requests the wrong identity at the head
         // surfaces a *named* mismatch rather than silently handing back the other effect's value.
-        let fixedDraws = LawKit.Draws(seed + 7)
+        let fixedDraws = (runner.Fork 7).Draws()
         let v1 = fixedDraws.Draw draw
         let v2 = fixedDraws.Draw draw
         let _, c1 = OpStream.captureEffect hashFn encode "clock" "alpha" (fun () -> v1) []
@@ -169,8 +169,8 @@ module internal CaptureStreamLaws =
 
         multiIdentity.Check(
             inOrder && misordered,
-            fun () -> sprintf "seed=%d: replayEffect did not enforce effect-identity order" seed
+            fun () -> sprintf "seed=%d: replayEffect did not enforce effect-identity order" runner.Seed
         )
 
         LawKit.results [ exact; deterministic; tamper; multiIdentity; jsonl ]
-        @ [ SampleAdequacy.reached "Conformance.captureReplayLaws" "tampered" seed [ "tampered", tampered ] ]
+        @ [ LawKit.guard runner "tampered" [ "tampered", tampered ] ]

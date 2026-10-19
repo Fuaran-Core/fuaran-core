@@ -231,7 +231,7 @@ let removalHonestyTests =
               let withPrior (s: RefSheet) resolve (_: int option) id = sheetEvalNode s resolve id
 
               let redWith =
-                  Conformance.propagationEvaluatorLawsWith (removing true) withPrior 2110 200
+                  Conformance.propagationPriorLawsAt (removing true) withPrior 2110 200
                   |> List.filter (fun r -> not r.Passed && not (r.Law.StartsWith SampleAdequacy.guardOpening))
 
               Expect.isEmpty redWith (sprintf "%A" redWith) ]

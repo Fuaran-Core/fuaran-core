@@ -81,7 +81,7 @@ module internal RegistrySeamLaws =
     ///  - **the function registry's index stays consistent**: after a random sequence of lifecycle
     ///    edits, `findBySignature` by result type returns exactly the enumerated entries of that type
     ///    the query matches — no phantom, no miss.
-    let registryLaws (seed: int) (iterations: int) : LawResult list =
+    let registryLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let findable =
             LawKit.LawCell "a function is findable by its declared result type + required holes (subsumption + exact)"
 
@@ -100,7 +100,7 @@ module internal RegistrySeamLaws =
             LawKit.LawCell
                 "findBySignature fills a hole exactly when the space relation says the context's space fits (Space.subsumes)"
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             // ---- 0. the hole match IS the space relation (Phase 295) ----
             let required = drawSpace rng
             let available = drawSpace rng
@@ -345,7 +345,7 @@ module internal RegistrySeamLaws =
             | Error _, Error _ -> true
             | _ -> false
 
-        LawKit.run iterations (seed + 316) (fun rng i at ->
+        LawKit.run (runner.Fork 316) iterations (fun rng i at ->
             let subset () =
                 pool |> List.filter (fun _ -> rng.IntBelow 2 = 0)
 
@@ -633,7 +633,7 @@ module internal RegistrySeamLaws =
     ///    change-detection, not a hand-incremented counter a host can forget to bump.
     ///  - **unload undoes load** (Phase 316) — `ContentPack.unload m` over the registry `load m reg`
     ///    returned gives back `reg`, and a second unload is refused `PackNotLoaded` by name.
-    let packLoadingLaws (seed: int) (iterations: int) : LawResult list =
+    let packLoadingLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let roundTrip =
             LawKit.LawCell "a content pack loads and each curried function is findable under its narrowed signature"
 
@@ -651,7 +651,7 @@ module internal RegistrySeamLaws =
             LawKit.LawCell
                 "unload undoes load (the registry the pack loaded into comes back), and unloading a pack not loaded is refused PackNotLoaded"
 
-        LawKit.run iterations seed (fun rng i at ->
+        LawKit.run runner iterations (fun rng i at ->
             let lo = rng.IntBelow 50
             let span = rng.IntBelow 50
             let hi = lo + span + 1

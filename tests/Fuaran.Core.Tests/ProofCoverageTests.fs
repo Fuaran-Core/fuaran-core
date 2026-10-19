@@ -1181,7 +1181,8 @@ let private liveOperationInputs () : OperationInputs =
     { Census = census
       Ladder = liveLadderOperations ()
       Rosters = Fuaran.Core.Families.families |> List.map (fun f -> f.Id, f.Operations)
-      Families = KitRoster.ids |> Set.ofList
+      // A family's pinned-default spellings are its entry points too (Phase 507).
+      Families = KitRoster.families |> List.collect (fun f -> f.Id :: f.Spellings) |> Set.ofList
       Exclusions = exclusions
       Classes = operationClassesOf exclusionsDoc.RootElement
       StandIns = standIns
@@ -1700,9 +1701,14 @@ let proofCoverageTests =
 
               // `obsolete` is carried exactly when a published operation carries `System.Obsolete`:
               // none does at a major boundary (Phase 386, the `OneDotZero` family), and the class
-              // stays in the vocabulary for the forward a later minor deprecates.
+              // stays in the vocabulary for the forward a later minor deprecates. An obsolete LAW
+              // FAMILY forward (Phase 507: `codecLaws`, `propagationEvaluatorLawsWith`) is mapped by
+              // its own roster row, which an exclusion may not double, so it does not demand the class.
               let exempt =
-                  if inputs.Census |> List.exists carriesObsolete then
+                  if
+                      inputs.Census
+                      |> List.exists (fun o -> carriesObsolete o && not (inputs.Families.Contains o.Name))
+                  then
                       Set.empty
                   else
                       Set.singleton "obsolete"

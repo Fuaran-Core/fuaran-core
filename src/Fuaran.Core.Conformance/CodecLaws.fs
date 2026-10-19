@@ -21,10 +21,6 @@ namespace Fuaran.Core
 /// refusal, this family reads every refusal the collecting reader answers.
 module internal CodecLaws =
 
-    /// The roster id the guards are labelled with.
-    [<Literal>]
-    let private family = "Conformance.codecLaws"
-
     /// The guard dimension the refusal arm is counted in.
     [<Literal>]
     let private mutationOutcome = "mutation outcome"
@@ -42,7 +38,12 @@ module internal CodecLaws =
 
     /// The laws, over `iterations` values `gen` draws from a cursor seeded at `seed`. `'T` needs
     /// equality: "reads back as the value" is `=`.
-    let codecLaws (codec: Codec<'T>) (gen: ConfRng.T -> 'T * ConfRng.T) (seed: int) (iterations: int) : LawResult list =
+    let codecLaws
+        (codec: Codec<'T>)
+        (gen: ConfRng.T -> 'T * ConfRng.T)
+        (runner: LawKit.Runner)
+        (iterations: int)
+        : LawResult list =
         let written =
             LawKit.LawCell "codec laws: every sampled value is written — the declaration covers it"
 
@@ -67,7 +68,7 @@ module internal CodecLaws =
         let mutable accepted = 0
         let mutable distinct: Set<string> = Set.empty
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run runner iterations (fun rng _ at ->
             let v = rng.Draw gen
 
             match codec.Write v with
@@ -124,5 +125,5 @@ module internal CodecLaws =
                         ))
 
         LawKit.results [ written; reads; inverse; text; refusals ]
-        @ [ SampleAdequacy.reachedBeside family mutationOutcome seed [ "refused", refused ] [ "accepted", accepted ]
-            SampleAdequacy.spanned family "distinct written values" 2 seed (Set.count distinct) iterations ]
+        @ [ LawKit.guardBeside runner mutationOutcome [ "refused", refused ] [ "accepted", accepted ]
+            LawKit.span runner "distinct written values" 2 (Set.count distinct) iterations ]

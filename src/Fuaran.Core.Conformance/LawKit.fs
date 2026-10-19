@@ -136,6 +136,78 @@ module internal LawKit =
 
         member d.Shuffle(xs: 'a list) : 'a list = d.Draw(ConfRng.shuffle xs)
 
+    /// A law family's identity, once (Phase 507): its roster key, `<Module>.<Entry>`, the spelling a
+    /// census cell, a guard label and a ladder row's `dischargedBy` use. It is handed to the runner by
+    /// the public entry point that names the family, so a law module never spells it: every guard the
+    /// family emits is labelled by the runner, never by a literal beside the guard.
+    type FamilyId =
+        | FamilyId of string
+
+        /// The id as the roster spells it.
+        member f.Label: string =
+            let (FamilyId s) = f
+            s
+
+    /// What a family runs under (Phase 507): WHICH family it is and the seed its draws replay from.
+    /// Every guard is minted from it (`guard`, `guardBeside`, `guardFraction`, `span`, `declared`),
+    /// labelled with the family's id, so a family cannot label a guard
+    /// with another family's id (the class Phase 498 found by hand), and every seed a family derives
+    /// is derived here (`Fork`), so no law module does seed arithmetic.
+    [<Sealed>]
+    type Runner(family: FamilyId, seed: int) =
+
+        /// The family this runner runs.
+        member _.Family: FamilyId = family
+
+        /// The seed the family's draws replay from; every counterexample is stamped with it.
+        member _.Seed: int = seed
+
+        /// A runner over the same family whose draws are an independent stream keyed `k` — an arm that
+        /// must not share the main loop's cursor. Seeded at `seed + k`, which is exactly the seed the
+        /// arms that fork used to compute by hand, so every recorded draw, counterexample stamp and
+        /// pinned vector replays unchanged: the key is a stream's name, the arithmetic is here.
+        member _.Fork(k: int) : Runner = Runner(family, seed + k)
+
+        /// A fresh cursor at this runner's seed — for an arm that draws outside `run`'s loop.
+        member _.Draws() : Draws = Draws seed
+
+    // ---- the guards, minted by the runner (Phase 507) -------------------------------------------
+    //
+    // Curried over the runner first, so a family's guard reads as `SampleAdequacy`'s public spelling
+    // with the family and the seed taken from where they are held rather than written beside it.
+
+    /// The coverage guard over `dimension`: red when a demanded count is zero
+    /// (`SampleAdequacy.reached`), labelled with the runner's family id.
+    let guard (runner: Runner) (dimension: string) (counts: (string * int) list) : LawResult =
+        SampleAdequacy.reached runner.Family.Label dimension runner.Seed counts
+
+    /// `guard`, with counts the family keeps but does not demand rendered beside the demanded ones
+    /// (`SampleAdequacy.reachedBeside`).
+    let guardBeside
+        (runner: Runner)
+        (dimension: string)
+        (counts: (string * int) list)
+        (beside: (string * int) list)
+        : LawResult =
+        SampleAdequacy.reachedBeside runner.Family.Label dimension runner.Seed counts beside
+
+    /// `guard`, demanding each verdict at least one time in `oneIn` (`SampleAdequacy.reachedFraction`).
+    let guardFraction (runner: Runner) (dimension: string) (counts: (string * int * int * int) list) : LawResult =
+        SampleAdequacy.reachedFraction runner.Family.Label dimension runner.Seed counts
+
+    /// The span guard: the widest of `n` samples must reach `atLeast` on `measure`
+    /// (`SampleAdequacy.spanned`).
+    let span (runner: Runner) (measure: string) (atLeast: int) (widest: int) (n: int) : LawResult =
+        SampleAdequacy.spanned runner.Family.Label measure atLeast runner.Seed widest n
+
+    /// The family's adequacy line when its laws are vacuous BY DECLARATION — the witness declares
+    /// nothing for them to reach. A pass, because that is the honest verdict, and a guard line,
+    /// because a census must read which verdict it is rather than count the laws as certified.
+    let declared (runner: Runner) (why: string) : LawResult =
+        { Law = SampleAdequacy.lawPrefix runner.Family.Label + why
+          Passed = true
+          Counterexample = None }
+
     /// How many times a tamper or collision arm redraws its replacement before it gives up
     /// (Phase 302).
     [<Literal>]
@@ -161,13 +233,13 @@ module internal LawKit =
 
         found
 
-    /// The loop every family runs: `iterations` bodies over one cursor seeded from `seed`, each
-    /// handed the cursor, its index and the counterexample stamp for that index.
-    let run (iterations: int) (seed: int) (body: Draws -> int -> (string -> string) -> unit) : unit =
-        let rng = Draws seed
+    /// The loop every family runs: `iterations` bodies over one cursor seeded from the runner's seed,
+    /// each handed the cursor, its index and the counterexample stamp for that index.
+    let run (runner: Runner) (iterations: int) (body: Draws -> int -> (string -> string) -> unit) : unit =
+        let rng = runner.Draws()
 
         for i in 0 .. iterations - 1 do
-            body rng i (failAt seed i)
+            body rng i (failAt runner.Seed i)
 
     /// The container capability a generator declares, total: `None` means every node can hold
     /// children (Phase 251).
@@ -541,8 +613,6 @@ module internal LawKit =
     /// writes is built from these so that each family reads exactly as it did before Phase 297.
     type SeamRendering<'Err> =
         {
-            /// The family's roster id (`Conformance.<entry>`), which the adequacy guard is named by.
-            Family: string
             /// The three law texts in result order: the three outcomes, the refusal preceding the
             /// body, and the host agreeing with its registry.
             Laws: string * string * string
@@ -589,7 +659,7 @@ module internal LawKit =
     /// the registry's own error. Guarded on the three outcomes ("dispatch outcome"); the second and
     /// third laws are asserted only on a dispatch that returned, so a run in which they assert
     /// nothing is one the guard counts nothing in, and they read through it (covered cells).
-    let seamLaws (adapter: SeamAdapter<'Entry, 'Args, 'v, 'Err>) (seed: int) (iterations: int) : LawResult list =
+    let seamLaws (adapter: SeamAdapter<'Entry, 'Args, 'v, 'Err>) (runner: Runner) (iterations: int) : LawResult list =
         let r = adapter.Rendering
         let outcomesLaw, precedesLaw, agreementLaw = r.Laws
         let outcomes = LawCell outcomesLaw
@@ -599,7 +669,7 @@ module internal LawKit =
         let mutable pending = 0
         let mutable refused = 0
 
-        run iterations seed (fun rng _ at ->
+        run runner iterations (fun rng _ at ->
             let id, args = rng.Draw adapter.Gen
 
             let runs = ref 0
@@ -707,8 +777,4 @@ module internal LawKit =
                     ))
 
         results [ outcomes; precedes; agreement ]
-        @ [ SampleAdequacy.reached
-                r.Family
-                "dispatch outcome"
-                seed
-                [ "settled", settled; "pending", pending; "refused", refused ] ]
+        @ [ guard runner "dispatch outcome" [ "settled", settled; "pending", pending; "refused", refused ] ]

@@ -1238,6 +1238,14 @@ so it is `Drawn` and `Guarded` on the mutation outcome, with a span guard on dis
 a generator that draws one value cannot certify the round trip. The two Phase 436 rows are
 `domain-obligation` rows discharged by it.
 
+*Amended by Phase 507 (2026-10-19).* The roster now types what a family takes (`Families.Takes`, Phase
+506), so the reason above no longer follows from a suffix rule: the family takes the domain's own
+`Codec<'T>`, which the base contract does not demand, and `Takes.Codec` records it. Its reason is
+therefore `NeedsWitnessCapability`, and under D127 its name is `Conformance.codecLawsAt`; the two
+Phase 436 rows move their `dischargedBy` to it. `codecLaws` is an `[<Obsolete>]` forward kept as a
+roster row under its own id and guard label until the `1.0` retirement, as D127's forwards were. The
+laws, the guards and the refusal verdict are unchanged.
+
 ## 2026-10-12 — D147: the `1.0.0` draft is released as `0.37.0`, a minor of the `0.x` line; the `OneDotZero` family stays as it is, vacuous by name at major 0 and armed for the eventual `1.0.0`; D101's gate and the surface guard do not read the major and are unchanged
 
 **Status:** Live
@@ -2876,6 +2884,13 @@ before the seed. Phase 390 makes it total and checkable:
   sibling always stands beside it. That is what the three existing precedents already were
   (`propagationEvaluatorLawsWith`, `keyedArbitrationLawsWith`, `FoldConfluence.laneFoldLawsWith`), so no
   `…With` name moves; the rule names what they already did.
+  *Note, Phase 507 (2026-10-19):* the reading stands as written and needs no second clause. A `…With`
+  and the form with its parameter at the default are ONE family: the roster lists the default form in
+  the `…With` row's `Spellings` (one census cell, one reference run), so the six pinned twins no longer
+  read as two families. The one precedent that ran its `…At` and ADDED laws,
+  `propagationEvaluatorLawsWith`, was a different law set rather than a configured form, and takes a
+  stem of its own (`propagationPriorLawsAt`; the old name an obsolete forward on its own row), as the
+  rule's third bullet already said of a different law set.
 - **A family whose stem is not `…Laws` keeps its stem** (`compositionPilot` → `compositionPilotAt`), and
   a family that is a different law SET over the same witness says so in its stem, not in a suffix the
   rule does not have: `aiSurfaceLawsUnderKitPolicy` (the proposal plumbing under the kit's policy, at the

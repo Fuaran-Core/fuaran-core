@@ -20,7 +20,7 @@ module internal PolicySeamLaws =
     ///  - **a gate only tightens** — `decide` after `withGate` is never less restrictive than before,
     ///    a union refuses whatever either side's policy refused, and `restrict` keeps the policy;
     ///  - **`decide` agrees with `dispatch`** — the body runs exactly when `decide` answers `Allow`.
-    let policyLaws (seed: int) (iterations: int) : LawResult list =
+    let policyLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let lattice =
             LawKit.LawCell
                 "join is the rank maximum, commutative up to the kept denial, associative, idempotent, with Allow its identity, Deny absorbing, and monotone; all and any fold join and meet"
@@ -87,7 +87,7 @@ module internal PolicySeamLaws =
               TotalRowCount = None
               NextPageToken = None }
 
-        LawKit.run iterations (seed + 318) (fun rng _ at ->
+        LawKit.run (runner.Fork 318) iterations (fun rng _ at ->
             // ---- the lattice, over a drawn triple ----
             let a = rng.Choose decisions
             let b = rng.Choose decisions
@@ -376,14 +376,13 @@ module internal PolicySeamLaws =
     ///  - **an inapplicable sequence never applies** — `submitGuarded` of a sequence whose dry run
     ///    refuses is a refusal (`SubmitDenied` or `SubmitOpRejected`), never applied or parked.
     let policyLawsAt
-        (family: string)
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
         (registry: CapabilityRegistry)
         (state0: 'State)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (actors: Actor list)
         (privileged: Actor -> bool)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let noWrite =
@@ -406,7 +405,7 @@ module internal PolicySeamLaws =
                 | Some c -> c.Signature.Effect.Host = WritesHost
                 | None -> false)
 
-        LawKit.run iterations (seed + 3180) (fun rng _ at ->
+        LawKit.run (runner.Fork 3180) iterations (fun rng _ at ->
             let op = rng.Draw genOp
             let op2 = rng.Draw genOp
             let actor = rng.Choose actors
@@ -449,10 +448,9 @@ module internal PolicySeamLaws =
                 | other -> inapplicable.Check(false, fun () -> at (sprintf "an inapplicable sequence was %A" other)))
 
         LawKit.results [ noWrite; dryRun; inapplicable ]
-        @ [ SampleAdequacy.reached
-                family
+        @ [ LawKit.guard
+                runner
                 "op and actor"
-                seed
                 [ "unprivileged actor", unprivileged
                   "host-writing op", writes
                   "refused dry run", refusedRuns ] ]
@@ -471,11 +469,10 @@ module internal PolicySeamLaws =
     ///  - **locking more never admits more** — a gate whose `Locked` is a superset refuses every op
     ///    the smaller one refused.
     let writeGateLaws
-        (family: string)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
-        (seed: int)
+        (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
         let cover =
@@ -507,7 +504,7 @@ module internal PolicySeamLaws =
             |> List.collect (fun n -> nodew.Children n |> List.map (fun c -> key (nodew.Id c), key (nodew.Id n)))
             |> Map.ofList
 
-        LawKit.run iterations (seed + 3181) (fun rng _ at ->
+        LawKit.run (runner.Fork 3181) iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let op = rng.Draw(LawKit.genOp nodew idw gen tree)
             let targets = WriteGate.targetsOf nodew idw op tree
@@ -581,7 +578,7 @@ module internal PolicySeamLaws =
             ))
 
         LawKit.results [ cover; first; subtree; monotone ]
-        @ [ SampleAdequacy.reached family "gated op" seed [ "applied op", applied; "denied op", denied ] ]
+        @ [ LawKit.guard runner "gated op" [ "applied op", applied; "denied op", denied ] ]
 
     // ---- the keyed capture journal (Phase 318) ----
 
@@ -604,7 +601,7 @@ module internal PolicySeamLaws =
     ///    `CapabilityRegistry.dispatchCaptured` replays through `dispatchReplayed` with the recorded
     ///    answer even when the live body would now answer otherwise, and an invocation the policy
     ///    refused journals nothing.
-    let keyedCaptureLaws (seed: int) (iterations: int) : LawResult list =
+    let keyedCaptureLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let verifies =
             LawKit.LawCell "a recorded keyed journal verifies: chain intact and phases paired"
 
@@ -648,7 +645,7 @@ module internal PolicySeamLaws =
                         Determinism = Effect.network } }
                 Server
 
-        LawKit.run iterations (seed + 3182) (fun rng _ at ->
+        LawKit.run (runner.Fork 3182) iterations (fun rng _ at ->
             let n = 1 + rng.IntBelow 6
 
             let calls =
