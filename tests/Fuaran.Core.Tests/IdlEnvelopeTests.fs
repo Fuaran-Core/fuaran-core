@@ -93,7 +93,8 @@ let private envelopeIdl: Idl =
               [ { Tag = "Literal"
                   // the union-case leg
                   Fields = [ req "text" TStr; omit "scale" TInt (VInt 1) ]
-                  Annotations = Annotations.Empty } ] } ]
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty } ]
       Enums =
         [ Declare.enumOf "Weight" [ "Normal"; "Heavy" ]
           Declare.enumOf "Presence" [ "Live"; "Muted" ]
@@ -101,9 +102,11 @@ let private envelopeIdl: Idl =
       Records =
         [ { Name = "Trim"
             // the record leg
-            Fields = [ omit "inset" TInt (VInt 0) ] }
+            Fields = [ omit "inset" TInt (VInt 0) ]
+            Annotations = Annotations.Empty }
           { Name = "Style"
-            Fields = [ req "name" TStr ] } ]
+            Fields = [ req "name" TStr ]
+            Annotations = Annotations.Empty } ]
       Defaults = []
       // The full `WIRE_FORMAT.md` §3.1 envelope: three wire-visible slots and two
       // host-only ones. `accessibility` is omit-at-default rather than optional

@@ -661,7 +661,11 @@ let compiledFixtures =
           testCase "a field-less RECORD is a marker type too, in the one type emitter" (fun _ ->
               let idl =
                   { ScoreDomainSpike.scoreIdl with
-                      Records = { Name = "Empty"; Fields = [] } :: ScoreDomainSpike.scoreIdl.Records }
+                      Records =
+                          { Name = "Empty"
+                            Fields = []
+                            Annotations = Annotations.Empty }
+                          :: ScoreDomainSpike.scoreIdl.Records }
 
               match Gen.fsharpTypes idl with
               | Ok src ->
@@ -960,7 +964,8 @@ let declarationRefusals =
                           Annotations = Annotations.Empty }
                         { Tag = "Ref"
                           Fields = [ reqField "name" TStr ]
-                          Annotations = Annotations.Empty } ] }
+                          Annotations = Annotations.Empty } ]
+                    Annotations = Annotations.Empty }
 
               let idl =
                   { ReferenceIdl.refIdl with
@@ -1012,7 +1017,8 @@ let private hardenIdl: Idl =
     { ReferenceIdl.refIdl with
         Records =
             { Name = "Target"
-              Fields = [ reqField "href" TStr ] }
+              Fields = [ reqField "href" TStr ]
+              Annotations = Annotations.Empty }
             :: ReferenceIdl.refIdl.Records
         Kinds =
             ReferenceIdl.refIdl.Kinds

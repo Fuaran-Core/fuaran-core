@@ -52,11 +52,13 @@ let private small: Idl =
       Unions =
         [ { Name = "Pair"
             Params = [ "A"; "B" ]
-            Cases = [ case "Of" [ f "a" (TVar "A") Required; f "b" (TVar "B") Required ] ] } ]
+            Cases = [ case "Of" [ f "a" (TVar "A") Required; f "b" (TVar "B") Required ] ]
+            Annotations = Annotations.Empty } ]
       Enums = [ Declare.enumWith "Level" [ "Low", "low"; "High", "high" ] ]
       Records =
         [ { Name = "Shape"
-            Fields = [ f "w" TInt Required; f "label" TStr Optional ] } ]
+            Fields = [ f "w" TInt Required; f "label" TStr Optional ]
+            Annotations = Annotations.Empty } ]
       Defaults = []
       NodeFields = []
       Ops = []
@@ -99,11 +101,16 @@ let private adversarial: (string * string * Idl) list =
           Unions =
               [ { Name = "Pair"
                   Params = [ "A"; "B" ]
-                  Cases = [ case "Of" []; case "Of" [] ] } ] }
+                  Cases = [ case "Of" []; case "Of" [] ]
+                  Annotations = Annotations.Empty } ] }
       "a type name declared twice",
       "type name 'Level'",
       { small with
-          Records = small.Records @ [ { Name = "Level"; Fields = [] } ] }
+          Records =
+              small.Records
+              @ [ { Name = "Level"
+                    Fields = []
+                    Annotations = Annotations.Empty } ] }
       "a wrong-typed omit-at-default",
       "omit-at-default value does not fit",
       small |> withKinds [ kind "Bad" [ f "n" TInt (OmitDefault(VStr "zero")) ] ]
@@ -142,7 +149,8 @@ let private adversarial: (string * string * Idl) list =
               small.Unions
               @ [ { Name = "Loose"
                     Params = [ "A" ]
-                    Cases = [ case "One" [ f "v" (TVar "Z") Required ] ] } ] }
+                    Cases = [ case "One" [ f "v" (TVar "Z") Required ] ]
+                    Annotations = Annotations.Empty } ] }
       "an object-capable transparent case",
       "can encode to an object",
       { small with
@@ -150,7 +158,8 @@ let private adversarial: (string * string * Idl) list =
               small.Unions
               @ [ { Name = "Lit"
                     Params = []
-                    Cases = [ case "Raw" [ f "v" TJson Required ] ] } ]
+                    Cases = [ case "Raw" [ f "v" TJson Required ] ]
+                    Annotations = Annotations.Empty } ]
           Harden =
               { HardenPolicy.Undeclared with
                   TransparentUnions = [ "Lit", "Raw" ] } }
@@ -161,7 +170,8 @@ let private adversarial: (string * string * Idl) list =
               small.Unions
               @ [ { Name = "Wrap"
                     Params = [ "T" ]
-                    Cases = [ case "Bare" [ f "v" (TVar "T") Required ] ] } ]
+                    Cases = [ case "Bare" [ f "v" (TVar "T") Required ] ]
+                    Annotations = Annotations.Empty } ]
           Harden =
               { HardenPolicy.Undeclared with
                   TransparentUnions = [ "Wrap", "Bare" ] } }
@@ -182,7 +192,8 @@ let private adversarial: (string * string * Idl) list =
           Records =
               small.Records
               @ [ { Name = "Ctor"
-                    Fields = [ f "constructor" TStr Optional ] } ] }
+                    Fields = [ f "constructor" TStr Optional ]
+                    Annotations = Annotations.Empty } ] }
       "a union case field named toString",
       "field 'toString' is reserved",
       { small with
@@ -190,7 +201,8 @@ let private adversarial: (string * string * Idl) list =
               small.Unions
               @ [ { Name = "Shown"
                     Params = []
-                    Cases = [ case "One" [ f "toString" TStr Required ] ] } ] }
+                    Cases = [ case "One" [ f "toString" TStr Required ] ]
+                    Annotations = Annotations.Empty } ] }
       "an envelope field named valueOf",
       "field 'valueOf' is reserved",
       { small with
@@ -290,7 +302,11 @@ let declareErrorsTests =
           test "a zero-field kind and a zero-field record are well-formed, and the artifact carries them" {
               let idl =
                   { small with
-                      Records = small.Records @ [ { Name = "Empty"; Fields = [] } ] }
+                      Records =
+                          small.Records
+                          @ [ { Name = "Empty"
+                                Fields = []
+                                Annotations = Annotations.Empty } ] }
 
               Expect.isEmpty (Declare.errors idl) "marker kind and empty record"
 
@@ -627,7 +643,8 @@ let samplerTotalityTests =
                   { small with
                       Records =
                           [ { Name = "Loop"
-                              Fields = [ f "next" (TRecord "Loop") Required ] } ] }
+                              Fields = [ f "next" (TRecord "Loop") Required ]
+                              Annotations = Annotations.Empty } ] }
                   |> withKinds [ kind "L" [ f "l" (TRecord "Loop") Required ] ]
 
               for name, idl, tag in [ "empty enum", emptyEnum, "E"; "self-referential record", selfRecord, "L" ] do

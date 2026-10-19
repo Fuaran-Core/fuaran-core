@@ -12,7 +12,8 @@ module Declare =
         { Name = name
           Cases = cases
           Wires = []
-          CaseAnnotations = [] }
+          CaseAnnotations = []
+          Annotations = Annotations.Empty }
 
     /// An enum whose wire strings differ from its host case names, declared as
     /// `(case, wire)` pairs. Taking PAIRS rather than two lists is the point: the
@@ -23,7 +24,8 @@ module Declare =
         { Name = name
           Cases = cases |> List.map fst
           Wires = cases |> List.map snd
-          CaseAnnotations = [] }
+          CaseAnnotations = []
+          Annotations = Annotations.Empty }
 
     /// Declare what is true ABOUT some of an enum's cases (Phase 119), by HOST case
     /// name. Sparse — name only the cases that say something; the rest read as

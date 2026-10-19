@@ -179,7 +179,8 @@ let docIdl: Idl =
                   Annotations = Annotations.Empty }
                 { Tag = "Code"
                   Fields = [ req "value" TStr ]
-                  Annotations = Annotations.Empty } ] } ]
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty } ]
       Enums =
         [ Declare.enumOf "Locale" [ "EnGB"; "EnUS" ]
           Declare.enumOf "Numbering" [ "NoNumbering"; "DecimalNumbering"; "LegalNumbering" ]

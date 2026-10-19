@@ -171,7 +171,12 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
             | Some "list" -> TList(go (Decoder.tryMember "of" shape |> Option.defaultValue (JObj [])))
             | Some "object" ->
                 let name = fresh "R"
-                records.Add { Name = name; Fields = fields shape }
+
+                records.Add
+                    { Name = name
+                      Fields = fields shape
+                      Annotations = Annotations.Empty }
+
                 TRecord name
             | Some "tagged" ->
                 let name = fresh "U"
@@ -186,7 +191,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                 unions.Add
                     { Name = name
                       Params = []
-                      Cases = cases }
+                      Cases = cases
+                      Annotations = Annotations.Empty }
 
                 TUnion(name, [])
             | Some "ref" ->

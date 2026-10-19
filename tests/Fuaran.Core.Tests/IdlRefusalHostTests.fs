@@ -883,7 +883,11 @@ let declarationTests =
               for name in [ "DecodeRefusal"; "Node"; "CornerSpec" ] do
                   let idl =
                       { RefusalCornersIdl.idl with
-                          Records = RefusalCornersIdl.idl.Records @ [ { Name = name; Fields = [] } ]
+                          Records =
+                              RefusalCornersIdl.idl.Records
+                              @ [ { Name = name
+                                    Fields = []
+                                    Annotations = Annotations.Empty } ]
                           Kinds =
                               RefusalCornersIdl.idl.Kinds
                               |> List.map (fun k ->

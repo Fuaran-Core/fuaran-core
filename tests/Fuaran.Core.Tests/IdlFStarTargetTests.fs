@@ -445,14 +445,16 @@ let private defaultedFamilyIdl: Idl =
                 Annotations = Annotations.Empty } ]
         Records =
             [ { Name = "Pt"
-                Fields = [ field "x" TStr Required ] } ]
+                Fields = [ field "x" TStr Required ]
+                Annotations = Annotations.Empty } ]
         Unions =
             [ { Name = "Src"
                 Params = []
                 Cases =
                   [ { Tag = "Lit"
                       Fields = [ field "text" TStr Required ]
-                      Annotations = Annotations.Empty } ] } ]
+                      Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty } ]
         NodeFields = [] }
 
 /// The model text over a vocabulary, every expressible kind selected, or a failed test.
@@ -601,7 +603,8 @@ let idlFStarTargetTests =
                                           Type = TVar "T"
                                           Opt = Required
                                           Annotations = Annotations.Empty } ]
-                                    Annotations = Annotations.Empty } ] }
+                                    Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty }
                         |> fun idl -> reached idl onlyTag
                     "an undeclared kind", "undeclared kind", (fun () -> reached (tinyIdl TStr Required) [ "Absent" ])
                     "a default omitting a required member",
@@ -619,7 +622,8 @@ let idlFStarTargetTests =
                                               Type = TStr
                                               Opt = Required
                                               Annotations = Annotations.Empty } ]
-                                        Annotations = Annotations.Empty } ] }
+                                        Annotations = Annotations.Empty } ]
+                                  Annotations = Annotations.Empty }
 
                         reached idl onlyTag
                     "a transparent union case that is not a single scalar member",
@@ -641,7 +645,8 @@ let idlFStarTargetTests =
                                               Type = TStr
                                               Opt = Required
                                               Annotations = Annotations.Empty } ]
-                                        Annotations = Annotations.Empty } ] }
+                                        Annotations = Annotations.Empty } ]
+                                  Annotations = Annotations.Empty }
 
                         reached
                             { idl with

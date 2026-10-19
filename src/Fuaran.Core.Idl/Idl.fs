@@ -515,6 +515,10 @@ and IdlUnion =
         Params: string list
         /// The cases, in declaration order.
         Cases: IdlUnionCase list
+        /// What is true ABOUT the union as a TYPE (Phase 542) — see [[IdlField.Annotations]].
+        /// [[Annotations.Empty]] for a union that says nothing, which is every union
+        /// declared before the slot existed; the artifact then omits it.
+        Annotations: Annotations
     }
 
 /// A closed set of bare strings on the wire.
@@ -564,6 +568,10 @@ and IdlEnum =
         /// `[]` — the default, and every declaration written before Phase 119 — means no
         /// case says anything. Read it through [[AnnotationsOf]] rather than by lookup.
         CaseAnnotations: (string * Annotations) list
+        /// What is true ABOUT the enum as a TYPE (Phase 542), as distinct from any one
+        /// of its cases ([[CaseAnnotations]]). [[Annotations.Empty]] for an enum that
+        /// says nothing; the artifact then omits it.
+        Annotations: Annotations
     }
 
     /// The annotation set declared for a HOST case name, or [[Annotations.Empty]] when
@@ -616,6 +624,9 @@ and IdlRecord =
         Name: string
         /// The record's fields; a field-less record is well-formed.
         Fields: IdlField list
+        /// What is true ABOUT the record as a TYPE (Phase 542) — see [[IdlField.Annotations]].
+        /// [[Annotations.Empty]] for a record that says nothing; the artifact then omits it.
+        Annotations: Annotations
     }
 
 /// An authored value, checked and encoded against the IDL.

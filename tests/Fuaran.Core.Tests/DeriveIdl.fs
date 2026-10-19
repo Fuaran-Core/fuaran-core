@@ -68,7 +68,8 @@ let deriveIdl: Idl =
                 case "Not" [ req "rule" rule ]
                 case "Maybe" [ opt "inner" rule ]
                 case "Guarded" [ req "guard" (TRecord "Guard") ]
-                case "Named" [ req "rules" (TMap rule) ] ] }
+                case "Named" [ req "rules" (TMap rule) ] ]
+            Annotations = Annotations.Empty }
           { Name = "Trigger"
             Params = []
             Cases =
@@ -78,19 +79,24 @@ let deriveIdl: Idl =
                     [ req "owner" (TRecord "Owner")
                       req "name" TStr
                       req "fire" (handler "string") ]
-                case "Manual" [ req "label" TStr ] ] }
+                case "Manual" [ req "label" TStr ] ]
+            Annotations = Annotations.Empty }
           { Name = "Measure"
             Params = []
-            Cases = [ case "Hours" [ req "amount" TFloat ]; case "Days" [ req "amount" TFloat ] ] } ]
+            Cases = [ case "Hours" [ req "amount" TFloat ]; case "Days" [ req "amount" TFloat ] ]
+            Annotations = Annotations.Empty } ]
       Records =
         [ { Name = "Owner"
             Fields =
               [ opt "name" TStr
-                field "priority" (TEnum "Priority") (OmitDefault(VEnum "Normal")) ] }
+                field "priority" (TEnum "Priority") (OmitDefault(VEnum "Normal")) ]
+            Annotations = Annotations.Empty }
           { Name = "Branch"
-            Fields = [ req "label" TStr; req "body" TNode ] }
+            Fields = [ req "label" TStr; req "body" TNode ]
+            Annotations = Annotations.Empty }
           { Name = "Guard"
-            Fields = [ req "rule" rule; opt "note" TStr ] } ]
+            Fields = [ req "rule" rule; opt "note" TStr ]
+            Annotations = Annotations.Empty } ]
       Kinds =
         [ kind
               "Section"

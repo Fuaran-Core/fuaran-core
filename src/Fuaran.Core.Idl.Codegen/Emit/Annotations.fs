@@ -151,6 +151,11 @@ module internal Annotations =
             |> List.exists (fun e -> e.CaseAnnotations |> List.exists (fun (_, a) -> (obsoleteAttr a).IsSome)))
         || (fieldSets
             |> List.exists (List.exists (fun f -> (obsoleteAttr f.Annotations).IsSome)))
+        // Phase 542 — a union, record or enum TYPE earns it on the same terms.
+        || ([ yield! idl.Unions |> List.map _.Annotations
+              yield! idl.Records |> List.map _.Annotations
+              yield! idl.Enums |> List.map _.Annotations ]
+            |> List.exists (fun a -> (obsoleteAttr a).IsSome))
 
     // -----------------------------------------------------------------------
     // Phase 293 — THE PRECEDENCE between a declared support doc and an authored annotation,

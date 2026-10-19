@@ -85,7 +85,8 @@ let docIdl: Idl =
                               Message = Some "resolve the reference before encoding." }
                       InProcessOnly = true
                       Since = Some "0.2.0"
-                      Doc = Some "A by-name reference to another note." } } ] } ]
+                      Doc = Some "A by-name reference to another note." } } ]
+            Annotations = Annotations.Empty } ]
       Enums =
         [ Declare.enumOf "Tone" [ "Quiet"; "Loud" ]
           // A doc that OPENS with `<` — the one shape the compiler reads as XML.
@@ -94,7 +95,8 @@ let docIdl: Idl =
         [ { Name = "Pair"
             Fields =
               [ f "left" TStr Required |> withDoc "The left half, < the right."
-                f "right" TStr Required ] } ]
+                f "right" TStr Required ]
+            Annotations = Annotations.Empty } ]
       Defaults = []
       NodeFields = []
       Ops = []
@@ -350,7 +352,8 @@ let tests =
                   { undocumented with
                       Records =
                           [ { Name = "Pair"
-                              Fields = [ f "left" TStr Required |> withDoc " \r\n\t "; f "right" TStr Required ] } ] }
+                              Fields = [ f "left" TStr Required |> withDoc " \r\n\t "; f "right" TStr Required ]
+                              Annotations = Annotations.Empty } ] }
 
               // Below the stamp (Phase 505): the doc is in the vocabulary, so its identity line moves.
               Expect.equal

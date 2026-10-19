@@ -68,12 +68,14 @@ module private Fixtures =
                 Params = []
                 Cases =
                   [ case "Inline" [ fld "text" TStr Required ]
-                    case "Ref" [ fld "id" TStr Required ] ] } ]
+                    case "Ref" [ fld "id" TStr Required ] ]
+                Annotations = Annotations.Empty } ]
           Enums =
             [ { Name = "Loudness"
                 Cases = [ "Plain"; "Loud" ]
                 Wires = []
-                CaseAnnotations = [] } ]
+                CaseAnnotations = []
+                Annotations = Annotations.Empty } ]
           Records = []
           Defaults = []
           NodeFields = []
