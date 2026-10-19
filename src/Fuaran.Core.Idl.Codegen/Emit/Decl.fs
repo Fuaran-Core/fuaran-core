@@ -38,6 +38,48 @@ type internal Instantiation =
       Union: IdlUnion
       Subst: Map<string, IdlType> }
 
+/// Phase 525 — what a kind selection reaches ON THE WIRE, monomorphised: the closed types (no
+/// type variable left) a model of the wire declares or iterates, in FIRST-REACH order. The walk
+/// starts at the node, takes the envelope's wire fields and then the selected kinds' in the
+/// caller's order; a record or a union instance is placed when it is first met, before what it
+/// reaches, and a list or a map after its element. A host-only field is never on the wire and
+/// reaches nothing; a hosted slot reaches its DECLARED wire form (Phase 252), the value every
+/// host's decoder checks, and nothing when it declares none. Two types that are one wire type
+/// (a hosted slot and its declared wire, a `TFn` and a `TClosure`) are one entry.
+///
+/// This is the reach the F* model is printed from. The host reach above ([[Decl.Records]] and
+/// its siblings) answers a different question — which declarations the host SOURCE must state,
+/// including those named only by a signature or a host-only field — and is a set in declaration
+/// order; this one is a sequence, because the model's order is the order it was reached in.
+type internal WireReach =
+    {
+        /// `TNode`, then everything the node envelope reaches, in first-reach order.
+        FromEnvelope: IdlType list
+        /// Everything the selected kinds reach beyond [[FromEnvelope]], in first-reach order.
+        FromKinds: IdlType list
+        /// The enums met, in first-reach order.
+        Enums: string list
+    }
+
+/// Phase 525 — an IDL-declared default VALUE as a typed literal: the value at the type it is
+/// declared at, every admissibility question already answered. [[Decl.literal]] is the ONE place
+/// a default is admitted or refused; each backend prints what it admits (the F# backend's
+/// `fsDefaultLit`, the F* target's `defaultLit`), and a backend that cannot spell an admitted
+/// literal says so as its own boundary, never by deciding admissibility again. A record's and a
+/// union case's members stay as authored: the presence rules that read them are the printers'.
+[<RequireQualifiedAccess>]
+type internal Literal =
+    | Str of string
+    | Int of int
+    /// A finite float — also an integer authored at a float slot.
+    | Float of float
+    | Bool of bool
+    /// The enum's HOST case, resolved from the wire spelling the value carries.
+    | Enum of enumName: string * case: string
+    | EmptyList
+    | Record of IdlRecord * authored: (string * IdlValue) list
+    | Union of IdlUnion * args: IdlType list * IdlUnionCase * authored: (string * IdlValue) list
+
 /// Phase 511 — THE ONE RESOLUTION of a vocabulary for one kind selection (B §8 S2). Built once
 /// by [[Decl.resolve]] and handed to every emitter, which reads the declaration graph from here
 /// and never re-walks the `Idl`: what a selection reaches, which declarations carry the message
@@ -78,6 +120,9 @@ type internal Decl =
         HostedFormat: bool
         /// The node envelope's layout.
         Envelope: EnvelopeLayout
+        /// Phase 525 — what the selection reaches on the wire, monomorphised and in first-reach
+        /// order (see [[WireReach]]).
+        Wire: WireReach
     }
 
 [<RequireQualifiedAccess>]
@@ -398,6 +443,142 @@ module internal Decl =
         fix Set.empty
 
     // -----------------------------------------------------------------------
+    // Phase 525 — the wire reach, monomorphised (see [[WireReach]]).
+    // -----------------------------------------------------------------------
+
+    /// The fields a declaration puts on the wire — every one but a host-only field.
+    let private onWire (fields: IdlField list) : IdlField list =
+        fields |> List.filter (fun f -> f.Opt <> HostOnly)
+
+    /// One wire type's identity: two closed types with one key are one entry of the reach. A
+    /// hosted slot is its declared wire form, or a verbatim JSON value when it declares none; a
+    /// signature and a closure are one sentinel.
+    let rec private wireKey (t: IdlType) : string =
+        match t with
+        | THosted h ->
+            match h.Wire with
+            | Some w -> wireKey w
+            | None -> "json"
+        | TJson -> "json"
+        | TFn _
+        | TClosure -> "closure"
+        | TOpaque -> "opaque"
+        | TStr -> "str"
+        | TInt -> "int"
+        | TBool -> "bool"
+        | TFloat -> "float"
+        | TNode -> "node"
+        | TKind -> "kind"
+        | TOp -> "op"
+        | TVar v -> "var_" + v
+        | TEnum n -> "enum_" + n
+        | TRecord n -> "record_" + n
+        | TList inner -> "list_" + wireKey inner
+        | TMap vt -> "map_" + wireKey vt
+        | TUnion(n, args) -> "union_" + n + "(" + (args |> List.map wireKey |> String.concat ",") + ")"
+
+    let private wireReach (idl: Idl) (kinds: IdlKind list) : WireReach =
+        let order = ResizeArray<IdlType>()
+        let seen = System.Collections.Generic.HashSet<string>()
+        let enums = ResizeArray<string>()
+        let mutable envelopeReach = 0
+
+        let rec visit (t: IdlType) =
+            match t with
+            | THosted h -> h.Wire |> Option.iter visit
+            | TEnum n ->
+                if not (enums.Contains n) then
+                    enums.Add n
+            | TList inner
+            | TMap inner ->
+                if seen.Add(wireKey t) then
+                    visit inner
+                    order.Add t
+            | TNode ->
+                if seen.Add "node" then
+                    // Placed BEFORE its members are walked, so a kind that holds a node does not
+                    // re-enter; the kinds come after everything the envelope reaches.
+                    order.Add TNode
+                    visitFields idl.NodeFields
+                    envelopeReach <- order.Count
+
+                    for k in kinds do
+                        visitFields k.Fields
+            | TRecord n ->
+                if seen.Add(wireKey t) then
+                    order.Add t
+                    CodegenLookup.tryRecord idl n |> Option.iter (fun r -> visitFields r.Fields)
+            | TUnion(n, args) ->
+                if seen.Add(wireKey t) then
+                    order.Add t
+
+                    match CodegenLookup.tryUnion idl n with
+                    | Some u ->
+                        match TypeParams.bind u args with
+                        | Some subst ->
+                            for c in u.Cases do
+                                for f in onWire c.Fields do
+                                    visit (TypeParams.substitute subst f.Type)
+                        | None -> ()
+                    | None -> ()
+            | _ -> ()
+
+        and visitFields (fields: IdlField list) =
+            for f in onWire fields do
+                visit f.Type
+
+        visit TNode
+        let all = List.ofSeq order
+
+        { FromEnvelope = List.truncate envelopeReach all
+          FromKinds = List.skip envelopeReach all
+          Enums = List.ofSeq enums }
+
+    // -----------------------------------------------------------------------
+    // Phase 525 — the ONE admissibility of a declared default (see [[Literal]]).
+    // -----------------------------------------------------------------------
+
+    /// The declared default `v` at the type `t` as a typed [[Literal]], or the refusal every
+    /// backend gives it. Admitted: a well-formed string; an int; a bool; a finite float (an int
+    /// authored at a float slot reads as one); an enum's WIRE spelling, resolved to its host case
+    /// through [[IdlEnum.CaseOf]] (a host case name the wire does not use is refused — Phase 292);
+    /// the empty list; a declared record; a declared union case at the declared arity that is not
+    /// the union's declared TRANSPARENT case (the 2026-09-13 ruling: the case encodes bare, so no
+    /// host can test for it on the wire). Everything else — a map, a JSON value, a closure or
+    /// hosted value, a non-empty list, an unpaired surrogate, a non-finite float — is refused.
+    let literal (idl: Idl) (t: IdlType) (v: IdlValue) : Result<Literal, CodegenError> =
+        let refuse () =
+            Error(CodegenError.UnsupportedDefault(t, v))
+
+        match t, v with
+        | TStr, VStr s when not (SourceLit.isWellFormed s) -> refuse ()
+        | TStr, VStr s -> Ok(Literal.Str s)
+        | TInt, VInt i -> Ok(Literal.Int i)
+        | TBool, VBool b -> Ok(Literal.Bool b)
+        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(Literal.Float f)
+        | TFloat, VInt i -> Ok(Literal.Float(float i))
+        | TEnum n, VEnum spelling ->
+            match CodegenLookup.tryEnum idl n |> Option.bind (fun e -> e.CaseOf spelling) with
+            | Some case -> Ok(Literal.Enum(n, case))
+            | None -> refuse ()
+        | TList _, VList [] -> Ok Literal.EmptyList
+        | TRecord n, VRecord authored ->
+            match CodegenLookup.tryRecord idl n with
+            | Some r -> Ok(Literal.Record(r, authored))
+            | None -> refuse ()
+        | TUnion(n, args), VUnion(tag, authored) ->
+            match CodegenLookup.tryUnion idl n with
+            | Some u when
+                List.length u.Params = List.length args
+                && TransparentUnion.tag idl.Harden u <> Some tag
+                ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                | Some c -> Ok(Literal.Union(u, args, c, authored))
+                | None -> refuse ()
+            | _ -> refuse ()
+        | _ -> refuse ()
+
+    // -----------------------------------------------------------------------
     // The resolution.
     // -----------------------------------------------------------------------
 
@@ -426,7 +607,8 @@ module internal Decl =
                 match idl.Wire.NodeEnvelope with
                 | NodeEnvelopeShape.NestedKind -> KindPlacement.NestedUnder "kind"
                 | NodeEnvelopeShape.FlatKind -> KindPlacement.Merged
-              Members = idl.NodeFields } }
+              Members = idl.NodeFields }
+          Wire = wireReach idl kinds }
 
     /// Resolve `idl` for the kinds named by `kindTags` (a tag the vocabulary does not declare
     /// selects nothing), with the host projections `projections` (empty where the target has

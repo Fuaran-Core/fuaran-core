@@ -746,3 +746,78 @@ let moveContainedLengthTests =
                   (TreePlacement.move nodew idw "a" "p" Anchor.Last t)
                   (Ok [ ReorderChildren("p", [ "b"; "a" ]) ])
                   "a reorder among its own siblings" ]
+
+// Phase 512 — one script runner. Ten loops spelled "thread a tree through ops, stop at the first
+// refusal"; they are one runner read several ways, so the forms must agree on every script: the
+// dry run names the refusal the script meets, a `Batch` is the script all-or-nothing, the inverse
+// script refuses where the script does and undoes it where it applies, and the grammar and gated
+// forms with nothing to say answer what the plain engine answers.
+
+/// Every non-batch op the sample tree's ids can spell: inserts of a fresh leaf, removals, moves,
+/// reorders (the current order reversed) and in-place rewrites.
+let everyOp (t: RNode) : SkeletonOp<RNode, string> list =
+    let ids = Tree.ids nodew t
+
+    [ for p in ids do
+          yield InsertChild(p, RNode.leaf "fresh" "para" "n")
+          yield RemoveNode p
+          yield UpdateNode(RNode.leaf p "retitled" "v")
+
+          match Tree.tryFind nodew idw p t with
+          | Some n -> yield ReorderChildren(p, n.Children |> List.map _.Id |> List.rev)
+          | None -> ()
+
+          for q in ids do
+              yield MoveNode(p, q) ]
+
+[<Tests>]
+let scriptRunnerTests =
+    testList
+        "Phase 512 - one script runner"
+        [ testCase "every two-op script: dry run, batch, inverse, grammar and gate agree with the script"
+          <| fun _ ->
+              let t = sample ()
+              let ops = everyOp t
+              let mutable refused = 0
+              let mutable applied = 0
+
+              for a in ops do
+                  for b in ops do
+                      let script = [ a; b ]
+                      let run = Ops.applyAll nodew idw script t
+
+                      let dry =
+                          match run with
+                          | Ok _ -> Ok()
+                          | Error r -> Error(r.Applied, r.Rejection)
+
+                      Expect.equal (Ops.canApplyAll nodew idw script t) dry "canApplyAll"
+                      Expect.equal (Ops.canApplyAllWith (fun _ -> true) nodew idw script t) dry "canApplyAllWith"
+
+                      Expect.equal
+                          (Ops.canApplyAllGrammar (fun _ -> None) (fun _ -> true) nodew idw script t)
+                          dry
+                          "canApplyAllGrammar with no grammar"
+
+                      Expect.equal
+                          (Ops.apply nodew idw (Batch script) t)
+                          (run |> Result.mapError _.Rejection)
+                          "Batch is the script, all-or-nothing"
+
+                      Expect.equal
+                          (WriteGate.applyGated WriteGate.allowAll nodew idw (Batch script) t)
+                          (run |> Result.mapError (fun r -> GatedApplyFailure.Rejected r.Rejection))
+                          "the permissive gate"
+
+                      match run, Ops.invertAll nodew idw script t with
+                      | Error r, Error(i, e) ->
+                          refused <- refused + 1
+                          Expect.equal (i, e) (r.Applied, r.Rejection) "invertAll refuses where the script does"
+                      | Ok after, Ok inverse ->
+                          applied <- applied + 1
+                          Expect.equal (Ops.applyAll nodew idw inverse after) (Ok t) "the inverse script undoes it"
+                      | r, i -> failtestf "applyAll and invertAll disagree on %A: %A / %A" script r i
+
+              // both outcomes are reached, so neither half of the agreement is vacuous
+              Expect.isGreaterThan applied 100 "applicable scripts probed"
+              Expect.isGreaterThan refused 100 "refused scripts probed" ]
