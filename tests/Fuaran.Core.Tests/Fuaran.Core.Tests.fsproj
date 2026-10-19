@@ -235,6 +235,9 @@
          checks that keep it an oracle: the law over the declared sample, a decode-and-recompute
          pass over every rendered vector, and the comparison against the shared corpus when it is
          checked out alongside. Reads nothing here, so it simply follows. -->
+    <!-- Phase 538 - the propagation law set, drawn by the families' own generator and written by
+         LawVectorExport.emitted beside the other law sets, so it compiles first. -->
+    <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="LawVectorExport.fs" />
     <Compile Include="LawVectorTests.fs" />
     <!-- Phase 139 — the checks that keep the `apply/` family an oracle: a decode-and-recompute
