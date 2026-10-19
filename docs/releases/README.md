@@ -5,11 +5,12 @@ and, for a released slot, its release record. The contract every version is held
 versioning policy, the surface classes, the stability-critical surfaces, the witness freeze —
 is [`STABILITY.md`](../../STABILITY.md); this directory is its ledger.
 
-Each slot below carries the heading its file opens with, word for word, and the suite holds the
-two together (the `Package roster` family, "the release ledger"): a slot without a file, a file
-without a slot here, or a heading that disagrees with its file is red. A tagged slot is headed
-`released <date> as v<version>` and the untagged standing `<Version>` is headed `DRAFT`. This index
-is what `Directory.Build.props` points a downstream version check at (`<FuaranStabilityRecord>`).
+Each entry below carries the heading its slot file opens with, word for word, and is rendered from
+the slot files: the `Release ledger` family holds the entries to that render
+(`CORE_APPROVE_DOCS=ledger-index` rewrites them), so a slot is added or re-headed in its own file,
+never here. A tag without a file, or a file that does not open with its own heading, is red. A tagged
+slot is headed `released <date> as v<version>` and the untagged standing `<Version>` is headed
+`DRAFT`. This index is what `Directory.Build.props` points a downstream version check at (`<FuaranStabilityRecord>`).
 
 ## 0.39.0 — DRAFT
 
