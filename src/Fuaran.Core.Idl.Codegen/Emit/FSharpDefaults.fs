@@ -64,6 +64,9 @@ module internal FSharpDefaults =
     /// has literals and patterns where JS has only `===`), and this is the one rule that is about
     /// the WIRE rather than about either host language. A rule about the wire that is spelled
     /// twice is a rule that drifts, and this one already had.
+    ///
+    /// Phase 525 — the F# side of the rule is now [[Decl.literal]]'s, the admissibility the F#
+    /// and F* backends share; both read the one primitive, [[TransparentUnion.tag]].
     let isDeclaredTransparentCase (idl: Idl) (u: IdlUnion) (tag: string) : bool =
         TransparentUnion.tag idl.Harden u = Some tag
 
@@ -86,75 +89,45 @@ module internal FSharpDefaults =
     /// `Error` ⇒ the generator cannot render it, and the module REFUSES rather than emitting an
     /// artefact that contradicts its own declaration — see [[CodegenError.UnsupportedDefault]].
     let rec fsDefaultLit (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        let refuse () =
-            Error(CodegenError.UnsupportedDefault(t, v))
-
-        match t, v with
-        // F# cannot spell an unpaired surrogate in a literal ([[SourceLit.isWellFormed]]); the
-        // encoder refuses such a string too, so there is no value here to reproduce.
-        | TStr, VStr s when not (SourceLit.isWellFormed s) -> refuse ()
-        | TStr, VStr s -> Ok(SourceLit.fsString s)
-        | TInt, VInt i -> Ok(string i)
-        | TBool, VBool b -> Ok(if b then "true" else "false")
-        // A non-finite double has no F# LITERAL (`nan` / `infinity` are identifiers), so it has
-        // no pattern spelling either and is refused rather than mis-emitted — the §5 sentinel
-        // Phase 1063 added is a WIRE spelling, and this is a host-source position.
-        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(fsFloatLit f)
-        // A whole-valued float authored as an integer — the canonical artifact writes one that
-        // way, so the emitter must read it back at a float slot (the same asymmetry `dFloat`
-        // carries on the decode side).
-        | TFloat, VInt i -> Ok(fsFloatLit (float i))
-        // The wire string resolves through [[IdlEnum.CaseOf]] to the host case the generated
-        // type declares, and a wire string the enum does not admit is refused (Phase 292) —
-        // it used to fall through as the case name, emitting an identifier nothing declared.
-        | TEnum n, VEnum c ->
-            match
-                idl.Enums
-                |> List.tryFind (fun e -> e.Name = n)
-                |> Option.bind (fun e -> e.CaseOf c)
-            with
-            | Some case -> Ok(n + "." + case)
-            | None -> refuse ()
-        | TList _, VList [] -> Ok "[]"
-        | TRecord n, VRecord authored ->
-            match CodegenLookup.tryRecord idl n with
-            | None -> refuse ()
-            | Some r ->
+        // Phase 525 — what is ADMITTED is [[Decl.literal]]'s, the one admissibility the F* target
+        // reads too: an unpaired surrogate (F# cannot spell it, and the encoder refuses it), a
+        // non-finite double (`nan` / `infinity` are identifiers, so they have no pattern spelling),
+        // an enum spelling [[IdlEnum.CaseOf]] does not resolve (Phase 292), and the union's declared
+        // transparent case (the 2026-09-13 ruling: the TypeScript backend cannot test for it on the
+        // wire, and a default only one host honours is not a default) are refused there. What
+        // follows only PRINTS an admitted literal.
+        Decl.literal idl t v
+        |> Result.bind (fun l ->
+            match l with
+            | Literal.Str s -> Ok(SourceLit.fsString s)
+            | Literal.Int i -> Ok(string i)
+            | Literal.Bool b -> Ok(if b then "true" else "false")
+            // A whole-valued float authored as an integer reads as a float here — the canonical
+            // artifact writes one that way (the same asymmetry `dFloat` carries on decode).
+            | Literal.Float f -> Ok(fsFloatLit f)
+            | Literal.Enum(n, case) -> Ok(n + "." + case)
+            | Literal.EmptyList -> Ok "[]"
+            | Literal.Record(r, authored) ->
                 r.Fields
                 |> List.map (fun rf ->
                     fsDefaultField idl Map.empty rf authored
                     |> Result.map (fun e -> pascal rf.Name + " = " + e))
                 |> sequenceR
                 |> Result.map (recordLit r.Name)
-        | TUnion(n, args), VUnion(tag, authored) ->
-            match CodegenLookup.tryUnion idl n with
-            | None -> refuse ()
-            | Some u when List.length u.Params <> List.length args -> refuse ()
-            // The shared wire rule — see [[isDeclaredTransparentCase]]. This arm is what the
-            // 2026-09-13 ruling added: the case renders as an F# pattern and expression without
-            // difficulty, and is refused anyway, because the TypeScript backend cannot test for
-            // it on the wire and a default only one of the two hosts honours is not a default.
-            | Some u when isDeclaredTransparentCase idl u tag -> refuse ()
-            | Some u ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None -> refuse ()
-                | Some c ->
-                    let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
+            | Literal.Union(u, args, c, authored) ->
+                let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
 
-                    // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed`
-                    // is a one-argument constructor whatever an `IdlValue` happens to carry, and
-                    // emitting the bare tag for a case that takes arguments would emit a FUNCTION
-                    // where a value belongs. That was reachable before Phase 124 — `VUnion(tag,
-                    // [])` matched on any union — and is exactly the artefact-vs-declaration
-                    // divergence this phase closes, so it refuses now.
-                    c.Fields
-                    |> List.map (fun cf -> fsDefaultField idl subst cf authored)
-                    |> sequenceR
-                    |> Result.map (fun parts ->
-                        match parts with
-                        | [] -> n + "." + tag
-                        | ps -> sprintf "%s.%s(%s)" n tag (String.concat ", " ps))
-        | _ -> refuse ()
+                // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed`
+                // is a one-argument constructor whatever an `IdlValue` happens to carry, and
+                // emitting the bare tag for a case that takes arguments would emit a FUNCTION
+                // where a value belongs (Phase 124).
+                c.Fields
+                |> List.map (fun cf -> fsDefaultField idl subst cf authored)
+                |> sequenceR
+                |> Result.map (fun parts ->
+                    match parts with
+                    | [] -> u.Name + "." + c.Tag
+                    | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (String.concat ", " ps)))
 
     /// One declared field of a union case or a record, rendered from the authored value set —
     /// honouring the same presence rules the encoder writes it under. A HostOnly slot is refused
