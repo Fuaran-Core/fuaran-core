@@ -91,33 +91,20 @@ module WriteGate =
         { Locked = Set.empty
           Writable = WriteScope.AllowList(Set.ofList ids) }
 
-    /// The ids ONE non-batch op writes when it lands on `root`: `Ops.footprint`'s structure writes
-    /// (the parents whose child lists change), content writes (the nodes it authors, destroys,
-    /// relocates or rewrites) and unknown-parent writes, the nodes of its slot writes, and — what the
-    /// pure footprint cannot name, recorded as its pinned over-approximation (2) — the subtree a
-    /// `RemoveNode` destroys, read from the tree.
-    let private targetsOfOne
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Set<string> =
-        let fp = Ops.footprint w idw [ op ]
-
-        let destroyed =
-            match op with
-            | RemoveNode target ->
-                match Tree.tryFind w idw target root with
-                | Some node -> Tree.ids w node |> List.map idw.ToString |> Set.ofList
-                | None -> Set.empty
-            | _ -> Set.empty
+    /// The ids ONE non-batch op writes where it lands, read from the op's view of that tree (Phase
+    /// 512): `Ops.footprint`'s structure writes (the parents whose child lists change), content writes
+    /// (the nodes it authors, destroys, relocates or rewrites) and unknown-parent writes, the nodes of
+    /// its slot writes, and — what the pure footprint cannot name, recorded as its pinned
+    /// over-approximation (2) — the subtree a `RemoveNode` destroys, the subtree the view located.
+    let private targetsOfOne (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (v: OpView<'Node, 'Id>) : Set<string> =
+        let fp = Ops.footprint w idw [ v.Op ]
 
         Set.unionMany
             [ fp.StructureWrites
               fp.ContentWrites
               fp.UnknownParentWrites
-              fp.SlotWrites |> Set.map fst
-              destroyed ]
+              Footprint.slotNodes fp.SlotWrites
+              Ops.destroyedBy (Tree.ids w) v |> List.map idw.ToString |> Set.ofList ]
 
     /// The chain a target's policy is read along, nearest first: the target, then its ancestors in
     /// `root`. For a node `op` creates — absent from `root`, inside an `InsertChild`'s graft — the
@@ -149,11 +136,11 @@ module WriteGate =
         (gate: WriteGate)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
+        (v: OpView<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, WriteDenial> =
-        let targets = targetsOfOne w idw op root |> Set.toList
-        let chains = targets |> List.map (fun t -> t, chainOf w idw op root t)
+        let targets = targetsOfOne w idw v |> Set.toList
+        let chains = targets |> List.map (fun t -> t, chainOf w idw v.Op root t)
 
         let locked =
             chains
@@ -173,6 +160,39 @@ module WriteGate =
             | Some(t, _) -> Error(WriteDenial.NotWritable(t, Set.toList writable))
             | None -> Ok()
 
+    /// The gate's walk over an op (Phase 512): a `Batch` taken op by op, each step's view located
+    /// on the tree the steps before it produced, `judge` reading the view, and the engine stepping
+    /// through the SAME view, so the gate and the reducer see one location of each op. The runner
+    /// stops at the first denial (`Choice1Of2`) or at the first op the reducer refuses
+    /// (`Choice2Of2`, carrying what `judge` said of it) — the reducer refuses there, whatever the
+    /// gate would say of the ops after it.
+    let private walk
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (judge: OpView<'Node, 'Id> -> 'Node -> Result<'Out, WriteDenial>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        =
+        let s = Ops.plainScope w idw
+
+        let rec steps (o: SkeletonOp<'Node, 'Id>) =
+            match o with
+            | Batch inner -> List.collect steps inner
+            | _ -> [ o ]
+
+        Ops.run
+            (fun node o ->
+                let v = Ops.view s o node
+
+                match judge v node with
+                | Error denial -> Error(Choice1Of2 denial)
+                | Ok out ->
+                    match Ops.applyView (fun _ -> true) s v node with
+                    | Ok next -> Ok(next, out)
+                    | Error _ -> Error(Choice2Of2 out))
+            (steps op)
+            root
+
     /// The ids `op` writes when it lands on `root` (Phase 318) — the targets the gate decides on:
     /// `Ops.footprint`'s structure, content and unknown-parent writes and its slot writes' nodes,
     /// with the subtree a `RemoveNode` destroys added from the tree. A `Batch` is taken op by op,
@@ -187,18 +207,14 @@ module WriteGate =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Set<string> =
-        let rec go (acc: Set<string>) (node: 'Node) (ops: SkeletonOp<'Node, 'Id> list) =
-            match ops with
-            | [] -> acc
-            | Batch inner :: rest -> go acc node (inner @ rest)
-            | o :: rest ->
-                let acc' = Set.union acc (targetsOfOne w idw o node)
+        let r = walk w idw (fun v _ -> Ok(targetsOfOne w idw v)) op root
 
-                match Ops.apply w idw o node with
-                | Ok next -> go acc' next rest
-                | Error _ -> acc'
+        let last =
+            match r.Refused with
+            | Some(Choice2Of2 targets) -> targets
+            | _ -> Set.empty
 
-        go Set.empty root [ op ]
+        Set.unionMany (last :: r.Outs)
 
     /// Decide whether `op` may write what it writes on `root` (Phase 318): `Error` with the first
     /// denial, `Ok ()` otherwise. A target is refused `Locked` when it or an ancestor is locked, and
@@ -213,18 +229,9 @@ module WriteGate =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, WriteDenial> =
-        let rec go (node: 'Node) (ops: SkeletonOp<'Node, 'Id> list) =
-            match ops with
-            | [] -> Ok()
-            | Batch inner :: rest -> go node (inner @ rest)
-            | o :: rest ->
-                decideOne gate w idw o node
-                |> Result.bind (fun () ->
-                    match Ops.apply w idw o node with
-                    | Ok next -> go next rest
-                    | Error _ -> Ok())
-
-        go root [ op ]
+        match (walk w idw (decideOne gate w idw) op root).Refused with
+        | Some(Choice1Of2 denial) -> Error denial
+        | _ -> Ok()
 
     /// Apply `op` only if the gate allows it (Phase 318): the gate is consulted FIRST and a denial
     /// returns before `Ops.apply` runs; an allowed op's reducer rejection is `Rejected`. Default-deny

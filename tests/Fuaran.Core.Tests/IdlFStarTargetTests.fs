@@ -192,6 +192,15 @@ let private refusalOf (t: IdlType) =
     | Ok _ -> None
     | Error e -> Some(CodegenError.describe e)
 
+/// Phase 525 — a hosted slot with the given declared wire form and format (Phase 252).
+let private hostedAt (wire: IdlType option) (format: HostedFormat option) : IdlType =
+    THosted
+        { FSharp = "System.DateOnly"
+          Encode = "encDate"
+          Decode = "decDate"
+          Wire = wire
+          Format = format }
+
 // ---------------------------------------------------------------------------
 // Phase 168 — reading the SHAPE of an emitted proof script. The pins below are over the
 // text the emitter produces, so these read it the way a reader does: by the lemma heads.
@@ -433,7 +442,6 @@ let private defaultedFamilyIdl: Idl =
                 Category = "Display"
                 Fields =
                   [ field "items" (TList TNode) (OmitDefault(VList []))
-                    field "table" (TMap TStr) (OmitDefault(VMap []))
                     field "at" (TRecord "Pt") (OmitDefault(VRecord [ "x", VStr "o" ]))
                     field "src" (TUnion("Src", [])) (OmitDefault(VUnion("Lit", [ "text", VStr "" ])))
                     field "flag" TBool (OmitDefault(VBool false))
@@ -580,6 +588,9 @@ let idlFStarTargetTests =
                                   Wire = None
                                   Format = None }
                         )
+                    "a hosted slot declaring a string format (Phase 525)",
+                    "which the model's string carries no predicate for",
+                    (fun () -> refusalOf (hostedAt (Some TStr) (Some HostedFormat.Uuid)))
                     "an unresolved type parameter",
                     "unresolved type parameter",
                     fun () -> reached (tinyIdl (TVar "T") Required) onlyTag
@@ -660,6 +671,111 @@ let idlFStarTargetTests =
                   | None -> failtestf "%s was NOT refused — the class is unreached, or the backend now admits it" name
                   | Some why ->
                       Expect.stringContains why fragment (sprintf "the refusal of %s names the construct" name)
+
+          // ---- Phase 525: the model is of the decoder the hosts implement --------
+
+          testCase "Phase 525 — a hosted slot that DECLARES its wire is modelled at that wire, as every host decodes it"
+          <| fun _ ->
+              // The F# and TypeScript decoders check a declared wire form before the codec runs
+              // (Phase 252), so a value that is not a string at a `Wire = Some TStr` slot is refused
+              // by both. Until Phase 525 the model carried every hosted slot as a verbatim `jval`,
+              // and the round trip was proved over a decoder that accepts what both hosts refuse.
+              match FStarTarget.vocabularyModule "M" (tinyIdl (hostedAt (Some TStr) None) Required) [ "Only" ] with
+              | Error e -> failtestf "a declared-wire hosted slot was refused: %s" (CodegenError.describe e)
+              | Ok text ->
+                  Expect.stringContains text "member:(string)" "the member is the declared wire's value"
+                  Expect.isFalse (text.Contains "member:(jval num flt)") "not a verbatim value the hosts never accept"
+
+              match
+                  FStarTarget.vocabularyModule "M" (tinyIdl (hostedAt (Some(TList TStr)) None) Required) [ "Only" ]
+              with
+              | Error e -> failtestf "a declared list wire was refused: %s" (CodegenError.describe e)
+              | Ok text -> Expect.stringContains text "member:(list (string))" "a declared list wire is a list"
+
+          testCase "Phase 525 — a hosted slot that declares NO wire stays a verbatim value"
+          <| fun _ ->
+              // D109.5's known disagreement, unchanged: a hosted slot with no declared wire is the
+              // host codec's business, carried as the `jval` the wire holds.
+              match FStarTarget.vocabularyModule "M" (tinyIdl (hostedAt None None) Required) [ "Only" ] with
+              | Error e -> failtestf "an undeclared-wire hosted slot was refused: %s" (CodegenError.describe e)
+              | Ok text -> Expect.stringContains text "member:(jval num flt)" "the undeclared wire is a verbatim value"
+
+          testCase "Phase 525 — a hosted FORMAT is refused by name: the model's string carries no format predicate"
+          <| fun _ ->
+              match refusalOf (hostedAt (Some TStr) (Some HostedFormat.Date)) with
+              | None -> failtest "a formatted hosted slot was modelled rather than refused"
+              | Some why ->
+                  Expect.stringContains why "format 'date'" "the refusal names the format"
+                  Expect.stringContains why "kind Only.member" "and where it was reached"
+
+          testCase "Phase 525 — a declared wire NO host can read is refused exactly as the hosts refuse it"
+          <| fun _ ->
+              let unreadable = hostedAt (Some TJson) None
+
+              match refusalOf unreadable, Gen.fsharpModule "M" (tinyIdl unreadable Required) [ "Only" ] with
+              | None, _ -> failtest "the model admitted a hosted wire form every host refuses"
+              | Some _, Ok _ -> failtest "the F# host admitted it — the premise of this case moved"
+              | Some why, Error fs ->
+                  Expect.stringContains why "declaring the wire form" "the hosts' own refusal"
+                  Expect.stringContains (CodegenError.describe fs) "declaring the wire form" "the F# host's"
+
+          testCase "Phase 525 — a default literal is admitted by the model exactly when the F# backend admits it"
+          <| fun _ ->
+              // One admissibility (`Decl.literal`), read by both backends. Each row is a declared
+              // default the two used to decide separately; the F* target admitted the first three
+              // and the F# backend refused them — the D33 agreement rule broken on the fourth
+              // backend. The model's own boundary (an opaque number has no F* literal) is not an
+              // admissibility question and is the one row where the two may differ.
+              let level = Declare.enumWith "Level" [ "Low", "low"; "High", "high" ]
+
+              let text =
+                  { Name = "Text"
+                    Params = []
+                    Cases =
+                      [ { Tag = "Inline"
+                          Fields =
+                            [ { Name = "text"
+                                Type = TStr
+                                Opt = Required
+                                Annotations = Annotations.Empty } ]
+                          Annotations = Annotations.Empty }
+                        { Tag = "Empty"
+                          Fields = []
+                          Annotations = Annotations.Empty } ]
+                    Annotations = Annotations.Empty }
+
+              let vocabulary (t: IdlType) (d: IdlValue) =
+                  let idl = tinyIdl t (OmitDefault d)
+
+                  { idl with
+                      Enums = [ level ]
+                      Unions = [ text ]
+                      Harden =
+                          { idl.Harden with
+                              TransparentUnions = [ "Text", "Inline" ] } }
+
+              let admitted (t: IdlType) (d: IdlValue) =
+                  let idl = vocabulary t d
+
+                  (FStarTarget.vocabularyModule "M" idl [ "Only" ] |> Result.isOk),
+                  (Gen.fsharpModule "M" idl [ "Only" ] |> Result.isOk)
+
+              let rows: (string * IdlType * IdlValue * bool) list =
+                  [ "an enum default by its HOST name (the wire spelling is `low`)", TEnum "Level", VEnum "Low", false
+                    "an empty map", TMap TStr, VMap [], false
+                    "the union's declared TRANSPARENT case",
+                    TUnion("Text", []),
+                    VUnion("Inline", [ "text", VStr "x" ]),
+                    false
+                    "an enum default by its WIRE spelling", TEnum "Level", VEnum "low", true
+                    "a tagged union case", TUnion("Text", []), VUnion("Empty", []), true
+                    "a string", TStr, VStr "s", true
+                    "an empty list", TList TStr, VList [], true ]
+
+              for name, t, d, expected in rows do
+                  let fstar, fsharp = admitted t d
+                  Expect.equal fsharp expected (sprintf "%s: the F# backend's verdict" name)
+                  Expect.equal fstar fsharp (sprintf "%s: the model admits it exactly when the F# backend does" name)
 
           // ---- the partition, per certification vocabulary -----------------
 
@@ -1310,7 +1426,7 @@ let idlFStarTargetTests =
                   "and the lookups cite their steps at the same application, so the body re-binds no `match`"
 
           testCase
-              "a defaulted list, map, record or union member's wrapper RECEIVES its encoding — the family recursion stays on the member, which is what lets F* see it terminate"
+              "a defaulted list, record or union member's wrapper RECEIVES its encoding — the family recursion stays on the member, which is what lets F* see it terminate"
           <| fun _ ->
               // Phase 256. Phase 222's omit-at-default wrapper took the member and encoded it
               // itself — `if v = d then None else Some (JArr (enc_items_l_node v))` under
@@ -1323,13 +1439,14 @@ let idlFStarTargetTests =
               // wrapper only chooses between it and absence. Each assertion below fails against
               // the 0.31.0 emitter (the go-red: the wrapper takes two value arguments and encodes
               // `v`) and holds against this one, whose model and proof script check under
-              // `--report_assumes error` (STABILITY.md, 0.32.0).
+              // `--report_assumes error` (STABILITY.md, 0.32.0). Phase 525 took the MAP row out: an
+              // empty-map default is refused by every backend now (`Decl.literal`, the admissibility
+              // the F# backend always applied), so no model carries a map omit-default wrapper.
               let model = modelOver defaultedFamilyIdl
               let holder = encoderArm "Holder" model
 
               for helper, fieldName, encoded, dflt in
                   [ "enc_dflt_l_node", "items", "JArr (enc_items_l_node %s)", "[]"
-                    "enc_dflt_m_str", "table", "JObj (enc_entries_m_str %s)", "[]"
                     "enc_dflt_r_pt", "at", "enc_r_pt %s", "(C__r_pt__Mk (\"o\"))"
                     "enc_dflt_u_src", "src", "enc_u_src %s", "(C__u_src__Lit (\"\"))" ] do
                   let call =

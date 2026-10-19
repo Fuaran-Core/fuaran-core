@@ -104,10 +104,10 @@ type Interference =
 /// The footprint builders (Phase 315) — the address shapes `Ops.footprint` folds a skeleton op into,
 /// public so a domain whose op vocabulary is NOT `SkeletonOp` lowers its own ops into the same
 /// `Footprint` without rebuilding the record by hand. Every address is an id key (the
-/// `IdWitness.ToString` form). The builders are the skeleton clauses' shapes: `insertUnder`,
-/// `removeNode` and `moveTo` are exactly `Ops.footprint` of a leaf `InsertChild`, a `RemoveNode` and a
-/// `MoveNode` (held to it by the suite), and a subtree insert is the `union` of one `insertUnder` per
-/// id it carries.
+/// `IdWitness.ToString` form). The builders are the skeleton clauses' shapes: `removeNode` and `moveTo`
+/// ARE `Ops.footprint`'s `RemoveNode` and `MoveNode` clauses (Phase 512; they were mirrors held to it by
+/// the suite), `insertUnder` is exactly `Ops.footprint` of a leaf `InsertChild`, and a subtree insert is
+/// the `union` of one `insertUnder` per id it carries.
 [<RequireQualifiedAccess>]
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Footprint =

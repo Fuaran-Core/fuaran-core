@@ -1,6 +1,7 @@
 namespace Fuaran.Core.Idl
 
 open Fuaran.Core
+open Fuaran.Core.Idl.Emit
 open Fuaran.Core.Idl.Emit.Core
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,8 @@ module FStarTarget =
     type private Member =
         {
             Name: string
+            /// The declared type, closed (Phase 525): what a default literal is admitted at.
+            Type: IdlType
             Slot: Slot
             /// `None` for a required member; `Some None` for an optional one; `Some (Some lit)`
             /// for an omit-default whose default renders as the F* literal `lit`.
@@ -116,7 +119,19 @@ module FStarTarget =
     let private unmodellable (construct: string) (where: string) =
         Error(CodegenError.UnmodellableInFStar(construct, where))
 
-    let rec private resolve (subst: Map<string, Slot>) (where: string) (t: IdlType) : Result<Slot, CodegenError> =
+    /// Phase 525 — a CLOSED IDL type (every type variable already substituted, by the
+    /// instantiation rule [[Decl]] applies) as the model's slot. A translation of one type
+    /// expression: the declaration graph is walked once, by [[Decl]] (its wire reach), and
+    /// never here.
+    ///
+    /// A HOSTED slot is modelled as every host decodes it. One that declares its wire form is
+    /// that form — the F# and TypeScript decoders check it before the codec runs (Phase 252),
+    /// so the model's decoder refuses what theirs refuse; a wire form no host can read is refused
+    /// with the hosts' own refusal; a declared string FORMAT is refused by name, because the
+    /// model's string carries no format predicate and a model that ignored it would accept what
+    /// every host refuses. One that declares no wire form is carried verbatim, the known
+    /// disagreement D109.5 names.
+    let rec private slotOf (where: string) (t: IdlType) : Result<Slot, CodegenError> =
         match t with
         | TStr -> Ok SStr
         | TInt -> Ok SInt
@@ -126,29 +141,33 @@ module FStarTarget =
         | TNode -> Ok SNode
         | TEnum n -> Ok(SEnum n)
         | TRecord n -> Ok(SRecord n)
-        | TList inner -> resolve subst where inner |> Result.map SList
-        | TMap vt -> resolve subst where vt |> Result.map SMap
-        | TVar v ->
-            match Map.tryFind v subst with
-            | Some s -> Ok s
-            | None -> unmodellable (sprintf "an unresolved type parameter '%s" v) where
+        | TList inner -> slotOf where inner |> Result.map SList
+        | TMap vt -> slotOf where vt |> Result.map SMap
+        | TVar v -> unmodellable (sprintf "an unresolved type parameter '%s" v) where
         | TUnion(n, args) ->
             let rec go acc rest =
                 match rest with
                 | [] -> Ok(List.rev acc)
                 | a :: t ->
-                    match resolve subst where a with
+                    match slotOf where a with
                     | Error e -> Error e
                     | Ok s -> go (s :: acc) t
 
             go [] args |> Result.map (fun ss -> SUnion(n, ss))
+        | THosted h when h.FSharp = "" -> unmodellable "a host codec with no declared host type" where
         | THosted h ->
-            // A host codec whose wire is JSON is carried verbatim; one that is not has no
-            // wire-level meaning to model at all.
-            if h.FSharp = "" then
-                unmodellable "a host codec with no declared host type" where
-            else
-                Ok SJson
+            match hostedWireRefusal "the F* proof model" h with
+            | Some e -> Error e
+            | None ->
+                match h.Wire, h.Format with
+                | Some _, Some f ->
+                    unmodellable
+                        (sprintf
+                            "a hosted slot declaring the format '%s', which the model's string carries no predicate for"
+                            (HostedFormat.name f))
+                        where
+                | Some w, None -> slotOf where w
+                | None, _ -> Ok SJson
         | TClosure -> Ok(SSentinel "<closure>")
         | TFn _ -> Ok(SSentinel "<closure>")
         | TOpaque -> Ok(SSentinel "<opaque>")
@@ -315,7 +334,7 @@ module FStarTarget =
     let private ctorName (owner: string) (case: string) : string = "C__" + owner + "__" + case
 
     // -----------------------------------------------------------------------
-    // 4. The closure — every slot the selected kinds reach, monomorphised.
+    // 4. The model's members — each reached declaration's fields, as slots.
     // -----------------------------------------------------------------------
 
     /// Whether a slot is one the emitted module DECLARES a type for (and therefore one the
@@ -340,50 +359,35 @@ module FStarTarget =
     // Phase 293 — the finders are the vocabulary's own (`CodegenLookup.tryRecord` / `tryUnion` /
     // `tryEnum`, one body since Phase 388): one spelling of a name lookup across every backend.
 
-    /// The declared default of an omit-default member, as an F* literal — the admissible set
-    /// is deliberately narrower than the F# backend's, because the model's `num` and `flt` are
-    /// OPAQUE: there is no F* literal for a number whose carrier is a type parameter. A
-    /// numeric default is therefore refused here and is not a defect in the declaration.
-    let rec private defaultLit (idl: Idl) (where: string) (s: Slot) (v: IdlValue) : Result<string, CodegenError> =
-        match s, v with
-        | SStr, VStr t when not (SourceLit.isWellFormed t) ->
-            unmodellable "a string default holding an unpaired surrogate, which F* cannot spell" where
-        | SStr, VStr t -> Ok(lit t)
-        | SBool, VBool b -> Ok(if b then "true" else "false")
-        | SList _, VList [] -> Ok "[]"
-        | SMap _, VMap [] -> Ok "[]"
-        | SSentinel _, _ -> Ok "()"
-        | SRecord n, VRecord authored ->
-            match CodegenLookup.tryRecord idl n with
-            | None -> Error(CodegenError.UnsupportedDefault(TRecord n, v))
-            | Some r ->
-                members idl Map.empty (where + " (default)") r.Fields
-                |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName s) "Mk") ms authored)
-        | SUnion(n, args), VUnion(tag, authored) ->
-            match CodegenLookup.tryUnion idl n with
-            | Some u when List.length u.Params = List.length args ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None -> Error(CodegenError.UnsupportedDefault(TUnion(n, []), v))
-                | Some c ->
-                    let subst = Map.ofList (List.zip u.Params args)
+    /// The declared default of an omit-default member, as an F* literal. WHETHER a default is
+    /// admitted is [[Decl.literal]]'s — the one admissibility the F# backend reads too (Phase 525;
+    /// until then this target decided its own and admitted an enum default by its host name, an
+    /// empty map, a sentinel and a union's transparent case, all of which the F# backend refuses).
+    /// What is decided here is only what the MODEL can spell: the model's `num` and `flt` are
+    /// OPAQUE, so there is no F* literal for a number whose carrier is a type parameter, and an
+    /// admitted numeric default is refused as the model's boundary, not as a defect in the
+    /// declaration.
+    let rec private defaultLit (idl: Idl) (where: string) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        Decl.literal idl t v
+        |> Result.bind (fun l ->
+            match l with
+            | Literal.Str s -> Ok(lit s)
+            | Literal.Bool b -> Ok(if b then "true" else "false")
+            | Literal.Int _
+            | Literal.Float _ ->
+                unmodellable (sprintf "a declared default the opaque numeric model cannot spell: %A" v) where
+            | Literal.Enum(n, case) -> Ok(ctorName ("e_" + snake n) case)
+            | Literal.EmptyList -> Ok "[]"
+            | Literal.Record(r, authored) ->
+                fieldMembers idl Map.empty (where + " (default)") r.Fields
+                |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName (SRecord r.Name)) "Mk") ms authored)
+            | Literal.Union(u, args, c, authored) ->
+                let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
 
-                    members idl subst (where + " (default)") c.Fields
-                    |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName s) tag) ms authored)
-            | _ -> Error(CodegenError.UnsupportedDefault(TUnion(n, []), v))
-        | SEnum n, VEnum spelling ->
-            // A `VEnum` carries the WIRE spelling, and an enum that declares no mapping has
-            // the two coincide — but a declared default is authored beside the F# backend,
-            // which falls THROUGH `CaseOf` to the string it was handed. Both spellings are
-            // therefore live in the corpus, and resolving either is the only reading that
-            // does not refuse a default the F# backend accepts.
-            match CodegenLookup.tryEnum idl n with
-            | Some e when List.contains spelling e.Cases -> Ok(ctorName ("e_" + snake n) spelling)
-            | Some e ->
-                match e.CaseOf spelling with
-                | Some case -> Ok(ctorName ("e_" + snake n) case)
-                | None -> Error(CodegenError.UnsupportedDefault(TEnum n, v))
-            | None -> Error(CodegenError.UnsupportedDefault(TEnum n, v))
-        | _ -> unmodellable (sprintf "a declared default the opaque numeric model cannot spell: %A" v) where
+                slotOf where t
+                |> Result.bind (fun s ->
+                    fieldMembers idl subst (where + " (default)") c.Fields
+                    |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName s) c.Tag) ms authored)))
 
     /// A constructor literal for a declared default, with each member taken from the authored
     /// field list under its own presence rule — the constructor's argument order is the declared
@@ -416,8 +420,8 @@ module FStarTarget =
                     | None, Some None -> Ok "None"
                     | None, Some(Some d) -> Ok d
                     | None, None -> unmodellable ("a default omitting the required member '" + m.Name + "'") where
-                    | Some av, Some None -> defaultLit idl where m.Slot av |> Result.map (fun e -> "(Some " + e + ")")
-                    | Some av, _ -> defaultLit idl where m.Slot av |> Result.map (fun e -> "(" + e + ")")
+                    | Some av, Some None -> defaultLit idl where m.Type av |> Result.map (fun e -> "(Some " + e + ")")
+                    | Some av, _ -> defaultLit idl where m.Type av |> Result.map (fun e -> "(" + e + ")")
 
                 match part with
                 | Error e -> Error e
@@ -429,42 +433,51 @@ module FStarTarget =
             | [] -> ctor
             | _ -> "(" + ctor + " " + String.concat " " parts + ")")
 
-    /// One field list resolved to members, host-only fields dropped.
-    and private members (idl: Idl) (subst: Map<string, Slot>) (where: string) (fs: IdlField list) =
+    /// One declared field list as the model's members: each wire field's type closed under the
+    /// instantiation `subst` and translated ([[slotOf]]), with its presence; host-only fields
+    /// dropped, because the model is of the wire. A projection of fields [[Decl]] has already
+    /// reached — it reaches nothing itself.
+    and private fieldMembers
+        (idl: Idl)
+        (subst: Map<string, IdlType>)
+        (where: string)
+        (fs: IdlField list)
+        : Result<Member list, CodegenError> =
         let rec go acc rest =
             match rest with
             | [] -> Ok(List.rev acc)
+            | (f: IdlField) :: t when f.Opt = HostOnly -> go acc t
             | (f: IdlField) :: t ->
-                match f.Opt with
-                | HostOnly -> go acc t
-                | _ ->
-                    match resolve subst (where + "." + f.Name) f.Type with
-                    | Error e -> Error e
-                    | Ok slot ->
-                        let presence =
-                            match f.Opt with
-                            | Required -> Ok None
-                            | Optional -> Ok(Some None)
-                            | OmitDefault d -> defaultLit idl (where + "." + f.Name) slot d |> Result.map (Some << Some)
-                            | HostOnly -> Ok None
+                let at = where + "." + f.Name
+                let ft = TypeParams.substitute subst f.Type
 
-                        match presence with
-                        | Error e -> Error e
-                        | Ok p ->
-                            go
-                                ({ Name = f.Name
-                                   Slot = slot
-                                   Presence = p }
-                                 :: acc)
-                                t
+                let presence =
+                    match f.Opt with
+                    | Optional -> Ok(Some None)
+                    | OmitDefault d -> defaultLit idl at ft d |> Result.map (Some << Some)
+                    | Required
+                    | HostOnly -> Ok None
+
+                match slotOf at ft with
+                | Error e -> Error e
+                | Ok slot ->
+                    match presence with
+                    | Error e -> Error e
+                    | Ok p ->
+                        go
+                            ({ Name = f.Name
+                               Type = ft
+                               Slot = slot
+                               Presence = p }
+                             :: acc)
+                            t
 
         go [] fs
 
-    /// The transitive monomorphic closure of the slots a kind selection reaches, together
-    /// with each declared type's resolved members. Ordered by first reach, so the emitted
-    /// file's order is a function of the IDL's own declaration order. Every member list is in
-    /// the vocabulary's declared KEY ORDER (Phase 293, [[orderMembers]]).
-    type private Closure =
+    /// The model of one kind selection: the declared types [[Decl]]'s wire reach yields, each
+    /// with its members, in the reach's first-reach order. Every member list is in the
+    /// vocabulary's declared KEY ORDER (Phase 293, [[orderMembers]]).
+    type private Model =
         {
             Order: Slot list
             Members: Map<string, Member list>
@@ -479,279 +492,229 @@ module FStarTarget =
             /// shape and the key order. Carried so the emitters need no second look at the IDL.
             Shape: NodeEnvelopeShape
             KeyOrder: KeyOrder
+            /// Phase 525 — whether a member is a hosted slot modelled at its DECLARED wire form,
+            /// which the header then states as part of the model's boundary.
+            DeclaredWire: bool
         }
 
     /// Phase 293 — the model's node object under the FLAT envelope: the kind's members and
     /// the envelope's share one object, kind members first as `Encode.encodeNodeEnv` builds it,
     /// and the whole list is then put in the declared key order.
-    let private flatNodeMembers (c: Closure) (kindMembers: Member list) =
+    let private flatNodeMembers (c: Model) (kindMembers: Member list) =
         orderMembers c.KeyOrder (kindMembers @ c.Envelope)
 
     // -----------------------------------------------------------------------
-    // 5. Walking the vocabulary.
+    // 5. The model over `Decl` — the reach is Decl's; this projects it.
     // -----------------------------------------------------------------------
 
-    let private walk (idl: Idl) (kindTags: string list) : Result<Closure, CodegenError> =
-        let order = ResizeArray<Slot>()
-        let seen = System.Collections.Generic.HashSet<string>()
+    /// The model of `kindTags` over `idl`, or the FIRST refusal its declarations meet. The reach,
+    /// its order and the instantiations are [[Decl.resolve]]'s (Phase 525, carrying Phase 511's
+    /// task 2: the target's own slot walk is gone). What is decided here is what the model can
+    /// express: each reached declaration is translated in the order it was reached — the envelope,
+    /// what it reaches, the selected kinds, what they reach — so the refusal a kind is named with
+    /// is the first one met in that order.
+    let private model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
+        let reach = (Decl.resolve idl Map.empty kindTags).Wire
         let memberMap = System.Collections.Generic.Dictionary<string, Member list>()
 
         let caseMap =
             System.Collections.Generic.Dictionary<string, (string * Member list) list>()
 
         let transparent = System.Collections.Generic.Dictionary<string, string>()
-        let enums = ResizeArray<string>()
-        let mutable failure: CodegenError option = None
 
-        let fail e =
-            if failure.IsNone then
-                failure <- Some e
+        let rec sequence (steps: (unit -> Result<unit, CodegenError>) list) =
+            match steps with
+            | [] -> Ok()
+            | step :: rest -> step () |> Result.bind (fun () -> sequence rest)
 
-        let rec visitSlot (s: Slot) =
-            if failure.IsSome then
-                ()
-            else
-                match s with
-                | SStr
-                | SInt
-                | SBool
-                | SFloat
-                | SJson
-                | SSentinel _ -> ()
-                | SEnum n ->
-                    if not (enums.Contains n) then
-                        enums.Add n
-                | SList inner
-                | SMap inner ->
-                    let key = slotName s
+        // One reached declaration's members, recorded under its slot name. A node, a list or a
+        // map declares no members of its own.
+        let declare (t: IdlType) () : Result<unit, CodegenError> =
+            match t with
+            | TRecord n ->
+                match CodegenLookup.tryRecord idl n with
+                | None -> unmodellable ("an undeclared record '" + n + "'") ("record " + n)
+                | Some r ->
+                    fieldMembers idl Map.empty ("record " + n) r.Fields
+                    |> Result.map (fun ms -> memberMap[slotName (SRecord n)] <- ms)
+            | TUnion(n, args) ->
+                match CodegenLookup.tryUnion idl n with
+                | None -> unmodellable ("an undeclared union '" + n + "'") ("union " + n)
+                | Some u ->
+                    match TypeParams.bind u args, slotOf ("union " + n) t with
+                    | None, _ -> unmodellable ("a union arity mismatch on '" + n + "'") ("union " + n)
+                    | _, Error e -> Error e
+                    | Some subst, Ok s ->
+                        let key = slotName s
 
-                    if seen.Add key then
-                        visitSlot inner
-                        order.Add s
-                | SNode ->
-                    if seen.Add "node" then
-                        // The node's own recursion: registered BEFORE its members are walked,
-                        // so a kind reaching a node does not re-enter.
-                        order.Add SNode
-                        visitEnvelope ()
-                        visitKinds ()
-                | SRecord n ->
-                    let key = slotName s
+                        u.Cases
+                        |> List.fold
+                            (fun acc c ->
+                                match acc with
+                                | Error e -> Error e
+                                | Ok cs ->
+                                    fieldMembers idl subst (n + "." + c.Tag) c.Fields
+                                    |> Result.map (fun ms -> (c.Tag, ms) :: cs))
+                            (Ok [])
+                        |> Result.map List.rev
+                        |> Result.bind (fun cs ->
+                            caseMap[key] <- cs
 
-                    if seen.Add key then
-                        order.Add s
+                            match TransparentUnion.tag idl.Harden u with
+                            | None -> Ok()
+                            | Some tag ->
+                                // A transparent case encodes BARE, so its decoder arm reads the
+                                // value itself rather than a member of it. That arm makes no
+                                // recursive call only when the case carries one scalar-shaped
+                                // member; anything else would decode `el` at its own size and
+                                // the model would not terminate.
+                                match cs |> List.tryFind (fun (t, _) -> t = tag) with
+                                | Some(_, [ m ]) when
+                                    (match m.Slot with
+                                     | SStr
+                                     | SInt
+                                     | SBool
+                                     | SFloat
+                                     | SSentinel _
+                                     | SEnum _ -> true
+                                     | _ -> false)
+                                    ->
+                                    transparent[key] <- tag
+                                    Ok()
+                                | _ ->
+                                    unmodellable
+                                        ("a transparent union case that is not a single scalar member ('" + tag + "')")
+                                        ("union " + n))
+            | _ -> Ok()
 
-                        match CodegenLookup.tryRecord idl n with
-                        | None ->
-                            fail (CodegenError.UnmodellableInFStar("an undeclared record '" + n + "'", "record " + n))
-                        | Some r ->
-                            match members idl Map.empty ("record " + n) r.Fields with
-                            | Error e -> fail e
-                            | Ok ms ->
-                                memberMap[key] <- ms
+        let envelope () =
+            fieldMembers idl Map.empty "node envelope" idl.NodeFields
+            |> Result.map (fun ms -> memberMap["node"] <- ms)
 
-                                for m in ms do
-                                    visitSlot m.Slot
-                | SUnion(n, args) ->
-                    let key = slotName s
+        let kinds () =
+            kindTags
+            |> List.fold
+                (fun acc tag ->
+                    match acc with
+                    | Error e -> Error e
+                    | Ok ks ->
+                        match CodegenLookup.tryKind idl tag with
+                        | None -> unmodellable ("an undeclared kind '" + tag + "'") ("kind " + tag)
+                        | Some k ->
+                            fieldMembers idl Map.empty ("kind " + tag) k.Fields
+                            |> Result.map (fun ms -> (tag, ms) :: ks))
+                (Ok [])
+            |> Result.map (fun ks -> caseMap["vkind"] <- List.rev ks)
 
-                    if seen.Add key then
-                        order.Add s
-
-                        match CodegenLookup.tryUnion idl n with
-                        | None ->
-                            fail (CodegenError.UnmodellableInFStar("an undeclared union '" + n + "'", "union " + n))
-                        | Some u when List.length u.Params <> List.length args ->
-                            fail (
-                                CodegenError.UnmodellableInFStar("a union arity mismatch on '" + n + "'", "union " + n)
-                            )
-                        | Some u ->
-                            let subst = Map.ofList (List.zip u.Params args)
-
-                            let resolved =
-                                u.Cases
-                                |> List.fold
-                                    (fun acc c ->
-                                        match acc with
-                                        | Error e -> Error e
-                                        | Ok cs ->
-                                            members idl subst (n + "." + c.Tag) c.Fields
-                                            |> Result.map (fun ms -> (c.Tag, ms) :: cs))
-                                    (Ok [])
-                                |> Result.map List.rev
-
-                            match resolved with
-                            | Error e -> fail e
-                            | Ok cs ->
-                                caseMap[key] <- cs
-
-                                match TransparentUnion.tag idl.Harden u with
-                                | Some tag ->
-                                    // A transparent case encodes BARE, so its decoder arm reads the
-                                    // value itself rather than a member of it. That arm makes no
-                                    // recursive call only when the case carries one scalar-shaped
-                                    // member; anything else would decode `el` at its own size and
-                                    // the model would not terminate.
-                                    match cs |> List.tryFind (fun (t, _) -> t = tag) with
-                                    | Some(_, [ m ]) when
-                                        (match m.Slot with
-                                         | SStr
-                                         | SInt
-                                         | SBool
-                                         | SFloat
-                                         | SSentinel _
-                                         | SEnum _ -> true
-                                         | _ -> false)
-                                        ->
-                                        transparent[key] <- tag
-                                    | _ ->
-                                        fail (
-                                            CodegenError.UnmodellableInFStar(
-                                                "a transparent union case that is not a single scalar member ('"
-                                                + tag
-                                                + "')",
-                                                "union " + n
-                                            )
-                                        )
-                                | None -> ()
-
-                                for _, ms in cs do
-                                    for m in ms do
-                                        visitSlot m.Slot
-
-        and visitEnvelope () =
-            match members idl Map.empty "node envelope" idl.NodeFields with
-            | Error e -> fail e
-            | Ok ms ->
-                memberMap["node"] <- ms
-
-                for m in ms do
-                    visitSlot m.Slot
-
-        and visitKinds () =
-            let resolved =
-                kindTags
-                |> List.fold
-                    (fun acc tag ->
-                        match acc with
+        let translated =
+            sequence (
+                [ envelope ]
+                @ (reach.FromEnvelope |> List.map declare)
+                @ [ kinds ]
+                @ (reach.FromKinds |> List.map declare)
+            )
+            |> Result.bind (fun () ->
+                // Every reached type has been met as a member's type by now, so none refuses.
+                let rec slots acc rest =
+                    match rest with
+                    | [] -> Ok(List.rev acc)
+                    | t :: tail ->
+                        match slotOf "the wire reach" t with
                         | Error e -> Error e
-                        | Ok ks ->
-                            match CodegenLookup.tryKind idl tag with
-                            | None ->
-                                Error(
-                                    CodegenError.UnmodellableInFStar("an undeclared kind '" + tag + "'", "kind " + tag)
-                                )
-                            | Some k ->
-                                members idl Map.empty ("kind " + tag) k.Fields
-                                |> Result.map (fun ms -> (tag, ms) :: ks))
-                    (Ok [])
-                |> Result.map List.rev
+                        | Ok s -> slots (s :: acc) tail
 
-            match resolved with
-            | Error e -> fail e
-            | Ok ks ->
-                caseMap["vkind"] <- ks
+                slots [] (reach.FromEnvelope @ reach.FromKinds))
 
-                for _, ms in ks do
-                    for m in ms do
-                        visitSlot m.Slot
+        match translated with
+        | Error e -> Error e
+        | Ok order ->
+            // Phase 293 — the shape the model cannot express is REFUSED by name, never emitted. The
+            // model's objects are literals, one entry per key, read back by `find_field` — so a key
+            // that would appear twice in one object is a document the model cannot round-trip. Under
+            // the FLAT envelope the node object carries the discriminator, `id`, the kind's members
+            // and the envelope's; under the NESTED one the node object carries `id`, `kind` and the
+            // envelope's members, and the kind object the discriminator and the kind's. A union
+            // case's object carries the discriminator beside its members in both shapes.
+            // `Declare.wireShapeErrors` refuses most of these at declaration; the target refuses them
+            // again because it is handed an `Idl` value, not a declaration that was checked.
+            let disc = idl.Wire.Discriminator
+            let envelope = memberMap["node"]
+            let kinds = caseMap["vkind"]
 
-        visitSlot SNode
+            let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
+                ms
+                |> List.tryPick (fun m ->
+                    reserved
+                    |> List.tryFind (fun (key, _) -> key = m.Name)
+                    |> Option.map (fun (_, holder) ->
+                        CodegenError.UnmodellableInFStar(
+                            sprintf "a member '%s' whose key the %s already carries" m.Name holder,
+                            where
+                        )))
 
-        // Phase 293 — the shape the model cannot express is REFUSED by name, never emitted. The
-        // model's objects are literals, one entry per key, read back by `find_field` — so a key
-        // that would appear twice in one object is a document the model cannot round-trip. Under
-        // the FLAT envelope the node object carries the discriminator, `id`, the kind's members
-        // and the envelope's; under the NESTED one the node object carries `id`, `kind` and the
-        // envelope's members, and the kind object the discriminator and the kind's. A union
-        // case's object carries the discriminator beside its members in both shapes.
-        // `Declare.wireShapeErrors` refuses most of these at declaration; the target refuses them
-        // again because it is handed an `Idl` value, not a declaration that was checked.
-        let disc = idl.Wire.Discriminator
+            let nodeKeys =
+                match idl.Wire.NodeEnvelope with
+                | NodeEnvelopeShape.FlatKind -> [ disc, "node object"; "id", "node object" ]
+                | NodeEnvelopeShape.NestedKind -> [ "id", "node object"; "kind", "node object" ]
 
-        let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
-            ms
-            |> List.tryPick (fun m ->
-                reserved
-                |> List.tryFind (fun (key, _) -> key = m.Name)
-                |> Option.map (fun (_, holder) ->
-                    CodegenError.UnmodellableInFStar(
-                        sprintf "a member '%s' whose key the %s already carries" m.Name holder,
-                        where
-                    )))
-
-        let shapeFailure =
-            match failure with
-            | Some e -> Some e
-            | None ->
-                let envelope =
-                    match memberMap.TryGetValue "node" with
-                    | true, ms -> ms
-                    | _ -> []
-
-                let kinds =
-                    match caseMap.TryGetValue "vkind" with
-                    | true, ks -> ks
-                    | _ -> []
-
-                let nodeKeys =
+            let kindFailure () =
+                kinds
+                |> List.tryPick (fun (tag, ms) ->
                     match idl.Wire.NodeEnvelope with
-                    | NodeEnvelopeShape.FlatKind -> [ disc, "node object"; "id", "node object" ]
-                    | NodeEnvelopeShape.NestedKind -> [ "id", "node object"; "kind", "node object" ]
+                    | NodeEnvelopeShape.FlatKind ->
+                        collisions
+                            ("kind " + tag)
+                            (nodeKeys @ (envelope |> List.map (fun m -> m.Name, "node envelope")))
+                            ms
+                    | NodeEnvelopeShape.NestedKind -> collisions ("kind " + tag) [ disc, "kind object" ] ms)
 
-                let envelopeFailure = collisions "node envelope" nodeKeys envelope
+            let unionFailure () =
+                caseMap
+                |> Seq.tryPick (fun kv ->
+                    if kv.Key = "vkind" then
+                        None
+                    else
+                        kv.Value
+                        |> List.tryPick (fun (tag, ms) ->
+                            match transparent.TryGetValue kv.Key with
+                            | true, t when t = tag -> None
+                            | _ -> collisions (sprintf "union %s case %s" kv.Key tag) [ disc, "case object" ] ms))
 
-                let kindFailure () =
-                    kinds
-                    |> List.tryPick (fun (tag, ms) ->
-                        match idl.Wire.NodeEnvelope with
-                        | NodeEnvelopeShape.FlatKind ->
-                            collisions
-                                ("kind " + tag)
-                                (nodeKeys @ (envelope |> List.map (fun m -> m.Name, "node envelope")))
-                                ms
-                        | NodeEnvelopeShape.NestedKind -> collisions ("kind " + tag) [ disc, "kind object" ] ms)
-
-                let unionFailure () =
-                    caseMap
-                    |> Seq.tryPick (fun kv ->
-                        if kv.Key = "vkind" then
-                            None
-                        else
-                            kv.Value
-                            |> List.tryPick (fun (tag, ms) ->
-                                match transparent.TryGetValue kv.Key with
-                                | true, t when t = tag -> None
-                                | _ -> collisions (sprintf "union %s case %s" kv.Key tag) [ disc, "case object" ] ms))
-
-                envelopeFailure
+            let shapeFailure =
+                collisions "node envelope" nodeKeys envelope
                 |> Option.orElseWith kindFailure
                 |> Option.orElseWith unionFailure
 
-        match shapeFailure with
-        | Some e -> Error e
-        | None ->
-            let ordered = orderMembers idl.Wire.KeyOrder
+            match shapeFailure with
+            | Some e -> Error e
+            | None ->
+                let ordered = orderMembers idl.Wire.KeyOrder
 
-            Ok
-                { Order = List.ofSeq order
-                  Members = memberMap |> Seq.map (fun kv -> kv.Key, ordered kv.Value) |> Map.ofSeq
-                  Cases =
-                    caseMap
-                    |> Seq.map (fun kv -> kv.Key, kv.Value |> List.map (fun (t, ms) -> t, ordered ms))
-                    |> Map.ofSeq
-                  Transparent = transparent |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
-                  Enums = List.ofSeq enums
-                  Kinds =
-                    (match caseMap.TryGetValue "vkind" with
-                     | true, ks -> ks |> List.map (fun (t, ms) -> t, ordered ms)
-                     | _ -> [])
-                  Envelope =
-                    (match memberMap.TryGetValue "node" with
-                     | true, ms -> ordered ms
-                     | _ -> [])
-                  Shape = idl.Wire.NodeEnvelope
-                  KeyOrder = idl.Wire.KeyOrder }
+                let rec declaredWire (t: IdlType) =
+                    match t with
+                    | THosted h -> h.Wire.IsSome
+                    | TList inner
+                    | TMap inner -> declaredWire inner
+                    | TUnion(_, args) -> args |> List.exists declaredWire
+                    | _ -> false
+
+                let everyMember =
+                    Seq.append (Seq.concat memberMap.Values) (caseMap.Values |> Seq.concat |> Seq.collect snd)
+
+                Ok
+                    { Order = order
+                      Members = memberMap |> Seq.map (fun kv -> kv.Key, ordered kv.Value) |> Map.ofSeq
+                      Cases =
+                        caseMap
+                        |> Seq.map (fun kv -> kv.Key, kv.Value |> List.map (fun (t, ms) -> t, ordered ms))
+                        |> Map.ofSeq
+                      Transparent = transparent |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                      Enums = reach.Enums
+                      Kinds = kinds |> List.map (fun (t, ms) -> t, ordered ms)
+                      Envelope = ordered envelope
+                      Shape = idl.Wire.NodeEnvelope
+                      KeyOrder = idl.Wire.KeyOrder
+                      DeclaredWire = everyMember |> Seq.exists (fun m -> declaredWire m.Type) }
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can
@@ -804,10 +767,12 @@ module FStarTarget =
     /// Every kind of the vocabulary, each with the reason the target cannot model it, or
     /// `None` when it can. The envelope is common to all of them, so a vocabulary whose
     /// node envelope is unmodellable has no expressible kind at all and says so on each.
+    /// Each verdict is the model of that kind ALONE (Phase 525: a projection of the one
+    /// resolution per selection, where it used to be the target's own walk per kind).
     let partition (idl: Idl) : Verdict list =
         idl.Kinds
         |> List.map (fun k ->
-            match walk idl [ k.Tag ] with
+            match model idl [ k.Tag ] with
             | Ok _ -> { Tag = k.Tag; Refusal = None }
             | Error e ->
                 { Tag = k.Tag
@@ -816,7 +781,7 @@ module FStarTarget =
     /// The DECLARED TYPES a selection reaches — the slots the emitted module declares a type
     /// for, which is what decides the size of the mutual family every query carries.
     let private declaredTypes (idl: Idl) (kindTags: string list) : Set<string> =
-        match walk idl kindTags with
+        match model idl kindTags with
         | Error _ -> Set.empty
         | Ok c -> c.Order |> List.filter declares |> List.map slotName |> Set.ofList
 
@@ -1256,7 +1221,7 @@ module FStarTarget =
         (moduleName: string)
         (idl: Idl)
         (kindTags: string list)
-        (c: Closure)
+        (c: Model)
         (refused: Verdict list)
         =
         let refusedLines =
@@ -1305,6 +1270,13 @@ module FStarTarget =
           "     - A `TJson` member, and a host-codec member whose wire is JSON, is carried VERBATIM"
           "       as a `jval`. What such a member holds is the host codec's business, not the"
           "       schema's, and inventing an F* counterpart for a host type would model a fiction."
+          // Phase 525 — stated where it applies, so a vocabulary without such a slot keeps its bytes.
+          if c.DeclaredWire then
+              yield!
+                  [ "     - A host-codec member that DECLARES its wire form is modelled AT that form: the"
+                    "       decoder checks the declared type exactly as every host's decoder does before"
+                    "       the codec runs. A declared string FORMAT is refused by name, because the"
+                    "       model's string carries no format predicate." ]
           "     - Generic unions are MONOMORPHISED at the arguments this vocabulary reaches, which"
           "       is what keeps every definition and every emitted lemma first-order."
           ""
@@ -1377,7 +1349,7 @@ module FStarTarget =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        match walk idl kindTags with
+        match model idl kindTags with
         | Error e -> Error e
         | Ok c ->
 
@@ -2765,7 +2737,7 @@ module FStarTarget =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        match walk idl kindTags with
+        match model idl kindTags with
         | Error e -> Error e
         | Ok c ->
 
@@ -3047,6 +3019,7 @@ module FStarTarget =
     /// model module's abbreviation and a dot) at `num = int`, `flt = string`.
     let rec private valueTerm
         (idl: Idl)
+        (m: Model)
         (q: string)
         (where: string)
         (s: Slot)
@@ -3061,8 +3034,9 @@ module FStarTarget =
         | SJson, VJson j -> jsonTerm where j
         | SSentinel _, _ -> Ok "()"
         | SEnum n, VEnum spelling ->
+            // Phase 525 — the WIRE spelling resolves through `CaseOf`, the one rule every backend
+            // reads; a host case name the wire does not use is not this enum's value.
             match CodegenLookup.tryEnum idl n with
-            | Some e when List.contains spelling e.Cases -> Ok(q + ctorName ("e_" + snake n) spelling)
             | Some e ->
                 match e.CaseOf spelling with
                 | Some case -> Ok(q + ctorName ("e_" + snake n) case)
@@ -3070,40 +3044,40 @@ module FStarTarget =
             | None -> unmodellable ("the undeclared enum " + n) where
         | SList inner, VList xs ->
             xs
-            |> List.map (valueTerm idl q where inner)
+            |> List.map (valueTerm idl m q where inner)
             |> seqR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SMap inner, VMap entries ->
             entries
-            |> List.map (fun (k, ev) -> pairTerm (strLit where k) (valueTerm idl q where inner ev))
+            |> List.map (fun (k, ev) -> pairTerm (strLit where k) (valueTerm idl m q where inner ev))
             |> seqR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SRecord n, VRecord fs ->
-            match CodegenLookup.tryRecord idl n with
+            match m.Members.TryFind(slotName s) with
             | None -> unmodellable ("the undeclared record " + n) where
-            | Some r ->
-                members idl Map.empty where r.Fields
-                |> Result.bind (fun ms -> ctorTerm idl q where (q + ctorName (slotName s) "Mk") [] ms fs)
+            | Some ms -> ctorTerm idl m q where (q + ctorName (slotName s) "Mk") [] ms fs
         | SUnion(n, args), VUnion(tag, fs) ->
             match CodegenLookup.tryUnion idl n with
             | Some u when List.length u.Params = List.length args ->
                 if (TransparentUnion.tag idl.Harden u).IsSome then
                     unmodellable ("a value of the transparent union " + n) where
                 else
-                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    match
+                        m.Cases.TryFind(slotName s)
+                        |> Option.bind (List.tryFind (fun (t, _) -> t = tag))
+                    with
                     | None -> unmodellable (sprintf "the case %s.%s" n tag) where
-                    | Some c ->
-                        members idl (Map.ofList (List.zip u.Params args)) where c.Fields
-                        |> Result.bind (fun ms -> ctorTerm idl q where (q + ctorName (slotName s) tag) [] ms fs)
+                    | Some(_, ms) -> ctorTerm idl m q where (q + ctorName (slotName s) tag) [] ms fs
             | _ -> unmodellable ("the union " + n) where
-        | SNode, VNode(id, tag, fs) -> nodeTerm idl q where id [] tag fs
-        | SNode, VNodeEnv(id, env, tag, fs) -> nodeTerm idl q where id env tag fs
+        | SNode, VNode(id, tag, fs) -> nodeTerm idl m q where id [] tag fs
+        | SNode, VNodeEnv(id, env, tag, fs) -> nodeTerm idl m q where id env tag fs
         | _ -> unmodellable (sprintf "a value that does not fit its slot: %A" v) where
 
     /// The constructor applied to `lead` and then each member in declared KEY ORDER, from the
     /// decoded field list: an absent optional is `None`, an absent omit-default its default.
     and private ctorTerm
         (idl: Idl)
+        (m: Model)
         (q: string)
         (where: string)
         (ctor: string)
@@ -3111,7 +3085,7 @@ module FStarTarget =
         (ms: Member list)
         (fs: (string * IdlValue) list)
         : Result<string, CodegenError> =
-        argTerms idl q where ms fs
+        argTerms idl m q where ms fs
         |> Result.map (fun parts ->
             match lead @ parts with
             | [] -> ctor
@@ -3119,31 +3093,33 @@ module FStarTarget =
 
     and private argTerms
         (idl: Idl)
+        (m: Model)
         (q: string)
         (where: string)
         (ms: Member list)
         (fs: (string * IdlValue) list)
         : Result<string list, CodegenError> =
         orderMembers idl.Wire.KeyOrder ms
-        |> List.map (fun m ->
+        |> List.map (fun mb ->
             let given =
                 fs
                 |> List.tryPick (fun (n, fv) ->
                     match fv with
                     | VAbsent -> None
-                    | _ when n = m.Name -> Some fv
+                    | _ when n = mb.Name -> Some fv
                     | _ -> None)
 
-            match given, m.Presence with
+            match given, mb.Presence with
             | None, Some None -> Ok "None"
             | None, Some(Some d) -> Ok("(" + d + ")")
-            | None, None -> unmodellable ("a value omitting the required member '" + m.Name + "'") where
-            | Some fv, Some None -> valueTerm idl q where m.Slot fv |> Result.map (fun t -> "(Some " + t + ")")
-            | Some fv, _ -> valueTerm idl q where m.Slot fv |> Result.map (fun t -> "(" + t + ")"))
+            | None, None -> unmodellable ("a value omitting the required member '" + mb.Name + "'") where
+            | Some fv, Some None -> valueTerm idl m q where mb.Slot fv |> Result.map (fun t -> "(Some " + t + ")")
+            | Some fv, _ -> valueTerm idl m q where mb.Slot fv |> Result.map (fun t -> "(" + t + ")"))
         |> seqR
 
     and private nodeTerm
         (idl: Idl)
+        (m: Model)
         (q: string)
         (where: string)
         (id: string)
@@ -3151,39 +3127,39 @@ module FStarTarget =
         (tag: string)
         (fs: (string * IdlValue) list)
         : Result<string, CodegenError> =
-        match CodegenLookup.tryKind idl tag with
+        match m.Kinds |> List.tryFind (fun (t, _) -> t = tag) with
         | None -> unmodellable ("the undeclared kind " + tag) where
-        | Some k ->
-            match members idl Map.empty where k.Fields, members idl Map.empty where idl.NodeFields, strLit where id with
-            | Error e, _, _
-            | _, Error e, _
-            | _, _, Error e -> Error e
-            | Ok kms, Ok ems, Ok idLit ->
+        | Some(_, kms) ->
+            let ems = m.Envelope
+
+            match strLit where id with
+            | Error e -> Error e
+            | Ok idLit ->
                 match idl.Wire.NodeEnvelope with
                 | NodeEnvelopeShape.NestedKind ->
-                    ctorTerm idl q where (q + ctorName "vkind" tag) [] kms fs
+                    ctorTerm idl m q where (q + ctorName "vkind" tag) [] kms fs
                     |> Result.bind (fun kindTerm ->
-                        ctorTerm idl q where (q + ctorName "node" "Node") [ idLit; kindTerm ] ems env)
+                        ctorTerm idl m q where (q + ctorName "node" "Node") [ idLit; kindTerm ] ems env)
                 | NodeEnvelopeShape.FlatKind ->
-                    ctorTerm idl q where (q + ctorName "node" tag) [ idLit ] (kms @ ems) (fs @ env)
+                    ctorTerm idl m q where (q + ctorName "node" tag) [ idLit ] (kms @ ems) (fs @ env)
 
     /// The EXPECTED term: the interpreter's bytes, parsed, as a `jval int string`, walked by the
     /// slot each member declares — so a number at a float slot is the model's float carrier
     /// whether the canonical layout wrote it as `2` or `2.5`, and every object keeps the key
     /// order the bytes carry.
-    let rec private wireTerm (idl: Idl) (where: string) (s: Slot) (j: JVal) : Result<string, CodegenError> =
+    let rec private wireTerm (idl: Idl) (m: Model) (where: string) (s: Slot) (j: JVal) : Result<string, CodegenError> =
         let objectOf (lookup: string -> Slot option) (fs: (string * JVal) list) =
             fs
             |> List.map (fun (k, v) ->
                 match lookup k with
                 | None -> unmodellable ("the undeclared member '" + k + "' in the interpreter's bytes") where
-                | Some slot -> pairTerm (strLit where k) (wireTerm idl where slot v))
+                | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
             |> seqR
             |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
 
         let disc = idl.Wire.Discriminator
 
-        let slotOf (ms: Member list) (k: string) =
+        let memberSlot (ms: Member list) (k: string) =
             ms |> List.tryFind (fun m -> m.Name = k) |> Option.map _.Slot
 
         let tagOf (fs: (string * JVal) list) =
@@ -3192,9 +3168,9 @@ module FStarTarget =
             | _ -> unmodellable "an object with no discriminator in the interpreter's bytes" where
 
         let kindMembers (tag: string) =
-            match CodegenLookup.tryKind idl tag with
+            match m.Kinds |> List.tryFind (fun (t, _) -> t = tag) with
             | None -> unmodellable ("the undeclared kind " + tag) where
-            | Some k -> members idl Map.empty where k.Fields
+            | Some(_, ms) -> Ok ms
 
         match s, j with
         | SFloat, JInt i -> floatCarrier where (float i) |> Result.map (fun l -> "(JFloat " + l + ")")
@@ -3205,63 +3181,61 @@ module FStarTarget =
         | SBool, JBool b -> Ok(if b then "(JBool true)" else "(JBool false)")
         | SList inner, JArr xs ->
             xs
-            |> List.map (wireTerm idl where inner)
+            |> List.map (wireTerm idl m where inner)
             |> seqR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
         | SRecord n, JObj fs ->
-            match CodegenLookup.tryRecord idl n with
+            match m.Members.TryFind(slotName s) with
             | None -> unmodellable ("the undeclared record " + n) where
-            | Some r ->
-                members idl Map.empty where r.Fields
-                |> Result.bind (fun ms -> objectOf (slotOf ms) fs)
+            | Some ms -> objectOf (memberSlot ms) fs
         | SUnion(n, args), JObj fs ->
             match CodegenLookup.tryUnion idl n, tagOf fs with
             | _, Error e -> Error e
             | Some u, Ok tag when List.length u.Params = List.length args ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                match
+                    m.Cases.TryFind(slotName s)
+                    |> Option.bind (List.tryFind (fun (t, _) -> t = tag))
+                with
                 | None -> unmodellable (sprintf "the case %s.%s" n tag) where
-                | Some c ->
-                    members idl (Map.ofList (List.zip u.Params args)) where c.Fields
-                    |> Result.bind (fun ms -> objectOf (fun k -> if k = disc then Some SStr else slotOf ms k) fs)
+                | Some(_, ms) -> objectOf (fun k -> if k = disc then Some SStr else memberSlot ms k) fs
             | _ -> unmodellable ("the union " + n) where
         | SNode, JObj fs ->
-            match members idl Map.empty where idl.NodeFields with
-            | Error e -> Error e
-            | Ok ems ->
-                match idl.Wire.NodeEnvelope with
-                | NodeEnvelopeShape.FlatKind ->
-                    tagOf fs
-                    |> Result.bind kindMembers
-                    |> Result.bind (fun kms ->
-                        objectOf
-                            (fun k ->
-                                if k = disc || k = "id" then
-                                    Some SStr
-                                else
-                                    slotOf (kms @ ems) k)
-                            fs)
-                | NodeEnvelopeShape.NestedKind ->
-                    let kindObject (kj: JVal) =
-                        match kj with
-                        | JObj kfs ->
-                            tagOf kfs
-                            |> Result.bind kindMembers
-                            |> Result.bind (fun kms ->
-                                objectOf (fun k -> if k = disc then Some SStr else slotOf kms k) kfs)
-                        | _ -> unmodellable "a node whose kind is not an object" where
+            let ems = m.Envelope
 
-                    fs
-                    |> List.map (fun (k, v) ->
-                        match k with
-                        | "id" -> pairTerm (Ok(lit "id")) (wireTerm idl where SStr v)
-                        | "kind" -> pairTerm (Ok(lit "kind")) (kindObject v)
-                        | _ ->
-                            match slotOf ems k with
-                            | None -> unmodellable ("the undeclared envelope member '" + k + "'") where
-                            | Some slot -> pairTerm (strLit where k) (wireTerm idl where slot v))
-                    |> seqR
-                    |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
+            match idl.Wire.NodeEnvelope with
+            | NodeEnvelopeShape.FlatKind ->
+                tagOf fs
+                |> Result.bind kindMembers
+                |> Result.bind (fun kms ->
+                    objectOf
+                        (fun k ->
+                            if k = disc || k = "id" then
+                                Some SStr
+                            else
+                                memberSlot (kms @ ems) k)
+                        fs)
+            | NodeEnvelopeShape.NestedKind ->
+                let kindObject (kj: JVal) =
+                    match kj with
+                    | JObj kfs ->
+                        tagOf kfs
+                        |> Result.bind kindMembers
+                        |> Result.bind (fun kms ->
+                            objectOf (fun k -> if k = disc then Some SStr else memberSlot kms k) kfs)
+                    | _ -> unmodellable "a node whose kind is not an object" where
+
+                fs
+                |> List.map (fun (k, v) ->
+                    match k with
+                    | "id" -> pairTerm (Ok(lit "id")) (wireTerm idl m where SStr v)
+                    | "kind" -> pairTerm (Ok(lit "kind")) (kindObject v)
+                    | _ ->
+                        match memberSlot ems k with
+                        | None -> unmodellable ("the undeclared envelope member '" + k + "'") where
+                        | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
+                |> seqR
+                |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
         | _ -> unmodellable (sprintf "interpreter bytes that do not fit their slot: %A" j) where
 
     /// Every node kind a value holds, at any depth.
@@ -3307,41 +3281,46 @@ module FStarTarget =
             let q = vm.Prefix + "."
 
             // The kinds the committed model declares: every kind the target can express.
-            let modelled =
-                partition vm.Idl |> List.filter _.Refusal.IsNone |> List.map _.Tag |> Set.ofList
+            let modelledTags =
+                partition vm.Idl |> List.filter _.Refusal.IsNone |> List.map _.Tag
+
+            let modelled = Set.ofList modelledTags
             // A top-level F* binding must start lower-case; the abbreviation must not.
             let b = vm.Prefix.ToLowerInvariant()
 
-            vm.Wires
-            |> List.mapi (fun i wire ->
-                let where = sprintf "%s vector %d" vm.Model i
+            // Phase 525 — the terms read the members of the model itself, not a re-resolution.
+            model vm.Idl modelledTags
+            |> Result.bind (fun mdl ->
+                vm.Wires
+                |> List.mapi (fun i wire ->
+                    let where = sprintf "%s vector %d" vm.Model i
 
-                match Decode.decode vm.Idl wire, Json.parse wire with
-                | Error m, _ -> unmodellable ("a wire the interpreter refuses: " + m) where
-                | _, Error m -> unmodellable ("a wire that does not parse: " + m) where
-                | Ok v, _ when not (Set.isSubset (nodeTags v) modelled) ->
-                    unmodellable
-                        ("a node of a kind the model does not declare ("
-                         + (Set.difference (nodeTags v) modelled |> String.concat ", ")
-                         + ")")
-                        where
-                | Ok v, Ok j ->
-                    match valueTerm vm.Idl q where SNode v, wireTerm vm.Idl where SNode j with
-                    | Error e, _
-                    | _, Error e -> Error e
-                    | Ok vt, Ok jt ->
-                        Ok(
-                            sprintf
-                                "let %s_v%d : %snode int string =\n  %s\n\nlet %s_e%d : jval int string =\n  %s\n"
-                                b
-                                i
-                                q
-                                vt
-                                b
-                                i
-                                jt
-                        ))
-            |> seqR
+                    match Decode.decode vm.Idl wire, Json.parse wire with
+                    | Error m, _ -> unmodellable ("a wire the interpreter refuses: " + m) where
+                    | _, Error m -> unmodellable ("a wire that does not parse: " + m) where
+                    | Ok v, _ when not (Set.isSubset (nodeTags v) modelled) ->
+                        unmodellable
+                            ("a node of a kind the model does not declare ("
+                             + (Set.difference (nodeTags v) modelled |> String.concat ", ")
+                             + ")")
+                            where
+                    | Ok v, Ok j ->
+                        match valueTerm vm.Idl mdl q where SNode v, wireTerm vm.Idl mdl where SNode j with
+                        | Error e, _
+                        | _, Error e -> Error e
+                        | Ok vt, Ok jt ->
+                            Ok(
+                                sprintf
+                                    "let %s_v%d : %snode int string =\n  %s\n\nlet %s_e%d : jval int string =\n  %s\n"
+                                    b
+                                    i
+                                    q
+                                    vt
+                                    b
+                                    i
+                                    jt
+                            ))
+                |> seqR)
             |> Result.map (fun defs ->
                 let facts =
                     vm.Wires
