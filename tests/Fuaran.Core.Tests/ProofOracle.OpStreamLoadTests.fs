@@ -305,15 +305,69 @@ let private pWrite (r: Result<string, JsonlWriteFault>) : string =
     | Ok text -> "Ok " + text
     | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
 
+let private mWrite (r: M.res<JsonParse.ch list, M.wfault>) : string =
+    match r with
+    | M.Ok text -> "Ok " + tokStr text
+    | M.Error f -> sprintf "Error line %d member %s: %s" (int f.wline) (tokStr f.wmember) (mWreason f.wreason)
+
 let private pField (r: Result<string, JsonlFault>) : string =
     match r with
     | Ok s -> "Ok " + s
     | Error f -> "Error " + pFault f
 
-let private mField (r: M.res<JsonParse.och list, M.fault>) : string =
-    match r with
-    | M.Ok s -> "Ok " + ochsStr s
-    | M.Error f -> "Error " + mFault f
+// ---- the render pairs ----
+
+/// The checked writer's answer: the text, or the refusal by line, member and reason.
+let private writes: Differential<Result<string, JsonlWriteFault>, M.res<JsonParse.ch list, M.wfault>> =
+    Differential.pair pWrite mWrite
+
+/// `unquote`'s answer over one raw span.
+let private unquoted: Differential<Result<string, JsonlFaultReason>, M.res<JsonParse.och list, M.reason>> =
+    Differential.pair
+        (function
+        | Ok s -> "Ok " + s
+        | Error r -> "Error " + pReason r)
+        (function
+         | M.Ok s -> "Ok " + ochsStr s
+         | M.Error r -> "Error " + mReason r)
+
+/// `checkRaw`'s answer over one raw span or line.
+let private checkedRaw: Differential<Result<unit, JsonlWriteFaultReason>, M.res<unit, M.wreason>> =
+    Differential.pair
+        (function
+        | Ok() -> "Ok"
+        | Error r -> "Error " + pWreason r)
+        (function
+         | M.Ok() -> "Ok"
+         | M.Error r -> "Error " + mWreason r)
+
+/// A load's answer, and a load that also returns the snapshot lines. `blind` is the go-red
+/// bridge: the model's unreadable fault rendered with its line number dropped.
+let private loads
+    (blind: bool)
+    : Differential<
+          Result<OpRecord<Counter.CounterOp> list, StreamLoadFault<ChainBreak>>,
+          M.res<M.lrec<Counter.CounterOp> list, M.lfault<Chain.cbreak>>
+       >
+    =
+    Differential.pair (pLoad Counter.witness) (function
+        | M.Error(M.LUnreadable f) when blind -> "Unreadable " + mFault (dropLine f)
+        | other -> mLoad Counter.witness other)
+
+let private snapshotLoads
+    (blind: bool)
+    : Differential<
+          Result<OpRecord<Counter.CounterOp> list * string list, StreamLoadFault<ChainBreak>>,
+          M.res<M.lrec<Counter.CounterOp> list * JsonParse.ch list list, M.lfault<Chain.cbreak>>
+       >
+    =
+    Differential.pair (pSnaps Counter.witness) (function
+        | M.Error(M.LUnreadable f) when blind -> "Unreadable " + mFault (dropLine f)
+        | other -> mSnaps Counter.witness other)
+
+/// The tally every comparison here records into, and the class the theorem-2 statement held to
+/// production records under (`faultsLocate`, production only).
+let private loadTally = Tally.empty [] |> Tally.classes [ "locate" ]
 
 // ---- generators, seeded ----
 
@@ -581,12 +635,17 @@ let private keys =
 
 /// Every building block over one line, both sides rendered: `parseLine` / `topFields` /
 /// `rawSpan`, and each field reader at each key; `unquote` and `checkRaw` over every raw span.
-let private compareLine (blind: bool) (number: int) (line: string) : string list =
+let private compareLine (blind: bool) (number: int) (line: string) (t: Tally) : Tally =
     let chs = toChs line
     let lineKey (k: string) = toChs k
 
     let mf (f: M.fault) =
         if blind then mFault (dropLine f) else mFault f
+
+    /// A building block's answer, both sides already rendered — each reader answers in its own
+    /// type, rendered by its own pair of matches below.
+    let rendered (what: string) (p: string) (m: string) (t: Tally) =
+        Differential.compareWith Differential.text (fun p m -> sprintf "%s: production %s, model %s" what p m) p m t
 
     let pLine =
         match Jsonl.parseLine number line with
@@ -610,225 +669,189 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
             sprintf "Ok %d %s [%s]" (int (M.line_number l)) (tokStr (M.line_text l)) fields
         | M.Error f -> "Error " + mf f
 
-    let diffs = ResizeArray<string>()
+    let t =
+        t
+        |> rendered (sprintf "parseLine %A" line) pLine mLine
+        |> Differential.over keys (fun k t ->
+            let pSpan =
+                match Jsonl.rawSpan k line with
+                | Ok(Some v) -> "Some " + v
+                | Ok None -> "None"
+                | Error f -> "Error " + pFault f
 
-    if pLine <> mLine then
-        diffs.Add(sprintf "parseLine %A: production %s, model %s" line pLine mLine)
+            let mSpan =
+                match M.raw_span (lineKey k) chs with
+                | M.Ok o ->
+                    match mOpt o with
+                    | Some v -> "Some " + tokStr v
+                    | None -> "None"
+                | M.Error f -> "Error " + mf f
 
-    for k in keys do
-        let pSpan =
-            match Jsonl.rawSpan k line with
-            | Ok(Some v) -> "Some " + v
-            | Ok None -> "None"
-            | Error f -> "Error " + pFault f
+            rendered (sprintf "rawSpan %s %A" k line) pSpan mSpan t)
 
-        let mSpan =
-            match M.raw_span (lineKey k) chs with
-            | M.Ok o ->
-                match mOpt o with
-                | Some v -> "Some " + tokStr v
-                | None -> "None"
-            | M.Error f -> "Error " + mf f
+    let t =
+        match Jsonl.parseLine number line, M.parse_line (nat number) chs with
+        | Ok pl, M.Ok ml ->
+            let t =
+                t
+                |> Differential.over keys (fun k t ->
+                    let mk = lineKey k
 
-        if pSpan <> mSpan then
-            diffs.Add(sprintf "rawSpan %s %A: production %s, model %s" k line pSpan mSpan)
+                    let pairs =
+                        [ "tryRawField",
+                          (match Jsonl.tryRawField k pl with
+                           | Some v -> "Some " + v
+                           | None -> "None"),
+                          (match mOpt (M.try_raw_field mk ml) with
+                           | Some v -> "Some " + tokStr v
+                           | None -> "None")
+                          "rawField",
+                          (match Jsonl.rawField k pl with
+                           | Ok v -> "Ok " + v
+                           | Error f -> "Error " + pFault f),
+                          (match M.raw_field mk ml with
+                           | M.Ok v -> "Ok " + tokStr v
+                           | M.Error f -> "Error " + mf f)
+                          "stringField",
+                          pField (Jsonl.stringField k pl),
+                          (match M.string_field mk ml with
+                           | M.Ok s -> "Ok " + ochsStr s
+                           | M.Error f -> "Error " + mf f)
+                          "intField",
+                          (match Jsonl.intField k pl with
+                           | Ok i -> "Ok " + string i
+                           | Error f -> "Error " + pFault f),
+                          (match M.int_field mk ml with
+                           | M.Ok i -> "Ok " + string i
+                           | M.Error f -> "Error " + mf f)
+                          "stringsField",
+                          (match Jsonl.stringsField k pl with
+                           | Ok xs -> "Ok [" + String.concat "|" xs + "]"
+                           | Error f -> "Error " + pFault f),
+                          (match M.strings_field mk ml with
+                           | M.Ok xs -> "Ok [" + (xs |> List.map ochsStr |> String.concat "|") + "]"
+                           | M.Error f -> "Error " + mf f)
+                          "actorField",
+                          (match Jsonl.actorField k pl with
+                           | Ok a -> "Ok " + Actor.encode a
+                           | Error f -> "Error " + pFault f),
+                          (match M.actor_field mk ml with
+                           | M.Ok a -> "Ok " + Actor.encode (pActor a)
+                           | M.Error f -> "Error " + mf f) ]
 
-    match Jsonl.parseLine number line, M.parse_line (nat number) chs with
-    | Ok pl, M.Ok ml ->
-        for k in keys do
-            let mk = lineKey k
+                    Differential.over pairs (fun (name, p, m) t -> rendered (sprintf "%s %s %A" name k line) p m t) t)
+                |> rendered (sprintf "refuse %A" line) (pFault (Jsonl.refuse pl "why")) (mf (M.refuse ml "why"))
 
-            let pairs =
-                [ "tryRawField",
-                  (match Jsonl.tryRawField k pl with
-                   | Some v -> "Some " + v
-                   | None -> "None"),
-                  (match mOpt (M.try_raw_field mk ml) with
-                   | Some v -> "Some " + tokStr v
-                   | None -> "None")
-                  "rawField",
-                  (match Jsonl.rawField k pl with
-                   | Ok v -> "Ok " + v
-                   | Error f -> "Error " + pFault f),
-                  (match M.raw_field mk ml with
-                   | M.Ok v -> "Ok " + tokStr v
-                   | M.Error f -> "Error " + mf f)
-                  "stringField",
-                  pField (Jsonl.stringField k pl),
-                  (match M.string_field mk ml with
-                   | M.Ok s -> "Ok " + ochsStr s
-                   | M.Error f -> "Error " + mf f)
-                  "intField",
-                  (match Jsonl.intField k pl with
-                   | Ok i -> "Ok " + string i
-                   | Error f -> "Error " + pFault f),
-                  (match M.int_field mk ml with
-                   | M.Ok i -> "Ok " + string i
-                   | M.Error f -> "Error " + mf f)
-                  "stringsField",
-                  (match Jsonl.stringsField k pl with
-                   | Ok xs -> "Ok [" + String.concat "|" xs + "]"
-                   | Error f -> "Error " + pFault f),
-                  (match M.strings_field mk ml with
-                   | M.Ok xs -> "Ok [" + (xs |> List.map ochsStr |> String.concat "|") + "]"
-                   | M.Error f -> "Error " + mf f)
-                  "actorField",
-                  (match Jsonl.actorField k pl with
-                   | Ok a -> "Ok " + Actor.encode a
-                   | Error f -> "Error " + pFault f),
-                  (match M.actor_field mk ml with
-                   | M.Ok a -> "Ok " + Actor.encode (pActor a)
-                   | M.Error f -> "Error " + mf f) ]
+            match Jsonl.topFields line with
+            | Ok fs ->
+                t
+                |> Differential.over fs (fun (_, v) t ->
+                    t
+                    |> Differential.compare unquoted (sprintf "unquote %A" v) (Jsonl.unquote v) (M.unquote (toChs v))
+                    |> Differential.compareWith
+                        checkedRaw
+                        (fun p m -> sprintf "checkRaw %A: production %s, model %s" v p m)
+                        (Jsonl.checkRaw v)
+                        (M.check_raw (toChs v)))
+            | Error _ -> t
+        | _ -> t
 
-            for name, p, m in pairs do
-                if p <> m then
-                    diffs.Add(sprintf "%s %s %A: production %s, model %s" name k line p m)
-
-        let pRefuse = pFault (Jsonl.refuse pl "why")
-        let mRefuse = mf (M.refuse ml "why")
-
-        if pRefuse <> mRefuse then
-            diffs.Add(sprintf "refuse %A: production %s, model %s" line pRefuse mRefuse)
-
-        match Jsonl.topFields line with
-        | Ok fs ->
-            for _, v in fs do
-                let pU =
-                    match Jsonl.unquote v with
-                    | Ok s -> "Ok " + s
-                    | Error r -> "Error " + pReason r
-
-                let mU =
-                    match M.unquote (toChs v) with
-                    | M.Ok s -> "Ok " + ochsStr s
-                    | M.Error r -> "Error " + mReason r
-
-                if pU <> mU then
-                    diffs.Add(sprintf "unquote %A: production %s, model %s" v pU mU)
-
-                let pC =
-                    match Jsonl.checkRaw v with
-                    | Ok() -> "Ok"
-                    | Error r -> "Error " + pWreason r
-
-                let mC =
-                    match M.check_raw (toChs v) with
-                    | M.Ok() -> "Ok"
-                    | M.Error r -> "Error " + mWreason r
-
-                if pC <> mC then
-                    diffs.Add(sprintf "checkRaw %A: production %s, model %s" v pC mC)
-        | Error _ -> ()
-    | _ -> ()
-
-    let pC =
-        match Jsonl.checkRaw line with
-        | Ok() -> "Ok"
-        | Error r -> "Error " + pWreason r
-
-    let mC =
-        match M.check_raw chs with
-        | M.Ok() -> "Ok"
-        | M.Error r -> "Error " + mWreason r
-
-    if pC <> mC then
-        diffs.Add(sprintf "checkRaw %A: production %s, model %s" line pC mC)
-
-    List.ofSeq diffs
+    t
+    |> Differential.compareWith
+        checkedRaw
+        (fun p m -> sprintf "checkRaw %A: production %s, model %s" line p m)
+        (Jsonl.checkRaw line)
+        (M.check_raw chs)
 
 /// Every load over one text, both sides rendered.
-let private compareLoads (blind: bool) (text: string) : string list =
+let private compareLoads (blind: bool) (text: string) (t: Tally) : Tally =
     let w = Counter.witness
     let mw = mWitness w
     let chs = toChs text
 
-    let blindLoad (s: string) = s
+    let message (name: string) (p: string) (m: string) =
+        sprintf "%s over %A: production %s, model %s" name text p m
 
-    let mL (r: M.res<M.lrec<Counter.CounterOp> list, M.lfault<Chain.cbreak>>) =
-        match r with
-        | M.Error(M.LUnreadable f) when blind -> "Unreadable " + mFault (dropLine f)
-        | other -> mLoad w other
-
-    let mS (r: M.res<M.lrec<Counter.CounterOp> list * JsonParse.ch list list, M.lfault<Chain.cbreak>>) =
-        match r with
-        | M.Error(M.LUnreadable f) when blind -> "Unreadable " + mFault (dropLine f)
-        | other -> mSnaps w other
-
-    [ "fromJsonl", pLoad w (Jsonl.read w text), mL (M.from_jsonl hostWs mw chs)
-      "fromJsonlWithSnapshots",
-      pSnaps w (Jsonl.readWithSnapshots w text),
-      mS (M.from_jsonl_with_snapshots hostWs mw chs)
-      "fromJsonlLegacyActor", pLoad w (Jsonl.readLegacyActor w text), mL (M.from_jsonl_legacy_actor hostWs mw chs)
-      "fromJsonlVerified",
-      pLoad w (Jsonl.readVerified (OpStream.canonical hashFn w) text),
-      mL (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs mw chs) ]
-    |> List.choose (fun (name, p, m) ->
-        if p = blindLoad m then
-            None
-        else
-            Some(sprintf "%s over %A: production %s, model %s" name text p m))
+    t
+    |> Differential.compareWith (loads blind) (message "fromJsonl") (Jsonl.read w text) (M.from_jsonl hostWs mw chs)
+    |> Differential.compareWith
+        (snapshotLoads blind)
+        (message "fromJsonlWithSnapshots")
+        (Jsonl.readWithSnapshots w text)
+        (M.from_jsonl_with_snapshots hostWs mw chs)
+    |> Differential.compareWith
+        (loads blind)
+        (message "fromJsonlLegacyActor")
+        (Jsonl.readLegacyActor w text)
+        (M.from_jsonl_legacy_actor hostWs mw chs)
+    |> Differential.compareWith
+        (loads blind)
+        (message "fromJsonlVerified")
+        (Jsonl.readVerified (OpStream.canonical hashFn w) text)
+        (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs mw chs)
 
 /// The lines of a text as `scanRecords` counts them.
 let private linesOf (text: string) : string[] = text.Replace("\r\n", "\n").Split '\n'
 
 /// THEOREM 2 held to production: a fault names a line that exists, is not blank, and is that
-/// line's own fault; a site names a line whose record the witness refused, by its hash.
-let private faultsLocate (text: string) : string list =
+/// line's own fault; a site names a line whose record the witness refused, by its hash. Each
+/// breach is a `locate` finding.
+let private faultsLocate (text: string) (t: Tally) : Tally =
     let w = Counter.witness
     let lines = linesOf text
-    let findings = ResizeArray<string>()
+    let found (message: string) (t: Tally) = Tally.record "locate" message t
 
-    let checkFault (f: JsonlFault) =
+    let checkFault (f: JsonlFault) (t: Tally) =
         if f.Line < 1 || f.Line > lines.Length then
-            findings.Add(sprintf "fault %s names line %d of %d" (pFault f) f.Line lines.Length)
+            found (sprintf "fault %s names line %d of %d" (pFault f) f.Line lines.Length) t
         else
             let l = lines.[f.Line - 1]
 
-            if l.Trim() = "" then
-                findings.Add(sprintf "fault %s names a blank line" (pFault f))
+            t
+            |> (if l.Trim() = "" then
+                    found (sprintf "fault %s names a blank line" (pFault f))
+                else
+                    id)
+            |> (if f.Position > l.Length then
+                    found (sprintf "fault %s sits past its line (%d chars)" (pFault f) l.Length)
+                else
+                    id)
+            |> (match Jsonl.parseLine f.Line l with
+                | Error g when g <> f ->
+                    found (sprintf "fault %s is not the line's parse fault %s" (pFault f) (pFault g))
+                | _ -> id)
 
-            if f.Position > l.Length then
-                findings.Add(sprintf "fault %s sits past its line (%d chars)" (pFault f) l.Length)
+    let checkSite (s: UndecodableOp) (t: Tally) =
+        if s.Line < 1 || s.Line > lines.Length then
+            found (sprintf "site at line %d of %d" s.Line lines.Length) t
+        else
+            match Jsonl.parseLine s.Line lines.[s.Line - 1] with
+            | Error g -> found (sprintf "site at line %d, which does not parse: %s" s.Line (pFault g)) t
+            | Ok l ->
+                t
+                |> (match Jsonl.rawField "op" l with
+                    | Ok raw ->
+                        match w.Decode raw with
+                        | Error why when why = s.Reason -> id
+                        | other ->
+                            found (sprintf "site at line %d: the witness answers %A, not %s" s.Line other s.Reason)
+                    | Error g -> found (sprintf "site at line %d has no op: %s" s.Line (pFault g)))
+                |> (match Jsonl.stringField "hash" l with
+                    | Ok h when h = s.NodeId -> id
+                    | other ->
+                        found (sprintf "site at line %d names node %s, the line's hash is %A" s.Line s.NodeId other))
 
-            match Jsonl.parseLine f.Line l with
-            | Error g when g <> f ->
-                findings.Add(sprintf "fault %s is not the line's parse fault %s" (pFault f) (pFault g))
-            | _ -> ()
-
-    for r in
+    t
+    |> Differential.over
         [ Jsonl.read w text
           Jsonl.readLegacyActor w text
           Jsonl.readVerified (OpStream.canonical hashFn w) text
-          Jsonl.readWithSnapshots w text |> Result.map fst ] do
-        match r with
-        | Error(StreamLoadFault.Unreadable(_, f)) -> checkFault f
-        | Error(StreamLoadFault.Undecodable sites) ->
-            for s in sites do
-                if s.Line < 1 || s.Line > lines.Length then
-                    findings.Add(sprintf "site at line %d of %d" s.Line lines.Length)
-                else
-                    match Jsonl.parseLine s.Line lines.[s.Line - 1] with
-                    | Error g -> findings.Add(sprintf "site at line %d, which does not parse: %s" s.Line (pFault g))
-                    | Ok l ->
-                        match Jsonl.rawField "op" l with
-                        | Ok raw ->
-                            match w.Decode raw with
-                            | Error why when why = s.Reason -> ()
-                            | other ->
-                                findings.Add(
-                                    sprintf "site at line %d: the witness answers %A, not %s" s.Line other s.Reason
-                                )
-                        | Error g -> findings.Add(sprintf "site at line %d has no op: %s" s.Line (pFault g))
-
-                        match Jsonl.stringField "hash" l with
-                        | Ok h when h = s.NodeId -> ()
-                        | other ->
-                            findings.Add(
-                                sprintf "site at line %d names node %s, the line's hash is %A" s.Line s.NodeId other
-                            )
-        | _ -> ()
-
-    List.ofSeq findings
+          Jsonl.readWithSnapshots w text |> Result.map fst ]
+        (fun r t ->
+            match r with
+            | Error(StreamLoadFault.Unreadable(_, f)) -> checkFault f t
+            | Error(StreamLoadFault.Undecodable sites) -> Differential.over sites checkSite t
+            | _ -> t)
 
 let private pool
     (seed: int)
@@ -869,11 +892,10 @@ let tests =
 
               Expect.isGreaterThan lines.Length 300 "the line pool is wide"
 
-              let diffs =
-                  lines |> List.mapi (fun i l -> compareLine false (i % 7 + 1) l) |> List.concat
-
-              if not diffs.IsEmpty then
-                  failtestf "%d disagreement(s):\n%s" diffs.Length (diffs |> List.truncate 10 |> String.concat "\n")
+              lines
+              |> List.indexed
+              |> fun ls -> Differential.over ls (fun (i, l) -> compareLine false (i % 7 + 1) l) loadTally
+              |> Differential.expectAgrees "the scanner's building blocks"
 
           testCase "the op-stream-load oracle agrees with every load over written streams and their mutations"
           <| fun _ ->
@@ -885,30 +907,27 @@ let tests =
                   @ (p |> List.collect (fun (_, _, ms) -> ms))
                   @ hostileTexts (List.head written)
 
-              let diffs = texts |> List.collect (compareLoads false)
-
-              if not diffs.IsEmpty then
-                  failtestf "%d disagreement(s):\n%s" diffs.Length (diffs |> List.truncate 10 |> String.concat "\n")
+              Differential.over texts (compareLoads false) loadTally
+              |> Differential.expectAgrees "the loads"
 
               // The checked writer, both sides, over the written records and over records that
               // carry an op encoding the writer must refuse.
               let w = Counter.witness
 
-              for rs, _, _ in p do
-                  let pW = pWrite (Jsonl.tryWrite w rs)
-
-                  let mW =
-                      match M.try_to_jsonl (mWitness w) (rs |> List.map (mRecord w)) with
-                      | M.Ok text -> "Ok " + tokStr text
-                      | M.Error f ->
-                          sprintf "Error line %d member %s: %s" (int f.wline) (tokStr f.wmember) (mWreason f.wreason)
-
-                  Expect.equal mW pW "tryToJsonl agrees"
-
-                  Expect.equal
-                      (tokStr (M.to_jsonl (mWitness w) (rs |> List.map (mRecord w))))
-                      (Jsonl.write w rs)
+              loadTally
+              |> Differential.over p (fun (rs, _, _) t ->
+                  t
+                  |> Differential.compare
+                      writes
+                      "tryToJsonl agrees"
+                      (Jsonl.tryWrite w rs)
+                      (M.try_to_jsonl (mWitness w) (rs |> List.map (mRecord w)))
+                  |> Differential.compare
+                      Differential.text
                       "toJsonl agrees"
+                      (Jsonl.write w rs)
+                      (tokStr (M.to_jsonl (mWitness w) (rs |> List.map (mRecord w)))))
+              |> Differential.expectAgrees "the checked writer"
 
               let multiLine: StreamWitness<Counter.CounterOp, int, string> =
                   { w with
@@ -922,21 +941,17 @@ let tests =
                   { w with
                       Encode = (fun o -> w.Encode o + " 1") }
 
-              for bad in [ multiLine; spaced; two ] do
-                  let rs = (p |> List.head |> (fun (rs, _, _) -> rs))
+              let rs = (p |> List.head |> (fun (rs, _, _) -> rs))
 
-                  let pW =
-                      match Jsonl.tryWrite bad rs with
-                      | Ok t -> "Ok " + t
-                      | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
-
-                  let mW =
-                      match M.try_to_jsonl (mWitness bad) (rs |> List.map (mRecord bad)) with
-                      | M.Ok text -> "Ok " + tokStr text
-                      | M.Error f ->
-                          sprintf "Error line %d member %s: %s" (int f.wline) (tokStr f.wmember) (mWreason f.wreason)
-
-                  Expect.equal mW pW "tryToJsonl refuses an embedding both sides alike"
+              loadTally
+              |> Differential.over [ multiLine; spaced; two ] (fun bad t ->
+                  Differential.compare
+                      writes
+                      "tryToJsonl refuses an embedding both sides alike"
+                      (Jsonl.tryWrite bad rs)
+                      (M.try_to_jsonl (mWitness bad) (rs |> List.map (mRecord bad)))
+                      t)
+              |> Differential.expectAgrees "the checked writer over a bad embedding"
 
               // Phase 473: the strings the writer quotes itself are checked too, by member, in line
               // order — an unpaired surrogate in the actor, prevHash or hash is refused alike.
@@ -944,45 +959,43 @@ let tests =
 
               match p |> List.head |> (fun (rs, _, _) -> rs) with
               | r :: _ ->
-                  for bad in
+                  loadTally
+                  |> Differential.over
                       [ { r with Actor = Human("a" + lone) }
                         { r with PrevHash = lone }
                         { r with Hash = "h" + lone }
                         { r with
                             Actor = Human lone
-                            Hash = lone } ] do
-                      let pW =
-                          match Jsonl.tryWrite w [ bad ] with
-                          | Ok t -> "Ok " + t
-                          | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
+                            Hash = lone } ]
+                      (fun bad t ->
+                          let pW = Jsonl.tryWrite w [ bad ]
+                          Expect.stringStarts (pWrite pW) "Error" "production refuses a quoted unpaired surrogate"
 
-                      let mW =
-                          match M.try_to_jsonl (mWitness w) [ mRecord w bad ] with
-                          | M.Ok text -> "Ok " + tokStr text
-                          | M.Error f ->
-                              sprintf
-                                  "Error line %d member %s: %s"
-                                  (int f.wline)
-                                  (tokStr f.wmember)
-                                  (mWreason f.wreason)
-
-                      Expect.stringStarts pW "Error" "production refuses a quoted unpaired surrogate"
-                      Expect.equal mW pW "tryToJsonl refuses a quoted string both sides alike"
+                          Differential.compare
+                              writes
+                              "tryToJsonl refuses a quoted string both sides alike"
+                              pW
+                              (M.try_to_jsonl (mWitness w) [ mRecord w bad ])
+                              t)
+                  |> Differential.expectAgrees "the checked writer over a quoted unpaired surrogate"
               | [] -> failtest "no written record to edit"
 
               // A negative sequence number: the scan admits it, the walk refuses it. The one
               // field the model's unary position cannot spell is the break's `got` text.
               let neg = List.head written |> fun t -> t.Replace("\"seq\":0,", "\"seq\":-1,")
 
-              Expect.equal
-                  (mLoad w (M.from_jsonl hostWs (mWitness w) (toChs neg)))
-                  (pLoad w (Jsonl.read w neg))
+              loadTally
+              |> Differential.compare
+                  (loads false)
                   "an unverified load admits a negative sequence number on both sides"
-
-              Expect.equal
-                  (mLoad w (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs (mWitness w) (toChs neg)))
-                  (pLoad w (Jsonl.readVerified (OpStream.canonical hashFn w) neg))
+                  (Jsonl.read w neg)
+                  (M.from_jsonl hostWs (mWitness w) (toChs neg))
+              |> Differential.compare
+                  (loads false)
                   "the verified load refuses it at the same index for the same reason"
+                  (Jsonl.readVerified (OpStream.canonical hashFn w) neg)
+                  (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs (mWitness w) (toChs neg))
+              |> Differential.expectAgrees "a negative sequence number"
 
               match Jsonl.readVerified (OpStream.canonical hashFn w) neg with
               | Error(StreamLoadFault.Broken b) ->
@@ -1001,10 +1014,8 @@ let tests =
                   @ (p |> List.collect (fun (_, _, ms) -> ms))
                   @ hostileTexts (List.head written)
 
-              let findings = texts |> List.collect faultsLocate
-
-              if not findings.IsEmpty then
-                  failtestf "%d finding(s):\n%s" findings.Length (findings |> List.truncate 10 |> String.concat "\n")
+              Differential.over texts faultsLocate loadTally
+              |> Differential.expectAgrees "theorem 2 held to production"
 
               let faults =
                   texts
@@ -1065,7 +1076,8 @@ let tests =
                       || unreadablePast (Jsonl.readVerified (OpStream.canonical hashFn w) t))
 
               let blindLosses =
-                  texts |> List.filter (fun t -> not (List.isEmpty (compareLoads true t)))
+                  texts
+                  |> List.filter (fun t -> not (List.isEmpty (Tally.disagreements (compareLoads true t loadTally))))
 
               Expect.isGreaterThan pastFirst.Length 50 "the pool holds faults past the first line"
 
