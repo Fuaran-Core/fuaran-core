@@ -232,6 +232,7 @@ module StoredIdentity =
         (records: OpRecord<'Op> list)
         : LawResult list =
         storeLaws declared hashFn (Linear(storeW, currentW, records))
+        |> LawKit.labelAs "StoredIdentity.linearLaws"
 
     /// The DAG's laws: every node id in `dag` was minted with `hashFn` under `Dag.nodeIdWith declared`,
     /// its ops encoded by `storeW`. `currentW` encodes them under `OpStream.currentProfile`.
@@ -244,9 +245,11 @@ module StoredIdentity =
         (dag: Dag.T<'Op>)
         : LawResult list =
         storeLaws declared hashFn (Graph(storeW, currentW, dag))
+        |> LawKit.labelAs "StoredIdentity.dagLaws"
 
     /// The capture log's laws: `captures` was chained with `hashFn` from the `""` genesis, its effect
     /// and determinism tags spelled as the declared profile spells them. `storeLaws` over
     /// `Store.Captures` since Phase 508.
     let captureLaws (declared: string) (hashFn: HashFn) (captures: EffectCapture list) : LawResult list =
         storeLaws declared hashFn (Store<unit, unit, unit>.Captures captures)
+        |> LawKit.labelAs "StoredIdentity.captureLaws"

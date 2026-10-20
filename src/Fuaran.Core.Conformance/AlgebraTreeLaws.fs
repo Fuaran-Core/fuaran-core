@@ -1237,6 +1237,7 @@ module internal AlgebraTreeLaws =
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
             @ [ LawKit.declared
                     runner
+                    "keyed position"
                     "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION" ]
         else
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]

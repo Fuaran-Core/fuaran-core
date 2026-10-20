@@ -149,12 +149,11 @@ let seamLawTests =
                   Expect.isTrue (List.head results).Passed (sprintf "seed %d: the subject law holds" seed)
                   Expect.isFalse guard.Passed (sprintf "seed %d: one iteration cannot reach three column types" seed)
 
-                  let cx = guard.Counterexample |> Option.defaultValue ""
-
-                  match cx.IndexOf "never reached" with
-                  | -1 -> failtestf "seed %d: the red guard names nothing it missed: %s" seed cx
-                  | at ->
-                      if (cx.Substring at).Contains "decimal cell" then
+                  // What it missed is read off the counts the guard carries (Phase 515), not its text.
+                  match guard.Reached |> List.filter (fun (_, n) -> n = 0) with
+                  | [] -> failtestf "seed %d: the red guard names nothing it missed: %A" seed guard.Reached
+                  | missed ->
+                      if missed |> List.exists (fun (v, _) -> v = "decimal cell") then
                           decimalMissed <- decimalMissed + 1
 
               Expect.isGreaterThan decimalMissed 0 "some single-iteration run missed the decimal column and said so" ]

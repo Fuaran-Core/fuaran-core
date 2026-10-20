@@ -262,9 +262,11 @@ module StringEscapeVectors =
         )
 
         VectorFamily.lawsWith [ format.Result ] table
+        |> LawKit.labelAs "StringEscapeVectors.lawsWith"
 
     /// The family as `LawResult`s (Phase 349), rostered as `StringEscapeVectors.laws` on the
     /// `WireNullTolerance.laws` precedent — `lawsWith vectors actorVectors`. The corpus is fixed, so
     /// the one run is the whole sample; the committed rendering a host in another language diffs
     /// against is `conformance/escape/string-escape.json`.
-    let laws () : LawResult list = lawsWith vectors actorVectors
+    let laws () : LawResult list =
+        lawsWith vectors actorVectors |> LawKit.labelAs "StringEscapeVectors.laws"

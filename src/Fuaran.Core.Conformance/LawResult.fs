@@ -11,15 +11,40 @@ namespace Fuaran.Core
 //  FSharp.Core only, Fable-clean.
 // ============================================================================
 
+/// What a law result IS (Phase 515) — the structural fact the kit used to spell into a result's text
+/// and parse back. A reader matches on it; nothing reads the prose to decide it.
+[<RequireQualifiedAccess>]
+type LawKind =
+    /// A law about the witness. `coveredBy` names the adequacy-guard dimension that reports this
+    /// law's zero when its arm was never reached (the law then reads green at zero evidence and the
+    /// guard beside it red); `None` is a STRICT law, which reds itself at zero evidence.
+    | Subject of coveredBy: string option
+    /// The adequacy guard over one dimension of the family's sample: red when the sample missed a
+    /// verdict the laws distinguish. Its counts are the result's `Reached`.
+    | Guard of dimension: string
+    /// The non-emptiness law of a fixed corpus or a store — `what` names the item (`vector`,
+    /// `record`, `node`, `capture`, `text`). Its `Evidence` is the number of items evaluated.
+    | Corpus of what: string
+    /// A side of the family that is vacuous BY DECLARATION: the witness declares nothing for it to
+    /// reach (`what` names the missing capability, e.g. `keyed position`). Green, because that is the
+    /// honest verdict, and its own kind, so a census never counts it as a law certified.
+    | Declared of what: string
+
 /// One law's verdict. `Counterexample` carries the seed + iteration so a failure is
 /// reproducible (deterministic seed-replay).
+///
+/// Since Phase 515 the result carries what it is (`Kind`), which family emitted it (`Family`), how many
+/// assertions it stands on (`Evidence`) and, for a guard, how often each side was reached (`Reached`) —
+/// the four facts the kit used to encode in `Law`'s prose and parse back. Build one with the
+/// constructors in the `LawResult` module rather than a record literal: they are the stable surface,
+/// and a literal is what a future field would break.
 ///
 /// It lives beside the adequacy guard rather than beside the laws because it is what BOTH produce,
 /// and because the guard must be compiled ahead of every family that declares demands through it.
 type LawResult =
     {
         /// The law's human-readable statement, stable across runs — the text a report and a
-        /// census name the law by.
+        /// census name the law by. Prose for a reader; no reader in the kit parses it.
         Law: string
         /// `true` when the law held on every assertion made. Zero assertions is not a pass: the
         /// kit's runner reports such a law red unless an adequacy guard covers it.
@@ -27,7 +52,98 @@ type LawResult =
         /// `None` exactly when `Passed`. The FIRST failure recorded, or the "never reached"
         /// remedy when the law was not asserted at all.
         Counterexample: string option
+        /// The roster key of the family whose run produced this result — `"<Module>.<Entry>"`, the
+        /// spelling a census cell uses. Filled by the kit's runner (or the guard constructors, which
+        /// take it), never parsed out of `Law`.
+        Family: string
+        /// What the result is: a subject law, an adequacy guard, a corpus law or a declared vacuity.
+        Kind: LawKind
+        /// The assertions the verdict stands on: for a subject law the times it was asserted (a
+        /// strict law that failed at zero evidence is the never-reached verdict); for a guard the
+        /// samples it counted toward its demand; for a corpus law the items evaluated; zero for a
+        /// declared vacuity.
+        Evidence: int
+        /// A guard's counts — every verdict it demanded, then any it counts beside them without
+        /// demanding — on the green path as on the red one, so a green guard says how often each
+        /// side was reached. Empty for every other kind.
+        Reached: (string * int) list
     }
+
+/// The constructors (Phase 515) — the stable way to build a `LawResult`. A consumer's record literal
+/// is one call here, and a field the record gains later moves no consumer.
+[<RequireQualifiedAccess>]
+module LawResult =
+
+    /// A subject law's verdict from its first counterexample, if any: green exactly when there is
+    /// none. `evidence` is the number of times the law was asserted. The shape every hand-built law
+    /// takes — `{ Law = l; Passed = cx.IsNone; Counterexample = cx }` is `subject family l n cx`.
+    let subject (family: string) (law: string) (evidence: int) (counterexample: string option) : LawResult =
+        { Family = family
+          Kind = LawKind.Subject None
+          Law = law
+          Passed = counterexample.IsNone
+          Evidence = evidence
+          Reached = []
+          Counterexample = counterexample }
+
+    /// A subject law that held on each of its `evidence` assertions.
+    let pass (family: string) (law: string) (evidence: int) : LawResult = subject family law evidence None
+
+    /// A subject law that failed; `counterexample` is its first failure.
+    let fail (family: string) (law: string) (evidence: int) (counterexample: string) : LawResult =
+        subject family law evidence (Some counterexample)
+
+    /// An adequacy guard over `dimension`: `law` is its statement, `reached` the counts it took
+    /// (demanded, then any counted beside), `counterexample` the shortfall — green exactly when there
+    /// is none. Its evidence is the sum of the counts.
+    let guard
+        (family: string)
+        (dimension: string)
+        (law: string)
+        (reached: (string * int) list)
+        (counterexample: string option)
+        : LawResult =
+        { Family = family
+          Kind = LawKind.Guard dimension
+          Law = law
+          Passed = counterexample.IsNone
+          Evidence = reached |> List.sumBy snd
+          Reached = reached
+          Counterexample = counterexample }
+
+    /// A side vacuous BY DECLARATION: `what` names what the witness declares none of, `law` says so.
+    let declared (family: string) (what: string) (law: string) : LawResult =
+        { Family = family
+          Kind = LawKind.Declared what
+          Law = law
+          Passed = true
+          Evidence = 0
+          Reached = []
+          Counterexample = None }
+
+    /// The result labelled with `family`, when nothing labelled it yet — how a runner stamps the
+    /// subject laws it ran without overwriting a guard a delegate minted under its own id.
+    let withFamily (family: string) (r: LawResult) : LawResult =
+        if r.Family = "" then { r with Family = family } else r
+
+    /// `true` for the family's adequacy lines — a guard or a declared vacuity — and `false` for
+    /// every law about the witness (a subject law or a corpus law).
+    let isAdequacy (r: LawResult) : bool =
+        match r.Kind with
+        | LawKind.Guard _
+        | LawKind.Declared _ -> true
+        | LawKind.Subject _
+        | LawKind.Corpus _ -> false
+
+    /// `true` for a law the run never asserted: a strict law (no guard covers it) or a corpus law,
+    /// red at zero evidence. A covered law at zero evidence is green and reported by its guard.
+    let isNeverReached (r: LawResult) : bool =
+        not r.Passed
+        && r.Evidence <= 0
+        && (match r.Kind with
+            | LawKind.Subject None
+            | LawKind.Corpus _ -> true
+            | _ -> false)
 
 /// One thing a family's SAMPLE must contain for the family's laws to have been tested at all.
 /// A family declares its demands beside its laws; the kit runs them alongside.

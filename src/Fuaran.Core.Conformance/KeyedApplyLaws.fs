@@ -336,14 +336,15 @@ module internal KeyedApplyLaws =
 
         if declaredKeyed = 0 && placementsTaken = 0 then
             // Vacuous BY DECLARATION for the keyed arms — the `keyedChildrenLaws` verdict, in its
-            // words, carried on the one guard line so the family's result count does not depend on
-            // the witness. The identity law needs no declaration and was asserted on every
+            // words, as a `Declared` result beside the op-kind guard (Phase 515; it was prose on the
+            // guard's dimension). The identity law needs no declaration and was asserted on every
             // iteration, so the op-kind guard still reads it.
             LawKit.results cells
-            @ [ LawKit.guard
+            @ [ LawKit.declared
                     runner
-                    "op kind (the witness declares NO keyed position, so the keyed laws are vacuous BY DECLARATION)"
-                    kinds.Demands ]
+                    "keyed position"
+                    "the witness declares NO keyed position, so the keyed laws are vacuous BY DECLARATION"
+                LawKit.guard runner "op kind" kinds.Demands ]
         else
             LawKit.results cells
             @ [ LawKit.guard

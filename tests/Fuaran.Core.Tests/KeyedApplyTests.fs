@@ -407,7 +407,7 @@ let tests =
                     Expect.isEmpty (failed results) "green"
 
                     Expect.isTrue
-                        (results |> List.exists (fun r -> r.Law.Contains "vacuous BY DECLARATION"))
+                        (results |> List.exists (fun r -> r.Kind = LawKind.Declared "keyed position"))
                         "the adequacy line says which verdict it is"
 
                 testCase

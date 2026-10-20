@@ -91,8 +91,117 @@ let guardTests =
 //  proved without them, over fixed results, and the witness-taking families' adequacy is held by
 //  their own suites.
 
+// ---------------------------------------------------------------------------
+//  Phase 515 — the result carries what it is, who emitted it, and how often it was reached
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let lawResultTests =
+    testList
+        "LawResult (Phase 515)"
+        [ testCase "a green guard says how often each side was reached — demanded and beside"
+          <| fun _ ->
+              let green =
+                  SampleAdequacy.reached "M.f" "outcome" 42 [ "folded", 73; "halted", 227 ]
+
+              Expect.isTrue green.Passed "both verdicts were reached"
+              Expect.equal green.Kind (LawKind.Guard "outcome") "its kind is the guard over its dimension"
+              Expect.equal green.Family "M.f" "labelled with the family that minted it"
+              Expect.equal green.Reached [ "folded", 73; "halted", 227 ] "the counts ride the GREEN path"
+              Expect.equal green.Evidence 300 "its evidence is the samples it counted"
+
+              Expect.stringStarts
+                  green.Law
+                  (SampleAdequacy.lawPrefix "M.f")
+                  "and its statement still opens with the family's prefix, for a reader"
+
+              let red = SampleAdequacy.reached "M.f" "outcome" 42 [ "folded", 150; "halted", 0 ]
+
+              Expect.isFalse red.Passed "a verdict reached zero times fails"
+              Expect.equal red.Reached [ "folded", 150; "halted", 0 ] "and the red path carries the same counts"
+
+              let span = SampleAdequacy.spanned "M.f" "table width" 3 42 5 20
+              Expect.equal span.Kind (LawKind.Guard "table width") "a span guard is a guard over its measure"
+              Expect.equal span.Reached [ "table width", 5 ] "its reach is the widest measure"
+              Expect.equal span.Evidence 20 "its evidence is the samples it measured"
+
+          testCase "the constructors are one call per verdict, and say what each result is"
+          <| fun _ ->
+              let held = LawResult.pass "M.f" "the law" 10
+              Expect.isTrue held.Passed "pass is green"
+              Expect.equal held.Kind (LawKind.Subject None) "a strict subject law"
+              Expect.equal (held.Family, held.Evidence) ("M.f", 10) "with its family and its evidence"
+
+              let refuted = LawResult.fail "M.f" "the law" 3 "seed=1 iter=2: a counterexample"
+              Expect.isFalse refuted.Passed "fail is red"
+
+              Expect.equal refuted.Counterexample (Some "seed=1 iter=2: a counterexample") "carrying its counterexample"
+
+              Expect.equal (LawResult.subject "M.f" "the law" 10 None) held "subject over no counterexample is pass"
+
+              Expect.equal
+                  (LawResult.subject "M.f" "the law" 3 (Some "seed=1 iter=2: a counterexample"))
+                  refuted
+                  "subject over a counterexample is fail"
+
+              let g =
+                  LawResult.guard "M.f" "arm" "the arm guard" [ "arm", 0 ] (Some "never reached arm")
+
+              Expect.equal g.Kind (LawKind.Guard "arm") "guard is a guard"
+              Expect.isFalse g.Passed "red exactly when it carries a shortfall"
+
+              let d =
+                  LawResult.declared "M.f" "keyed position" "no keyed position, so vacuous BY DECLARATION"
+
+              Expect.equal d.Kind (LawKind.Declared "keyed position") "declared is its own kind"
+              Expect.isTrue d.Passed "and the honest verdict, a pass"
+              Expect.equal d.Evidence 0 "standing on nothing"
+
+          testCase "the readers read fields, and each goes red on the result it exists to name"
+          <| fun _ ->
+              let strictZero =
+                  LawResult.fail "M.f" "a strict law" 0 "never reached — widen the generator"
+
+              let refuted =
+                  LawResult.fail "M.f" "a refuted law" 1 "seed=1 iter=0: a counterexample"
+
+              let coveredZero =
+                  { LawResult.pass "M.f" "a covered law" 0 with
+                      Kind = LawKind.Subject(Some "arm") }
+
+              let emptyCorpus =
+                  { LawResult.fail "M.f" "the corpus evaluated at least one vector" 0 "never reached" with
+                      Kind = LawKind.Corpus "vector" }
+
+              Expect.isTrue (LawResult.isNeverReached strictZero) "a strict law red at zero evidence is never reached"
+              Expect.isTrue (LawResult.isNeverReached emptyCorpus) "so is an empty corpus"
+              Expect.isFalse (LawResult.isNeverReached refuted) "a refuted law was asserted"
+              Expect.isFalse (LawResult.isNeverReached coveredZero) "a covered law reads through its guard"
+
+              let guard = SampleAdequacy.reached "M.f" "arm" 1 [ "arm", 1 ]
+              let declared = LawResult.declared "M.f" "slot access" "no slot access"
+
+              Expect.equal
+                  ([ strictZero; refuted; coveredZero; emptyCorpus; guard; declared ]
+                   |> List.map LawResult.isAdequacy)
+                  [ false; false; false; false; true; true ]
+                  "isAdequacy is the guard and the declared line, never a law about the witness"
+
+          testCase "withFamily labels an unlabelled result and leaves a delegate's label alone"
+          <| fun _ ->
+              let unlabelled = LawResult.pass "" "the law" 1
+
+              Expect.equal (LawResult.withFamily "M.f" unlabelled).Family "M.f" "an unlabelled result takes the id"
+
+              let delegated = SampleAdequacy.reached "M.fWith" "arm" 1 [ "arm", 1 ]
+
+              Expect.equal
+                  (LawResult.withFamily "M.f" delegated).Family
+                  "M.fWith"
+                  "a guard a delegate minted keeps the delegate's id" ]
+
 let private adequacyLaws (rs: LawResult list) =
-    rs |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
+    rs |> List.filter (fun r -> LawResult.isAdequacy r)
 
 // ---------------------------------------------------------------------------
 //  census completeness — the half a declaration cannot check about itself

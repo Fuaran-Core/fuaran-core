@@ -893,15 +893,14 @@ module internal IntegrityLaws =
                 "the default FNV-1a admits a re-hashed forgery (an in-budget collision — documented non-crypto posture)"
 
         if budget < 2 then
-            { Law = "the collision-search budget is at least two pre-images"
-              Passed = false
-              Counterexample =
-                Some(
-                    sprintf
-                        "seed=%d: budget=%d is refused — a collision needs two pre-images, so no pre-image was hashed and neither law below was run"
-                        runner.Seed
-                        budget
-                ) }
+            LawResult.fail
+                runner.Family.Label
+                "the collision-search budget is at least two pre-images"
+                1
+                (sprintf
+                    "seed=%d: budget=%d is refused — a collision needs two pre-images, so no pre-image was hashed and neither law below was run"
+                    runner.Seed
+                    budget)
             :: LawKit.results [ resist; admit ]
         else
             // The first two distinct pre-images sharing a hash — the re-hashed-forgery primitive — and
@@ -1241,4 +1240,8 @@ module internal IntegrityLaws =
                     + " case(s) and none of them is a round-trip document, so every law below holds vacuously"
             )
 
-            LawKit.results [ nonVacuity; accepted; reencoded ]
+            // The non-vacuity law is the corpus law of this family (Phase 515): the two covered laws
+            // read through it by name, so it carries the item it counts as its kind.
+            { nonVacuity.Result with
+                Kind = LawKind.Corpus "round-trip document" }
+            :: LawKit.results [ accepted; reencoded ]

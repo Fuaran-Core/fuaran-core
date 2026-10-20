@@ -42,7 +42,7 @@ module internal KeyedArbitrationLaws =
     ///
     /// **Vacuity is declared, not hidden.** A generator whose `CanHold` is `None` has no
     /// container-illegal proposal to draw, and a witness that declares no keyed position has no
-    /// keyed clash to build; each such arm is VACUOUS BY DECLARATION and the guard line says so,
+    /// keyed clash to build; each such arm is VACUOUS BY DECLARATION and a `Declared` result beside the guard says so,
     /// while the partition and landing laws are asserted all the same. `'Node` needs equality.
     let keyedArbitrationLawsWith
         (keyw: KeyedWitness<'Node, 'Id>)
@@ -357,17 +357,32 @@ module internal KeyedArbitrationLaws =
                  [ "container-illegal proposal", containerArms ])
             @ (if noKeyed then [] else [ "keyed-id clash", clashArms ])
 
+        // D100's recorded waiver, as data (Phase 515): each built arm the witness declares nothing for is a
+        // `Declared` result beside the guard, where it used to be prose appended to the guard's dimension.
+        let declared =
+            (if noContainer then
+                 [ LawKit.declared
+                       runner
+                       "container capability"
+                       "OpGen.CanHold is None, so the container arm is vacuous BY DECLARATION" ]
+             else
+                 [])
+            @ (if noKeyed then
+                   [ LawKit.declared
+                         runner
+                         "keyed position"
+                         "the witness declares NO keyed position, so the clash arm is vacuous BY DECLARATION" ]
+               else
+                   [])
+
         let dimension =
-            match noContainer, noKeyed with
-            | false, false -> "arbitration bucket, built arm and op kind"
-            | true, false ->
-                "arbitration bucket, built arm and op kind (OpGen.CanHold is None, so the container arm is vacuous BY DECLARATION)"
-            | false, true ->
-                "arbitration bucket, built arm and op kind (the witness declares NO keyed position, so the clash arm is vacuous BY DECLARATION)"
-            | true, true ->
-                "arbitration bucket and op kind (no container capability and no keyed position, so both built arms are vacuous BY DECLARATION)"
+            if noContainer && noKeyed then
+                "arbitration bucket and op kind"
+            else
+                "arbitration bucket, built arm and op kind"
 
         LawKit.results cells
+        @ declared
         @ [ LawKit.guard
                 runner
                 dimension

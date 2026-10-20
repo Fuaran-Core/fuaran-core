@@ -119,7 +119,7 @@ let foldConfluenceTests =
               // onto the kit's shared adequacy guard, which reports every verdict it demanded and
               // names the ones it never reached.
               Expect.isTrue
-                  (lawNamed "sample adequacy" results).Passed
+                  ((results |> List.find LawResult.isAdequacy)).Passed
                   "both the folding and the halting lane set were exercised"
 
           testCase "the work-plan op codec round-trips (the witness a consumer copies is complete)"
@@ -157,7 +157,7 @@ let foldConfluenceTests =
                   (lawNamed "lane-halt determinism" results).Passed
                   "nothing halted, so nothing halted wrongly"
 
-              let adequacy = lawNamed "sample adequacy" results
+              let adequacy = (results |> List.find LawResult.isAdequacy)
               Expect.isFalse adequacy.Passed "the vacuity guard reports that the halt law was never tested"
 
               match adequacy.Counterexample with
@@ -399,11 +399,11 @@ let rejectedLaneTests =
 
               Expect.isTrue
                   (results
-                   |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening))
+                   |> List.filter (fun r -> not (LawResult.isAdequacy r))
                    |> List.forall _.Passed)
                   "the subject laws hold over lane sets that all reject — which is the problem"
 
-              let adequacy = lawNamed "sample adequacy" results
+              let adequacy = (results |> List.find LawResult.isAdequacy)
               Expect.isFalse adequacy.Passed "a sample of only rejected lanes is starved"
 
               let cx = defaultArg adequacy.Counterexample ""
@@ -421,4 +421,4 @@ let rejectedLaneTests =
               let results =
                   FoldConfluence.laneFoldLawsAt planW planFootprint planHash planLaneGen 3 4100 150
 
-              Expect.isTrue (lawNamed "sample adequacy" results).Passed "the guard does not demand a rejection" ]
+              Expect.isTrue ((results |> List.find LawResult.isAdequacy)).Passed "the guard does not demand a rejection" ]

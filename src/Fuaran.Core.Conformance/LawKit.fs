@@ -30,10 +30,10 @@ module internal LawKit =
         "seed=" + string seed + " iter=" + string i + ": " + msg
 
     /// The remedy a never-reached law names. It is the sample's fault and not the law's, which is
-    /// why the words are `SampleAdequacy`'s.
-    [<Literal>]
+    /// why the remedy is `SampleAdequacy`'s own words, spelled once there.
     let private unreachedRemedy =
-        " — the law asserted NOTHING in this run: no iteration reached the arm that builds its evidence, so a pass here would certify nothing (Phase 302). WIDEN THE GENERATOR; raising the iteration count or hunting a seed until the arm is reached leaves the law certified by one trial"
+        " — the law asserted NOTHING in this run: no iteration reached the arm that builds its evidence, so a pass here would certify nothing (Phase 302). "
+        + SampleAdequacy.widenTheGenerator
 
     /// One law under test. The first counterexample is kept and every later one discarded — a law
     /// is reported once, with the earliest seed-stamped case — and the EVIDENCE count is what the
@@ -93,21 +93,25 @@ module internal LawKit =
                 c.Fail(counterexample ())
 
         /// The verdict. Red on a recorded counterexample; on zero evidence red, naming the remedy,
-        /// unless a guard covers the arm (see the type's note); green otherwise.
+        /// unless a guard covers the arm (see the type's note); green otherwise. A `Subject` result
+        /// carrying the covering dimension, its family left for the runner to label (`label`). A
+        /// recorded counterexample is an assertion that failed, so a red law stands on at least one;
+        /// a red law at ZERO evidence is therefore exactly the never-reached verdict.
         member _.Result: LawResult =
+            let verdict passed ev cx =
+                { Family = ""
+                  Kind = LawKind.Subject coveredBy
+                  Law = name
+                  Passed = passed
+                  Evidence = ev
+                  Reached = []
+                  Counterexample = cx }
+
             match failure with
-            | Some cx ->
-                { Law = name
-                  Passed = false
-                  Counterexample = Some cx }
+            | Some cx -> verdict false (max 1 evidence) (Some cx)
             | None when evidence <= 0 && coveredBy.IsNone ->
-                { Law = name
-                  Passed = false
-                  Counterexample = Some(SampleAdequacy.neverReached + unreachedRemedy) }
-            | None ->
-                { Law = name
-                  Passed = true
-                  Counterexample = None }
+                verdict false 0 (Some(SampleAdequacy.neverReached + unreachedRemedy))
+            | None -> verdict true evidence None
 
     /// The verdicts of several cells, in the order given — the tail of every family.
     let results (cells: LawCell list) : LawResult list = cells |> List.map _.Result
@@ -200,13 +204,25 @@ module internal LawKit =
     let span (runner: Runner) (measure: string) (atLeast: int) (widest: int) (n: int) : LawResult =
         SampleAdequacy.spanned runner.Family.Label measure atLeast runner.Seed widest n
 
-    /// The family's adequacy line when its laws are vacuous BY DECLARATION — the witness declares
-    /// nothing for them to reach. A pass, because that is the honest verdict, and a guard line,
+    /// The family's adequacy line when a side of it is vacuous BY DECLARATION — the witness declares
+    /// no `what` for its laws to reach (Phase 515: a `Declared` result, where it used to be prose
+    /// appended to a guard's dimension). A pass, because that is the honest verdict, and its own kind,
     /// because a census must read which verdict it is rather than count the laws as certified.
-    let declared (runner: Runner) (why: string) : LawResult =
-        { Law = SampleAdequacy.lawPrefix runner.Family.Label + why
-          Passed = true
-          Counterexample = None }
+    let declared (runner: Runner) (what: string) (why: string) : LawResult =
+        LawResult.declared runner.Family.Label what (SampleAdequacy.lawPrefix runner.Family.Label + why)
+
+    /// Every result labelled with the runner's family, where nothing labelled it yet (Phase 515): how
+    /// the subject laws a family ran carry its id, filled by the runner rather than spelled by a law
+    /// module. A guard a delegate minted keeps the delegate's id.
+    let label (runner: Runner) (results: LawResult list) : LawResult list =
+        results |> List.map (LawResult.withFamily runner.Family.Label)
+
+    /// Every result labelled `id` — the roster key of a fixed-corpus family's entry point (a vector or
+    /// a stored family runs no seeded runner, so its entry point names the family it answers for, the
+    /// way `Conformance`'s forwards hand their runner its id). It overwrites, because a family's
+    /// pinned-default entry (`laws ()` over `lawsWith`) is a family of its own on the roster.
+    let labelAs (id: string) (results: LawResult list) : LawResult list =
+        results |> List.map (fun r -> { r with Family = id })
 
     /// How many times a tamper or collision arm redraws its replacement before it gives up
     /// (Phase 302).

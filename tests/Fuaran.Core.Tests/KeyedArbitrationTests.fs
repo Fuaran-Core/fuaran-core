@@ -294,7 +294,7 @@ let tests =
                     | bad -> failtestf "%A" bad
 
                     Expect.isFalse
-                        (results |> List.exists (fun r -> r.Law.Contains "vacuous BY DECLARATION"))
+                        (results |> List.exists (fun r -> r.Kind.IsDeclared))
                         "no arm is vacuous at this witness"
 
                 testCase "handed arbitrate's footprint, the clash arm goes red"
@@ -351,5 +351,5 @@ let tests =
                     Expect.isEmpty (failed results) "green"
 
                     Expect.isTrue
-                        (results |> List.exists (fun r -> r.Law.Contains "vacuous BY DECLARATION"))
+                        (results |> List.exists (fun r -> r.Kind = LawKind.Declared "keyed position"))
                         "the adequacy line says which verdict it is" ] ]

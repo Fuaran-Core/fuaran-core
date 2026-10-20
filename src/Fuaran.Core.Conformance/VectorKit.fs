@@ -62,6 +62,13 @@ module internal VectorKit =
     let corpusCell (prefix: string) : LawKit.LawCell =
         LawKit.LawCell(prefix + ": the corpus evaluated at least one vector")
 
+    /// The corpus law's verdict, as what it is (Phase 515): a `Corpus` result over vectors, its
+    /// evidence the vectors evaluated, so a census reads it as the non-emptiness law by its kind and
+    /// never by its name.
+    let corpusResult (corpus: LawKit.LawCell) : LawResult =
+        { corpus.Result with
+            Kind = LawKind.Corpus "vector" }
+
     /// One vector's law: green exactly when every outcome it produced passed, its first failing
     /// outcome the counterexample. The vector is counted on `corpus` as it is evaluated.
     let verdict (corpus: LawKit.LawCell) (law: string) (outcomes: Corpus.Outcome list) : LawResult =
@@ -83,7 +90,8 @@ module internal VectorKit =
         for _ in 1..count do
             cell.Saw()
 
-        cell.Result
+        { cell.Result with
+            Kind = LawKind.Corpus what }
 
 /// A vector family over one shape (Phase 508): a fixed corpus, what one vector checks, and the line a
 /// host in another language diffs. The verbs over it are generic (`VectorFamily.run`, `check`,
@@ -139,7 +147,7 @@ module internal VectorFamily =
             family.Corpus
             |> List.map (fun v -> VectorKit.verdict corpus (family.Label + ": " + family.Name v) (family.Check v))
 
-        perVector @ extra @ [ corpus.Result ]
+        perVector @ extra @ [ VectorKit.corpusResult corpus ]
 
     /// `lawsWith []` — the per-vector laws and the corpus law.
     let laws (family: VectorFamily<'V>) : LawResult list = lawsWith [] family

@@ -725,17 +725,12 @@ let private classOf (id: string) : AdequacyClass =
 /// `keyedArbitrationLawsAt` read its guard under `keyedArbitrationLawsWith`'s id with nothing able to
 /// object; it now hands the internal its own id, its row declares no delegate, and the label is held
 /// to the row rather than to the whole roster.
+///
+/// Phase 515 — a guard is a result whose `Kind` is `Guard` (a `Declared` line is the family's
+/// adequacy line too, and is labelled the same way), and its label is its `Family`: both read off the
+/// result, where they were cut out of its law text.
 let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results: LawResult list) : string list =
-    let opening = SampleAdequacy.guardOpening
-
-    let labelOf (law: string) =
-        let rest = law.Substring opening.Length
-        let at = rest.IndexOf "): "
-        if at < 0 then rest else rest.Substring(0, at)
-
-    let guards =
-        results
-        |> List.filter (fun r -> r.Law.StartsWith(opening, System.StringComparison.Ordinal))
+    let guards = results |> List.filter LawResult.isAdequacy
 
     // A declared delegate is in the family's own module: `<Module>.<entry>`.
     let declared =
@@ -757,7 +752,7 @@ let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results
 
     let bare =
         guards
-        |> List.map (fun r -> labelOf r.Law)
+        |> List.map _.Family
         |> List.filter (fun l -> l <> id && not (List.contains l declared && Set.contains l ids))
         |> List.distinct
         |> List.map (fun l ->
@@ -783,19 +778,12 @@ let cases () : (string * CaseCount) list =
     |> List.sortBy fst
 
 /// Phase 223 — the six families Phase 220's audit found drawing a refusal population a run could
-/// silently miss, with the dimensions each is now `Guarded` over. Five are this repository's since
-/// Phase 258: `transformLaws` left with the dataframe layer it reads (D66), and the compute
-/// repository's suite holds its row. Since Phase 297 `casLaws` also counts its race arm (two
-/// `appendIf` calls at one head that both apply), which is drawn too.
-let private drawnRefusalSix: (string * string list) list =
-    [ "Conformance.casLaws", [ "accepted"; "refused"; "race arm" ]
-      "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
-      "Conformance.aiSurfaceLawsAt", [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
-      // Phase 276 — and the column type of the ranged column, int or decimal.
-      "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell"; "int cell"; "decimal cell" ]
-      "Conformance.diffContainedLaws", [ "accepted"; "refused" ] ]
-
-/// ... and each one's reference run as a function of the seed, at the size the census runs it:
+/// silently miss. Five are this repository's since Phase 258: `transformLaws` left with the dataframe
+/// layer it reads (D66), and the compute repository's suite holds its row. Since Phase 297 `casLaws`
+/// also counts its race arm (two `appendIf` calls at one head that both apply), which is drawn too.
+/// Since Phase 515 the verdicts each is `Guarded` over are read from the roster and held to the
+/// counts its guards carry (`Reached`), where a second list here restated them.
+/// Each one's reference run as a function of the seed, at the size the census runs it:
 /// the kit reference generator, stratified, which is what "the kit's own run" means.
 let private drawnRefusalSixRuns: (string * (int * (int -> LawResult list))) list =
     [ "Conformance.casLaws",
@@ -901,10 +889,7 @@ let vacuityTests =
                       4242
                       200
 
-              let subject =
-                  results
-                  |> List.filter (fun r ->
-                      not (r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.attestationLawsAt")))
+              let subject = results |> List.filter (LawResult.isAdequacy >> not)
 
               Expect.isTrue
                   (subject |> List.forall _.Passed)
@@ -930,16 +915,13 @@ let vacuityTests =
               // is exercised over inputs chosen here rather than over whatever the kit happens to
               // produce today.
               let subject law passed =
-                  { Law = law
-                    Passed = passed
-                    Counterexample = None }
+                  if passed then
+                      LawResult.pass "M.f" law 1
+                  else
+                      LawResult.fail "M.f" law 1 "a counterexample"
 
               let guard family passed =
-                  { Law =
-                      SampleAdequacy.lawPrefix family
-                      + "the sample reached every arm the laws distinguish"
-                    Passed = passed
-                    Counterexample = None }
+                  SampleAdequacy.reached family "arm" 1 [ "arm", (if passed then 1 else 0) ]
 
               let unconditional = Unconditional "each iteration builds both arms"
 
@@ -973,16 +955,13 @@ let vacuityTests =
                   (SampleAdequacy.isVacuous starved)
                   "but a starved dimension is vacuity on the side the law is about"
 
-              Expect.equal
-                  starved.Starved
-                  [ "the sample reached every arm the laws distinguish" ]
-                  "and the cell names the dimension, stripped of the guard's own prefix"
+              Expect.equal starved.Starved [ "arm" ] "and the cell names the dimension the guard carries in its kind"
 
-              // A DELEGATING family emits its delegate's name in the guard — `columnarOpLaws` runs
+              // A DELEGATING family emits its delegate's id on the guard — `columnarOpLaws` runs
               // `columnarOpLawsWith`, `IncrementalDelta.laws` runs `lawsWith` — and that guard is
-              // still the caller's own verdict, which is why the recognition keys on the opening
-              // rather than on the name. Keying on the name would read these as subject laws and
-              // lose exactly the starvation the census exists to show.
+              // still the caller's own verdict, which is why the census reads the guard's KIND and
+              // never its family. Keying on the family would read these as subject laws and lose
+              // exactly the starvation the census exists to show.
               let delegated =
                   SampleAdequacy.cases "M.f" (Guarded [ "arm" ]) 10 [ subject "a" true; guard "M.fWith" false ]
 
@@ -992,8 +971,8 @@ let vacuityTests =
 
               Expect.equal
                   delegated.Starved
-                  [ "the sample reached every arm the laws distinguish" ]
-                  "and the dimension is cut at the guard's own `): `, not at an assumed family name"
+                  [ "arm" ]
+                  "and the dimension is the guard's own, whichever family minted it"
 
           // ---- Phase 297: guards the census can see, and a class read off the code ----
 
@@ -1019,16 +998,9 @@ let vacuityTests =
               let ids = Set.ofList [ "M.f"; "M.fWith" ]
 
               let guard (label: string) =
-                  { Law =
-                      SampleAdequacy.lawPrefix label
-                      + "the sample reached every arm the laws distinguish"
-                    Passed = true
-                    Counterexample = None }
+                  SampleAdequacy.reached label "arm" 1 [ "arm", 1 ]
 
-              let subject =
-                  { Law = "a"
-                    Passed = true
-                    Counterexample = None }
+              let subject = LawResult.pass "M.f" "a" 1
 
               Expect.isEmpty
                   (guardDefects ids "M.f" (Guarded [ "arm (delegates to fWith)" ]) [ subject; guard "M.fWith" ])
@@ -1069,23 +1041,21 @@ let vacuityTests =
 
           testCase "a law the runner reports NEVER REACHED is starvation, under either class — made-up runs"
           <| fun _ ->
+              // The runner's never-reached verdict: a strict law, red at zero evidence.
               let unreached =
-                  { Law = "the tamper law"
-                    Passed = false
-                    Counterexample = Some(SampleAdequacy.neverReached + " — widen the generator") }
+                  LawResult.fail "M.f" "the tamper law" 0 (SampleAdequacy.neverReached + " — widen the generator")
 
-              let held =
-                  { Law = "the replay law"
-                    Passed = true
-                    Counterexample = None }
+              let held = LawResult.pass "M.f" "the replay law" 10
 
               for klass in [ Unconditional "built"; Guarded [ "arm" ] ] do
                   let measured = SampleAdequacy.cases "M.f" klass 10 [ held; unreached ]
                   Expect.isTrue (SampleAdequacy.isVacuous measured) (sprintf "%A: a never-reached law is vacuity" klass)
                   Expect.equal measured.Starved [ "the tamper law" ] "and the cell names the law"
 
+              // A refuted law was asserted: its counterexample is the assertion that failed.
               let refuted =
                   { unreached with
+                      Evidence = 1
                       Counterexample = Some "seed=1 iter=0: a real counterexample" }
 
               Expect.isFalse
@@ -1158,10 +1128,7 @@ let vacuityTests =
                     Conformance.hashFnLaws ConformanceTests.sw refusedOps OpStream.defaultHash 4242 200 ]
 
               let isStarvation (r: LawResult) =
-                  r.Law.StartsWith SampleAdequacy.guardOpening
-                  || (match r.Counterexample with
-                      | Some cx -> cx.StartsWith SampleAdequacy.neverReached
-                      | None -> false)
+                  LawResult.isAdequacy r || LawResult.isNeverReached r
 
               for id, results in degenerate do
                   let red = results |> List.filter (fun r -> not r.Passed)
@@ -1276,13 +1243,34 @@ let vacuityTests =
           <| fun _ ->
               let measured = cases ()
 
-              for id, dims in drawnRefusalSix do
+              for id, _ in drawnRefusalSixRuns do
                   Expect.equal
                       (KitRoster.tryRefusal id |> Option.map _.Population)
                       (Some Families.Drawn)
                       (sprintf "%s is audited Drawn" id)
 
-                  Expect.equal (classOf id) (Guarded dims) (sprintf "%s is censused Guarded" id)
+                  Expect.isTrue
+                      (match classOf id with
+                       | Guarded _ -> true
+                       | Unconditional _ -> false)
+                      (sprintf "%s is censused Guarded" id)
+
+                  // Phase 515 — the run's guards say how often each side was reached, on the green
+                  // path too: every guard of the reference run carries its counts, and every one of
+                  // them is positive (a drawn family's reference generator is stratified to reach
+                  // every verdict it counts, demanded or beside).
+                  let guards =
+                      (runs.Value[LawKit.FamilyId id]).Results
+                      |> List.filter (fun r -> r.Kind.IsGuard)
+
+                  Expect.isNonEmpty guards (sprintf "%s emits its guards at the reference witness" id)
+
+                  for g in guards do
+                      Expect.isTrue
+                          (g.Passed
+                           && not (List.isEmpty g.Reached)
+                           && g.Reached |> List.forall (fun (_, n) -> n > 0))
+                          (sprintf "%s: %A reached %A at the reference witness" id g.Kind g.Reached)
 
                   Expect.equal
                       (KitRoster.adequacyToken measured id)
@@ -1369,41 +1357,35 @@ let private caseBlindIdw: IdWitness<string> =
 
 let private constantNodeEncode (_: RNode) = "x"
 
-/// The phase's own premise, checked rather than trusted: `Conformance.fs`, `LawKit.fs` and the
-/// topic files carry `LawCell(name, Some "<dimension>")` — a cell that reads green at zero evidence
-/// because a guard counts its arm. A covered dimension no guard emits is a cell that can be starved
-/// with nothing to say so. Every covered dimension named in the sources must OPEN a guard
-/// dimension some reference run emits (a guard may append a "(…vacuous BY DECLARATION)" note).
-let private coveredDimensions () : (string * string) list =
-    let dir = Snapshots.repoFile "src/Fuaran.Core.Conformance"
+/// Phase 302's premise, checked rather than trusted, and read off the results since Phase 515: a cell
+/// that reads green at zero evidence because a guard counts its arm is a `Subject (Some dimension)`
+/// result, and the law that reports its zero must be IN THE SAME RUN, naming that dimension: a guard
+/// over it, or the family's corpus law counting it (`constructThenEncodeLaws`' round-trip document). A
+/// covered dimension nothing in its run names is a cell that can be starved silently. Pure, so
+/// the go-red perturbs its input rather than the tree. It replaces a regex over the kit's sources,
+/// which could see a cell's text but not which run emitted it.
+let coverageOrphans (results: LawResult list) : (string * string) list =
+    let guards =
+        results
+        |> List.choose (fun r ->
+            match r.Kind with
+            | LawKind.Guard d
+            | LawKind.Corpus d -> Some d
+            | _ -> None)
+        |> set
 
-    let pattern =
-        System.Text.RegularExpressions.Regex(
-            "LawCell\\(\\s*(?:\"(?:[^\"\\\\]|\\\\.)*\"|[A-Za-z]\\w*)\\s*,\\s*Some \"([^\"]+)\"|coveredBy = Some \"([^\"]+)\"|LawCell\\((?:precedesLaw|agreementLaw), Some \"([^\"]+)\"\\)"
-        )
+    [ for r in results do
+          match r.Kind with
+          | LawKind.Subject(Some d) when not (Set.contains d guards) -> yield r.Law, d
+          | _ -> () ]
 
-    [ for file in System.IO.Directory.GetFiles(dir, "*.fs") do
-          let text = System.IO.File.ReadAllText file
-
-          for m in pattern.Matches text do
-              let dim = [ 1; 2; 3 ] |> List.map (fun g -> m.Groups[g]) |> List.find _.Success
-
-              yield System.IO.Path.GetFileName file, dim.Value ]
-
-let private guardDimensions () : string list =
-    let reached = "the sample reached every "
-    let spans = "the sample spans the "
-
+/// Every covered cell the reference runs emit, with its family and dimension.
+let private coveredCells () : (string * string) list =
     [ for r in allRuns () do
           for law in r.Results do
-              if law.Law.StartsWith SampleAdequacy.guardOpening then
-                  let at = law.Law.IndexOf "): "
-                  let sentence = law.Law.Substring(at + 3)
-
-                  if sentence.StartsWith reached then
-                      yield sentence.Substring(reached.Length).Replace(" the laws distinguish", "")
-                  elif sentence.StartsWith spans then
-                      yield sentence.Substring(spans.Length) ]
+              match law.Kind with
+              | LawKind.Subject(Some d) -> yield r.Id, d
+              | _ -> () ]
     |> List.distinct
 
 [<Tests>]
@@ -1433,7 +1415,8 @@ let floorTests =
                   certifyAt ConformanceTests.sw idw OpStream.defaultHash ConformanceTests.refusalFreeStreamGen
 
               Expect.isTrue
-                  (hasRed "sample adequacy (Conformance.reducer)" free)
+                  (free
+                   |> List.exists (fun r -> not r.Passed && r.Kind.IsGuard && r.Family = "Conformance.reducer"))
                   (sprintf "refusal-free StreamGen: %A" (redLaws free))
 
               let reference =
@@ -1522,9 +1505,10 @@ let floorTests =
                     "arbitrationLaws", Conformance.arbitrationLaws nodew idw gen constantNodeEncode 8585 300 ] do
                   let guard =
                       results
-                      |> List.filter (fun r -> not r.Passed)
-                      |> List.choose _.Counterexample
-                      |> List.exists (fun cx -> cx.Contains "never reached" && cx.Contains "encode-distinguished node")
+                      |> List.exists (fun r ->
+                          not r.Passed
+                          && r.Kind.IsGuard
+                          && List.contains ("encode-distinguished node", 0) r.Reached)
 
                   Expect.isTrue guard (sprintf "%s names the starved encode: %A" name (redLaws results))
 
@@ -1625,18 +1609,50 @@ let floorTests =
                        && (r.Counterexample |> Option.exists (fun cx -> cx.Contains "do not hold"))))
                   (sprintf "%A" (redLaws results))
 
-          testCase "every covered cell names a dimension a guard emits — the zero is always reported somewhere"
+          testCase "every covered cell names a guard or corpus law of its own run — the zero is always reported"
           <| fun _ ->
-              let guards = guardDimensions ()
-              let covered = coveredDimensions ()
-              Expect.isNonEmpty covered "the scan found the covered cells it is about"
+              Expect.isNonEmpty (coveredCells ()) "the reference runs emit the covered cells this is about"
 
               let orphans =
-                  covered
-                  |> List.filter (fun (_, dim) -> not (guards |> List.exists (fun g -> g.StartsWith dim)))
-                  |> List.distinct
+                  [ for r in allRuns () do
+                        for law, dim in coverageOrphans r.Results do
+                            yield sprintf "%s: %s (covered by %s)" r.Id law dim ]
 
-              Expect.isEmpty orphans "a covered cell whose dimension no guard emits can be starved silently" ]
+              Expect.isEmpty
+                  orphans
+                  (sprintf
+                      "a covered cell whose dimension no guard emits can be starved silently:
+%s"
+                      (String.concat
+                          "
+"
+                          orphans))
+
+          testCase "the covered-cell check goes red on a planted orphan — made-up runs"
+          <| fun _ ->
+              let covered dim =
+                  { LawResult.pass "M.f" "a covered law" 0 with
+                      Kind = LawKind.Subject(Some dim) }
+
+              let guard = SampleAdequacy.reached "M.f" "arm" 1 [ "arm", 3 ]
+
+              Expect.isEmpty (coverageOrphans [ covered "arm"; guard ]) "a cell its run's guard counts is clean"
+
+              Expect.equal
+                  (coverageOrphans [ covered "elsewhere"; guard ])
+                  [ "a covered law", "elsewhere" ]
+                  "a cell no guard of its run counts is named"
+
+              Expect.equal
+                  (coverageOrphans [ covered "arm" ])
+                  [ "a covered law", "arm" ]
+                  "a guard in another run does not cover it"
+
+              let corpusLaw =
+                  { LawResult.pass "M.f" "the corpus holds a document" 2 with
+                      Kind = LawKind.Corpus "document" }
+
+              Expect.isEmpty (coverageOrphans [ covered "document"; corpusLaw ]) "a corpus law of its run covers it" ]
 
 // ---- Phase 383 — the collision search demands a budget ----
 
@@ -1684,9 +1700,10 @@ let private vectorModules =
           "StoredIdentity"
           "ParityVectors" ]
 
-/// Each vector family's run over NO vectors, with the fragment of the law that must read red.
+/// Each vector family's run over NO vectors, with the item its `Corpus` law counts — the law that
+/// must read red (Phase 515: found by its kind, where a fragment of its name used to find it).
 let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
-    let corpus = "the corpus evaluated at least one vector"
+    let corpus = "vector"
 
     [ "WireNullTolerance.laws", corpus, (fun () -> WireNullTolerance.lawsWith [])
       "WireNullTolerance.lawsWith", corpus, (fun () -> WireNullTolerance.lawsWith [])
@@ -1698,13 +1715,13 @@ let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
       "ParityVectors.lawsWith", corpus, (fun () -> ParityVectors.lawsWith [])
       // The stored families' sample is the store a consumer hands them: an empty store is the zero.
       "EncodingProfileVectors.storedCodecLawsAt",
-      "the store holds at least one text",
+      "text",
       (fun () -> EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [])
       "EncodingProfileVectors.storedCodecLaws",
-      "the store holds at least one text",
+      "text",
       (fun () -> EncodingProfileVectors.storedCodecLaws "v2" Codec.json [])
       "StoredIdentity.linearLaws",
-      "the store holds at least one record",
+      "record",
       (fun () ->
           StoredIdentity.linearLaws
               "v2"
@@ -1713,11 +1730,9 @@ let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
               storedIdentityWitness
               OpStream.empty)
       "StoredIdentity.dagLaws",
-      "the store holds at least one node",
+      "node",
       (fun () -> StoredIdentity.dagLaws "v2" OpStream.defaultHash storedIdentityWitness storedIdentityWitness Dag.empty)
-      "StoredIdentity.captureLaws",
-      "the store holds at least one capture",
-      (fun () -> StoredIdentity.captureLaws "v2" OpStream.defaultHash []) ]
+      "StoredIdentity.captureLaws", "capture", (fun () -> StoredIdentity.captureLaws "v2" OpStream.defaultHash []) ]
 
 [<Tests>]
 let vectorFamilyTests =
@@ -1744,12 +1759,13 @@ let vectorFamilyTests =
 
           testCase "a zero-vector run of every vector family is red, by name"
           <| fun _ ->
-              for id, fragment, runEmpty in zeroVectorRuns do
+              for id, what, runEmpty in zeroVectorRuns do
                   let results = runEmpty ()
 
                   Expect.isTrue
-                      (hasRed fragment results)
-                      (sprintf "%s over no vectors must be red (%s): %A" id fragment (redLaws results))
+                      (results
+                       |> List.exists (fun r -> r.Kind = LawKind.Corpus what && LawResult.isNeverReached r))
+                      (sprintf "%s over no %ss must be red by its corpus law: %A" id what (redLaws results))
 
           testCase "laws () is lawsWith over the committed corpus, and green"
           <| fun _ ->
@@ -1768,7 +1784,16 @@ let vectorFamilyTests =
                     ) ]
 
               for name, laws, withCorpus in pairs do
-                  Expect.equal laws withCorpus (sprintf "%s.laws () is lawsWith over its committed corpus" name)
+                  // The two are two roster rows, so each entry labels its results with its own id.
+                  Expect.equal
+                      laws
+                      (withCorpus |> LawKit.labelAs (name + ".laws"))
+                      (sprintf "%s.laws () is lawsWith over its committed corpus, under its own id" name)
+
+                  Expect.isTrue
+                      (withCorpus |> List.forall (fun r -> r.Family = name + ".lawsWith"))
+                      (sprintf "%s.lawsWith labels every result with its own id" name)
+
                   Expect.isEmpty (redLaws laws) (sprintf "%s is green over its committed corpus" name)
 
           testCase "ParityVectors.lawsWith is red on a row that breaks what makes it comparable"

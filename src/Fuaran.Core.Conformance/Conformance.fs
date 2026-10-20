@@ -79,6 +79,17 @@ module Conformance =
     let private family (entry: string) (seed: int) : LawKit.Runner =
         LawKit.Runner(LawKit.FamilyId("Conformance." + entry), seed)
 
+    /// Run one family body under `runner` and label what it returns with the runner's family (Phase
+    /// 515): every forward ends `X.laws … |> within (family "<entry>" seed) iterations`, so the subject
+    /// laws a family ran carry its id the same way its guards do — filled by the runner, never spelled
+    /// in a law module.
+    let private within
+        (runner: LawKit.Runner)
+        (iterations: int)
+        (body: LawKit.Runner -> int -> LawResult list)
+        : LawResult list =
+        body runner iterations |> LawKit.label runner
+
     /// Forward — see `AlgebraTreeLaws.witnessLaws`.
     let witnessLaws
         (nodew: NodeWitness<'Node, 'Id>)
@@ -87,7 +98,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.witnessLaws nodew idw gen (family "witnessLaws" seed) iterations
+        AlgebraTreeLaws.witnessLaws nodew idw gen
+        |> within (family "witnessLaws" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.opAlgebra`.
     let opAlgebra
@@ -97,7 +109,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.opAlgebra nodew idw gen (family "opAlgebra" seed) iterations
+        AlgebraTreeLaws.opAlgebra nodew idw gen
+        |> within (family "opAlgebra" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.diffLaws`.
     let diffLaws
@@ -107,7 +120,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.diffLaws nodew idw gen (family "diffLaws" seed) iterations
+        AlgebraTreeLaws.diffLaws nodew idw gen
+        |> within (family "diffLaws" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.diffContainedLaws`.
     let diffContainedLaws
@@ -117,7 +131,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.diffContainedLaws nodew idw gen (family "diffContainedLaws" seed) iterations
+        AlgebraTreeLaws.diffContainedLaws nodew idw gen
+        |> within (family "diffContainedLaws" seed) iterations
 
     /// Forward — see `ValidityTreeLaws.digestLaws` (Phase 314): `Tree.digests` and `Tree.Digests.diff` held
     /// to the per-node digests, the four-way partition and `Diff.changes`, over a domain's witness
@@ -130,7 +145,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.digestLaws nodew idw encode gen (family "digestLaws" seed) iterations
+        ValidityTreeLaws.digestLaws nodew idw encode gen
+        |> within (family "digestLaws" seed) iterations
 
     /// Forward — see `ValidityTreeLaws.changeLaws` (Phase 314): `Diff.changes` held to the script
     /// `Diff.toOpsWith` emits, kind by kind.
@@ -142,7 +158,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.changeLaws nodew idw encode gen (family "changeLaws" seed) iterations
+        ValidityTreeLaws.changeLaws nodew idw encode gen
+        |> within (family "changeLaws" seed) iterations
 
     /// Forward — see `ValidityTreeLaws.introducedLaws` (Phase 314): `Validator.introduced`, `verdict`, `gate`
     /// and `encodeVerdict` held to the defect-set difference and the three policies, over a domain's
@@ -155,7 +172,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.introducedLaws nodew idw reg gen (family "introducedLaws" seed) iterations
+        ValidityTreeLaws.introducedLaws nodew idw reg gen
+        |> within (family "introducedLaws" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.normalizeLaws`.
     let normalizeLaws
@@ -165,7 +183,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.normalizeLaws nodew idw gen (family "normalizeLaws" seed) iterations
+        AlgebraTreeLaws.normalizeLaws nodew idw gen
+        |> within (family "normalizeLaws" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.containerLaws`.
     let containerLaws
@@ -175,7 +194,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.containerLaws nodew idw gen (family "containerLaws" seed) iterations
+        AlgebraTreeLaws.containerLaws nodew idw gen
+        |> within (family "containerLaws" seed) iterations
 
     /// Forward — see `AlgebraTreeLaws.keyedChildrenLawsAt`: the keyed-position laws at a DOMAIN'S
     /// `KeyedWitness`.
@@ -187,7 +207,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.keyedChildrenLawsAt keyw nodew idw gen (family "keyedChildrenLawsAt" seed) iterations
+        AlgebraTreeLaws.keyedChildrenLawsAt keyw nodew idw gen
+        |> within (family "keyedChildrenLawsAt" seed) iterations
 
     /// Forward — see `PlacementTreeLaws.placementLaws` (Phase 312).
     let placementLaws
@@ -197,7 +218,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        PlacementTreeLaws.placementLaws nodew idw gen (family "placementLaws" seed) iterations
+        PlacementTreeLaws.placementLaws nodew idw gen
+        |> within (family "placementLaws" seed) iterations
 
     /// Forward — see `ValidityTreeLaws.containmentLaws` (Phase 313).
     let containmentLaws
@@ -208,7 +230,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.containmentLaws allowedChildren nodew idw gen (family "containmentLaws" seed) iterations
+        ValidityTreeLaws.containmentLaws allowedChildren nodew idw gen
+        |> within (family "containmentLaws" seed) iterations
 
     /// Forward — see `ValidityTreeLaws.referenceLawsAt` (Phase 313): the reference laws at a DOMAIN'S
     /// `RefWitness`.
@@ -220,7 +243,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.referenceLawsAt refw nodew idw gen (family "referenceLawsAt" seed) iterations
+        ValidityTreeLaws.referenceLawsAt refw nodew idw gen
+        |> within (family "referenceLawsAt" seed) iterations
 
     /// Forward — see `PlacementTreeLaws.loweringLaws` (Phase 312).
     let loweringLaws
@@ -230,7 +254,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        PlacementTreeLaws.loweringLaws nodew idw gen (family "loweringLaws" seed) iterations
+        PlacementTreeLaws.loweringLaws nodew idw gen
+        |> within (family "loweringLaws" seed) iterations
 
     /// Forward — see `PlacementTreeLaws.freshIdLaws` (Phase 312). `setId` rebuilds a node with a new id and
     /// `mint` is the strategy certified — `FreshIds.derived idw`, `FreshIds.sequential idw prefix`, or
@@ -244,7 +269,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        PlacementTreeLaws.freshIdLaws nodew idw gen setId mint (family "freshIdLaws" seed) iterations
+        PlacementTreeLaws.freshIdLaws nodew idw gen setId mint
+        |> within (family "freshIdLaws" seed) iterations
 
     /// Forward — see `KeyedApplyLaws.keyedApplyLawsAt` (Phase 286).
     let keyedApplyLawsAt
@@ -255,7 +281,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        KeyedApplyLaws.keyedApplyLawsAt keyw nodew idw gen (family "keyedApplyLawsAt" seed) iterations
+        KeyedApplyLaws.keyedApplyLawsAt keyw nodew idw gen
+        |> within (family "keyedApplyLawsAt" seed) iterations
 
     /// Forward — see `ChainStreamLaws.streamLaws`.
     let streamLaws
@@ -265,7 +292,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.streamLaws sw gen hashFn (family "streamLaws" seed) iterations
+        ChainStreamLaws.streamLaws sw gen hashFn
+        |> within (family "streamLaws" seed) iterations
 
     /// Forward — see `ChainStreamLaws.reducer`.
     let reducer
@@ -275,7 +303,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.reducer apply gen namesAlternatives (family "reducer" seed) iterations
+        ChainStreamLaws.reducer apply gen namesAlternatives
+        |> within (family "reducer" seed) iterations
 
     /// Forward — see `ChainStreamLaws.snapshotLawsWith`.
     let snapshotLawsWith
@@ -287,7 +316,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.snapshotLawsWith sw gen stateEncode hashFn cfg (family "snapshotLawsWith" seed) iterations
+        ChainStreamLaws.snapshotLawsWith sw gen stateEncode hashFn cfg
+        |> within (family "snapshotLawsWith" seed) iterations
 
     /// Forward — see `ChainStreamLaws.snapshotLaws`.
     let snapshotLaws
@@ -298,7 +328,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.snapshotLaws sw gen stateEncode hashFn (family "snapshotLawsWith" seed) iterations
+        ChainStreamLaws.snapshotLaws sw gen stateEncode hashFn
+        |> within (family "snapshotLawsWith" seed) iterations
 
     /// Forward — see `ChainStreamLaws.streamConfigLaws` (Phase 349): the `…With` stream operations held
     /// at the caller's `StreamConfig` and `HashFn`, so a variant that ignores either goes red.
@@ -310,7 +341,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.streamConfigLaws sw gen hashFn cfg (family "streamConfigLaws" seed) iterations
+        ChainStreamLaws.streamConfigLaws sw gen hashFn cfg
+        |> within (family "streamConfigLaws" seed) iterations
 
     /// Forward — see `DagStreamLaws.dagLaws`.
     let dagLaws
@@ -320,7 +352,7 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        DagStreamLaws.dagLaws sw gen hashFn (family "dagLaws" seed) iterations
+        DagStreamLaws.dagLaws sw gen hashFn |> within (family "dagLaws" seed) iterations
 
     /// Forward — see `DagStreamLaws.reachLaws` (Phase 289).
     let reachLaws
@@ -330,7 +362,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        DagStreamLaws.reachLaws sw gen hashFn (family "reachLaws" seed) iterations
+        DagStreamLaws.reachLaws sw gen hashFn
+        |> within (family "reachLaws" seed) iterations
 
     /// Forward — see `DagStreamLaws.checkpointLaws` (Phase 288).
     let checkpointLaws
@@ -341,7 +374,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        DagStreamLaws.checkpointLaws sw gen stateEncode hashFn (family "checkpointLaws" seed) iterations
+        DagStreamLaws.checkpointLaws sw gen stateEncode hashFn
+        |> within (family "checkpointLaws" seed) iterations
 
     /// Forward — see `DagStreamLaws.laneLaws` (Phase 311).
     let laneLaws
@@ -351,7 +385,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        DagStreamLaws.laneLaws sw gen hashFn (family "laneLaws" seed) iterations
+        DagStreamLaws.laneLaws sw gen hashFn
+        |> within (family "laneLaws" seed) iterations
 
     /// Forward — see `CaptureStreamLaws.captureReplayLaws`.
     let captureReplayLaws
@@ -362,7 +397,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        CaptureStreamLaws.captureReplayLaws encode decode draw hashFn (family "captureReplayLaws" seed) iterations
+        CaptureStreamLaws.captureReplayLaws encode decode draw hashFn
+        |> within (family "captureReplayLaws" seed) iterations
 
     /// Forward — see `ChainStreamLaws.casLaws`.
     let casLaws
@@ -372,7 +408,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.casLaws sw gen hashFn (family "casLaws" seed) iterations
+        ChainStreamLaws.casLaws sw gen hashFn
+        |> within (family "casLaws" seed) iterations
 
     /// Forward — see `ChainStreamLaws.idempotencyLaws`.
     let idempotencyLaws
@@ -383,19 +420,23 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ChainStreamLaws.idempotencyLaws keyOf sw gen hashFn (family "idempotencyLaws" seed) iterations
+        ChainStreamLaws.idempotencyLaws keyOf sw gen hashFn
+        |> within (family "idempotencyLaws" seed) iterations
 
     /// Forward — see `ChainStreamLaws.chainBreakReasonLaws`.
     let chainBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
-        ChainStreamLaws.chainBreakReasonLaws (family "chainBreakReasonLaws" seed) iterations
+        ChainStreamLaws.chainBreakReasonLaws
+        |> within (family "chainBreakReasonLaws" seed) iterations
 
     /// Forward — see `DagStreamLaws.dagBreakReasonLaws`.
     let dagBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
-        DagStreamLaws.dagBreakReasonLaws (family "dagBreakReasonLaws" seed) iterations
+        DagStreamLaws.dagBreakReasonLaws
+        |> within (family "dagBreakReasonLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.canonicalFloatLaws`.
     let canonicalFloatLaws (seed: int) (iterations: int) : LawResult list =
-        IntegrityLaws.canonicalFloatLaws (family "canonicalFloatLaws" seed) iterations
+        IntegrityLaws.canonicalFloatLaws
+        |> within (family "canonicalFloatLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.encoderInjectivityLawsAt`.
     let encoderInjectivityLawsAt
@@ -405,7 +446,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.encoderInjectivityLawsAt w encode gen (family "encoderInjectivityLawsAt" seed) iterations
+        IntegrityLaws.encoderInjectivityLawsAt w encode gen
+        |> within (family "encoderInjectivityLawsAt" seed) iterations
 
     /// Forward — see `IntegrityLaws.codecInjectivityLaws`.
     let codecInjectivityLaws
@@ -414,7 +456,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.codecInjectivityLaws w gen (family "codecInjectivityLaws" seed) iterations
+        IntegrityLaws.codecInjectivityLaws w gen
+        |> within (family "codecInjectivityLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.attestationLawsAt`.
     let attestationLawsAt
@@ -425,7 +468,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.attestationLawsAt sw gen sink hashFn (family "attestationLawsAt" seed) iterations
+        IntegrityLaws.attestationLawsAt sw gen sink hashFn
+        |> within (family "attestationLawsAt" seed) iterations
 
     /// Forward — see `IntegrityLaws.noAttestationVacuityLaws`.
     let noAttestationVacuityLaws
@@ -435,7 +479,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.noAttestationVacuityLaws sw gen hashFn (family "noAttestationVacuityLaws" seed) iterations
+        IntegrityLaws.noAttestationVacuityLaws sw gen hashFn
+        |> within (family "noAttestationVacuityLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.hashFnLaws`.
     let hashFnLaws
@@ -445,11 +490,15 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.hashFnLaws sw gen hashFn (family "hashFnLaws" seed) iterations
+        IntegrityLaws.hashFnLaws sw gen hashFn
+        |> within (family "hashFnLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.hashFnAdversarialLaws`.
     let hashFnAdversarialLaws (cryptoHf: HashFn) (budget: int) (seed: int) : LawResult list =
-        IntegrityLaws.hashFnAdversarialLaws cryptoHf budget (family "hashFnAdversarialLaws" seed)
+        let runner = family "hashFnAdversarialLaws" seed
+
+        IntegrityLaws.hashFnAdversarialLaws cryptoHf budget runner
+        |> LawKit.label runner
 
     /// Forward — see `IntegrityLaws.attributedLaws`.
     let attributedLaws
@@ -459,7 +508,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        IntegrityLaws.attributedLaws w gen hashFn (family "attributedLaws" seed) iterations
+        IntegrityLaws.attributedLaws w gen hashFn
+        |> within (family "attributedLaws" seed) iterations
 
     /// Forward — see `IntegrityLaws.constructThenEncodeLaws`.
     let constructThenEncodeLaws
@@ -479,7 +529,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.footprintLaws nodew idw gen encode (family "footprintLaws" seed) iterations
+        ConcurrencyLaws.footprintLaws nodew idw gen encode
+        |> within (family "footprintLaws" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.footprintLawsAt` (Phase 249): `footprintLaws`' soundness law
     /// at the domain's own ops, stream witness and generator, rather than the skeleton op algebra.
@@ -491,7 +542,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.footprintLawsAt sw footprintOf hashState gen (family "footprintLawsAt" seed) iterations
+        ConcurrencyLaws.footprintLawsAt sw footprintOf hashState gen
+        |> within (family "footprintLawsAt" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.footprintInLawsAt` (Phase 500): the same laws at the base-aware
     /// projection a domain folds with when it holds the tree, plus its refinement of the pure one.
@@ -504,14 +556,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.footprintInLawsAt
-            sw
-            footprintOf
-            footprintIn
-            hashState
-            gen
-            (family "footprintInLawsAt" seed)
-            iterations
+        ConcurrencyLaws.footprintInLawsAt sw footprintOf footprintIn hashState gen
+        |> within (family "footprintInLawsAt" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.mergeConflictLaws`.
     let mergeConflictLaws
@@ -521,7 +567,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.mergeConflictLaws nodew idw gen (family "mergeConflictLaws" seed) iterations
+        ConcurrencyLaws.mergeConflictLaws nodew idw gen
+        |> within (family "mergeConflictLaws" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.reconcileLawsWith`: the reconcile laws under the domain's own
     /// chain hash (Phase 297), the pinned parameter last before `seed`.
@@ -534,7 +581,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.reconcileLawsWith nodew idw gen encode hashFn (family "reconcileLawsWith" seed) iterations
+        ConcurrencyLaws.reconcileLawsWith nodew idw gen encode hashFn
+        |> within (family "reconcileLawsWith" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.reconcileLaws`.
     let reconcileLaws
@@ -545,7 +593,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.reconcileLaws nodew idw gen encode (family "reconcileLawsWith" seed) iterations
+        ConcurrencyLaws.reconcileLaws nodew idw gen encode
+        |> within (family "reconcileLawsWith" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.concurrencyLawsWith`.
     let concurrencyLawsWith
@@ -557,14 +606,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.concurrencyLawsWith
-            nodew
-            idw
-            gen
-            encode
-            footprintOf
-            (family "concurrencyLawsWith" seed)
-            iterations
+        ConcurrencyLaws.concurrencyLawsWith nodew idw gen encode footprintOf
+        |> within (family "concurrencyLawsWith" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.concurrencyLaws`.
     let concurrencyLaws
@@ -575,7 +618,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.concurrencyLaws nodew idw gen encode (family "concurrencyLawsWith" seed) iterations
+        ConcurrencyLaws.concurrencyLaws nodew idw gen encode
+        |> within (family "concurrencyLawsWith" seed) iterations
 
     /// Forward — see `ConcurrencyLaws.arbitrationLaws`.
     let arbitrationLaws
@@ -586,7 +630,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.arbitrationLaws nodew idw gen encode (family "arbitrationLaws" seed) iterations
+        ConcurrencyLaws.arbitrationLaws nodew idw gen encode
+        |> within (family "arbitrationLaws" seed) iterations
 
     /// Forward — see `KeyedArbitrationLaws.keyedArbitrationLawsWith` (Phase 247): the arbitration
     /// laws over `Arbitration.arbitrateWith footprintOf canApplyOf`, held to the keyed engine the
@@ -603,16 +648,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        KeyedArbitrationLaws.keyedArbitrationLawsWith
-            keyw
-            nodew
-            idw
-            gen
-            encode
-            footprintOf
-            canApplyOf
-            (family "keyedArbitrationLawsWith" seed)
-            iterations
+        KeyedArbitrationLaws.keyedArbitrationLawsWith keyw nodew idw gen encode footprintOf canApplyOf
+        |> within (family "keyedArbitrationLawsWith" seed) iterations
 
     /// Forward — the keyed-arbitration laws at a DOMAIN'S `KeyedWitness`, with the keyed composition as
     /// the footprint and admission pair (Phase 247; Phase 390's spelling — `keyedArbitrationLawsWith` is
@@ -639,12 +676,12 @@ module Conformance =
             encode
             (Ops.footprintKeyed keyw nodew idw)
             (Ops.canApplyAllKeyed keyw (LawKit.canHoldOf gen) nodew idw)
-            (family "keyedArbitrationLawsWith" seed)
-            iterations
+        |> within (family "keyedArbitrationLawsWith" seed) iterations
 
     /// Forward — see `CapabilitySeamLaws.capabilityLaws`.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list =
-        CapabilitySeamLaws.capabilityLaws (family "capabilityLaws" seed) iterations
+        CapabilitySeamLaws.capabilityLaws
+        |> within (family "capabilityLaws" seed) iterations
 
     /// Forward — see `CapabilitySeamLaws.capabilityLawsAt`: the capability seam laws at a DOMAIN'S seam.
     let capabilityLawsAt
@@ -653,11 +690,12 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        CapabilitySeamLaws.capabilityLawsAt w body (family "capabilityLawsAt" seed) iterations
+        CapabilitySeamLaws.capabilityLawsAt w body
+        |> within (family "capabilityLawsAt" seed) iterations
 
     /// Forward — see `QuerySeamLaws.queryLaws`.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
-        QuerySeamLaws.queryLaws (family "queryLaws" seed) iterations
+        QuerySeamLaws.queryLaws |> within (family "queryLaws" seed) iterations
 
     /// Forward — see `QuerySeamLaws.queryLawsAt`: the query seam laws at a DOMAIN'S seam.
     let queryLawsAt
@@ -666,16 +704,17 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        QuerySeamLaws.queryLawsAt w resolver (family "queryLawsAt" seed) iterations
+        QuerySeamLaws.queryLawsAt w resolver
+        |> within (family "queryLawsAt" seed) iterations
 
     /// Forward — see `RegistrySeamLaws.registryLaws`.
     let registryLaws (seed: int) (iterations: int) : LawResult list =
-        RegistrySeamLaws.registryLaws (family "registryLaws" seed) iterations
+        RegistrySeamLaws.registryLaws |> within (family "registryLaws" seed) iterations
 
     /// Forward — see `PolicySeamLaws.policyLaws` (Phase 318): the policy decision's join and the gate on
     /// the three invocable registries, from the kit's own fixtures.
     let policyLaws (seed: int) (iterations: int) : LawResult list =
-        PolicySeamLaws.policyLaws (family "policyLaws" seed) iterations
+        PolicySeamLaws.policyLaws |> within (family "policyLaws" seed) iterations
 
     /// Forward — see `PolicySeamLaws.policyLawsAt` (Phase 318): the no-unapproved-write law and the dry
     /// run's agreement with `Apply`, under the DOMAIN'S own policy, its effects accessor and the
@@ -693,7 +732,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        PolicySeamLaws.policyLawsAt gw registry state0 genOp actors privileged (family "policyLawsAt" seed) iterations
+        PolicySeamLaws.policyLawsAt gw registry state0 genOp actors privileged
+        |> within (family "policyLawsAt" seed) iterations
 
     /// Forward — see `PolicySeamLaws.writeGateLaws` (Phase 318): the write gate's targets cover what an
     /// op writes, the gate runs before the reducer, a lock covers its subtree, and a wider lock never
@@ -705,30 +745,36 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        PolicySeamLaws.writeGateLaws nodew idw gen (family "writeGateLaws" seed) iterations
+        PolicySeamLaws.writeGateLaws nodew idw gen
+        |> within (family "writeGateLaws" seed) iterations
 
     /// Forward — see `PolicySeamLaws.keyedCaptureLaws` (Phase 318): the keyed, two-phase capture journal
     /// verifies, replays by key in any order across keys, refuses a miss, detects tampering, and
     /// replays a network capability exactly through the seam.
     let keyedCaptureLaws (seed: int) (iterations: int) : LawResult list =
-        PolicySeamLaws.keyedCaptureLaws (family "keyedCaptureLaws" seed) iterations
+        PolicySeamLaws.keyedCaptureLaws
+        |> within (family "keyedCaptureLaws" seed) iterations
 
     /// Forward — see `RegistrySeamLaws.packLoadingLaws`.
     let packLoadingLaws (seed: int) (iterations: int) : LawResult list =
-        RegistrySeamLaws.packLoadingLaws (family "packLoadingLaws" seed) iterations
+        RegistrySeamLaws.packLoadingLaws
+        |> within (family "packLoadingLaws" seed) iterations
 
     /// Forward — see `ColumnarSeamLaws.aggregateNullSkipLaws`.
     let aggregateNullSkipLaws (seed: int) (iterations: int) : LawResult list =
-        ColumnarSeamLaws.aggregateNullSkipLaws (family "aggregateNullSkipLaws" seed) iterations
+        ColumnarSeamLaws.aggregateNullSkipLaws
+        |> within (family "aggregateNullSkipLaws" seed) iterations
 
     /// Forward — see `ColumnarSeamLaws.columnVectorLaws` (Phase 417).
     let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
-        ColumnarSeamLaws.columnVectorLaws (family "columnVectorLaws" seed) iterations
+        ColumnarSeamLaws.columnVectorLaws
+        |> within (family "columnVectorLaws" seed) iterations
 
     /// Forward — see `ColumnarSeamLaws.columnOwnershipLaws` (Phase 418): the ownership law over the
     /// kit's own sample, with `operation` the consumer's pipeline.
     let columnOwnershipLaws (operation: Column list -> unit) (seed: int) (iterations: int) : LawResult list =
-        ColumnarSeamLaws.columnOwnershipLaws operation (family "columnOwnershipLawsWith" seed) iterations
+        ColumnarSeamLaws.columnOwnershipLaws operation
+        |> within (family "columnOwnershipLawsWith" seed) iterations
 
     /// Forward — see `ColumnarSeamLaws.columnOwnershipLawsWith` (Phase 418): the ownership law over
     /// columns the consumer draws itself (`draw` is the injected sample, last before the seed).
@@ -738,27 +784,32 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ColumnarSeamLaws.columnOwnershipLawsWith operation draw (family "columnOwnershipLawsWith" seed) iterations
+        ColumnarSeamLaws.columnOwnershipLawsWith operation draw
+        |> within (family "columnOwnershipLawsWith" seed) iterations
 
     /// Forward — see `ColumnarSeamLaws.columnarValidatorLaws`.
     let columnarValidatorLaws (seed: int) (iterations: int) : LawResult list =
-        ColumnarSeamLaws.columnarValidatorLaws (family "columnarValidatorLaws" seed) iterations
+        ColumnarSeamLaws.columnarValidatorLaws
+        |> within (family "columnarValidatorLaws" seed) iterations
 
     /// Forward — see `PipelineSeamLaws.deferredLaws`.
     let deferredLaws (seed: int) (iterations: int) : LawResult list =
-        PipelineSeamLaws.deferredLaws (family "deferredLaws" seed) iterations
+        PipelineSeamLaws.deferredLaws |> within (family "deferredLaws" seed) iterations
 
     /// Forward — see `PipelineSeamLaws.capabilityPipelineLaws`.
     let capabilityPipelineLaws (seed: int) (iterations: int) : LawResult list =
-        PipelineSeamLaws.capabilityPipelineLaws (family "capabilityPipelineLaws" seed) iterations
+        PipelineSeamLaws.capabilityPipelineLaws
+        |> within (family "capabilityPipelineLaws" seed) iterations
 
     /// Forward — see `PipelineSeamLaws.capabilityPipelineLawsAt`: the pipeline laws at a DOMAIN'S registry.
     let capabilityPipelineLawsAt (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
-        PipelineSeamLaws.capabilityPipelineLawsAt w (family "capabilityPipelineLawsAt" seed) iterations
+        PipelineSeamLaws.capabilityPipelineLawsAt w
+        |> within (family "capabilityPipelineLawsAt" seed) iterations
 
     /// Forward — see `PipelineSeamLaws.capabilityPipelineIncrementalLaws`.
     let capabilityPipelineIncrementalLaws (seed: int) (iterations: int) : LawResult list =
-        PipelineSeamLaws.capabilityPipelineIncrementalLaws (family "capabilityPipelineIncrementalLaws" seed) iterations
+        PipelineSeamLaws.capabilityPipelineIncrementalLaws
+        |> within (family "capabilityPipelineIncrementalLaws" seed) iterations
 
     /// Forward — see `FunctionLaws.compositionLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let compositionLawsAt
@@ -769,7 +820,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.compositionLaws wa wb embed draw (family "compositionLawsAt" seed) iterations
+        FunctionLaws.compositionLaws wa wb embed draw
+        |> within (family "compositionLawsAt" seed) iterations
 
     /// Forward — see `FunctionLaws.verifyFunction`.
     let verifyFunction
@@ -807,7 +859,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.functionVerifyLaws w sound broken reg genParams (family "functionVerifyLawsAt" seed) iterations
+        FunctionLaws.functionVerifyLaws w sound broken reg genParams
+        |> within (family "functionVerifyLawsAt" seed) iterations
 
     /// Forward — see `FunctionLaws.memoLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let memoLawsAt
@@ -818,7 +871,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.memoLaws w encode draw hashFn (family "memoLawsAt" seed) iterations
+        FunctionLaws.memoLaws w encode draw hashFn
+        |> within (family "memoLawsAt" seed) iterations
 
     /// Forward — see `FunctionLaws.compositionPilot`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let compositionPilotAt
@@ -831,7 +885,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.compositionPilot wa wb embed encodeA encodeB draw (family "compositionPilotAt" seed) iterations
+        FunctionLaws.compositionPilot wa wb embed encodeA encodeB draw
+        |> within (family "compositionPilotAt" seed) iterations
 
     /// Forward — see `FunctionLaws.verifyHonestyLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let verifyHonestyLawsAt
@@ -843,7 +898,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.verifyHonestyLaws w mkSound mkBroken reg genParams (family "verifyHonestyLawsAt" seed) iterations
+        FunctionLaws.verifyHonestyLaws w mkSound mkBroken reg genParams
+        |> within (family "verifyHonestyLawsAt" seed) iterations
 
     /// Forward — see `FunctionLaws.memoSoundnessLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let memoSoundnessLawsAt
@@ -854,26 +910,24 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        FunctionLaws.memoSoundnessLaws
-            w
-            encode
-            underDeclaredFn
-            underDeclaredArgs
-            (family "memoSoundnessLawsAt" seed)
-            iterations
+        FunctionLaws.memoSoundnessLaws w encode underDeclaredFn underDeclaredArgs
+        |> within (family "memoSoundnessLawsAt" seed) iterations
 
     /// Forward — see `PropagationLaws.dirtyPropagationLaws`.
     let dirtyPropagationLaws (seed: int) (iterations: int) : LawResult list =
-        PropagationLaws.dirtyPropagationLaws (family "dirtyPropagationLaws" seed) iterations
+        PropagationLaws.dirtyPropagationLaws
+        |> within (family "dirtyPropagationLaws" seed) iterations
 
     /// Forward — see `PropagationLaws.propagationEvalLaws`.
     let propagationEvalLaws (seed: int) (iterations: int) : LawResult list =
-        PropagationLaws.propagationEvalLaws (family "propagationEvalLaws" seed) iterations
+        PropagationLaws.propagationEvalLaws
+        |> within (family "propagationEvalLaws" seed) iterations
 
     /// Forward — see `PropagationLaws.propagationEvaluatorLawsAt`: the evaluator-contract laws at a
     /// DOMAIN'S `EvaluatorWitness`.
     let propagationEvaluatorLawsAt (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
-        PropagationLaws.propagationEvaluatorLawsAt evw (family "propagationEvaluatorLawsAt" seed) iterations
+        PropagationLaws.propagationEvaluatorLawsAt evw
+        |> within (family "propagationEvaluatorLawsAt" seed) iterations
 
     /// The evaluator-contract laws for a PRIOR-AWARE evaluator — see `PropagationLaws.propagationPriorLawsAt`
     /// (Phase 250; its own stem since Phase 507): `propagationEvaluatorLawsAt` over the domain's
@@ -887,7 +941,8 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         propagationEvaluatorLawsAt evw seed iterations
-        @ PropagationLaws.propagationPriorLawsAt evw evalNodeWith (family "propagationPriorLawsAt" seed) iterations
+        @ (PropagationLaws.propagationPriorLawsAt evw evalNodeWith
+           |> within (family "propagationPriorLawsAt" seed) iterations)
 
     /// Forward — `propagationPriorLawsAt` under the name it carried until Phase 507, when `…With` came
     /// to mean one pinned parameter only. Kept as a roster row under its own id and its own guard
@@ -900,11 +955,8 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         propagationEvaluatorLawsAt evw seed iterations
-        @ PropagationLaws.propagationPriorLawsAt
-            evw
-            evalNodeWith
-            (family "propagationEvaluatorLawsWith" seed)
-            iterations
+        @ (PropagationLaws.propagationPriorLawsAt evw evalNodeWith
+           |> within (family "propagationEvaluatorLawsWith" seed) iterations)
 
     /// Forward — see `SurfaceLaws.projectionLaws`: the projection laws at a DOMAIN'S
     /// `ProjectionWitness`.
@@ -916,7 +968,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        SurfaceLaws.projectionLaws pw applyOps wireEncode gen (family "projectionLawsAt" seed) iterations
+        SurfaceLaws.projectionLaws pw applyOps wireEncode gen
+        |> within (family "projectionLawsAt" seed) iterations
 
     /// Forward — see `ObserverLaws.observerLaws` (Phase 298): in-memory equals live, a cyclic parent
     /// declaration terminates, and re-entrant subscribers are isolated, at a DOMAIN'S
@@ -927,13 +980,14 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ObserverLaws.observerLaws w genInput (family "observerLawsAt" seed) iterations
+        ObserverLaws.observerLaws w genInput
+        |> within (family "observerLawsAt" seed) iterations
 
     /// Forward — see `SanitizeLaws.sanitizeLaws` (Phase 349): the sanitisation floor each of the six
     /// `Fuaran.Core.Idl.Sanitize` functions claims, over generated adversarial strings and the pinned
     /// vectors, at a host's `SanitizeWitness` — `SanitizeWitness.core` for Core's own floor.
     let sanitizeLawsAt (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
-        SanitizeLaws.sanitizeLaws w (family "sanitizeLawsAt" seed) iterations
+        SanitizeLaws.sanitizeLaws w |> within (family "sanitizeLawsAt" seed) iterations
 
     /// Forward — see `CodecLaws.codecLaws` (Phase 442): the premises a domain owes for the parts it
     /// hands the `Codec` blocks, sampled at its own codec over the values its generator draws. Spelled
@@ -945,13 +999,13 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        CodecLaws.codecLaws codec gen (family "codecLawsAt" seed) iterations
+        CodecLaws.codecLaws codec gen |> within (family "codecLawsAt" seed) iterations
 
     /// Forward — `codecLawsAt` under the name it carried until Phase 507. Kept as a roster row under
     /// its own id and its own guard label, as D127's forwards were, until the next breaking cut.
     [<System.Obsolete("Use Conformance.codecLawsAt — the same laws, spelled …At because the family takes the domain's codec (Phase 507); this forward goes at the next breaking cut.")>]
     let codecLaws (codec: Codec<'T>) (gen: ConfRng.T -> 'T * ConfRng.T) (seed: int) (iterations: int) : LawResult list =
-        CodecLaws.codecLaws codec gen (family "codecLaws" seed) iterations
+        CodecLaws.codecLaws codec gen |> within (family "codecLaws" seed) iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.
@@ -962,7 +1016,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        SurfaceLaws.aiSurfaceLawsAt w genOp state0 (family "aiSurfaceLawsAt" seed) iterations
+        SurfaceLaws.aiSurfaceLawsAt w genOp state0
+        |> within (family "aiSurfaceLawsAt" seed) iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceKitPolicyLawsAt`: the AI-surface laws with the KIT'S policy swapped
     /// in for the domain's, at the domain's witness — the proposal plumbing, beside `aiSurfaceLawsAt`.
@@ -973,7 +1028,8 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        SurfaceLaws.aiSurfaceKitPolicyLawsAt w genOp state0 (family "aiSurfaceKitPolicyLawsAt" seed) iterations
+        SurfaceLaws.aiSurfaceKitPolicyLawsAt w genOp state0
+        |> within (family "aiSurfaceKitPolicyLawsAt" seed) iterations
 
     /// Forward — see `SurfaceLaws.frozenWitnessFields`.
     let frozenWitnessFields: WitnessFields list = SurfaceLaws.frozenWitnessFields
@@ -1019,16 +1075,18 @@ module Conformance =
         // Each member family draws its own stream, forked from the caller's seed by a fixed key
         // (Phase 507: `Runner.Fork` holds the arithmetic the four offsets used to spell inline).
         let reducerGuards () =
-            let p = SampleAdequacy.guardOpening
-
-            ChainStreamLaws.reducer sw.Apply streamGen None ((family "reducer" seed).Fork 4) iterations
-            |> List.filter (fun r -> r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p)
+            ChainStreamLaws.reducer sw.Apply streamGen None
+            |> within ((family "reducer" seed).Fork 4) iterations
+            |> List.filter LawResult.isAdequacy
 
         let rest =
             if witness |> List.forall _.Passed then
-                AlgebraTreeLaws.opAlgebra nodew idw opGen ((family "opAlgebra" seed).Fork 1) iterations
-                @ AlgebraTreeLaws.diffLaws nodew idw opGen ((family "diffLaws" seed).Fork 3) iterations
-                @ ChainStreamLaws.streamLaws sw streamGen hashFn ((family "streamLaws" seed).Fork 2) iterations
+                (AlgebraTreeLaws.opAlgebra nodew idw opGen
+                 |> within ((family "opAlgebra" seed).Fork 1) iterations)
+                @ (AlgebraTreeLaws.diffLaws nodew idw opGen
+                   |> within ((family "diffLaws" seed).Fork 3) iterations)
+                @ (ChainStreamLaws.streamLaws sw streamGen hashFn
+                   |> within ((family "streamLaws" seed).Fork 2) iterations)
                 @ reducerGuards ()
             else
                 [] // witness defect — the downstream laws would be noise
@@ -1073,13 +1131,10 @@ module Conformance =
         // Phase 220 — the short-circuit reads the SUBJECT laws only. It exists because a non-total
         // reducer would crash `streamLaws`; a starved adequacy guard is no such hazard, and
         // hiding the stream laws behind it would turn one red line into four.
-        let isGuard (r: LawResult) =
-            let p = SampleAdequacy.guardOpening
-            r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p
-
         let stream =
-            if red |> List.filter (isGuard >> not) |> List.forall _.Passed then
-                ChainStreamLaws.streamLaws sw streamGen hashFn ((family "streamLaws" seed).Fork 1) iterations
+            if red |> List.filter (LawResult.isAdequacy >> not) |> List.forall _.Passed then
+                ChainStreamLaws.streamLaws sw streamGen hashFn
+                |> within ((family "streamLaws" seed).Fork 1) iterations
             else
                 []
 

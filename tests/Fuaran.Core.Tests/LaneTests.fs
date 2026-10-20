@@ -815,7 +815,7 @@ let laneLawTests =
 
               let guard =
                   results
-                  |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.laneLaws"))
+                  |> List.find (fun r -> r.Kind.IsGuard && r.Family = "Conformance.laneLaws")
 
               Expect.isFalse guard.Passed "the lane-shape guard is red" ]
 

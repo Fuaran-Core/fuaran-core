@@ -746,10 +746,6 @@ module internal QuerySeamLaws =
                     )
                 | _ -> ())
 
-        let isGuard (r: LawResult) =
-            let p = SampleAdequacy.guardOpening
-            r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p
-
         let seam =
             LawKit.seamLaws
                 { Lookup =
@@ -777,6 +773,6 @@ module internal QuerySeamLaws =
                 runner
                 iterations
 
-        (seam |> List.filter (isGuard >> not))
+        (seam |> List.filter (LawResult.isAdequacy >> not))
         @ LawKit.results [ bound ]
-        @ (seam |> List.filter isGuard)
+        @ (seam |> List.filter LawResult.isAdequacy)

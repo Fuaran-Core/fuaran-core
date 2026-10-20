@@ -443,10 +443,12 @@ module EncodingProfileVectors =
             cell.Result
 
         VectorFamily.lawsWith [ shared; format.Result ] table
+        |> LawKit.labelAs "EncodingProfileVectors.lawsWith"
 
     /// The family as `LawResult`s, on the `StringEscapeVectors.laws` precedent — `lawsWith vectors
     /// actorVectors`. The committed rendering is `conformance/encoding/encoding-profiles.json`.
-    let laws () : LawResult list = lawsWith vectors actorVectors
+    let laws () : LawResult list =
+        lawsWith vectors actorVectors |> LawKit.labelAs "EncodingProfileVectors.laws"
 
     /// The stored-codec family (Phase 379) — the one a content-addressed consumer runs against ITS
     /// OWN persisted corpus of canonical texts, `StoredIdentity`'s posture for a store written
@@ -554,9 +556,11 @@ module EncodingProfileVectors =
           recomputes.Result
           control.Result
           VectorKit.storeCell "stored codec: " "text" (List.length stored) ]
+        |> LawKit.labelAs "EncodingProfileVectors.storedCodecLawsAt"
 
     /// Forward — `storedCodecLawsAt` under the name it carried until Phase 507. Kept as a roster row
     /// under its own id until the next breaking cut.
     [<System.Obsolete("Use EncodingProfileVectors.storedCodecLawsAt — the same laws, spelled …At because the family takes the domain's codec (Phase 507); this forward goes at the next breaking cut.")>]
     let storedCodecLaws (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
         storedCodecLawsAt declared codec stored
+        |> LawKit.labelAs "EncodingProfileVectors.storedCodecLaws"

@@ -545,16 +545,16 @@ let checkpointLawTests =
               let results =
                   Conformance.checkpointLaws ConformanceTests.sw ConformanceTests.streamGen enc oneId 4242 50
 
-              let guardPrefix = SampleAdequacy.lawPrefix "Conformance.checkpointLaws"
+              let isGuard (r: LawResult) =
+                  r.Kind.IsGuard && r.Family = "Conformance.checkpointLaws"
 
               for r in results do
-                  if not (r.Law.StartsWith guardPrefix) then
+                  if not (isGuard r) then
                       Expect.isTrue
-                          (r.Passed
-                           || (defaultArg r.Counterexample "").StartsWith SampleAdequacy.neverReached)
+                          (r.Passed || LawResult.isNeverReached r)
                           (sprintf "no law is refuted, only untested: %s %A" r.Law r.Counterexample)
 
-              let guard = results |> List.find (fun r -> r.Law.StartsWith guardPrefix)
+              let guard = results |> List.find isGuard
               Expect.isFalse guard.Passed "the DAG-shape guard is red"
 
               Expect.stringContains

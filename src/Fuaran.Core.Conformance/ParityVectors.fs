@@ -1220,8 +1220,11 @@ let lawsWith (rows: (string * string) list) : LawResult list =
             sprintf "lines rendered %d lines for %d rows, or a line not of the VEC shape" rendered.Length rows.Length
     )
 
-    LawKit.results [ ascii; labels; sanitiser; format; corpus ]
+    LawKit.results [ ascii; labels; sanitiser; format ]
+    @ [ VectorKit.corpusResult corpus ]
+    |> LawKit.labelAs "ParityVectors.lawsWith"
 
 /// The whole table as `LawResult`s — `lawsWith` over the named table, the hash sweep and the
 /// sanitiser sweep, the rows `lines ()` renders. A fixed table: every run evaluates every row.
-let laws () : LawResult list = lawsWith family.Corpus
+let laws () : LawResult list =
+    lawsWith family.Corpus |> LawKit.labelAs "ParityVectors.laws"

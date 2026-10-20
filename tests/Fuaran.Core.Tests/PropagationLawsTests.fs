@@ -49,7 +49,7 @@ let propagationEvaluatorLawTests =
 
               let adequacy =
                   Conformance.propagationEvaluatorLawsAt sheetw 2110 200
-                  |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
+                  |> List.filter (fun r -> LawResult.isAdequacy r)
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
               Expect.isTrue (List.head adequacy).Passed "the formula sheet reaches every arm"
@@ -155,7 +155,7 @@ let propagationEvaluatorLawTests =
                               | ok -> ok }
 
               let results = Conformance.propagationEvaluatorLawsAt neverFails 2110 200
-              let adequacy = evaluatorLaw "sample adequacy" results
+              let adequacy = (results |> List.find LawResult.isAdequacy)
               Expect.isFalse adequacy.Passed "an arm nothing reached must be reported"
 
               let why = adequacy.Counterexample |> Option.defaultValue ""
@@ -223,8 +223,7 @@ let removalHonestyTests =
               let results = Conformance.propagationEvaluatorLawsAt (removing true) 2110 200
 
               let red =
-                  results
-                  |> List.filter (fun r -> not r.Passed && not (r.Law.StartsWith SampleAdequacy.guardOpening))
+                  results |> List.filter (fun r -> not r.Passed && not (LawResult.isAdequacy r))
 
               Expect.isEmpty red (sprintf "%A" red)
 
@@ -232,6 +231,6 @@ let removalHonestyTests =
 
               let redWith =
                   Conformance.propagationPriorLawsAt (removing true) withPrior 2110 200
-                  |> List.filter (fun r -> not r.Passed && not (r.Law.StartsWith SampleAdequacy.guardOpening))
+                  |> List.filter (fun r -> not r.Passed && not (LawResult.isAdequacy r))
 
               Expect.isEmpty redWith (sprintf "%A" redWith) ]

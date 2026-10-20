@@ -174,9 +174,7 @@ let reconcileShapeTests =
 
               let results = FoldConfluence.laneFoldLawsAt w blind string gen 2 11 5
 
-              for r in
-                  results
-                  |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening)) do
+              for r in results |> List.filter (fun r -> not (LawResult.isAdequacy r)) do
                   Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
 
           testCase "reconcileMany names the rejecting lane set, sorted by head, whatever the head order"

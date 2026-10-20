@@ -541,6 +541,7 @@ outcomes:
                 [ "rejected", rejected
                   "duplicate-head", duplicateHeads
                   "fast-forward", fastForwards ] ]
+        |> LawKit.label runner
 
     /// The fold-confluence laws (Phase 100) at a DOMAIN'S witness and lane generator, chained with
     /// `OpStream.defaultHash` — the shape a domain runs. `laneFoldLawsWith` is this family with the

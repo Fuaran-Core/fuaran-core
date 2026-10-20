@@ -179,8 +179,7 @@ let integrityLawTests =
               let results =
                   Conformance.attestationLawsAt sw streamGen OpStream.noAttestation OpStream.defaultHash 4242 200
 
-              let guardOf (r: LawResult) =
-                  r.Law.StartsWith SampleAdequacy.guardOpening
+              let guardOf (r: LawResult) = LawResult.isAdequacy r
 
               Expect.isTrue
                   (results |> List.filter (guardOf >> not) |> List.forall _.Passed)

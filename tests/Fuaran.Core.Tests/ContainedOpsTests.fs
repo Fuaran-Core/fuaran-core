@@ -287,7 +287,7 @@ let containerLawTests =
               // leaves the witness-taking ones to their own suite. This is that suite.
               let adequacy =
                   Conformance.containerLaws nodew idw containerGen 1610 40
-                  |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
+                  |> List.filter (fun r -> LawResult.isAdequacy r)
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
 
@@ -343,7 +343,7 @@ let containerLawTests =
                       1610
                       200
 
-              let adequacy = results |> List.find (fun r -> r.Law.StartsWith "sample adequacy")
+              let adequacy = results |> List.find (fun r -> LawResult.isAdequacy r)
               Expect.isFalse adequacy.Passed "an arm nothing reached must be reported"
 
               Expect.stringContains

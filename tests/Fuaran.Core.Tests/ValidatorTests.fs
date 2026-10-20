@@ -310,13 +310,17 @@ let tests =
 
                   // The clean stratum can also be EMPTY (every drawn cell null, and nulls dropped), so
                   // the int cell may be missed beside it; the decimal one always is.
-                  let cx = (List.last results).Counterexample |> Option.defaultValue ""
-                  let missed = cx.Substring(max 0 (cx.IndexOf "never reached"))
+                  let columnType = List.last results
+
+                  Expect.contains
+                      columnType.Reached
+                      ("decimal cell", 0)
+                      (sprintf "seed %d: the column-type guard counts the decimal cell it missed" seed)
 
                   Expect.stringContains
-                      missed
+                      (defaultArg columnType.Counterexample "")
                       "decimal cell"
-                      (sprintf "seed %d: the column-type guard names the decimal cell it missed" seed)
+                      (sprintf "seed %d: and names it" seed)
 
           testCase "Phase 276 — twelve iterations reach both column types and every stratum of each, all green"
           <| fun _ ->

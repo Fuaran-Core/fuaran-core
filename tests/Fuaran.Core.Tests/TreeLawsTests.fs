@@ -206,7 +206,7 @@ let keyedChildrenLawTests =
 
               let adequacy =
                   Conformance.keyedChildrenLawsAt keyw knodew idw kGen 1890 200
-                  |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
+                  |> List.filter (fun r -> LawResult.isAdequacy r)
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
               Expect.isTrue (List.head adequacy).Passed "the reference witness reaches every arm"
@@ -272,7 +272,9 @@ let keyedChildrenLawTests =
 
               Expect.equal (List.length results) 4 "the report keeps its shape whatever the witness declares"
 
-              let adequacy = lawNamed "sample adequacy" results
+              let adequacy = (results |> List.find LawResult.isAdequacy)
+
+              Expect.equal adequacy.Kind (LawKind.Declared "keyed position") "the adequacy line is a declared vacuity"
 
               Expect.stringContains
                   adequacy.Law
@@ -294,7 +296,7 @@ let keyedChildrenLawTests =
                       1890
                       200
 
-              let adequacy = lawNamed "sample adequacy" results
+              let adequacy = (results |> List.find LawResult.isAdequacy)
               Expect.isFalse adequacy.Passed "an arm nothing could reach must be reported"
 
               Expect.stringContains

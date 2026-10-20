@@ -327,11 +327,23 @@ module internal ConcurrencyLaws =
 
         let dimension =
             if noSlots then
-                "script-pair independence (the footprint declares NO slot access, so the slot arms are vacuous BY DECLARATION)"
+                "script-pair independence"
             else
                 "script-pair independence and slot granularity"
 
+        // Phase 515 — a footprint with no slot access declares the slot arms vacuous as a `Declared`
+        // result, not as prose on the guard's dimension.
+        let declaredSlots =
+            if noSlots then
+                [ LawKit.declared
+                      runner
+                      "slot access"
+                      "the footprint declares NO slot access, so the slot arms are vacuous BY DECLARATION" ]
+            else
+                []
+
         LawKit.results [ soundness; determinism; slotNamed ]
+        @ declaredSlots
         @ [ LawKit.guardBeside
                 runner
                 dimension
@@ -372,13 +384,13 @@ module internal ConcurrencyLaws =
         let soundness =
             LawKit.LawCell(
                 "base-aware footprint soundness at the domain's ops (a pair Dag.conflictsIn reports clean commutes under the domain's Apply from the state it was read at)",
-                Some "script-pair independence"
+                Some "script-pair independence and base-aware precision"
             )
 
         let refinement =
             LawKit.LawCell(
                 "base-aware footprint refinement (a pair the pure projection calls independent, the base-aware one calls independent)",
-                Some "script-pair independence"
+                Some "script-pair independence and base-aware precision"
             )
 
         let determinism =

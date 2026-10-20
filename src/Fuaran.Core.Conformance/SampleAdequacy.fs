@@ -50,27 +50,36 @@ module SampleAdequacy =
     let private renderCounts (counts: (string * int) list) : string =
         counts |> List.map (fun (v, n) -> v + "=" + string n) |> String.concat " "
 
-    /// The opening of every law THIS module emits, and the one structural mark that separates a
-    /// guard's own verdict from a family's subject laws. Phase 196 reads it back rather than
-    /// parsing law prose: the guard writes the opening, so the guard can recognise it.
-    ///
-    /// The recognition is on the OPENING and not on the whole `sample adequacy (<family>): `
-    /// prefix, because a delegating family emits its delegate's name — `snapshotLaws` runs
-    /// `snapshotLawsWith`, as the compute repository's columnar and incremental families run theirs —
-    /// and that guard is still the caller's own verdict, which is exactly what the census's "(delegates
-    /// to …)" rows already say. Keying on the name would read those as subject laws and lose the
-    /// starvation they report.
-    [<Literal>]
-    let guardOpening = "sample adequacy ("
-
-    /// The full opening one family's own guard laws carry.
-    let lawPrefix (family: string) : string = guardOpening + family + "): "
+    /// The opening every guard law this module emits carries: `sample adequacy (<family>): `. A
+    /// spelling for a reader since Phase 515, never a mark: a guard's kind is its `Kind`, and nothing
+    /// in the kit reads this back.
+    let lawPrefix (family: string) : string = "sample adequacy (" + family + "): "
 
     /// The standing remedy, in the words Phase 106 had to learn: a coverage guard is satisfied by
     /// one trial in three hundred, so turning it green by re-seeding or by iterating harder leaves
     /// the law certified by that one trial.
+    let internal widenTheGenerator =
+        "WIDEN THE GENERATOR (raising the iteration count, or hunting a seed until the count turns positive, leaves the law certified by one trial)"
+
+    /// A guard's remedy: the shortfall, then `widenTheGenerator`.
     let private remedy =
-        " — the law that reads it was never tested; WIDEN THE GENERATOR (raising the iteration count, or hunting a seed until the count turns positive, leaves the law certified by one trial)"
+        " — the law that reads it was never tested; " + widenTheGenerator
+
+    /// The statement of a coverage guard over `dimension` — one spelling for `reached`,
+    /// `reachedBeside` and `reachedFraction`, so a guard does not change its name by counting more.
+    let private reachedLaw (family: string) (dimension: string) : string =
+        lawPrefix family
+        + "the sample reached every "
+        + dimension
+        + " the laws distinguish"
+
+    /// A coverage guard handed no verdicts demands nothing, which is red rather than vacuously green.
+    let private declaredNothing (seed: int) (dimension: string) : string =
+        "seed="
+        + string seed
+        + ": "
+        + dimension
+        + " declared no verdicts, so it demands nothing"
 
     /// `reached`, with a second set of counts the family KEEPS but does not DEMAND rendered beside
     /// the demanded ones — Phase 245. An outcome the laws tolerate without being about it (a lane
@@ -93,36 +102,28 @@ module SampleAdequacy =
             else
                 " (counted beside them, not demanded: " + renderCounts beside + ")"
 
-        { Law =
-            lawPrefix family
-            + "the sample reached every "
-            + dimension
-            + " the laws distinguish"
-          Passed = not (List.isEmpty counts) && List.isEmpty missed
-          Counterexample =
-            if List.isEmpty counts then
-                Some(
-                    "seed="
-                    + string seed
-                    + ": "
-                    + dimension
-                    + " declared no verdicts, so it demands nothing"
-                )
-            elif List.isEmpty missed then
-                None
-            else
-                Some(
-                    "seed="
-                    + string seed
-                    + ": "
-                    + dimension
-                    + " reached "
-                    + renderCounts counts
-                    + besideText
-                    + " — never reached "
-                    + String.concat ", " missed
-                    + remedy
-                ) }
+        LawResult.guard
+            family
+            dimension
+            (reachedLaw family dimension)
+            (counts @ beside)
+            (if List.isEmpty counts then
+                 Some(declaredNothing seed dimension)
+             elif List.isEmpty missed then
+                 None
+             else
+                 Some(
+                     "seed="
+                     + string seed
+                     + ": "
+                     + dimension
+                     + " reached "
+                     + renderCounts counts
+                     + besideText
+                     + " — never reached "
+                     + String.concat ", " missed
+                     + remedy
+                 ))
 
     /// `reached`, with every count also held to a FRACTION of the attempts it was drawn out of —
     /// Phase 302. A count that is positive is not evidence the arm is well covered: an arm built
@@ -149,35 +150,27 @@ module SampleAdequacy =
             + string oneIn
             + ")"
 
-        { Law =
-            lawPrefix family
-            + "the sample reached every "
-            + dimension
-            + " the laws distinguish"
-          Passed = not (List.isEmpty counts) && List.isEmpty missed
-          Counterexample =
-            if List.isEmpty counts then
-                Some(
-                    "seed="
-                    + string seed
-                    + ": "
-                    + dimension
-                    + " declared no verdicts, so it demands nothing"
-                )
-            elif List.isEmpty missed then
-                None
-            else
-                Some(
-                    "seed="
-                    + string seed
-                    + ": "
-                    + dimension
-                    + " reached "
-                    + (counts |> List.map render |> String.concat " ")
-                    + " — too rarely: "
-                    + (missed |> List.map (fun (v, _, _, _) -> v) |> String.concat ", ")
-                    + remedy
-                ) }
+        LawResult.guard
+            family
+            dimension
+            (reachedLaw family dimension)
+            (counts |> List.map (fun (v, n, _, _) -> v, n))
+            (if List.isEmpty counts then
+                 Some(declaredNothing seed dimension)
+             elif List.isEmpty missed then
+                 None
+             else
+                 Some(
+                     "seed="
+                     + string seed
+                     + ": "
+                     + dimension
+                     + " reached "
+                     + (counts |> List.map render |> String.concat " ")
+                     + " — too rarely: "
+                     + (missed |> List.map (fun (v, _, _, _) -> v) |> String.concat ", ")
+                     + remedy
+                 ))
 
     /// A verdict-coverage law over counts the family already keeps. Fails when any declared verdict
     /// was reached zero times — and when the family declared NO verdicts at all, which is a demand
@@ -187,15 +180,15 @@ module SampleAdequacy =
 
     /// A span law over a measure the family already keeps: the widest sample must reach `atLeast`.
     let spanned (family: string) (measure: string) (atLeast: int) (seed: int) (widest: int) (n: int) : LawResult =
-        { Law =
+        let law =
             lawPrefix family
             + "the sample spans the "
             + measure
             + " range the laws need (at least "
             + string atLeast
             + ")"
-          Passed = widest >= atLeast
-          Counterexample =
+
+        let shortfall =
             if widest >= atLeast then
                 None
             else
@@ -211,7 +204,11 @@ module SampleAdequacy =
                     + ", and the law needs at least "
                     + string atLeast
                     + remedy
-                ) }
+                )
+
+        // The span guard's reach is the widest measure; its evidence is the samples it measured.
+        { LawResult.guard family measure law [ measure, widest ] shortfall with
+            Evidence = max 0 n }
 
     /// Run a family's declared demands over its sample. One `LawResult` per demand, in declaration
     /// order, carrying the COUNTS — a vacuous family fails saying what it did reach, which is what
@@ -252,11 +249,6 @@ module SampleAdequacy =
     //  nothing in a family's signature changes, which is what makes the column additive for every
     //  consumer already pinned to this kit.
 
-    /// A plain prefix test, spelled out rather than taken from `String.StartsWith` so it behaves
-    /// identically under Fable and under .NET with no culture in the argument list.
-    let private hasPrefix (p: string) (s: string) : bool =
-        s.Length >= p.Length && s.Substring(0, p.Length) = p
-
     /// What a census cell reads when the count is zero, or when a guarded dimension was starved.
     /// One spelling, exported, because a consumer's census and the registry that grades it must
     /// agree on the word without either of them inventing it.
@@ -266,8 +258,9 @@ module SampleAdequacy =
     /// The opening of the counterexample a law carries when it asserted NOTHING in its run — the
     /// runner's non-degeneracy rule (Phase 302, carried by Phase 297's `LawCell`): a law asserted
     /// only inside an arm no guard counts, and never reached, reds ITSELF rather than reporting a
-    /// green it never earned. `cases` reads it back as starvation, whatever the family's class,
-    /// because a subject law that was never asserted is vacuity on the side that law is about.
+    /// green it never earned. `cases` counts that verdict as starvation, whatever the family's class,
+    /// because a subject law that was never asserted is vacuity on the side that law is about — read
+    /// off the result (`LawResult.isNeverReached`) since Phase 515, never off this text.
     [<Literal>]
     let neverReached = "never reached"
 
@@ -279,30 +272,13 @@ module SampleAdequacy =
     /// caller knows which). The family's own `AdequacyClass` decides how the two are read, which
     /// is what "built on the census, not beside it" means here: a class that changes changes this.
     let cases (family: string) (klass: AdequacyClass) (iterations: int) (results: LawResult list) : CaseCount =
-        let isGuard (r: LawResult) = hasPrefix guardOpening r.Law
-
-        /// The guard's sentence without the `sample adequacy (<family>): ` it opens with — a
-        /// census cell wants the dimension, not the sentence it failed in. The family name inside
-        /// the parentheses is whichever entry point actually ran (see `guardOpening`), so the cut
-        /// is at the closing `): ` rather than at a name this function assumes.
-        let dimension (law: string) =
-            let at = law.IndexOf "): "
-
-            if at < 0 then law else law.Substring(at + 3)
-
-        let subject = results |> List.filter (isGuard >> not)
+        let subject = results |> List.filter (LawResult.isAdequacy >> not)
 
         // Phase 297 — a subject law the runner reports NEVER REACHED is starved in its own right,
         // under either class: it is the one red a gated arm with no counting guard can show, and a
-        // census cell that rendered a number over it would claim cases the law never saw.
-        let unreached =
-            subject
-            |> List.filter (fun r ->
-                not r.Passed
-                && (match r.Counterexample with
-                    | Some cx -> hasPrefix neverReached cx
-                    | None -> false))
-            |> List.map _.Law
+        // census cell that rendered a number over it would claim cases the law never saw. Read off
+        // the result's kind and evidence since Phase 515, never off its counterexample's prose.
+        let unreached = subject |> List.filter LawResult.isNeverReached |> List.map _.Law
 
         let guardStarved =
             match klass with
@@ -311,14 +287,16 @@ module SampleAdequacy =
             // guard to starve: it is vacuous by running nothing at all, which `Cases` already says,
             // or by a law the runner reports never reached, which `unreached` above says.
             | Unconditional _ -> []
-            // A `Guarded` family's guard is the measurement. A red guard law names a dimension the
+            // A `Guarded` family's guard is the measurement. A red guard names a dimension the
             // sample never reached — vacuity on the side the law is about, which a total cannot
-            // show. The prefix is stripped because a census cell wants the dimension, not the
-            // sentence the guard failed in.
+            // show. The dimension is the guard's own `Kind`, and a delegate's guard (its `Family` the
+            // delegate's id) is still the caller's verdict, so the family is not consulted.
             | Guarded _ ->
                 results
-                |> List.filter (fun r -> isGuard r && not r.Passed)
-                |> List.map (fun r -> dimension r.Law)
+                |> List.choose (fun r ->
+                    match r.Kind with
+                    | LawKind.Guard dimension when not r.Passed -> Some dimension
+                    | _ -> None)
 
         let starved = guardStarved @ unreached
 

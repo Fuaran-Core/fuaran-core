@@ -226,9 +226,11 @@ module WireNullTolerance =
     /// Phase 508.
     let lawsWith (vs: Vector list) : LawResult list =
         VectorFamily.laws (VectorFamily.over vs family)
+        |> LawKit.labelAs "WireNullTolerance.lawsWith"
 
     /// The family over the committed corpus — `lawsWith vectors`.
-    let laws () : LawResult list = lawsWith vectors
+    let laws () : LawResult list =
+        lawsWith vectors |> LawKit.labelAs "WireNullTolerance.laws"
 
     /// The whole family as a single verdict — `Ok` or the first failing vector, named.
     let check () : Result<unit, string> = VectorFamily.check family

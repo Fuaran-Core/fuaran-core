@@ -677,16 +677,10 @@ let loneLeafGen: OpGen<RNode, string> =
       CanHold = Some(fun _ -> false) }
 
 let guardNamed (family: string) (side: string) (results: LawResult list) =
-    results
-    |> List.find (fun r ->
-        r.Law = SampleAdequacy.lawPrefix family
-                + "the sample reached every "
-                + side
-                + " the laws distinguish")
+    results |> List.find (fun r -> r.Family = family && r.Kind = LawKind.Guard side)
 
 let subjectOf (results: LawResult list) =
-    results
-    |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening))
+    results |> List.filter (LawResult.isAdequacy >> not)
 
 [<Tests>]
 let refusableFamilyTests =
@@ -727,9 +721,7 @@ let refusableFamilyTests =
 
               let redGuards =
                   report.Results
-                  |> List.filter (fun r ->
-                      not r.Passed
-                      && r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.opAlgebra"))
+                  |> List.filter (fun r -> not r.Passed && LawResult.isAdequacy r && r.Family = "Conformance.opAlgebra")
 
               Expect.isFalse report.AllPassed "a run that reached one side of apply no longer certifies"
               Expect.isNonEmpty redGuards "and the red line is opAlgebra's guard, naming the starved side" ]
@@ -755,8 +747,7 @@ let streamAdequacyFacadeTests =
               let redStreamGuards (report: ConformanceReport) =
                   report.Results
                   |> List.filter (fun r ->
-                      not r.Passed
-                      && r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.streamLaws"))
+                      not r.Passed && LawResult.isAdequacy r && r.Family = "Conformance.streamLaws")
 
               let streamOnly =
                   Conformance.certifyStream sw allRefusedGen OpStream.defaultHash 271 200

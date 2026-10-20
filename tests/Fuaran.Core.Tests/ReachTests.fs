@@ -455,12 +455,12 @@ let tests =
                   Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen oneId 4242 50
 
               for r in results do
-                  if not (r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.reachLaws")) then
+                  if not (r.Kind.IsGuard && r.Family = "Conformance.reachLaws") then
                       Expect.isTrue r.Passed (sprintf "no law is refuted, only untested: %s %A" r.Law r.Counterexample)
 
               let guard =
                   results
-                  |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.reachLaws"))
+                  |> List.find (fun r -> r.Kind.IsGuard && r.Family = "Conformance.reachLaws")
 
               Expect.isFalse guard.Passed "the DAG-shape guard is red"
 

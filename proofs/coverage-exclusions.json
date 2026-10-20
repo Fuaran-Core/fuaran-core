@@ -474,7 +474,6 @@
       "members": [
         "SampleAdequacy.cases",
         "SampleAdequacy.isVacuous",
-        "SampleAdequacy.lawPrefix",
         "SampleAdequacy.renderCases"
       ],
       "class": "measured-elsewhere",
@@ -484,11 +483,27 @@
     {
       "members": [
         "SampleAdequacy.check",
+        "SampleAdequacy.lawPrefix",
         "SampleAdequacy.reached",
         "SampleAdequacy.spanned"
       ],
       "class": "measured-elsewhere",
       "reason": "The kit's sample-adequacy machinery: it is how every gated family counts what it built, and its own tests (Phase 302's floor) stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SampleAdequacyTests.fs"
+    },
+    {
+      "members": [
+        "LawResult.declared",
+        "LawResult.fail",
+        "LawResult.guard",
+        "LawResult.isAdequacy",
+        "LawResult.isNeverReached",
+        "LawResult.pass",
+        "LawResult.subject",
+        "LawResult.withFamily"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The kit's verdict constructors and readers (Phase 515): every family builds its results through them and every census reads a result's kind, family, evidence and reach through them; the adequacy tests stand in, each reader shown red on the result it exists to name.",
       "standIn": "tests/Fuaran.Core.Tests/SampleAdequacyTests.fs"
     },
     {

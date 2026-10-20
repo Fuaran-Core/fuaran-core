@@ -516,11 +516,11 @@ let tests =
 
                     Expect.isEmpty (failed results) (sprintf "%A" (failed results))
 
-                    let guard =
-                        results
-                        |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.footprintLawsAt"))
+                    let declared =
+                        results |> List.find (fun r -> r.Kind = LawKind.Declared "slot access")
 
-                    Expect.stringContains guard.Law "vacuous BY DECLARATION" "the slot arms are declared vacuous"
+                    Expect.equal declared.Family "Conformance.footprintLawsAt" "labelled with the family"
+                    Expect.stringContains declared.Law "vacuous BY DECLARATION" "the slot arms are declared vacuous"
 
                 testCase
                     "teeth: a rewrite declared as a slot write is RED on soundness — the whole-node rule is load-bearing"
