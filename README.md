@@ -41,7 +41,7 @@ field freeze in [`STABILITY.md`](STABILITY.md) names the domains whose adoption 
 | **`Fuaran.Core.Validator`** | the rule-family framework over a node witness (defect/severity, registration, walker, `PackRule`, byte-parity `canonicalCodes`); + the `ColumnValidator` columnar rule family over a `Table` (`NotNull`/`OfType`/`InRange`/`Unique`, reusing the same defect model) | node witness (+ `Column`) |
 | **`Fuaran.Core.Observer`** | the runtime-verification seam: the `Observation` record, the pure `Input`→`Flag` derivation shape, the register/snapshot/derive/subscribe contract, and an in-memory engine. The runtime analogue of `Validator`; all flag content stays domain-side | nothing (FSharp.Core only) |
 | **`Fuaran.Core.Projection`** | the projection seam: a compact, id-keyed, round-trippable textual projection an AI reads instead of the wire JSON, plus scoped/windowed reads (whole / by-id / subtree / changed-since) | a domain `ProjectionWitness` |
-| **`Fuaran.Core.Propagation`** | change propagation over a reference DAG + tree-level dirty recomputation: the dependency map from a per-call `readsOf`, the dependency order + reference-cycle enumeration (Tarjan SCC, cycles as data), and the minimal dirty set from a value change or a structural `SkeletonOp` (and `changedForOp` (since `0.32.0`), the post-edit change set, and a part-granular dirty set over caller-named parts); + the incremental recompute driver (`eval` / `evalFrom` over a domain-supplied node evaluator, and `evalWith` (since `0.32.0`) / `evalFromWith` (since `0.32.0`), which hand a node its own prior value; and the pull, `neededFor` (since `0.33.0`) with `evalFor` (since `0.33.0`) / `evalForWith` (since `0.33.0`), which evaluate a target set and only what it reads; and `evalScoped` (since `0.39.0`, unreleased) / `evalScopedWith` (since `0.39.0`, unreleased), the one evaluator over a `Scope` — full, push or pull — of which those eight are spellings), whose agreement with full evaluation is a theorem under a stated evaluator contract ([`proofs/`](proofs/README.md), theorem 11). Owns no evaluator — staleness is a returned `Set` | node/id witness |
+| **`Fuaran.Core.Propagation`** | change propagation over a reference DAG + tree-level dirty recomputation: the dependency map from a per-call `readsOf`, the dependency order + reference-cycle enumeration (Tarjan SCC, cycles as data), and the minimal dirty set from a value change or a structural `SkeletonOp` (and `changedForOp` (since `0.32.0`), the post-edit change set, and a part-granular dirty set over caller-named parts); + the incremental recompute driver (`eval` / `evalFrom` over a domain-supplied node evaluator, and `evalWith` (since `0.32.0`) / `evalFromWith` (since `0.32.0`), which hand a node its own prior value; and the pull, `neededFor` (since `0.33.0`) with `evalFor` (since `0.33.0`) / `evalForWith` (since `0.33.0`), which evaluate a target set and only what it reads; and `evalScoped` (since `0.39.0`) / `evalScopedWith` (since `0.39.0`), the one evaluator over a `Scope` — full, push or pull — of which those eight are spellings), whose agreement with full evaluation is a theorem under a stated evaluator contract ([`proofs/`](proofs/README.md), theorem 11). Owns no evaluator — staleness is a returned `Set` | node/id witness |
 | **`Fuaran.Core.AiSurface`** | the AI-surface seam: read tools, the mutation-op emission catalogue (JSON schema per op kind), an NL→op pattern bank with a deterministic fast-path resolver, and a proposals/approval flow with agent-readable rejection guidance. Tool logic, pattern content and policy stay domain-side | a domain AI witness |
 | **`Fuaran.Core.Conformance`** | a property-based law kit a domain runs against its witness (apply totality, `canApply`≡`apply`, apply∘invert=identity, `verifyChain`, replay determinism, `captureReplayLaws`, `capabilityLaws`, `queryLaws`, `compositionLawsAt` (since `0.36.0`), `memoLawsAt` (since `0.36.0`), `registryLaws`, `aggregateNullSkipLaws` (since `0.32.0`), `columnarValidatorLaws`, `deferredLaws`, `capabilityPipelineLaws`, `FoldConfluence.laneFoldLawsAt` (since `0.36.0`); and at a domain's own seam, `capabilityLawsAt` (since `0.33.0`), `queryLawsAt` (since `0.33.0`), `capabilityPipelineLawsAt` (since `0.33.0`)). It references neither `DataFrame` nor `Column.Ops`; the families over them ship from `Fuaran.Core.DataFrame.Conformance`, in the compute repository | any witness + a generator |
 | **`Fuaran.Core.Idl`** | the interface-definition model: a typed description of a domain's node vocabulary (kinds, unions, enums, records, four-way optionality, a declarable node envelope, hosted slots), the schema-driven canonical encoder/decoder derived from it, a deterministic adversarial sampler, the canonical `idl.json` artifact projection, and the host-neutral sanitisation floor | a declared vocabulary (data) |
@@ -124,9 +124,9 @@ positions (`KeyedChildren` (since `0.33.0`)), an arity-preserving rebuild of the
 place one there (`PlaceKeyedChild` (since `0.30.0`)), and your own full-walk id check (`IdsUnique` (since `0.30.0`)). Then
 `Tree.traversal nodew keyw` (since `0.33.0`) is a witness every navigator (`tryFind`, `path`, `Index.build`,
 `updateNode`, …) reaches those nodes through; `Tree.idsKeyed` (since `0.33.0`) / `wellFormedKeyed` (since `0.33.0`) /
-`graftWellFormedKeyed` (since `0.33.0`) are the keyed walks; and the engine under `OpScope.keyed keyw canHold nodew idw` (since `0.39.0`, unreleased)
+`graftWellFormedKeyed` (since `0.33.0`) are the keyed walks; and the engine under `OpScope.keyed keyw canHold nodew idw` (since `0.39.0`)
 refuses a `DuplicateId` held in a keyed position on either side of an insert, and addresses nodes below one. Under
-`OpScope.plain` (since `0.39.0`, unreleased) or `OpScope.contained` (since `0.39.0`, unreleased) the engine is unchanged: it sees only `Children`, so a domain that uses them
+`OpScope.plain` (since `0.39.0`) or `OpScope.contained` (since `0.39.0`) the engine is unchanged: it sees only `Children`, so a domain that uses them
 still owes its own check over its own walk.
 
 **And certify the declaration rather than assuming it.** `Conformance.keyedApplyLawsAt` (since `0.36.0`) BUILDS the
@@ -185,11 +185,11 @@ whatever it was handed.** The order is an obligation on every caller: `verifyCha
 `Snapshots.compact mode s` (over `Snapshots.take mode s` (since `0.33.0`)) seeds the boundary at sequence zero with the
 `Genesis` of the stream's config, the value every chain walker starts from, so a compaction at zero
 verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). Under
-`StreamConfig.canonical` (since `0.39.0`, unreleased) it is the empty-genesis instantiation and emits the same bytes it always has.
+`StreamConfig.canonical` (since `0.39.0`) it is the empty-genesis instantiation and emits the same bytes it always has.
 
 ### The container capability — what a contained scope enforces, and the one thing it asks of you
 
-`OpScope.contained canHold nodew idw` (since `0.39.0`, unreleased) is the scope for a domain with leaves: `canHold` answers *can this
+`OpScope.contained canHold nodew idw` (since `0.39.0`) is the scope for a domain with leaves: `canHold` answers *can this
 node hold children at all*, and a node that cannot earns a typed `NotAContainer` instead of an
 op that silently does nothing. Containment **legality** — which kinds may parent which — stays
 yours; this is the coarse question only.
@@ -276,7 +276,7 @@ number — when the run certified nothing, naming the starved dimension; `unmeas
 separate state of a rendering handed no run at all. Every family reaches a non-zero, non-starved
 count here, which is what lets a host read a zero in its own census as a fact about its own
 witness rather than about the kit. The instance that proves it: `attestationLawsAt` (since `0.36.0`) at
-`Attestation.noAttestation` (since `0.39.0`, unreleased) reports its laws green over zero signed heads, and now says so.
+`Attestation.noAttestation` (since `0.39.0`) reports its laws green over zero signed heads, and now says so.
 
 ## Adopting a domain
 
