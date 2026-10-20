@@ -175,8 +175,9 @@ module Counter =
           Decode = decode }
 
 /// A DAG node a test builds from nodes it just appended cannot be refused (Phase 296: `Dag.append` /
-/// `Dag.merge` return `Result`); a refusal fails the test with the fault's own text.
-let built (r: Result<string * Dag.T<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
+/// `Dag.merge` return `Result`); a refusal fails the test with the fault's own text. The write's
+/// `Written` (Phase 529) is spelled back as the id and the DAG a fixture binds.
+let built (r: Result<Dag.Written<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
     match r with
-    | Ok v -> v
+    | Ok w -> w.Id, w.Dag
     | Error f -> failwith ("the DAG refused a node the test built: " + DagAppendFault.toString f)

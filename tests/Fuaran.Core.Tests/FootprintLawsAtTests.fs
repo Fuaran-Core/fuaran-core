@@ -308,13 +308,14 @@ let tests =
                     let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
                     let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
-                    let built (r: Result<string * Dag.T<_>, DagAppendFault>) =
+                    let built (r: Result<Dag.Written<_>, DagAppendFault>) =
                         match r with
-                        | Ok v -> v
+                        | Ok w -> w.Id, w.Dag
                         | Error e -> failtestf "append refused: %A" e
 
                     let b, d0 =
-                        Dag.append OpStream.defaultHash w (Human "base") baseOp "" Dag.empty |> built
+                        Dag.append (OpStream.canonical OpStream.defaultHash w) (Human "base") baseOp "" Dag.empty
+                        |> built
 
                     let hs, d =
                         lanes
@@ -325,7 +326,12 @@ let tests =
                                     ops
                                     |> List.fold
                                         (fun (h, dd) op ->
-                                            Dag.append OpStream.defaultHash w (Human("lane-" + string i)) op h dd
+                                            Dag.append
+                                                (OpStream.canonical OpStream.defaultHash w)
+                                                (Human("lane-" + string i))
+                                                op
+                                                h
+                                                dd
                                             |> built)
                                         (b, d)
 

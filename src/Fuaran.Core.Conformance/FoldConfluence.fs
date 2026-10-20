@@ -219,7 +219,8 @@ module FoldConfluence =
     /// `Human "base"` actor. One definition, so `laneDag` and the shaped draws of
     /// `laneFoldLawsWith` cannot build different bases.
     let private baseNode (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (baseOp: 'Op) : string * Dag.T<'Op> =
-        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> LawKit.dagBuilt
+        Dag.append (OpStream.canonical hashFn w) (Human "base") baseOp "" Dag.empty
+        |> LawKit.dagBuilt
 
     /// Chain each lane onto `parentOf i` under its own actor, returning the heads in lane order.
     let private chainLanes
@@ -238,7 +239,7 @@ module FoldConfluence =
                 let head, d' =
                     ops
                     |> List.fold
-                        (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> LawKit.dagBuilt)
+                        (fun (h, dd) op -> Dag.append (OpStream.canonical hashFn w) actor op h dd |> LawKit.dagBuilt)
                         (parentOf i hs, d)
 
                 hs @ [ head ], d')

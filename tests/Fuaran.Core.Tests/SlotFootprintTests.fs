@@ -110,12 +110,15 @@ let private forkDag (a: RecOp list) (b: RecOp list) =
         ops
         |> List.fold
             (fun (head, d) op ->
-                let id, d' = Dag.append h recordW (Human actor) op head d |> Reference.built
+                let id, d' =
+                    Dag.append (OpStream.canonical h recordW) (Human actor) op head d
+                    |> Reference.built
+
                 id, d')
             (parent, d0)
 
     let baseId, d1 =
-        Dag.append h recordW (Human "base") (Rewrite("base", [])) "" Dag.empty
+        Dag.append (OpStream.canonical h recordW) (Human "base") (Rewrite("base", [])) "" Dag.empty
         |> Reference.built
 
     let headA, d2 = chain "lane-a" a baseId d1

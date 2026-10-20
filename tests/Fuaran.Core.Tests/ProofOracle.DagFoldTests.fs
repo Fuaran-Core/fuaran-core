@@ -570,7 +570,7 @@ let private mergedUnion
                 if h = acc then
                     acc, d
                 else
-                    Dag.merge OpStream.defaultHash w (Human "merge") mergeOp acc h d
+                    Dag.merge (OpStream.canonical OpStream.defaultHash w) (Human "merge") mergeOp acc h d
                     |> Reference.built)
             (h0, dag)
 
@@ -615,7 +615,8 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
               (String.concat "; " m) ],
         widest
     | Ok _, None -> [ sprintf "head %s: the model REFUSED a closure with no dangling parent" head ], widest
-    | Error e, _ -> [ sprintf "head %s: production reports a cyclic closure it cannot have: %s" head e ], widest
+    | Error e, _ ->
+        [ sprintf "head %s: production reports a cyclic closure it cannot have: %A" head e.Unplaced ], widest
 
 // ---------------------------------------------------------------------------
 //  Phase 309 — `Dag.tryReplayTo` beside the extracted `replay_to` (DagFold.fst section 16).
@@ -627,11 +628,25 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
 //  disagreement says which clause moved.
 // ---------------------------------------------------------------------------
 
-let private renderProductionReplay (hashState: 'State -> string) (r: Result<'State, Dag.ReplayFault<'Rej>>) : string =
+/// Production's one `Cyclic` answer (Phase 529) names every unplaced node of the replayed closure, where
+/// the model's `RCyclicHistory` names the head: a cyclic closure leaves its own head unplaced (a placed
+/// node's ancestors are all placed), so the bridge renders production's answer as the head exactly when
+/// the head is among the nodes it names, and as the whole set otherwise — which then disagrees.
+let private renderCyclic (head: string) (c: Dag.Cyclic) : string =
+    if List.contains head c.Unplaced then
+        "cyclic " + head
+    else
+        sprintf "cyclic without its head %s: %A" head c.Unplaced
+
+let private renderProductionReplay
+    (hashState: 'State -> string)
+    (head: string)
+    (r: Result<'State, Dag.ReplayFault<'Rej>>)
+    : string =
     match r with
     | Ok s -> "ok " + hashState s
     | Error(Dag.ReplayFault.UnknownHead h) -> "unknown-head " + h
-    | Error(Dag.ReplayFault.CyclicHistory h) -> "cyclic " + h
+    | Error(Dag.ReplayFault.Cyclic c) -> renderCyclic head c
     | Error(Dag.ReplayFault.Rejected(id, e)) -> sprintf "rejected %s %A" id e
 
 let private renderModelReplay
@@ -663,7 +678,7 @@ let private replayDisagreement
     (dag: Dag.T<'Op>)
     (head: string)
     : string option * string =
-    let p = renderProductionReplay hashState (Dag.tryReplayTo w state0 dag head)
+    let p = renderProductionReplay hashState head (Dag.tryReplayTo w state0 dag head)
     let m = renderModelReplay hashState (modelReplay w state0 (bridge dag) head)
     let arm = p.Split(' ')[0]
 
@@ -728,7 +743,9 @@ let private foldPullFold
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> Reference.built) (merged, d)
+                    |> List.fold
+                        (fun (h, dd) op -> Dag.append (OpStream.canonical hashFn w) actor op h dd |> Reference.built)
+                        (merged, d)
 
                 hs @ [ head ], d')
             ([], dagM)
@@ -887,10 +904,12 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
 
     let chain (actor: string) (ops: PlanOp list) (parent: string) (dag: Dag.T<PlanOp>) =
         ops
-        |> List.fold (fun (p, dd) op -> Dag.append h planW (Human actor) op p dd |> Reference.built) (parent, dag)
+        |> List.fold
+            (fun (p, dd) op -> Dag.append (OpStream.canonical h planW) (Human actor) op p dd |> Reference.built)
+            (parent, dag)
 
     let g, d0 =
-        Dag.append h planW (Human "base") planLaneGen.BaseOp "" Dag.empty
+        Dag.append (OpStream.canonical h planW) (Human "base") planLaneGen.BaseOp "" Dag.empty
         |> Reference.built
 
     let ha, d1 = chain "lane-a" a g d0
@@ -898,11 +917,11 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
     let hff, d3 = chain "lane-b" b ha d1
 
     let m1, d4 =
-        Dag.merge h planW (Human "merge-1") planLaneGen.BaseOp ha hb d2
+        Dag.merge (OpStream.canonical h planW) (Human "merge-1") planLaneGen.BaseOp ha hb d2
         |> Reference.built
 
     let m2, d5 =
-        Dag.merge h planW (Human "merge-2") planLaneGen.BaseOp ha hb d4
+        Dag.merge (OpStream.canonical h planW) (Human "merge-2") planLaneGen.BaseOp ha hb d4
         |> Reference.built
 
     let h1, d6 = chain "lane-a" c m1 d5
@@ -939,14 +958,25 @@ let private crissCross
 
     let chain (actor: string) (ops: 'Op list) (parent: string) (dag: Dag.T<'Op>) =
         ops
-        |> List.fold (fun (p, dd) op -> Dag.append h w (Human actor) op p dd |> Reference.built) (parent, dag)
+        |> List.fold
+            (fun (p, dd) op -> Dag.append (OpStream.canonical h w) (Human actor) op p dd |> Reference.built)
+            (parent, dag)
 
-    let g, d0 = Dag.append h w (Human "base") baseOp "" Dag.empty |> Reference.built
+    let g, d0 =
+        Dag.append (OpStream.canonical h w) (Human "base") baseOp "" Dag.empty
+        |> Reference.built
+
     let ha, d1 = chain "lane-a" a g d0
     let hb, d2 = chain "lane-b" b g d1
 
-    let m1, d3 = Dag.merge h w (Human "merge-1") baseOp ha hb d2 |> Reference.built
-    let m2, d4 = Dag.merge h w (Human "merge-2") baseOp hb ha d3 |> Reference.built
+    let m1, d3 =
+        Dag.merge (OpStream.canonical h w) (Human "merge-1") baseOp ha hb d2
+        |> Reference.built
+
+    let m2, d4 =
+        Dag.merge (OpStream.canonical h w) (Human "merge-2") baseOp hb ha d3
+        |> Reference.built
+
     let h1, d5 = chain "lane-c" c m1 d4
     let h2, d6 = chain "lane-d" d m2 d5
     h1, h2, d6
@@ -984,12 +1014,16 @@ let private modelHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (baseId: s
     |> List.sort
 
 /// `Dag.CheckpointFault` and the model's `ck_fault`, rendered alike.
-let private renderProductionFrom (hashState: 'State -> string) (r: Result<'State, Dag.CheckpointFault<'Rej>>) =
+let private renderProductionFrom
+    (hashState: 'State -> string)
+    (head: string)
+    (r: Result<'State, Dag.CheckpointFault<'Rej>>)
+    =
     match r with
     | Ok s -> "ok " + hashState s
     | Error(Dag.CheckpointFault.UnknownNode n) -> "unknown-node " + n
     | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.UnknownHead h)) -> "unknown-head " + h
-    | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.CyclicHistory h)) -> "cyclic " + h
+    | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Cyclic c)) -> renderCyclic head c
     | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected(id, e))) -> sprintf "rejected %s %A" id e
     | Error(Dag.CheckpointFault.Unreached h) -> "unreached " + h
     | Error(Dag.CheckpointFault.Uncovered n) -> "uncovered " + n
@@ -1032,7 +1066,7 @@ let private foldPullFoldSide
     match heads1, heads2 with
     | r1 :: _, r2 :: rest when r1 <> merged && r2 <> merged ->
         let side, dag' =
-            Dag.merge OpStream.defaultHash w (Human "side") baseOp r2 r1 dag
+            Dag.merge (OpStream.canonical OpStream.defaultHash w) (Human "side") baseOp r2 r1 dag
             |> Reference.built
 
         baseId, merged, heads1, side :: rest, dag'
@@ -1078,7 +1112,7 @@ let private checkpointDisagreements
                       sprintf "checkpointAt %s: production (%s, %s) model (%s, %s)" c pc.Node pc.Hash mc.cnode mc.cseal
 
               for t in targets |> List.distinct do
-                  let pr = renderProductionFrom hashState (Dag.replayFrom w pc dag t)
+                  let pr = renderProductionFrom hashState t (Dag.replayFrom w pc dag t)
 
                   let mr =
                       renderModelFrom hashState (modelReplayFrom w model (toModelCheckpoint pc) t)
@@ -1093,7 +1127,7 @@ let private checkpointDisagreements
                       tally.Unreached <- tally.Unreached + 1
 
               match Dag.compactAt h hashState w state0 dag c with
-              | Ok(cp, compacted) ->
+              | Ok { Checkpoint = cp; Dag = compacted } ->
                   let keep = compacted.Nodes |> Map.toList |> List.map fst
 
                   if not (DagFold.truncation_ok model fuel c keep) then
@@ -1115,8 +1149,8 @@ let private checkpointDisagreements
                       tally.Banded <- tally.Banded + 1
 
                   for t in keep do
-                      let full = renderProductionFrom hashState (Dag.replayFrom w cp dag t)
-                      let cut = renderProductionFrom hashState (Dag.replayFrom w cp compacted t)
+                      let full = renderProductionFrom hashState t (Dag.replayFrom w cp dag t)
+                      let cut = renderProductionFrom hashState t (Dag.replayFrom w cp compacted t)
 
                       let mcut =
                           renderModelFrom hashState (modelReplayFrom w truncated (toModelCheckpoint cp) t)
@@ -1136,7 +1170,7 @@ let private checkpointDisagreements
               | Error(Dag.CheckpointFault.Uncovered _) -> tally.CutRefused <- tally.CutRefused + 1
               | Error e -> yield sprintf "compactAt %s refused a checkpoint checkpointAt took: %A" c e
           | Error pe, DagFold.Error me ->
-              let pr = renderProductionFrom hashState (Error pe)
+              let pr = renderProductionFrom hashState c (Error pe)
               let mr = renderModelFrom hashState (DagFold.Error me)
 
               if pr <> mr then
@@ -1194,7 +1228,7 @@ let private ofFound (f: DagFold.found<string>) : string option =
     | DagFold.Found x -> Some x
     | DagFold.Missing -> None
 
-let private renderTopo (r: Result<string list, string>) : string =
+let private renderTopo (r: Result<string list, Dag.Cyclic>) : string =
     match r with
     | Ok l -> "ok " + String.concat "," l
     | Error _ -> "cyclic"
@@ -1289,7 +1323,7 @@ let private boundaryDisagreements
           let m = DagPrimitives.cut_keep ordLt model fuel c
 
           match Dag.compactAt OpStream.defaultHash hashState w state0 dag c, m with
-          | Ok(_, compacted), DagPrimitives.CutKeep k ->
+          | Ok { Dag = compacted }, DagPrimitives.CutKeep k ->
               let kept = compacted.Nodes |> Map.toList |> List.map fst |> Set.ofList
 
               if Set.ofList k <> kept then
@@ -1904,7 +1938,7 @@ let tests =
 
               match Dag.tryTopoOrder cyclic "d" with
               | Ok _ -> failtest "production must refuse a cyclic closure through tryTopoOrder"
-              | Error e -> Expect.stringContains e "cyclic history" "production names the cycle"
+              | Error e -> Expect.equal e.Unplaced [ "b"; "c"; "d" ] "production names every node of the cycle"
 
               // The model: the same short drain, from the same nodes.
               let ns = modelClosure cyclic "d"
@@ -2083,15 +2117,16 @@ let tests =
 
               // Production.
               let id1, d1 =
-                  Dag.append collide planW (Human "x") op1 "" Dag.empty |> Reference.built
+                  Dag.append (OpStream.canonical collide planW) (Human "x") op1 "" Dag.empty
+                  |> Reference.built
 
-              match Dag.append collide planW (Human "x") op1 "" d1 with
-              | Ok(id, d) ->
+              match Dag.append (OpStream.canonical collide planW) (Human "x") op1 "" d1 with
+              | Ok { Id = id; Dag = d } ->
                   Expect.equal id id1 "the same node twice is one node"
                   Expect.equal d.Nodes.Count 1 "and the DAG is unchanged"
               | Error f -> failtestf "production refused an identical node: %A" f
 
-              match Dag.append collide planW (Human "x") op2 "" d1 with
+              match Dag.append (OpStream.canonical collide planW) (Human "x") op2 "" d1 with
               | Error(DagAppendFault.ContentIdCollision id) -> Expect.equal id id1 "production names the colliding id"
               | other -> failtestf "production must refuse a differing node minting a held id: %A" other
 
@@ -2563,7 +2598,7 @@ let tests =
                               DagFold.cnode = baseId }
 
                       for t in heads2 do
-                          let p = renderProductionFrom planHash (Dag.replayFrom planW cp dag t)
+                          let p = renderProductionFrom planHash t (Dag.replayFrom planW cp dag t)
                           let m = renderModelFrom planHash (modelReplayFrom planW model moved t)
 
                           if p <> m then

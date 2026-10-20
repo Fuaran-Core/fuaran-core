@@ -447,7 +447,10 @@ let tests =
           testCase "the DAG folds the canonical spelling into a node's content id, and its JSONL round-trips"
           <| fun _ ->
               let actor = Agent("m\n", "1\t", "id\r")
-              let id, dag = Dag.append h sw actor (Note "x") "" Dag.empty |> Reference.built
+
+              let id, dag =
+                  Dag.append (OpStream.canonical h sw) actor (Note "x") "" Dag.empty
+                  |> Reference.built
 
               Expect.equal
                   id
@@ -460,7 +463,10 @@ let tests =
               Expect.stringContains text "\\u000d" "the node line carries the canonical spelling"
               Expect.isFalse (text.Contains "\\r") "and never the short form"
 
-              match Dag.fromJsonlVerified h sw text |> Result.mapError Dag.loadFaultToString with
+              match
+                  Dag.fromJsonlVerified (OpStream.canonical h sw) text
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Ok back -> Expect.equal back dag "round-trip is exact and the DAG verifies"
               | Error e -> failtestf "Dag.fromJsonlVerified: %s" e
 

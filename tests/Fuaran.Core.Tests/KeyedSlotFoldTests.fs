@@ -83,12 +83,15 @@ let private forkDag (a: SkeletonOp<KNode, string> list) (b: SkeletonOp<KNode, st
         ops
         |> List.fold
             (fun (head, d) op ->
-                let id, d' = Dag.append h sw (Human actor) op head d |> Reference.built
+                let id, d' =
+                    Dag.append (OpStream.canonical h sw) (Human actor) op head d |> Reference.built
+
                 id, d')
             (parent, d0)
 
     let baseId, d1 =
-        Dag.append h sw (Human "base") (Batch []) "" Dag.empty |> Reference.built
+        Dag.append (OpStream.canonical h sw) (Human "base") (Batch []) "" Dag.empty
+        |> Reference.built
 
     let headA, d2 = chain "lane-a" a baseId d1
     let headB, dag = chain "lane-b" b baseId d2

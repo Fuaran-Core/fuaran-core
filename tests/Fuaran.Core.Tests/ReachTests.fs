@@ -16,11 +16,23 @@ let private nodeIds (ns: DagNode<'Op> list) = ns |> List.map _.Id
 
 /// genesis g; a and b fork off g; c extends a; m merges c and b.
 let private forkMerge () =
-    let g, d1 = Dag.append h sw (Human "x") (Inc 1) "" Dag.empty |> Reference.built
-    let a, d2 = Dag.append h sw (Human "x") (Inc 2) g d1 |> Reference.built
-    let b, d3 = Dag.append h sw (Human "x") (Inc 3) g d2 |> Reference.built
-    let c, d4 = Dag.append h sw (Human "x") (Inc 4) a d3 |> Reference.built
-    let m, d5 = Dag.merge h sw (Human "x") (Inc 5) c b d4 |> Reference.built
+    let g, d1 =
+        Dag.append (OpStream.canonical h sw) (Human "x") (Inc 1) "" Dag.empty
+        |> Reference.built
+
+    let a, d2 =
+        Dag.append (OpStream.canonical h sw) (Human "x") (Inc 2) g d1 |> Reference.built
+
+    let b, d3 =
+        Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) g d2 |> Reference.built
+
+    let c, d4 =
+        Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) a d3 |> Reference.built
+
+    let m, d5 =
+        Dag.merge (OpStream.canonical h sw) (Human "x") (Inc 5) c b d4
+        |> Reference.built
+
     g, a, b, c, m, d5
 
 /// Every answer of `reach` against the unindexed functions on `dag`, over `ids` and their pairs.
@@ -58,7 +70,11 @@ module Measure =
         let hash = OpStream.sha256Hash
         let rng = Random(seed)
         let actor (i: int) = Human("lane-" + string (i % lanes))
-        let g, d0 = Dag.append hash sw (actor 0) (Inc 1) "" Dag.empty |> Reference.built
+
+        let g, d0 =
+            Dag.append (OpStream.canonical hash sw) (actor 0) (Inc 1) "" Dag.empty
+            |> Reference.built
+
         let mutable reach = Dag.Reach.ofDag d0
         let heads = Array.create lanes g
         let mutable count = 1
@@ -67,7 +83,7 @@ module Measure =
 
         let take (r: Result<Dag.IndexedAppend<CounterOp>, DagAppendFault>) =
             match r with
-            | Ok x -> x.Id, x.Reach
+            | Ok x -> x.Written.Id, x.Reach
             | Error f -> failwith ("measurement DAG refused a node: " + DagAppendFault.toString f)
 
         while count < nodes do
@@ -77,14 +93,29 @@ module Measure =
                 let other = (lane + 1 + rng.Next(lanes - 1)) % lanes
 
                 let id, r' =
-                    take (Dag.mergeIndexed hash sw (actor lane) (Inc count) heads[lane] heads[other] reach)
+                    take (
+                        Dag.mergeIndexed
+                            (OpStream.canonical hash sw)
+                            (actor lane)
+                            (Inc count)
+                            heads[lane]
+                            heads[other]
+                            reach
+                    )
 
                 heads[lane] <- id
                 reach <- r'
                 mergesDone <- mergesDone + 1
             else
                 let id, r' =
-                    take (Dag.appendIndexed hash sw (actor lane) (Inc(1 + count % 7)) heads[lane] reach)
+                    take (
+                        Dag.appendIndexed
+                            (OpStream.canonical hash sw)
+                            (actor lane)
+                            (Inc(1 + count % 7))
+                            heads[lane]
+                            reach
+                    )
 
                 heads[lane] <- id
                 reach <- r'
@@ -169,10 +200,10 @@ module Measure =
                 let mutable parent = tail
 
                 for i in 1..k do
-                    match Dag.appendIndexed h sw (Human "ext") (Inc i) parent r with
+                    match Dag.appendIndexed (OpStream.canonical h sw) (Human "ext") (Inc i) parent r with
                     | Ok x ->
                         r <- x.Reach
-                        parent <- x.Id
+                        parent <- x.Written.Id
                     | Error _ -> ()
 
                 s.Elapsed.TotalMilliseconds * 1000.0 / float k
@@ -183,8 +214,8 @@ module Measure =
                 let mutable parent = tail
 
                 for i in 1..k do
-                    match Dag.append h sw (Human "ext") (Inc i) parent d with
-                    | Ok(id, d') ->
+                    match Dag.append (OpStream.canonical h sw) (Human "ext") (Inc i) parent d with
+                    | Ok { Id = id; Dag = d' } ->
                         Dag.Reach.ofDag d' |> ignore
                         d <- d'
                         parent <- id
@@ -304,23 +335,23 @@ let tests =
               let step (f: Dag.Reach<CounterOp> -> Result<Dag.IndexedAppend<CounterOp>, DagAppendFault>) =
                   match f reach.Value with
                   | Ok x ->
-                      Expect.isTrue (Dag.Reach.dag x.Reach = x.Dag) "the extended index carries the new DAG"
+                      Expect.isTrue (Dag.Reach.dag x.Reach = x.Written.Dag) "the extended index carries the new DAG"
                       reach.Value <- x.Reach
-                      ids.Value <- ids.Value @ [ x.Id ]
-                      x.Id
+                      ids.Value <- ids.Value @ [ x.Written.Id ]
+                      x.Written.Id
                   | Error f -> failwith (DagAppendFault.toString f)
 
               // ids drawn from FNV over these ops land in no particular order, so a new leaf enters
               // the drain both before and after older lanes
-              let g = step (Dag.appendIndexed h sw (Human "x") (Inc 1) "")
-              let a = step (Dag.appendIndexed h sw (Human "x") (Inc 2) g)
-              let b = step (Dag.appendIndexed h sw (Human "x") (Inc 3) g)
-              let c = step (Dag.appendIndexed h sw (Human "y") (Inc 4) g)
-              let r2 = step (Dag.appendIndexed h sw (Human "z") (Inc 9) "")
-              let m = step (Dag.mergeIndexed h sw (Human "x") (Inc 5) a b)
-              let n = step (Dag.mergeIndexed h sw (Human "x") (Inc 6) m c)
-              let _ = step (Dag.mergeIndexed h sw (Human "x") (Inc 7) n r2)
-              let _ = step (Dag.appendIndexed h sw (Human "x") (Inc 8) a)
+              let g = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 1) "")
+              let a = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 2) g)
+              let b = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 3) g)
+              let c = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "y") (Inc 4) g)
+              let r2 = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "z") (Inc 9) "")
+              let m = step (Dag.mergeIndexed (OpStream.canonical h sw) (Human "x") (Inc 5) a b)
+              let n = step (Dag.mergeIndexed (OpStream.canonical h sw) (Human "x") (Inc 6) m c)
+              let _ = step (Dag.mergeIndexed (OpStream.canonical h sw) (Human "x") (Inc 7) n r2)
+              let _ = step (Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 8) a)
               let final = reach.Value
               let dag = Dag.Reach.dag final
               let ids' = ids.Value @ [ "absent" ]
@@ -338,10 +369,10 @@ let tests =
               let g, a, _, _, _, dag = forkMerge ()
               let reach = Dag.Reach.ofDag dag
 
-              match Dag.appendIndexed h sw (Human "x") (Inc 2) g reach with
+              match Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 2) g reach with
               | Ok x ->
-                  Expect.equal x.Id a "the same node"
-                  Expect.isTrue (x.Dag = dag) "the DAG is unchanged"
+                  Expect.equal x.Written.Id a "the same node"
+                  Expect.isTrue (x.Written.Dag = dag) "the DAG is unchanged"
                   agrees dag x.Reach (Map.toList dag.Nodes |> List.map fst)
               | Error f -> failwith (DagAppendFault.toString f)
 
@@ -351,14 +382,14 @@ let tests =
               let reach = Dag.Reach.ofDag dag
 
               let refused =
-                  match Dag.appendIndexed h sw (Human "x") (Inc 1) "nope" reach with
+                  match Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 1) "nope" reach with
                   | Error f -> Some f
                   | Ok _ -> None
 
               Expect.equal refused (Some(DagAppendFault.UnknownParent "nope")) "an unknown parent"
 
               let refusedMerge =
-                  match Dag.mergeIndexed h sw (Human "x") (Inc 1) "" m reach with
+                  match Dag.mergeIndexed (OpStream.canonical h sw) (Human "x") (Inc 1) "" m reach with
                   | Error f -> Some f
                   | Ok _ -> None
 
@@ -386,20 +417,25 @@ let tests =
 
               Expect.isError (Dag.Reach.tryTopoOrder reach "cz") "a cyclic history is still an error"
 
-              Expect.equal
-                  (Dag.tryReplayToWith sw 0 reach "cz")
-                  (Error(Dag.ReplayFault.CyclicHistory "cz"))
-                  "and still refused by the replay"
+              match Dag.tryTopoOrder forged "cz" with
+              | Error cyclic ->
+                  Expect.contains cyclic.Unplaced "cz" "the cycle's own nodes are named"
+
+                  Expect.equal
+                      (Dag.tryReplayToWith sw 0 reach "cz")
+                      (Error(Dag.ReplayFault.Cyclic cyclic))
+                      "and still refused by the replay, naming the same nodes"
+              | Ok _ -> failtest "the forged closure drained"
 
               // a node minted under the dangling id makes "cd" a non-root: the index rebuilds
               let minted: HashFn = fun _ _ -> "missing"
 
-              match Dag.appendIndexed minted sw (Human "x") (Inc 3) m reach with
-              | Ok x -> agrees x.Dag x.Reach (ids @ [ "cd" ])
+              match Dag.appendIndexed (OpStream.canonical minted sw) (Human "x") (Inc 3) m reach with
+              | Ok x -> agrees x.Written.Dag x.Reach (ids @ [ "cd" ])
               | Error f -> failwith (DagAppendFault.toString f)
 
-              match Dag.appendIndexed h sw (Human "x") (Inc 3) "cz" reach with
-              | Ok x -> agrees x.Dag x.Reach (ids @ [ x.Id ])
+              match Dag.appendIndexed (OpStream.canonical h sw) (Human "x") (Inc 3) "cz" reach with
+              | Ok x -> agrees x.Written.Dag x.Reach (ids @ [ x.Written.Id ])
               | Error f -> failwith (DagAppendFault.toString f)
 
           testCase "reconcileManyWith answers as reconcileMany over every base and head set of a lane DAG"

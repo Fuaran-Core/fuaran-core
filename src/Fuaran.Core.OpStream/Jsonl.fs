@@ -66,6 +66,18 @@ type JsonlFaultReason =
     /// A raw surrogate code unit that is not half of a high-low pair (Phase 466) — at the unit.
     /// `path` as for `RawControl`. An unpaired surrogate ESCAPE is `InvalidEscape`, as it always was.
     | LoneSurrogate of path: string
+    /// A DAG checkpoint sidecar line (Phase 529; a `Refused` sentence before) whose `seq` is not `0`:
+    /// a checkpoint is the snapshot at sequence zero of the history that begins at its node. The four
+    /// checkpoint cases follow every earlier one, so each existing case keeps its tag.
+    | CheckpointNotAtSeqZero of seq: int
+    /// A DAG checkpoint sidecar line whose `prevHash` — the checkpoint's node — is empty (Phase 529).
+    | CheckpointWithoutNode
+    /// A DAG checkpoint sidecar line that is a chain-only snapshot (`"stateHashed":false`) (Phase 529):
+    /// a checkpoint's seal always binds its state.
+    | CheckpointChainOnly
+    /// A DAG checkpoint sidecar line that is not a snapshot line at all (`"snapshot":true` absent)
+    /// (Phase 529).
+    | NotACheckpoint
 
 /// One refused JSONL line (Phase 296): the 1-based `Line` number counted over EVERY line of the
 /// text (blank lines included, so it is the number an editor shows), the scanner's own 0-based
@@ -110,6 +122,12 @@ module JsonlFault =
         | JsonlFaultReason.RepeatedKey path -> "repeated key at " + path
         | JsonlFaultReason.RawControl path -> "unescaped control character in a string at " + path
         | JsonlFaultReason.LoneSurrogate path -> "unpaired surrogate in a string at " + path
+        | JsonlFaultReason.CheckpointNotAtSeqZero seq ->
+            sprintf "a checkpoint is the snapshot at seq 0; this line is at seq %d" seq
+        | JsonlFaultReason.CheckpointWithoutNode -> "a checkpoint names its node in prevHash, and this one is empty"
+        | JsonlFaultReason.CheckpointChainOnly -> "a checkpoint's seal binds its state; a chain-only line is not one"
+        | JsonlFaultReason.NotACheckpoint ->
+            "not a checkpoint line: a checkpoint is a snapshot line (\"snapshot\":true)"
 
     /// `line N: <reason> (position P)` — the `line N:` prefix every JSONL reader's `Error` string
     /// has carried since Phase 252, now 1-based over all lines.

@@ -738,7 +738,10 @@ module internal ConcurrencyLaws =
             let mutable d = d0
 
             for op in ops do
-                let id, d' = Dag.append hashFn sw (Human actor) op head d |> LawKit.dagBuilt
+                let id, d' =
+                    Dag.append (OpStream.canonical hashFn sw) (Human actor) op head d
+                    |> LawKit.dagBuilt
+
                 head <- id
                 d <- d'
 
@@ -772,7 +775,8 @@ module internal ConcurrencyLaws =
             // a genesis base node carrying the no-op (it is in the base closure, which the
             // partition excludes), then branch A forked off it under its own actor.
             let genesis, d1 =
-                Dag.append hashFn sw (Human "base") noOp "" Dag.empty |> LawKit.dagBuilt
+                Dag.append (OpStream.canonical hashFn sw) (Human "base") noOp "" Dag.empty
+                |> LawKit.dagBuilt
 
             let headA0, d2 = chain "lane-a" a genesis d1
 
@@ -820,10 +824,12 @@ module internal ConcurrencyLaws =
                     let headB0, d3 = chain "lane-b" b genesis d2
 
                     let m1, d4 =
-                        Dag.merge hashFn sw (Human "merge-1") noOp headA0 headB0 d3 |> LawKit.dagBuilt
+                        Dag.merge (OpStream.canonical hashFn sw) (Human "merge-1") noOp headA0 headB0 d3
+                        |> LawKit.dagBuilt
 
                     let m2, d5 =
-                        Dag.merge hashFn sw (Human "merge-2") noOp headA0 headB0 d4 |> LawKit.dagBuilt
+                        Dag.merge (OpStream.canonical hashFn sw) (Human "merge-2") noOp headA0 headB0 d4
+                        |> LawKit.dagBuilt
 
                     // Phase 302 — the lanes above the two merges are an independent pair where one
                     // can be drawn, so the criss-cross trial can fold clean and its shared-history
@@ -911,7 +917,8 @@ module internal ConcurrencyLaws =
                 else
                     // shared history once: the script from tryReplayTo(base) ≡ tryReplayTo(merge of the heads).
                     let m, dm =
-                        Dag.merge hashFn sw (Human "merge") noOp headA headB dag |> LawKit.dagBuilt
+                        Dag.merge (OpStream.canonical hashFn sw) (Human "merge") noOp headA headB dag
+                        |> LawKit.dagBuilt
 
                     // Both heads are nodes the kit just built, so the only fault left is the domain's.
                     let replayRej (h: string) =

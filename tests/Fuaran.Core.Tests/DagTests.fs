@@ -19,27 +19,48 @@ let tests =
         "Dag"
         [ testCase "a linear chain verifies and replays like the linear spine"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
               Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) d2) "intact DAG verifies"
               Expect.equal (Dag.tryReplayTo sw 0 d2 b) (Ok 8) "replay to b = 5 + 3"
               Expect.equal (Dag.heads d2) [ b ] "single head"
 
           testCase "appending onto a non-head node forks a branch"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
+
               Expect.equal (Dag.tryReplayTo sw 0 d3 b) (Ok 8) "branch b = 5 + 3"
               Expect.equal (Dag.tryReplayTo sw 0 d3 c) (Ok 9) "branch c = 5 + 4"
               Expect.equal (Dag.heads d3 |> List.length) 2 "two heads after the fork"
 
           testCase "merge converges both branches; replay is deterministic and order-symmetric"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built
-              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) a d2 |> Reference.built
+
+              let m, d4 =
+                  Dag.merge (OpStream.canonical h sw) (Human "x") (Inc 0) b c d3
+                  |> Reference.built
               // genesis(5) + branch b(3) + branch c(4) + merge(0) = 12
               Expect.equal (Dag.tryReplayTo sw 0 d4 m) (Ok 12) "merge replays both branches once"
               Expect.equal (Dag.tryReplayTo sw 0 d4 m) (Dag.tryReplayTo sw 0 d4 m) "replay is deterministic"
@@ -48,24 +69,40 @@ let tests =
               // the symmetric merge (c,b) converges to the SAME content id (Phase 64.1 —
               // parents are sorted before hashing, so merge identity is order-independent;
               // two hosts reconciling the same pair mint the same node).
-              let m2, d5 = Dag.merge h sw (Human "x") (Inc 0) c b d4 |> Reference.built
+              let m2, d5 =
+                  Dag.merge (OpStream.canonical h sw) (Human "x") (Inc 0) c b d4
+                  |> Reference.built
+
               Expect.equal m2 m "left/right order ⇒ the SAME content id (order-independent merge)"
               Expect.equal (Dag.tryReplayTo sw 0 d5 m2) (Dag.tryReplayTo sw 0 d4 m) "and the same converged state"
 
           testCase "identical histories converge to identical content ids"
           <| fun _ ->
-              let a1, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let a2, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let a1, _ =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let a2, _ =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
               Expect.equal a1 a2 "content addressing is deterministic"
 
               // a different op or actor ⇒ a different id
-              let a3, _ = Dag.append h sw (Human "x") (Inc 6) "" Dag.empty |> Reference.built
+              let a3, _ =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 6) "" Dag.empty
+                  |> Reference.built
+
               Expect.notEqual a1 a3 "different op ⇒ different id"
 
           testCase "verifyDag detects a tampered node"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let _, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
 
               let tampered = DagOf.nodes (d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 99 }))
 
@@ -75,10 +112,19 @@ let tests =
 
           testCase "a branch+merge DAG round-trips through JSONL"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built
-              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) a d2 |> Reference.built
+
+              let m, d4 =
+                  Dag.merge (OpStream.canonical h sw) (Human "x") (Inc 0) b c d3
+                  |> Reference.built
 
               match
                   Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4)
@@ -97,8 +143,13 @@ let tests =
 
           testCase "toJsonl is stable (id-sorted) for a fixed DAG"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let _, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
               Expect.equal (Dag.toJsonl sw.Encode d2) (Dag.toJsonl sw.Encode d2) "stable output"
 
           testCase "a malformed line is a named Error, not an exception"
@@ -170,28 +221,41 @@ let tests =
               | Ok dag -> failtestf "a kind-less actor must not decode, got %A" dag
 
               Expect.isError
-                  (Dag.fromJsonlVerified h sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}"))
+                  (Dag.fromJsonlVerified (OpStream.canonical h sw) (node "{\"kind\":\"service\",\"id\":\"svc-1\"}"))
                   "the verified reader refuses"
 
           // Phase 13 — verified load gates the structural decode on verifyDag.
           testCase "fromJsonlVerified accepts an intact DAG and rejects a dangling parent"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              Expect.equal (Dag.fromJsonlVerified h sw (Dag.toJsonl sw.Encode d2)) (Ok d2) "intact DAG verifies on load"
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              Expect.equal
+                  (Dag.fromJsonlVerified (OpStream.canonical h sw) (Dag.toJsonl sw.Encode d2))
+                  (Ok d2)
+                  "intact DAG verifies on load"
 
               // a genuinely dangling parent: serialize only b's line (b's id IS its real content
               // hash, so the missing-parent check trips — not content-id mismatch)
               let bLine =
                   (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
 
-              match Dag.fromJsonlVerified h sw bLine |> Result.mapError Dag.loadFaultToString with
+              match
+                  Dag.fromJsonlVerified (OpStream.canonical h sw) bLine
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e -> Expect.stringContains e "parent" "the load is gated on verifyDag (missing parent)"
               | Ok _ -> failtest "expected the dangling-parent DAG to be refused on load"
 
           testCase "fromJsonlVerified rejects a tampered node id"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
               // rewrite the stored id so it no longer matches the content hash
               let tampered =
                   DagOf.nodes (
@@ -202,30 +266,49 @@ let tests =
                   )
 
               Expect.isError
-                  (Dag.fromJsonlVerified h sw (Dag.toJsonl sw.Encode tampered))
+                  (Dag.fromJsonlVerified (OpStream.canonical h sw) (Dag.toJsonl sw.Encode tampered))
                   "a content-id mismatch is refused on load"
 
           // ---- merge-base / branch-delta (Phase 08) ----
 
           testCase "mergeBase finds the fork point of two branches"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
+
               Expect.equal (Dag.mergeBase d3 b c) (Some a) "the fork point a is the merge base"
               Expect.equal (Dag.ancestorsOf d3 a) (Set.ofList [ a ]) "a genesis closure is itself"
 
           testCase "mergeBase is None for disjoint histories"
           <| fun _ ->
-              let g1, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let g2, d2 = Dag.append h sw (Human "x") (Inc 7) "" d1 |> Reference.built // a second, unrelated genesis
+              let g1, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let g2, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 7) "" d1
+                  |> Reference.built // a second, unrelated genesis
+
               Expect.equal (Dag.mergeBase d2 g1 g2) None "no common ancestor"
 
           testCase "between returns the branch delta in topological order"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 |> Reference.built // linear a -> b -> c
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) b d2 |> Reference.built // linear a -> b -> c
 
               Expect.equal (Dag.between d3 a c |> List.map _.Id) [ b; c ] "nodes after a, up to c"
               Expect.equal (Dag.between d3 c c) [] "base == head ⇒ empty delta"
@@ -234,9 +317,15 @@ let tests =
           // Phase 26 — branch delta as an applyable op list.
           testCase "betweenOps projects the branch delta's ops in topological order"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 4) b d2 |> Reference.built
 
               Expect.equal (Dag.betweenOps d3 a c) [ Inc 3; Inc 4 ] "ops of the nodes between a and c"
               Expect.equal (Dag.betweenOps d3 c c) [] "base == head ⇒ no ops"
@@ -246,14 +335,23 @@ let tests =
           // Phase 21 — DAG break localisation.
           testCase "firstBreak is None for an intact DAG"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let _, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
               Expect.isNone (Dag.firstBreak (OpStream.canonical h sw) d2) "intact ⇒ no break"
 
           testCase "firstBreak localises a tampered node and a dangling parent"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let _, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
 
               // tamper a node's op without rewriting its id ⇒ content-id mismatch
               let tampered =
@@ -265,8 +363,14 @@ let tests =
 
               // a real node whose parent is dropped from the map: its id still matches its content
               // hash, so the *missing-parent* check (not content-id) is what trips
-              let ra, dra = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let _, drab = Dag.append h sw (Human "x") (Inc 3) ra dra |> Reference.built
+              let ra, dra =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let _, drab =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) ra dra
+                  |> Reference.built
+
               let orphaned = DagOf.nodes (drab.Nodes |> Map.remove ra)
 
               match Dag.firstBreak (OpStream.canonical h sw) orphaned with
@@ -283,13 +387,20 @@ let tests =
               // is typed now, but this error text is what a consumer outside this library matches,
               // and `DagBreakReason.toString` is the only thing keeping it what it was. An exact
               // comparison, not a substring: this case exists to go red if the wording ever moves.
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
 
               let bLine =
                   (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
 
-              match Dag.fromJsonlVerified h sw bLine |> Result.mapError Dag.loadFaultToString with
+              match
+                  Dag.fromJsonlVerified (OpStream.canonical h sw) bLine
+                  |> Result.mapError Dag.loadFaultToString
+              with
               | Error e ->
                   Expect.equal
                       e
@@ -363,17 +474,22 @@ let tests =
               Expect.isFalse (Dag.isAcyclic cyclic "a") "the closure is cyclic"
 
               match Dag.tryTopoOrder cyclic "a" with
-              | Error msg -> Expect.stringContains msg "cyclic" "names the cyclic history"
+              | Error c -> Expect.equal c.Unplaced [ "a"; "b" ] "names every node of the cyclic history"
               | Ok _ -> failtest "expected a cyclic-history error"
 
               match Dag.tryReplayTo sw 0 cyclic "a" with
-              | Error(Dag.ReplayFault.CyclicHistory "a") -> ()
-              | other -> failtestf "expected CyclicHistory, got %A" other
+              | Error(Dag.ReplayFault.Cyclic { Unplaced = [ "a"; "b" ] }) -> ()
+              | other -> failtestf "expected Cyclic, got %A" other
 
           testCase "tryReplayTo replays an acyclic DAG like replayTo"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 =
+                  Dag.append (OpStream.canonical h sw) (Human "x") (Inc 3) a d1 |> Reference.built
+
               Expect.isTrue (Dag.isAcyclic d2 b) "a genuine DAG is acyclic"
 
               match Dag.tryReplayTo sw 0 d2 b with
@@ -390,7 +506,9 @@ let refusalTests =
         "Dag refusals (Phase 296)"
         [ testCase "ofNodes admits a map filed by node id and refuses a key that is not its node's id (Phase 386)"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
+
               let node = d1.Nodes[a]
 
               match Dag.ofNodes d1.Nodes with
@@ -416,7 +534,8 @@ let refusalTests =
 
           testCase "tryReplayTo refuses a head the DAG does not hold"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
 
               Expect.equal (Dag.tryReplayTo sw 0 d1 a) (Ok 5) "a held head replays"
 
@@ -427,20 +546,21 @@ let refusalTests =
 
           testCase "append and merge refuse a parent the DAG does not hold"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
 
               Expect.equal
-                  (Dag.append h sw x (Inc 1) "nope" d1)
+                  (Dag.append (OpStream.canonical h sw) x (Inc 1) "nope" d1)
                   (Error(DagAppendFault.UnknownParent "nope"))
                   "an append onto an absent parent"
 
               Expect.equal
-                  (Dag.merge h sw x (Inc 0) a "nope" d1)
+                  (Dag.merge (OpStream.canonical h sw) x (Inc 0) a "nope" d1)
                   (Error(DagAppendFault.UnknownParent "nope"))
                   "a merge naming an absent parent"
 
               Expect.equal
-                  (Dag.append h sw x (Inc 1) "p,q" d1)
+                  (Dag.append (OpStream.canonical h sw) x (Inc 1) "p,q" d1)
                   (Error(DagAppendFault.CommaInParentId "p,q"))
                   "a comma-bearing id is refused for what it is, before it is looked up"
 
@@ -448,26 +568,34 @@ let refusalTests =
               "an id the DAG holds for a different node is refused; the held node stays (a HashFn that collides on demand)"
           <| fun _ ->
               let collide: HashFn = fun _ _ -> "c"
-              let c, d1 = Dag.append collide sw x (Inc 5) "" Dag.empty |> Reference.built
+
+              let c, d1 =
+                  Dag.append (OpStream.canonical collide sw) x (Inc 5) "" Dag.empty
+                  |> Reference.built
 
               Expect.equal
-                  (Dag.append collide sw x (Inc 6) "" d1)
+                  (Dag.append (OpStream.canonical collide sw) x (Inc 6) "" d1)
                   (Error(DagAppendFault.ContentIdCollision c))
                   "a different op under the same id"
 
               Expect.equal
-                  (Dag.append collide sw (Human "y") (Inc 5) "" d1)
+                  (Dag.append (OpStream.canonical collide sw) (Human "y") (Inc 5) "" d1)
                   (Error(DagAppendFault.ContentIdCollision c))
                   "a different actor under the same id"
 
-              Expect.equal (Dag.append collide sw x (Inc 5) "" d1) (Ok(c, d1)) "the SAME node deduplicates, by design"
+              Expect.equal
+                  (Dag.append (OpStream.canonical collide sw) x (Inc 5) "" d1)
+                  (Ok { Id = c; Dag = d1 })
+                  "the SAME node deduplicates, by design"
 
           testCase "a merge and an append naming the comma-spliced parent are told apart by their parents"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw x (Inc 3) a d1 |> Reference.built
-              let c, d3 = Dag.append h sw x (Inc 4) a d2 |> Reference.built
-              let m, d4 = Dag.merge h sw x (Inc 0) b c d3 |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
+
+              let b, d2 = Dag.append (OpStream.canonical h sw) x (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append (OpStream.canonical h sw) x (Inc 4) a d2 |> Reference.built
+              let m, d4 = Dag.merge (OpStream.canonical h sw) x (Inc 0) b c d3 |> Reference.built
 
               let lo, hi =
                   (if System.String.CompareOrdinal(b, c) < 0 then
@@ -502,24 +630,30 @@ let refusalTests =
 
           testCase "appendChecked applies the op at the caller's state: a rejected op never enters the DAG"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
 
-              match Dag.appendChecked h sw x (Dec 9) 5 a d1 with
+              match Dag.appendChecked (OpStream.canonical h sw) x (Dec 9) 5 a d1 with
               | Error(DagAppendRejection.Domain "would go negative") -> ()
               | other -> failtestf "expected the domain's rejection, got %A" other
 
-              match Dag.appendChecked h sw x (Dec 2) 5 a d1 with
+              match Dag.appendChecked (OpStream.canonical h sw) x (Dec 2) 5 a d1 with
               | Ok r when r.State = 3 ->
-                  Expect.equal (Dag.tryReplayTo sw 0 r.Dag r.Id) (Ok 3) "the state it returns is the replay"
+                  Expect.equal
+                      (Dag.tryReplayTo sw 0 r.Written.Dag r.Written.Id)
+                      (Ok 3)
+                      "the state it returns is the replay"
               | other -> failtestf "expected the applied node, got %A" other
 
-              match Dag.mergeChecked h sw x (Inc 0) 5 a "nope" d1 with
+              match Dag.mergeChecked (OpStream.canonical h sw) x (Inc 0) 5 a "nope" d1 with
               | Error(DagAppendRejection.Fault(DagAppendFault.UnknownParent "nope")) -> ()
               | other -> failtestf "the graph refusal is judged first, got %A" other
 
           testCase "the DAG reader refuses what the shared scanner refuses, with a 1-based line"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
+
               let good = Dag.toJsonl sw.Encode d1
 
               let refused (text: string) (expect: string) =
@@ -564,10 +698,12 @@ let verifiedTests =
     let x = Human "x"
 
     // genesis g (5); fork heads a = g+3 (8) and b = g+4 (9); the merge m of (a, b) with Inc 0 (12).
-    let g, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
-    let a, d2 = Dag.append h sw x (Inc 3) g d1 |> Reference.built
-    let b, d3 = Dag.append h sw x (Inc 4) g d2 |> Reference.built
-    let m, d4 = Dag.merge h sw x (Inc 0) a b d3 |> Reference.built
+    let g, d1 =
+        Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
+
+    let a, d2 = Dag.append (OpStream.canonical h sw) x (Inc 3) g d1 |> Reference.built
+    let b, d3 = Dag.append (OpStream.canonical h sw) x (Inc 4) g d2 |> Reference.built
+    let m, d4 = Dag.merge (OpStream.canonical h sw) x (Inc 0) a b d3 |> Reference.built
 
     let checkedAs r =
         r |> Result.mapError Dag.VerifiedAppendRejection.Checked
@@ -577,32 +713,41 @@ let verifiedTests =
         [ testCase "handed the parent's own state, the verified forms answer exactly as the checked forms"
           <| fun _ ->
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 8 a d4)
-                  (Dag.appendChecked h sw x (Inc 1) 8 a d4 |> checkedAs)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 8 a d4)
+                  (Dag.appendChecked (OpStream.canonical h sw) x (Inc 1) 8 a d4 |> checkedAs)
                   "an append onto a fork head"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Dec 9) 8 a d4)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Dec 9) 8 a d4)
                   (Error(Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Domain "would go negative")))
                   "the domain's rejection at a verified state is the checked form's, verbatim"
 
               // the merge's parents replay to 5 + 3 + 4, without the merge op
-              match Dag.mergeVerified h sw 0 x (Inc 0) 12 a b d3 with
+              match Dag.mergeVerified (OpStream.canonical h sw) 0 x (Inc 0) 12 a b d3 with
               | Ok r as verified when r.State = 12 ->
-                  Expect.equal verified (Dag.mergeChecked h sw x (Inc 0) 12 a b d3 |> checkedAs) "the checked merge"
-                  Expect.equal r.Id m "the same merge node"
-                  Expect.equal (Dag.tryReplayTo sw 0 r.Dag r.Id) (Ok 12) "whose own replay is the state returned"
+                  Expect.equal
+                      verified
+                      (Dag.mergeChecked (OpStream.canonical h sw) x (Inc 0) 12 a b d3 |> checkedAs)
+                      "the checked merge"
+
+                  Expect.equal r.Written.Id m "the same merge node"
+
+                  Expect.equal
+                      (Dag.tryReplayTo sw 0 r.Written.Dag r.Written.Id)
+                      (Ok 12)
+                      "whose own replay is the state returned"
               | other -> failtestf "expected the verified merge, got %A" other
 
           testCase "the genesis parent replays to the initial state itself"
           <| fun _ ->
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 5) 0 "" Dag.empty)
-                  (Dag.appendChecked h sw x (Inc 5) 0 "" Dag.empty |> checkedAs)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 5) 0 "" Dag.empty)
+                  (Dag.appendChecked (OpStream.canonical h sw) x (Inc 5) 0 "" Dag.empty
+                   |> checkedAs)
                   "a genesis append handed the initial state"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 5) 3 "" d4)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 5) 3 "" d4)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(3, 0)))
                   "a genesis append handed any other state"
 
@@ -610,10 +755,10 @@ let verifiedTests =
           <| fun _ ->
               // At the merge's 12, Dec 7 applies; at g's own 5 it does not — the checked form admits
               // an op that never applied at that point in the graph.
-              Expect.isOk (Dag.appendChecked h sw x (Dec 7) 12 g d4) "the checked form admits it"
+              Expect.isOk (Dag.appendChecked (OpStream.canonical h sw) x (Dec 7) 12 g d4) "the checked form admits it"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Dec 7) 12 g d4)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Dec 7) 12 g d4)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(12, 5)))
                   "the verified form refuses the pairing"
 
@@ -621,29 +766,29 @@ let verifiedTests =
           <| fun _ ->
               // At b's own 9, Dec 9 applies; at a's 8 it does not — the checked form refuses a valid op.
               Expect.equal
-                  (Dag.appendChecked h sw x (Dec 9) 8 b d3)
+                  (Dag.appendChecked (OpStream.canonical h sw) x (Dec 9) 8 b d3)
                   (Error(DagAppendRejection.Domain "would go negative"))
                   "the checked form refuses a valid op"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Dec 9) 8 b d3)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Dec 9) 8 b d3)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(8, 9)))
                   "the verified form names the mis-pairing instead"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 9 a d3)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 9 a d3)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 8)))
                   "and the other way round"
 
           testCase "passing one side's state after a merge is refused, both states named"
           <| fun _ ->
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 8 m d4)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 8 m d4)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(8, 12)))
                   "an append onto the merge holding a's state"
 
               Expect.equal
-                  (Dag.mergeVerified h sw 0 x (Inc 0) 9 a b d3)
+                  (Dag.mergeVerified (OpStream.canonical h sw) 0 x (Inc 0) 9 a b d3)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 12)))
                   "a merge handed b's state alone"
 
@@ -651,19 +796,20 @@ let verifiedTests =
           <| fun _ ->
               // The plain append does not apply the op (D83), so a rejecting node can be built — one
               // that rejects wherever it drains, since no state in this DAG reaches 20.
-              let bad, e1 = Dag.append h sw x (Dec 20) g d4 |> Reference.built
+              let bad, e1 =
+                  Dag.append (OpStream.canonical h sw) x (Dec 20) g d4 |> Reference.built
 
               let fault = Dag.ReplayFault.Rejected(bad, "would go negative")
 
               Expect.equal (Dag.tryReplayTo sw 0 e1 bad) (Error fault) "the parent does not replay"
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 0 bad e1)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 0 bad e1)
                   (Error(Dag.VerifiedAppendRejection.ParentReplay fault))
                   "an append onto it"
 
               Expect.equal
-                  (Dag.mergeVerified h sw 0 x (Inc 0) 0 m bad e1)
+                  (Dag.mergeVerified (OpStream.canonical h sw) 0 x (Inc 0) 0 m bad e1)
                   (Error(Dag.VerifiedAppendRejection.ParentReplay fault))
                   "a merge with it"
 
@@ -677,21 +823,21 @@ let verifiedTests =
                   DagOf.nodes (Map.ofList [ "p", node "p" "q"; "q", node "q" "p" ])
 
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 0 "p" cyclic)
-                  (Error(Dag.VerifiedAppendRejection.ParentReplay(Dag.ReplayFault.CyclicHistory "p")))
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 0 "p" cyclic)
+                  (Error(Dag.VerifiedAppendRejection.ParentReplay(Dag.ReplayFault.Cyclic { Unplaced = [ "p"; "q" ] })))
                   "a cyclic history"
 
           testCase "the graph refusals are judged before anything is replayed"
           <| fun _ ->
               Expect.equal
-                  (Dag.appendVerified h sw 0 x (Inc 1) 0 "nope" d4)
+                  (Dag.appendVerified (OpStream.canonical h sw) 0 x (Inc 1) 0 "nope" d4)
                   (Error(
                       Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Fault(DagAppendFault.UnknownParent "nope"))
                   ))
                   "an unknown parent"
 
               Expect.equal
-                  (Dag.mergeVerified h sw 0 x (Inc 0) 0 "" a d4)
+                  (Dag.mergeVerified (OpStream.canonical h sw) 0 x (Inc 0) 0 "" a d4)
                   (Error(Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Fault DagAppendFault.EmptyParentId)))
                   "the genesis marker as a merge parent"
 
@@ -700,22 +846,24 @@ let verifiedTests =
               let skips = fun (_: int) (_: int) -> true
 
               Expect.equal
-                  (Dag.appendVerifiedWith skips h sw 0 x (Dec 7) 12 g d4)
-                  (Dag.appendChecked h sw x (Dec 7) 12 g d4 |> checkedAs)
+                  (Dag.appendVerifiedWith skips (OpStream.canonical h sw) 0 x (Dec 7) 12 g d4)
+                  (Dag.appendChecked (OpStream.canonical h sw) x (Dec 7) 12 g d4 |> checkedAs)
                   "a comparison that always agrees is the checked form, mis-pairing and all"
 
               Expect.equal
-                  (Dag.mergeVerifiedWith skips h sw 0 x (Inc 0) 9 a b d3)
-                  (Dag.mergeChecked h sw x (Inc 0) 9 a b d3 |> checkedAs)
+                  (Dag.mergeVerifiedWith skips (OpStream.canonical h sw) 0 x (Inc 0) 9 a b d3)
+                  (Dag.mergeChecked (OpStream.canonical h sw) x (Inc 0) 9 a b d3 |> checkedAs)
                   "for a merge too"
 
               // a coarser domain equality: states agreeing on parity are one state to this caller
               let parity = fun (p: int) (q: int) -> p % 2 = q % 2
 
-              Expect.isOk (Dag.appendVerifiedWith parity h sw 0 x (Inc 1) 10 a d4) "10 and 8 agree on parity"
+              Expect.isOk
+                  (Dag.appendVerifiedWith parity (OpStream.canonical h sw) 0 x (Inc 1) 10 a d4)
+                  "10 and 8 agree on parity"
 
               Expect.equal
-                  (Dag.appendVerifiedWith parity h sw 0 x (Inc 1) 9 a d4)
+                  (Dag.appendVerifiedWith parity (OpStream.canonical h sw) 0 x (Inc 1) 9 a d4)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 8)))
                   "9 and 8 do not" ]
 
@@ -739,7 +887,9 @@ let parentsScanTests =
         "Dag.fromJsonl refuses a bad parents string (Phase 383)"
         [ testCase "an unterminated string, a bad escape and a bad \\u are each refused with the scanner's reason"
           <| fun _ ->
-              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let a, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 5) "" Dag.empty |> Reference.built
+
               let good = Dag.toJsonl sw.Encode d1
 
               for parents, reason in
@@ -772,21 +922,27 @@ let newerDagTests =
 
     let built r =
         match r with
-        | Ok(c: Dag.CheckedAppend<int, OpStreamTests.Newer.NewerOp>) -> c.Id, c.Dag
+        | Ok(c: Dag.CheckedAppend<int, OpStreamTests.Newer.NewerOp>) -> c.Written.Id, c.Written.Dag
         | Error e -> failwithf "the newer host could not write: %A" e
 
     // g; r1 = reset on g; a on r1; r2 = reset on a
     let newerDag () =
         let g, d1 =
-            Dag.appendChecked h nw x (OpStreamTests.Newer.Known(Inc 1)) 0 "" Dag.empty
+            Dag.appendChecked (OpStream.canonical h nw) x (OpStreamTests.Newer.Known(Inc 1)) 0 "" Dag.empty
             |> built
 
-        let r1, d2 = Dag.appendChecked h nw x OpStreamTests.Newer.Reset 1 g d1 |> built
+        let r1, d2 =
+            Dag.appendChecked (OpStream.canonical h nw) x OpStreamTests.Newer.Reset 1 g d1
+            |> built
 
         let a, d3 =
-            Dag.appendChecked h nw x (OpStreamTests.Newer.Known(Inc 2)) 0 r1 d2 |> built
+            Dag.appendChecked (OpStream.canonical h nw) x (OpStreamTests.Newer.Known(Inc 2)) 0 r1 d2
+            |> built
 
-        let r2, d4 = Dag.appendChecked h nw x OpStreamTests.Newer.Reset 2 a d3 |> built
+        let r2, d4 =
+            Dag.appendChecked (OpStream.canonical h nw) x OpStreamTests.Newer.Reset 2 a d3
+            |> built
+
         d4, [ r1; r2 ]
 
     testList
@@ -810,9 +966,13 @@ let newerDagTests =
                         Reason = OpStreamTests.Newer.refusal })
                   |> List.sortBy (fun s -> s.Line)
 
-              Expect.equal (Dag.fromJsonlVerified h sw text) (Error(StreamLoadFault.Undecodable expected)) "verified"
+              Expect.equal
+                  (Dag.fromJsonlVerified (OpStream.canonical h sw) text)
+                  (Error(StreamLoadFault.Undecodable expected))
+                  "verified"
+
               Expect.equal (Dag.fromJsonl sw text) (Error(StreamLoadFault.Undecodable expected)) "structural"
-              Expect.equal (Dag.fromJsonlVerified h nw text) (Ok dag) "the newer witness reads it"
+              Expect.equal (Dag.fromJsonlVerified (OpStream.canonical h nw) text) (Ok dag) "the newer witness reads it"
 
           testCase "a tampered DAG answers the break whatever else it holds"
           <| fun _ ->
@@ -822,6 +982,6 @@ let newerDagTests =
               let tampered = text.Replace("\"id\":\"" + r1 + "\"", "\"id\":\"" + r1 + "0\"")
               Expect.notEqual tampered text "the probe flipped the id"
 
-              match Dag.fromJsonlVerified h sw tampered with
+              match Dag.fromJsonlVerified (OpStream.canonical h sw) tampered with
               | Error(StreamLoadFault.Broken _) -> ()
               | other -> failtestf "expected the break, got %A" other ]

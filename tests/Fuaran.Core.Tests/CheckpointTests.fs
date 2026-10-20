@@ -22,11 +22,13 @@ let private x = Human "x"
 
 /// genesis g; a and b fork off g; m merges a and b; y extends m.
 let private forkMergeTail () =
-    let g, d1 = Dag.append h sw x (Inc 1) "" Dag.empty |> Reference.built
-    let a, d2 = Dag.append h sw x (Inc 2) g d1 |> Reference.built
-    let b, d3 = Dag.append h sw x (Inc 3) g d2 |> Reference.built
-    let m, d4 = Dag.merge h sw x (Inc 4) a b d3 |> Reference.built
-    let y, d5 = Dag.append h sw x (Inc 5) m d4 |> Reference.built
+    let g, d1 =
+        Dag.append (OpStream.canonical h sw) x (Inc 1) "" Dag.empty |> Reference.built
+
+    let a, d2 = Dag.append (OpStream.canonical h sw) x (Inc 2) g d1 |> Reference.built
+    let b, d3 = Dag.append (OpStream.canonical h sw) x (Inc 3) g d2 |> Reference.built
+    let m, d4 = Dag.merge (OpStream.canonical h sw) x (Inc 4) a b d3 |> Reference.built
+    let y, d5 = Dag.append (OpStream.canonical h sw) x (Inc 5) m d4 |> Reference.built
     g, a, b, m, y, d5
 
 let private ok (r: Result<'a, 'e>) : 'a =
@@ -52,11 +54,14 @@ let private logEnc (s: string) = "\"" + s + "\""
 /// 2a, because its id is smaller, so 1c is folded inside the prefix a checkpoint at 3b stands for.
 let private branchBelow () =
     let w = logWitness
-    let g, d1 = Dag.append named w x "0g" "" Dag.empty |> Reference.built
-    let a, d2 = Dag.append named w x "2a" g d1 |> Reference.built
-    let b, d3 = Dag.append named w x "3b" a d2 |> Reference.built
-    let c, d4 = Dag.append named w x "1c" g d3 |> Reference.built
-    let m, d5 = Dag.merge named w x "4m" b c d4 |> Reference.built
+
+    let g, d1 =
+        Dag.append (OpStream.canonical named w) x "0g" "" Dag.empty |> Reference.built
+
+    let a, d2 = Dag.append (OpStream.canonical named w) x "2a" g d1 |> Reference.built
+    let b, d3 = Dag.append (OpStream.canonical named w) x "3b" a d2 |> Reference.built
+    let c, d4 = Dag.append (OpStream.canonical named w) x "1c" g d3 |> Reference.built
+    let m, d5 = Dag.merge (OpStream.canonical named w) x "4m" b c d4 |> Reference.built
     g, a, b, c, m, d5
 
 /// One sidecar line with the character at `i` replaced.
@@ -125,7 +130,9 @@ let tests =
           <| fun _ ->
               let _, _, _, m, _, dag = forkMergeTail ()
               let cp = Dag.checkpointAt h enc sw 0 dag m |> ok
-              let lane, side = Dag.toJsonlWithCheckpoints encode enc dag [ cp ]
+
+              let lane, side =
+                  Dag.toJsonlWithCheckpoints encode enc dag [ cp ] |> fun t -> t.Lane, t.Sidecar
 
               Expect.equal
                   side
@@ -145,7 +152,7 @@ let tests =
                       Dag.fromJsonlWithCheckpoints sw dec lane (Some tampered)
                       |> Result.mapError Dag.loadFaultToString
                   with
-                  | Ok(d, [ cp' ]) ->
+                  | Ok { Dag = d; Checkpoints = [ cp' ] } ->
                       Expect.isError (Dag.verifyCheckpoint h enc sw cp' d) (sprintf "byte %d changed: %s" i tampered)
                   | other -> failtestf "byte %d changed: the sidecar read as %A" i other
 
@@ -200,7 +207,8 @@ let tests =
                   (Error(Dag.CheckpointFault.UnknownNode "nope"))
                   "checkpointAt names the node"
 
-              let rejecting, d = Dag.append h sw x (Dec 99) m dag |> Reference.built
+              let rejecting, d =
+                  Dag.append (OpStream.canonical h sw) x (Dec 99) m dag |> Reference.built
 
               Expect.equal
                   (Dag.replayFrom sw (Dag.checkpointAt h enc sw 0 d m |> ok) d rejecting)
@@ -226,7 +234,7 @@ let tests =
 
               Expect.equal
                   (Dag.replayFrom sw cpA cyclic "q")
-                  (Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.CyclicHistory "q")))
+                  (Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Cyclic { Unplaced = [ "p"; "q" ] })))
                   "a cyclic history"
 
           testCase
@@ -279,7 +287,10 @@ let tests =
               "compactAt keeps the node and what is after it; the compacted DAG verifies and replays as the full one"
           <| fun _ ->
               let g, a, b, m, y, dag = forkMergeTail ()
-              let cp, small = Dag.compactAt h enc sw 0 dag m |> ok
+
+              let cp, small =
+                  Dag.compactAt h enc sw 0 dag m |> ok |> (fun c -> c.Checkpoint, c.Dag)
+
               Expect.equal cp (Dag.checkpointAt h enc sw 0 dag m |> ok) "the checkpoint checkpointAt takes"
               Expect.equal (small.Nodes |> Map.toList |> List.map fst |> Set.ofList) (set [ m; y ]) "m and y kept"
               Expect.isTrue (Dag.verifyDagFrom h enc sw cp small) "the compacted DAG verifies from its checkpoint"
@@ -308,15 +319,19 @@ let tests =
           testCase "a byte changed in a node the compaction keeps, or in its checkpoint, fails verifyDagFrom"
           <| fun _ ->
               let _, _, _, m, _, dag = forkMergeTail ()
-              let cp, small = Dag.compactAt h enc sw 0 dag m |> ok
-              let lane, side = Dag.toJsonlWithCheckpoints encode enc small [ cp ]
+
+              let cp, small =
+                  Dag.compactAt h enc sw 0 dag m |> ok |> (fun c -> c.Checkpoint, c.Dag)
+
+              let lane, side =
+                  Dag.toJsonlWithCheckpoints encode enc small [ cp ] |> fun t -> t.Lane, t.Sidecar
 
               let verifies (laneText: string) (sideText: string) =
                   match
                       Dag.fromJsonlWithCheckpoints sw dec laneText (Some sideText)
                       |> Result.mapError Dag.loadFaultToString
                   with
-                  | Ok(d, [ cp' ]) -> Dag.verifyDagFrom h enc sw cp' d
+                  | Ok { Dag = d; Checkpoints = [ cp' ] } -> Dag.verifyDagFrom h enc sw cp' d
                   | _ -> false
 
               Expect.isTrue (verifies lane side) "intact"
@@ -347,13 +362,16 @@ let tests =
           testCase "compactAt keeps the band when a node after the checkpoint names a parent behind it"
           <| fun _ ->
               // g -> a -> b (the checkpoint); z extends b; w merges z with a, which is behind b
-              let g, d1 = Dag.append h sw x (Inc 1) "" Dag.empty |> Reference.built
-              let a, d2 = Dag.append h sw x (Inc 2) g d1 |> Reference.built
-              let b, d3 = Dag.append h sw x (Inc 3) a d2 |> Reference.built
-              let z, d4 = Dag.append h sw x (Inc 4) b d3 |> Reference.built
-              let w, dag = Dag.merge h sw x (Inc 5) z a d4 |> Reference.built
+              let g, d1 =
+                  Dag.append (OpStream.canonical h sw) x (Inc 1) "" Dag.empty |> Reference.built
 
-              let cp, small = Dag.compactAt h enc sw 0 dag b |> ok
+              let a, d2 = Dag.append (OpStream.canonical h sw) x (Inc 2) g d1 |> Reference.built
+              let b, d3 = Dag.append (OpStream.canonical h sw) x (Inc 3) a d2 |> Reference.built
+              let z, d4 = Dag.append (OpStream.canonical h sw) x (Inc 4) b d3 |> Reference.built
+              let w, dag = Dag.merge (OpStream.canonical h sw) x (Inc 5) z a d4 |> Reference.built
+
+              let cp, small =
+                  Dag.compactAt h enc sw 0 dag b |> ok |> (fun c -> c.Checkpoint, c.Dag)
 
               Expect.equal
                   (small.Nodes |> Map.toList |> List.map fst |> Set.ofList)
@@ -384,11 +402,18 @@ let tests =
           testCase "a compacted DAG lives on: append onto its node, checkpoint and compact again"
           <| fun _ ->
               let _, _, _, m, y, dag = forkMergeTail ()
-              let cp, small = Dag.compactAt h enc sw 0 dag y |> ok
+
+              let cp, small =
+                  Dag.compactAt h enc sw 0 dag y |> ok |> (fun c -> c.Checkpoint, c.Dag)
+
               Expect.equal (Dag.heads small) [ y ] "an empty history above the checkpoint has its node as the head"
 
-              let n, small' = Dag.append h sw x (Inc 6) y small |> Reference.built
-              let n2, dag' = Dag.append h sw x (Inc 6) y dag |> Reference.built
+              let n, small' =
+                  Dag.append (OpStream.canonical h sw) x (Inc 6) y small |> Reference.built
+
+              let n2, dag' =
+                  Dag.append (OpStream.canonical h sw) x (Inc 6) y dag |> Reference.built
+
               Expect.equal n n2 "the same node as on the full DAG"
               Expect.isTrue (Dag.verifyDagFrom h enc sw cp small') "the appended DAG verifies"
               Expect.equal (Dag.replayFrom sw cp small' n) (Ok 21) "1 + … + 6"
@@ -401,8 +426,8 @@ let tests =
 
               let again = Dag.compactFrom h enc sw cp small' n |> ok
               let direct = Dag.compactAt h enc sw 0 dag' n |> ok
-              Expect.equal (fst again) (fst direct) "re-compacting gives the full DAG's checkpoint"
-              Expect.equal (snd again).Nodes (snd direct).Nodes "and the full DAG's retained nodes"
+              Expect.equal again.Checkpoint direct.Checkpoint "re-compacting gives the full DAG's checkpoint"
+              Expect.equal again.Dag.Nodes direct.Dag.Nodes "and the full DAG's retained nodes"
 
               Expect.equal
                   (Dag.checkpointFrom h enc sw cp small' "nope")
@@ -418,18 +443,20 @@ let tests =
           <| fun _ ->
               // the import node is an ordinary genesis node; its state was converted, not folded
               let imp, d1 =
-                  Dag.append h sw (Human "import") (Inc 0) "" Dag.empty |> Reference.built
+                  Dag.append (OpStream.canonical h sw) (Human "import") (Inc 0) "" Dag.empty
+                  |> Reference.built
 
               let cp = Dag.sealAt h enc sw imp 42
-              let p, d2 = Dag.append h sw x (Inc 1) imp d1 |> Reference.built
-              let q, d3 = Dag.append h sw x (Inc 2) imp d2 |> Reference.built
-              let r, dag = Dag.merge h sw x (Inc 3) p q d3 |> Reference.built
+              let p, d2 = Dag.append (OpStream.canonical h sw) x (Inc 1) imp d1 |> Reference.built
+              let q, d3 = Dag.append (OpStream.canonical h sw) x (Inc 2) imp d2 |> Reference.built
+              let r, dag = Dag.merge (OpStream.canonical h sw) x (Inc 3) p q d3 |> Reference.built
 
               Expect.isTrue (Dag.verifyDagFrom h enc sw cp dag) "the history begins at the checkpoint and verifies"
               Expect.equal (Dag.replayFrom sw cp dag r) (Ok 48) "42 + 1 + 2 + 3"
               Expect.equal (Dag.tryReplayTo sw 0 dag r) (Ok 6) "a replay from the origin knows nothing of the import"
 
-              let second, withRoot = Dag.append h sw x (Inc 7) "" dag |> Reference.built
+              let second, withRoot =
+                  Dag.append (OpStream.canonical h sw) x (Inc 7) "" dag |> Reference.built
 
               Expect.equal
                   (Dag.firstBreakFrom h enc sw cp withRoot)
@@ -440,20 +467,32 @@ let tests =
           <| fun _ ->
               let _, _, _, m, y, dag = forkMergeTail ()
               let cp = Dag.checkpointAt h enc sw 0 dag m |> ok
-              let lane, side = Dag.toJsonlWithCheckpoints encode enc dag [ cp ]
+
+              let lane, side =
+                  Dag.toJsonlWithCheckpoints encode enc dag [ cp ] |> fun t -> t.Lane, t.Sidecar
+
               Expect.equal lane (Dag.toJsonl encode dag) "the lane is toJsonl's bytes"
-              Expect.equal (Dag.toJsonlWithCheckpoints encode enc dag [] |> snd) "" "no checkpoints, an empty sidecar"
+              Expect.equal (Dag.toJsonlWithCheckpoints encode enc dag []).Sidecar "" "no checkpoints, an empty sidecar"
 
               let read = Dag.fromJsonlWithCheckpoints sw dec lane None |> ok
-              Expect.equal (fst read) (Dag.fromJsonl sw lane |> ok) "no sidecar reads as fromJsonl"
-              Expect.equal (snd read) [] "and carries no checkpoint"
-              Expect.equal (Dag.fromJsonlWithCheckpoints sw dec lane (Some "") |> ok |> snd) [] "an empty sidecar"
-
-              let cpY = Dag.checkpointAt h enc sw 0 dag y |> ok
-              let _, side2 = Dag.toJsonlWithCheckpoints encode enc dag [ cp; cpY ]
+              Expect.equal read.Dag (Dag.fromJsonl sw lane |> ok) "no sidecar reads as fromJsonl"
+              Expect.equal read.Checkpoints [] "and carries no checkpoint"
 
               Expect.equal
-                  (Dag.fromJsonlWithCheckpoints sw dec lane (Some(side2 + "\n")) |> ok |> snd)
+                  (Dag.fromJsonlWithCheckpoints sw dec lane (Some "") |> ok |> _.Checkpoints)
+                  []
+                  "an empty sidecar"
+
+              let cpY = Dag.checkpointAt h enc sw 0 dag y |> ok
+
+              let _, side2 =
+                  Dag.toJsonlWithCheckpoints encode enc dag [ cp; cpY ]
+                  |> fun t -> t.Lane, t.Sidecar
+
+              Expect.equal
+                  (Dag.fromJsonlWithCheckpoints sw dec lane (Some(side2 + "\n"))
+                   |> ok
+                   |> _.Checkpoints)
                   [ cp; cpY ]
                   "the sidecar round-trips in order"
 
@@ -463,7 +502,9 @@ let tests =
           <| fun _ ->
               let _, _, _, m, _, dag = forkMergeTail ()
               let cp = Dag.checkpointAt h enc sw 0 dag m |> ok
-              let lane, side = Dag.toJsonlWithCheckpoints encode enc dag [ cp ]
+
+              let lane, side =
+                  Dag.toJsonlWithCheckpoints encode enc dag [ cp ] |> fun t -> t.Lane, t.Sidecar
 
               let refused (sidecar: string) (fragment: string) =
                   match

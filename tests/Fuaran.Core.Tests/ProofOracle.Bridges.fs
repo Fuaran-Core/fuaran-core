@@ -110,7 +110,8 @@ let productionDag
     let hashFn = OpStream.defaultHash
 
     let baseId, d0 =
-        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> Reference.built
+        Dag.append (OpStream.canonical hashFn w) (Human "base") baseOp "" Dag.empty
+        |> Reference.built
 
     let heads, dag =
         lanes
@@ -121,7 +122,9 @@ let productionDag
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> Reference.built) (baseId, d)
+                    |> List.fold
+                        (fun (h, dd) op -> Dag.append (OpStream.canonical hashFn w) actor op h dd |> Reference.built)
+                        (baseId, d)
 
                 hs @ [ head ], d')
             ([], d0)

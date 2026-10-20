@@ -112,8 +112,10 @@ let private storedIdentityDag =
     storedIdentityOps
     |> List.fold
         (fun (parent, d) op ->
-            match Dag.append OpStream.defaultHash storedIdentityWitness (Human "a\tb") op parent d with
-            | Ok(id, d') -> id, d'
+            match
+                Dag.append (OpStream.canonical OpStream.defaultHash storedIdentityWitness) (Human "a\tb") op parent d
+            with
+            | Ok w -> w.Id, w.Dag
             | Error e -> failwithf "%A" e)
         ("", Dag.empty)
     |> snd

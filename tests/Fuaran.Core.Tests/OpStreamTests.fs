@@ -1406,16 +1406,16 @@ let checkedWriterTests =
                   | Error e -> failtestf "compact failed: %A" e
               | Error e -> failtestf "build failed: %A" e
 
-              match Dag.append OpStream.defaultHash rawWitness (Human "t") " 5" "" Dag.empty with
-              | Ok(_, dag) ->
+              match Dag.append (OpStream.canonical OpStream.defaultHash rawWitness) (Human "t") " 5" "" Dag.empty with
+              | Ok { Dag = dag } ->
                   Expect.equal
                       (Dag.tryToJsonl id dag |> Result.mapError (fun f -> f.Line, f.Member, f.Reason))
                       (Error(1, "op", JsonlWriteFaultReason.NotTrimStable))
                       "a node whose encoding the reader would trim"
               | Error e -> failtestf "dag append failed: %A" e
 
-              match Dag.append OpStream.defaultHash rawWitness (Human "t") "5" "" Dag.empty with
-              | Ok(_, dag) ->
+              match Dag.append (OpStream.canonical OpStream.defaultHash rawWitness) (Human "t") "5" "" Dag.empty with
+              | Ok { Dag = dag } ->
                   Expect.equal (Dag.tryToJsonl id dag) (Ok(Dag.toJsonl id dag)) "a faithful DAG writes unchanged"
               | Error e -> failtestf "dag append failed: %A" e
 
@@ -1489,8 +1489,8 @@ let checkedWriterTests =
                   | Error e -> failtestf "compact failed: %A" e
               | Error e -> failtestf "build failed: %A" e
 
-              match Dag.append OpStream.defaultHash rawWitness (Human "t") "5" "" Dag.empty with
-              | Ok(_, dag) ->
+              match Dag.append (OpStream.canonical OpStream.defaultHash rawWitness) (Human "t") "5" "" Dag.empty with
+              | Ok { Dag = dag } ->
                   let edit (f: DagNode<string> -> DagNode<string>) =
                       let nodes =
                           dag.Nodes
