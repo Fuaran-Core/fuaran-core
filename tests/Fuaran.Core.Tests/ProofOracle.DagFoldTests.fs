@@ -1838,7 +1838,7 @@ let tests =
                   let ns = modelClosure merged unionHead
 
                   Expect.isTrue
-                      (Dag.verifyDag OpStream.defaultHash planW merged)
+                      (Dag.verifyDag (OpStream.canonical OpStream.defaultHash planW) merged)
                       "the production DAG holds every parent it names"
 
                   let ignored = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns

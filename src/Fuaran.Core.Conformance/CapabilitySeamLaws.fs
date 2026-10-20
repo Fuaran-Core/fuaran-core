@@ -10,7 +10,7 @@ module internal CapabilitySeamLaws =
     ///    arg addressing no declared hole are each a named `InvokeError`, never a throw or a silent
     ///    pass (default-deny by shape);
     ///  - **byte-identical replay** — a non-`Deterministic` invocation's realized value, journaled
-    ///    via `OpStream.captureEffect` (keyed by `Capability.invocationKey` + `determinismTag`),
+    ///    via `EffectCapture.captureEffect` (keyed by `Capability.invocationKey` + `determinismTag`),
     ///    replays through `replayEffect` **byte-identically** even when the live source would now
     ///    produce a different value, and fully consumes the journal;
     ///  - **a capture records the whole class** (Phase 319) — the declared determinism is a SET of
@@ -138,11 +138,12 @@ module internal CapabilitySeamLaws =
             let key = Capability.invocationKey cap args
             let det = Capability.determinismTag cap
 
-            let _, caps = OpStream.captureEffect hashFn encodeV det key (fun () -> realized) []
+            let _, caps =
+                EffectCapture.captureEffect StreamConfig.canonical hashFn encodeV det key (fun () -> realized) []
 
             let liveDifferent () = realized + 1 // a divergent live source
 
-            match OpStream.replayEffect decodeV key det liveDifferent caps with
+            match EffectCapture.replayEffect decodeV key det liveDifferent caps with
             | Ok(v, rest) ->
                 replay.Check(
                     (v = realized && List.isEmpty rest),
@@ -163,7 +164,8 @@ module internal CapabilitySeamLaws =
 
                     realized
 
-                let _, journal = OpStream.captureEffect hashFn encodeV det key body []
+                let _, journal =
+                    EffectCapture.captureEffect StreamConfig.canonical hashFn encodeV det key body []
 
                 let recorded =
                     match journal with

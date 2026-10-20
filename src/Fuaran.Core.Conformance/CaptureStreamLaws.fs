@@ -3,7 +3,7 @@ namespace Fuaran.Core
 /// The effect-capture family: capture and byte-identical replay — `StreamLaws` until the Phase 388
 /// split along its banners.
 module internal CaptureStreamLaws =
-    /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
+    /// The determinism-capture / replay laws (Phase 27) — the teeth on `EffectCapture.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
     /// realized effect value (the stand-in for a live non-deterministic source); the kit certifies:
     ///
@@ -16,7 +16,7 @@ module internal CaptureStreamLaws =
     ///    re-evaluates the live source (the journal is untouched);
     ///  - **tamper-evidence** — a tampered captured value fails `verifyCaptures`;
     ///  - **persistence** (Phase 301) — the journal's JSONL, written by the checked
-    ///    `tryCaptureToJsonl`, reads back to a journal that `verifyCaptures` and re-writes identically.
+    ///    `EffectCapture.tryToJsonl`, reads back to a journal that `verifyCaptures` and re-writes identically.
     ///
     /// `'v` needs equality (it compares recorded vs replayed values). Opt-in like `snapshotLaws` /
     /// `dagLaws` — it carries a value codec + generator the base `certify` does not, so a domain
@@ -45,7 +45,8 @@ module internal CaptureStreamLaws =
         // back to a journal that verifies and re-writes byte-identically. A value codec whose output
         // carries a line break or whitespace around the value fails here.
         let jsonl =
-            LawKit.LawCell "the capture JSONL round trip verifies (tryCaptureToJsonl, captureFromJsonl, verifyCaptures)"
+            LawKit.LawCell
+                "the capture JSONL round trip verifies (EffectCapture.tryToJsonl, EffectCapture.ofJsonl, verifyCaptures)"
         // The tamper arm runs only when the fresh draw encodes differently from the capture it
         // replaces — a `draw` that keeps yielding the same value never tampers.
         let mutable tampered = 0
@@ -60,7 +61,14 @@ module internal CaptureStreamLaws =
                 let v = rng.Draw draw
                 // the recorded "live source" draws v; captureEffect journals it under "random".
                 let got, caps' =
-                    OpStream.captureEffect hashFn encode "random" "eff" (fun () -> v) captures
+                    EffectCapture.captureEffect
+                        StreamConfig.canonical
+                        hashFn
+                        encode
+                        "random"
+                        "eff"
+                        (fun () -> v)
+                        captures
 
                 captures <- caps'
                 recorded <- recorded @ [ got ]
@@ -74,7 +82,7 @@ module internal CaptureStreamLaws =
                 // a divergent live fallback: if replay ever re-evaluated, it would diverge from orig.
                 let liveDifferent () = rng.Draw draw
 
-                match OpStream.replayEffect decode "eff" "random" liveDifferent cursor with
+                match EffectCapture.replayEffect decode "eff" "random" liveDifferent cursor with
                 | Ok(v, rest) ->
                     cursor <- rest
                     replayed <- replayed @ [ v ]
@@ -91,29 +99,41 @@ module internal CaptureStreamLaws =
                 fun () -> at "replay-with-capture ≠ recorded session"
             )
 
-            match OpStream.tryCaptureToJsonl captures with
+            match EffectCapture.tryToJsonl captures with
             | Error f ->
                 jsonl.Check(
                     false,
                     fun () -> at ("the checked writer refused the journal: " + JsonlWriteFault.toString f)
                 )
             | Ok text ->
-                match OpStream.captureFromJsonl text with
+                match EffectCapture.ofJsonl text with
                 | Ok back ->
                     jsonl.Check(
-                        OpStream.verifyCaptures hashFn back && OpStream.captureToJsonl back = text,
+                        EffectCapture.verifyCaptures StreamConfig.canonical hashFn back
+                        && EffectCapture.toJsonl back = text,
                         fun () -> at "the journal read back from its JSONL does not verify or re-write identically"
                     )
-                | Error e -> jsonl.Check(false, fun () -> at ("the written journal did not read back: " + e))
+                | Error e ->
+                    jsonl.Check(
+                        false,
+                        fun () -> at ("the written journal did not read back: " + JsonlFault.toString e)
+                    )
 
             // deterministic pass-through: no capture emitted, replay re-evaluates live, journal intact.
             let dv = rng.Draw draw
 
             let dGot, dCaps =
-                OpStream.captureEffect hashFn encode OpStream.deterministicTag "eff" (fun () -> dv) []
+                EffectCapture.captureEffect
+                    StreamConfig.canonical
+                    hashFn
+                    encode
+                    EffectCapture.deterministicTag
+                    "eff"
+                    (fun () -> dv)
+                    []
 
             let dReplay =
-                OpStream.replayEffect decode "eff" OpStream.deterministicTag (fun () -> dv) dCaps
+                EffectCapture.replayEffect decode "eff" EffectCapture.deterministicTag (fun () -> dv) dCaps
 
             deterministic.Check(
                 not (dGot <> dv || not (List.isEmpty dCaps) || dReplay <> Ok(dv, [])),
@@ -139,7 +159,7 @@ module internal CaptureStreamLaws =
                         |> List.mapi (fun j c -> if j = tIdx then { c with Value = newValue } else c)
 
                     tamper.Check(
-                        not (OpStream.verifyCaptures hashFn forged),
+                        not (EffectCapture.verifyCaptures StreamConfig.canonical hashFn forged),
                         fun () -> at "a tampered capture was not detected"
                     ))
 
@@ -149,21 +169,25 @@ module internal CaptureStreamLaws =
         let fixedDraws = (runner.Fork 7).Draws()
         let v1 = fixedDraws.Draw draw
         let v2 = fixedDraws.Draw draw
-        let _, c1 = OpStream.captureEffect hashFn encode "clock" "alpha" (fun () -> v1) []
-        let _, caps = OpStream.captureEffect hashFn encode "random" "beta" (fun () -> v2) c1
+
+        let _, c1 =
+            EffectCapture.captureEffect StreamConfig.canonical hashFn encode "clock" "alpha" (fun () -> v1) []
+
+        let _, caps =
+            EffectCapture.captureEffect StreamConfig.canonical hashFn encode "random" "beta" (fun () -> v2) c1
 
         // in record order: alpha then beta — both hit their captures byte-identically.
         let inOrder =
-            match OpStream.replayEffect decode "alpha" "clock" (fun () -> v1) caps with
+            match EffectCapture.replayEffect decode "alpha" "clock" (fun () -> v1) caps with
             | Ok(a, rest) ->
-                match OpStream.replayEffect decode "beta" "random" (fun () -> v2) rest with
+                match EffectCapture.replayEffect decode "beta" "random" (fun () -> v2) rest with
                 | Ok(b, []) -> encode a = c1.Head.Value && encode b = (List.item 1 caps).Value
                 | _ -> false
             | _ -> false
 
         // out of order: requesting beta while the head is alpha must be a named error.
         let misordered =
-            match OpStream.replayEffect decode "beta" "random" (fun () -> v2) caps with
+            match EffectCapture.replayEffect decode "beta" "random" (fun () -> v2) caps with
             | Error msg -> msg.Contains "identity mismatch"
             | Ok _ -> false
 

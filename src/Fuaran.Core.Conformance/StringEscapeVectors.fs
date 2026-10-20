@@ -6,7 +6,7 @@ namespace Fuaran.Core
 //  The spine has ONE rule for spelling a string inside canonical JSON — `"` as `\"`, `\` as
 //  `\\`, every control character `U+0000`–`U+001F` as lower-case `\u00xx`, nothing else — and
 //  TWO bodies that carry it: `Wire.Json.escape` (the original; `Canonical.write Rendering.CrossHost` escapes through
-//  it) and the copy in `Fuaran.Core.OpStream` (`OpStream.Jsonl.quote`), which DECISIONS.md D2
+//  it) and the copy in `Fuaran.Core.OpStream` (`Jsonl.quote`), which DECISIONS.md D2
 //  demands because that package takes no `Wire` reference. `Actor.encode` spells through the
 //  copy, and so does `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — which references
 //  `OpStream` and so carries no copy of its own since Phase 388. A copy is safe only while it
@@ -31,7 +31,7 @@ module StringEscapeVectors =
 
     /// One character the rule escapes (or, as a control, one it must leave alone), with the
     /// exact bytes every escaper on the spine emits for it — and the bytes the linear chain
-    /// wrote for it BEFORE Phase 287, which `OpStream.legacyEscapeConfig` still reproduces.
+    /// wrote for it BEFORE Phase 287, which `StreamConfig.legacyEscape` still reproduces.
     type Vector =
         {
             /// The case label — `U+XXXX` (uppercase hex) for a control character, a word for the
@@ -140,18 +140,18 @@ module StringEscapeVectors =
               (Actor.encode (Agent(v.Input, v.Input, v.Input)))
           // the linear chain pre-image, canonical and legacy
           expect
-              (v.Name + " / OpStream.canonicalConfig.Payload")
-              "canonicalConfig.Payload"
+              (v.Name + " / StreamConfig.canonical.Payload")
+              "StreamConfig.canonical.Payload"
               (payload human)
-              (OpStream.canonicalConfig.Payload 0 (Human v.Input) "{}")
+              (StreamConfig.canonical.Payload 0 (Human v.Input) "{}")
           expect
-              (v.Name + " / OpStream.legacyEscapeConfig.Payload")
-              "legacyEscapeConfig.Payload"
+              (v.Name + " / StreamConfig.legacyEscape.Payload")
+              "StreamConfig.legacyEscape.Payload"
               (payload humanLegacy)
-              (OpStream.legacyEscapeConfig.Payload 0 (Human v.Input) "{}")
+              (StreamConfig.legacyEscape.Payload 0 (Human v.Input) "{}")
           // the no-op claim, both ways: the two payloads agree exactly when the spellings do
-          (let canonical = OpStream.canonicalConfig.Payload 0 (Human v.Input) "{}"
-           let legacy = OpStream.legacyEscapeConfig.Payload 0 (Human v.Input) "{}"
+          (let canonical = StreamConfig.canonical.Payload 0 (Human v.Input) "{}"
+           let legacy = StreamConfig.legacyEscape.Payload 0 (Human v.Input) "{}"
            let same = canonical = legacy
 
            if same = (v.Escaped = v.Legacy) then
@@ -171,10 +171,10 @@ module StringEscapeVectors =
     let runActor (name: string, actor: Actor, encoded: string) : Corpus.Outcome list =
         [ expect (name + " / Actor.encode") "Actor.encode" encoded (Actor.encode actor)
           expect
-              (name + " / OpStream.canonicalConfig.Payload")
-              "canonicalConfig.Payload"
+              (name + " / StreamConfig.canonical.Payload")
+              "StreamConfig.canonical.Payload"
               (payload encoded)
-              (OpStream.canonicalConfig.Payload 0 actor "{}") ]
+              (StreamConfig.canonical.Payload 0 actor "{}") ]
 
     /// One row of the family (Phase 508): a character the rule escapes, or a named actor.
     type internal Entry =
@@ -204,7 +204,7 @@ module StringEscapeVectors =
             function
             | Character v -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
             | NamedActor(name, actor, encoded) ->
-                name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" }
+                name + "\t" + encoded + "\t" + StreamConfig.canonical.Payload 0 actor "{}" }
 
     /// Run the whole family.
     let run () : Corpus.Outcome list = VectorFamily.run family

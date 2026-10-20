@@ -945,20 +945,6 @@ module Conformance =
         @ (PropagationLaws.propagationPriorLawsAt evw evalNodeWith
            |> within (family "propagationPriorLawsAt" seed) iterations)
 
-    /// Forward — `propagationPriorLawsAt` under the name it carried until Phase 507, when `…With` came
-    /// to mean one pinned parameter only. Kept as a roster row under its own id and its own guard
-    /// label, as D127's forwards were, until the next breaking cut removes it.
-    [<System.Obsolete("Use Conformance.propagationPriorLawsAt — the same laws under their own stem (Phase 507); this forward goes at the next breaking cut.")>]
-    let propagationEvaluatorLawsWith
-        (evw: EvaluatorWitness<'Model, 'V>)
-        (evalNodeWith: 'Model -> (string -> 'V option) -> 'V option -> string -> Result<'V, string>)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        propagationEvaluatorLawsAt evw seed iterations
-        @ (PropagationLaws.propagationPriorLawsAt evw evalNodeWith
-           |> within (family "propagationEvaluatorLawsWith" seed) iterations)
-
     /// Forward — see `SurfaceLaws.projectionLaws`: the projection laws at a DOMAIN'S
     /// `ProjectionWitness`.
     let projectionLawsAt
@@ -1001,12 +987,6 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         CodecLaws.codecLaws codec gen |> within (family "codecLawsAt" seed) iterations
-
-    /// Forward — `codecLawsAt` under the name it carried until Phase 507. Kept as a roster row under
-    /// its own id and its own guard label, as D127's forwards were, until the next breaking cut.
-    [<System.Obsolete("Use Conformance.codecLawsAt — the same laws, spelled …At because the family takes the domain's codec (Phase 507); this forward goes at the next breaking cut.")>]
-    let codecLaws (codec: Codec<'T>) (gen: ConfRng.T -> 'T * ConfRng.T) (seed: int) (iterations: int) : LawResult list =
-        CodecLaws.codecLaws codec gen |> within (family "codecLaws" seed) iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.

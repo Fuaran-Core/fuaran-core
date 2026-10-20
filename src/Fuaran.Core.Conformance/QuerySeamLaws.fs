@@ -180,14 +180,16 @@ module internal QuerySeamLaws =
 
             let key = Query.invocationKey q [ "p0", Int 42 ]
             let det = Query.determinismTag q
-            let _, caps = OpStream.captureEffect hashFn encodeV det key (fun () -> realized) []
+
+            let _, caps =
+                EffectCapture.captureEffect StreamConfig.canonical hashFn encodeV det key (fun () -> realized) []
 
             // a divergent live source: a different page number.
             let liveDifferent () =
                 { realized with
                     PageNum = realized.PageNum + 1 }
 
-            (match OpStream.replayEffect decodeV key det liveDifferent caps with
+            (match EffectCapture.replayEffect decodeV key det liveDifferent caps with
              | Ok(v, rest) ->
                  replay.Check((v = realized && List.isEmpty rest), fun () -> at "replay ≠ recorded result")
              | Error m -> replay.Check(false, fun () -> at (sprintf "replay errored: %s" m)))
@@ -237,7 +239,16 @@ module internal QuerySeamLaws =
                 |> List.fold
                     (fun caps (k, r) ->
                         match r with
-                        | Some page -> OpStream.captureEffect hashFn encodeV det k (fun () -> page) caps |> snd
+                        | Some page ->
+                            EffectCapture.captureEffect
+                                StreamConfig.canonical
+                                hashFn
+                                encodeV
+                                det
+                                k
+                                (fun () -> page)
+                                caps
+                            |> snd
                         | None -> caps)
                     []
 
@@ -245,7 +256,7 @@ module internal QuerySeamLaws =
                 keys
                 |> List.fold
                     (fun (acc, caps) k ->
-                        match OpStream.replayEffectStrict decodeV k det (fun () -> pageOf 99) caps with
+                        match EffectCapture.replayEffectStrict decodeV k det (fun () -> pageOf 99) caps with
                         | Ok(v, rest) -> acc @ [ Some v ], rest
                         | Error _ -> acc @ [ None ], caps)
                     ([], journal)

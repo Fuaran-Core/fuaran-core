@@ -1676,8 +1676,8 @@ let tests =
               // It read through `Int64.Parse` under the current culture, which THROWS on `-5` where
               // the negative sign is not U+002D.
               let read (text: string) =
-                  OpStream.Jsonl.parseLine 1 text
-                  |> Result.bind (OpStream.Jsonl.intField "n")
+                  Jsonl.parseLine 1 text
+                  |> Result.bind (Jsonl.intField "n")
                   |> Result.mapError _.Reason
 
               let documents =

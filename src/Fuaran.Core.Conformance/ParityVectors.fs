@@ -161,7 +161,7 @@ let private streamWitness: StreamWitness<int, int, string> =
 /// hide behind a matching second one.
 let private chain: OpRecord<int> list =
     let step actor op (state, records) =
-        match OpStream.append OpStream.defaultHash streamWitness actor op state records with
+        match OpStream.append (OpStream.canonical OpStream.defaultHash streamWitness) actor op state records with
         | Ok(state', records') -> (state', records')
         | Error _ -> (state, records)
 

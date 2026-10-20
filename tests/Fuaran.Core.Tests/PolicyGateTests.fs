@@ -381,7 +381,7 @@ let tests =
               let j2 = c2.Journal
 
               Expect.equal (c1.Outcome, c2.Outcome) (Ok(Ready(page 1)), Ok(Ready(page 2))) "live pages"
-              Expect.isTrue (OpStream.verifyKeyedCaptures hashFn j2) "the journal verifies"
+              Expect.isTrue (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn j2) "the journal verifies"
 
               // replay page two FIRST: keyed, not positional
               let live _ _ = Ready(page 99)
@@ -412,19 +412,24 @@ let tests =
               let enc (v: int) = string v
 
               let captured =
-                  OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> None) []
+                  KeyedCapture.captureEffectKeyed StreamConfig.canonical hashFn enc "network" "k" (fun () -> None) []
 
               let occ, j = captured.Occurrence, captured.Journal
 
               Expect.equal (captured.Answer, occ, List.length j) (None, 0, 1) "only the attempt is journalled"
-              Expect.isTrue (OpStream.verifyKeyedCaptures hashFn j) "an open attempt verifies"
 
-              match OpStream.settleEffectKeyed hashFn enc "k" occ (Error "timed out") j with
+              Expect.isTrue
+                  (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn j)
+                  "an open attempt verifies"
+
+              match KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn enc "k" occ (Error "timed out") j with
               | Ok settled ->
-                  Expect.isTrue (OpStream.verifyKeyedCaptures hashFn settled) "the settled journal verifies"
+                  Expect.isTrue
+                      (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn settled)
+                      "the settled journal verifies"
 
                   Expect.equal
-                      (OpStream.replayEffectKeyed
+                      (KeyedCapture.replayEffectKeyed
                           (fun s -> Ok(int s))
                           "network"
                           "k"
@@ -443,16 +448,33 @@ let tests =
               let enc (v: int) = string v
 
               let settledOnce =
-                  (OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> Some(Ok 1)) []).Journal
+                  (KeyedCapture.captureEffectKeyed
+                      StreamConfig.canonical
+                      hashFn
+                      enc
+                      "network"
+                      "k"
+                      (fun () -> Some(Ok 1))
+                      [])
+                      .Journal
 
               // drop the attempt: the settlement at occurrence 0 is now an orphan
               let orphaned =
                   settledOnce |> List.filter (fun c -> c.Phase <> CapturePhase.Attempted)
 
-              Expect.isFalse (OpStream.verifyKeyedCaptures hashFn orphaned) "the input is malformed"
+              Expect.isFalse
+                  (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn orphaned)
+                  "the input is malformed"
 
               let captured =
-                  OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> Some(Ok 2)) orphaned
+                  KeyedCapture.captureEffectKeyed
+                      StreamConfig.canonical
+                      hashFn
+                      enc
+                      "network"
+                      "k"
+                      (fun () -> Some(Ok 2))
+                      orphaned
 
               Expect.equal (captured.Answer, captured.Occurrence) (Some(Ok 2), 0) "the live answer, at occurrence 0"
 
@@ -462,12 +484,13 @@ let tests =
                   "the attempt and its settlement are journalled"
 
               Expect.isFalse
-                  (OpStream.verifyKeyedCaptures hashFn captured.Journal)
+                  (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn captured.Journal)
                   "and the malformation is still reported"
 
-              let occ, attempted = OpStream.beginEffectKeyed hashFn "network" "k" orphaned
+              let occ, attempted =
+                  KeyedCapture.beginEffectKeyed StreamConfig.canonical hashFn "network" "k" orphaned
 
               Expect.equal
-                  (OpStream.settleEffectKeyed hashFn enc "k" occ (Ok 2) attempted)
+                  (KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn enc "k" occ (Ok 2) attempted)
                   (Error(KeyedCaptureFault.AlreadySettled("k", 0)))
                   "the two-step form refuses the same input on its typed channel" ]

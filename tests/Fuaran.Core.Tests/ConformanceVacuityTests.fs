@@ -77,7 +77,8 @@ let private honestFootprint = Ops.footprint Policy.none (OpScope.plain nodew idw
 /// variant ignoring its parameter could not agree with.
 let secondConfig: StreamConfig =
     { Genesis = "phase-349-genesis"
-      Payload = fun seq actor encoded -> "v2|" + OpStream.canonicalConfig.Payload seq actor encoded }
+      Payload = fun seq actor encoded -> "v2|" + StreamConfig.canonical.Payload seq actor encoded
+      Quote = StreamConfig.canonical.Quote }
 
 /// Phase 360 — the stores the stored-identity families' reference runs read: three ops whose strings
 /// carry a line feed, a tab and a carriage return, written by the ordinary append under the CURRENT
@@ -95,7 +96,14 @@ let private storedIdentityLinear =
     storedIdentityOps
     |> List.fold
         (fun recs op ->
-            match OpStream.append OpStream.defaultHash storedIdentityWitness (Human "a\nb") op () recs with
+            match
+                OpStream.append
+                    (OpStream.canonical OpStream.defaultHash storedIdentityWitness)
+                    (Human "a\nb")
+                    op
+                    ()
+                    recs
+            with
             | Ok(_, recs') -> recs'
             | Error e -> failwith e)
         OpStream.empty
@@ -114,7 +122,14 @@ let private storedIdentityCaptures =
     [ "x\ny"; "z" ]
     |> List.fold
         (fun caps eff ->
-            OpStream.captureEffect OpStream.defaultHash id "io\twall" eff (fun () -> "\"v\"") caps
+            EffectCapture.captureEffect
+                StreamConfig.canonical
+                OpStream.defaultHash
+                id
+                "io\twall"
+                eff
+                (fun () -> "\"v\"")
+                caps
             |> snd)
         []
 
@@ -612,15 +627,6 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                       PropagationCompositionTests.withPrior
                       2500
                       120)
-              // Phase 507 — the obsolete forward is a roster row of its own, measured under its own id.
-              run
-                  "Conformance.propagationEvaluatorLawsWith"
-                  120
-                  (Conformance.propagationEvaluatorLawsWith
-                      PropagationCompositionTests.evaluatorWitness
-                      PropagationCompositionTests.withPrior
-                      2500
-                      120)
               run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
               run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
               run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)
@@ -651,11 +657,6 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                   "Conformance.codecLawsAt"
                   200
                   (Conformance.codecLawsAt CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
-              // Phase 507 — the obsolete forward, measured under its own id.
-              run
-                  "Conformance.codecLaws"
-                  200
-                  (Conformance.codecLaws CodecLawsTests.referenceCodec CodecLawsTests.referenceGen 442 200)
               // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
               // each at a store the ordinary append wrote: the store, walked whole, is the sample.
               run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
@@ -678,11 +679,6 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                   "EncodingProfileVectors.storedCodecLawsAt"
                   2
                   (EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
-              // Phase 507 — the obsolete forward, measured under its own id.
-              run
-                  "EncodingProfileVectors.storedCodecLaws"
-                  2
-                  (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
               run
                   "StoredIdentity.linearLaws"
                   3
@@ -893,7 +889,7 @@ let vacuityTests =
                   Conformance.attestationLawsAt
                       ConformanceTests.sw
                       ConformanceTests.streamGen
-                      OpStream.noAttestation
+                      Attestation.noAttestation
                       OpStream.defaultHash
                       4242
                       200
@@ -1497,7 +1493,7 @@ let floorTests =
                           ConformanceTests.sw
                           ConformanceTests.streamGen
                           OpStream.defaultHash
-                          OpStream.canonicalConfig
+                          StreamConfig.canonical
                           349
                           100
                   ))
@@ -1726,9 +1722,6 @@ let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
       "EncodingProfileVectors.storedCodecLawsAt",
       "text",
       (fun () -> EncodingProfileVectors.storedCodecLawsAt "v2" Codec.json [])
-      "EncodingProfileVectors.storedCodecLaws",
-      "text",
-      (fun () -> EncodingProfileVectors.storedCodecLaws "v2" Codec.json [])
       "StoredIdentity.linearLaws",
       "record",
       (fun () ->
@@ -1998,7 +1991,7 @@ let private spellingPairs: (string * string * Lazy<LawResult list * LawResult li
                ConformanceTests.streamGen
                string
                OpStream.defaultHash
-               OpStream.canonicalConfig
+               StreamConfig.canonical
                321
                40)
       "Conformance.columnOwnershipLaws",

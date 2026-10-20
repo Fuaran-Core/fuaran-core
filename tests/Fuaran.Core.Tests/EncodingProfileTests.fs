@@ -12,7 +12,7 @@ module Fuaran.Core.Tests.EncodingProfileTests
 open Expecto
 open Fuaran.Core
 
-/// A linear store of three records, as `OpStream.toJsonl` 0.30.0 wrote it (FNV-1a default hash).
+/// A linear store of three records, as `OpStream.toJsonl` 0.30.0 wrote it (`Jsonl.write` since 0.39.0) (FNV-1a default hash).
 let internal linear030 =
     """
 {"seq":0,"actor":{"kind":"human","id":"alice"},"op":{"kind":"note","text":"line one\nline two"},"prevHash":"","hash":"412a642d"}
@@ -29,7 +29,7 @@ let internal dag030 =
 /// The merge node: the DAG's one head.
 let internal dagHead030 = "0485eaa5"
 
-/// A capture log of two records, as `OpStream.captureToJsonl` 0.30.0 wrote it.
+/// A capture log of two records, as `OpStream.captureToJsonl` 0.30.0 wrote it (`EffectCapture.toJsonl` since 0.39.0).
 let internal captures030 =
     """{"capture":true,"seq":0,"eff":"read\tline","det":"io\nwall","value":"line\n","prevHash":"","hash":"fbdf4255"}
 {"capture":true,"seq":1,"eff":"clock","det":"wallclock","value":"t","prevHash":"fbdf4255","hash":"f05ff4c0"}"""
@@ -46,8 +46,10 @@ let internal v1Witness: StreamWitness<JVal, unit, string> =
         Encode = Json.renderWith EncodingProfile.V1 }
 
 let private h = OpStream.defaultHash
-let private pV1 = OpStream.EncodingProfile.V1
-let private pV2 = OpStream.EncodingProfile.V2
+/// The op stream's profiles are its config constructors (Phase 516): `V1` is `StreamConfig.legacyEscape`,
+/// `V2` `StreamConfig.canonical`.
+let private pV1 = StreamConfig.legacyEscape
+let private pV2 = StreamConfig.canonical
 
 let private ok (r: Result<'a, 'e>) : 'a =
     match r with
@@ -55,13 +57,13 @@ let private ok (r: Result<'a, 'e>) : 'a =
     | Error e -> failtestf "did not load: %A" e
 
 let private linear () =
-    OpStream.fromJsonl jvalWitness (linear030.Trim()) |> ok
+    Jsonl.read jvalWitness (linear030.Trim()) |> ok
 
 let private dag () =
     Dag.fromJsonl jvalWitness (dag030.Trim()) |> ok
 
 let private captures () =
-    OpStream.captureFromJsonl (captures030.Trim()) |> ok
+    EffectCapture.ofJsonl (captures030.Trim()) |> ok
 
 /// The committed rendering of `EncodingProfileVectors.lines`: the table a host in another language,
 /// or a later rewrite of the live renderer, diffs against. Written by `--emit-encoding`, held to a
@@ -108,15 +110,15 @@ let tests =
               Expect.equal recs.Length 3 "three records"
 
               Expect.isFalse
-                  (OpStream.verifyChain h jvalWitness recs)
+                  (OpStream.verifyChain (OpStream.canonical h jvalWitness) recs)
                   "the current renderer moved the stored bytes (the Phase 287 counter-example)"
 
               Expect.isFalse
-                  (OpStream.verifyChainWith OpStream.legacyEscapeConfig h jvalWitness recs)
+                  (OpStream.verifyChain (OpStream.ofConfig StreamConfig.legacyEscape h jvalWitness) recs)
                   "the one-witness legacy config reaches the actor, never the op's own bytes"
 
               Expect.isTrue
-                  (OpStream.verifyChainWith (OpStream.configFor pV1) h v1Witness recs)
+                  (OpStream.verifyChain (OpStream.ofConfig pV1 h v1Witness) recs)
                   "under V1 — config and encoder — every stored hash recomputes"
 
           testCase
@@ -124,13 +126,17 @@ let tests =
           <| fun _ ->
               let d = dag ()
               Expect.equal (Dag.heads d) [ dagHead030 ] "one head"
-              Expect.isFalse (Dag.verifyDag h jvalWitness d) "the current renderer moved the stored ids"
-              Expect.isTrue (Dag.verifyDagWith pV1 h v1Witness d) "under V1 every stored id recomputes"
-              Expect.isNone (Dag.firstBreakWith pV1 h v1Witness d) "and nothing breaks"
+
+              Expect.isFalse
+                  (Dag.verifyDag (OpStream.canonical h jvalWitness) d)
+                  "the current renderer moved the stored ids"
+
+              Expect.isTrue (Dag.verifyDag (OpStream.ofConfig pV1 h v1Witness) d) "under V1 every stored id recomputes"
+              Expect.isNone (Dag.firstBreak (OpStream.ofConfig pV1 h v1Witness) d) "and nothing breaks"
 
               for n in d.Nodes |> Map.toList |> List.map snd do
                   Expect.equal
-                      (Dag.nodeIdWith pV1 h v1Witness.Encode n.Parents n.Actor n.Op)
+                      (Dag.nodeId (OpStream.ofConfig pV1 h v1Witness) n.Parents n.Actor n.Op)
                       n.Id
                       "nodeIdWith V1 mints the stored id"
 
@@ -138,35 +144,38 @@ let tests =
               "regression: the 0.30.0 capture log verifies under the profile it was written under, and not under the current one"
           <| fun _ ->
               let caps = captures ()
-              Expect.isFalse (OpStream.verifyCaptures h caps) "the current spelling moved the stored hashes"
 
-              Expect.isNone
-                  (OpStream.firstCaptureBreakEncoding pV1 OpStream.canonicalConfig h caps)
-                  "under V1 every stored capture hash recomputes"
+              Expect.isFalse
+                  (EffectCapture.verifyCaptures StreamConfig.canonical h caps)
+                  "the current spelling moved the stored hashes"
+
+              Expect.isNone (EffectCapture.firstCaptureBreak pV1 h caps) "under V1 every stored capture hash recomputes"
 
           // ---- the profile surface ----
           testCase "V2 is the current default on every surface"
           <| fun _ ->
               Expect.equal EncodingProfile.current EncodingProfile.V2 "Wire's current"
-              Expect.equal OpStream.currentProfile pV2 "OpStream's current"
               let recs = linear ()
               let d = dag ()
 
               for r in recs do
                   Expect.equal
-                      ((OpStream.configFor pV2).Payload r.Seq r.Actor "{}")
-                      (OpStream.canonicalConfig.Payload r.Seq r.Actor "{}")
-                      "configFor V2 is canonicalConfig"
+                      (pV2.Payload r.Seq r.Actor "{}")
+                      (StreamConfig.canonical.Payload r.Seq r.Actor "{}")
+                      "the V2 config is the canonical config"
 
-                  Expect.equal (OpStream.encodeActorWith pV2 r.Actor) (Actor.encode r.Actor) "encodeActorWith V2"
+                  Expect.equal (StreamConfig.spellActor pV2 r.Actor) (Actor.encode r.Actor) "spellActor V2"
 
               for n in d.Nodes |> Map.toList |> List.map snd do
                   Expect.equal
-                      (Dag.nodeIdWith pV2 h jvalWitness.Encode n.Parents n.Actor n.Op)
-                      (Dag.nodeId h jvalWitness.Encode n.Parents n.Actor n.Op)
-                      "nodeIdWith V2 is nodeId"
+                      (Dag.nodeId (OpStream.ofConfig pV2 h jvalWitness) n.Parents n.Actor n.Op)
+                      (Dag.nodeId (OpStream.canonical h jvalWitness) n.Parents n.Actor n.Op)
+                      "nodeId over the V2 config is the canonical stream's"
 
-              Expect.equal (Dag.firstBreakWith pV2 h jvalWitness d) (Dag.firstBreak h jvalWitness d) "firstBreakWith V2"
+              Expect.equal
+                  (Dag.firstBreak (OpStream.ofConfig pV2 h jvalWitness) d)
+                  (Dag.firstBreak (OpStream.canonical h jvalWitness) d)
+                  "firstBreak over the V2 config"
 
               for v in EncodingProfileVectors.vectors do
                   Expect.equal
@@ -226,13 +235,14 @@ let tests =
           <| fun _ ->
               let recs = linear ()
 
-              match
-                  OpStream.rehashEncoding (OpStream.configFor pV1) v1Witness OpStream.canonicalConfig jvalWitness h recs
-              with
+              match OpStream.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.canonical h jvalWitness) recs with
               | Error b -> failtestf "refused: %A" b
-              | Ok(migrated, ids) ->
+              | Ok migrated ->
+                  let ids =
+                      List.zip recs migrated |> List.map (fun (r, m) -> r.Hash, m.Hash) |> Map.ofList
+
                   Expect.isTrue
-                      (OpStream.verifyChain h jvalWitness migrated)
+                      (OpStream.verifyChain (OpStream.canonical h jvalWitness) migrated)
                       "the result verifies under the current profile"
 
                   Expect.equal (Map.count ids) 3 "every stored hash is mapped"
@@ -247,27 +257,15 @@ let tests =
                       "every record follows a moved one, so every hash moved"
 
                   match
-                      OpStream.rehashEncoding
-                          OpStream.canonicalConfig
-                          jvalWitness
-                          (OpStream.configFor pV1)
-                          v1Witness
-                          h
-                          migrated
+                      OpStream.rehash (OpStream.canonical h jvalWitness) (OpStream.ofConfig pV1 h v1Witness) migrated
                   with
                   | Error b -> failtestf "the rehash back refused: %A" b
-                  | Ok(back, _) -> Expect.equal back recs "the rehash back is the source again"
+                  | Ok back -> Expect.equal back recs "the rehash back is the source again"
 
           testCase "linear: the two-witness rehash refuses a source that does not verify under the profile it names"
           <| fun _ ->
               match
-                  OpStream.rehashEncoding
-                      OpStream.canonicalConfig
-                      jvalWitness
-                      (OpStream.configFor pV1)
-                      v1Witness
-                      h
-                      (linear ())
+                  OpStream.rehash (OpStream.canonical h jvalWitness) (OpStream.ofConfig pV1 h v1Witness) (linear ())
               with
               | Error b ->
                   Expect.equal b.Index 0 "the first record"
@@ -279,14 +277,19 @@ let tests =
           <| fun _ ->
               let d = dag ()
 
-              match Dag.rehashEncoding pV1 v1Witness pV2 jvalWitness h d with
+              match Dag.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.ofConfig pV2 h jvalWitness) d with
               | Error f -> failtestf "refused: %A" f
               | Ok(migrated, ids) ->
-                  Expect.isTrue (Dag.verifyDag h jvalWitness migrated) "the result verifies under the current profile"
+                  Expect.isTrue
+                      (Dag.verifyDag (OpStream.canonical h jvalWitness) migrated)
+                      "the result verifies under the current profile"
+
                   Expect.equal (Map.count ids) 4 "every node is mapped"
                   Expect.equal (Dag.heads migrated) [ ids[dagHead030] ] "the head is the old head's new id"
 
-                  match Dag.rehashEncoding pV2 jvalWitness pV1 v1Witness h migrated with
+                  match
+                      Dag.rehash (OpStream.ofConfig pV2 h jvalWitness) (OpStream.ofConfig pV1 h v1Witness) migrated
+                  with
                   | Error f -> failtestf "the rehash back refused: %A" f
                   | Ok(back, _) -> Expect.equal back d "the rehash back is the source again"
 
@@ -294,7 +297,7 @@ let tests =
                   { Dag = d
                     LaneOf = d.Nodes |> Map.map (fun id _ -> if id = dagHead030 then "merge" else "main") }
 
-              match Dag.rehashEncoding pV1 v1Witness pV2 jvalWitness h loaded.Dag with
+              match Dag.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.ofConfig pV2 h jvalWitness) loaded.Dag with
               | Error f -> failtestf "lanes refused: %A" f
               | Ok(d', ids) ->
                   let laneOf =
@@ -309,7 +312,7 @@ let tests =
 
           testCase "DAG: the two-witness rehash refuses a source that does not verify under the profile it names"
           <| fun _ ->
-              match Dag.rehashEncoding pV2 jvalWitness pV1 v1Witness h (dag ()) with
+              match Dag.rehash (OpStream.ofConfig pV2 h jvalWitness) (OpStream.ofConfig pV1 h v1Witness) (dag ()) with
               | Error(Dag.RehashFault.Unverified b) ->
                   Expect.equal b.Reason DagBreakReason.ContentIdMismatch "named as a content-id mismatch"
               | other -> failtestf "a V1 DAG named as V2 was not refused as unverified: %A" other
@@ -318,21 +321,25 @@ let tests =
           <| fun _ ->
               let caps = captures ()
 
-              match OpStream.rehashCapturesEncoding pV1 pV2 OpStream.canonicalConfig h caps with
+              match EffectCapture.rehashCaptures pV1 pV2 h caps with
               | Error b -> failtestf "refused: %A" b
-              | Ok(migrated, ids) ->
-                  Expect.isTrue (OpStream.verifyCaptures h migrated) "the result verifies under the live walker"
+              | Ok migrated ->
+                  let ids =
+                      List.zip caps migrated |> List.map (fun (c, m) -> c.Hash, m.Hash) |> Map.ofList
+
+                  Expect.isTrue
+                      (EffectCapture.verifyCaptures StreamConfig.canonical h migrated)
+                      "the result verifies under the live walker"
+
                   Expect.equal (Map.count ids) 2 "both hashes mapped"
 
                   Expect.equal (migrated |> List.map _.Value) (caps |> List.map _.Value) "values carried byte for byte"
 
-                  match OpStream.rehashCapturesEncoding pV2 pV1 OpStream.canonicalConfig h migrated with
+                  match EffectCapture.rehashCaptures pV2 pV1 h migrated with
                   | Error b -> failtestf "the rehash back refused: %A" b
-                  | Ok(back, _) -> Expect.equal back caps "the rehash back is the source again"
+                  | Ok back -> Expect.equal back caps "the rehash back is the source again"
 
-              Expect.isError
-                  (OpStream.rehashCapturesEncoding pV2 pV1 OpStream.canonicalConfig h caps)
-                  "a V1 log named as V2 is refused"
+              Expect.isError (EffectCapture.rehashCaptures pV2 pV1 h caps) "a V1 log named as V2 is refused"
 
           // ---- the stored-identity family, at the 0.30.0 stores ----
           testCase "stored identity: the 0.30.0 stores, declared v1, are green on every law"
@@ -366,14 +373,8 @@ let tests =
           testCase "stored identity: a store written under the current profile is green declared v2"
           <| fun _ ->
               match
-                  OpStream.rehashEncoding
-                      (OpStream.configFor pV1)
-                      v1Witness
-                      OpStream.canonicalConfig
-                      jvalWitness
-                      h
-                      (linear ())
+                  OpStream.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.canonical h jvalWitness) (linear ())
               with
               | Error b -> failtestf "refused: %A" b
-              | Ok(migrated, _) ->
+              | Ok migrated ->
                   allGreen "linearLaws v2" (StoredIdentity.linearLaws "v2" h jvalWitness jvalWitness migrated) ]

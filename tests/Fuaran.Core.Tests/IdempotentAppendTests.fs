@@ -24,7 +24,14 @@ let private buildIdem ops =
     let step acc op =
         acc
         |> Result.bind (fun (st, recs, idx) ->
-            OpStream.appendIdempotent OpStream.defaultHash sw (keyOf op) (Human "tester") op st idx recs
+            OpStream.appendIdempotent
+                (OpStream.canonical OpStream.defaultHash sw)
+                (keyOf op)
+                (Human "tester")
+                op
+                st
+                idx
+                recs
             |> Result.map (function
                 | AppendOutcome.Appended(st', recs', idx') -> st', recs', idx'
                 | AppendOutcome.Duplicate _ -> st, recs, idx))
@@ -66,10 +73,18 @@ let tests =
               | Ok(st, recs, idx) ->
                   let op = Dec 2
 
-                  let viaAppend = OpStream.append OpStream.defaultHash sw (Human "tester") op st recs
+                  let viaAppend =
+                      OpStream.append (OpStream.canonical OpStream.defaultHash sw) (Human "tester") op st recs
 
                   match
-                      OpStream.appendIdempotent OpStream.defaultHash sw (keyOf op) (Human "tester") op st idx recs
+                      OpStream.appendIdempotent
+                          (OpStream.canonical OpStream.defaultHash sw)
+                          (keyOf op)
+                          (Human "tester")
+                          op
+                          st
+                          idx
+                          recs
                   with
                   | Ok(AppendOutcome.Appended(st', recs', idx')) ->
                       Expect.equal (Ok(st', recs')) viaAppend "chain-identical to plain append"
@@ -96,8 +111,7 @@ let tests =
 
                   match
                       OpStream.appendIdempotent
-                          OpStream.defaultHash
-                          sw
+                          (OpStream.canonical OpStream.defaultHash sw)
                           (keyOf existing.Op)
                           (Human "tester")
                           existing.Op
@@ -124,8 +138,7 @@ let tests =
           <| fun _ ->
               match
                   OpStream.appendIdempotent
-                      OpStream.defaultHash
-                      sw
+                      (OpStream.canonical OpStream.defaultHash sw)
                       (keyOf (Dec 5))
                       (Human "tester")
                       (Dec 5)
@@ -148,7 +161,8 @@ let tests =
               // the rebuilt index must name the FIRST entry the key produced.
               let step acc op =
                   acc
-                  |> Result.bind (fun (st, recs) -> OpStream.append OpStream.defaultHash sw (Human "tester") op st recs)
+                  |> Result.bind (fun (st, recs) ->
+                      OpStream.append (OpStream.canonical OpStream.defaultHash sw) (Human "tester") op st recs)
 
               match [ Inc 5; Inc 5; Dec 2 ] |> List.fold step (Ok(0, OpStream.empty)) with
               | Ok(_, recs) ->
@@ -172,8 +186,7 @@ let tests =
 
                   match
                       OpStream.appendIdempotentIf
-                          OpStream.defaultHash
-                          sw
+                          (OpStream.canonical OpStream.defaultHash sw)
                           (keyOf existing.Op)
                           "stale-head"
                           (Human "tester")
@@ -193,8 +206,7 @@ let tests =
               | Ok(st, recs, idx) ->
                   match
                       OpStream.appendIdempotentIf
-                          OpStream.defaultHash
-                          sw
+                          (OpStream.canonical OpStream.defaultHash sw)
                           (keyOf (Dec 1))
                           "not-the-head"
                           (Human "tester")
@@ -205,7 +217,7 @@ let tests =
                   with
                   | Error(AppendRejection.StaleHead(expected, actual)) ->
                       Expect.equal expected "not-the-head" "names the caller's expected head"
-                      Expect.equal actual (OpStream.head recs) "names the stream's actual head"
+                      Expect.equal actual (OpStream.head StreamConfig.canonical recs) "names the stream's actual head"
                   | other -> failtestf "expected StaleHead, got %A" other
               | Error e -> failtestf "unexpected %A" e
 
@@ -215,14 +227,14 @@ let tests =
               | Ok(st, recs, idx) ->
                   let op = Dec 2
 
-                  let viaAppend = OpStream.append OpStream.defaultHash sw (Human "tester") op st recs
+                  let viaAppend =
+                      OpStream.append (OpStream.canonical OpStream.defaultHash sw) (Human "tester") op st recs
 
                   match
                       OpStream.appendIdempotentIf
-                          OpStream.defaultHash
-                          sw
+                          (OpStream.canonical OpStream.defaultHash sw)
                           (keyOf op)
-                          (OpStream.head recs)
+                          (OpStream.head StreamConfig.canonical recs)
                           (Human "tester")
                           op
                           st
@@ -238,10 +250,9 @@ let tests =
           <| fun _ ->
               match
                   OpStream.appendIdempotentIf
-                      OpStream.defaultHash
-                      sw
+                      (OpStream.canonical OpStream.defaultHash sw)
                       (keyOf (Dec 5))
-                      (OpStream.head OpStream.empty)
+                      (OpStream.head StreamConfig.canonical OpStream.empty)
                       (Human "t")
                       (Dec 5)
                       3

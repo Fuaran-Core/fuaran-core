@@ -21,7 +21,7 @@ let tests =
           <| fun _ ->
               let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              Expect.isTrue (Dag.verifyDag h sw d2) "intact DAG verifies"
+              Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) d2) "intact DAG verifies"
               Expect.equal (Dag.tryReplayTo sw 0 d2 b) (Ok 8) "replay to b = 5 + 3"
               Expect.equal (Dag.heads d2) [ b ] "single head"
 
@@ -69,7 +69,7 @@ let tests =
 
               let tampered = DagOf.nodes (d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 99 }))
 
-              Expect.isFalse (Dag.verifyDag h sw tampered) "a tampered op breaks the content hash"
+              Expect.isFalse (Dag.verifyDag (OpStream.canonical h sw) tampered) "a tampered op breaks the content hash"
 
           // ---- JSONL persistence (Phase 01) ----
 
@@ -86,7 +86,7 @@ let tests =
               with
               | Ok d4' ->
                   Expect.equal d4'.Nodes d4.Nodes "round-trip preserves every node"
-                  Expect.isTrue (Dag.verifyDag h sw d4') "the decoded DAG re-verifies"
+                  Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) d4') "the decoded DAG re-verifies"
                   Expect.equal (Dag.tryReplayTo sw 0 d4' m) (Dag.tryReplayTo sw 0 d4 m) "decoded replays identically"
               | Error e -> failtestf "fromJsonl failed: %s" e
 
@@ -115,7 +115,8 @@ let tests =
                   + "}"
 
               match Dag.fromJsonl sw line |> Result.mapError Dag.loadFaultToString with
-              | Ok dag -> Expect.isFalse (Dag.verifyDag h sw dag) "a missing parent breaks verifyDag"
+              | Ok dag ->
+                  Expect.isFalse (Dag.verifyDag (OpStream.canonical h sw) dag) "a missing parent breaks verifyDag"
               | Error e -> failtestf "structural parse should succeed: %s" e
 
           // Phase 260 — an unknown actor kind refuses instead of reading as Human.
@@ -247,7 +248,7 @@ let tests =
           <| fun _ ->
               let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
-              Expect.isNone (Dag.firstBreak h sw d2) "intact ⇒ no break"
+              Expect.isNone (Dag.firstBreak (OpStream.canonical h sw) d2) "intact ⇒ no break"
 
           testCase "firstBreak localises a tampered node and a dangling parent"
           <| fun _ ->
@@ -258,7 +259,7 @@ let tests =
               let tampered =
                   DagOf.nodes (d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }))
 
-              match Dag.firstBreak h sw tampered with
+              match Dag.firstBreak (OpStream.canonical h sw) tampered with
               | Some b -> Expect.equal b.Reason DagBreakReason.ContentIdMismatch "names a content-id mismatch"
               | None -> failtest "expected a break"
 
@@ -268,7 +269,7 @@ let tests =
               let _, drab = Dag.append h sw (Human "x") (Inc 3) ra dra |> Reference.built
               let orphaned = DagOf.nodes (drab.Nodes |> Map.remove ra)
 
-              match Dag.firstBreak h sw orphaned with
+              match Dag.firstBreak (OpStream.canonical h sw) orphaned with
               | Some b ->
                   Expect.equal b.Reason DagBreakReason.MissingParent "names a missing parent"
                   Expect.equal b.Got ra "reports the missing parent id"
@@ -299,7 +300,7 @@ let tests =
               let tampered =
                   DagOf.nodes (d1.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }))
 
-              match Dag.firstBreak h sw tampered with
+              match Dag.firstBreak (OpStream.canonical h sw) tampered with
               | Some br ->
                   Expect.equal
                       (DagBreakReason.toString br.Reason)
@@ -407,7 +408,10 @@ let refusalTests =
               let tampered = Map.ofList [ a, { node with Op = Inc 6 } ]
 
               match Dag.ofNodes tampered with
-              | Ok d -> Expect.isFalse (Dag.verifyDag h sw d) "admitted, and verifyDag catches the tamper"
+              | Ok d ->
+                  Expect.isFalse
+                      (Dag.verifyDag (OpStream.canonical h sw) d)
+                      "admitted, and verifyDag catches the tamper"
               | Error m -> failtestf "a content tamper is firstBreak's to report, not ofNodes': %A" m
 
           testCase "tryReplayTo refuses a head the DAG does not hold"

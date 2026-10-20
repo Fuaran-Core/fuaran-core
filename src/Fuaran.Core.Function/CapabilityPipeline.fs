@@ -298,7 +298,7 @@ module CapabilityPipeline =
 
     /// The Phase-27 capture key a node's realized result is journalled under: a readable prefix
     /// (`source#<id>#` / `<capId>#<id>#`) + a hash of the node's canonical pre-image. A consumer
-    /// threads this as `OpStream.captureEffect`'s `eff` argument, so the whole dataflow replays
+    /// threads this as `EffectCapture.captureEffect`'s `eff` argument, so the whole dataflow replays
     /// byte-identically. Since Phase 225 the hashed pre-image goes through `Hash.canonicalFields`
     /// and covers EVERY component — the ids as well as the arg references, each binding three
     /// fields (addr, `L`/`N`, value) and the bindings in sorted order — so it is injective: two

@@ -711,7 +711,8 @@ module internal FunctionLaws =
                 (Ok(s.PureFn, OpStream.empty), [ s.Args; s.Args; s.ArgsAlt ])
                 ||> List.fold (fun acc op ->
                     acc
-                    |> Result.bind (fun (st, rs) -> OpStream.append hashFn swPlain (Human "memo") op st rs))
+                    |> Result.bind (fun (st, rs) ->
+                        OpStream.append (OpStream.canonical hashFn swPlain) (Human "memo") op st rs))
                 |> Result.map snd
 
             (match recordsResult with

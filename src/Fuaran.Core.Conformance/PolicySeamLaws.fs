@@ -670,13 +670,20 @@ module internal PolicySeamLaws =
                 |> List.fold
                     (fun (j, ts) (key, outcome) ->
                         let captured =
-                            OpStream.captureEffectKeyed hashFn enc "network" key (fun () -> outcome) j
+                            KeyedCapture.captureEffectKeyed
+                                StreamConfig.canonical
+                                hashFn
+                                enc
+                                "network"
+                                key
+                                (fun () -> outcome)
+                                j
 
                         captured.Journal, ts @ [ key, captured.Occurrence, outcome ])
                     ([], [])
 
             verifies.Check(
-                OpStream.verifyKeyedCaptures hashFn journal,
+                KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn journal,
                 fun () -> at (sprintf "a recorded journal of %d calls does not verify" n)
             )
 
@@ -688,7 +695,9 @@ module internal PolicySeamLaws =
                 order
                 |> List.fold
                     (fun (cursor, ok) (key, _, outcome) ->
-                        match OpStream.replayEffectKeyed dec "network" key (fun () -> Some(Ok -1)) cursor journal with
+                        match
+                            KeyedCapture.replayEffectKeyed dec "network" key (fun () -> Some(Ok -1)) cursor journal
+                        with
                         | Ok(answer, cursor') -> cursor', ok && answer = outcome
                         | Error _ -> cursor, false)
                     (Map.empty, true)
@@ -698,14 +707,14 @@ module internal PolicySeamLaws =
 
             // misses
             let missing =
-                OpStream.replayEffectKeyed dec "network" "absent" (fun () -> None) Map.empty journal
+                KeyedCapture.replayEffectKeyed dec "network" "absent" (fun () -> None) Map.empty journal
 
             let firstKey, _, _ = List.head tickets
 
             let recorded = tickets |> List.filter (fun (k, _, _) -> k = firstKey) |> List.length
 
             let past =
-                OpStream.replayEffectKeyed
+                KeyedCapture.replayEffectKeyed
                     dec
                     "network"
                     firstKey
@@ -716,7 +725,7 @@ module internal PolicySeamLaws =
             let twice =
                 match tickets |> List.tryFind (fun (_, _, o) -> Option.isSome o) with
                 | Some(k, occ, _) ->
-                    OpStream.settleEffectKeyed hashFn enc k occ (Ok 1) journal = Error(
+                    KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn enc k occ (Ok 1) journal = Error(
                         KeyedCaptureFault.AlreadySettled(k, occ)
                     )
                 | None -> true
@@ -725,7 +734,7 @@ module internal PolicySeamLaws =
                 missing = Error(KeyedCaptureFault.NoCapture "absent")
                 && past = Error(KeyedCaptureFault.Exhausted(firstKey, recorded))
                 && twice
-                && OpStream.settleEffectKeyed hashFn enc "absent" 0 (Ok 1) journal = Error(
+                && KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn enc "absent" 0 (Ok 1) journal = Error(
                     KeyedCaptureFault.NotAttempted("absent", 0)
                 ),
                 fun () -> at (sprintf "a miss was not refused over %A" calls)
@@ -744,9 +753,10 @@ module internal PolicySeamLaws =
                 journal |> List.exists (fun c -> c.Phase = CapturePhase.Completed)
 
             tamper.Check(
-                (not anyCompleted || not (OpStream.verifyKeyedCaptures hashFn changed))
+                (not anyCompleted
+                 || not (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn changed))
                 && (List.length journal < 2
-                    || not (OpStream.verifyKeyedCaptures hashFn (List.tail journal))),
+                    || not (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn (List.tail journal))),
                 fun () -> at "a tampered keyed journal verified"
             )
 
@@ -756,16 +766,31 @@ module internal PolicySeamLaws =
             let orphanKey = "orphan"
 
             let orphaned =
-                (OpStream.captureEffectKeyed hashFn enc "network" orphanKey (fun () -> Some(Ok 1)) journal).Journal
+                (KeyedCapture.captureEffectKeyed
+                    StreamConfig.canonical
+                    hashFn
+                    enc
+                    "network"
+                    orphanKey
+                    (fun () -> Some(Ok 1))
+                    journal)
+                    .Journal
                 |> List.filter (fun c -> not (c.Key = orphanKey && c.Phase = CapturePhase.Attempted))
 
             let again =
-                OpStream.captureEffectKeyed hashFn enc "network" orphanKey (fun () -> Some(Ok 2)) orphaned
+                KeyedCapture.captureEffectKeyed
+                    StreamConfig.canonical
+                    hashFn
+                    enc
+                    "network"
+                    orphanKey
+                    (fun () -> Some(Ok 2))
+                    orphaned
 
             total.Check(
                 again.Answer = Some(Ok 2)
                 && List.length again.Journal = List.length orphaned + 2
-                && not (OpStream.verifyKeyedCaptures hashFn again.Journal),
+                && not (KeyedCapture.verifyKeyedCaptures StreamConfig.canonical hashFn again.Journal),
                 fun () -> at (sprintf "capture over an orphaned settlement answered %A" again.Answer)
             )
 

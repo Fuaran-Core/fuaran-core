@@ -289,7 +289,8 @@ module Dag =
     /// exactly the invariant `firstBreak`/`verifyDag` re-derive through this one function.
     ///
     /// `nodeHashAs` is the same pre-image with the actor spelled by `actorText` (Phase 360), so the
-    /// profiled forms (`nodeIdWith`, `firstBreakWith`, `rehashEncoding`) share this one definition.
+    /// stream-spelled forms (`nodeId`, `firstBreak` and `rehash`, each over a `Stream`'s config) share
+    /// this one definition.
     let private nodeHashAs
         (actorText: Actor -> string)
         (hashFn: HashFn)
@@ -390,29 +391,18 @@ module Dag =
         : Result<string * T<'Op>, DagAppendFault> =
         addNodeAs (nodeHash hashFn encode parents actor op) encode actor op parents dag
 
-    /// The content id a node of (`parents`, `actor`, `op`) has (Phase 311) — `nodeHash`, public, so a
-    /// consumer that names a node before (or without) building it computes the id this module mints
-    /// instead of re-deriving the pre-image: `hashFn (sorted parents joined by ",") (Actor.encode
-    /// actor + "|" + encode op)`, the parents sorted ordinally, so the id is a function of the parent
-    /// SET's order-free spelling. `encode` is the witness's `Encode`. `firstBreak` and `verifyDag`
-    /// recompute ids through this same function.
-    let nodeId (hashFn: HashFn) (encode: 'Op -> string) (parents: string list) (actor: Actor) (op: 'Op) : string =
-        nodeHash hashFn encode parents actor op
-
-    /// `nodeId` under a named encoding profile (Phase 360): the same pre-image with the actor spelled
-    /// as `profile` spells it (`OpStream.encodeActorWith`). `nodeIdWith OpStream.EncodingProfile.V2` is
-    /// `nodeId`; `V1` is the id `0.30.0` minted. The op's bytes are `encode`'s, so a store pinned to
-    /// `V1` passes an encoder that renders through `Json.renderWith EncodingProfile.V1` — one
-    /// declaration, both halves of the pre-image.
-    let nodeIdWith
-        (profile: OpStream.EncodingProfile)
-        (hashFn: HashFn)
-        (encode: 'Op -> string)
-        (parents: string list)
-        (actor: Actor)
-        (op: 'Op)
-        : string =
-        nodeHashAs (OpStream.encodeActorWith profile) hashFn encode parents actor op
+    /// The content id a node of (`parents`, `actor`, `op`) has in stream `s` (Phase 311; one verb over the
+    /// stream since Phase 516) — `nodeHash`, public, so a consumer that names a node before (or without)
+    /// building it computes the id this module mints instead of re-deriving the pre-image: `s.HashFn
+    /// (sorted parents joined by ",") (actor + "|" + s.Witness.Encode op)`, the parents sorted ordinally,
+    /// so the id is a function of the parent SET's order-free spelling, and the actor spelled as `s`'s
+    /// config spells it (`StreamConfig.spellActor`: `Actor.encode` under `StreamConfig.canonical`, the
+    /// id `0.30.0` minted under `StreamConfig.legacyEscape`). A store pinned to `0.30.0`'s spelling passes
+    /// a stream over that config whose witness renders through `Json.renderWith EncodingProfile.V1` — one
+    /// declaration, both halves of the pre-image. `firstBreak` and `verifyDag` recompute ids through this
+    /// same function.
+    let nodeId (s: Stream<'Op, 'State, 'Rej>) (parents: string list) (actor: Actor) (op: 'Op) : string =
+        nodeHashAs (StreamConfig.spellActor s.Config) s.HashFn s.Witness.Encode parents actor op
 
     /// Append `op` as a child of EVERY id in `parents` (Phase 311) — the N-parent constructor `append`
     /// (one parent) and `merge` (two) are the cases of. `[]` is a genesis node. The parents are stored
@@ -759,44 +749,24 @@ module Dag =
                           Got = missing }
                 | None -> None)
 
-    /// The first integrity fault in the DAG (Phase 21): a node whose stored id is not the content hash
-    /// of its (parents, actor, op) — a tampered node — or a node naming a parent the DAG does not
-    /// contain. `None` for an intact DAG. Localises what `verifyDag` only reports as a boolean, so
-    /// `fromJsonlVerified` / an operator can say *where*.
+    /// The first integrity fault in the DAG under stream `s` (Phase 296; one verb over the stream since
+    /// Phase 516): a node whose id is not the content hash of its (parents, actor, op) under `s`'s hash,
+    /// witness and actor spelling, or a parent the DAG does not hold. `None` for an intact DAG. A store
+    /// minted under `0.30.0`'s spelling is verified by a stream over `StreamConfig.legacyEscape`.
+    /// Localises what `verifyDag` only reports as a boolean, so `fromJsonlVerified` / an operator can
+    /// say *where*.
     ///
     /// **The scan is TOPOLOGICAL since Phase 311** — the whole DAG's drain (`drainBy`, smallest id first
     /// among the ready nodes), then any node on or below a cycle in id order — so where a DAG holds
     /// several faults the one named is the EARLIEST in its history, never whichever id sorts first. It
     /// was the id order until `0.34.0`; which nodes are faulty, and `verifyDag`'s verdict, are unchanged.
-    let firstBreak (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
-        firstBreakAs Actor.encode hashFn w dag
+    let firstBreak (s: Stream<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
+        firstBreakAs (StreamConfig.spellActor s.Config) s.HashFn s.Witness dag
 
-    /// `firstBreak` under a named encoding profile (Phase 360): every id recomputed through `nodeIdWith
-    /// profile`, so a DAG whose ids were minted under `profile` — `0.30.0`'s, for `V1` — verifies for
-    /// what it is. `w.Encode` must render the op as the store declares too (`Json.renderWith`).
-    /// `firstBreakWith OpStream.EncodingProfile.V2` is `firstBreak`.
-    let firstBreakWith
-        (profile: OpStream.EncodingProfile)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (dag: T<'Op>)
-        : DagBreak option =
-        firstBreakAs (OpStream.encodeActorWith profile) hashFn w dag
-
-    /// Verify the DAG: every node's id is the content hash of its (parents, actor, op), and
-    /// every parent exists — generalises the linear `verifyChain` to a DAG. Re-expressed over
-    /// `firstBreak` (Phase 21) so the two share one definition of integrity.
-    let verifyDag (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : bool =
-        firstBreak hashFn w dag |> Option.isNone
-
-    /// `verifyDag` under a named encoding profile (Phase 360) — `firstBreakWith profile` finds nothing.
-    let verifyDagWith
-        (profile: OpStream.EncodingProfile)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (dag: T<'Op>)
-        : bool =
-        firstBreakWith profile hashFn w dag |> Option.isNone
+    /// Verify the DAG under stream `s`: every node's id is the content hash of its (parents, actor, op),
+    /// and every parent exists — generalises the linear `OpStream.verifyChain` to a DAG. Re-expressed
+    /// over `firstBreak`, one definition of integrity, localising or boolean.
+    let verifyDag (s: Stream<'Op, 'State, 'Rej>) (dag: T<'Op>) : bool = firstBreak s dag |> Option.isNone
 
     /// The Kahn topological-sort core: returns the emitted order **and** the head's ancestor-closure.
     /// On an acyclic closure `List.length order = Set.count anc`; a cycle leaves the cyclic nodes
@@ -1130,7 +1100,7 @@ module Dag =
     // ---- JSONL persistence (Phase 01) ----
     // The linear OpStream round-trips to JSONL; the DAG does too, closing the persistence
     // asymmetry. Read through the linear package's one scanner (`OpStream.Jsonl`, Phase 296) and
-    // spelled by its one escaper (`OpStream.Jsonl.quote`, Phase 388): this package references
+    // spelled by its one escaper (`Jsonl.quote`, Phase 388): this package references
     // `OpStream`, so neither is copied here, and it stays Fable-clean (Phase 241). One JSON
     // object per node; the `op` value is the witness's own Encode output embedded raw (preserved
     // byte-for-byte); nodes are emitted in id-sorted order so output is stable for a fixed DAG.
@@ -1139,9 +1109,9 @@ module Dag =
     /// JSON (the witness's own Encode output), so a round-trip preserves it byte-for-byte.
     let private nodeLine (n: DagNode<'Op>) (opJson: string) : string =
         "{\"node\":true,\"id\":"
-        + OpStream.Jsonl.quote n.Id
+        + Jsonl.quote n.Id
         + ",\"parents\":["
-        + (n.Parents |> List.map OpStream.Jsonl.quote |> String.concat ",")
+        + (n.Parents |> List.map Jsonl.quote |> String.concat ",")
         + "],\"actor\":"
         + Actor.encode n.Actor
         + ",\"op\":"
@@ -1159,7 +1129,7 @@ module Dag =
         |> String.concat "\n"
 
     /// `toJsonl` that refuses an op encoding the reader cannot read back (Phase 301) — the linear
-    /// writers' check (`OpStream.Jsonl.checkRaw`) over every node's `encode n.Op`, and since Phase 473
+    /// writers' check (`Jsonl.checkRaw`) over every node's `encode n.Op`, and since Phase 473
     /// over the id, parents and actor it quotes itself, in line order and in the id order the lines
     /// are written. A node's content id is hashed over its encoding, so an encoding carrying a
     /// line break, or whitespace either side of the value, read back changed and failed `verifyDag`.
@@ -1175,8 +1145,8 @@ module Dag =
         |> Jsonl.checkedLines
             "op"
             (fun (n: DagNode<'Op>) ->
-                [ "id", OpStream.Jsonl.quote n.Id
-                  "parents", "[" + (n.Parents |> List.map OpStream.Jsonl.quote |> String.concat ",") + "]"
+                [ "id", Jsonl.quote n.Id
+                  "parents", "[" + (n.Parents |> List.map Jsonl.quote |> String.concat ",") + "]"
                   "actor", Actor.encode n.Actor
                   "op", encode n.Op ])
             nodeLine
@@ -1192,14 +1162,14 @@ module Dag =
         let bind f r = Result.bind f r
 
         let nodeOf (line: JsonlLine) =
-            OpStream.Jsonl.stringField "id" line
+            Jsonl.stringField "id" line
             |> bind (fun id ->
-                OpStream.Jsonl.stringsField "parents" line
+                Jsonl.stringsField "parents" line
                 |> bind (fun parents ->
-                    OpStream.Jsonl.actorField "actor" line
+                    Jsonl.actorField "actor" line
                     |> bind (fun actor ->
-                        OpStream.Jsonl.rawField "op" line
-                        |> bind (fun raw -> cw.Decode raw |> Result.mapError (OpStream.Jsonl.refuse line))
+                        Jsonl.rawField "op" line
+                        |> bind (fun raw -> cw.Decode raw |> Result.mapError (Jsonl.refuse line))
                         |> Result.map (fun op ->
                             line,
                             { Id = id
@@ -1208,18 +1178,18 @@ module Dag =
                               Op = op }))))
 
         text
-        |> OpStream.Jsonl.scanRecords nodeOf
+        |> Jsonl.scanRecords nodeOf
         |> bind (fun lines ->
             let rec go (acc: Map<string, DagNode<string * Result<'Op, string>>>) (at: Map<string, int>) =
                 function
                 | [] -> Ok({ NodeMap = acc }, at)
                 | (line, node: DagNode<string * Result<'Op, string>>) :: rest ->
                     match Map.tryFind node.Id acc with
-                    | None -> go (Map.add node.Id node acc) (Map.add node.Id (OpStream.Jsonl.lineNumber line) at) rest
+                    | None -> go (Map.add node.Id node acc) (Map.add node.Id (Jsonl.lineNumber line) at) rest
                     | Some held when sameNode cw.Encode held node.Parents node.Actor node.Op -> go acc at rest
                     | Some _ ->
                         Error(
-                            OpStream.Jsonl.refuse
+                            Jsonl.refuse
                                 line
                                 ("node "
                                  + node.Id
@@ -1307,7 +1277,7 @@ module Dag =
         match readCarried w text with
         | Error f -> Error(StreamLoadFault.Unreadable(None, f))
         | Ok(carried, lineOf) ->
-            match firstBreak hashFn (Jsonl.carry w) carried with
+            match firstBreak (OpStream.canonical hashFn (Jsonl.carry w)) carried with
             | Some b -> Error(StreamLoadFault.Broken b)
             | None -> settle (fun _ -> None) lineOf carried
 
@@ -2484,7 +2454,7 @@ module Dag =
                 Sealed.firstBreak
                     hashFn
                     stateEncode
-                    (ChainShape.records OpStream.canonicalConfig w.Encode)
+                    (ChainShape.records StreamConfig.canonical w.Encode)
                     (sealedOf cp)
                     []
             with
@@ -2763,20 +2733,20 @@ module Dag =
         (stateDecode: string -> Result<'State, string>)
         (line: JsonlLine)
         : Result<Checkpoint<'State>, JsonlFault> =
-        let refuse = OpStream.Jsonl.refuse line
+        let refuse = Jsonl.refuse line
 
-        match OpStream.Jsonl.tryRawField "snapshot" line, OpStream.Jsonl.tryRawField "stateHashed" line with
+        match Jsonl.tryRawField "snapshot" line, Jsonl.tryRawField "stateHashed" line with
         | Some "true", (None | Some "true") ->
-            OpStream.Jsonl.intField "seq" line
+            Jsonl.intField "seq" line
             |> Result.bind (fun seq ->
                 if seq <> 0 then
                     Error(refuse (sprintf "a checkpoint is the snapshot at seq 0; this line is at seq %d" seq))
                 else
-                    OpStream.Jsonl.rawField "state" line)
+                    Jsonl.rawField "state" line)
             |> Result.bind (fun raw ->
-                OpStream.Jsonl.stringField "prevHash" line
+                Jsonl.stringField "prevHash" line
                 |> Result.bind (fun node ->
-                    OpStream.Jsonl.stringField "hash" line
+                    Jsonl.stringField "hash" line
                     |> Result.bind (fun hash ->
                         if node = "" then
                             Error(refuse "a checkpoint names its node in prevHash, and this one is empty")
@@ -2789,7 +2759,7 @@ module Dag =
 
     /// Write a DAG and its checkpoints (Phase 288): `(lane, sidecar)`. The lane is `toJsonl encode dag`,
     /// byte for byte; the sidecar is one line per checkpoint, in the order given, each the linear snapshot
-    /// line (`OpStream.Snapshots.toJsonl`) of the snapshot the checkpoint is sealed as. No checkpoints, an
+    /// line (`Snapshots.toJsonl`) of the snapshot the checkpoint is sealed as. No checkpoints, an
     /// empty sidecar.
     let toJsonlWithCheckpoints
         (encode: 'Op -> string)
@@ -2799,11 +2769,11 @@ module Dag =
         : string * string =
         toJsonl encode dag,
         checkpoints
-        |> List.map (fun cp -> OpStream.Snapshots.toJsonl stateEncode (asSnapshot cp))
+        |> List.map (fun cp -> Snapshots.toJsonl stateEncode (asSnapshot cp))
         |> String.concat "\n"
 
     /// `toJsonlWithCheckpoints` through the checked writers (Phase 301): the lane by `tryToJsonl`, each
-    /// sidecar line by `OpStream.Snapshots.tryToJsonl` — a refused state is the `Error` by its 1-based
+    /// sidecar line by `Snapshots.tryToJsonl` — a refused state is the `Error` by its 1-based
     /// SIDECAR line, member `state`. On `Ok` both texts are `toJsonlWithCheckpoints`'s, byte for byte.
     let tryToJsonlWithCheckpoints
         (encode: 'Op -> string)
@@ -2817,7 +2787,7 @@ module Dag =
                 function
                 | [] -> Ok(lane, acc |> List.rev |> String.concat "\n")
                 | (cp: Checkpoint<'State>) :: rest ->
-                    match OpStream.Snapshots.tryToJsonl stateEncode (asSnapshot cp) with
+                    match Snapshots.tryToJsonl stateEncode (asSnapshot cp) with
                     | Error f -> Error { f with Line = i + 1 }
                     | Ok line -> go (i + 1) (line :: acc) rest
 
@@ -2842,7 +2812,7 @@ module Dag =
             match sidecar with
             | None -> Ok(dag, [])
             | Some side ->
-                OpStream.Jsonl.scanRecords (checkpointOf stateDecode) side
+                Jsonl.scanRecords (checkpointOf stateDecode) side
                 |> Result.map (fun cps -> dag, cps)
                 |> Result.mapError StreamLoadFault.UnreadableCheckpoint)
 
@@ -2967,7 +2937,7 @@ module Dag =
         : Result<Loaded<'Op>, StreamLoadFault<LaneBreak>> =
         loadCarried w lanes
         |> Result.bind (fun (loaded, lineOf) ->
-            match firstBreak hashFn (Jsonl.carry w) loaded.Dag with
+            match firstBreak (OpStream.canonical hashFn (Jsonl.carry w)) loaded.Dag with
             | Some b ->
                 Error(
                     StreamLoadFault.Broken
@@ -3016,7 +2986,7 @@ module Dag =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (loaded: Loaded<'Op>)
         : Result<unit, LaneBreak> =
-        match firstBreak hashFn w loaded.Dag with
+        match firstBreak (OpStream.canonical hashFn w) loaded.Dag with
         | None -> Ok()
         | Some b ->
             Error
@@ -3188,19 +3158,19 @@ module Dag =
     // first. A DAG's ids ARE its hashes, so a change of hash function — the 32-bit FNV-1a default to a
     // host's SHA-256 — re-mints every node, and each child's parent ids with it.
 
-    /// Why `rehashWith` (Phase 311) or `rehashEncoding` (Phase 360) refused.
+    /// Why `rehash` refused (Phase 311; over two streams since Phase 516).
     [<RequireQualifiedAccess>]
     type RehashFault =
-        /// The source does not verify under `fromHash` (or, for `rehashEncoding`, under its profile and
-        /// witness): its first break. A history that does not verify is not re-blessed under a new hash
+        /// The source does not verify under the `from` stream (its hash, witness and actor spelling): its
+        /// first break. A history that does not verify is not re-blessed under a new hash
         /// or a new encoding.
         | Unverified of DagBreak
         /// Nodes no drain places — a cycle — every one, in id order.
         | Cyclic of unplaced: string list
-        /// Two nodes mint one id under `toHash`: the target hash collides, at that id.
+        /// Two nodes mint one id under the `into` stream: the target hash collides, at that id.
         | Collision of nodeId: string
 
-    /// The re-mint both rehashes share (Phase 360 factored it out of Phase 311's `rehashWith`): refuse
+    /// The re-mint `rehash` performs (Phase 360 factored it out of Phase 311's form): refuse
     /// a `sourceBreak`, then rebuild every node in topological order at the id `idOf` mints, each
     /// parent id replaced by its new one, keyed by `encode` for the collision check.
     let private remint
@@ -3230,29 +3200,31 @@ module Dag =
 
                 go empty Map.empty order
 
-    /// Re-mint a DAG under another hash function (Phase 311): verify it under `fromHash` (`firstBreak`;
-    /// a break is `Unverified`), then rebuild every node in topological order under `toHash`, each
-    /// parent id replaced by its new id — the ops, actors and parent ORDER are the source of truth, only
-    /// the ids change. `Ok(dag', ids)`, with `ids` mapping every old id to its new one (for heads,
-    /// lanes, checkpoints and attestations a host keys by id). The result verifies under `toHash`, and
-    /// `rehashWith toHash fromHash` of it is the source again (`Conformance.laneLaws`).
-    let rehashWith
-        (fromHash: HashFn)
-        (toHash: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+    /// Re-mint the DAG from one stream to another (Phase 311; one verb over two streams since Phase 516):
+    /// verify it under `from` — a break is `RehashFault.Unverified`, and nothing is re-minted — then
+    /// re-derive every node's id under `into`, parents first, each child's parent ids with it.
+    /// `Ok(dag', ids)`, with `ids` mapping every old id to its new one (for heads, checkpoints and
+    /// attestations a host keys by id). The two streams may differ in their hash (the 32-bit FNV-1a
+    /// default to a host's SHA-256), their actor spelling (`StreamConfig.legacyEscape` to
+    /// `StreamConfig.canonical`), or their witness's `Encode` (a store whose op encoder rendered through
+    /// `Json.renderWith EncodingProfile.V1` before `0.33.0`); only the witnesses' `Encode` is read. The
+    /// result verifies under `into`, and the rehash back is the source again. A cycle is
+    /// `RehashFault.Cyclic`; two nodes landing on one new id is `RehashFault.Collision`.
+    let rehash
+        (from: Stream<'Op, 'State, 'Rej>)
+        (into: Stream<'Op, 'State, 'Rej>)
         (dag: T<'Op>)
         : Result<T<'Op> * Map<string, string>, RehashFault> =
-        remint (firstBreak fromHash w dag) (fun ps a op -> nodeHash toHash w.Encode ps a op) w.Encode dag
+        remint (firstBreak from dag) (fun ps a op -> nodeId into ps a op) into.Witness.Encode dag
 
-    /// `rehashWith` over a lane store (Phase 311): the union re-minted, and every node's lane carried to
-    /// its new id.
+    /// `rehash` over a lane store (Phase 311): the union re-minted, and every node's lane carried to its
+    /// new id.
     let rehashLanes
-        (fromHash: HashFn)
-        (toHash: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (from: Stream<'Op, 'State, 'Rej>)
+        (into: Stream<'Op, 'State, 'Rej>)
         (loaded: Loaded<'Op>)
         : Result<Loaded<'Op> * Map<string, string>, RehashFault> =
-        rehashWith fromHash toHash w loaded.Dag
+        rehash from into loaded.Dag
         |> Result.map (fun (d, ids) ->
             { Dag = d
               LaneOf =
@@ -3262,32 +3234,10 @@ module Dag =
                 |> Map.ofList },
             ids)
 
-    /// The TWO-WITNESS rehash across encoding profiles (Phase 360): verify the DAG under `fromProfile`
-    /// with `fromW`'s encoder (`firstBreakWith`; a break is `Unverified`), then re-mint every node under
-    /// `toProfile` with `toW`'s — `rehashWith` changes the hash function and keeps one encoder; this
-    /// changes the encoding and keeps one hash function. A store whose op encoder rendered through
-    /// `Json.render` before `0.33.0` passes `fromW` encoding with `Json.renderWith EncodingProfile.V1`
-    /// and `toW` with `V2`. Only the witnesses' `Encode` is read. `Ok(dag', ids)` as for `rehashWith`;
-    /// the result verifies under `toProfile` and `toW`, and the rehash back is the source again. A lane
-    /// store carries its lanes across through `ids`, as `rehashLanes` does for the hash axis.
-    let rehashEncoding
-        (fromProfile: OpStream.EncodingProfile)
-        (fromW: StreamWitness<'Op, 'State, 'Rej>)
-        (toProfile: OpStream.EncodingProfile)
-        (toW: StreamWitness<'Op, 'State, 'Rej>)
-        (hashFn: HashFn)
-        (dag: T<'Op>)
-        : Result<T<'Op> * Map<string, string>, RehashFault> =
-        remint
-            (firstBreakWith fromProfile hashFn fromW dag)
-            (fun ps a op -> nodeIdWith toProfile hashFn toW.Encode ps a op)
-            toW.Encode
-            dag
-
     // ---- attestation (Phase 311) ----
     // The linear stream signs its chain head through `IAttestationSink` (Phase 320). A DAG node's id is a
     // hash over its whole closure, so signing a node signs its history; on a store several parties write,
-    // the signature also says WHO vouched (`OpStream.attestationSubject`, a party-bound subject).
+    // the signature also says WHO vouched (`Attestation.attestationSubject`, a party-bound subject).
 
     /// Why `attestHead` refused (Phase 311).
     [<RequireQualifiedAccess>]
@@ -3296,7 +3246,7 @@ module Dag =
         | UnknownNode of nodeId: string
 
     /// Attest a node of the DAG — usually a head — as `party` (Phase 311): the sink signs
-    /// `OpStream.attestationSubject hashFn party headId`, and since the node id is a hash over its whole
+    /// `Attestation.attestationSubject hashFn party headId`, and since the node id is a hash over its whole
     /// ancestor closure one signature covers that history. `Ok None` from the no-op sink; `Error
     /// UnknownNode` for an id the DAG does not hold. Integrity is a separate act, as for the linear
     /// stream: verify the DAG (`verifyDag`, `verifyLanes`) before attesting it.
@@ -3310,7 +3260,7 @@ module Dag =
         if not (dag.Nodes.ContainsKey headId) then
             Error(DagAttestFault.UnknownNode headId)
         else
-            Ok(sink.Sign(OpStream.attestationSubject hashFn party headId))
+            Ok(sink.Sign(Attestation.attestationSubject hashFn party headId))
 
     /// Re-verify a party's attestation of a node (Phase 311): `true` only when the DAG holds `headId`, the
     /// attestation names the subject `attestHead` would sign for this party and node, and the sink accepts
@@ -3323,7 +3273,7 @@ module Dag =
         (dag: T<'Op>)
         (headId: string)
         : bool =
-        let subject = OpStream.attestationSubject hashFn party headId
+        let subject = Attestation.attestationSubject hashFn party headId
 
         dag.Nodes.ContainsKey headId
         && attestation.Head = subject

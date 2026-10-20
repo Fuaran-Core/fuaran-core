@@ -181,18 +181,25 @@ let tests =
                     let w = Counter.witness
 
                     match
-                        OpStream.appendMany OpStream.sha256Hash w (Human "h") [ Counter.Inc 2; Counter.Dec 1 ] 0 []
+                        OpStream.appendMany
+                            (OpStream.canonical OpStream.sha256Hash w)
+                            (Human "h")
+                            [ Counter.Inc 2; Counter.Dec 1 ]
+                            0
+                            []
                     with
                     | Error e -> failtestf "refused %A" e
                     | Ok(_, recs) ->
-                        Expect.isTrue (OpStream.verifyChain OpStream.sha256Hash w recs) "intact"
+                        Expect.isTrue (OpStream.verifyChain (OpStream.canonical OpStream.sha256Hash w) recs) "intact"
                         Expect.equal recs.Head.Hash.Length 64 "a SHA-256 hex digest"
 
                         let forged =
                             recs
                             |> List.mapi (fun i r -> if i = 1 then { r with Op = Counter.Dec 2 } else r)
 
-                        Expect.isFalse (OpStream.verifyChain OpStream.sha256Hash w forged) "tamper detected" ]
+                        Expect.isFalse
+                            (OpStream.verifyChain (OpStream.canonical OpStream.sha256Hash w) forged)
+                            "tamper detected" ]
 
           testList
               "stateless and batch append"
@@ -201,14 +208,19 @@ let tests =
                     let w = Counter.witness
 
                     match
-                        OpStream.appendMany OpStream.defaultHash w (Human "h") [ Counter.Inc 1; Counter.Inc 4 ] 0 []
+                        OpStream.appendMany
+                            (OpStream.canonical OpStream.defaultHash w)
+                            (Human "h")
+                            [ Counter.Inc 1; Counter.Inc 4 ]
+                            0
+                            []
                     with
                     | Error e -> failtestf "refused %A" e
                     | Ok(_, recs) ->
                         for r in recs do
                             Expect.equal
                                 (OpStream.chainHashOf
-                                    OpStream.canonicalConfig
+                                    StreamConfig.canonical
                                     OpStream.defaultHash
                                     r.Seq
                                     r.Actor
@@ -225,13 +237,16 @@ let tests =
                     for hashFn in [ OpStream.defaultHash; OpStream.sha256Hash ] do
                         let stateless =
                             (OpStream.empty, ops)
-                            ||> List.fold (fun recs op -> OpStream.appendChainOnly hashFn w.Encode (Human "h") op recs)
+                            ||> List.fold (fun recs op ->
+                                OpStream.appendChainOnly (OpStream.canonical hashFn w) (Human "h") op recs)
 
-                        match OpStream.appendMany hashFn w (Human "h") ops 0 [] with
+                        match OpStream.appendMany (OpStream.canonical hashFn w) (Human "h") ops 0 [] with
                         | Error e -> failtestf "refused %A" e
                         | Ok(_, recs) -> Expect.equal stateless recs "the same records, byte for byte"
 
-                        Expect.isTrue (OpStream.verifyChain hashFn w stateless) "a stateless adapter's chain verifies"
+                        Expect.isTrue
+                            (OpStream.verifyChain (OpStream.canonical hashFn w) stateless)
+                            "a stateless adapter's chain verifies"
 
                 testCase "appendChainOnly chains an op the domain refuses; replay is where it is refused"
                 <| fun _ ->
@@ -240,10 +255,17 @@ let tests =
                     let recs =
                         [ Counter.Inc 1; Counter.Dec 5 ]
                         |> List.fold
-                            (fun recs op -> OpStream.appendChainOnly OpStream.defaultHash w.Encode (Human "h") op recs)
+                            (fun recs op ->
+                                OpStream.appendChainOnly
+                                    (OpStream.canonical OpStream.defaultHash w)
+                                    (Human "h")
+                                    op
+                                    recs)
                             OpStream.empty
 
-                    Expect.isTrue (OpStream.verifyChain OpStream.defaultHash w recs) "the chain itself is intact"
+                    Expect.isTrue
+                        (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash w) recs)
+                        "the chain itself is intact"
 
                     match OpStream.replay w 0 recs with
                     | Error(1, _) -> ()
@@ -263,7 +285,12 @@ let tests =
                         rng <- r2
 
                         match
-                            OpStream.appendMany OpStream.defaultHash skeletonStream (Human "h") ops (sample ()) [],
+                            OpStream.appendMany
+                                (OpStream.canonical OpStream.defaultHash skeletonStream)
+                                (Human "h")
+                                ops
+                                (sample ())
+                                [],
                             Ops.applyAll Policy.none (OpScope.plain nodew idw) ops (sample ())
                         with
                         | Error(i, e), Error { Applied = j; Rejection = e' } ->
@@ -582,19 +609,21 @@ let tests =
 
                     for actor in [ Human ""; Agent("m", "1", "") ] do
                         let recs =
-                            OpStream.appendChainOnly OpStream.defaultHash w.Encode actor (Counter.Inc 1) []
+                            OpStream.appendChainOnly
+                                (OpStream.canonical OpStream.defaultHash w)
+                                actor
+                                (Counter.Inc 1)
+                                []
 
-                        match
-                            OpStream.fromJsonl w (OpStream.toJsonl w recs)
-                            |> Result.mapError StreamLoadFault.toString
-                        with
+                        match Jsonl.read w (Jsonl.write w recs) |> Result.mapError StreamLoadFault.toString with
                         | Error e -> Expect.stringContains e "the actor in actor has an empty id" "the refusal names it"
                         | Ok _ -> failtestf "an empty %A was read back" actor
 
                     let named =
-                        OpStream.appendChainOnly OpStream.defaultHash w.Encode (Human "ada") (Counter.Inc 1) []
+                        OpStream.appendChainOnly
+                            (OpStream.canonical OpStream.defaultHash w)
+                            (Human "ada")
+                            (Counter.Inc 1)
+                            []
 
-                    Expect.equal
-                        (OpStream.fromJsonl w (OpStream.toJsonl w named))
-                        (Ok named)
-                        "a named actor round-trips" ] ]
+                    Expect.equal (Jsonl.read w (Jsonl.write w named)) (Ok named) "a named actor round-trips" ] ]

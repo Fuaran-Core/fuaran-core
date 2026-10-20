@@ -77,7 +77,7 @@ type Sealed<'State> =
         Seal: string
     }
 
-/// The sealing verbs, written once over `Sealed` (Phase 530): `OpStream.Snapshots`, the compacted
+/// The sealing verbs, written once over `Sealed` (Phase 530): `Snapshots`, the compacted
 /// stream and the op-DAG's checkpoints seal, verify and replay through these.
 [<RequireQualifiedAccess>]
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -148,7 +148,7 @@ module Sealed =
         match tail with
         | r :: _ when r.Seq <> sv.Anchor.Seq -> Error(SnapshotFault.TailSeqMismatch(sv.Anchor.Seq, r.Seq))
         | _ ->
-            match OpStreamChain.replay w sv.State tail with
+            match OpStream.replay w sv.State tail with
             | Ok st -> Ok st
             | Error(i, e) -> Error(SnapshotFault.TailRejected(i, e))
 
@@ -161,7 +161,7 @@ module Sealed =
           Mode = snap.Mode
           Seal = snap.Hash }
 
-    /// The snapshot a sealed state is — the record `OpStream.Snapshots` and its line carry.
+    /// The snapshot a sealed state is — the record `Snapshots` and its line carry.
     let toSnapshot (sv: Sealed<'State>) : Snapshot<'State> =
         { Seq = sv.Anchor.Seq
           State = sv.State
@@ -169,147 +169,175 @@ module Sealed =
           Hash = sv.Seal
           Mode = sv.Mode }
 
-/// The bodies of the `OpStream` snapshot members (Phase 332): the `OpStream.Snapshots` family, each
-/// over `Sealed` since Phase 530. Internal: a consumer reaches each one through its forward in
-/// `OpStream` (OpStream.fs), which carries the member's contract and documentation. (The pre-Phase-296
-/// matrix that was forwarded over it left at `0.37.0`, Phase 386.)
-module internal OpStreamSnapshot =
-    open Fuaran.Core.OpStreamChain
-    open Fuaran.Core.OpStreamJsonl
+/// The snapshot family (Phase 244; one family since Phase 296; over `Sealed` since Phase 530; the public
+/// module itself since Phase 516): take a snapshot of a stream's state at a boundary, compact a stream to
+/// it, verify the boundary and the tail above it, replay from it, and its one JSONL line. Every verb that
+/// reads the chain takes the stream's one `Stream` value, so the boundary is sealed and verified under
+/// the config the stream was written under.
+[<RequireQualifiedAccess>]
+module Snapshots =
 
-    // ---- snapshot / compaction (Phase 244; one family since Phase 296; over `Sealed` since 530) ----
+    /// The snapshot of `state` at boundary `seq` whose boundary hash is `prevHash`, hashed by
+    /// `mode` — `Sealed.seal` at that anchor.
+    let internal seal
+        (mode: SnapshotMode)
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (seq: int)
+        (state: 'State)
+        (prevHash: string)
+        : Snapshot<'State> =
+        Sealed.seal mode hashFn stateEncode { Seq = seq; PrevHash = prevHash } state
+        |> Sealed.toSnapshot
 
-    module Snapshots =
+    /// Capture a snapshot at boundary `atSeq` — the state after `records[0 .. atSeq-1]` from
+    /// `state0` — hashed by `mode`. The boundary hash at sequence zero is `s`'s genesis, the seed
+    /// every chain walker starts from (Phase 227: `compact_at_zero_verifies_under_any_genesis`,
+    /// `proofs/Chain.fst`); past zero it is the stored `records[atSeq-1].Hash`, read and TRUSTED —
+    /// verify the stream before snapshotting it. Only the config's genesis is read: the snapshot's own
+    /// pre-image is the checkpoint format, not the per-op chain format.
+    let take
+        (mode: SnapshotMode)
+        (s: Stream<'Op, 'State, 'Rej>)
+        (stateEncode: 'State -> string)
+        (state0: 'State)
+        (records: OpRecord<'Op> list)
+        (atSeq: int)
+        : Result<Snapshot<'State>, SnapshotFault<'Rej>> =
+        let n = List.length records
 
-        /// The snapshot of `state` at boundary `seq` whose boundary hash is `prevHash`, hashed by
-        /// `mode` — `Sealed.seal` at that anchor.
-        let seal
-            (mode: SnapshotMode)
-            (hashFn: HashFn)
-            (stateEncode: 'State -> string)
-            (seq: int)
-            (state: 'State)
-            (prevHash: string)
-            : Snapshot<'State> =
-            Sealed.seal mode hashFn stateEncode { Seq = seq; PrevHash = prevHash } state
-            |> Sealed.toSnapshot
+        if atSeq < 0 || atSeq > n then
+            Error(SnapshotFault.SeqOutOfRange(atSeq, n))
+        else
+            let prefix = List.truncate atSeq records
 
-        let take
-            (mode: SnapshotMode)
-            (cfg: StreamConfig)
-            (hashFn: HashFn)
-            (stateEncode: 'State -> string)
-            (w: StreamWitness<'Op, 'State, 'Rej>)
-            (state0: 'State)
-            (records: OpRecord<'Op> list)
-            (atSeq: int)
-            : Result<Snapshot<'State>, SnapshotFault<'Rej>> =
-            let n = List.length records
+            match OpStream.replay s.Witness state0 prefix with
+            | Error(i, e) -> Error(SnapshotFault.PrefixRejected(i, e))
+            | Ok state ->
+                // The boundary is the tip of the prefix just replayed, read from it rather than
+                // from the record list by index.
+                let at =
+                    ChainShape.tip (ChainShape.records s.Config s.Witness.Encode) (Anchor.genesis s.Config) prefix
 
-            if atSeq < 0 || atSeq > n then
-                Error(SnapshotFault.SeqOutOfRange(atSeq, n))
-            else
-                let prefix = List.truncate atSeq records
+                Ok(seal mode s.HashFn stateEncode atSeq state at.PrevHash)
 
-                match replay w state0 prefix with
-                | Error(i, e) -> Error(SnapshotFault.PrefixRejected(i, e))
-                | Ok state ->
-                    // The boundary is the tip of the prefix just replayed, read from it rather than
-                    // from the record list by index.
-                    let at =
-                        ChainShape.tip (ChainShape.records cfg w.Encode) (Anchor.genesis cfg) prefix
+    /// Compact a stream at `atSeq` into `(snapshot, tail)` that replays identically to the full
+    /// stream from `state0` — the prefix is discarded, the chain stays verifiable.
+    ///
+    /// **Verify, then compact (Phase 227).** `compact` does not walk the chain: it reads
+    /// `records[atSeq-1].Hash` and TRUSTS it. So the compacted stream verifies exactly when the
+    /// original does only if the discarded prefix verified first — `compact_preserves_verify` /
+    /// `compact_verifies_iff_original` (`proofs/Chain.fst`). A tamper in the prefix of an
+    /// UNVERIFIED stream survives compaction, verifies across the boundary, and once the prefix is
+    /// discarded nothing can find it again. Run `OpStream.verifyChain s` over the stream first.
+    let compact
+        (mode: SnapshotMode)
+        (s: Stream<'Op, 'State, 'Rej>)
+        (stateEncode: 'State -> string)
+        (state0: 'State)
+        (records: OpRecord<'Op> list)
+        (atSeq: int)
+        : Result<Snapshot<'State> * OpRecord<'Op> list, SnapshotFault<'Rej>> =
+        take mode s stateEncode state0 records atSeq
+        |> Result.map (fun snap -> snap, List.skip atSeq records)
 
-                    Ok(seal mode hashFn stateEncode atSeq state at.PrevHash)
+    /// The first place a snapshot boundary fails to verify, under the snapshot's OWN mode — its
+    /// hash (and, `Strict`, the state it folds in), then the tail's chain from the snapshot's
+    /// `PrevHash` and `Seq` under `s`'s config through the one chain walker. `None` for an intact
+    /// boundary. The localising form of `verify`, public since Phase 296.
+    let firstBreak
+        (s: Stream<'Op, 'State, 'Rej>)
+        (stateEncode: 'State -> string)
+        (snap: Snapshot<'State>)
+        (tail: OpRecord<'Op> list)
+        : SnapshotBreak option =
+        Sealed.firstBreak
+            s.HashFn
+            stateEncode
+            (ChainShape.records s.Config s.Witness.Encode)
+            (Sealed.ofSnapshot snap)
+            tail
 
-        let compact
-            (mode: SnapshotMode)
-            (cfg: StreamConfig)
-            (hashFn: HashFn)
-            (stateEncode: 'State -> string)
-            (w: StreamWitness<'Op, 'State, 'Rej>)
-            (state0: 'State)
-            (records: OpRecord<'Op> list)
-            (atSeq: int)
-            : Result<Snapshot<'State> * OpRecord<'Op> list, SnapshotFault<'Rej>> =
-            take mode cfg hashFn stateEncode w state0 records atSeq
-            |> Result.map (fun snap -> snap, List.skip atSeq records)
+    /// Verify the chain across the truncation boundary under the snapshot's own mode — `firstBreak
+    /// … |> Option.isNone`. A `ChainOnly` snapshot does NOT detect a swapped `'State` (its
+    /// trade-off); a `Strict` one does.
+    let verify
+        (s: Stream<'Op, 'State, 'Rej>)
+        (stateEncode: 'State -> string)
+        (snap: Snapshot<'State>)
+        (tail: OpRecord<'Op> list)
+        : bool =
+        firstBreak s stateEncode snap tail |> Option.isNone
 
-        let firstBreak
-            (cfg: StreamConfig)
-            (hashFn: HashFn)
-            (stateEncode: 'State -> string)
-            (w: StreamWitness<'Op, 'State, 'Rej>)
-            (snap: Snapshot<'State>)
-            (tail: OpRecord<'Op> list)
-            : SnapshotBreak option =
-            Sealed.firstBreak hashFn stateEncode (ChainShape.records cfg w.Encode) (Sealed.ofSnapshot snap) tail
+    /// Bounded replay from a snapshot (Phase 296 checks the seam): the tail must start at the
+    /// snapshot's boundary — its first record's `Seq` equal to the snapshot's `Seq` — or the
+    /// replay would fold ops from the wrong position onto the checkpoint; then `Apply` is folded
+    /// over the tail from `snap.State`. The mode does not reach replay.
+    let replayFrom
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (snap: Snapshot<'State>)
+        (tail: OpRecord<'Op> list)
+        : Result<'State, SnapshotFault<'Rej>> =
+        Sealed.replayFrom w (Sealed.ofSnapshot snap) tail
 
-        let verify
-            (cfg: StreamConfig)
-            (hashFn: HashFn)
-            (stateEncode: 'State -> string)
-            (w: StreamWitness<'Op, 'State, 'Rej>)
-            (snap: Snapshot<'State>)
-            (tail: OpRecord<'Op> list)
-            : bool =
-            firstBreak cfg hashFn stateEncode w snap tail |> Option.isNone
+    /// The snapshot line: the chained line (`linked`) over the snapshot's members — its strict seal
+    /// payload, or for a chain-only snapshot the same members with the state carried and
+    /// `stateHashed` false, since a chain-only seal does not hold the state the line must.
+    let private lineOf (snap: Snapshot<'State>) (stateJson: string) : string =
+        Jsonl.linked
+            ("{\"snapshot\":true,\"seq\":"
+             + string snap.Seq
+             + ",\"state\":"
+             + stateJson
+             + (match snap.Mode with
+                | SnapshotMode.Strict -> ""
+                | SnapshotMode.ChainOnly -> ",\"stateHashed\":false")
+             + "}")
+            snap.PrevHash
+            snap.Hash
 
-        let replayFrom
-            (w: StreamWitness<'Op, 'State, 'Rej>)
-            (snap: Snapshot<'State>)
-            (tail: OpRecord<'Op> list)
-            : Result<'State, SnapshotFault<'Rej>> =
-            Sealed.replayFrom w (Sealed.ofSnapshot snap) tail
+    /// One snapshot line, by the snapshot's mode: a `Strict` line carries no `stateHashed` member
+    /// (byte-identical to the pre-Phase-258 format); a `ChainOnly` line carries
+    /// `"stateHashed":false`. The `state` member is `stateEncode`'s output embedded raw.
+    let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string = lineOf snap (stateEncode snap.State)
 
-        /// The snapshot line: the chained line (`linked`) over the snapshot's members — its strict seal
-        /// payload, or for a chain-only snapshot the same members with the state carried and
-        /// `stateHashed` false, since a chain-only seal does not hold the state the line must.
-        let private lineOf (snap: Snapshot<'State>) (stateJson: string) : string =
-            linked
-                ("{\"snapshot\":true,\"seq\":"
-                 + string snap.Seq
-                 + ",\"state\":"
-                 + stateJson
-                 + (match snap.Mode with
-                    | SnapshotMode.Strict -> ""
-                    | SnapshotMode.ChainOnly -> ",\"stateHashed\":false")
-                 + "}")
-                snap.PrevHash
-                snap.Hash
+    /// `toJsonl` that refuses a state encoding the reader cannot read back (Phase 301) — the
+    /// `Jsonl.checkRaw` check over `stateEncode snap.State`, and since Phase 473 over `prevHash` and
+    /// `hash`, refused as line 1 by member. On `Ok` the line is `toJsonl`'s, byte for byte.
+    let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
+        Jsonl.checkedLines
+            "state"
+            (fun (s: Snapshot<'State>) ->
+                [ "state", stateEncode s.State
+                  "prevHash", Jsonl.jstr s.PrevHash
+                  "hash", Jsonl.jstr s.Hash ])
+            lineOf
+            [ snap ]
 
-        let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
-            lineOf snap (stateEncode snap.State)
+    /// Parse a snapshot line through the one scanner, the mode read from the line: `ChainOnly`
+    /// when it carries `"stateHashed":false`, `Strict` when the member is absent or `true`
+    /// (every pre-Phase-258 line is strict), a refusal for any other value. The `state` span is
+    /// handed to `stateDecode`, whose `Error` is threaded through.
+    let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
+        Jsonl.parseLine 1 line
+        |> Jsonl.bindR (fun l ->
+            let mode =
+                match Jsonl.tryRawField "stateHashed" l with
+                | None
+                | Some "true" -> Ok SnapshotMode.Strict
+                | Some "false" -> Ok SnapshotMode.ChainOnly
+                | Some other -> Error(Jsonl.refuse l ("stateHashed is " + other + ", not a boolean"))
 
-        let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
-            checkedLines
-                "state"
-                (fun (s: Snapshot<'State>) ->
-                    [ "state", stateEncode s.State
-                      "prevHash", jstr s.PrevHash
-                      "hash", jstr s.Hash ])
-                lineOf
-                [ snap ]
-
-        let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
-            Jsonl.parseLine 1 line
-            |> bindR (fun l ->
-                let mode =
-                    match Jsonl.tryRawField "stateHashed" l with
-                    | None
-                    | Some "true" -> Ok SnapshotMode.Strict
-                    | Some "false" -> Ok SnapshotMode.ChainOnly
-                    | Some other -> Error(Jsonl.refuse l ("stateHashed is " + other + ", not a boolean"))
-
-                mode
-                |> bindR (fun mode ->
-                    linkedOf l (fun _ -> Jsonl.rawField "state" l)
-                    |> Result.map (fun (seq, stateRaw, prevHash, hash) -> mode, seq, stateRaw, prevHash, hash)))
-            |> Result.mapError spanFault
-            |> Result.bind (fun (mode, seq, stateRaw, prevHash, hash) ->
-                stateDecode stateRaw
-                |> Result.map (fun state ->
-                    { Seq = seq
-                      State = state
-                      PrevHash = prevHash
-                      Hash = hash
-                      Mode = mode }))
+            mode
+            |> Jsonl.bindR (fun mode ->
+                Jsonl.linkedOf l (fun _ -> Jsonl.rawField "state" l)
+                |> Result.map (fun (seq, stateRaw, prevHash, hash) -> mode, seq, stateRaw, prevHash, hash)))
+        |> Result.mapError Jsonl.spanFault
+        |> Result.bind (fun (mode, seq, stateRaw, prevHash, hash) ->
+            stateDecode stateRaw
+            |> Result.map (fun state ->
+                { Seq = seq
+                  State = state
+                  PrevHash = prevHash
+                  Hash = hash
+                  Mode = mode }))

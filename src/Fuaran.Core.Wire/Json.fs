@@ -341,7 +341,7 @@ module Json =
     /// `CanonicalJson.appendRawString` and the TypeScript twin's escaper, so a hash pre-image that
     /// carries a string means one thing on every host. `Rendering.CrossHost` escapes through this function
     /// too; the one copy the standalone layers keep (`JsonString.quote` in `Fuaran.Core.OpStream`,
-    /// public as `OpStream.Jsonl.quote` — D2 forbids it a reference here; `Actor.encode` spells
+    /// public as `Jsonl.quote` — D2 forbids it a reference here; `Actor.encode` spells
     /// through it, and `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` has spelled through it rather than
     /// a copy of its own since Phase 388) is held value-identical to it by `StringEscapeVectors` in the
     /// conformance kit. Beside that copy sits its legacy twin, `JsonString.quoteLegacy`: the `V1`

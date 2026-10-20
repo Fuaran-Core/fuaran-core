@@ -1296,7 +1296,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Reads the pre-Phase-145 actor spelling; measured through the legacy-actor JSONL reader.",
-      "through": "OpStream.fromJsonlLegacyActor",
+      "through": "Jsonl.readLegacyActor",
       "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
     },
     {
@@ -1321,7 +1321,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "The reason sentence inside a JSONL read fault's text; measured through the stream readers' errors.",
-      "through": "OpStream.fromJsonl",
+      "through": "Jsonl.read",
       "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
     },
     {
@@ -1330,7 +1330,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Renders a JSONL read fault; the stream readers return it as their error text, and the stream tests read those errors.",
-      "through": "OpStream.fromJsonl",
+      "through": "Jsonl.read",
       "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
     },
     {
@@ -1371,30 +1371,26 @@
     },
     {
       "members": [
+        "EffectCapture.capturedSeed",
+        "EffectCapture.isDeterminismLabel",
         "OpStream.appendChainOnly",
-        "OpStream.appendMany",
-        "OpStream.captureHead",
-        "OpStream.capturedSeed",
-        "OpStream.firstChainBreak",
-        "OpStream.isDeterminismLabel",
-        "OpStream.rehash",
-        "OpStream.replayLenient",
-        "OpStream.tryRehash",
-        "OpStream.verifyCapturesAt"
+        "OpStream.canonical",
+        "OpStream.ofConfig",
+        "OpStream.replayLenient"
       ],
       "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: the chain-only append, the lenient replay, the capture seed and label readers, and the two `Stream` constructors every rostered verb is called through. The stream tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
     },
     {
       "members": [
-        "OpStream.attestHeadAs",
-        "OpStream.attestationSubject",
+        "Attestation.attestHeadAs",
+        "Attestation.attestationSubject",
         "OpStream.sha256Hash",
-        "OpStream.verifyAttestationAs"
+        "Attestation.verifyAttestationAs"
       ],
       "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: the chain-only append, the lenient replay, the capture seed and label readers, and the two `Stream` constructors every rostered verb is called through. The stream tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/LaneTests.fs"
     },
     {
@@ -1402,15 +1398,15 @@
         "OpStream.chainHashOf"
       ],
       "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: the chain-only append, the lenient replay, the capture seed and label readers, and the two `Stream` constructors every rostered verb is called through. The stream tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
     },
     {
       "members": [
-        "OpStream.Attributed.byActor",
-        "OpStream.Attributed.bySession",
-        "OpStream.Attributed.decodeEnvelope",
-        "OpStream.Attributed.encodeEnvelope"
+        "Attributed.byActor",
+        "Attributed.bySession",
+        "Attributed.decodeEnvelope",
+        "Attributed.encodeEnvelope"
       ],
       "class": "measured-elsewhere",
       "reason": "Attributed-envelope codec and per-actor / per-session projections beside the rostered `liftWitness`; example-tested.",
@@ -1418,10 +1414,10 @@
     },
     {
       "members": [
-        "OpStream.Compacted.appendIdempotentTo",
-        "OpStream.Compacted.appendIfTo",
-        "OpStream.Compacted.compactAt",
-        "OpStream.Compacted.verify"
+        "Compacted.appendIdempotentTo",
+        "Compacted.appendIfTo",
+        "Compacted.compactAt",
+        "Compacted.verify"
       ],
       "class": "measured-elsewhere",
       "reason": "Compacted-stream operations beside the modelled `appendTo` / `compactFrom` / `keyIndex` / `head`: conditional and idempotent appends, compaction at a sequence, replay and verify; the compacted-stream tests stand in.",
@@ -1429,15 +1425,15 @@
     },
     {
       "members": [
-        "OpStream.Compacted.replayFrom"
+        "Compacted.replayFrom"
       ],
       "class": "forward",
       "reason": "Replays the compacted stream's tail from its snapshot: `Snapshots.replayFrom` over the record's two fields.",
-      "forwardsTo": "OpStream.Snapshots.replayFrom"
+      "forwardsTo": "Snapshots.replayFrom"
     },
     {
       "members": [
-        "OpStream.Jsonl.quote"
+        "Jsonl.quote"
       ],
       "class": "measured-elsewhere",
       "reason": "The package's one JSON string escaper, public since Phase 388 so the DAG package spells its node lines through it instead of carrying a third copy. Its bytes are pinned character by character against `Wire.Json.escape` by the `StringEscapeVectors` family, through `Actor.encode` and `Dag.toJsonl`.",
@@ -1445,11 +1441,11 @@
     },
     {
       "members": [
-        "OpStream.Snapshots.firstBreak",
-        "OpStream.Snapshots.ofJsonl",
-        "OpStream.Snapshots.take",
-        "OpStream.Snapshots.toJsonl",
-        "OpStream.Snapshots.tryToJsonl"
+        "Snapshots.firstBreak",
+        "Snapshots.ofJsonl",
+        "Snapshots.take",
+        "Snapshots.toJsonl",
+        "Snapshots.tryToJsonl"
       ],
       "class": "measured-elsewhere",
       "reason": "Snapshot-sidecar operations beside the rostered compact / replayFrom / verify; example-tested.",

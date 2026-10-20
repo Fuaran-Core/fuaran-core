@@ -371,15 +371,15 @@ module internal IntegrityLaws =
     // the "adversary rewrites history and recomputes every hash" operation. The result verifies under
     // `verifyChain` (it is internally consistent), so it is the forgery a bare hash chain re-accepts;
     // what catches it is either a moved head vs an external commitment (Phase 65) or an attestation
-    // signed over the original head (Phase 60). Uses only the public `canonicalConfig` payload binding.
+    // signed over the original head (Phase 60). Uses only the public `StreamConfig.canonical` payload binding.
     let private reforgeCanonical
         (hashFn: HashFn)
         (encode: 'Op -> string)
         (records: OpRecord<'Op> list)
         : OpRecord<'Op> list =
-        (([], OpStream.canonicalConfig.Genesis), records)
+        (([], StreamConfig.canonical.Genesis), records)
         ||> List.fold (fun (acc, prev) r ->
-            let payload = OpStream.canonicalConfig.Payload r.Seq r.Actor (encode r.Op)
+            let payload = StreamConfig.canonical.Payload r.Seq r.Actor (encode r.Op)
             let h = hashFn prev payload
             acc @ [ { r with PrevHash = prev; Hash = h } ], h)
         |> fst
@@ -444,7 +444,7 @@ module internal IntegrityLaws =
                 coveredBy
             )
         // Phase 196 — the two arms whose evidence is DRAWN rather than built. Four of the five
-        // laws below run only where the sink actually signed, and `OpStream.noAttestation` signs
+        // laws below run only where the sink actually signed, and `Attestation.noAttestation` signs
         // nothing: under it this family reports five greens over zero exercised cases, which is
         // the exact shape a consumer's census used to render as "adopted". Counting is what lets
         // the census say `vacuous` instead, so the counters are not diagnostics — they are the
@@ -463,12 +463,12 @@ module internal IntegrityLaws =
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
 
             // checkpoint round-trip: a signed head verifies against its own chain (vacuous under noAttestation).
-            (match OpStream.attestHead sink recs with
+            (match Attestation.attestHead sink StreamConfig.canonical recs with
              | Some att ->
                  signed <- signed + 1
 
                  roundTrip.Check(
-                     OpStream.verifyAttestation sink att recs,
+                     Attestation.verifyAttestation sink StreamConfig.canonical att recs,
                      fun () -> at "a signed head failed verifyAttestation"
                  )
              | None -> ())
@@ -479,21 +479,25 @@ module internal IntegrityLaws =
             let n = rng.IntBelow(len + 1)
             let pfx = recs |> List.truncate n
 
-            (match OpStream.attestHead sink pfx with
+            (match Attestation.attestHead sink StreamConfig.canonical pfx with
              | Some attN ->
                  prefix.Check(
-                     OpStream.verifyAttestation sink attN pfx,
+                     Attestation.verifyAttestation sink StreamConfig.canonical attN pfx,
                      fun () -> at "a prefix head failed to verify against its own prefix"
                  )
 
                  let n2 = if n = len then max 0 (n - 1) else len
                  let pfx2 = recs |> List.truncate n2
 
-                 if n2 <> n && OpStream.head pfx2 <> OpStream.head pfx then
+                 if
+                     n2 <> n
+                     && OpStream.head StreamConfig.canonical pfx2
+                        <> OpStream.head StreamConfig.canonical pfx
+                 then
                      prefixMoved <- prefixMoved + 1
 
                      prefix.Check(
-                         not (OpStream.verifyAttestation sink attN pfx2),
+                         not (Attestation.verifyAttestation sink StreamConfig.canonical attN pfx2),
                          fun () -> at "a prefix signature covered a different-length prefix"
                      )
              | None -> ())
@@ -505,7 +509,7 @@ module internal IntegrityLaws =
                  replayEq.Check(false, fun () -> at (sprintf "replay of the attested log ≠ live state (got %A)" other)))
 
             // falsification — only when the sink actually signs (vacuous under noAttestation).
-            match recs, OpStream.attestHead sink recs with
+            match recs, Attestation.attestHead sink StreamConfig.canonical recs with
             | [], _
             | _, None -> ()
             | _, Some att ->
@@ -527,8 +531,8 @@ module internal IntegrityLaws =
 
                     opTamper.Check(
                         not (
-                            OpStream.verifyChain hashFn sw forged
-                            && OpStream.verifyAttestation sink att forged
+                            OpStream.verifyChain (OpStream.canonical hashFn sw) forged
+                            && Attestation.verifyAttestation sink StreamConfig.canonical att forged
                         ),
                         fun () -> at "a rehashed op-forgery passed verifyAttestation"
                     )
@@ -550,8 +554,8 @@ module internal IntegrityLaws =
 
                 actorTamper.Check(
                     not (
-                        OpStream.verifyChain hashFn sw forgedA
-                        && OpStream.verifyAttestation sink att forgedA
+                        OpStream.verifyChain (OpStream.canonical hashFn sw) forgedA
+                        && Attestation.verifyAttestation sink StreamConfig.canonical att forgedA
                     ),
                     fun () -> at "a rehashed actor-re-attribution passed verifyAttestation"
                 ))
@@ -560,7 +564,7 @@ module internal IntegrityLaws =
         // Phase 196. A sink that never signs leaves four of the five laws above asserting
         // nothing, and every one of them still reports green — so the guard is the only thing
         // that can tell a certified attestation seam from an unexercised one. Running this
-        // family at `OpStream.noAttestation` is therefore RED here by design: the vacuous path
+        // family at `Attestation.noAttestation` is therefore RED here by design: the vacuous path
         // has its own family (`noAttestationVacuityLaws`), which is what a host with no sink
         // should be running. Phase 297 folds the op-tamper count into the same guard (the
         // family's result count is pinned) rather than emitting a second one.
@@ -577,7 +581,7 @@ module internal IntegrityLaws =
     /// false`), and — because attestation is a read-only side-band — the chain is byte-identical whether
     /// or not a host ever attests. So adopting the seam is free: no sink ⇒ exactly the pre-attestation
     /// path — which is why a host with no sink runs THIS family, and not `attestationLaws
-    /// OpStream.noAttestation`, whose guard reds the vacuous run (Phase 196). Self-contained over a supplied
+    /// Attestation.noAttestation`, whose guard reds the vacuous run (Phase 196). Self-contained over a supplied
     /// witness + stream generator; `'State` is not compared.
     let noAttestationVacuityLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)
@@ -596,27 +600,30 @@ module internal IntegrityLaws =
             let _, recs, _ = LawKit.buildChain hashFn sw gen rng
 
             noSign.Check(
-                OpStream.attestHead OpStream.noAttestation recs = None,
+                Attestation.attestHead Attestation.noAttestation StreamConfig.canonical recs = None,
                 fun () -> at "noAttestation issued an attestation"
             )
 
             // even a well-formed attestation over the real head is rejected by the no-op sink.
             let plausible: Attestation =
-                { Head = OpStream.head recs
+                { Head = OpStream.head StreamConfig.canonical recs
                   KeyId = "k"
                   Signature = "sig" }
 
             noVerify.Check(
-                not (OpStream.verifyAttestation OpStream.noAttestation plausible recs),
+                not (Attestation.verifyAttestation Attestation.noAttestation StreamConfig.canonical plausible recs),
                 fun () -> at "noAttestation verified an attestation"
             )
 
             // attesting is read-only: the head is stable and the chain still verifies across an attest call.
-            let before = OpStream.head recs
-            OpStream.attestHead OpStream.noAttestation recs |> ignore
+            let before = OpStream.head StreamConfig.canonical recs
+
+            Attestation.attestHead Attestation.noAttestation StreamConfig.canonical recs
+            |> ignore
 
             unchanged.Check(
-                OpStream.head recs = before && OpStream.verifyChain hashFn sw recs,
+                OpStream.head StreamConfig.canonical recs = before
+                && OpStream.verifyChain (OpStream.canonical hashFn sw) recs,
                 fun () -> at "attesting altered the un-attested chain"
             ))
 
@@ -734,7 +741,7 @@ module internal IntegrityLaws =
                         else r)
 
                 tamper.Check(
-                    not (OpStream.verifyChain hashFn sw swapped),
+                    not (OpStream.verifyChain (OpStream.canonical hashFn sw) swapped),
                     fun () -> at "a reordered chain passed verifyChain"
                 )
 
@@ -755,7 +762,7 @@ module internal IntegrityLaws =
                     |> List.map snd
 
                 tamper.Check(
-                    not (OpStream.verifyChain hashFn sw dropped),
+                    not (OpStream.verifyChain (OpStream.canonical hashFn sw) dropped),
                     fun () -> at "a chain with a dropped link passed verifyChain"
                 )
 
@@ -779,7 +786,7 @@ module internal IntegrityLaws =
                         |> List.mapi (fun j r -> if j = tIdx then { r with Hash = flippedHash } else r)
 
                     tamper.Check(
-                        not (OpStream.verifyChain hashFn sw flipped),
+                        not (OpStream.verifyChain (OpStream.canonical hashFn sw) flipped),
                         fun () -> at "a bit-flipped hash passed verifyChain"
                     )
 
@@ -801,7 +808,7 @@ module internal IntegrityLaws =
                         recs |> List.mapi (fun j r -> if j = tIdx then { r with Op = newOp } else r)
 
                     opTamper.Check(
-                        not (OpStream.verifyChain hashFn sw forged),
+                        not (OpStream.verifyChain (OpStream.canonical hashFn sw) forged),
                         fun () -> at (sprintf "a chain whose op at %d was replaced passed verifyChain" tIdx)
                     )
 
@@ -812,7 +819,8 @@ module internal IntegrityLaws =
                     let reminted = reforgeCanonical hashFn sw.Encode forged
 
                     reMint.Check(
-                        OpStream.head reminted <> OpStream.head recs,
+                        OpStream.head StreamConfig.canonical reminted
+                        <> OpStream.head StreamConfig.canonical recs,
                         fun () ->
                             at (
                                 sprintf
@@ -827,7 +835,7 @@ module internal IntegrityLaws =
             // FNV-1a is not, and collides at scale — see `hashFnAdversarialLaws`).
             let prev =
                 match recs with
-                | [] -> OpStream.canonicalConfig.Genesis
+                | [] -> StreamConfig.canonical.Genesis
                 | _ -> (List.item (rng.IntBelow len) recs).PrevHash
 
             let a = rng.Draw gen.Op
@@ -837,8 +845,8 @@ module internal IntegrityLaws =
             | Some b ->
                 distinguished <- distinguished + 1
                 let actor = Human "conf"
-                let ha = hashFn prev (OpStream.canonicalConfig.Payload 1 actor (sw.Encode a))
-                let hb = hashFn prev (OpStream.canonicalConfig.Payload 1 actor (sw.Encode b))
+                let ha = hashFn prev (StreamConfig.canonical.Payload 1 actor (sw.Encode a))
+                let hb = hashFn prev (StreamConfig.canonical.Payload 1 actor (sw.Encode b))
 
                 distinguish.Check(
                     ha <> hb,
@@ -956,7 +964,7 @@ module internal IntegrityLaws =
 
             LawKit.results [ resist; admit ]
 
-    /// The attributed-stream lift laws (Phase 81) — the teeth on `OpStream.Attributed.liftWitness` and
+    /// The attributed-stream lift laws (Phase 81) — the teeth on `Attributed.liftWitness` and
     /// the "attribution rides inside the chained op, so the hash chain covers it" claim. Over a
     /// seed-replayable sample it builds two parallel chains from the same op sequence — a bare inner
     /// chain and an attributed chain through the lifted witness (each op wrapped in a synthesized
@@ -984,7 +992,7 @@ module internal IntegrityLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let lifted = OpStream.Attributed.liftWitness w
+        let lifted = Attributed.liftWitness w
 
         let replayCx =
             LawKit.LawCell "attributed lift preserves replay (a lifted stream replays to its inner-op state)"
@@ -1021,13 +1029,13 @@ module internal IntegrityLaws =
 
                 // The SAME op is appended to both chains; the lifted Apply delegates to the inner Apply on
                 // .Op, so both accept/reject identically and stay structurally parallel.
-                match OpStream.append hashFn w (Human "conf") op innerState innerRecs with
+                match OpStream.append (OpStream.canonical hashFn w) (Human "conf") op innerState innerRecs with
                 | Ok(s, rs) ->
                     innerState <- s
                     innerRecs <- rs
                 | Error _ -> ()
 
-                match OpStream.append hashFn lifted (Human "conf") attr attrState attrRecs with
+                match OpStream.append (OpStream.canonical hashFn lifted) (Human "conf") attr attrState attrRecs with
                 | Ok(s, rs) ->
                     attrState <- s
                     attrRecs <- rs
@@ -1055,13 +1063,17 @@ module internal IntegrityLaws =
                              r)
 
                  tamperCx.Check(
-                     not (OpStream.verifyChain hashFn lifted tampered),
+                     not (OpStream.verifyChain (OpStream.canonical hashFn lifted) tampered),
                      fun () -> at "re-attributing a chained op was not detected"
                  ))
 
             // envelope round-trip: the attributed chain survives toJsonl/fromJsonl byte-for-byte + verifies.
-            match OpStream.toJsonl lifted attrRecs |> OpStream.fromJsonl lifted with
-            | Ok restored when restored = attrRecs && OpStream.verifyChain hashFn lifted restored -> roundTripCx.Saw()
+            match Jsonl.write lifted attrRecs |> Jsonl.read lifted with
+            | Ok restored when
+                restored = attrRecs
+                && OpStream.verifyChain (OpStream.canonical hashFn lifted) restored
+                ->
+                roundTripCx.Saw()
             | other ->
                 roundTripCx.Check(false, fun () -> at (sprintf "attributed JSONL round-trip ≠ original (%A)" other)))
 

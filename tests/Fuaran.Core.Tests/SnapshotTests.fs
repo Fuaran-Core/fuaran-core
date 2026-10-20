@@ -38,7 +38,7 @@ let private stateDec (s: string) = int s
 let private build () =
     let step acc op =
         acc
-        |> Result.bind (fun (st, recs) -> OpStream.append h sw (Human "tester") op st recs)
+        |> Result.bind (fun (st, recs) -> OpStream.append (OpStream.canonical h sw) (Human "tester") op st recs)
 
     [ Inc 5; Inc 3; Dec 2; Inc 4 ] |> List.fold step (Ok(0, OpStream.empty))
 
@@ -111,8 +111,8 @@ let tests =
                           (Ok snap)
                           "snapshot survives the round-trip"
                       // a snapshot line interleaved with op records is ignored by fromJsonl
-                      let mixed = line + "\n" + OpStream.toJsonl sw recs
-                      Expect.equal (OpStream.fromJsonl sw mixed) (Ok recs) "fromJsonl skips the snapshot line"
+                      let mixed = line + "\n" + Jsonl.write sw recs
+                      Expect.equal (Jsonl.read sw mixed) (Ok recs) "fromJsonl skips the snapshot line"
                   | Error e -> failtestf "snapshotAt failed: %s" e
               | Error e -> failtestf "build failed: %A" e
 
@@ -140,14 +140,14 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  let jsonl = OpStream.toJsonl sw recs
-                  Expect.equal (OpStream.fromJsonlVerified h sw jsonl) (Ok recs) "intact stream verifies"
+                  let jsonl = Jsonl.write sw recs
+                  Expect.equal (Jsonl.readVerified (OpStream.canonical h sw) jsonl) (Ok recs) "intact stream verifies"
 
                   let tampered =
                       recs |> List.mapi (fun i r -> if i = 1 then { r with Op = Inc 999 } else r)
 
                   Expect.isError
-                      (OpStream.fromJsonlVerified h sw (OpStream.toJsonl sw tampered))
+                      (Jsonl.readVerified (OpStream.canonical h sw) (Jsonl.write sw tampered))
                       "a tampered op (stale hash) fails the chain gate"
               | Error e -> failtestf "build failed: %A" e
 
@@ -158,13 +158,9 @@ let tests =
               | Ok(live, recs) ->
                   match SnapshotMatrix.compact h stateEnc sw 0 recs 2 with
                   | Ok(snap, tail) ->
-                      let file =
-                          SnapshotMatrix.snapshotToJsonl stateEnc snap + "\n" + OpStream.toJsonl sw tail
+                      let file = SnapshotMatrix.snapshotToJsonl stateEnc snap + "\n" + Jsonl.write sw tail
 
-                      match
-                          OpStream.fromJsonlWithSnapshots sw file
-                          |> Result.mapError StreamLoadFault.toString
-                      with
+                      match Jsonl.readWithSnapshots sw file |> Result.mapError StreamLoadFault.toString with
                       | Ok(recs', snaps) ->
                           Expect.equal recs' tail "tail records recovered"
                           Expect.equal (List.length snaps) 1 "the snapshot line is surfaced, not dropped"
@@ -208,11 +204,13 @@ let tests =
           <| fun _ ->
               let cfg: StreamConfig =
                   { Payload = (fun seq actor opJson -> sprintf "%d|%s|%s" seq (Actor.id actor) opJson)
-                    Genesis = "GEN" }
+                    Genesis = "GEN"
+                    Quote = StreamConfig.canonical.Quote }
 
               let step acc op =
                   acc
-                  |> Result.bind (fun (st, recs) -> OpStream.appendWith cfg h sw (Human "tester") op st recs)
+                  |> Result.bind (fun (st, recs) ->
+                      OpStream.append (OpStream.ofConfig cfg h sw) (Human "tester") op st recs)
 
               match [ Inc 5; Inc 3; Dec 2; Inc 4 ] |> List.fold step (Ok(0, OpStream.empty)) with
               | Ok(_, recs) ->
@@ -279,19 +277,23 @@ let tests =
               // payload format and a non-empty genesis — at every boundary, zero included.
               let cfg: StreamConfig =
                   { Payload = fun seq _ op -> sprintf "custom-v1|%d|%s" seq op
-                    Genesis = "genesis-236" }
+                    Genesis = "genesis-236"
+                    Quote = StreamConfig.canonical.Quote }
 
               let step acc op =
                   acc
-                  |> Result.bind (fun (st, recs) -> OpStream.appendWith cfg h sw (Human "tester") op st recs)
+                  |> Result.bind (fun (st, recs) ->
+                      OpStream.append (OpStream.ofConfig cfg h sw) (Human "tester") op st recs)
 
               match [ Inc 5; Inc 3; Dec 2; Inc 4 ] |> List.fold step (Ok(0, OpStream.empty)) with
               | Error e -> failtestf "build failed: %A" e
               | Ok(live, recs) ->
-                  Expect.isTrue (OpStream.verifyChainWith cfg h sw recs) "the stream verifies under its own config"
+                  Expect.isTrue
+                      (OpStream.verifyChain (OpStream.ofConfig cfg h sw) recs)
+                      "the stream verifies under its own config"
 
                   Expect.isFalse
-                      (OpStream.verifyChain h sw recs)
+                      (OpStream.verifyChain (OpStream.canonical h sw) recs)
                       "the config is genuinely non-canonical: the canonical walker refuses the stream"
 
                   let flipLast (s: string) =
@@ -437,12 +439,9 @@ let tests =
 
                       // a full compacted file: the reader recovers snapshot + tail, sees the flag, verifies
                       // in chain-only mode, and replays to the live state.
-                      let file = line + "\n" + OpStream.toJsonl sw tail
+                      let file = line + "\n" + Jsonl.write sw tail
 
-                      match
-                          OpStream.fromJsonlWithSnapshots sw file
-                          |> Result.mapError StreamLoadFault.toString
-                      with
+                      match Jsonl.readWithSnapshots sw file |> Result.mapError StreamLoadFault.toString with
                       | Ok(recs', [ snapLine ]) ->
                           Expect.equal recs' tail "tail recovered"
 
@@ -478,7 +477,7 @@ let sealedTests =
               | Ok(_, recs) ->
                   for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
                       for atSeq in 0 .. recs.Length do
-                          match OpStream.Snapshots.take mode OpStream.canonicalConfig h stateEnc sw 0 recs atSeq with
+                          match Snapshots.take mode (OpStream.canonical h sw) stateEnc 0 recs atSeq with
                           | Error e -> failtestf "take failed: %A" e
                           | Ok snap ->
                               let anchor =
@@ -489,11 +488,11 @@ let sealedTests =
                               Expect.equal (Sealed.toSnapshot sv) snap "the same snapshot, byte for byte"
                               Expect.equal (Sealed.ofSnapshot snap) sv "and back"
                               let tail = List.skip atSeq recs
-                              let shape = ChainShape.records OpStream.canonicalConfig sw.Encode
+                              let shape = ChainShape.records StreamConfig.canonical sw.Encode
 
                               Expect.equal
                                   (Sealed.firstBreak h stateEnc shape sv tail)
-                                  (OpStream.Snapshots.firstBreak OpStream.canonicalConfig h stateEnc sw snap tail)
+                                  (Snapshots.firstBreak (OpStream.canonical h sw) stateEnc snap tail)
                                   "one verifier"
 
                               Expect.equal (Sealed.replayFrom sw sv tail) (Ok 10) "replays to the live state"
@@ -512,9 +511,9 @@ let sealedTests =
               | Error e -> failtestf "build failed: %A" e
               | Ok(_, recs) ->
                   let sv =
-                      Sealed.seal SnapshotMode.Strict h stateEnc (Anchor.genesis OpStream.canonicalConfig) 0
+                      Sealed.seal SnapshotMode.Strict h stateEnc (Anchor.genesis StreamConfig.canonical) 0
 
-                  let shape = ChainShape.records OpStream.canonicalConfig sw.Encode
+                  let shape = ChainShape.records StreamConfig.canonical sw.Encode
 
                   Expect.equal
                       (Sealed.firstBreak h stateEnc shape { sv with Seal = "x" } recs)

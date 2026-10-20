@@ -69,8 +69,8 @@
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it:
      - `DagOpStream.fs` — `DagNode`, `Dag.T`, `Dag.nodeHash`, `Dag.append`, `Dag.merge`,
                           `Dag.firstBreak`, `Dag.verifyDag`, `DagBreak`
-     - `Chain.fs`       — `OpRecord`, `StreamConfig`, `OpStream.appendWith`,
-                          `OpStream.firstChainBreakWith`, `verifyChain`, `ChainBreak`,
+     - `Chain.fs`       — `OpRecord`, `StreamConfig`, `OpStream.append`,
+                          `OpStream.firstChainBreak`, `verifyChain`, `ChainBreak`,
                           `ChainBreakReason` (the types, and since Phase 332 the members'
                           bodies; `OpStream.fs` holds their forwards)
    The reasons a break carries are reproduced VERBATIM rather than classified, as the decode model
@@ -1379,7 +1379,7 @@ type pos =
 type record (op: eqtype) =
   { rseq: pos; ractor: string; rop: op; rprev: string; rhash: string }
 
-(* F#: `OpStream.canonicalConfig`'s `payloadOf` — the `{seq, actor, op}` envelope, with the actor
+(* F#: `StreamConfig.canonical`'s `payloadAs` — the `{seq, actor, op}` envelope, with the actor
    the typed object `Actor.encode` emits (Phase 320, which folded attribution into the chain). *)
 let rec_payload
   (#op: eqtype)
@@ -1613,7 +1613,7 @@ let rec actors_ok (#op: eqtype) (actor_ok: string -> bool) (rs: list (record op)
    own position, which is where production takes it from too. *)
 type cbreak = { cindex: pos; creason: string; cexpected: string; cgot: string }
 
-(* F#: `OpStream.firstChainBreakWith`, clause for clause: sequence, then prev-link, then the
+(* F#: `OpStream.firstChainBreak` (over a `Stream`'s config), clause for clause: sequence, then prev-link, then the
    record's own recomputed hash — and the hash is computed only after the two cheap checks pass,
    as production's comment says it is. *)
 let rec first_chain_break_from
@@ -1715,7 +1715,7 @@ let rec chain_break_none_iff
 
 (* ---- intactness ---- *)
 
-(* One `append`: the actor and the op. F#: `OpStream.appendWith`, whose `seq` is the record count
+(* One `append`: the actor and the op. F#: `OpStream.append`, whose `seq` is the record count
    and whose `prev` is the last record's hash (the genesis sentinel when there is none). The
    domain reducer is orthogonal to the chain — `append` refuses on a rejection and chains nothing
    — so what the model builds is the chain shape of a run of SUCCESSFUL appends. *)
@@ -2556,7 +2556,7 @@ let rec last_hash (#op: eqtype) (prev: string) (rs: list (record op)) : Tot stri
   | [] -> prev
   | r :: t -> last_hash r.rhash t
 
-(* F#: `OpStream.appendWith` — the record at sequence `List.length records`, linked to the head. *)
+(* F#: `OpStream.append` — the record at sequence `List.length records`, linked to the head. *)
 let append_full
   (#op: eqtype)
   (h: string -> string -> string)
@@ -2569,7 +2569,7 @@ let append_full
   : Tot (list (record op)) =
   snoc rs (append_rec h show enc_op (last_hash genesis rs) (plen rs) a o)
 
-(* F#: `OpStream.Compacted.appendTo` — the record at `Snapshot.Seq + List.length Tail`, linked to the
+(* F#: `Compacted.appendTo` — the record at `Snapshot.Seq + List.length Tail`, linked to the
    tail's last hash or, on an empty tail, to the snapshot's boundary hash. *)
 let append_to
   (#op: eqtype)
@@ -2591,7 +2591,7 @@ let starts_at (#op: eqtype) (n: pos) (tail: list (record op)) : Tot bool =
   | [] -> true
   | r :: _ -> r.rseq = n
 
-(* F#: `OpStream.Compacted.compactFrom`, clause for clause: the seam, the range, the replay of the
+(* F#: `Compacted.compactFrom`, clause for clause: the seam, the range, the replay of the
    cut records from the snapshot's state NUMBERED FROM ITS BOUNDARY (so a refusal names the origin
    index, as `compact`'s does), the boundary hash, the snapshot sealed in the same payload, and the
    rest of the tail. The refusal strings render production's typed faults the way `compact`'s do. *)
@@ -3528,7 +3528,7 @@ let replay_answers_head
       `Verify` compares the attestation's recorded `Head` against the head it is handed has the
       binding property by construction, with no cryptography spent; what the cryptography buys is
       the half this model does not state.
-   2. **It is the SINK'S, and Core ships no sink that signs.** `OpStream.noAttestation` signs
+   2. **It is the SINK'S, and Core ships no sink that signs.** `Attestation.noAttestation` signs
       nothing and verifies nothing, and a real sink is host-side. The model is handed the sink's
       own `Sign` and `Verify`, so the property is one a host's sink either has or lacks: a sink
       that verifies everything falsifies it, and the differential measures that. The shipped kit
@@ -3564,7 +3564,7 @@ let rec chain_head (#op: eqtype) (rs: list (record op)) : Tot string (decreases 
 (* F#: `Attestation`. All three fields are the host's: Core reads none of them. *)
 type attestation = { ahead: string; akey: string; asig: string }
 
-(* F#: `OpStream.attestHead sink records = sink.Sign (head records)`. `sign` is the sink's `Sign`,
+(* F#: `Attestation.attestHead sink cfg records = sink.Sign (OpStream.head cfg records)`. `sign` is the sink's `Sign`,
    and `Missing` is the no-op sink's `None`. *)
 let attest_head
   (#op: eqtype)
@@ -3573,7 +3573,7 @@ let attest_head
   : Tot (found attestation) =
   sign (chain_head rs)
 
-(* F#: `OpStream.verifyAttestation sink attestation records = sink.Verify attestation (head records)`. *)
+(* F#: `Attestation.verifyAttestation sink cfg attestation records = sink.Verify attestation (OpStream.head cfg records)`. *)
 let verify_attestation
   (#op: eqtype)
   (verify: attestation -> string -> bool)

@@ -12,9 +12,10 @@ namespace Fuaran.Core
 /// order and whitespace are the same under both. Since Phase 520 each profile names a `Rendering`
 /// (`Rendering.ofProfile`), and the cross-host form is a named rendering too (`Rendering.CrossHost`).
 ///
-/// `Fuaran.Core.OpStream` carries the same two cases as `OpStream.EncodingProfile` for the pre-images
-/// it builds itself (DECISIONS.md D2 keeps that package free of a reference here); both spell a
-/// profile by the same `name`.
+/// `Fuaran.Core.OpStream` names the same two profiles for the pre-images it builds itself as config
+/// constructors (`StreamConfig.legacyEscape` is `V1`, `StreamConfig.canonical` `V2`, since Phase 516);
+/// DECISIONS.md D2 keeps that package free of a reference here, so a consumer holding both maps one to
+/// the other in a two-case match.
 [<RequireQualifiedAccess>]
 type EncodingProfile =
     /// The rendering of `0.30.0` through `0.32.0`: `\n`, `\r` and `\t` as the short escapes, every
@@ -37,8 +38,8 @@ module EncodingProfile =
     /// Every profile, oldest first.
     let all: EncodingProfile list = [ EncodingProfile.V1; EncodingProfile.V2 ]
 
-    /// The canonical name a store declares its profile by: `v1` or `v2`. The same strings
-    /// `OpStream.profileName` spells, so one declaration names both halves of a store's encoding.
+    /// The canonical name a store declares its profile by: `v1` or `v2` — one declaration names both
+    /// halves of a store's encoding, its renderer here and its op-stream config.
     let name (profile: EncodingProfile) : string =
         match profile with
         | EncodingProfile.V1 -> "v1"

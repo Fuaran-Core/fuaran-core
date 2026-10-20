@@ -881,7 +881,7 @@ module Query =
     /// replay the same captured rows. The pre-image is INJECTIVE (Phase 225,
     /// `invocation_key_injective` in `proofs/Query.fst`): distinct argument sets never share one,
     /// whatever their string cells contain. That two distinct pre-images hash apart is a property
-    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `OpStream.captureEffect`'s
+    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `EffectCapture.captureEffect`'s
     /// `eff` argument (the `Capability.invocationKey` pattern).
     ///
     /// Since Phase 398 the key also sees the declaration's `Where` and `OrderBy` (the paging
@@ -975,7 +975,7 @@ module Query =
     /// host-invented shape; a resolver failure is the named `ExecutionFailed`, never a throw and
     /// never an untyped `Failed` riding out of the seam. Deterministic queries re-evaluate freely;
     /// for a non-`Deterministic` query the caller journals the realized result (the `Ready` payload —
-    /// `Pending` is not captured, replay re-issues) via `OpStream.captureEffect` keyed by
+    /// `Pending` is not captured, replay re-issues) via `EffectCapture.captureEffect` keyed by
     /// `invocationKey` + `determinismTag` (Phase 27), so the query replays exactly.
     ///
     /// The three outcomes, exhaustively: `Ok(Ready r)` settled · `Ok Pending` in flight · `Error e`

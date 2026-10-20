@@ -199,14 +199,14 @@ let private production (body: string) : Result<string list option, string> =
         + quote ("y" + body)
         + "]}"
 
-    match OpStream.Jsonl.unquote (quote body), OpStream.Jsonl.parseLine 1 line with
+    match Jsonl.unquote (quote body), Jsonl.parseLine 1 line with
     | Error _, Error _ -> Ok None
     | Error r, Ok _ -> Error("unquote refused (" + JsonlFault.reasonText r + ") and the line read")
     | Ok _, Error f -> Error("unquote read and the line was refused: " + JsonlFault.toString f)
     | Ok whole, Ok l ->
-        match OpStream.Jsonl.topFields line with
+        match Jsonl.topFields line with
         | Ok((key, _) :: _) ->
-            match OpStream.Jsonl.stringField key l, OpStream.Jsonl.stringsField "q" l with
+            match Jsonl.stringField key l, Jsonl.stringsField "q" l with
             | Ok value, Ok [ i0; i1 ] -> Ok(Some [ whole; key; value; i0; i1 ])
             | v, items -> Error(sprintf "member value %A, items %A" v items)
         | other -> Error(sprintf "top fields %A" other)
@@ -228,7 +228,7 @@ let private mismatchesOf (decodes: string -> Result<string list option, string>)
 
 /// A candidate decoder over the bodies production accepts: the go-red's harness.
 let private candidate (decode: string -> string) (body: string) : Result<string list option, string> =
-    match OpStream.Jsonl.unquote (quote body) with
+    match Jsonl.unquote (quote body) with
     | Error _ -> Ok None
     | Ok _ -> Ok(Some(tokensOf body |> List.map decode))
 
@@ -290,7 +290,7 @@ let tests =
 
               let accepted =
                   inputs
-                  |> List.filter (fun (_, b) -> Result.isOk (OpStream.Jsonl.unquote (quote b)))
+                  |> List.filter (fun (_, b) -> Result.isOk (Jsonl.unquote (quote b)))
                   |> List.length
 
               Expect.isGreaterThan accepted 50000 "a large share of it is accepted and decoded"
@@ -300,22 +300,22 @@ let tests =
           testCase "each fault at the start, middle and end of a run keeps its kind and position"
           <| fun _ ->
               for label, line, pos, reason in pinned do
-                  match OpStream.Jsonl.parseLine 1 line with
+                  match Jsonl.parseLine 1 line with
                   | Ok _ -> failtestf "%s: the line read" label
                   | Error f -> Expect.equal (f.Position, f.Reason) (pos, reason) label
 
           testCase "the common string, with no escape, decodes to its own text"
           <| fun _ ->
               for s in [ ""; "plain"; "é \U0001F600 /" ] do
-                  Expect.equal (OpStream.Jsonl.unquote (quote s)) (Ok s) (sprintf "%A" s)
+                  Expect.equal (Jsonl.unquote (quote s)) (Ok s) (sprintf "%A" s)
 
               let line = "{\"k\":\"ab" + bs + "ncd\",\"e\":\"" + bs + "u00e9x\"}"
 
-              match OpStream.Jsonl.parseLine 1 line with
+              match Jsonl.parseLine 1 line with
               | Error f -> failtest (JsonlFault.toString f)
               | Ok l ->
-                  Expect.equal (OpStream.Jsonl.stringField "k" l) (Ok "ab\ncd") "runs on both sides of an escape"
-                  Expect.equal (OpStream.Jsonl.stringField "e" l) (Ok "éx") "a run after a \\u escape"
+                  Expect.equal (Jsonl.stringField "k" l) (Ok "ab\ncd") "runs on both sides of an escape"
+                  Expect.equal (Jsonl.stringField "e" l) (Ok "éx") "a run after a \\u escape"
 
           testCase "run boundaries (Phase 369): two broken run decoders are red against the oracle"
           <| fun _ ->
@@ -414,7 +414,7 @@ module private Strict =
                   yield "as the line", v.Input ]
 
         [ for how, line in readings do
-              match grammarRefusal v, OpStream.Jsonl.parseLine 1 line with
+              match grammarRefusal v, Jsonl.parseLine 1 line with
               | None, Ok _ -> ()
               | None, Error f ->
                   yield sprintf "%s %s: refused (%s), the grammar reads it" v.Name how (JsonlFault.toString f)
@@ -523,7 +523,7 @@ let strictTests =
           testCase "the cases the corpus cannot spell, and the paths, are answered as pinned"
           <| fun _ ->
               for label, line, want in Strict.pinned do
-                  match want, OpStream.Jsonl.parseLine 1 line with
+                  match want, Jsonl.parseLine 1 line with
                   | None, Ok _ -> ()
                   | None, Error f -> failtestf "%s: refused (%s)" label (JsonlFault.toString f)
                   | Some _, Ok _ -> failtestf "%s: read" label

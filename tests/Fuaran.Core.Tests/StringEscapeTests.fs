@@ -30,7 +30,7 @@ let private buildWith (cfg: StreamConfig) (steps: (Actor * NoteOp) list) : OpRec
     steps
     |> List.fold
         (fun (st, recs) (actor, op) ->
-            match OpStream.appendWith cfg h sw actor op st recs with
+            match OpStream.append (OpStream.ofConfig cfg h sw) actor op st recs with
             | Ok(st', recs') -> st', recs'
             | Error e -> failtestf "append refused: %s" e)
         ([], OpStream.empty)
@@ -144,7 +144,7 @@ module RunBoundaries =
           Canonical.write Rendering.CrossHost (JObj [ s, JStr s ])
           "Actor.encode", human, Actor.encode (Human s)
           // Phase 388 - the op-stream package's one escaper, public; `Dag.toJsonl` spells through it.
-          "OpStream.Jsonl.quote", q, OpStream.Jsonl.quote s
+          "OpStream.Jsonl.quote", q, Jsonl.quote s
           "Dag.toJsonl",
           "{\"node\":true,\"id\":"
           + q
@@ -343,54 +343,63 @@ let tests =
 
           testCase "a store written under the old spelling verifies under legacyEscapeConfig, not under canonical"
           <| fun _ ->
-              let legacy = buildWith OpStream.legacyEscapeConfig controlActors
+              let legacy = buildWith StreamConfig.legacyEscape controlActors
 
               Expect.isTrue
-                  (OpStream.verifyChainWith OpStream.legacyEscapeConfig h sw legacy)
+                  (OpStream.verifyChain (OpStream.ofConfig StreamConfig.legacyEscape h sw) legacy)
                   "verifies under the config it was written with"
 
               Expect.isFalse
-                  (OpStream.verifyChain h sw legacy)
+                  (OpStream.verifyChain (OpStream.canonical h sw) legacy)
                   "the canonical payload spells the actor differently, so the old chain does not verify under it"
 
           testCase "rehash legacyEscapeConfig canonicalConfig cuts a control-character store over, and the head moves"
           <| fun _ ->
-              let legacy = buildWith OpStream.legacyEscapeConfig controlActors
+              let legacy = buildWith StreamConfig.legacyEscape controlActors
 
-              match OpStream.rehash OpStream.legacyEscapeConfig OpStream.canonicalConfig h sw legacy with
-              | Error e -> failtestf "rehash refused: %s" e
+              match
+                  OpStream.rehash (OpStream.ofConfig StreamConfig.legacyEscape h sw) (OpStream.canonical h sw) legacy
+              with
+              | Error e -> failtestf "rehash refused: %A" e
               | Ok migrated ->
-                  Expect.isTrue (OpStream.verifyChain h sw migrated) "the migrated chain verifies under canonical"
+                  Expect.isTrue
+                      (OpStream.verifyChain (OpStream.canonical h sw) migrated)
+                      "the migrated chain verifies under canonical"
 
                   Expect.equal
                       (migrated |> List.map (fun r -> r.Seq, r.Actor, r.Op))
                       (legacy |> List.map (fun r -> r.Seq, r.Actor, r.Op))
                       "rehash touches only the hash chain — the records are the source of truth"
 
-                  Expect.notEqual (OpStream.head migrated) (OpStream.head legacy) "the bytes moved, so the head moved"
+                  Expect.notEqual
+                      (OpStream.head StreamConfig.canonical migrated)
+                      (OpStream.head StreamConfig.canonical legacy)
+                      "the bytes moved, so the head moved"
 
                   Expect.equal
-                      (OpStream.head migrated)
-                      (OpStream.head (buildWith OpStream.canonicalConfig controlActors))
+                      (OpStream.head StreamConfig.canonical migrated)
+                      (OpStream.head StreamConfig.canonical (buildWith StreamConfig.canonical controlActors))
                       "the migrated chain is the chain a canonical writer would have produced"
 
           testCase
               "a store whose actors carry no control character hashes identically under both — proved by the rehash"
           <| fun _ ->
-              let legacy = buildWith OpStream.legacyEscapeConfig plainActors
+              let legacy = buildWith StreamConfig.legacyEscape plainActors
 
               Expect.isTrue
-                  (OpStream.verifyChain h sw legacy)
+                  (OpStream.verifyChain (OpStream.canonical h sw) legacy)
                   "an unmigrated control-free store already verifies under canonical"
 
-              match OpStream.rehash OpStream.legacyEscapeConfig OpStream.canonicalConfig h sw legacy with
-              | Error e -> failtestf "rehash refused: %s" e
+              match
+                  OpStream.rehash (OpStream.ofConfig StreamConfig.legacyEscape h sw) (OpStream.canonical h sw) legacy
+              with
+              | Error e -> failtestf "rehash refused: %A" e
               | Ok migrated ->
                   Expect.equal migrated legacy "the rehash is a no-op: every record, every hash, byte-identical"
 
           testCase "rehash refuses a legacy store that was tampered"
           <| fun _ ->
-              let legacy = buildWith OpStream.legacyEscapeConfig controlActors
+              let legacy = buildWith StreamConfig.legacyEscape controlActors
 
               let tampered =
                   legacy
@@ -401,7 +410,9 @@ let tests =
                       else
                           r)
 
-              match OpStream.rehash OpStream.legacyEscapeConfig OpStream.canonicalConfig h sw tampered with
+              match
+                  OpStream.rehash (OpStream.ofConfig StreamConfig.legacyEscape h sw) (OpStream.canonical h sw) tampered
+              with
               | Ok _ -> failtest "a re-attributed record must not migrate"
               | Error _ -> ()
 
@@ -410,7 +421,7 @@ let tests =
               // A pre-320 writer wrote the actor as a bare JSON string with the short escape; the
               // legacy config exists to reproduce THOSE bytes, so it must not adopt the new rule.
               Expect.equal
-                  (OpStream.legacyActorConfig.Payload 3 (Human "a\nb") "{}")
+                  (StreamConfig.legacyActor.Payload 3 (Human "a\nb") "{}")
                   "{\"seq\":3,\"actor\":\"a\\nb\",\"op\":{}}"
                   "pre-320 payload bytes are unchanged by Phase 287"
 
@@ -419,14 +430,17 @@ let tests =
           testCase "the linear JSONL round-trips a control-character actor and a control-character op"
           <| fun _ ->
               let recs =
-                  buildWith OpStream.canonicalConfig [ Agent("m\n", "1\t", "id\r"), Note "line\u0001break\n" ]
+                  buildWith StreamConfig.canonical [ Agent("m\n", "1\t", "id\r"), Note "line\u0001break\n" ]
 
-              let text = OpStream.toJsonl sw recs
+              let text = Jsonl.write sw recs
 
               Expect.stringContains text "\\u000a" "the line carries the canonical spelling"
               Expect.isFalse (text.Contains "\\n") "and never the short form"
 
-              match OpStream.fromJsonlVerified h sw text |> Result.mapError StreamLoadFault.toString with
+              match
+                  Jsonl.readVerified (OpStream.canonical h sw) text
+                  |> Result.mapError StreamLoadFault.toString
+              with
               | Ok back -> Expect.equal back recs "round-trip is exact and the chain verifies"
               | Error e -> failtestf "fromJsonlVerified: %s" e
 
@@ -440,7 +454,7 @@ let tests =
                   (h "" (Actor.encode actor + "|" + sw.Encode(Note "x")))
                   "the content id is hashed over Actor.encode's \\u00xx bytes"
 
-              Expect.isTrue (Dag.verifyDag h sw dag) "verifies"
+              Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) dag) "verifies"
 
               let text = Dag.toJsonl sw.Encode dag
               Expect.stringContains text "\\u000d" "the node line carries the canonical spelling"
@@ -459,10 +473,10 @@ let tests =
                     At = "2026-09-30T00:00:00Z"
                     Op = Note "n" }
 
-              let text = OpStream.Attributed.encodeEnvelope sw.Encode a
+              let text = Attributed.encodeEnvelope sw.Encode a
               Expect.stringContains text "\\u0009" "the envelope carries the canonical spelling"
 
-              match OpStream.Attributed.decodeEnvelope sw.Decode text with
+              match Attributed.decodeEnvelope sw.Decode text with
               | Ok back -> Expect.equal back a "round-trip"
               | Error e -> failtestf "decodeEnvelope: %s" e ]
 

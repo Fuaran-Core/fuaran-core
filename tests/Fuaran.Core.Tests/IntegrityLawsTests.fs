@@ -177,7 +177,7 @@ let integrityLawTests =
           testCase "attestationLaws report the noAttestation default as VACUOUS, not as green (Phase 196)"
           <| fun _ ->
               let results =
-                  Conformance.attestationLawsAt sw streamGen OpStream.noAttestation OpStream.defaultHash 4242 200
+                  Conformance.attestationLawsAt sw streamGen Attestation.noAttestation OpStream.defaultHash 4242 200
 
               let guardOf (r: LawResult) = LawResult.isAdequacy r
 

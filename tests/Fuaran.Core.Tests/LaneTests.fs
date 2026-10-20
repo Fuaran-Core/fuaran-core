@@ -250,8 +250,13 @@ let tests =
 
                     let id, d = Dag.appendOn h sw x (Inc 9) [ g; a; b ] dag |> ok
                     Expect.equal d.Nodes[id].Parents [ g; a; b ] "the parents are stored as given"
-                    Expect.equal id (Dag.nodeId h sw.Encode [ b; g; a ] x (Inc 9)) "nodeId is the minted id, order-free"
-                    Expect.isTrue (Dag.verifyDag h sw d) "an N-parent node verifies"
+
+                    Expect.equal
+                        id
+                        (Dag.nodeId (OpStream.canonical h sw) [ b; g; a ] x (Inc 9))
+                        "nodeId is the minted id, order-free"
+
+                    Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) d) "an N-parent node verifies"
 
                 testCase "appendOn judges the parents in order and refuses as append and merge do"
                 <| fun _ ->
@@ -377,7 +382,7 @@ let tests =
                                 |> Map.add b { d3.Nodes[b] with Op = Inc 98 }
                             )
 
-                        match Dag.firstBreak h sw tampered with
+                        match Dag.firstBreak (OpStream.canonical h sw) tampered with
                         | Some br -> Expect.equal br.NodeId a "the ancestor"
                         | None -> failtest "a tampered DAG verified"
 
@@ -664,16 +669,30 @@ let tests =
                 testCase "rehashWith re-mints under SHA-256 and back, and refuses an unverified source"
                 <| fun _ ->
                     let loaded = fixtureStore ()
-                    let there, ids = Dag.rehashWith h OpStream.sha256Hash sw loaded.Dag |> ok
-                    Expect.isTrue (Dag.verifyDag OpStream.sha256Hash sw there) "verifies under the new hash"
-                    Expect.isFalse (Dag.verifyDag h sw there) "and not under the old"
-                    let back, ids' = Dag.rehashWith OpStream.sha256Hash h sw there |> ok
+
+                    let there, ids =
+                        Dag.rehash (OpStream.canonical h sw) (OpStream.canonical OpStream.sha256Hash sw) loaded.Dag
+                        |> ok
+
+                    Expect.isTrue
+                        (Dag.verifyDag (OpStream.canonical OpStream.sha256Hash sw) there)
+                        "verifies under the new hash"
+
+                    Expect.isFalse (Dag.verifyDag (OpStream.canonical h sw) there) "and not under the old"
+
+                    let back, ids' =
+                        Dag.rehash (OpStream.canonical OpStream.sha256Hash sw) (OpStream.canonical h sw) there
+                        |> ok
+
                     Expect.equal (Dag.toJsonl sw.Encode back) (Dag.toJsonl sw.Encode loaded.Dag) "round trip"
 
                     for KeyValue(o, n) in ids do
                         Expect.equal ids'[n] o "the id map inverts"
 
-                    let relaned, _ = Dag.rehashLanes h OpStream.sha256Hash sw loaded |> ok
+                    let relaned, _ =
+                        Dag.rehashLanes (OpStream.canonical h sw) (OpStream.canonical OpStream.sha256Hash sw) loaded
+                        |> ok
+
                     Expect.equal (Dag.verifyLanes OpStream.sha256Hash sw relaned) (Ok()) "the lanes carried"
 
                     Expect.equal
@@ -692,7 +711,7 @@ let tests =
                                     Op = Inc 31 }
                         )
 
-                    match Dag.rehashWith h OpStream.sha256Hash sw tampered with
+                    match Dag.rehash (OpStream.canonical h sw) (OpStream.canonical OpStream.sha256Hash sw) tampered with
                     | Error(Dag.RehashFault.Unverified b) -> Expect.equal b.NodeId victim "the break"
                     | other -> failtestf "expected Unverified, got %A" other
 
@@ -706,7 +725,7 @@ let tests =
                         | Ok(Some a) -> a
                         | other -> failtestf "expected an attestation, got %A" other
 
-                    Expect.equal att.Head (OpStream.attestationSubject h alice m) "the party-bound subject"
+                    Expect.equal att.Head (Attestation.attestationSubject h alice m) "the party-bound subject"
                     Expect.isTrue (Dag.verifyAttestation recordingSink h alice att dag m) "verifies"
                     Expect.isFalse (Dag.verifyAttestation recordingSink h (Human "bob") att dag m) "not as bob"
                     Expect.isFalse (Dag.verifyAttestation recordingSink h alice att dag b) "not for another node"
@@ -716,17 +735,28 @@ let tests =
                         (Error(Dag.DagAttestFault.UnknownNode "zz"))
                         "an unknown node"
 
-                    Expect.equal (Dag.attestHead OpStream.noAttestation h alice dag m) (Ok None) "the no-op sink"
+                    Expect.equal (Dag.attestHead Attestation.noAttestation h alice dag m) (Ok None) "the no-op sink"
 
                     let records =
                         [ Inc 1; Inc 2 ]
-                        |> List.fold (fun st op -> OpStream.append h sw x op 0 st |> ok |> snd) []
+                        |> List.fold (fun st op -> OpStream.append (OpStream.canonical h sw) x op 0 st |> ok |> snd) []
 
-                    let linear = OpStream.attestHeadAs recordingSink h alice records |> Option.get
-                    Expect.isTrue (OpStream.verifyAttestationAs recordingSink h alice linear records) "linear"
+                    let linear =
+                        Attestation.attestHeadAs recordingSink StreamConfig.canonical h alice records
+                        |> Option.get
+
+                    Expect.isTrue
+                        (Attestation.verifyAttestationAs recordingSink StreamConfig.canonical h alice linear records)
+                        "linear"
 
                     Expect.isFalse
-                        (OpStream.verifyAttestationAs recordingSink h (Human "bob") linear records)
+                        (Attestation.verifyAttestationAs
+                            recordingSink
+                            StreamConfig.canonical
+                            h
+                            (Human "bob")
+                            linear
+                            records)
                         "linear, bob"
 
                 testCase "prunable names the branches no root needs, and the pruned DAG keeps every root"
@@ -743,7 +773,7 @@ let tests =
                     let pruned: Dag.T<CounterOp> =
                         DagOf.nodes (dag.Nodes |> Map.filter (fun id _ -> id <> z))
 
-                    Expect.isTrue (Dag.verifyDag h sw pruned) "verifies"
+                    Expect.isTrue (Dag.verifyDag (OpStream.canonical h sw) pruned) "verifies"
 
                     for r in keepRoots do
                         Expect.equal (Dag.tryReplayTo sw 0 pruned r) (Dag.tryReplayTo sw 0 dag r) "replays as before"

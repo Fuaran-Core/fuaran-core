@@ -543,7 +543,7 @@ let seamTests =
           <| fun _ ->
               let s =
                   Seam.create toyVocabulary
-                  |> Seam.register (toy "d" OpStream.deterministicTag)
+                  |> Seam.register (toy "d" EffectCapture.deterministicTag)
                   |> orFail
 
               let captured =

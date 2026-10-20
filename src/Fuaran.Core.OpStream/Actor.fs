@@ -30,7 +30,7 @@ type ActorInvalid =
 /// control character against `Wire.Json.escape`'s, so a copy that drifts is caught rather than
 /// discovered as a chain that verifies on one host and not another. This is the one copy D2
 /// demands, and the only one there is (Phase 388): the package's writers spell through it
-/// (`OpStreamJsonl.jstr`), and it is public as `OpStream.Jsonl.quote`, which is how
+/// (`Jsonl.jstr`), and it is public as `Jsonl.quote`, which is how
 /// `Fuaran.Core.OpStream.Dag` — a package that references this one — spells its node lines
 /// rather than carrying a third body.
 ///
@@ -42,7 +42,7 @@ type ActorInvalid =
 ///
 /// `quoteLegacy` is the spelling this package wrote BEFORE Phase 287 — the three short forms, and
 /// `\u00xx` only for the other control characters. It exists so a chain hashed under the old bytes
-/// can still be verified and rehashed (`OpStream.legacyEscapeConfig`, `OpStream.legacyActorConfig`);
+/// can still be verified and rehashed (`StreamConfig.legacyEscape`, `StreamConfig.legacyActor`);
 /// nothing writes it.
 module internal JsonString =
 
@@ -156,7 +156,7 @@ module Actor =
 
     /// Lift a pre-Phase-320 bare actor *string* (the old op-stream format recorded the actor as an
     /// unstructured string outside any Human/Agent distinction) to the typed `Human` case — the
-    /// migration default. See `OpStream.legacyActorConfig` / `OpStream.fromJsonlLegacyActor`.
+    /// migration default. See `StreamConfig.legacyActor` / `Jsonl.readLegacyActor`.
     let ofLegacyString (s: string) : Actor = Human s
 
     // ---- Phase 315: an actor names somebody ----
@@ -164,7 +164,7 @@ module Actor =
     // such ops into one anonymous author. The two cases cannot refuse it themselves — a union case
     // is a constructor, and closing them would break every construction site — so the refusal is
     // stated here, once, and applied at the two boundaries that admit an actor: these constructors,
-    // and the JSONL decoder (`OpStream.Jsonl.actorField`, which answers `JsonlFaultReason.ActorInvalid`).
+    // and the JSONL decoder (`Jsonl.actorField`, which answers `JsonlFaultReason.ActorInvalid`).
 
     /// The actor, or the first reason it names nobody: an empty `id` (`ActorInvalid.EmptyId`).
     /// `model` and `version` are attribution detail and may be empty; the id is the identity.

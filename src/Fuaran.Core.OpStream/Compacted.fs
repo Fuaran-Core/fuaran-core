@@ -39,14 +39,14 @@ type CompactedOutcome<'Op, 'State> =
     /// and nothing was appended.
     | Duplicate of existing: EntryRef
 
-/// The bodies of the `OpStream.Compacted` members (Phase 301). Internal: a consumer reaches each one
-/// through its forward in `OpStream` (OpStream.fs), which carries the member's contract.
-module internal OpStreamCompacted =
-    open Fuaran.Core.OpStreamChain
-    open Fuaran.Core.OpStreamSnapshot
+/// The compacted stream's verbs (Phase 301; the public module itself since Phase 516): compact a stream
+/// to a snapshot and the tail above it, compact again from a compacted stream, append onto the tail —
+/// plain, compare-and-append and idempotent — and verify and replay across the boundary. Every verb
+/// that reads or extends the chain takes the stream's one `Stream` value.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Compacted =
 
-    /// Fold `keyOf` over `records` onto `index`, first-wins — `KeyIndex.ofStream` continued from an
-    /// index rather than started from the empty one, skipping an op that carries no key.
     let private indexOnto (keyOf: 'Op -> string option) (index: KeyIndex) (records: OpRecord<'Op> list) : KeyIndex =
         (index, records)
         ||> List.fold (fun idx r ->
@@ -63,27 +63,34 @@ module internal OpStreamCompacted =
     let private tip (c: Compacted<'Op, 'State>) : Anchor =
         ChainShape.tipBy (fun (r: OpRecord<'Op>) -> r.Hash) (anchorOf c) c.Tail
 
+    /// Compact `records` at `atSeq` (`Snapshots.compact`, same refusals) into a compacted stream
+    /// whose `Keys` is the index `keyOf` builds over the discarded prefix — first-wins, an op
+    /// `keyOf` answers `None` for carries no key. A stream that keys nothing passes
+    /// `fun _ -> None`. Verify, then compact: the prefix is folded and discarded unchecked.
     let compactAt
         (mode: SnapshotMode)
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
+        (s: Stream<'Op, 'State, 'Rej>)
         (stateEncode: 'State -> string)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
         (keyOf: 'Op -> string option)
         (state0: 'State)
         (records: OpRecord<'Op> list)
         (atSeq: int)
         : Result<Compacted<'Op, 'State>, SnapshotFault<'Rej>> =
-        Snapshots.compact mode cfg hashFn stateEncode w state0 records atSeq
+        Snapshots.compact mode s stateEncode state0 records atSeq
         |> Result.map (fun (snap, tail) ->
             { Snapshot = snap
               Tail = tail
               Keys = indexOnto keyOf KeyIndex.empty (List.truncate atSeq records) })
 
+    /// Compact AGAIN at `atSeq`, counted in the ORIGIN's numbering (`Snapshot.Seq` up to
+    /// `Snapshot.Seq` plus the tail's length) — the snapshot sealed in the stream's own mode, the
+    /// cut tail records indexed onto `Keys`. Exactly the compacted stream `compactAt` takes of the
+    /// full history at `atSeq` (`compact_compose`), refusals included: `SeqOutOfRange` names
+    /// `atSeq` and the origin length, and `PrefixRejected` the ORIGIN index of the op the domain
+    /// refused. A tail that does not start at the boundary is `TailSeqMismatch`.
     let compactFrom
-        (hashFn: HashFn)
+        (s: Stream<'Op, 'State, 'Rej>)
         (stateEncode: 'State -> string)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
         (keyOf: 'Op -> string option)
         (c: Compacted<'Op, 'State>)
         (atSeq: int)
@@ -98,23 +105,26 @@ module internal OpStreamCompacted =
         | _ ->
             let cut = List.truncate k c.Tail
 
-            match replay w snap.State cut with
+            match OpStream.replay s.Witness snap.State cut with
             | Error(i, e) -> Error(SnapshotFault.PrefixRejected(snap.Seq + i, e))
             | Ok state ->
                 // The new boundary is the tip of the part of the tail just replayed (Phase 530).
                 let at = ChainShape.tipBy (fun (r: OpRecord<'Op>) -> r.Hash) (anchorOf c) cut
 
                 Ok
-                    { Snapshot = Sealed.seal snap.Mode hashFn stateEncode at state |> Sealed.toSnapshot
+                    { Snapshot = Sealed.seal snap.Mode s.HashFn stateEncode at state |> Sealed.toSnapshot
                       Tail = List.skip k c.Tail
                       Keys = indexOnto keyOf c.Keys cut }
 
+    /// The head — the tail's last hash, or the snapshot's `PrevHash` (the boundary record's hash,
+    /// the configured genesis at sequence zero) on an empty tail. What `appendIfTo` compares and
+    /// what an attestation of a compacted stream signs: the same head the full stream has.
     let head (c: Compacted<'Op, 'State>) : string = (tip c).PrevHash
 
+    /// Append onto a compacted stream: the record at sequence `Snapshot.Seq` plus the tail's
+    /// length, linked to `head c`, hashed under `s`'s config. A domain rejection is the `Error`.
     let appendTo
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
@@ -122,13 +132,14 @@ module internal OpStreamCompacted =
         : Result<'State * Compacted<'Op, 'State>, 'Rej> =
         let at = tip c
 
-        chainOne cfg hashFn w actor at.Seq at.PrevHash op state
+        OpStream.chainOne s actor at.Seq at.PrevHash op state
         |> Result.map (fun (state', r) -> state', { c with Tail = c.Tail @ [ r ] })
 
+    /// Compare-and-append onto a compacted stream (`appendIf`'s contract): `StaleHead` when
+    /// `expectedHead` is not `head c`, nothing written; otherwise `appendTo`, a domain rejection
+    /// as `Domain`.
     let appendIfTo
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (expectedHead: string)
         (actor: Actor)
         (op: 'Op)
@@ -140,12 +151,14 @@ module internal OpStreamCompacted =
         if expectedHead <> actual then
             Error(AppendRejection.StaleHead(expectedHead, actual))
         else
-            appendTo cfg hashFn w actor op state c |> Result.mapError AppendRejection.Domain
+            appendTo s actor op state c |> Result.mapError AppendRejection.Domain
 
+    /// Idempotent append onto a compacted stream (`appendIdempotent`'s contract): a key `index`
+    /// already holds is `Duplicate` naming the entry it produced — before or after the boundary,
+    /// so a retry of a pre-compaction key converges — and nothing is written; otherwise `appendTo`
+    /// and the index extended. Thread `keyIndex keyOf c` as the first `index`.
     let appendIdempotentTo
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (key: string)
         (actor: Actor)
         (op: 'Op)
@@ -156,22 +169,20 @@ module internal OpStreamCompacted =
         match KeyIndex.tryFind key index with
         | Some existing -> Ok(CompactedOutcome.Duplicate existing)
         | None ->
-            appendTo cfg hashFn w actor op state c
+            appendTo s actor op state c
             |> Result.map (fun (state', c') ->
                 let r = List.last c'.Tail
                 CompactedOutcome.Appended(state', c', KeyIndex.add key { Seq = r.Seq; Hash = r.Hash } index))
 
+    /// The key index of the whole history: `Keys` (the discarded prefix's) with the tail's keys
+    /// folded on, first-wins — `KeyIndex.ofStream` of the uncompacted stream, rebuilt without it.
     let keyIndex (keyOf: 'Op -> string option) (c: Compacted<'Op, 'State>) : KeyIndex = indexOnto keyOf c.Keys c.Tail
 
-    let verify
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (stateEncode: 'State -> string)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (c: Compacted<'Op, 'State>)
-        : bool =
-        Snapshots.verify cfg hashFn stateEncode w c.Snapshot c.Tail
+    /// `Snapshots.verify` over the snapshot and the tail, under the snapshot's own mode.
+    let verify (s: Stream<'Op, 'State, 'Rej>) (stateEncode: 'State -> string) (c: Compacted<'Op, 'State>) : bool =
+        Snapshots.verify s stateEncode c.Snapshot c.Tail
 
+    /// `Snapshots.replayFrom` over the snapshot and the tail — the seam checked.
     let replayFrom
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (c: Compacted<'Op, 'State>)

@@ -100,7 +100,7 @@ let private streams (seed: int) (count: int) : (int * OpRecord<CounterOp> list) 
           for _ in 1..len do
               let op = if rng.Next 3 = 0 then Dec(rng.Next 4) else Inc(rng.Next 5)
 
-              match OpStream.append OpStream.defaultHash witness (Human "w") op st rs with
+              match OpStream.append (OpStream.canonical OpStream.defaultHash witness) (Human "w") op st rs with
               | Ok(st', rs') ->
                   st <- st'
                   rs <- rs'
@@ -109,7 +109,7 @@ let private streams (seed: int) (count: int) : (int * OpRecord<CounterOp> list) 
           yield st, rs ]
 
 let private compactProd mode rs n =
-    OpStream.Compacted.compactAt mode OpStream.canonicalConfig OpStream.defaultHash stateEnc witness keyOf 0 rs n
+    Compacted.compactAt mode (OpStream.canonical OpStream.defaultHash witness) stateEnc keyOf 0 rs n
 
 let private compactModel (hashFn: HashFn) mode rs n =
     Chain.compact hashFn showPos (modelPay mode) (chainApply witness) "" 0 (toChainRecords rs) (posOfInt n)
@@ -145,7 +145,12 @@ let private recompactionDifferential (modelHash: HashFn) =
                         for k in 0 .. len - n + 1 do
                             let p =
                                 ofProd (
-                                    OpStream.Compacted.compactFrom OpStream.defaultHash stateEnc witness keyOf c (n + k)
+                                    Compacted.compactFrom
+                                        (OpStream.canonical OpStream.defaultHash witness)
+                                        stateEnc
+                                        keyOf
+                                        c
+                                        (n + k)
                                 )
 
                             let m =
@@ -236,7 +241,7 @@ let compactedOracleTests =
                           (Actor.encode (Human "w"))
                           (Inc 2)
 
-                  match OpStream.append OpStream.defaultHash witness (Human "w") (Inc 2) st rs with
+                  match OpStream.append (OpStream.canonical OpStream.defaultHash witness) (Human "w") (Inc 2) st rs with
                   | Error e -> failtestf "append refused: %A" e
                   | Ok(_, full) ->
                       Expect.equal (toChainRecords full) fullModel "the model's append is production's"
@@ -251,10 +256,8 @@ let compactedOracleTests =
                                   emptyTail <- emptyTail + 1
 
                               match
-                                  OpStream.Compacted.appendTo
-                                      OpStream.canonicalConfig
-                                      OpStream.defaultHash
-                                      witness
+                                  Compacted.appendTo
+                                      (OpStream.canonical OpStream.defaultHash witness)
                                       (Human "w")
                                       (Inc 2)
                                       st
@@ -276,13 +279,8 @@ let compactedOracleTests =
                                       (sprintf "appendTo at %d" n)
 
                                   Expect.equal
-                                      (OpStream.Compacted.verify
-                                          OpStream.canonicalConfig
-                                          OpStream.defaultHash
-                                          stateEnc
-                                          witness
-                                          c')
-                                      (OpStream.verifyChain OpStream.defaultHash witness full)
+                                      (Compacted.verify (OpStream.canonical OpStream.defaultHash witness) stateEnc c')
+                                      (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash witness) full)
                                       (sprintf "append_after_compact_verifies_iff, of production, at %d" n)
                               | Error e -> failtestf "appendTo refused: %A" e
                           | p, m -> failtestf "compactions disagree at %d: %A / %A" n p m
@@ -312,7 +310,7 @@ let compactedOracleTests =
                           Expect.equal (ofModelIndex modelSplit) (ofModelIndex whole) "key_index_rebuild_parity"
 
                           Expect.equal
-                              (ofProdIndex (OpStream.Compacted.keyIndex keyOf c))
+                              (ofProdIndex (Compacted.keyIndex keyOf c))
                               (ofModelIndex modelSplit)
                               (sprintf "Compacted.keyIndex at %d" n)
                       | Error e -> failtestf "compact failed: %A" e
@@ -329,7 +327,7 @@ let private decInt (s: string) : Result<int, string> =
     Json.parse s |> Result.bind (Decoder.describing Decoder.int)
 
 let private labels =
-    [ "clock"; "random"; "clock+random"; "network"; OpStream.deterministicTag ]
+    [ "clock"; "random"; "clock+random"; "network"; EffectCapture.deterministicTag ]
 
 /// A seeded pool of sessions: effect identity, label and realised value per evaluation.
 let private sessions (seed: int) (count: int) : (string * string * int) list list =
@@ -343,7 +341,7 @@ let private sessions (seed: int) (count: int) : (string * string * int) list lis
 let private recordProd (session: (string * string * int) list) : EffectCapture list =
     (([]: EffectCapture list), session)
     ||> List.fold (fun caps (eff, det, v) ->
-        snd (OpStream.captureEffect OpStream.defaultHash encInt det eff (fun () -> v) caps))
+        snd (EffectCapture.captureEffect StreamConfig.canonical OpStream.defaultHash encInt det eff (fun () -> v) caps))
 
 let private toReqs (session: (string * string * int) list) : Chain.creq list =
     session
@@ -374,7 +372,7 @@ let private replayProd (session: (string * string * int) list) (caps: EffectCapt
         function
         | [] -> Chain.RDone(List.rev acc, toModelCaptures caps)
         | (eff, det, v) :: rest ->
-            match OpStream.replayEffectStrict decInt eff det (fun () -> v) caps with
+            match EffectCapture.replayEffectStrict decInt eff det (fun () -> v) caps with
             | Ok(x, caps') -> go (encInt x :: acc) caps' rest
             | Error(CaptureReplayFault.Exhausted e) -> Chain.RStopped(Chain.RExhausted e)
             | Error(CaptureReplayFault.IdentityMismatch(r, c)) -> Chain.RStopped(Chain.RIdentity(r, c))
@@ -404,7 +402,7 @@ let private captureDifferential (modelHash: HashFn) =
             note (sprintf "record: %A\n  production: %A\n  model:      %A" session caps modelCaps)
 
         let walk (cs: EffectCapture list) =
-            OpStream.firstCaptureBreak OpStream.defaultHash cs
+            EffectCapture.firstCaptureBreak StreamConfig.canonical OpStream.defaultHash cs
             |> Option.map (fun b -> b.Index, b.Reason),
             ofModelBreak (Chain.first_capture_break_from modelHash showPos esc "" Chain.PZero (toModelCaptures cs))
 
@@ -428,7 +426,7 @@ let private captureDifferential (modelHash: HashFn) =
                 if p <> m then
                     note (sprintf "a tamper at %d: production %A, model %A" i p m)
 
-        let canonical = OpStream.isDeterminismLabel
+        let canonical = EffectCapture.isDeterminismLabel
         let full = replayProd session caps
         let model = Chain.replay_session canonical (toReqs session) modelCaps
 

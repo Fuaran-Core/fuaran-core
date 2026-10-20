@@ -2,7 +2,7 @@ namespace Fuaran.Core
 
 /// An attribution envelope wrapping a domain op with "who did what" provenance (Phase 81): the actor
 /// and session ids, an optional turn/sequence within the session, and a host-supplied timestamp — all
-/// carried INSIDE the chained op via `OpStream.Attributed.liftWitness`, not via a new witness field
+/// carried INSIDE the chained op via `Attributed.liftWitness`, not via a new witness field
 /// (GP2 — the per-op witness-metadata seam F8 was rejected and stays rejected; this *wraps*, it does
 /// not seam). Because the envelope rides inside the op's wire encoding, the existing hash chain covers
 /// it: re-attributing a chained op breaks `verifyChain` exactly as op-tampering does — provenance is
@@ -14,9 +14,9 @@ namespace Fuaran.Core
 /// clock (the Phase 27 effect discipline); the host supplies it, `""` meaning unstamped.
 type Attributed<'Op> =
     {
-        /// The host's opaque actor id; the key `OpStream.Attributed.byActor` groups on.
+        /// The host's opaque actor id; the key `Attributed.byActor` groups on.
         Actor: string
-        /// The host's opaque session id; the key `OpStream.Attributed.bySession` groups on.
+        /// The host's opaque session id; the key `Attributed.bySession` groups on.
         Session: string
         /// The op's ordinal within its session, or `None` — encoded as JSON `null`, and a missing `turn`
         /// member also decodes as `None`.
@@ -28,82 +28,94 @@ type Attributed<'Op> =
         Op: 'Op
     }
 
-/// The bodies of the `OpStream.Attributed` members (Phase 332). Internal: a consumer reaches each one
-/// through its forward in `OpStream.Attributed` (OpStream.fs), which carries the member's contract
-/// and documentation.
-module internal OpStreamAttributed =
-    open Fuaran.Core.OpStreamJsonl
+/// The attributed-stream lift (Phase 81; the public module itself since Phase 516): an op wrapped with
+/// who sent it, in which session and turn, and when, as a stream of its own over the inner witness.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Attributed =
 
-    // ---- attributed-stream lift (Phase 81) ----
+    /// Encode an attribution envelope around the inner op's raw wire JSON:
+    /// `{"actor":…,"session":…,"turn":<int>|null,"at":…,"op":<inner>}` (camelCase, the `Wire`
+    /// kind-tag discipline). The inner op is embedded verbatim (whatever `encodeInner` produced), so
+    /// it round-trips byte-for-byte and joins the chain hash exactly as a bare op does. `turn` is the
+    /// one nullable slot — an absent optional renders as the bare `null` token, read back to `None`.
+    let encodeEnvelope (encodeInner: 'Op -> string) (a: Attributed<'Op>) : string =
+        "{\"actor\":"
+        + Jsonl.jstr a.Actor
+        + ",\"session\":"
+        + Jsonl.jstr a.Session
+        + ",\"turn\":"
+        + (match a.Turn with
+           | Some t -> string t
+           | None -> "null")
+        + ",\"at\":"
+        + Jsonl.jstr a.At
+        + ",\"op\":"
+        + encodeInner a.Op
+        + "}"
 
-    module Attributed =
+    /// Decode an attribution envelope, delegating the inner `op` raw span to `decodeInner`. Reuses
+    /// the self-contained flat-object scanner (`Jsonl.topFields`) — FSharp.Core-only + Fable-clean —
+    /// so an attributed host decodes / verifies / replays in-browser without a host boundary. A
+    /// structural fault or an inner-decode `Error` is a named `Error`, never an exception (the
+    /// recoverable-envelope discipline). An absent / `null` `turn` decodes to `None`.
+    let decodeEnvelope (decodeInner: string -> Result<'Op, string>) (line: string) : Result<Attributed<'Op>, string> =
+        Jsonl.parseLine 1 line
+        |> Jsonl.bindR (fun l ->
+            let turn =
+                match Jsonl.tryRawField "turn" l with
+                | None
+                | Some "null" -> Ok None
+                | Some _ -> Jsonl.intField "turn" l |> Result.map Some
 
-        let encodeEnvelope (encodeInner: 'Op -> string) (a: Attributed<'Op>) : string =
-            "{\"actor\":"
-            + jstr a.Actor
-            + ",\"session\":"
-            + jstr a.Session
-            + ",\"turn\":"
-            + (match a.Turn with
-               | Some t -> string t
-               | None -> "null")
-            + ",\"at\":"
-            + jstr a.At
-            + ",\"op\":"
-            + encodeInner a.Op
-            + "}"
+            Jsonl.stringField "actor" l
+            |> Jsonl.bindR (fun actor ->
+                Jsonl.stringField "session" l
+                |> Jsonl.bindR (fun session ->
+                    turn
+                    |> Jsonl.bindR (fun turn ->
+                        Jsonl.stringField "at" l
+                        |> Jsonl.bindR (fun at ->
+                            Jsonl.rawField "op" l
+                            |> Jsonl.bindR (fun raw -> decodeInner raw |> Result.mapError (Jsonl.refuse l))
+                            |> Result.map (fun op ->
+                                { Actor = actor
+                                  Session = session
+                                  Turn = turn
+                                  At = at
+                                  Op = op }))))))
+        |> Result.mapError Jsonl.spanFault
 
-        let decodeEnvelope
-            (decodeInner: string -> Result<'Op, string>)
-            (line: string)
-            : Result<Attributed<'Op>, string> =
-            Jsonl.parseLine 1 line
-            |> bindR (fun l ->
-                let turn =
-                    match Jsonl.tryRawField "turn" l with
-                    | None
-                    | Some "null" -> Ok None
-                    | Some _ -> Jsonl.intField "turn" l |> Result.map Some
+    /// Lift a `StreamWitness<'Op,'State,'Rej>` to `StreamWitness<Attributed<'Op>,'State,'Rej>` — the
+    /// derived attributed witness. `Apply` delegates to the inner `Apply` on `.Op`; `Encode`/`Decode`
+    /// wrap the inner codec in the attribution envelope. No new witness field (GP2): the lift is a
+    /// pure value over the existing three-seam witness, so an attributed stream appends / verifies /
+    /// replays through the unchanged `OpStream` surface and the chain hash covers the attribution.
+    let liftWitness (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<Attributed<'Op>, 'State, 'Rej> =
+        { Apply = fun a state -> w.Apply a.Op state
+          Encode = encodeEnvelope w.Encode
+          Decode = decodeEnvelope w.Decode }
 
-                Jsonl.stringField "actor" l
-                |> bindR (fun actor ->
-                    Jsonl.stringField "session" l
-                    |> bindR (fun session ->
-                        turn
-                        |> bindR (fun turn ->
-                            Jsonl.stringField "at" l
-                            |> bindR (fun at ->
-                                Jsonl.rawField "op" l
-                                |> bindR (fun raw -> decodeInner raw |> Result.mapError (Jsonl.refuse l))
-                                |> Result.map (fun op ->
-                                    { Actor = actor
-                                      Session = session
-                                      Turn = turn
-                                      At = at
-                                      Op = op }))))))
-            |> Result.mapError spanFault
+    /// Group an attributed stream's records by a projected key, preserving per-key append order
+    /// (records for one key stay in stream order). The shared engine for `byActor` / `bySession`.
+    let private groupBy
+        (keyOf: Attributed<'Op> -> string)
+        (records: OpRecord<Attributed<'Op>> list)
+        : Map<string, OpRecord<Attributed<'Op>> list> =
+        // Linear (Phase 296): each group is built reversed with a cons, then reversed once — the
+        // old `group @ [ r ]` copied the group on every record, quadratic in a busy actor's share.
+        (Map.empty, records)
+        ||> List.fold (fun acc r ->
+            let k = keyOf r.Op
+            Map.add k (r :: (Map.tryFind k acc |> Option.defaultValue [])) acc)
+        |> Map.map (fun _ group -> List.rev group)
 
-        let liftWitness (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<Attributed<'Op>, 'State, 'Rej> =
-            { Apply = fun a state -> w.Apply a.Op state
-              Encode = encodeEnvelope w.Encode
-              Decode = decodeEnvelope w.Decode }
+    /// Project an attributed stream to "who appended what" — records grouped by actor id, each group
+    /// in stream order. A pure fold, no host dependency.
+    let byActor (records: OpRecord<Attributed<'Op>> list) : Map<string, OpRecord<Attributed<'Op>> list> =
+        groupBy _.Actor records
 
-        /// Group an attributed stream's records by a projected key, preserving per-key append order
-        /// (records for one key stay in stream order). The shared engine for `byActor` / `bySession`.
-        let private groupBy
-            (keyOf: Attributed<'Op> -> string)
-            (records: OpRecord<Attributed<'Op>> list)
-            : Map<string, OpRecord<Attributed<'Op>> list> =
-            // Linear (Phase 296): each group is built reversed with a cons, then reversed once — the
-            // old `group @ [ r ]` copied the group on every record, quadratic in a busy actor's share.
-            (Map.empty, records)
-            ||> List.fold (fun acc r ->
-                let k = keyOf r.Op
-                Map.add k (r :: (Map.tryFind k acc |> Option.defaultValue [])) acc)
-            |> Map.map (fun _ group -> List.rev group)
-
-        let byActor (records: OpRecord<Attributed<'Op>> list) : Map<string, OpRecord<Attributed<'Op>> list> =
-            groupBy _.Actor records
-
-        let bySession (records: OpRecord<Attributed<'Op>> list) : Map<string, OpRecord<Attributed<'Op>> list> =
-            groupBy _.Session records
+    /// Project an attributed stream by session id — each session's appended records in stream order.
+    /// A pure fold, no host dependency.
+    let bySession (records: OpRecord<Attributed<'Op>> list) : Map<string, OpRecord<Attributed<'Op>> list> =
+        groupBy _.Session records

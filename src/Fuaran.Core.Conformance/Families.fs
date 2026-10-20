@@ -265,7 +265,7 @@ module Families =
           Guarded [ "accepted"; "tampered chain" ],
           drawn
               "the tampered chain it must reject is built only over a chain the caller's StreamGen fills, and a refused append is skipped; guarded on accepted op and tampered chain (Phase 245)",
-          "OpStream.empty OpStream.append OpStream.replay OpStream.verifyChain OpStream.toJsonl OpStream.fromJsonl OpStream.tryToJsonl"
+          "OpStream.empty OpStream.append OpStream.replay OpStream.verifyChain Jsonl.write Jsonl.read Jsonl.tryWrite"
           ("Conformance.reducer", [ Takes.StreamGen ], BaseRun, []),
           Guarded [ "accepted"; "refused" ],
           drawn
@@ -320,13 +320,13 @@ module Families =
           Unconditional
               "each iteration takes a snapshot and replays across it; a run whose chains are too short to cut one reds both laws as never reached",
           none "a rejected append is skipped; a compact Error only fails a law",
-          "OpStream.Snapshots.compact OpStream.Snapshots.replayFrom OpStream.Snapshots.verify OpStream.appendWith"
+          "Snapshots.compact Snapshots.replayFrom Snapshots.verify OpStream.append"
           ("Conformance.streamConfigLaws", stream, stronger, []),
           Unconditional
               "each iteration builds a configured chain and journal and checks them under their own and perturbed parameters; a run that never chains an op reds the read law as never reached",
           built
               "every refused verification (another genesis, payload or hash, a tampered record, a stale head) is built from the iteration's own chain; a domain-refused append only ends the fold",
-          "OpStream.appendIfWith OpStream.appendManyWith OpStream.captureEffectWith OpStream.captureHeadWith OpStream.firstCaptureBreakWith OpStream.headWith OpStream.verifyCapturesAtWith OpStream.verifyChainWith"
+          "OpStream.appendIf OpStream.appendMany EffectCapture.captureEffect EffectCapture.captureHead EffectCapture.firstCaptureBreak OpStream.head EffectCapture.verifyCapturesAt OpStream.verifyChain"
           ("Conformance.dagLaws", stream, stronger, []),
           Unconditional
               "each iteration builds, replays and round-trips one DAG, and tampers it whenever a fresh draw differs; a run that never tampers reds the tamper law as never reached",
@@ -347,7 +347,7 @@ module Families =
           Guarded [ "lane shape" ],
           drawn
               "the lane fork and the cross-lane content collision are built from a replacement op the caller's generator must draw distinct, and are demanded by the lane-shape guard; the refusals the store's own draws produce (a collision skipping a step or a fold) are counted beside them, not demanded",
-          "Dag.loadLanes Dag.verifyLanes Dag.laneCollisions Dag.appendOnLane Dag.lanesToJsonl Dag.totalOrderBy Dag.totalOrder Dag.replayAll Dag.appendOn Dag.mergeAll Dag.commonBase Dag.Reach.commonBase Dag.rehashWith Dag.prunable"
+          "Dag.loadLanes Dag.verifyLanes Dag.laneCollisions Dag.appendOnLane Dag.lanesToJsonl Dag.totalOrderBy Dag.totalOrder Dag.replayAll Dag.appendOn Dag.mergeAll Dag.commonBase Dag.Reach.commonBase Dag.rehash Dag.prunable"
           ("Conformance.casLaws", stream, stronger, []),
           Guarded [ "accepted"; "refused"; "race arm" ],
           drawn
@@ -367,7 +367,7 @@ module Families =
           Guarded [ "tampered chain (re-attributed)" ],
           drawn
               "a re-attributed op is built and must fail verifyChain, but only over a non-empty drawn stream; guarded on tampered chain (Phase 297)",
-          "OpStream.Attributed.liftWitness"
+          "Attributed.liftWitness"
           ("Conformance.codecInjectivityLaws", stream, stronger, []),
           Unconditional
               "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything",
@@ -376,11 +376,11 @@ module Families =
           ("Conformance.noAttestationVacuityLaws", stream, stronger, []),
           Unconditional "each iteration asks the no-op sink to sign and to verify",
           built "a plausible attestation is built and the no-op sink must reject it",
-          "OpStream.verifyAttestation"
+          "Attestation.verifyAttestation"
           ("Conformance.attestationLawsAt", stream @ [ Takes.IAttestationSink ], capability, []),
           Guarded [ "signing outcome and op tamper" ],
           built "op and actor forgeries are built each iteration; its guard is on the signing outcome",
-          "OpStream.attestHead OpStream.verifyAttestation"
+          "Attestation.attestHead Attestation.verifyAttestation"
           ("Conformance.compositionLawsAt", [ Takes.ArtifactWitness ], capability, []),
           Unconditional "each iteration composes a drawn pair and compares against the nested application",
           none "a compose Error only fails a law or is compared opaquely",
@@ -513,17 +513,11 @@ module Families =
           drawn
               "runs propagationEvaluatorLawsAt first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit",
           "Propagation.evalWith Propagation.evalFromWith Propagation.sort"
-          ("Conformance.propagationEvaluatorLawsWith", [ Takes.EvaluatorWitness ], capability, []),
-          Guarded
-              [ "evaluator edit (delegates to propagationEvaluatorLawsAt)"
-                "prior-aware edit" ],
-          drawn "the obsolete forward of propagationPriorLawsAt (Phase 507); the same laws, labelled with its own id",
-          ""
           ("Conformance.captureReplayLaws", [], seam, []),
           Guarded [ "tampered" ],
           drawn
               "the tampered capture is built only when a fresh draw encodes differently from the value it replaces (guarded on tampered, Phase 297); the misordered replay is built",
-          "OpStream.captureEffect OpStream.replayEffect OpStream.verifyCaptures OpStream.captureToJsonl OpStream.captureFromJsonl OpStream.tryCaptureToJsonl"
+          "EffectCapture.captureEffect EffectCapture.replayEffect EffectCapture.verifyCaptures EffectCapture.toJsonl EffectCapture.ofJsonl EffectCapture.tryToJsonl"
           ("Conformance.constructThenEncodeLaws", [], seam, []),
           Unconditional
               "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly",
@@ -567,7 +561,7 @@ module Families =
           Unconditional
               "each iteration records a drawn session, replays it shuffled across keys, tampers with it and dispatches through the seam",
           built "NoCapture, Exhausted, NotAttempted and a policy refusal at the seam are built each iteration",
-          "OpStream.beginEffectKeyed OpStream.beginEffectKeyedWith OpStream.settleEffectKeyed OpStream.settleEffectKeyedWith OpStream.captureEffectKeyed OpStream.captureEffectKeyedWith OpStream.replayEffectKeyed OpStream.firstKeyedCaptureBreak OpStream.firstKeyedCaptureBreakWith OpStream.verifyKeyedCaptures OpStream.verifyKeyedCapturesWith CapabilityRegistry.dispatchCaptured CapabilityRegistry.dispatchReplayed QueryRegistry.dispatchCaptured QueryRegistry.dispatchPageCaptured QueryRegistry.dispatchReplayed"
+          "KeyedCapture.beginEffectKeyed KeyedCapture.settleEffectKeyed KeyedCapture.captureEffectKeyed KeyedCapture.replayEffectKeyed KeyedCapture.firstKeyedCaptureBreak KeyedCapture.verifyKeyedCaptures CapabilityRegistry.dispatchCaptured CapabilityRegistry.dispatchReplayed QueryRegistry.dispatchCaptured QueryRegistry.dispatchPageCaptured QueryRegistry.dispatchReplayed"
           ("Conformance.packLoadingLaws", [], seam, []),
           Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base",
           built "a stale-version pack and an unknown base are built",
@@ -620,7 +614,7 @@ module Families =
           Unconditional
               "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed",
           built "all three break kinds are built each iteration",
-          "ChainBreakReason.ofString ChainBreakReason.toString OpStream.firstChainBreakWith OpStream.firstCaptureBreak"
+          "ChainBreakReason.ofString ChainBreakReason.toString OpStream.firstChainBreak EffectCapture.firstCaptureBreak"
           ("Conformance.dagBreakReasonLaws", [], seam, []),
           Unconditional
               "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed",
@@ -645,10 +639,6 @@ module Families =
           drawn
               "the refusal law reads the codec's refusals of mutations built from each drawn value, and a codec that refuses none holds it over nothing; guarded on mutation outcome",
           ""
-          ("Conformance.codecLaws", [ Takes.Codec ], capability, []),
-          Guarded [ "mutation outcome"; "distinct written values" ],
-          drawn "the obsolete forward of codecLawsAt (Phase 507); the same laws, labelled with its own id",
-          ""
           ("StringEscapeVectors.laws", [], seam, []),
           Unconditional
               "a fixed vector corpus: every run evaluates every character and actor vector and the rendered table, so there is no sample that could miss one",
@@ -658,33 +648,29 @@ module Families =
           Unconditional
               "a fixed vector corpus: every run evaluates every value, actor and capture vector under both profiles and the rendered table, so there is no sample that could miss one",
           none "every vector is an accepted rendering; no refused outcome is read",
-          "Json.renderWith Json.escapeWith EncodingProfile.name EncodingProfile.tryParse OpStream.profileName OpStream.tryProfile OpStream.encodeActorWith OpStream.configFor Dag.nodeIdWith EncodingProfileVectors.lines Canonical.write Canonical.tryWrite Canonical.isCanonical"
+          "Json.renderWith Json.escapeWith EncodingProfile.name EncodingProfile.tryParse StreamConfig.spellActor Dag.nodeId EncodingProfileVectors.lines Canonical.write Canonical.tryWrite Canonical.isCanonical"
           ("EncodingProfileVectors.storedCodecLawsAt", [ Takes.Codec ], capability, []),
           Unconditional
               "the consumer's own stored texts, walked whole: every text is read, re-rendered under the declared profile and under every other, so there is no sample that could miss one",
           none
               "reads a stored corpus; a defect in a stored text is a red law about that store, not a sampled refused outcome",
           "Canonical.read Codec.read Codec.write"
-          ("EncodingProfileVectors.storedCodecLaws", [ Takes.Codec ], capability, []),
-          Unconditional "the obsolete forward of storedCodecLawsAt (Phase 507); the same laws over the same store",
-          none "the obsolete forward of storedCodecLawsAt; its refusal verdict is that family's",
-          ""
           ("StoredIdentity.linearLaws", [ Takes.StreamWitness ], seam, []),
           Unconditional
               "the consumer's own stored chain, walked whole: every record is recomputed and every hash round-trips, so there is no sample that could miss one",
           none "reads a stored chain; a rehash refusal is a red law about that store, not a sampled refused outcome",
-          "OpStream.rehashEncoding"
+          "OpStream.rehash"
           ("StoredIdentity.dagLaws", [ Takes.StreamWitness ], seam, []),
           Unconditional
               "the consumer's own stored DAG, walked whole: every node id is recomputed and every id round-trips, so there is no sample that could miss one",
           none "reads a stored DAG; a rehash refusal is a red law about that store, not a sampled refused outcome",
-          "Dag.firstBreakWith Dag.verifyDagWith Dag.rehashEncoding"
+          "Dag.firstBreak Dag.verifyDag Dag.rehash"
           ("StoredIdentity.captureLaws", [], seam, []),
           Unconditional
               "the consumer's own stored capture log, walked whole: every hash is recomputed and round-trips, so there is no sample that could miss one",
           none
               "reads a stored capture log; a rehash refusal is a red law about that store, not a sampled refused outcome",
-          "OpStream.firstCaptureBreakEncoding OpStream.rehashCapturesEncoding"
+          "EffectCapture.firstCaptureBreak EffectCapture.rehashCaptures"
           ("WireNullTolerance.laws", [], seam, []),
           Unconditional
               "a fixed vector corpus: every run evaluates every vector under both read policies, so there is no sample that could miss one",

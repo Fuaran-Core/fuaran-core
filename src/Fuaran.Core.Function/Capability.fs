@@ -274,7 +274,7 @@ module Capability =
     /// same args replay the same captured value, and the pre-image is INJECTIVE (Phase 225,
     /// `invocation_key_injective` in `proofs/Capability.fst`): distinct argument sets never share
     /// one, whatever their values contain. That two distinct pre-images hash apart is a property
-    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `OpStream.captureEffect`'s
+    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `EffectCapture.captureEffect`'s
     /// `eff` argument.
     ///
     /// Since Phase 295 each argument is keyed by its CANONICAL spelling in its hole's space
@@ -347,7 +347,7 @@ module Capability =
 
     /// Invoke a capability: validate the args, then run the host `body`. Deterministic capabilities
     /// re-evaluate freely; for a non-`Deterministic` capability the caller journals the realized
-    /// value via `OpStream.captureEffect` keyed by `invocationKey` + `determinismTag` (Phase 27),
+    /// value via `EffectCapture.captureEffect` keyed by `invocationKey` + `determinismTag` (Phase 27),
     /// so the invocation replays exactly. A body failure is a named `BodyFailed`, never a throw.
     ///
     /// **The body must be TOTAL (Phase 307).** The seam does not wrap it: a body that throws
@@ -602,7 +602,7 @@ module CapabilityRegistry =
     /// after the id resolved, the arguments validated and the policy admitted the invocation, and
     /// before the body runs; the body's answer settles it — `Ready v` as `Completed` (`encode v`),
     /// `Failed m` as `Refused m` — and a `Pending` answer leaves the attempt open, with the returned
-    /// `Ticket` (`key`, occurrence) the one `OpStream.settleEffectKeyed` settles it with later. A
+    /// `Ticket` (`key`, occurrence) the one `KeyedCapture.settleEffectKeyed` settles it with later. A
     /// refusal before the body journals nothing, so a policy refusal leaves no capture; a
     /// deterministic capability journals nothing either (`Ticket = None`). The `Outcome` is exactly
     /// `dispatch`'s; a `CapturedDispatch` since Phase 391.

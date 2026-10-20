@@ -65,7 +65,10 @@ module internal DagStreamLaws =
 
             let g, a, b, m, dag = LawKit.randomDag hashFn sw false op0 opA opB opM
 
-            verify.Check(Dag.verifyDag hashFn sw dag, fun () -> at "verifyDag rejected an intact DAG")
+            verify.Check(
+                Dag.verifyDag (OpStream.canonical hashFn sw) dag,
+                fun () -> at "verifyDag rejected an intact DAG"
+            )
 
             // Determinism (Phase 18): build the SAME logical history with a permuted append order
             // (B before A) and confirm it converges to the same content-addressed DAG + head and
@@ -93,7 +96,10 @@ module internal DagStreamLaws =
             | Some newOp ->
                 let forged = dagOf (Map.add tid { tnode with Op = newOp } dag.Nodes)
 
-                tamper.Check(not (Dag.verifyDag hashFn sw forged), fun () -> at "a tampered DAG node was not detected")
+                tamper.Check(
+                    not (Dag.verifyDag (OpStream.canonical hashFn sw) forged),
+                    fun () -> at "a tampered DAG node was not detected"
+                )
 
             // JSONL persistence round-trip (Phase 01 is shipped)
             match Dag.fromJsonl sw (Dag.toJsonl sw.Encode dag) with
@@ -1044,7 +1050,7 @@ module internal DagStreamLaws =
 
     /// Lane-store laws (Phase 311) — the teeth on `Dag.loadLanes` / `lanesToJsonl`, `verifyLanes`,
     /// `laneCollisions`, `totalOrderBy` / `totalOrder` / `replayAll`, `mergeAll` / `appendOn`,
-    /// `commonBase`, `rehashWith` and `prunable`. Each iteration draws a lane store from the caller's ops:
+    /// `commonBase`, `rehash` and `prunable`. Each iteration draws a lane store from the caller's ops:
     /// two to four lanes, each lane one writer (its own actor) whose nodes go onto its own last node, onto
     /// every head of the union (a convergence, the shape a writer that folds before it writes takes), or —
     /// for a lane's first node — onto any node already written. Then:
@@ -1064,7 +1070,7 @@ module internal DagStreamLaws =
     ///    of a left fold of binary merges, with the fold's merge nodes removed, in the same drain order;
     ///  - **one common base** — `commonBase` is the same under a shuffle of the heads, is `mergeBase` at
     ///    two, and `Reach.commonBase` answers as it does;
-    ///  - **rehashWith round trip** — the store re-minted under SHA-256 verifies there and re-minted back
+    ///  - **rehash round trip** — the store re-minted under SHA-256 verifies there and re-minted back
     ///    under the caller's hash is the store, every id mapped back to itself; a tampered store is
     ///    refused as `Unverified`;
     ///  - **verifyLanes names the lane** — `Ok` on the drawn store, and the lane of a node whose op is
@@ -1117,7 +1123,7 @@ module internal DagStreamLaws =
 
         let rehashCell =
             LawKit.LawCell
-                "rehashWith to SHA-256 verifies there and rehashes back to the store; an unverified store is refused"
+                "rehash to SHA-256 verifies there and rehashes back to the store; an unverified store is refused"
 
         let verifyCell =
             LawKit.LawCell "verifyLanes accepts the drawn store and names the lane of a node changed under its id"
@@ -1390,10 +1396,11 @@ module internal DagStreamLaws =
                 fun () -> at (sprintf "heads %A: commonBase %A" baseHeads cb)
             )
 
-            // ---- rehashWith round trip ----
-            match Dag.rehashWith hashFn OpStream.sha256Hash sw dag with
+            // ---- rehash round trip ----
+            match Dag.rehash (OpStream.canonical hashFn sw) (OpStream.canonical OpStream.sha256Hash sw) dag with
             | Ok(there, ids1) ->
-                let back = Dag.rehashWith OpStream.sha256Hash hashFn sw there
+                let back =
+                    Dag.rehash (OpStream.canonical OpStream.sha256Hash sw) (OpStream.canonical hashFn sw) there
 
                 let roundTrip =
                     match back with
@@ -1403,7 +1410,7 @@ module internal DagStreamLaws =
                     | Error _ -> false
 
                 rehashCell.Check(
-                    Dag.verifyDag OpStream.sha256Hash sw there && roundTrip,
+                    Dag.verifyDag (OpStream.canonical OpStream.sha256Hash sw) there && roundTrip,
                     fun () ->
                         at (
                             sprintf
@@ -1439,7 +1446,12 @@ module internal DagStreamLaws =
                 )
 
                 rehashCell.Check(
-                    (match Dag.rehashWith hashFn OpStream.sha256Hash sw tampered.Dag with
+                    (match
+                        Dag.rehash
+                            (OpStream.canonical hashFn sw)
+                            (OpStream.canonical OpStream.sha256Hash sw)
+                            tampered.Dag
+                     with
                      | Error(Dag.RehashFault.Unverified b) -> b.NodeId = victim
                      | _ -> false),
                     fun () -> at (sprintf "a tampered store was re-minted, node %s" victim)
@@ -1464,7 +1476,7 @@ module internal DagStreamLaws =
 
                 pruneCell.Check(
                     (dropped = (ids |> List.filter (fun id -> not (Set.contains id kept))))
-                    && Dag.verifyDag hashFn sw pruned
+                    && Dag.verifyDag (OpStream.canonical hashFn sw) pruned
                     && roots
                        |> List.forall (fun r ->
                            Dag.tryReplayTo sw state0 pruned r = Dag.tryReplayTo sw state0 dag r
@@ -1589,7 +1601,7 @@ module internal DagStreamLaws =
 
             let tampered = dagOf (Map.add tid { tnode with Op = tnode.Op + 1000 } dag.Nodes)
 
-            match reasonOf "content-id" at (Dag.firstBreak hashFn sw tampered) with
+            match reasonOf "content-id" at (Dag.firstBreak (OpStream.canonical hashFn sw) tampered) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
             | None -> ()
 
@@ -1598,7 +1610,7 @@ module internal DagStreamLaws =
             // parent check is the one that fires — the only way to reach that arm.
             let orphaned = dagOf (Map.remove g dag.Nodes)
 
-            match reasonOf "missing-parent" at (Dag.firstBreak hashFn sw orphaned) with
+            match reasonOf "missing-parent" at (Dag.firstBreak (OpStream.canonical hashFn sw) orphaned) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
             | None -> ()
 

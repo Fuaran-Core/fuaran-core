@@ -650,7 +650,8 @@ let typedDispatchTests =
               let sentence = QueryError.describe (ExecutionFailed("down", []))
 
               let legacy =
-                  OpStream.captureEffectKeyed
+                  KeyedCapture.captureEffectKeyed
+                      StreamConfig.canonical
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       (Query.determinismTag sampleQuery)

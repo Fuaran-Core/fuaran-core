@@ -62,9 +62,9 @@ module EncodingProfileVectors =
             Name: string
             /// The actor.
             Actor: Actor
-            /// `OpStream.encodeActorWith V1` of `Actor` — `0.30.0`'s `Actor.encode`.
+            /// `StreamConfig.spellActor StreamConfig.legacyEscape` of `Actor` — `0.30.0`'s `Actor.encode`.
             V1: string
-            /// `OpStream.encodeActorWith V2` of `Actor` — `Actor.encode` since `0.33.0`.
+            /// `StreamConfig.spellActor StreamConfig.canonical` of `Actor` — `Actor.encode` since `0.33.0`.
             V2: string
         }
 
@@ -168,20 +168,31 @@ module EncodingProfileVectors =
             V1 = """{"kind":"human","id":"\u0000"}"""
             V2 = """{"kind":"human","id":"\u0000"}""" } ]
 
-    /// The two profile pairs, `Wire`'s and `OpStream`'s, in table order.
-    let private profilePairs: (EncodingProfile * OpStream.EncodingProfile) list =
-        [ EncodingProfile.V1, OpStream.EncodingProfile.V1
-          EncodingProfile.V2, OpStream.EncodingProfile.V2 ]
+    /// The op stream's config each profile names (Phase 516: the op stream carries no profile type of
+    /// its own; its profiles are the config constructors), in table order.
+    let private configOf (p: EncodingProfile) : StreamConfig =
+        match p with
+        | EncodingProfile.V1 -> StreamConfig.legacyEscape
+        | EncodingProfile.V2 -> StreamConfig.canonical
+
+    /// A hash function that hashes nothing: the id it mints IS the pre-image, so a check can read the
+    /// bytes a node id or a capture hash is computed over.
+    let private reveal: HashFn = fun prev payload -> prev + "#" + payload
+
+    /// A stream whose op encodes as `{}`, so a node id's pre-image is the actor's and the parents'.
+    let private bareStream (cfg: StreamConfig) : Stream<unit, unit, unit> =
+        OpStream.ofConfig
+            cfg
+            reveal
+            { Apply = fun () s -> Ok s
+              Encode = fun () -> "{}"
+              Decode = fun _ -> Ok() }
 
     /// The column of a vector a profile reads.
     let private column (p: EncodingProfile) (v1: string) (v2: string) : string =
         match p with
         | EncodingProfile.V1 -> v1
         | EncodingProfile.V2 -> v2
-
-    /// A hash function that hashes nothing: the id it mints IS the pre-image, so a check can read the
-    /// bytes a node id or a capture hash is computed over.
-    let private reveal: HashFn = fun prev payload -> prev + "#" + payload
 
     /// The genesis node's pre-image for one actor and the empty op, under `reveal`.
     let private nodePreimage (actor: string) : string = "#" + actor + "|{}"
@@ -323,74 +334,41 @@ module EncodingProfileVectors =
            else
                fail name (sprintf "columns differ: %b; carries LF/CR/TAB: %b" (v.V1 <> v.V2) (carriesShortForm v.Value))) ]
 
-    /// Every check one actor vector makes: the actor's encoding, the chain payload `configFor` builds
-    /// around it, and the node id `Dag.nodeIdWith` folds it into, under each profile.
+    /// Every check one actor vector makes: the actor's spelling, the chain payload the profile's config
+    /// builds around it, and the node id `Dag.nodeId` folds it into over that config, under each profile.
     let private runActor (a: ActorVector) : Corpus.Outcome list =
-        [ for wp, op in profilePairs do
+        [ for wp in EncodingProfile.all do
               let tag = a.Name + " / " + EncodingProfile.name wp
               let expected = column wp a.V1 a.V2
+              let cfg = configOf wp
+
+              expect (tag + " / StreamConfig.spellActor") "spellActor" expected (StreamConfig.spellActor cfg a.Actor)
 
               expect
-                  (tag + " / OpStream.encodeActorWith")
-                  "encodeActorWith"
-                  expected
-                  (OpStream.encodeActorWith op a.Actor)
-
-              expect
-                  (tag + " / OpStream.configFor payload")
-                  "configFor.Payload"
+                  (tag + " / StreamConfig payload")
+                  "StreamConfig.Payload"
                   (payload expected)
-                  ((OpStream.configFor op).Payload 0 a.Actor "{}")
+                  (cfg.Payload 0 a.Actor "{}")
 
               expect
-                  (tag + " / Dag.nodeIdWith pre-image")
-                  "nodeIdWith"
+                  (tag + " / Dag.nodeId pre-image")
+                  "nodeId"
                   (nodePreimage expected)
-                  (Dag.nodeIdWith op reveal (fun () -> "{}") [] a.Actor ())
+                  (Dag.nodeId (bareStream cfg) [] a.Actor ())
           expect (a.Name + " / Actor.encode is V2") "Actor.encode" a.V2 (Actor.encode a.Actor) ]
 
-    /// The checks no single vector owns: the two profile types name the same profiles; the DAG's
-    /// parents are sorted into a profiled id exactly as into an unprofiled one; the capture
+    /// The checks no single vector owns: the DAG's parents are sorted into a profiled id exactly as into
+    /// an unprofiled one; the capture
     /// pre-image each profile hashes; and guard parity — the canonical writer refuses, under every
     /// profile, each value the other guarded renderers refuse (Phase 495).
     let private runShared () : Corpus.Outcome list =
-        [ expect
-              "profile names: Wire and OpStream spell the same profiles alike"
-              "the profile names"
-              (EncodingProfile.all |> List.map EncodingProfile.name |> String.concat ",")
-              (OpStream.profiles |> List.map OpStream.profileName |> String.concat ",")
-          expect
-              "profile names: the current profile is the same on both sides"
-              "the current profile"
-              (EncodingProfile.name EncodingProfile.current)
-              (OpStream.profileName OpStream.currentProfile)
-          (let name = "profile names: every name parses back to its profile, on both sides"
-
-           let wireOk =
-               EncodingProfile.all
-               |> List.forall (fun p -> EncodingProfile.tryParse (EncodingProfile.name p) = Some p)
-
-           let streamOk =
-               OpStream.profiles
-               |> List.forall (fun p -> OpStream.tryProfile (OpStream.profileName p) = Some p)
-
-           let refuses =
-               [ "V1"; "v3"; ""; " v1" ]
-               |> List.forall (fun s -> EncodingProfile.tryParse s = None && OpStream.tryProfile s = None)
-
-           if wireOk && streamOk && refuses then
-               pass name
-           else
-               fail
-                   name
-                   (sprintf "Wire round-trips: %b; OpStream round-trips: %b; others refused: %b" wireOk streamOk refuses))
-          for _, op in profilePairs do
+        [ for wp in EncodingProfile.all do
               expect
-                  ("merge pre-image / " + OpStream.profileName op)
-                  "nodeIdWith"
+                  ("merge pre-image / " + EncodingProfile.name wp)
+                  "nodeId"
                   ("p1,p2" + nodePreimage """{"kind":"human","id":"alice"}""")
-                  (Dag.nodeIdWith op reveal (fun () -> "{}") [ "p2"; "p1" ] (Human "alice") ())
-          for wp, op in profilePairs do
+                  (Dag.nodeId (bareStream (configOf wp)) [ "p2"; "p1" ] (Human "alice") ())
+          for wp in EncodingProfile.all do
               let expected = capturePreimage wp
 
               let capture: EffectCapture =
@@ -401,9 +379,9 @@ module EncodingProfileVectors =
                     PrevHash = ""
                     Hash = "#" + expected }
 
-              let name = "capture pre-image / " + OpStream.profileName op
+              let name = "capture pre-image / " + EncodingProfile.name wp
 
-              match OpStream.firstCaptureBreakEncoding op (OpStream.configFor op) reveal [ capture ] with
+              match EffectCapture.firstCaptureBreak (configOf wp) reveal [ capture ] with
               | None -> pass name
               | Some b -> fail name (sprintf "the capture did not recompute: %A" b)
           // Phase 495 — guard parity. The three values no profile renders as text that parses back,
@@ -633,10 +611,3 @@ module EncodingProfileVectors =
           control.Result
           VectorKit.storeCell "stored codec: " "text" (List.length stored) ]
         |> LawKit.labelAs "EncodingProfileVectors.storedCodecLawsAt"
-
-    /// Forward — `storedCodecLawsAt` under the name it carried until Phase 507. Kept as a roster row
-    /// under its own id until the next breaking cut.
-    [<System.Obsolete("Use EncodingProfileVectors.storedCodecLawsAt — the same laws, spelled …At because the family takes the domain's codec (Phase 507); this forward goes at the next breaking cut.")>]
-    let storedCodecLaws (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
-        storedCodecLawsAt declared codec stored
-        |> LawKit.labelAs "EncodingProfileVectors.storedCodecLaws"

@@ -15,8 +15,9 @@
 //     ending in `Laws`, and `opAlgebra`, `reducer` and `compositionPilot` are not spelled that
 //     way — two of the three being the very families `certify` and `certifyStream` are built from.
 //   * WITNESS — re-derived from the entry point's own parameter types.
-//   * OPT-IN — read off `certify` / `certifyStream`'s own source: a family either appears in an
-//     aggregate's body or it does not.
+//   * OPT-IN — each family's `Election` held to what `certify` / `certifyStream` RUN (Phase 516): every
+//     result an aggregate reports carries the family that emitted it, so a base-run family either
+//     labels some result of an aggregate run or it does not. Read off the report, never the source.
 //   * DISCHARGES — held equal, both directions, to the claims ladder's `dischargedBy` rows.
 //   * CENSUS — held equal to `KitRoster.census`, so the adequacy declaration and the roster
 //     can no longer name different sets.
@@ -121,44 +122,44 @@ let compareRoster (declared: Set<string>) (shipped: Set<string>) : string list *
     Set.difference shipped declared |> Set.toList, Set.difference declared shipped |> Set.toList
 
 // ---------------------------------------------------------------------------
-//  opt-in, read off the aggregates' own source
+//  opt-in, the roster's `Election` held to what the aggregates run
 // ---------------------------------------------------------------------------
 
-let private conformanceSource =
-    lazy (File.ReadAllText(Snapshots.repoFile "src/Fuaran.Core.Conformance/Conformance.fs"))
+/// The families an aggregate run labelled its results with (Phase 516). Every result a family emits
+/// carries its roster id (`LawResult.Family`, filled by the runner since Phase 515), so what an
+/// aggregate RAN is read off its report rather than off its source.
+let familiesRanBy (results: LawResult list) : Set<string> =
+    results |> List.map _.Family |> Set.ofList
 
-/// The body of a top-level `let <name>` binding in the kit's own source: from the binding line to
-/// the next line that opens a sibling binding or its doc comment. Comment lines are stripped, so
-/// a family NAMED in a prose aside is never read as a family CALLED.
-let private bodyOf (name: string) (source: string) : string =
-    let lines = source.Replace("\r\n", "\n").Split('\n')
+/// The roster rows whose `Election` the aggregates' run contradicts: a `BaseRun` family no aggregate
+/// ran, or an `OptIn` family one did. Empty when the roster and the run agree. Pure, so a planted
+/// mis-election is shown red against the same run.
+let electionDisagreements (roster: Families.LawFamily list) (ran: Set<string>) : string list =
+    roster
+    |> List.choose (fun f ->
+        match f.Election, Set.contains f.Id ran with
+        | Families.BaseRun, false -> Some(sprintf "%s is declared base run, but no aggregate ran it" f.Id)
+        | Families.OptIn _, true -> Some(sprintf "%s is declared opt-in, but an aggregate ran it" f.Id)
+        | _ -> None)
 
-    let opens =
-        Regex(@"^    let " + Regex.Escape name + @"$|^    let " + Regex.Escape name + @"\s")
+/// The families `certify` and `certifyStream` run over the reference witness — the base run.
+let private aggregateRun: Lazy<Set<string>> =
+    lazy
+        (let tree =
+            Conformance.certify
+                Reference.nodew
+                Reference.idw
+                ConformanceTests.opGen
+                ConformanceTests.sw
+                ConformanceTests.streamGen
+                OpStream.defaultHash
+                516
+                40
 
-    match lines |> Array.tryFindIndex opens.IsMatch with
-    | None -> failtestf "the kit no longer declares a top-level `%s`" name
-    | Some start ->
-        let after = lines[start + 1 ..]
+         let stream =
+             Conformance.certifyStream ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 516 40
 
-        let stop =
-            after
-            |> Array.tryFindIndex (fun l ->
-                l.StartsWith("    let ", StringComparison.Ordinal)
-                || l.StartsWith("    ///", StringComparison.Ordinal))
-            |> Option.defaultValue after.Length
-
-        after[.. stop - 1]
-        |> Array.filter (fun l -> not ((l.TrimStart()).StartsWith("//", StringComparison.Ordinal)))
-        |> String.concat "\n"
-
-/// The families an aggregate's body invokes by name.
-let private invokedBy (aggregate: string) (entries: string list) : Set<string> =
-    let body = bodyOf aggregate conformanceSource.Value
-
-    entries
-    |> List.filter (fun e -> Regex.IsMatch(body, @"(?<![A-Za-z0-9_'])" + Regex.Escape e + @"(?![A-Za-z0-9_'])"))
-    |> Set.ofList
+         Set.union (familiesRanBy tree.Results) (familiesRanBy stream.Results))
 
 // ---------------------------------------------------------------------------
 //  the claims ladder's side of the discharge relation
@@ -327,37 +328,40 @@ let familiesTests =
                               f.Id)
                   | None -> ()
 
-          testCase "opt-in is exactly `not folded into certify or certifyStream`"
+          testCase "opt-in is exactly `not run by certify or certifyStream`, read off the roster's Election"
           <| fun _ ->
-              // Read off the aggregates' own bodies: a family folded into one of them without its
-              // record moving would leave the roster telling a domain to call something it already
-              // gets, or worse, that it need not call something it does not.
-              let conformance =
-                  KitRoster.families |> List.filter (fun f -> f.Module = "Conformance")
+              // Phase 516 — the roster's `Election` is held to what the two aggregates RUN over the
+              // reference witness, read off the families their results carry. A family folded into an
+              // aggregate without its record moving would leave the roster telling a domain to call
+              // something it already gets, or worse, that it need not call something it does not.
+              let ran = aggregateRun.Value
 
-              let entries = conformance |> List.map _.Entry
+              Expect.isNonEmpty ran "the aggregates ran some family, so the check reads a real run"
+              Expect.isEmpty (electionDisagreements KitRoster.families ran) "every Election agrees with the run"
 
-              let folded =
-                  Set.union (invokedBy "certify" entries) (invokedBy "certifyStream" entries)
+          testCase "the Election check goes red on a planted mis-election, either way"
+          <| fun _ ->
+              let ran = aggregateRun.Value
 
-              for f in conformance do
-                  Expect.equal
-                      f.OptIn
-                      (not (Set.contains f.Entry folded))
-                      (sprintf
-                          "%s is declared %s but %s in an aggregate's body"
-                          f.Id
-                          (if f.OptIn then "opt-in" else "base run")
-                          (if Set.contains f.Entry folded then
-                               "IS called"
-                           else
-                               "is NOT called"))
+              let flip (id: string) (election: Families.Election) =
+                  KitRoster.families
+                  |> List.map (fun f -> if f.Id = id then { f with Election = election } else f)
 
-              // No aggregate exists outside `Conformance`, so every family in another module is
-              // opt-in by construction — stated rather than assumed, since a second aggregate
-              // would silently invalidate the check above.
-              for f in KitRoster.families |> List.filter (fun f -> f.Module <> "Conformance") do
-                  Expect.isTrue f.OptIn (sprintf "%s is outside Conformance, so no aggregate can run it" f.Id)
+              let baseRun =
+                  KitRoster.families |> List.find (fun f -> f.Election = Families.BaseRun)
+
+              let optIn =
+                  KitRoster.families |> List.find (fun f -> f.Election <> Families.BaseRun)
+
+              Expect.equal
+                  (electionDisagreements (flip baseRun.Id (Families.OptIn Families.StrongerPromise)) ran)
+                  [ sprintf "%s is declared opt-in, but an aggregate ran it" baseRun.Id ]
+                  "a base-run family declared opt-in is named"
+
+              Expect.equal
+                  (electionDisagreements (flip optIn.Id Families.BaseRun) ran)
+                  [ sprintf "%s is declared base run, but no aggregate ran it" optIn.Id ]
+                  "an opt-in family declared base run is named"
 
           testCase "the discharge relation is the claims ladder's, seen from the other side"
           <| fun _ ->

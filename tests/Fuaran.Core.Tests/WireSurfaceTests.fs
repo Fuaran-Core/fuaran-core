@@ -370,11 +370,8 @@ let internal roots: WireRoot list =
       derived<InvokeError> "Fuaran.Core.Function" "invokeError" CapabilityCodec.encodeInvokeError
       derived<QueryError> "Fuaran.Core.Query" "queryError" QueryCodec.encodeQueryError
       derived<Actor> "Fuaran.Core.OpStream" "actor" Actor.encode
-      derived<OpRecord<string> list> "Fuaran.Core.OpStream" "records" (OpStream.toJsonl stringStream)
-      derived<Attributed<string>>
-          "Fuaran.Core.OpStream"
-          "attributed"
-          (OpStream.Attributed.encodeEnvelope stringStream.Encode)
+      derived<OpRecord<string> list> "Fuaran.Core.OpStream" "records" (Jsonl.write stringStream)
+      derived<Attributed<string>> "Fuaran.Core.OpStream" "attributed" (Attributed.encodeEnvelope stringStream.Encode)
       derived<Dag.T<string>> "Fuaran.Core.OpStream.Dag" "dag" (Dag.toJsonl stringStream.Encode)
       derived<JVal> "Fuaran.Core.Wire" "jval" (Canonical.write Rendering.CrossHost)
       derived<Versioning.Envelope> "Fuaran.Core.Wire" "envelope" Versioning.render

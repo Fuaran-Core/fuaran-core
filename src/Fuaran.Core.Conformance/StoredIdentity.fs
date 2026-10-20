@@ -29,9 +29,16 @@ module StoredIdentity =
     let private declaredCell () =
         LawKit.LawCell "the store declares an encoding profile this Core knows"
 
+    /// The chain config a profile names (Phase 516: the op stream's profiles are its config
+    /// constructors) — `StreamConfig.legacyEscape` for `V1`, `StreamConfig.canonical` for `V2`.
+    let private configOf (profile: EncodingProfile) : StreamConfig =
+        match profile with
+        | EncodingProfile.V1 -> StreamConfig.legacyEscape
+        | EncodingProfile.V2 -> StreamConfig.canonical
+
     /// The declared profile, with the first law's verdict recorded in `cell`.
-    let private parseDeclared (cell: LawKit.LawCell) (declared: string) : OpStream.EncodingProfile option =
-        let p = OpStream.tryProfile declared
+    let private parseDeclared (cell: LawKit.LawCell) (declared: string) : EncodingProfile option =
+        let p = EncodingProfile.tryParse declared
 
         cell.Check(
             p.IsSome,
@@ -39,7 +46,7 @@ module StoredIdentity =
                 sprintf
                     "the store declares %A, which names no profile (known: %s)"
                     declared
-                    (OpStream.profiles |> List.map OpStream.profileName |> String.concat ", ")
+                    (EncodingProfile.all |> List.map EncodingProfile.name |> String.concat ", ")
         )
 
         p
@@ -58,14 +65,14 @@ module StoredIdentity =
     /// holding one shape — declare, recompute, round-trip, count — and are three cases of one walk now
     /// (`storeLaws`).
     type internal Store<'Op, 'State, 'Rej> =
-        /// A linear chain: `records` chained under `configFor declared`, ops encoded by the store
-        /// witness; the current witness encodes them under `OpStream.currentProfile`.
+        /// A linear chain: `records` chained under the declared profile's config, ops encoded by the store
+        /// witness; the current witness encodes them under `EncodingProfile.current`.
         | Linear of
             storeW: StreamWitness<'Op, 'State, 'Rej> *
             currentW: StreamWitness<'Op, 'State, 'Rej> *
             records: OpRecord<'Op> list
-        /// A DAG: every node id minted under `Dag.nodeIdWith declared`, ops encoded by the store
-        /// witness; the current witness encodes them under `OpStream.currentProfile`.
+        /// A DAG: every node id minted by `Dag.nodeId` over a stream on the declared profile's config, ops
+        /// encoded by the store witness; the current witness encodes them under `EncodingProfile.current`.
         | Graph of
             storeW: StreamWitness<'Op, 'State, 'Rej> *
             currentW: StreamWitness<'Op, 'State, 'Rej> *
@@ -82,9 +89,9 @@ module StoredIdentity =
             Count: int
             Recompute: string
             RoundTrip: string
-            FirstBreak: OpStream.EncodingProfile -> (unit -> string) option
+            FirstBreak: EncodingProfile -> (unit -> string) option
             /// `Error` naming the rehash that refused, or whether every stored id came home, and why not.
-            Home: OpStream.EncodingProfile -> Result<bool * (unit -> string), string>
+            Home: EncodingProfile -> Result<bool * (unit -> string), string>
         }
 
     let private walkOf (hashFn: HashFn) (store: Store<'Op, 'State, 'Rej>) : Walk =
@@ -96,7 +103,7 @@ module StoredIdentity =
               RoundTrip = "the two-witness rehash to the current profile and back reproduces every stored hash"
               FirstBreak =
                 fun p ->
-                    OpStream.firstChainBreakWith (OpStream.configFor p) hashFn storeW records
+                    OpStream.firstChainBreak (OpStream.ofConfig (configOf p) hashFn storeW) records
                     |> Option.map (fun b ->
                         fun () ->
                             sprintf
@@ -107,16 +114,19 @@ module StoredIdentity =
                                 b.Got)
               Home =
                 fun p ->
-                    let cfg = OpStream.configFor p
-                    let currentCfg = OpStream.configFor OpStream.currentProfile
+                    let stored = OpStream.ofConfig (configOf p) hashFn storeW
+                    let current = OpStream.ofConfig (configOf EncodingProfile.current) hashFn currentW
+                    let hashes (rs: OpRecord<'Op> list) = rs |> List.map (fun r -> r.Hash)
 
-                    match OpStream.rehashEncoding cfg storeW currentCfg currentW hashFn records with
+                    match OpStream.rehash stored current records with
                     | Error b -> Error(sprintf "the forward rehash refused at record %d" b.Index)
-                    | Ok(migrated, there) ->
-                        match OpStream.rehashEncoding currentCfg currentW cfg storeW hashFn migrated with
+                    | Ok migrated ->
+                        let there = Map.ofList (List.zip (hashes records) (hashes migrated))
+
+                        match OpStream.rehash current stored migrated with
                         | Error b -> Error(sprintf "the rehash back refused at record %d" b.Index)
-                        | Ok(back, home) ->
-                            let hashes (rs: OpRecord<'Op> list) = rs |> List.map (fun r -> r.Hash)
+                        | Ok back ->
+                            let home = Map.ofList (List.zip (hashes migrated) (hashes back))
 
                             Ok(
                                 hashes back = hashes records && firstStray there home = None,
@@ -132,17 +142,18 @@ module StoredIdentity =
               RoundTrip = "the two-witness rehash to the current profile and back reproduces every stored id"
               FirstBreak =
                 fun p ->
-                    Dag.firstBreakWith p hashFn storeW dag
+                    Dag.firstBreak (OpStream.ofConfig (configOf p) hashFn storeW) dag
                     |> Option.map (fun b ->
                         fun () -> sprintf "node %s: %A (expected %s, got %s)" b.NodeId b.Reason b.Expected b.Got)
               Home =
                 fun p ->
-                    let current = OpStream.currentProfile
+                    let stored = OpStream.ofConfig (configOf p) hashFn storeW
+                    let current = OpStream.ofConfig (configOf EncodingProfile.current) hashFn currentW
 
-                    match Dag.rehashEncoding p storeW current currentW hashFn dag with
+                    match Dag.rehash stored current dag with
                     | Error f -> Error(sprintf "the forward rehash refused: %A" f)
                     | Ok(migrated, there) ->
-                        match Dag.rehashEncoding current currentW p storeW hashFn migrated with
+                        match Dag.rehash current stored migrated with
                         | Error f -> Error(sprintf "the rehash back refused: %A" f)
                         | Ok(back, home) ->
                             Ok(
@@ -160,7 +171,7 @@ module StoredIdentity =
               RoundTrip = "the rehash to the current profile and back reproduces every stored capture hash"
               FirstBreak =
                 fun p ->
-                    OpStream.firstCaptureBreakEncoding p (OpStream.configFor p) hashFn captures
+                    EffectCapture.firstCaptureBreak (configOf p) hashFn captures
                     |> Option.map (fun b ->
                         fun () ->
                             sprintf
@@ -171,16 +182,19 @@ module StoredIdentity =
                                 b.Got)
               Home =
                 fun p ->
-                    let cfg = OpStream.configFor p
-                    let current = OpStream.currentProfile
+                    let stored = configOf p
+                    let current = configOf EncodingProfile.current
+                    let hashes (cs: EffectCapture list) = cs |> List.map (fun c -> c.Hash)
 
-                    match OpStream.rehashCapturesEncoding p current cfg hashFn captures with
+                    match EffectCapture.rehashCaptures stored current hashFn captures with
                     | Error b -> Error(sprintf "the forward rehash refused at capture %d" b.Index)
-                    | Ok(migrated, there) ->
-                        match OpStream.rehashCapturesEncoding current p cfg hashFn migrated with
+                    | Ok migrated ->
+                        let there = Map.ofList (List.zip (hashes captures) (hashes migrated))
+
+                        match EffectCapture.rehashCaptures current stored hashFn migrated with
                         | Error b -> Error(sprintf "the rehash back refused at capture %d" b.Index)
-                        | Ok(back, home) ->
-                            let hashes (cs: EffectCapture list) = cs |> List.map (fun c -> c.Hash)
+                        | Ok back ->
+                            let home = Map.ofList (List.zip (hashes migrated) (hashes back))
 
                             Ok(
                                 hashes back = hashes captures && firstStray there home = None,
@@ -221,8 +235,8 @@ module StoredIdentity =
           roundTrip.Result
           VectorKit.storeCell "" walk.Item walk.Count ]
 
-    /// The linear store's laws: `records` was chained with `hashFn` under `configFor declared`, its
-    /// ops encoded by `storeW`. `currentW` encodes them under `OpStream.currentProfile`. `storeLaws`
+    /// The linear store's laws: `records` was chained with `hashFn` under the declared profile's config, its
+    /// ops encoded by `storeW`. `currentW` encodes them under `EncodingProfile.current`. `storeLaws`
     /// over `Store.Linear` since Phase 508.
     let linearLaws
         (declared: string)
@@ -234,8 +248,8 @@ module StoredIdentity =
         storeLaws declared hashFn (Linear(storeW, currentW, records))
         |> LawKit.labelAs "StoredIdentity.linearLaws"
 
-    /// The DAG's laws: every node id in `dag` was minted with `hashFn` under `Dag.nodeIdWith declared`,
-    /// its ops encoded by `storeW`. `currentW` encodes them under `OpStream.currentProfile`.
+    /// The DAG's laws: every node id in `dag` was minted with `hashFn` under `Dag.nodeId declared`,
+    /// its ops encoded by `storeW`. `currentW` encodes them under `EncodingProfile.current`.
     /// `storeLaws` over `Store.Graph` since Phase 508.
     let dagLaws
         (declared: string)

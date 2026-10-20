@@ -12,7 +12,7 @@ module Fuaran.Core.Tests.SnapshotMatrix
 
 open Fuaran.Core
 
-let private canonical = OpStream.canonicalConfig
+let private canonical = StreamConfig.canonical
 
 /// A `SnapshotFault` as the matrix's `Error` string — the proof model's spelling, `snapshotAt:`
 /// prefix included whichever member reported.
@@ -40,7 +40,7 @@ let snapshotAtOptWith
     (records: OpRecord<'Op> list)
     (atSeq: int)
     : Result<Snapshot<'State>, string> =
-    OpStream.Snapshots.take (modeOf stateEncode) cfg hashFn (encoderOf stateEncode) w state0 records atSeq
+    Snapshots.take (modeOf stateEncode) (OpStream.ofConfig cfg hashFn w) (encoderOf stateEncode) state0 records atSeq
     |> Result.mapError faultText
 
 let snapshotAtOpt
@@ -61,7 +61,7 @@ let snapshotAt
     (records: OpRecord<'Op> list)
     (atSeq: int)
     : Result<Snapshot<'State>, string> =
-    OpStream.Snapshots.take SnapshotMode.Strict canonical hashFn stateEncode w state0 records atSeq
+    Snapshots.take SnapshotMode.Strict (OpStream.ofConfig canonical hashFn w) stateEncode state0 records atSeq
     |> Result.mapError faultText
 
 let snapshotAtChainOnly
@@ -71,7 +71,7 @@ let snapshotAtChainOnly
     (records: OpRecord<'Op> list)
     (atSeq: int)
     : Result<Snapshot<'State>, string> =
-    OpStream.Snapshots.take SnapshotMode.ChainOnly canonical hashFn (fun _ -> "") w state0 records atSeq
+    Snapshots.take SnapshotMode.ChainOnly (OpStream.ofConfig canonical hashFn w) (fun _ -> "") state0 records atSeq
     |> Result.mapError faultText
 
 let compactWith
@@ -83,7 +83,7 @@ let compactWith
     (records: OpRecord<'Op> list)
     (atSeq: int)
     : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
-    OpStream.Snapshots.compact SnapshotMode.Strict cfg hashFn stateEncode w state0 records atSeq
+    Snapshots.compact SnapshotMode.Strict (OpStream.ofConfig cfg hashFn w) stateEncode state0 records atSeq
     |> Result.mapError faultText
 
 let compactChainOnlyWith
@@ -94,7 +94,7 @@ let compactChainOnlyWith
     (records: OpRecord<'Op> list)
     (atSeq: int)
     : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
-    OpStream.Snapshots.compact SnapshotMode.ChainOnly cfg hashFn (fun _ -> "") w state0 records atSeq
+    Snapshots.compact SnapshotMode.ChainOnly (OpStream.ofConfig cfg hashFn w) (fun _ -> "") state0 records atSeq
     |> Result.mapError faultText
 
 let compact
@@ -133,7 +133,11 @@ let verifyAcrossWithOpt
     (snap: Snapshot<'State>)
     (tail: OpRecord<'Op> list)
     : bool =
-    OpStream.Snapshots.verify cfg hashFn (encoderOf stateEncode) w { snap with Mode = modeOf stateEncode } tail
+    Snapshots.verify
+        (OpStream.ofConfig cfg hashFn w)
+        (encoderOf stateEncode)
+        { snap with Mode = modeOf stateEncode }
+        tail
 
 let verifyAcrossWith
     (cfg: StreamConfig)
@@ -143,7 +147,7 @@ let verifyAcrossWith
     (snap: Snapshot<'State>)
     (tail: OpRecord<'Op> list)
     : bool =
-    OpStream.Snapshots.verify cfg hashFn stateEncode w { snap with Mode = SnapshotMode.Strict } tail
+    Snapshots.verify (OpStream.ofConfig cfg hashFn w) stateEncode { snap with Mode = SnapshotMode.Strict } tail
 
 let verifyAcrossChainOnlyWith
     (cfg: StreamConfig)
@@ -152,11 +156,9 @@ let verifyAcrossChainOnlyWith
     (snap: Snapshot<'State>)
     (tail: OpRecord<'Op> list)
     : bool =
-    OpStream.Snapshots.verify
-        cfg
-        hashFn
+    Snapshots.verify
+        (OpStream.ofConfig cfg hashFn w)
         (fun _ -> "")
-        w
         { snap with
             Mode = SnapshotMode.ChainOnly }
         tail
@@ -179,10 +181,10 @@ let verifyAcrossChainOnly
     verifyAcrossChainOnlyWith canonical hashFn w snap tail
 
 let snapshotToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
-    OpStream.Snapshots.toJsonl stateEncode { snap with Mode = SnapshotMode.Strict }
+    Snapshots.toJsonl stateEncode { snap with Mode = SnapshotMode.Strict }
 
 let snapshotToJsonlChainOnly (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
-    OpStream.Snapshots.toJsonl
+    Snapshots.toJsonl
         stateEncode
         { snap with
             Mode = SnapshotMode.ChainOnly }
@@ -190,7 +192,7 @@ let snapshotToJsonlChainOnly (stateEncode: 'State -> string) (snap: Snapshot<'St
 /// Whether a snapshot line claims a state-hashed (strict) snapshot: anything but an explicit
 /// `"stateHashed":false` reads as strict, an unreadable line included, as the retired reader did.
 let snapshotStateHashedFromJsonl (line: string) : bool =
-    match OpStream.Jsonl.rawSpan "stateHashed" line with
+    match Jsonl.rawSpan "stateHashed" line with
     | Ok(Some v) -> v <> "false"
     | Ok None
     | Error _ -> true
@@ -199,10 +201,10 @@ let snapshotFromJsonlResult
     (stateDecode: string -> Result<'State, string>)
     (line: string)
     : Result<Snapshot<'State>, string> =
-    OpStream.Snapshots.ofJsonl stateDecode line
+    Snapshots.ofJsonl stateDecode line
 
 let snapshotFromJsonl (stateDecode: string -> 'State) (line: string) : Result<Snapshot<'State>, string> =
-    OpStream.Snapshots.ofJsonl
+    Snapshots.ofJsonl
         (fun s ->
             try
                 Ok(stateDecode s)

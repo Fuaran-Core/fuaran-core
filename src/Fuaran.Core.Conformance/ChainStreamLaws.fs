@@ -43,19 +43,23 @@ module internal ChainStreamLaws =
             let state, recs, acceptedHere = LawKit.buildChain hashFn sw gen rng
             accepted <- accepted + acceptedHere
 
-            verify.Check(OpStream.verifyChain hashFn sw recs, fun () -> at "an intact chain failed verifyChain")
+            verify.Check(
+                OpStream.verifyChain (OpStream.canonical hashFn sw) recs,
+                fun () -> at "an intact chain failed verifyChain"
+            )
 
-            match OpStream.tryToJsonl sw recs with
+            match Jsonl.tryWrite sw recs with
             | Error f ->
                 jsonl.Check(
                     false,
                     fun () -> at ("the checked writer refused the chain: " + JsonlWriteFault.toString f)
                 )
             | Ok text ->
-                match OpStream.fromJsonl sw text with
+                match Jsonl.read sw text with
                 | Ok back ->
                     jsonl.Check(
-                        OpStream.verifyChain hashFn sw back && OpStream.toJsonl sw back = text,
+                        OpStream.verifyChain (OpStream.canonical hashFn sw) back
+                        && Jsonl.write sw back = text,
                         fun () -> at "the chain read back from its JSONL does not verify or re-write identically"
                     )
                 | Error e ->
@@ -86,7 +90,7 @@ module internal ChainStreamLaws =
                         recs |> List.mapi (fun j r -> if j = tIdx then { r with Op = newOp } else r)
 
                     tamper.Check(
-                        not (OpStream.verifyChain hashFn sw forged),
+                        not (OpStream.verifyChain (OpStream.canonical hashFn sw) forged),
                         fun () -> at "a tampered op was not detected"
                     ))
 
@@ -175,7 +179,7 @@ module internal ChainStreamLaws =
 
     /// Snapshot / compaction laws under an explicit `StreamConfig` (Phase 14): **bounded replay**
     /// (`replayFrom` a compacted checkpoint equals `replay` from origin) and **verifyAcrossWith
-    /// accepts an intact boundary** — the stream is built with `appendWith cfg` and the boundary
+    /// accepts an intact boundary** — the stream is built with `append` over `OpStream.ofConfig cfg` and the boundary
     /// verified with `verifyAcrossWith cfg`, so a domain on a legacy chain format certifies its own
     /// snapshot path. `'State` needs equality. The pinned `cfg` sits last before `seed`, under the
     /// kit's `…With` rule (Phase 330; it was first until then, and no forward keeps that order).
@@ -205,7 +209,7 @@ module internal ChainStreamLaws =
             for _ in 0..5 do
                 let op = rng.Draw gen.Op
 
-                match OpStream.appendWith cfg hashFn sw (Human "conf") op state recs with
+                match OpStream.append (OpStream.ofConfig cfg hashFn sw) (Human "conf") op state recs with
                 | Ok(s', recs') ->
                     state <- s'
                     recs <- recs'
@@ -217,16 +221,22 @@ module internal ChainStreamLaws =
                 let atSeq = rng.IntBelow(len + 1)
 
                 match
-                    OpStream.Snapshots.compact SnapshotMode.Strict cfg hashFn stateEncode sw gen.State0 recs atSeq
+                    Snapshots.compact
+                        SnapshotMode.Strict
+                        (OpStream.ofConfig cfg hashFn sw)
+                        stateEncode
+                        gen.State0
+                        recs
+                        atSeq
                 with
                 | Ok(snap, tail) ->
-                    match OpStream.Snapshots.replayFrom sw snap tail, OpStream.replay sw gen.State0 recs with
+                    match Snapshots.replayFrom sw snap tail, OpStream.replay sw gen.State0 recs with
                     | Ok a, Ok b when a = b -> bounded.Saw()
                     | other ->
                         bounded.Check(false, fun () -> at (sprintf "replayFrom ≠ replay-from-origin (%A)" other))
 
                     across.Check(
-                        OpStream.Snapshots.verify cfg hashFn stateEncode sw snap tail,
+                        Snapshots.verify (OpStream.ofConfig cfg hashFn sw) stateEncode snap tail,
                         fun () -> at "verifyAcrossWith rejected an intact (snapshot, tail)"
                     )
                 | Error e -> bounded.Check(false, fun () -> at (sprintf "compact failed: %A" e)))
@@ -245,35 +255,35 @@ module internal ChainStreamLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        snapshotLawsWith sw gen stateEncode hashFn OpStream.canonicalConfig runner iterations
+        snapshotLawsWith sw gen stateEncode hashFn StreamConfig.canonical runner iterations
 
     /// The configured-stream laws (Phase 349): the `…With` stream operations — each the bare form
     /// with its `StreamConfig` (the payload pre-image and the genesis) a parameter beside its
     /// `HashFn` — held at the config and hash the caller passes, so a domain on its own chain format
     /// certifies the operations it actually calls, and a variant that ignores either parameter goes
-    /// red. Run it at a config and a hash that are NOT the canonical ones: at `canonicalConfig` and
+    /// red. Run it at a config and a hash that are NOT the canonical ones: at `StreamConfig.canonical` and
     /// `defaultHash` a variant that silently used them would agree with itself.
     ///
     ///  - **the configured chain is the chain its config and hash describe** — every record built
-    ///    with `appendWith cfg hashFn` has `Seq` its index, `PrevHash` the previous `Hash` (from
+    ///    with `append` over `OpStream.ofConfig cfg hashFn` has `Seq` its index, `PrevHash` the previous `Hash` (from
     ///    `cfg.Genesis`) and `Hash = hashFn PrevHash (cfg.Payload Seq Actor (Encode Op))`;
-    ///    `headWith cfg` is the last hash or the genesis; `verifyChainWith` accepts the chain and
-    ///    `firstChainBreakWith` finds no break;
-    ///  - **`appendManyWith` is the fold of `appendWith`** — the same state and records, byte for
+    ///    `head cfg` is the last hash or the genesis; `verifyChain` accepts the chain and
+    ///    `firstChainBreak` finds no break;
+    ///  - **`appendMany` is the fold of `append`** — the same state and records, byte for
     ///    byte, or the index of the first op the fold refuses with nothing chained;
-    ///  - **`appendIfWith` at the configured head is `appendWith`**, and at any other head it is
+    ///  - **`appendIf` at the configured head is `append`**, and at any other head it is
     ///    `StaleHead` naming the configured head;
-    ///  - **the parameters are read** — a non-empty configured chain fails `verifyChainWith` under
+    ///  - **the parameters are read** — a non-empty configured chain fails `verifyChain` under
     ///    another genesis, another payload and another hash (each the caller's own, perturbed), and a
-    ///    record whose hash is tampered fails it with `firstChainBreakWith` naming that record;
-    ///  - **captures under the config** — a journal built with `captureEffectWith cfg hashFn` links
-    ///    from `cfg.Genesis`, `captureHeadWith cfg` is its last hash or the genesis, it verifies
-    ///    against that head with `verifyCapturesAtWith` and `firstCaptureBreakWith` finds no break;
+    ///    record whose hash is tampered fails it with `firstChainBreak` naming that record;
+    ///  - **captures under the config** — a journal built with `captureEffect cfg hashFn` links
+    ///    from `cfg.Genesis`, `captureHead cfg` is its last hash or the genesis, it verifies
+    ///    against that head with `verifyCapturesAt` and `firstCaptureBreak` finds no break;
     ///    under another genesis or another hash a non-empty journal does neither, and a deterministic
     ///    effect journals nothing.
     ///
     /// Every arm is built on every iteration (an empty chain still checks its head and its
-    /// `appendIfWith`), so the family carries no guard. The perturbed parameters are DERIVED from the
+    /// `appendIf`), so the family carries no guard. The perturbed parameters are DERIVED from the
     /// caller's — a suffix on the genesis, the payload and the hash — so they differ from the
     /// caller's on every input by construction rather than by a fixture's luck.
     let streamConfigLaws
@@ -288,18 +298,18 @@ module internal ChainStreamLaws =
             LawKit.LawCell "the configured chain is the chain its config and hash describe, and verifies under them"
 
         let many =
-            LawKit.LawCell "appendManyWith is the fold of appendWith, byte for byte, or refuses at the fold's index"
+            LawKit.LawCell "appendMany is the fold of append, byte for byte, or refuses at the fold's index"
 
         let cas =
-            LawKit.LawCell "appendIfWith at the configured head is appendWith; at another head it is StaleHead"
+            LawKit.LawCell "appendIf at the configured head is append; at another head it is StaleHead"
 
         let read =
             LawKit.LawCell
-                "the parameters are read: another genesis, payload or hash, or a tampered record, fails verifyChainWith"
+                "the parameters are read: another genesis, payload or hash, or a tampered record, fails verifyChain"
 
         let captures =
             LawKit.LawCell
-                "captures under the config link from its genesis and verify against captureHeadWith, and under no other"
+                "captures under the config link from its genesis and verify against captureHead, and under no other"
 
         let otherGenesis = { cfg with Genesis = cfg.Genesis + "'" }
 
@@ -313,7 +323,7 @@ module internal ChainStreamLaws =
         LawKit.run runner iterations (fun rng _ at ->
             let ops = [ for _ in 1 .. rng.IntBelow 7 -> rng.Draw gen.Op ]
 
-            // ---- the fold of appendWith, and the chain it builds ----
+            // ---- the fold of append, and the chain it builds ----
             let mutable state = gen.State0
             let mutable recs = OpStream.empty
             let mutable refusedAt = None
@@ -321,7 +331,7 @@ module internal ChainStreamLaws =
             ops
             |> List.iteri (fun k op ->
                 if refusedAt.IsNone then
-                    match OpStream.appendWith cfg hashFn sw actor op state recs with
+                    match OpStream.append (OpStream.ofConfig cfg hashFn sw) actor op state recs with
                     | Ok(s', r') ->
                         state <- s'
                         recs <- r'
@@ -348,23 +358,25 @@ module internal ChainStreamLaws =
 
             described.Check(
                 describedOk
-                && OpStream.headWith cfg recs = expectedHead
-                && OpStream.verifyChainWith cfg hashFn sw recs
-                && OpStream.firstChainBreakWith cfg hashFn sw recs = None,
+                && OpStream.head cfg recs = expectedHead
+                && OpStream.verifyChain (OpStream.ofConfig cfg hashFn sw) recs
+                && OpStream.firstChainBreak (OpStream.ofConfig cfg hashFn sw) recs = None,
                 fun () ->
                     at (
                         sprintf
-                            "records described: %b; headWith %A (expected %A); verifyChainWith %b; firstChainBreakWith %A"
+                            "records described: %b; head %A (expected %A); verifyChain %b; firstChainBreak %A"
                             describedOk
-                            (OpStream.headWith cfg recs)
+                            (OpStream.head cfg recs)
                             expectedHead
-                            (OpStream.verifyChainWith cfg hashFn sw recs)
-                            (OpStream.firstChainBreakWith cfg hashFn sw recs)
+                            (OpStream.verifyChain (OpStream.ofConfig cfg hashFn sw) recs)
+                            (OpStream.firstChainBreak (OpStream.ofConfig cfg hashFn sw) recs)
                     )
             )
 
-            // ---- appendManyWith is the fold ----
-            match OpStream.appendManyWith cfg hashFn sw actor ops gen.State0 OpStream.empty, refusedAt with
+            // ---- appendMany is the fold ----
+            match
+                OpStream.appendMany (OpStream.ofConfig cfg hashFn sw) actor ops gen.State0 OpStream.empty, refusedAt
+            with
             | Ok(s, r), None when s = state && r = recs -> many.Saw()
             | Error(k, _), Some k' when k = k' -> many.Saw()
             | other, _ ->
@@ -373,7 +385,7 @@ module internal ChainStreamLaws =
                     fun () ->
                         at (
                             sprintf
-                                "appendManyWith answered %s where the fold of appendWith %s"
+                                "appendMany answered %s where the fold of append %s"
                                 (match other with
                                  | Ok(_, r) -> sprintf "Ok with %d records" (List.length r)
                                  | Error(k, _) -> sprintf "Error at %d" k)
@@ -383,27 +395,27 @@ module internal ChainStreamLaws =
                         )
                 )
 
-            // ---- appendIfWith ----
+            // ---- appendIf ----
             let probe = rng.Draw gen.Op
-            let head = OpStream.headWith cfg recs
+            let head = OpStream.head cfg recs
 
             let casOk =
                 match
-                    OpStream.appendIfWith cfg hashFn sw head actor probe state recs,
-                    OpStream.appendWith cfg hashFn sw actor probe state recs
+                    OpStream.appendIf (OpStream.ofConfig cfg hashFn sw) head actor probe state recs,
+                    OpStream.append (OpStream.ofConfig cfg hashFn sw) actor probe state recs
                 with
                 | Ok a, Ok b -> a = b
                 | Error(AppendRejection.Domain _), Error _ -> true
                 | _ -> false
 
             let staleOk =
-                match OpStream.appendIfWith cfg hashFn sw (head + "'") actor probe state recs with
+                match OpStream.appendIf (OpStream.ofConfig cfg hashFn sw) (head + "'") actor probe state recs with
                 | Error(AppendRejection.StaleHead(_, actual)) -> actual = head
                 | _ -> false
 
             cas.Check(
                 casOk && staleOk,
-                fun () -> at (sprintf "appendIfWith at the head agrees: %b; at a stale head refuses: %b" casOk staleOk)
+                fun () -> at (sprintf "appendIf at the head agrees: %b; at a stale head refuses: %b" casOk staleOk)
             )
 
             // ---- the parameters are read ----
@@ -414,24 +426,24 @@ module internal ChainStreamLaws =
                     recs
                     |> List.mapi (fun k r -> if k = victim then { r with Hash = r.Hash + "'" } else r)
 
-                let breakAt = OpStream.firstChainBreakWith cfg hashFn sw tampered
+                let breakAt = OpStream.firstChainBreak (OpStream.ofConfig cfg hashFn sw) tampered
 
                 read.Check(
-                    not (OpStream.verifyChainWith otherGenesis hashFn sw recs)
-                    && not (OpStream.verifyChainWith otherPayload hashFn sw recs)
-                    && not (OpStream.verifyChainWith cfg otherHash sw recs)
-                    && not (OpStream.verifyChainWith cfg hashFn sw tampered)
+                    not (OpStream.verifyChain (OpStream.ofConfig otherGenesis hashFn sw) recs)
+                    && not (OpStream.verifyChain (OpStream.ofConfig otherPayload hashFn sw) recs)
+                    && not (OpStream.verifyChain (OpStream.ofConfig cfg otherHash sw) recs)
+                    && not (OpStream.verifyChain (OpStream.ofConfig cfg hashFn sw) tampered)
                     && (breakAt |> Option.map _.Index) = Some victim,
                     fun () ->
                         at (
                             sprintf
                                 "a %d-record chain verified under another genesis %b, payload %b, hash %b; tampered at %d: verified %b, first break %A"
                                 arr.Length
-                                (OpStream.verifyChainWith otherGenesis hashFn sw recs)
-                                (OpStream.verifyChainWith otherPayload hashFn sw recs)
-                                (OpStream.verifyChainWith cfg otherHash sw recs)
+                                (OpStream.verifyChain (OpStream.ofConfig otherGenesis hashFn sw) recs)
+                                (OpStream.verifyChain (OpStream.ofConfig otherPayload hashFn sw) recs)
+                                (OpStream.verifyChain (OpStream.ofConfig cfg otherHash sw) recs)
                                 victim
-                                (OpStream.verifyChainWith cfg hashFn sw tampered)
+                                (OpStream.verifyChain (OpStream.ofConfig cfg hashFn sw) tampered)
                                 breakAt
                         )
                 )
@@ -445,7 +457,7 @@ module internal ChainStreamLaws =
                 |> List.fold
                     (fun caps (k, v) ->
                         snd (
-                            OpStream.captureEffectWith
+                            EffectCapture.captureEffect
                                 cfg
                                 hashFn
                                 string
@@ -458,7 +470,14 @@ module internal ChainStreamLaws =
 
             let det =
                 snd (
-                    OpStream.captureEffectWith cfg hashFn string OpStream.deterministicTag "det" (fun () -> 0) journal
+                    EffectCapture.captureEffect
+                        cfg
+                        hashFn
+                        string
+                        EffectCapture.deterministicTag
+                        "det"
+                        (fun () -> 0)
+                        journal
                 )
 
             let jarr = List.toArray journal
@@ -468,7 +487,7 @@ module internal ChainStreamLaws =
                 |> Array.mapi (fun k c -> c.Seq = k && c.PrevHash = (if k = 0 then cfg.Genesis else jarr[k - 1].Hash))
                 |> Array.forall id
 
-            let capHead = OpStream.captureHeadWith cfg journal
+            let capHead = EffectCapture.captureHead cfg journal
 
             let expectedCapHead =
                 if jarr.Length = 0 then
@@ -479,22 +498,22 @@ module internal ChainStreamLaws =
             let refusedElsewhere =
                 jarr.Length = 0
                 || (not (
-                        OpStream.verifyCapturesAtWith
+                        EffectCapture.verifyCapturesAt
                             otherGenesis
                             hashFn
-                            (OpStream.captureHeadWith otherGenesis journal)
+                            (EffectCapture.captureHead otherGenesis journal)
                             journal
                     )
-                    && not (OpStream.verifyCapturesAtWith cfg otherHash capHead journal)
-                    && (OpStream.firstCaptureBreakWith otherGenesis hashFn journal).IsSome
-                    && (OpStream.firstCaptureBreakWith cfg otherHash journal).IsSome)
+                    && not (EffectCapture.verifyCapturesAt cfg otherHash capHead journal)
+                    && (EffectCapture.firstCaptureBreak otherGenesis hashFn journal).IsSome
+                    && (EffectCapture.firstCaptureBreak cfg otherHash journal).IsSome)
 
             captures.Check(
                 jarr.Length = List.length values
                 && linked
                 && capHead = expectedCapHead
-                && OpStream.verifyCapturesAtWith cfg hashFn capHead journal
-                && OpStream.firstCaptureBreakWith cfg hashFn journal = None
+                && EffectCapture.verifyCapturesAt cfg hashFn capHead journal
+                && EffectCapture.firstCaptureBreak cfg hashFn journal = None
                 && refusedElsewhere
                 && det = journal,
                 fun () ->
@@ -505,8 +524,8 @@ module internal ChainStreamLaws =
                             linked
                             capHead
                             expectedCapHead
-                            (OpStream.verifyCapturesAtWith cfg hashFn capHead journal)
-                            (OpStream.firstCaptureBreakWith cfg hashFn journal)
+                            (EffectCapture.verifyCapturesAt cfg hashFn capHead journal)
+                            (EffectCapture.firstCaptureBreak cfg hashFn journal)
                             refusedElsewhere
                             (det <> journal)
                     )
@@ -556,12 +575,14 @@ module internal ChainStreamLaws =
             // Build a random base chain (as streamLaws does) — the CAS is exercised against its head.
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
 
-            let baseHead = OpStream.head recs
+            let baseHead = OpStream.head StreamConfig.canonical recs
 
             // ---- match ≡ append ----
             let opM = rng.Draw gen.Op
-            let viaAppend = OpStream.append hashFn sw actor opM state recs
-            let viaCas = OpStream.appendIf hashFn sw baseHead actor opM state recs
+            let viaAppend = OpStream.append (OpStream.canonical hashFn sw) actor opM state recs
+
+            let viaCas =
+                OpStream.appendIf (OpStream.canonical hashFn sw) baseHead actor opM state recs
 
             (match viaAppend with
              | Ok _ -> accepted <- accepted + 1
@@ -579,7 +600,7 @@ module internal ChainStreamLaws =
             let opS = rng.Draw gen.Op
             let staleHead = baseHead + "!" // guaranteed ≠ baseHead
 
-            match OpStream.appendIf hashFn sw staleHead actor opS state recs with
+            match OpStream.appendIf (OpStream.canonical hashFn sw) staleHead actor opS state recs with
             | Error(AppendRejection.StaleHead(expected, actual)) when expected = staleHead && actual = baseHead ->
                 staleLaw.Saw() // recs is an immutable value the caller still holds — there is no partial write
             | other ->
@@ -594,16 +615,19 @@ module internal ChainStreamLaws =
 
             // A genuine CAS race needs both ops to individually apply against the base — a domain
             // reject is not a CAS outcome, so skip the race check for that iteration.
-            match OpStream.append hashFn sw actor opA state recs, OpStream.append hashFn sw actor opB state recs with
+            match
+                OpStream.append (OpStream.canonical hashFn sw) actor opA state recs,
+                OpStream.append (OpStream.canonical hashFn sw) actor opB state recs
+            with
             | Ok _, Ok _ ->
                 races <- races + 1
 
                 // The first writer commits against the base head → succeeds and advances the chain; the
                 // second still holds baseHead as its expectation → StaleHead. Exactly one winner.
                 let serialise first second =
-                    match OpStream.appendIf hashFn sw baseHead actor first state recs with
+                    match OpStream.appendIf (OpStream.canonical hashFn sw) baseHead actor first state recs with
                     | Ok(s1, recs1) ->
-                        match OpStream.appendIf hashFn sw baseHead actor second s1 recs1 with
+                        match OpStream.appendIf (OpStream.canonical hashFn sw) baseHead actor second s1 recs1 with
                         | Error(AppendRejection.StaleHead _) -> true
                         | _ -> false
                     | _ -> false
@@ -694,7 +718,9 @@ module internal ChainStreamLaws =
             for _ in 0..5 do
                 let op = rng.Draw gen.Op
 
-                match OpStream.appendIdempotent hashFn sw (keyOf op) actor op state index recs with
+                match
+                    OpStream.appendIdempotent (OpStream.canonical hashFn sw) (keyOf op) actor op state index recs
+                with
                 | Ok(AppendOutcome.Appended(s', recs', idx')) ->
                     state <- s'
                     recs <- recs'
@@ -707,7 +733,7 @@ module internal ChainStreamLaws =
                     fun () -> at "ofStream ≠ the incrementally-maintained index"
                 )
 
-            let baseHead = OpStream.head recs
+            let baseHead = OpStream.head StreamConfig.canonical recs
 
             // ---- fresh ≡ append (chain-identity + index extended by exactly the new entry) ----
             // Phase 302 — the fresh op is redrawn until its key is unseen, and the arm's reach is
@@ -719,10 +745,10 @@ module internal ChainStreamLaws =
             | None -> ()
             | Some opF ->
                 freshBuilt <- freshBuilt + 1
-                let viaAppend = OpStream.append hashFn sw actor opF state recs
+                let viaAppend = OpStream.append (OpStream.canonical hashFn sw) actor opF state recs
 
                 let viaIdem =
-                    OpStream.appendIdempotent hashFn sw (keyOf opF) actor opF state index recs
+                    OpStream.appendIdempotent (OpStream.canonical hashFn sw) (keyOf opF) actor opF state index recs
 
                 (match viaAppend with
                  | Ok _ -> accepted <- accepted + 1
@@ -762,7 +788,7 @@ module internal ChainStreamLaws =
                             )
                     )
                 | Some first ->
-                    match OpStream.appendIdempotent hashFn sw key actor opD state index recs with
+                    match OpStream.appendIdempotent (OpStream.canonical hashFn sw) key actor opD state index recs with
                     | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
                         dupLaw.Saw() // recs/index are immutable values the caller still holds — the stream is byte-identical
                     | other ->
@@ -774,7 +800,17 @@ module internal ChainStreamLaws =
                     // ---- idempotency-before-CAS: the lost-ack retry converges under a stale head ----
                     let staleHead = baseHead + "!" // guaranteed ≠ baseHead
 
-                    match OpStream.appendIdempotentIf hashFn sw key staleHead actor opD state index recs with
+                    match
+                        OpStream.appendIdempotentIf
+                            (OpStream.canonical hashFn sw)
+                            key
+                            staleHead
+                            actor
+                            opD
+                            state
+                            index
+                            recs
+                    with
                     | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
                         casLaw.Saw()
                     | other ->
@@ -797,7 +833,17 @@ module internal ChainStreamLaws =
                 freshBuilt <- freshBuilt + 1
                 let staleHead = baseHead + "!"
 
-                match OpStream.appendIdempotentIf hashFn sw (keyOf opC) staleHead actor opC state index recs with
+                match
+                    OpStream.appendIdempotentIf
+                        (OpStream.canonical hashFn sw)
+                        (keyOf opC)
+                        staleHead
+                        actor
+                        opC
+                        state
+                        index
+                        recs
+                with
                 | Error(AppendRejection.StaleHead(expected, actual)) when expected = staleHead && actual = baseHead ->
                     casLaw.Saw()
                 | other ->
@@ -806,10 +852,18 @@ module internal ChainStreamLaws =
                         fun () -> at (sprintf "a fresh key under a stale head was not StaleHead (got %A)" other)
                     )
 
-                let viaAppend = OpStream.append hashFn sw actor opC state recs
+                let viaAppend = OpStream.append (OpStream.canonical hashFn sw) actor opC state recs
 
                 let viaBoth =
-                    OpStream.appendIdempotentIf hashFn sw (keyOf opC) baseHead actor opC state index recs
+                    OpStream.appendIdempotentIf
+                        (OpStream.canonical hashFn sw)
+                        (keyOf opC)
+                        baseHead
+                        actor
+                        opC
+                        state
+                        index
+                        recs
 
                 (match viaAppend with
                  | Ok _ -> accepted <- accepted + 1
@@ -843,7 +897,7 @@ module internal ChainStreamLaws =
     /// string-matching this library's spellings. That only helps if the walkers actually stay
     /// inside the named cases: a walker that minted an `Unrecognised` would hand every consumer
     /// back exactly the untyped string the type exists to remove, and nothing would say so. So this
-    /// family drives BOTH walkers — the op walk (`firstChainBreakWith`) and the capture walk
+    /// family drives BOTH walkers — the op walk (`firstChainBreak`) and the capture walk
     /// (`firstCaptureBreak`) — into EVERY break each can produce, and asserts the reason is named.
     ///
     /// The three breaks are BUILT each iteration rather than drawn, so the sample cannot miss one:
@@ -925,7 +979,7 @@ module internal ChainStreamLaws =
             for _ in 0..3 do
                 let op = rng.IntBelow 50
 
-                match OpStream.append hashFn sw (Human "conf") (op + 1) state recs with
+                match OpStream.append (OpStream.canonical hashFn sw) (Human "conf") (op + 1) state recs with
                 | Ok(s', recs') ->
                     state <- s'
                     recs <- recs'
@@ -939,9 +993,7 @@ module internal ChainStreamLaws =
                     recs
                     |> List.mapi (fun j r -> if j = len - 1 then { r with Seq = r.Seq + 7 } else r)
 
-                match
-                    reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw renumbered)
-                with
+                match reasonOf "op" at (OpStream.firstChainBreak (OpStream.canonical hashFn sw) renumbered) with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -954,7 +1006,7 @@ module internal ChainStreamLaws =
                         else
                             r)
 
-                match reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw repointed) with
+                match reasonOf "op" at (OpStream.firstChainBreak (OpStream.canonical hashFn sw) repointed) with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -964,7 +1016,7 @@ module internal ChainStreamLaws =
                     recs
                     |> List.mapi (fun j r -> if j = len - 1 then { r with Op = r.Op + 1000 } else r)
 
-                match reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw tampered) with
+                match reasonOf "op" at (OpStream.firstChainBreak (OpStream.canonical hashFn sw) tampered) with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -973,7 +1025,14 @@ module internal ChainStreamLaws =
 
             for k in 0..2 do
                 let v, caps' =
-                    OpStream.captureEffect hashFn string "nondeterministic" ("eff" + string k) (fun () -> k * 3) caps
+                    EffectCapture.captureEffect
+                        StreamConfig.canonical
+                        hashFn
+                        string
+                        "nondeterministic"
+                        ("eff" + string k)
+                        (fun () -> k * 3)
+                        caps
 
                 ignore v
                 caps <- caps'
@@ -985,7 +1044,9 @@ module internal ChainStreamLaws =
                     caps
                     |> List.mapi (fun j c -> if j = clen - 1 then { c with Seq = c.Seq + 7 } else c)
 
-                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capRenumbered) with
+                match
+                    reasonOf "capture" at (EffectCapture.firstCaptureBreak StreamConfig.canonical hashFn capRenumbered)
+                with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 
@@ -997,7 +1058,9 @@ module internal ChainStreamLaws =
                         else
                             c)
 
-                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capRepointed) with
+                match
+                    reasonOf "capture" at (EffectCapture.firstCaptureBreak StreamConfig.canonical hashFn capRepointed)
+                with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 
@@ -1005,7 +1068,9 @@ module internal ChainStreamLaws =
                     caps
                     |> List.mapi (fun j c -> if j = clen - 1 then { c with Value = c.Value + "9" } else c)
 
-                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capTampered) with
+                match
+                    reasonOf "capture" at (EffectCapture.firstCaptureBreak StreamConfig.canonical hashFn capTampered)
+                with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 

@@ -172,7 +172,7 @@ moves the dependency map must be re-primed with `eval`, not replayed.
 
 ### Compacting an op-stream — verify, then compact
 
-**`OpStream.Snapshots.compact` (since `0.33.0`) does not walk the chain, in either mode.** It reads the boundary record's
+**`Snapshots.compact` (since `0.33.0`) does not walk the chain, in either mode.** It reads the boundary record's
 hash and TRUSTS it. So the compacted stream verifies exactly when the original does only over a
 prefix that was verified BEFORE it was discarded — `compact_preserves_verify` and its corollary
 `compact_verifies_iff_original` in [`proofs/Chain.fst`](proofs/Chain.fst) — and a tamper in the
@@ -182,10 +182,10 @@ whatever it was handed.** The order is an obligation on every caller: `verifyCha
 `verifyChainWith cfg`) first, then `compact`.
 
 **A stream kept under its own `StreamConfig` compacts under the same config** (Phase 227):
-`OpStream.Snapshots.compact mode cfg` (over `OpStream.Snapshots.take mode cfg` (since `0.33.0`)) seeds the boundary at
-sequence zero with `cfg.Genesis`, the value every chain walker starts from, so a compaction at zero
+`Snapshots.compact mode s` (over `Snapshots.take mode s` (since `0.33.0`)) seeds the boundary at sequence zero with the
+`Genesis` of the stream's config, the value every chain walker starts from, so a compaction at zero
 verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). Under
-`canonicalConfig` it is the empty-genesis instantiation and emits the same bytes it always has.
+`StreamConfig.canonical` (since `0.39.0`, unreleased) it is the empty-genesis instantiation and emits the same bytes it always has.
 
 ### The container capability — what a contained scope enforces, and the one thing it asks of you
 
@@ -276,7 +276,7 @@ number — when the run certified nothing, naming the starved dimension; `unmeas
 separate state of a rendering handed no run at all. Every family reaches a non-zero, non-starved
 count here, which is what lets a host read a zero in its own census as a fact about its own
 witness rather than about the kit. The instance that proves it: `attestationLawsAt` (since `0.36.0`) at
-`OpStream.noAttestation` reports its laws green over zero signed heads, and now says so.
+`Attestation.noAttestation` (since `0.39.0`, unreleased) reports its laws green over zero signed heads, and now says so.
 
 ## Adopting a domain
 

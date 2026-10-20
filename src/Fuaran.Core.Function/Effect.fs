@@ -103,7 +103,7 @@ module Effect =
     /// `"clock+random+network"`). A single factor keeps the label it always had, so a journal keyed
     /// by `"clock"` still names the same effect. Read-only projection. `OpStream` sits below
     /// `Function` and cannot reference `DeterminismSource`, so a consumer threads this label into
-    /// `OpStream.captureEffect` / `replayEffect`.
+    /// `EffectCapture.captureEffect` / `replayEffect`.
     let determinismTag (d: DeterminismSource) : string =
         match canonicalFactors |> List.filter (fun f -> Set.contains f d) with
         | [] -> "deterministic"

@@ -1020,15 +1020,15 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 24 | 0 | 11 | 1 | 0 | 0 | 0 | 12 |
 | `Fuaran.Core.Column` | 121 | 47 | 48 | 3 | 0 | 0 | 0 | 23 |
-| `Fuaran.Core.Conformance` | 162 | 2 | 108 | 2 | 6 | 0 | 0 | 44 |
+| `Fuaran.Core.Conformance` | 159 | 2 | 105 | 2 | 6 | 0 | 0 | 44 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 159 | 41 | 64 | 5 | 0 | 0 | 0 | 49 |
 | `Fuaran.Core.Idl` | 63 | 0 | 6 | 1 | 1 | 0 | 0 | 55 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
-| `Fuaran.Core.OpStream` | 144 | 28 | 54 | 3 | 1 | 0 | 2 | 56 |
-| `Fuaran.Core.OpStream.Dag` | 91 | 38 | 30 | 0 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.OpStream` | 125 | 28 | 39 | 3 | 1 | 0 | 2 | 52 |
+| `Fuaran.Core.OpStream.Dag` | 87 | 38 | 26 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 56 | 21 | 12 | 14 | 0 | 0 | 0 | 9 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 27 | 7 | 6 | 0 | 0 | 0 | 0 | 14 |
@@ -1037,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Wire` | 138 | 64 | 12 | 3 | 2 | 0 | 0 | 57 |
-| **Total** | 1249 | 303 | 411 | 38 | 13 | 0 | 3 | 481 |
+| **Total** | 1223 | 303 | 389 | 38 | 13 | 0 | 3 | 477 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3394,7 +3394,7 @@ parameter, as `rec_injective` is, never an `assume`. Two things about it are wor
    compares the attestation's recorded `Head` has the binding property by construction, with no
    cryptography spent; what the cryptography buys is the half this model does not state.
 2. **It is classified a `model-bridge` that closes `unscheduled`, and the second word is the
-   finding.** Core ships **no production signer**: `OpStream.noAttestation` signs nothing and
+   finding.** Core ships **no production signer**: `Attestation.noAttestation` signs nothing and
    verifies nothing, a real sink is host-side, and the only concrete sinks in this repository are
    test-local. So the model's abstract `verify` is bridged to no production signature at all, which
    is the bridge the row names. But it is not `permanent`, because something could close it and it
@@ -3577,7 +3577,7 @@ sentence the phase was chartered with.
 
 **What the differential measures**, in `ProofOracle.ChainTests`, beside Phase 145's cases:
 
-- that `rec_payload` IS `OpStream.canonicalConfig.Payload`, byte for byte, over the adversarial
+- that `rec_payload` IS `StreamConfig.canonical.Payload`, byte for byte, over the adversarial
   actors, seven envelope-hostile op encodings (the closing brace, `,"op":`, a whole envelope) and
   eight sequences — the parse is a theorem about the model's copy, and this is what makes it a
   theorem about production's;

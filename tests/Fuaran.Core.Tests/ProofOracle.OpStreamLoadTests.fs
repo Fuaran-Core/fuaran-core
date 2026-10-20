@@ -114,7 +114,7 @@ let private hashFn: HashFn = OpStream.defaultHash
 
 /// Production's quote, the walk's `qh`: the model owns a loaded actor's shape, the host its
 /// escaping, as it owns the hash.
-let private quoteFn: string -> string = OpStream.Jsonl.quote
+let private quoteFn: string -> string = Jsonl.quote
 
 /// A model actor as the production value it decodes to, rendered by `Actor.encode` — so the two
 /// sides are compared through one encoder over the host's code units.
@@ -353,14 +353,21 @@ let private writtenStream (rng: System.Random) (n: int) : OpRecord<Counter.Count
         if i = n then
             recs
         else
-            match OpStream.append hashFn Counter.witness (actorPool rng) (Counter.Inc(rng.Next 1000)) state recs with
+            match
+                OpStream.append
+                    (OpStream.canonical hashFn Counter.witness)
+                    (actorPool rng)
+                    (Counter.Inc(rng.Next 1000))
+                    state
+                    recs
+            with
             | Ok(state', recs') -> go (i + 1) state' recs'
             | Error e -> failwithf "append refused an Inc: %s" e
 
     go 0 0 []
 
 let private writtenText (rs: OpRecord<Counter.CounterOp> list) : string =
-    match OpStream.tryToJsonl Counter.witness rs with
+    match Jsonl.tryWrite Counter.witness rs with
     | Ok text -> text
     | Error f -> failwithf "tryToJsonl refused a written stream: %s" (JsonlWriteFault.toString f)
 
@@ -578,14 +585,14 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
         if blind then mFault (dropLine f) else mFault f
 
     let pLine =
-        match OpStream.Jsonl.parseLine number line with
+        match Jsonl.parseLine number line with
         | Ok l ->
             let fields =
-                match OpStream.Jsonl.topFields line with
+                match Jsonl.topFields line with
                 | Ok fs -> fs |> List.map (fun (k, v) -> k + "=" + v) |> String.concat ";"
                 | Error f -> "topFields " + pFault f
 
-            sprintf "Ok %d %s [%s]" (OpStream.Jsonl.lineNumber l) (OpStream.Jsonl.lineText l) fields
+            sprintf "Ok %d %s [%s]" (Jsonl.lineNumber l) (Jsonl.lineText l) fields
         | Error f -> "Error " + pFault f
 
     let mLine =
@@ -606,7 +613,7 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
 
     for k in keys do
         let pSpan =
-            match OpStream.Jsonl.rawSpan k line with
+            match Jsonl.rawSpan k line with
             | Ok(Some v) -> "Some " + v
             | Ok None -> "None"
             | Error f -> "Error " + pFault f
@@ -622,47 +629,47 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
         if pSpan <> mSpan then
             diffs.Add(sprintf "rawSpan %s %A: production %s, model %s" k line pSpan mSpan)
 
-    match OpStream.Jsonl.parseLine number line, M.parse_line (nat number) chs with
+    match Jsonl.parseLine number line, M.parse_line (nat number) chs with
     | Ok pl, M.Ok ml ->
         for k in keys do
             let mk = lineKey k
 
             let pairs =
                 [ "tryRawField",
-                  (match OpStream.Jsonl.tryRawField k pl with
+                  (match Jsonl.tryRawField k pl with
                    | Some v -> "Some " + v
                    | None -> "None"),
                   (match mOpt (M.try_raw_field mk ml) with
                    | Some v -> "Some " + tokStr v
                    | None -> "None")
                   "rawField",
-                  (match OpStream.Jsonl.rawField k pl with
+                  (match Jsonl.rawField k pl with
                    | Ok v -> "Ok " + v
                    | Error f -> "Error " + pFault f),
                   (match M.raw_field mk ml with
                    | M.Ok v -> "Ok " + tokStr v
                    | M.Error f -> "Error " + mf f)
                   "stringField",
-                  pField (OpStream.Jsonl.stringField k pl),
+                  pField (Jsonl.stringField k pl),
                   (match M.string_field mk ml with
                    | M.Ok s -> "Ok " + ochsStr s
                    | M.Error f -> "Error " + mf f)
                   "intField",
-                  (match OpStream.Jsonl.intField k pl with
+                  (match Jsonl.intField k pl with
                    | Ok i -> "Ok " + string i
                    | Error f -> "Error " + pFault f),
                   (match M.int_field mk ml with
                    | M.Ok i -> "Ok " + string i
                    | M.Error f -> "Error " + mf f)
                   "stringsField",
-                  (match OpStream.Jsonl.stringsField k pl with
+                  (match Jsonl.stringsField k pl with
                    | Ok xs -> "Ok [" + String.concat "|" xs + "]"
                    | Error f -> "Error " + pFault f),
                   (match M.strings_field mk ml with
                    | M.Ok xs -> "Ok [" + (xs |> List.map ochsStr |> String.concat "|") + "]"
                    | M.Error f -> "Error " + mf f)
                   "actorField",
-                  (match OpStream.Jsonl.actorField k pl with
+                  (match Jsonl.actorField k pl with
                    | Ok a -> "Ok " + Actor.encode a
                    | Error f -> "Error " + pFault f),
                   (match M.actor_field mk ml with
@@ -673,17 +680,17 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
                 if p <> m then
                     diffs.Add(sprintf "%s %s %A: production %s, model %s" name k line p m)
 
-        let pRefuse = pFault (OpStream.Jsonl.refuse pl "why")
+        let pRefuse = pFault (Jsonl.refuse pl "why")
         let mRefuse = mf (M.refuse ml "why")
 
         if pRefuse <> mRefuse then
             diffs.Add(sprintf "refuse %A: production %s, model %s" line pRefuse mRefuse)
 
-        match OpStream.Jsonl.topFields line with
+        match Jsonl.topFields line with
         | Ok fs ->
             for _, v in fs do
                 let pU =
-                    match OpStream.Jsonl.unquote v with
+                    match Jsonl.unquote v with
                     | Ok s -> "Ok " + s
                     | Error r -> "Error " + pReason r
 
@@ -696,7 +703,7 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
                     diffs.Add(sprintf "unquote %A: production %s, model %s" v pU mU)
 
                 let pC =
-                    match OpStream.Jsonl.checkRaw v with
+                    match Jsonl.checkRaw v with
                     | Ok() -> "Ok"
                     | Error r -> "Error " + pWreason r
 
@@ -711,7 +718,7 @@ let private compareLine (blind: bool) (number: int) (line: string) : string list
     | _ -> ()
 
     let pC =
-        match OpStream.Jsonl.checkRaw line with
+        match Jsonl.checkRaw line with
         | Ok() -> "Ok"
         | Error r -> "Error " + pWreason r
 
@@ -743,15 +750,13 @@ let private compareLoads (blind: bool) (text: string) : string list =
         | M.Error(M.LUnreadable f) when blind -> "Unreadable " + mFault (dropLine f)
         | other -> mSnaps w other
 
-    [ "fromJsonl", pLoad w (OpStream.fromJsonl w text), mL (M.from_jsonl hostWs mw chs)
+    [ "fromJsonl", pLoad w (Jsonl.read w text), mL (M.from_jsonl hostWs mw chs)
       "fromJsonlWithSnapshots",
-      pSnaps w (OpStream.fromJsonlWithSnapshots w text),
+      pSnaps w (Jsonl.readWithSnapshots w text),
       mS (M.from_jsonl_with_snapshots hostWs mw chs)
-      "fromJsonlLegacyActor",
-      pLoad w (OpStream.fromJsonlLegacyActor w text),
-      mL (M.from_jsonl_legacy_actor hostWs mw chs)
+      "fromJsonlLegacyActor", pLoad w (Jsonl.readLegacyActor w text), mL (M.from_jsonl_legacy_actor hostWs mw chs)
       "fromJsonlVerified",
-      pLoad w (OpStream.fromJsonlVerified hashFn w text),
+      pLoad w (Jsonl.readVerified (OpStream.canonical hashFn w) text),
       mL (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs mw chs) ]
     |> List.choose (fun (name, p, m) ->
         if p = blindLoad m then
@@ -781,16 +786,16 @@ let private faultsLocate (text: string) : string list =
             if f.Position > l.Length then
                 findings.Add(sprintf "fault %s sits past its line (%d chars)" (pFault f) l.Length)
 
-            match OpStream.Jsonl.parseLine f.Line l with
+            match Jsonl.parseLine f.Line l with
             | Error g when g <> f ->
                 findings.Add(sprintf "fault %s is not the line's parse fault %s" (pFault f) (pFault g))
             | _ -> ()
 
     for r in
-        [ OpStream.fromJsonl w text
-          OpStream.fromJsonlLegacyActor w text
-          OpStream.fromJsonlVerified hashFn w text
-          OpStream.fromJsonlWithSnapshots w text |> Result.map fst ] do
+        [ Jsonl.read w text
+          Jsonl.readLegacyActor w text
+          Jsonl.readVerified (OpStream.canonical hashFn w) text
+          Jsonl.readWithSnapshots w text |> Result.map fst ] do
         match r with
         | Error(StreamLoadFault.Unreadable(_, f)) -> checkFault f
         | Error(StreamLoadFault.Undecodable sites) ->
@@ -798,10 +803,10 @@ let private faultsLocate (text: string) : string list =
                 if s.Line < 1 || s.Line > lines.Length then
                     findings.Add(sprintf "site at line %d of %d" s.Line lines.Length)
                 else
-                    match OpStream.Jsonl.parseLine s.Line lines.[s.Line - 1] with
+                    match Jsonl.parseLine s.Line lines.[s.Line - 1] with
                     | Error g -> findings.Add(sprintf "site at line %d, which does not parse: %s" s.Line (pFault g))
                     | Ok l ->
-                        match OpStream.Jsonl.rawField "op" l with
+                        match Jsonl.rawField "op" l with
                         | Ok raw ->
                             match w.Decode raw with
                             | Error why when why = s.Reason -> ()
@@ -811,7 +816,7 @@ let private faultsLocate (text: string) : string list =
                                 )
                         | Error g -> findings.Add(sprintf "site at line %d has no op: %s" s.Line (pFault g))
 
-                        match OpStream.Jsonl.stringField "hash" l with
+                        match Jsonl.stringField "hash" l with
                         | Ok h when h = s.NodeId -> ()
                         | other ->
                             findings.Add(
@@ -886,7 +891,7 @@ let tests =
               let w = Counter.witness
 
               for rs, _, _ in p do
-                  let pW = pWrite (OpStream.tryToJsonl w rs)
+                  let pW = pWrite (Jsonl.tryWrite w rs)
 
                   let mW =
                       match M.try_to_jsonl (mWitness w) (rs |> List.map (mRecord w)) with
@@ -898,7 +903,7 @@ let tests =
 
                   Expect.equal
                       (tokStr (M.to_jsonl (mWitness w) (rs |> List.map (mRecord w))))
-                      (OpStream.toJsonl w rs)
+                      (Jsonl.write w rs)
                       "toJsonl agrees"
 
               let multiLine: StreamWitness<Counter.CounterOp, int, string> =
@@ -917,7 +922,7 @@ let tests =
                   let rs = (p |> List.head |> (fun (rs, _, _) -> rs))
 
                   let pW =
-                      match OpStream.tryToJsonl bad rs with
+                      match Jsonl.tryWrite bad rs with
                       | Ok t -> "Ok " + t
                       | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
 
@@ -943,7 +948,7 @@ let tests =
                             Actor = Human lone
                             Hash = lone } ] do
                       let pW =
-                          match OpStream.tryToJsonl w [ bad ] with
+                          match Jsonl.tryWrite w [ bad ] with
                           | Ok t -> "Ok " + t
                           | Error f -> sprintf "Error line %d member %s: %s" f.Line f.Member (pWreason f.Reason)
 
@@ -967,15 +972,15 @@ let tests =
 
               Expect.equal
                   (mLoad w (M.from_jsonl hostWs (mWitness w) (toChs neg)))
-                  (pLoad w (OpStream.fromJsonl w neg))
+                  (pLoad w (Jsonl.read w neg))
                   "an unverified load admits a negative sequence number on both sides"
 
               Expect.equal
                   (mLoad w (M.from_jsonl_verified hashFn quoteFn ochsStr hostWs (mWitness w) (toChs neg)))
-                  (pLoad w (OpStream.fromJsonlVerified hashFn w neg))
+                  (pLoad w (Jsonl.readVerified (OpStream.canonical hashFn w) neg))
                   "the verified load refuses it at the same index for the same reason"
 
-              match OpStream.fromJsonlVerified hashFn w neg with
+              match Jsonl.readVerified (OpStream.canonical hashFn w) neg with
               | Error(StreamLoadFault.Broken b) ->
                   Expect.equal b.Reason ChainBreakReason.SequenceMismatch "a sequence-number mismatch"
                   Expect.equal b.Got "-1" "production spells the number it read"
@@ -1000,14 +1005,14 @@ let tests =
               let faults =
                   texts
                   |> List.filter (fun t ->
-                      match OpStream.fromJsonl w t with
+                      match Jsonl.read w t with
                       | Error(StreamLoadFault.Unreadable _) -> true
                       | _ -> false)
 
               let sites =
                   texts
                   |> List.filter (fun t ->
-                      match OpStream.fromJsonl w t with
+                      match Jsonl.read w t with
                       | Error(StreamLoadFault.Undecodable _) -> true
                       | _ -> false)
 
@@ -1017,15 +1022,15 @@ let tests =
               // THEOREM 3 held to production: what the checked writer wrote loads back, verified
               // or not, with no snapshot.
               for rs, text, _ in p do
-                  Expect.equal (OpStream.fromJsonl w text) (Ok rs) "fromJsonl reads the written records"
+                  Expect.equal (Jsonl.read w text) (Ok rs) "fromJsonl reads the written records"
 
                   Expect.equal
-                      (OpStream.fromJsonlWithSnapshots w text)
+                      (Jsonl.readWithSnapshots w text)
                       (Ok(rs, []))
                       "fromJsonlWithSnapshots reads them, no snapshot"
 
                   Expect.equal
-                      (OpStream.fromJsonlVerified hashFn w text)
+                      (Jsonl.readVerified (OpStream.canonical hashFn w) text)
                       (Ok rs)
                       "fromJsonlVerified reads them: an appended chain verifies"
 
@@ -1050,10 +1055,10 @@ let tests =
               let pastFirst =
                   texts
                   |> List.filter (fun t ->
-                      unreadablePast (OpStream.fromJsonl w t)
-                      || unreadablePast (OpStream.fromJsonlWithSnapshots w t)
-                      || unreadablePast (OpStream.fromJsonlLegacyActor w t)
-                      || unreadablePast (OpStream.fromJsonlVerified hashFn w t))
+                      unreadablePast (Jsonl.read w t)
+                      || unreadablePast (Jsonl.readWithSnapshots w t)
+                      || unreadablePast (Jsonl.readLegacyActor w t)
+                      || unreadablePast (Jsonl.readVerified (OpStream.canonical hashFn w) t))
 
               let blindLosses =
                   texts |> List.filter (fun t -> not (List.isEmpty (compareLoads true t)))
@@ -1080,7 +1085,7 @@ let tests =
               let text =
                   (List.head (pool 458 1 0) |> fun (_, t, _) -> t).Replace("\"seq\"", "\"s\\u0065q\"")
 
-              Expect.isOk (OpStream.fromJsonl w text) "production reads the escaped key as `seq`"
+              Expect.isOk (Jsonl.read w text) "production reads the escaped key as `seq`"
 
               match M.from_jsonl hostWs (mWitness w) (toChs text) with
               | M.Error(M.LUnreadable f) ->

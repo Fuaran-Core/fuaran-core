@@ -1216,9 +1216,9 @@
     {
       "id": "seq-numeral-code-certified",
       "level": "tested",
-      "statement": "The sequence numeral's code (`seq_numeral_code`), the one premise the envelope parse names beyond the DAG side's — `show` is injective and a numeral carries no comma — is measured, because production's `show` is `string : int -> string` and the model cannot inspect it: comma-free and injective over the adversarial sequences and 0..2000, beside the byte-for-byte check that `rec_payload` IS `OpStream.canonicalConfig.Payload` over the adversarial actors, envelope ops and sequences, and the parse's conclusion over the same population — no two distinct (seq, actor, op) triples share an envelope. The theorem's arm beside production: every payload splice — one record's content, or its actor-and-op alone, swapped for another record's with its hash and prev-link kept — is refused by `verifyChain` and by the oracle alike, over the work-plan and reference streams.",
+      "statement": "The sequence numeral's code (`seq_numeral_code`), the one premise the envelope parse names beyond the DAG side's — `show` is injective and a numeral carries no comma — is measured, because production's `show` is `string : int -> string` and the model cannot inspect it: comma-free and injective over the adversarial sequences and 0..2000, beside the byte-for-byte check that `rec_payload` IS `StreamConfig.canonical.Payload` over the adversarial actors, envelope ops and sequences, and the parse's conclusion over the same population — no two distinct (seq, actor, op) triples share an envelope. The theorem's arm beside production: every payload splice — one record's content, or its actor-and-op alone, swapped for another record's with its hash and prev-link kept — is refused by `verifyChain` and by the oracle alike, over the work-plan and reference streams.",
       "boundary": "Sampled over those populations and streams, never proved. Both alphabet premises are probed in the losing direction: under a FREE actor code the same envelope is ambiguous (the reading the model's section 6b names, exhibited), and a thousands-separated numeral defeats the first-comma cut — which is a refutation of the PROOF STEP and not of the envelope, since the bytes after that comma are `000,\"actor\":` and no skeleton begins with them. Comma-freedom is therefore recorded as sufficient and true of production rather than necessary. Under a hash that folds its payload the same splice is invisible to both, which is the boundary of the discharge: the parse makes the envelope injective, and `hash_injective` stays the one premise the linear side assumes.",
-      "claim": "The sequence numeral's code (`seq_numeral_code`), the one premise the envelope parse names beyond the DAG side's — `show` is injective and a numeral carries no comma — is measured, because production's `show` is `string : int -> string` and the model cannot inspect it: comma-free and injective over the adversarial sequences and 0..2000, beside the byte-for-byte check that `rec_payload` IS `OpStream.canonicalConfig.Payload` over the adversarial actors, envelope ops and sequences, and the parse's conclusion over the same population — no two distinct (seq, actor, op) triples share an envelope. The theorem's arm beside production: every payload splice — one record's content, or its actor-and-op alone, swapped for another record's with its hash and prev-link kept — is refused by `verifyChain` and by the oracle alike, over the work-plan and reference streams. Sampled over those populations and streams, never proved. Both alphabet premises are probed in the losing direction: under a FREE actor code the same envelope is ambiguous (the reading the model's section 6b names, exhibited), and a thousands-separated numeral defeats the first-comma cut — which is a refutation of the PROOF STEP and not of the envelope, since the bytes after that comma are `000,\"actor\":` and no skeleton begins with them. Comma-freedom is therefore recorded as sufficient and true of production rather than necessary. Under a hash that folds its payload the same splice is invisible to both, which is the boundary of the discharge: the parse makes the envelope injective, and `hash_injective` stays the one premise the linear side assumes.",
+      "claim": "The sequence numeral's code (`seq_numeral_code`), the one premise the envelope parse names beyond the DAG side's — `show` is injective and a numeral carries no comma — is measured, because production's `show` is `string : int -> string` and the model cannot inspect it: comma-free and injective over the adversarial sequences and 0..2000, beside the byte-for-byte check that `rec_payload` IS `StreamConfig.canonical.Payload` over the adversarial actors, envelope ops and sequences, and the parse's conclusion over the same population — no two distinct (seq, actor, op) triples share an envelope. The theorem's arm beside production: every payload splice — one record's content, or its actor-and-op alone, swapped for another record's with its hash and prev-link kept — is refused by `verifyChain` and by the oracle alike, over the work-plan and reference streams. Sampled over those populations and streams, never proved. Both alphabet premises are probed in the losing direction: under a FREE actor code the same envelope is ambiguous (the reading the model's section 6b names, exhibited), and a thousands-separated numeral defeats the first-comma cut — which is a refutation of the PROOF STEP and not of the envelope, since the bytes after that comma are `000,\"actor\":` and no skeleton begins with them. Comma-freedom is therefore recorded as sufficient and true of production rather than necessary. Under a hash that folds its payload the same splice is invisible to both, which is the boundary of the discharge: the parse makes the envelope injective, and `hash_injective` stays the one premise the linear side assumes.",
       "phase": "fuaran-core#197",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -1327,8 +1327,8 @@
       "id": "signature-binds-one-head",
       "level": "assumed",
       "statement": "The signature primitive, abstract, with ONE assumed property: an attestation verifies against at most one head — `verify` holds only for the signed bytes. It is an explicit lemma-valued PARAMETER (`signature_binds`) of the two signed-head theorems rather than an assume, so which results depend on it is visible in their signatures. It is BINDING and not unforgeability: a sink whose `Verify` compares the attestation's recorded `Head` has it by construction, and what the cryptography buys is the half no row here states.",
-      "boundary": "Core ships no signer (`OpStream.noAttestation` signs nothing and verifies nothing) and the only concrete sinks in this repository are test-local, so the model's abstract `verify` is bridged to no production signature at all: that is the bridge this row names. It is `unscheduled` rather than `permanent` because something COULD close it, and it is already half-built — the property is one a host's `IAttestationSink` either has or lacks (a sink that verifies everything falsifies it), and the shipped kit samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two rehashed-forgery arms are each one attestation offered two heads. Recording it as a `domain-obligation` discharged by that law is what would close it, and it is not done, because the discharge relation is shipped data (`Fuaran.Core.Families.obligations`, held to this file row for row by the Conformance.Families family), so adding the pair is a change to a shipped package's source rather than a proof-leg artefact, and is an operator's call. Under the `noAttestation` default these theorems say nothing, which is correct — there is no signed head.",
-      "claim": "The signature primitive, abstract, with ONE assumed property: an attestation verifies against at most one head — `verify` holds only for the signed bytes. It is an explicit lemma-valued PARAMETER (`signature_binds`) of the two signed-head theorems rather than an assume, so which results depend on it is visible in their signatures. It is BINDING and not unforgeability: a sink whose `Verify` compares the attestation's recorded `Head` has it by construction, and what the cryptography buys is the half no row here states. Core ships no signer (`OpStream.noAttestation` signs nothing and verifies nothing) and the only concrete sinks in this repository are test-local, so the model's abstract `verify` is bridged to no production signature at all: that is the bridge this row names. It is `unscheduled` rather than `permanent` because something COULD close it, and it is already half-built — the property is one a host's `IAttestationSink` either has or lacks (a sink that verifies everything falsifies it), and the shipped kit samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two rehashed-forgery arms are each one attestation offered two heads. Recording it as a `domain-obligation` discharged by that law is what would close it, and it is not done, because the discharge relation is shipped data (`Fuaran.Core.Families.obligations`, held to this file row for row by the Conformance.Families family), so adding the pair is a change to a shipped package's source rather than a proof-leg artefact, and is an operator's call. Under the `noAttestation` default these theorems say nothing, which is correct — there is no signed head.",
+      "boundary": "Core ships no signer (`Attestation.noAttestation` signs nothing and verifies nothing) and the only concrete sinks in this repository are test-local, so the model's abstract `verify` is bridged to no production signature at all: that is the bridge this row names. It is `unscheduled` rather than `permanent` because something COULD close it, and it is already half-built — the property is one a host's `IAttestationSink` either has or lacks (a sink that verifies everything falsifies it), and the shipped kit samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two rehashed-forgery arms are each one attestation offered two heads. Recording it as a `domain-obligation` discharged by that law is what would close it, and it is not done, because the discharge relation is shipped data (`Fuaran.Core.Families.obligations`, held to this file row for row by the Conformance.Families family), so adding the pair is a change to a shipped package's source rather than a proof-leg artefact, and is an operator's call. Under the `noAttestation` default these theorems say nothing, which is correct — there is no signed head.",
+      "claim": "The signature primitive, abstract, with ONE assumed property: an attestation verifies against at most one head — `verify` holds only for the signed bytes. It is an explicit lemma-valued PARAMETER (`signature_binds`) of the two signed-head theorems rather than an assume, so which results depend on it is visible in their signatures. It is BINDING and not unforgeability: a sink whose `Verify` compares the attestation's recorded `Head` has it by construction, and what the cryptography buys is the half no row here states. Core ships no signer (`Attestation.noAttestation` signs nothing and verifies nothing) and the only concrete sinks in this repository are test-local, so the model's abstract `verify` is bridged to no production signature at all: that is the bridge this row names. It is `unscheduled` rather than `permanent` because something COULD close it, and it is already half-built — the property is one a host's `IAttestationSink` either has or lacks (a sink that verifies everything falsifies it), and the shipped kit samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two rehashed-forgery arms are each one attestation offered two heads. Recording it as a `domain-obligation` discharged by that law is what would close it, and it is not done, because the discharge relation is shipped data (`Fuaran.Core.Families.obligations`, held to this file row for row by the Conformance.Families family), so adding the pair is a change to a shipped package's source rather than a proof-leg artefact, and is an operator's call. Under the `noAttestation` default these theorems say nothing, which is correct — there is no signed head.",
       "phase": "fuaran-core#193",
       "class": "model-bridge",
       "closes": "unscheduled",
@@ -4150,43 +4150,43 @@
     {
       "id": "append-after-compact",
       "level": "proved",
-      "statement": "A COMPACTED STREAM KEEPS WRITING. For every stream, reducer, hash and snapshot payload, every boundary n and the (snapshot, tail) that compact produces at n, the compaction of the APPENDED stream is the appended compaction — `compact (append_full rs a o) n == Compacted snap (append_to snap tail a o)`, snapshot and tail alike — so the record `OpStream.Compacted.appendTo` mints onto the tail is the record `append` mints onto the whole stream: at sequence `snap.Seq + length tail` and linked to the tail's last hash or, on an EMPTY tail, to the snapshot's boundary hash. With it (`compact_preserves_verify` on the appended stream) the appended original verifies exactly when its discarded prefix verifies and the appended compaction verifies across, and `append_after_compact_verifies_iff` is the chartered sentence with its premise: over a prefix that verified, `verifyChain (rs @ [r]) = verifyAcross snap (appendTo snap tail r)`. Proved with no assume and no admit.",
+      "statement": "A COMPACTED STREAM KEEPS WRITING. For every stream, reducer, hash and snapshot payload, every boundary n and the (snapshot, tail) that compact produces at n, the compaction of the APPENDED stream is the appended compaction — `compact (append_full rs a o) n == Compacted snap (append_to snap tail a o)`, snapshot and tail alike — so the record `Compacted.appendTo` mints onto the tail is the record `append` mints onto the whole stream: at sequence `snap.Seq + length tail` and linked to the tail's last hash or, on an EMPTY tail, to the snapshot's boundary hash. With it (`compact_preserves_verify` on the appended stream) the appended original verifies exactly when its discarded prefix verifies and the appended compaction verifies across, and `append_after_compact_verifies_iff` is the chartered sentence with its premise: over a prefix that verified, `verifyChain (rs @ [r]) = verifyAcross snap (appendTo snap tail r)`. Proved with no assume and no admit.",
       "boundary": "The verification equation holds only over a prefix that verified. NOT claimed: the compare-and-append and idempotent forms beyond the record they share with `appendTo` (`appendIfTo` compares `Compacted.head`, which is the head `append_to` links to; `appendIdempotentTo` is `appendTo` behind a key lookup), and any persisted form of the compacted stream.",
-      "claim": "A COMPACTED STREAM KEEPS WRITING. For every stream, reducer, hash and snapshot payload, every boundary n and the (snapshot, tail) that compact produces at n, the compaction of the APPENDED stream is the appended compaction — `compact (append_full rs a o) n == Compacted snap (append_to snap tail a o)`, snapshot and tail alike — so the record `OpStream.Compacted.appendTo` mints onto the tail is the record `append` mints onto the whole stream: at sequence `snap.Seq + length tail` and linked to the tail's last hash or, on an EMPTY tail, to the snapshot's boundary hash. With it (`compact_preserves_verify` on the appended stream) the appended original verifies exactly when its discarded prefix verifies and the appended compaction verifies across, and `append_after_compact_verifies_iff` is the chartered sentence with its premise: over a prefix that verified, `verifyChain (rs @ [r]) = verifyAcross snap (appendTo snap tail r)`. Proved with no assume and no admit. The verification equation holds only over a prefix that verified. NOT claimed: the compare-and-append and idempotent forms beyond the record they share with `appendTo` (`appendIfTo` compares `Compacted.head`, which is the head `append_to` links to; `appendIdempotentTo` is `appendTo` behind a key lookup), and any persisted form of the compacted stream.",
+      "claim": "A COMPACTED STREAM KEEPS WRITING. For every stream, reducer, hash and snapshot payload, every boundary n and the (snapshot, tail) that compact produces at n, the compaction of the APPENDED stream is the appended compaction — `compact (append_full rs a o) n == Compacted snap (append_to snap tail a o)`, snapshot and tail alike — so the record `Compacted.appendTo` mints onto the tail is the record `append` mints onto the whole stream: at sequence `snap.Seq + length tail` and linked to the tail's last hash or, on an EMPTY tail, to the snapshot's boundary hash. With it (`compact_preserves_verify` on the appended stream) the appended original verifies exactly when its discarded prefix verifies and the appended compaction verifies across, and `append_after_compact_verifies_iff` is the chartered sentence with its premise: over a prefix that verified, `verifyChain (rs @ [r]) = verifyAcross snap (appendTo snap tail r)`. Proved with no assume and no admit. The verification equation holds only over a prefix that verified. NOT claimed: the compare-and-append and idempotent forms beyond the record they share with `appendTo` (`appendIfTo` compares `Compacted.head`, which is the head `append_to` links to; `appendIdempotentTo` is `appendTo` behind a key lookup), and any persisted form of the compacted stream.",
       "phase": "fuaran-core#301",
       "evidence": {
         "theorem": "append_after_compact",
         "model": "proofs/Chain.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.Compacted.appendTo",
-          "OpStream.Compacted.head"
+          "Compacted.appendTo",
+          "Compacted.head"
         ]
       }
     },
     {
       "id": "compact-compose",
       "level": "proved",
-      "statement": "RE-COMPACTION IS COMPACTION. Compacting a compacted stream again k records past its boundary n — `compact_from snap tail k`, the model of `OpStream.Compacted.compactFrom` at `atSeq = n + k` — is compacting the full stream at n + k: the same snapshot (sequence, state, boundary hash and seal, in the snapshot's own payload) and the same tail, or the same refusal with the same message, for every stream, reducer, hash and payload. A prefix refusal is reported at the ORIGIN index, because the cut records are replayed numbered from the snapshot's boundary, exactly as `compact` numbers them. Proved with no assume and no admit.",
+      "statement": "RE-COMPACTION IS COMPACTION. Compacting a compacted stream again k records past its boundary n — `compact_from snap tail k`, the model of `Compacted.compactFrom` at `atSeq = n + k` — is compacting the full stream at n + k: the same snapshot (sequence, state, boundary hash and seal, in the snapshot's own payload) and the same tail, or the same refusal with the same message, for every stream, reducer, hash and payload. A prefix refusal is reported at the ORIGIN index, because the cut records are replayed numbered from the snapshot's boundary, exactly as `compact` numbers them. Proved with no assume and no admit.",
       "boundary": "Given only that the tail starts at its boundary (`starts_at`, the seam `compactFrom` checks before it replays, as `Snapshots.replayFrom` does). NOT claimed: anything of a tail whose first record is not at its boundary, which `compactFrom` refuses by name (`TailSeqMismatch`).",
-      "claim": "RE-COMPACTION IS COMPACTION. Compacting a compacted stream again k records past its boundary n — `compact_from snap tail k`, the model of `OpStream.Compacted.compactFrom` at `atSeq = n + k` — is compacting the full stream at n + k: the same snapshot (sequence, state, boundary hash and seal, in the snapshot's own payload) and the same tail, or the same refusal with the same message, for every stream, reducer, hash and payload. A prefix refusal is reported at the ORIGIN index, because the cut records are replayed numbered from the snapshot's boundary, exactly as `compact` numbers them. Proved with no assume and no admit. Given only that the tail starts at its boundary (`starts_at`, the seam `compactFrom` checks before it replays, as `Snapshots.replayFrom` does). NOT claimed: anything of a tail whose first record is not at its boundary, which `compactFrom` refuses by name (`TailSeqMismatch`).",
+      "claim": "RE-COMPACTION IS COMPACTION. Compacting a compacted stream again k records past its boundary n — `compact_from snap tail k`, the model of `Compacted.compactFrom` at `atSeq = n + k` — is compacting the full stream at n + k: the same snapshot (sequence, state, boundary hash and seal, in the snapshot's own payload) and the same tail, or the same refusal with the same message, for every stream, reducer, hash and payload. A prefix refusal is reported at the ORIGIN index, because the cut records are replayed numbered from the snapshot's boundary, exactly as `compact` numbers them. Proved with no assume and no admit. Given only that the tail starts at its boundary (`starts_at`, the seam `compactFrom` checks before it replays, as `Snapshots.replayFrom` does). NOT claimed: anything of a tail whose first record is not at its boundary, which `compactFrom` refuses by name (`TailSeqMismatch`).",
       "phase": "fuaran-core#301",
       "evidence": {
         "theorem": "compact_compose",
         "model": "proofs/Chain.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.Compacted.compactFrom",
-          "OpStream.Snapshots.replayFrom"
+          "Compacted.compactFrom",
+          "Snapshots.replayFrom"
         ]
       }
     },
     {
       "id": "key-index-rebuild-parity",
       "level": "proved",
-      "statement": "THE KEY INDEX SURVIVES COMPACTION. The first-wins key-index fold splits at ANY boundary: the index of the first n records, continued over the rest, is the index of the whole stream (`key_index_rebuild_parity`), and at a compaction `compact` produced, the discarded prefix's index (`Compacted.Keys`) continued over the tail is `KeyIndex.ofStream` of the uncompacted stream (`key_index_compact_parity`). So `OpStream.Compacted.keyIndex` answers every key the stream ever produced, with the entry it first produced, and an idempotent retry of a pre-compaction key is the `Duplicate` it was before the compaction. Proved with no assume and no admit.",
+      "statement": "THE KEY INDEX SURVIVES COMPACTION. The first-wins key-index fold splits at ANY boundary: the index of the first n records, continued over the rest, is the index of the whole stream (`key_index_rebuild_parity`), and at a compaction `compact` produced, the discarded prefix's index (`Compacted.Keys`) continued over the tail is `KeyIndex.ofStream` of the uncompacted stream (`key_index_compact_parity`). So `Compacted.keyIndex` answers every key the stream ever produced, with the entry it first produced, and an idempotent retry of a pre-compaction key is the `Duplicate` it was before the compaction. Proved with no assume and no admit.",
       "boundary": "NOT claimed: the persistence of `Keys`, which no hash binds and which the host carries beside the compacted stream (DECISIONS, the `fuaran-core#301` entry).",
-      "claim": "THE KEY INDEX SURVIVES COMPACTION. The first-wins key-index fold splits at ANY boundary: the index of the first n records, continued over the rest, is the index of the whole stream (`key_index_rebuild_parity`), and at a compaction `compact` produced, the discarded prefix's index (`Compacted.Keys`) continued over the tail is `KeyIndex.ofStream` of the uncompacted stream (`key_index_compact_parity`). So `OpStream.Compacted.keyIndex` answers every key the stream ever produced, with the entry it first produced, and an idempotent retry of a pre-compaction key is the `Duplicate` it was before the compaction. Proved with no assume and no admit. NOT claimed: the persistence of `Keys`, which no hash binds and which the host carries beside the compacted stream (DECISIONS, the `fuaran-core#301` entry).",
+      "claim": "THE KEY INDEX SURVIVES COMPACTION. The first-wins key-index fold splits at ANY boundary: the index of the first n records, continued over the rest, is the index of the whole stream (`key_index_rebuild_parity`), and at a compaction `compact` produced, the discarded prefix's index (`Compacted.Keys`) continued over the tail is `KeyIndex.ofStream` of the uncompacted stream (`key_index_compact_parity`). So `Compacted.keyIndex` answers every key the stream ever produced, with the entry it first produced, and an idempotent retry of a pre-compaction key is the `Duplicate` it was before the compaction. Proved with no assume and no admit. NOT claimed: the persistence of `Keys`, which no hash binds and which the host carries beside the compacted stream (DECISIONS, the `fuaran-core#301` entry).",
       "phase": "fuaran-core#301",
       "evidence": {
         "theorem": "key_index_rebuild_parity",
@@ -4194,7 +4194,7 @@
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "KeyIndex.ofStream",
-          "OpStream.Compacted.keyIndex"
+          "Compacted.keyIndex"
         ]
       }
     },
@@ -4214,16 +4214,16 @@
     {
       "id": "replay-record",
       "level": "proved",
-      "statement": "REPLAY OF A RECORDED SESSION IS THE SESSION. STRICT replay (`OpStream.replayEffectStrict`, modelled before the domain decode as `replay_strict`) of a recorded session over its own complete journal answers every value the session realised, in order, and leaves nothing in the journal (`replay_record` — `replay (record s) = s`): a non-deterministic effect from its capture, a deterministic one from the live source. Beside it, `truncated_journal_exhausted`: the same session replayed against a journal that lacks the capture of its LAST non-deterministic effect stops `Exhausted`, naming that effect — the tail truncation the lenient `replayEffect` answers from the live source with no signal. Proved with no assume and no admit.",
+      "statement": "REPLAY OF A RECORDED SESSION IS THE SESSION. STRICT replay (`EffectCapture.replayEffectStrict`, modelled before the domain decode as `replay_strict`) of a recorded session over its own complete journal answers every value the session realised, in order, and leaves nothing in the journal (`replay_record` — `replay (record s) = s`): a non-deterministic effect from its capture, a deterministic one from the live source. Beside it, `truncated_journal_exhausted`: the same session replayed against a journal that lacks the capture of its LAST non-deterministic effect stops `Exhausted`, naming that effect — the tail truncation the lenient `replayEffect` answers from the live source with no signal. Proved with no assume and no admit.",
       "boundary": "Given only that every label is canonical. NOT claimed: the domain decode, a round trip the value codec owns (the theorem says the decoder is handed the recorded encoding); the label vocabulary itself (`isDeterminismLabel` is a parameter, held equal to `Effect.tryDeterminismOfTag` by a test); and a truncation the session never reaches, which only an anchored head (`verifyCapturesAt`) detects.",
-      "claim": "REPLAY OF A RECORDED SESSION IS THE SESSION. STRICT replay (`OpStream.replayEffectStrict`, modelled before the domain decode as `replay_strict`) of a recorded session over its own complete journal answers every value the session realised, in order, and leaves nothing in the journal (`replay_record` — `replay (record s) = s`): a non-deterministic effect from its capture, a deterministic one from the live source. Beside it, `truncated_journal_exhausted`: the same session replayed against a journal that lacks the capture of its LAST non-deterministic effect stops `Exhausted`, naming that effect — the tail truncation the lenient `replayEffect` answers from the live source with no signal. Proved with no assume and no admit. Given only that every label is canonical. NOT claimed: the domain decode, a round trip the value codec owns (the theorem says the decoder is handed the recorded encoding); the label vocabulary itself (`isDeterminismLabel` is a parameter, held equal to `Effect.tryDeterminismOfTag` by a test); and a truncation the session never reaches, which only an anchored head (`verifyCapturesAt`) detects.",
+      "claim": "REPLAY OF A RECORDED SESSION IS THE SESSION. STRICT replay (`EffectCapture.replayEffectStrict`, modelled before the domain decode as `replay_strict`) of a recorded session over its own complete journal answers every value the session realised, in order, and leaves nothing in the journal (`replay_record` — `replay (record s) = s`): a non-deterministic effect from its capture, a deterministic one from the live source. Beside it, `truncated_journal_exhausted`: the same session replayed against a journal that lacks the capture of its LAST non-deterministic effect stops `Exhausted`, naming that effect — the tail truncation the lenient `replayEffect` answers from the live source with no signal. Proved with no assume and no admit. Given only that every label is canonical. NOT claimed: the domain decode, a round trip the value codec owns (the theorem says the decoder is handed the recorded encoding); the label vocabulary itself (`isDeterminismLabel` is a parameter, held equal to `Effect.tryDeterminismOfTag` by a test); and a truncation the session never reaches, which only an anchored head (`verifyCapturesAt`) detects.",
       "phase": "fuaran-core#301",
       "evidence": {
         "theorem": "replay_record",
         "model": "proofs/Chain.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.replayEffectStrict"
+          "EffectCapture.replayEffectStrict"
         ]
       }
     },
@@ -4256,9 +4256,9 @@
     {
       "id": "compacted-stream-differential",
       "level": "tested",
-      "statement": "The extracted model of the compacted stream agrees with production over a seeded pool of sixty counter streams of every length up to seven: `compact_from` against `OpStream.Compacted.compactFrom` at EVERY (n, k) pair of every stream in both snapshot modes, out-of-range boundaries included, and over a STARVED snapshot whose state was set back to the initial one so the prefix refusal is met and its origin index compared; `append_to` against `Compacted.appendTo` at every boundary, the empty tail included; `append_full` against `append`; and `index_onto` against `KeyIndex.ofStream` and `Compacted.keyIndex` at every boundary. PRODUCTION is also held to the theorems' own statements on its own values — `compactFrom (compactAt rs n) (n + k) = compactAt rs (n + k)` and `Compacted.verify (appendTo …) = verifyChain (append …)` — so a model that agreed with production while both drifted from the theorem would still be caught. A model handed a different hash must disagree, and perturbing the extracted oracle by hand to number an appended record and a re-compaction from the tail rather than the boundary fails both comparisons.",
+      "statement": "The extracted model of the compacted stream agrees with production over a seeded pool of sixty counter streams of every length up to seven: `compact_from` against `Compacted.compactFrom` at EVERY (n, k) pair of every stream in both snapshot modes, out-of-range boundaries included, and over a STARVED snapshot whose state was set back to the initial one so the prefix refusal is met and its origin index compared; `append_to` against `Compacted.appendTo` at every boundary, the empty tail included; `append_full` against `append`; and `index_onto` against `KeyIndex.ofStream` and `Compacted.keyIndex` at every boundary. PRODUCTION is also held to the theorems' own statements on its own values — `compactFrom (compactAt rs n) (n + k) = compactAt rs (n + k)` and `Compacted.verify (appendTo …) = verifyChain (append …)` — so a model that agreed with production while both drifted from the theorem would still be caught. A model handed a different hash must disagree, and perturbing the extracted oracle by hand to number an appended record and a re-compaction from the tail rather than the boundary fails both comparisons.",
       "boundary": "Agreement is over that pool, never over all inputs.",
-      "claim": "The extracted model of the compacted stream agrees with production over a seeded pool of sixty counter streams of every length up to seven: `compact_from` against `OpStream.Compacted.compactFrom` at EVERY (n, k) pair of every stream in both snapshot modes, out-of-range boundaries included, and over a STARVED snapshot whose state was set back to the initial one so the prefix refusal is met and its origin index compared; `append_to` against `Compacted.appendTo` at every boundary, the empty tail included; `append_full` against `append`; and `index_onto` against `KeyIndex.ofStream` and `Compacted.keyIndex` at every boundary. PRODUCTION is also held to the theorems' own statements on its own values — `compactFrom (compactAt rs n) (n + k) = compactAt rs (n + k)` and `Compacted.verify (appendTo …) = verifyChain (append …)` — so a model that agreed with production while both drifted from the theorem would still be caught. A model handed a different hash must disagree, and perturbing the extracted oracle by hand to number an appended record and a re-compaction from the tail rather than the boundary fails both comparisons. Agreement is over that pool, never over all inputs.",
+      "claim": "The extracted model of the compacted stream agrees with production over a seeded pool of sixty counter streams of every length up to seven: `compact_from` against `Compacted.compactFrom` at EVERY (n, k) pair of every stream in both snapshot modes, out-of-range boundaries included, and over a STARVED snapshot whose state was set back to the initial one so the prefix refusal is met and its origin index compared; `append_to` against `Compacted.appendTo` at every boundary, the empty tail included; `append_full` against `append`; and `index_onto` against `KeyIndex.ofStream` and `Compacted.keyIndex` at every boundary. PRODUCTION is also held to the theorems' own statements on its own values — `compactFrom (compactAt rs n) (n + k) = compactAt rs (n + k)` and `Compacted.verify (appendTo …) = verifyChain (append …)` — so a model that agreed with production while both drifted from the theorem would still be caught. A model handed a different hash must disagree, and perturbing the extracted oracle by hand to number an appended record and a re-compaction from the tail rather than the boundary fails both comparisons. Agreement is over that pool, never over all inputs.",
       "phase": "fuaran-core#301",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -4271,9 +4271,9 @@
         ],
         "operations": [
           "KeyIndex.ofStream",
-          "OpStream.Compacted.appendTo",
-          "OpStream.Compacted.compactFrom",
-          "OpStream.Compacted.keyIndex"
+          "Compacted.appendTo",
+          "Compacted.compactFrom",
+          "Compacted.keyIndex"
         ]
       }
     },
@@ -6029,21 +6029,21 @@
         "model": "proofs/OpStreamLoad.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.Jsonl.actorField",
-          "OpStream.Jsonl.checkRaw",
-          "OpStream.Jsonl.intField",
-          "OpStream.Jsonl.lineNumber",
-          "OpStream.Jsonl.lineText",
-          "OpStream.Jsonl.parseLine",
-          "OpStream.Jsonl.rawField",
-          "OpStream.Jsonl.rawSpan",
-          "OpStream.Jsonl.refuse",
-          "OpStream.Jsonl.scanRecords",
-          "OpStream.Jsonl.stringField",
-          "OpStream.Jsonl.stringsField",
-          "OpStream.Jsonl.topFields",
-          "OpStream.Jsonl.tryRawField",
-          "OpStream.Jsonl.unquote"
+          "Jsonl.actorField",
+          "Jsonl.checkRaw",
+          "Jsonl.intField",
+          "Jsonl.lineNumber",
+          "Jsonl.lineText",
+          "Jsonl.parseLine",
+          "Jsonl.rawField",
+          "Jsonl.rawSpan",
+          "Jsonl.refuse",
+          "Jsonl.scanRecords",
+          "Jsonl.stringField",
+          "Jsonl.stringsField",
+          "Jsonl.topFields",
+          "Jsonl.tryRawField",
+          "Jsonl.unquote"
         ]
       }
     },
@@ -6059,8 +6059,8 @@
         "model": "proofs/OpStreamLoad.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.fromJsonlLegacyActor",
-          "OpStream.fromJsonlWithSnapshots"
+          "Jsonl.readLegacyActor",
+          "Jsonl.readWithSnapshots"
         ]
       }
     },
@@ -6076,7 +6076,7 @@
         "model": "proofs/OpStreamLoad.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "OpStream.fromJsonlVerified"
+          "Jsonl.readVerified"
         ]
       }
     },

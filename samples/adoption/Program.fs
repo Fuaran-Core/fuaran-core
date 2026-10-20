@@ -350,14 +350,15 @@ let main _ =
             ||> List.fold (fun acc op ->
                 acc
                 |> Result.bind (fun (st, recs) ->
-                    OpStream.append OpStream.defaultHash streamW (Human "demo") op st recs))
+                    OpStream.append (OpStream.canonical OpStream.defaultHash streamW) (Human "demo") op st recs))
 
         match built with
         | Ok(state, recs) ->
-            let verified = OpStream.verifyChain OpStream.defaultHash streamW recs
+            let verified =
+                OpStream.verifyChain (OpStream.canonical OpStream.defaultHash streamW) recs
 
             let roundTrips =
-                match OpStream.toJsonl streamW recs |> OpStream.fromJsonl streamW with
+                match Jsonl.write streamW recs |> Jsonl.read streamW with
                 | Ok restored -> OpStream.replay streamW sampleTree restored = Ok state
                 | Error _ -> false
 

@@ -65,10 +65,13 @@ module internal PipelineSeamLaws =
 
             // a Ready value replays byte-identically through the Phase 27 seam.
             let key = "deferred#" + string i
-            let _, caps = OpStream.captureEffect hashFn encV "network" key (fun () -> v) []
+
+            let _, caps =
+                EffectCapture.captureEffect StreamConfig.canonical hashFn encV "network" key (fun () -> v) []
+
             let liveDifferent () = v + 1
 
-            match OpStream.replayEffect decV key "network" liveDifferent caps with
+            match EffectCapture.replayEffect decV key "network" liveDifferent caps with
             | Ok(rv, rest) ->
                 replay.Check(
                     (rv = v && List.isEmpty rest),
@@ -271,9 +274,11 @@ module internal PipelineSeamLaws =
 
                 // per-node replay byte-identity through the Phase 27 seam
                 let key = CapabilityPipeline.nodeInvocationKey (List.head good.Nodes)
-                let _, caps = OpStream.captureEffect hashFn encV "random" key (fun () -> v) []
 
-                match OpStream.replayEffect decV key "random" (fun () -> v + 1) caps with
+                let _, caps =
+                    EffectCapture.captureEffect StreamConfig.canonical hashFn encV "random" key (fun () -> v) []
+
+                match EffectCapture.replayEffect decV key "random" (fun () -> v + 1) caps with
                 | Ok(rv, rest) ->
                     replay.Check(
                         (rv = v && List.isEmpty rest),

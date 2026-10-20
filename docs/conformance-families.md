@@ -41,7 +41,7 @@ misses one stays green unless the family is guarded).
 **Package.** The package a family ships from. The families that read the dataframe layer ship
 from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census lists them.
 
-97 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+94 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -62,7 +62,6 @@ from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census list
 | `Conformance.chainBreakReasonLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
 | `Conformance.checkpointLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.codecInjectivityLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `none` |
-| `Conformance.codecLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `Codec` | — | 1000 | `guarded-reached` | `drawn` |
 | `Conformance.codecLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `Codec` | `decode-layer-refusal-premises`, `decode-layer-round-trip-premises` | 1000 | `guarded-reached` | `drawn` |
 | `Conformance.columnOwnershipLawsWith` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 200 | `unconditional` | `none` |
 | `Conformance.columnVectorLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `none` |
@@ -111,7 +110,6 @@ from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census list
 | `Conformance.projectionLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — | 800 | `unconditional` | `none` |
 | `Conformance.propagationEvalLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `built` |
 | `Conformance.propagationEvaluatorLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 | `guarded-reached` | `drawn` |
-| `Conformance.propagationEvaluatorLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | — | 720 | `guarded-reached` | `drawn` |
 | `Conformance.propagationPriorLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-prior-blind` | 720 | `guarded-reached` | `drawn` |
 | `Conformance.queryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 2600 | `unconditional` | `built` |
 | `Conformance.queryLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `QuerySeamWitness` | — | 1200 | `guarded-reached` | `drawn` |
@@ -130,7 +128,6 @@ from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census list
 | `Conformance.writeGateLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `drawn` |
 | `EncodingProfileVectors.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 49 | `unconditional` | `none` |
 | `EncodingProfileVectors.lawsWith` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 49 | `unconditional` | `none` |
-| `EncodingProfileVectors.storedCodecLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `Codec` | — | 10 | `unconditional` | `none` |
 | `EncodingProfileVectors.storedCodecLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `Codec` | — | 10 | `unconditional` | `none` |
 | `FoldConfluence.laneFoldLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `ParityVectors.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 5 | `unconditional` | `none` |

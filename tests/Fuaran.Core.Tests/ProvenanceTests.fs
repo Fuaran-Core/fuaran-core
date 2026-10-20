@@ -73,7 +73,8 @@ let private toLegacyJsonl (records: OpRecord<CounterOp> list) : string =
 
 let private build () =
     let step acc (actor, op) =
-        acc |> Result.bind (fun (st, recs) -> OpStream.append h sw actor op st recs)
+        acc
+        |> Result.bind (fun (st, recs) -> OpStream.append (OpStream.canonical h sw) actor op st recs)
 
     [ alice, Inc 5; bot, Inc 3; alice, Dec 2 ]
     |> List.fold step (Ok(0, OpStream.empty))
@@ -103,7 +104,7 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  Expect.isTrue (OpStream.verifyChain h sw recs) "intact chain verifies"
+                  Expect.isTrue (OpStream.verifyChain (OpStream.canonical h sw) recs) "intact chain verifies"
 
                   // re-attribute op 1 from the agent to a human, leaving op + hashes untouched
                   let reattributed =
@@ -111,10 +112,10 @@ let tests =
                       |> List.mapi (fun i r -> if i = 1 then { r with Actor = Human "mallory" } else r)
 
                   Expect.isFalse
-                      (OpStream.verifyChain h sw reattributed)
+                      (OpStream.verifyChain (OpStream.canonical h sw) reattributed)
                       "a re-attributed op no longer hashes to its stored chain link"
 
-                  match OpStream.firstChainBreak h sw reattributed with
+                  match OpStream.firstChainBreak (OpStream.canonical h sw) reattributed with
                   | Some b ->
                       Expect.equal b.Index 1 "break localised to the re-attributed record"
                       // 0.23.0 — the reason is typed. `HashMismatch` is the digest check, which is
@@ -128,14 +129,13 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  match
-                      OpStream.toJsonl sw recs
-                      |> OpStream.fromJsonl sw
-                      |> Result.mapError StreamLoadFault.toString
-                  with
+                  match Jsonl.write sw recs |> Jsonl.read sw |> Result.mapError StreamLoadFault.toString with
                   | Ok restored ->
                       Expect.equal restored recs "records (typed actor included) survive the round-trip"
-                      Expect.isTrue (OpStream.verifyChain h sw restored) "restored chain still verifies"
+
+                      Expect.isTrue
+                          (OpStream.verifyChain (OpStream.canonical h sw) restored)
+                          "restored chain still verifies"
                   | Error e -> failtestf "fromJsonl failed: %s" e
               | Error e -> failtestf "build failed: %A" e
 
@@ -147,7 +147,7 @@ let tests =
               let step acc (actor, op) =
                   acc
                   |> Result.bind (fun (st, recs) ->
-                      OpStream.appendWith OpStream.legacyActorConfig h sw actor op st recs)
+                      OpStream.append (OpStream.ofConfig StreamConfig.legacyActor h sw) actor op st recs)
 
               match
                   [ Human "alice", Inc 5; Human "bob", Inc 3 ]
@@ -155,11 +155,11 @@ let tests =
               with
               | Ok(_, legacy) ->
                   Expect.isTrue
-                      (OpStream.verifyChainWith OpStream.legacyActorConfig h sw legacy)
+                      (OpStream.verifyChain (OpStream.ofConfig StreamConfig.legacyActor h sw) legacy)
                       "intact under the legacy bare-string config"
 
                   Expect.isFalse
-                      (OpStream.verifyChain h sw legacy)
+                      (OpStream.verifyChain (OpStream.canonical h sw) legacy)
                       "the canonical typed-actor config does not verify the legacy chain"
               | Error e -> failtestf "legacy build failed: %A" e
 
@@ -168,7 +168,7 @@ let tests =
               let step acc (actor, op) =
                   acc
                   |> Result.bind (fun (st, recs) ->
-                      OpStream.appendWith OpStream.legacyActorConfig h sw actor op st recs)
+                      OpStream.append (OpStream.ofConfig StreamConfig.legacyActor h sw) actor op st recs)
 
               match
                   [ Human "alice", Inc 5; Human "bob", Inc 3; Human "alice", Dec 2 ]
@@ -178,17 +178,19 @@ let tests =
                   // a pre-320 file on disk: bare-string actors
                   let file = toLegacyJsonl legacy
 
-                  match
-                      OpStream.fromJsonlLegacyActor sw file
-                      |> Result.mapError StreamLoadFault.toString
-                  with
+                  match Jsonl.readLegacyActor sw file |> Result.mapError StreamLoadFault.toString with
                   | Ok read ->
                       Expect.equal read legacy "the legacy reader lifts each bare-string actor to Human"
 
-                      match OpStream.rehash OpStream.legacyActorConfig OpStream.canonicalConfig h sw read with
+                      match
+                          OpStream.rehash
+                              (OpStream.ofConfig StreamConfig.legacyActor h sw)
+                              (OpStream.canonical h sw)
+                              read
+                      with
                       | Ok migrated ->
                           Expect.isTrue
-                              (OpStream.verifyChain h sw migrated)
+                              (OpStream.verifyChain (OpStream.canonical h sw) migrated)
                               "the migrated chain verifies under the canonical typed-actor config"
 
                           Expect.equal
@@ -197,7 +199,7 @@ let tests =
                               "actors are preserved (still Human) — only the hash chain changed"
 
                           Expect.equal (OpStream.replay sw 0 migrated) (Ok live) "replay reproduces the same state"
-                      | Error e -> failtestf "rehash failed: %s" e
+                      | Error e -> failtestf "rehash failed: %A" e
                   | Error e -> failtestf "fromJsonlLegacyActor failed: %s" e
               | Error e -> failtestf "legacy build failed: %A" e
 
@@ -207,15 +209,18 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  Expect.equal (OpStream.attestHead OpStream.noAttestation recs) None "no-op sink ⇒ no attestation"
+                  Expect.equal
+                      (Attestation.attestHead Attestation.noAttestation StreamConfig.canonical recs)
+                      None
+                      "no-op sink ⇒ no attestation"
 
                   let bogus =
-                      { Head = OpStream.head recs
+                      { Head = OpStream.head StreamConfig.canonical recs
                         KeyId = "k"
                         Signature = "s" }
 
                   Expect.isFalse
-                      (OpStream.verifyAttestation OpStream.noAttestation bogus recs)
+                      (Attestation.verifyAttestation Attestation.noAttestation StreamConfig.canonical bogus recs)
                       "no-op sink verifies nothing"
               | Error e -> failtestf "build failed: %A" e
 
@@ -225,12 +230,15 @@ let tests =
 
               match build () with
               | Ok(_, recs) ->
-                  match OpStream.attestHead sink recs with
+                  match Attestation.attestHead sink StreamConfig.canonical recs with
                   | Some att ->
-                      Expect.equal att.Head (OpStream.head recs) "the attestation covers the current head"
+                      Expect.equal
+                          att.Head
+                          (OpStream.head StreamConfig.canonical recs)
+                          "the attestation covers the current head"
 
                       Expect.isTrue
-                          (OpStream.verifyAttestation sink att recs)
+                          (Attestation.verifyAttestation sink StreamConfig.canonical att recs)
                           "the signed checkpoint verifies against the head"
                   | None -> failtest "expected the sink to sign"
               | Error e -> failtestf "build failed: %A" e
@@ -243,11 +251,15 @@ let tests =
 
               match build () with
               | Ok(live, recs) ->
-                  let att = OpStream.attestHead sink recs |> Option.get
+                  let att = Attestation.attestHead sink StreamConfig.canonical recs |> Option.get
 
                   // an independent verifier, given only the records + the attestation:
-                  Expect.isTrue (OpStream.verifyChain h sw recs) "(1) the hash chain is intact"
-                  Expect.isTrue (OpStream.verifyAttestation sink att recs) "(2) the signed head checks out"
+                  Expect.isTrue (OpStream.verifyChain (OpStream.canonical h sw) recs) "(1) the hash chain is intact"
+
+                  Expect.isTrue
+                      (Attestation.verifyAttestation sink StreamConfig.canonical att recs)
+                      "(2) the signed head checks out"
+
                   Expect.equal (OpStream.replay sw 0 recs) (Ok live) "(3) replay re-derives exactly the state"
                   Expect.equal (OpStream.replay sw 0 recs) (OpStream.replay sw 0 recs) "replay is deterministic"
 
@@ -258,7 +270,7 @@ let tests =
                       |> List.mapi (fun i r -> if i = 1 then { r with Actor = Human "mallory" } else r)
 
                   Expect.isFalse
-                      (OpStream.verifyChain h sw tampered)
+                      (OpStream.verifyChain (OpStream.canonical h sw) tampered)
                       "re-attribution breaks the chain ⇒ the attested head no longer follows from the log"
               | Error e -> failtestf "build failed: %A" e
 
@@ -276,7 +288,10 @@ let tests =
               Expect.equal (Dag.heads dag) [ m ] "the merge is the sole head"
 
               // an independent verifier:
-              Expect.isTrue (Dag.verifyDag h sw dag) "(1) every node id is the content hash of its (parents, actor, op)"
+              Expect.isTrue
+                  (Dag.verifyDag (OpStream.canonical h sw) dag)
+                  "(1) every node id is the content hash of its (parents, actor, op)"
+
               Expect.isTrue (sink.Verify att m) "(2) the signed head id checks out"
 
               match Dag.tryReplayTo sw 0 dag m with
@@ -290,4 +305,6 @@ let tests =
               let tampered =
                   DagOf.nodes (dag.Nodes |> Map.map (fun _ n -> { n with Actor = Human "mallory" }))
 
-              Expect.isFalse (Dag.verifyDag h sw tampered) "re-attribution breaks every node's content id" ]
+              Expect.isFalse
+                  (Dag.verifyDag (OpStream.canonical h sw) tampered)
+                  "re-attribution breaks every node's content id" ]

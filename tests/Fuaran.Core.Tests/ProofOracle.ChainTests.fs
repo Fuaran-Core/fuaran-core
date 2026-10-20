@@ -125,7 +125,7 @@ let private dagVerdicts
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (dag: Dag.T<'Op>)
     : DagVerdict * DagVerdict =
-    prodDagVerdict (Dag.firstBreak prodHash w dag),
+    prodDagVerdict (Dag.firstBreak (OpStream.canonical prodHash w) dag),
     modelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
 
 /// The DAG `FoldConfluence.foldOnce` builds, under a CHOSEN `HashFn` — one shared base node and
@@ -374,7 +374,7 @@ let private chainVerdicts
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (rs: OpRecord<'Op> list)
     : ChainVerdict * ChainVerdict =
-    prodChainVerdict (OpStream.firstChainBreak prodHash w rs),
+    prodChainVerdict (OpStream.firstChainBreak (OpStream.canonical prodHash w) rs),
     modelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
 
 /// A chain production built by `OpStream.append`, skipping the ops the domain reducer rejects —
@@ -390,7 +390,7 @@ let private chainUnder
     let mutable rs: OpRecord<'Op> list = OpStream.empty
 
     for op in ops do
-        match OpStream.append hashFn w actor op st rs with
+        match OpStream.append (OpStream.canonical hashFn w) actor op st rs with
         | Ok(st', rs') ->
             st <- st'
             rs <- rs'
@@ -703,7 +703,7 @@ let private snapshotDifferential
                     showPos
                     (modelPay mode stateEnc)
                     apply
-                    OpStream.canonicalConfig.Genesis
+                    StreamConfig.canonical.Genesis
                     gen.State0
                     (toChainRecords rs)
                     (posOfInt n)
@@ -778,8 +778,10 @@ let private snapshotDifferential
                     )
 
                 // `compact_preserves_verify`, held of PRODUCTION's three values.
-                let whole = OpStream.verifyChain prodHash w rs
-                let prefix = OpStream.verifyChain prodHash w (List.truncate n rs)
+                let whole = OpStream.verifyChain (OpStream.canonical prodHash w) rs
+
+                let prefix =
+                    OpStream.verifyChain (OpStream.canonical prodHash w) (List.truncate n rs)
 
                 if whole <> (prefix && pAcross) then
                     note (
@@ -943,9 +945,9 @@ let private modelVerify (sink: IAttestationSink) (att: Chain.attestation) (head:
 /// The shape of `Conformance.attestationLawsAt`'s forgery, spelled here over a step list because a
 /// splice changes the chain's LENGTH, which a record-for-record rehash cannot.
 let private remint (hashFn: HashFn) (encode: 'Op -> string) (steps: (Actor * 'Op) list) : OpRecord<'Op> list =
-    (([], OpStream.canonicalConfig.Genesis, 0), steps)
+    (([], StreamConfig.canonical.Genesis, 0), steps)
     ||> List.fold (fun (acc, prev, i) (actor, op) ->
-        let h = hashFn prev (OpStream.canonicalConfig.Payload i actor (encode op))
+        let h = hashFn prev (StreamConfig.canonical.Payload i actor (encode op))
 
         { Seq = i
           Actor = actor
@@ -1118,7 +1120,7 @@ let private signedHeadDifferential
                     (steps |> List.map (snd >> w.Encode) |> String.concat "; ")
 
             // `OpStream.head` against `chain_head`, and the premise the theorem carries about it.
-            let pHead = OpStream.head intact
+            let pHead = OpStream.head StreamConfig.canonical intact
             let mHead = Chain.chain_head (toChainRecords intact)
 
             if pHead <> mHead then
@@ -1137,7 +1139,7 @@ let private signedHeadDifferential
                 note (sprintf "%s\n  the test's own re-mint does not reproduce production's append" (here "intact"))
 
             // `attestHead` against `attest_head`.
-            let pAtt = OpStream.attestHead sink intact
+            let pAtt = Attestation.attestHead sink StreamConfig.canonical intact
             let mAtt = Chain.attest_head (modelSign sink) (toChainRecords intact)
 
             (match pAtt, mAtt with
@@ -1157,7 +1159,8 @@ let private signedHeadDifferential
                         MultiKey = t.MultiKey + (if List.length ring.Keys > 1 then 1 else 0) }
 
                 let accepts (verifier: IAttestationSink) (a: Attestation) (rs: OpRecord<'Op> list) : bool * bool =
-                    (OpStream.verifyChain prodHash w rs && OpStream.verifyAttestation verifier a rs),
+                    (OpStream.verifyChain (OpStream.canonical prodHash w) rs
+                     && Attestation.verifyAttestation verifier StreamConfig.canonical a rs),
                     Chain.accepts_signed
                         modelHash
                         showPos
@@ -1222,7 +1225,7 @@ let private signedHeadDifferential
                                 (if sp.Steps <> steps then "moved" else "did not move")
                         )
 
-                    let walker = OpStream.verifyChain prodHash w pForged
+                    let walker = OpStream.verifyChain (OpStream.canonical prodHash w) pForged
                     let accepted = agree sp.Name (accepts sink att pForged)
 
                     t <-
@@ -1519,7 +1522,7 @@ let private payloadSpliceDifferential
                 op)
             |> List.fold
                 (fun (st, acc) (actor, op) ->
-                    match OpStream.append prodHash w actor op st acc with
+                    match OpStream.append (OpStream.canonical prodHash w) actor op st acc with
                     | Ok(st', acc') -> st', acc'
                     | Error _ -> st, acc)
                 (gen.State0, OpStream.empty)
@@ -1950,7 +1953,7 @@ let tests =
                         Op = planLaneGen.BaseOp }
                   |> DagOf.nodes
 
-              match Dag.firstBreak OpStream.defaultHash planW spoiled with
+              match Dag.firstBreak (OpStream.canonical OpStream.defaultHash planW) spoiled with
               | Some b ->
                   // Typed since Phase 147 — `Reason` was the string this case compared when it was
                   // written, and comparing the case is what that phase made possible.
@@ -2007,7 +2010,7 @@ let tests =
                   )
 
               Expect.isTrue
-                  (Dag.verifyDag OpStream.defaultHash lossy tampered)
+                  (Dag.verifyDag (OpStream.canonical OpStream.defaultHash lossy) tampered)
                   "under a non-injective CODEC — the hash untouched — production's own walker cannot see the tamper"
 
           // ---- Phase 197 — the envelope parse: the linear side's premise, discharged ----
@@ -2022,7 +2025,7 @@ let tests =
                       for o in adversarialEnvelopeOps do
                           Expect.equal
                               (modelEnvelope showPos seq (Actor.encode a) o)
-                              (OpStream.canonicalConfig.Payload seq a o)
+                              (StreamConfig.canonical.Payload seq a o)
                               (sprintf "the model's envelope is production's payload for seq=%d actor=%A op=%s" seq a o)
 
           testCase "the envelope parse recovers the sequence, the actor and the op over the adversarial population"
@@ -2336,7 +2339,9 @@ let tests =
                       else
                           r)
 
-              Expect.isFalse (OpStream.verifyChain OpStream.defaultHash planW rs) "the original does not verify"
+              Expect.isFalse
+                  (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash planW) rs)
+                  "the original does not verify"
 
               match SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 2 with
               | Error e -> failtestf "the tampered prefix still replays, so compact does not refuse: %s" e
@@ -2356,7 +2361,7 @@ let tests =
                       "and so does the model — the split theorem says exactly this"
 
                   Expect.isFalse
-                      (OpStream.verifyChain OpStream.defaultHash planW (List.truncate 2 rs))
+                      (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash planW) (List.truncate 2 rs))
                       "the prefix is where the break is, which is the other conjunct of the split"
 
           testCase
@@ -2369,14 +2374,16 @@ let tests =
               // agrees with production value for value. Until 227 the snapshot at zero said `""` and
               // the first tail record linked to the genesis, so zero did not verify.
               let cfg =
-                  { OpStream.canonicalConfig with
+                  { StreamConfig.canonical with
                       Genesis = "g0" }
 
               let mutable st = planLaneGen.State0
               let mutable rs: OpRecord<PlanOp> list = OpStream.empty
 
               for op in [ AddItem("g1", "one"); AddItem("g2", "two") ] do
-                  match OpStream.appendWith cfg OpStream.defaultHash planW (Human "writer") op st rs with
+                  match
+                      OpStream.append (OpStream.ofConfig cfg OpStream.defaultHash planW) (Human "writer") op st rs
+                  with
                   | Ok(st', rs') ->
                       st <- st'
                       rs <- rs'
@@ -2385,7 +2392,7 @@ let tests =
               Expect.hasLength rs 2 "both appends were accepted"
 
               Expect.isTrue
-                  (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
+                  (OpStream.verifyChain (OpStream.ofConfig cfg OpStream.defaultHash planW) rs)
                   "the stream verifies under its own config"
 
               let prodWith (mode: SnapshotMode) (n: int) =
@@ -2446,8 +2453,10 @@ let tests =
                           // `compact_preserves_verify`, held of production under the config, with no
                           // condition on the genesis left in it.
                           Expect.equal
-                              (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
-                              (OpStream.verifyChainWith cfg OpStream.defaultHash planW (List.truncate n rs)
+                              (OpStream.verifyChain (OpStream.ofConfig cfg OpStream.defaultHash planW) rs)
+                              (OpStream.verifyChain
+                                  (OpStream.ofConfig cfg OpStream.defaultHash planW)
+                                  (List.truncate n rs)
                                && pAcross)
                               (sprintf "%A at %d: the split holds under the configured genesis" mode n)
 
@@ -2486,7 +2495,7 @@ let tests =
 
               Expect.hasLength rs 2 "both appends were accepted"
 
-              for cfg in [ OpStream.canonicalConfig; OpStream.legacyActorConfig ] do
+              for cfg in [ StreamConfig.canonical; StreamConfig.legacyActor ] do
                   Expect.equal cfg.Genesis "" "a shipped config carries the empty genesis"
 
                   for n in 0 .. List.length rs + 1 do
@@ -2613,12 +2622,12 @@ let tests =
               let forged =
                   remint OpStream.defaultHash planW.Encode [ List.head steps; Human "writer", AddItem("s2", "TWO") ]
 
-              match OpStream.attestHead promiscuousSink signed with
+              match Attestation.attestHead promiscuousSink StreamConfig.canonical signed with
               | None -> failtest "the promiscuous sink signs"
               | Some att ->
                   Expect.isTrue
-                      (OpStream.verifyChain OpStream.defaultHash planW forged
-                       && OpStream.verifyAttestation promiscuousSink att forged)
+                      (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash planW) forged
+                       && Attestation.verifyAttestation promiscuousSink StreamConfig.canonical att forged)
                       "production accepts the forgery under a sink that does not bind"
 
                   Expect.isTrue
@@ -2635,12 +2644,12 @@ let tests =
                   // Under the keyring sink the same forgery is refused by both.
                   let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
 
-                  match OpStream.attestHead sink signed with
+                  match Attestation.attestHead sink StreamConfig.canonical signed with
                   | None -> failtest "the keyring sink signs"
                   | Some bound ->
                       Expect.isFalse
-                          (OpStream.verifyChain OpStream.defaultHash planW forged
-                           && OpStream.verifyAttestation sink bound forged)
+                          (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash planW) forged
+                           && Attestation.verifyAttestation sink StreamConfig.canonical bound forged)
                           "production refuses it under a sink that binds"
 
                       Expect.isFalse
@@ -2662,17 +2671,25 @@ let tests =
               let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
 
               let empty: OpRecord<PlanOp> list = OpStream.empty
-              Expect.equal (OpStream.head empty) "" "production's head of the empty chain is the literal empty string"
+
+              Expect.equal
+                  (OpStream.head StreamConfig.canonical empty)
+                  ""
+                  "production's head of the empty chain is the literal empty string"
+
               Expect.equal (Chain.chain_head (toChainRecords empty)) "" "and so is the model's"
 
               let one =
                   remint OpStream.defaultHash planW.Encode [ Human "writer", AddItem("s1", "one") ]
 
-              match OpStream.attestHead sink empty, OpStream.attestHead sink one with
+              match
+                  Attestation.attestHead sink StreamConfig.canonical empty,
+                  Attestation.attestHead sink StreamConfig.canonical one
+              with
               | Some overNothing, Some overOne ->
                   let accepts (att: Attestation) (rs: OpRecord<PlanOp> list) =
-                      (OpStream.verifyChain OpStream.defaultHash planW rs
-                       && OpStream.verifyAttestation sink att rs),
+                      (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash planW) rs
+                       && Attestation.verifyAttestation sink StreamConfig.canonical att rs),
                       Chain.accepts_signed
                           OpStream.defaultHash
                           showPos

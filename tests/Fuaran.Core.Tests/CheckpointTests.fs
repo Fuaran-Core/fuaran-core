@@ -88,8 +88,7 @@ let tests =
 
               // the one pre-image, reached through the linear family: the snapshot at seq 0 chained from m
               let snap =
-                  OpStream.Snapshots.take SnapshotMode.Strict OpStream.canonicalConfig h enc sw 10 [] 0
-                  |> ok
+                  Snapshots.take SnapshotMode.Strict (OpStream.canonical h sw) enc 10 [] 0 |> ok
 
               Expect.equal snap.Hash (h "" "{\"snapshot\":true,\"seq\":0,\"state\":10}") "the linear seal at genesis"
 
@@ -287,7 +286,7 @@ let tests =
               Expect.isTrue (Dag.verifyDagFrom h enc sw cp dag) "so does the full DAG"
 
               Expect.equal
-                  (Dag.firstBreak h sw small)
+                  (Dag.firstBreak (OpStream.canonical h sw) small)
                   (Some
                       { NodeId = m
                         Reason = DagBreakReason.MissingParent

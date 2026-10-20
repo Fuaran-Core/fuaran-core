@@ -24,7 +24,7 @@ type OpRecord<'Op> =
 /// walkers can report, typed where the reason is MINTED rather than re-derived downstream by
 /// string-matching this library's spellings.
 ///
-/// **Three named cases for four spellings, deliberately.** `firstChainBreakWith` and
+/// **Three named cases for four spellings, deliberately.** `firstChainBreak` and
 /// `firstCaptureBreak` spell the digest failure differently (`"tampered op/actor/seq"` vs
 /// `"tampered capture"`) because they walk different records; both are the SAME check, and which
 /// walker ran is the caller's own choice — it called one of them. A case that every consumer
@@ -116,20 +116,22 @@ type StreamWitness<'Op, 'State, 'Rej> =
 /// Fable-clean default) for SHA-256 at its boundary while keeping cross-host parity.
 type HashFn = string -> string -> string
 
-/// The chain-*payload* binding (Phase 255 — finding F4): `Payload seq actor opJson -> payload`
-/// plus the genesis sentinel for the first record's `PrevHash`. Cross-host hash parity is
-/// already pluggable via `HashFn`; the payload format is the other half. A domain whose
-/// persisted streams use its own legacy chain format (Documents `"%d|%s|%s|%s"` + `"genesis"`,
-/// Calc / Geom their own) matches that format with a `StreamConfig`, verifies the existing
-/// streams, then `rehash`es to the canonical form — no flag-day re-hash of history. The default
-/// (`OpStream.canonicalConfig`) is the `{seq,actor,op}` envelope + `""` genesis. **Phase 320
-/// bumped the hash format**: `actor` is now the typed `Actor` *object* rather than a bare string,
-/// so the canonical payload is no longer byte-identical to the pre-320 chain — a stream persisted
-/// before Phase 320 verifies under `legacyActorConfig` and `rehash`es to the new canonical form.
-/// **Phase 287 changed the string spelling inside it**: every control character in the actor's
-/// strings is `\u00xx` now, where `\n` / `\r` / `\t` were short escapes — a stream persisted
-/// between the two, whose actors carry such a character, verifies under `legacyEscapeConfig` and
-/// `rehash`es to canonical the same way; one whose actors carry none hashes identically under both.
+/// How this package builds the pre-images it hashes (Phase 255 — finding F4; one value with the
+/// encoding profile since Phase 516): the chain-*payload* binding `Payload seq actor opJson ->
+/// payload`, the genesis sentinel for the first record's `PrevHash`, and the JSON string spelling
+/// (`Quote`) of every string this package spells inside a pre-image it builds itself. Cross-host hash
+/// parity is already pluggable via `HashFn`; the payload format is the other half. A domain whose
+/// persisted streams use its own legacy chain format (Documents `"%d|%s|%s|%s"` + `"genesis"`, Calc /
+/// Geom their own) matches that format with a `StreamConfig`, verifies the existing streams, then
+/// `OpStream.rehash`es to the canonical form — no flag-day re-hash of history.
+///
+/// **The encoding profiles are constructors** (Phase 516): `StreamConfig.canonical` is the
+/// `{seq,actor,op}` envelope + `""` genesis with every control character spelled `\u00xx` (the
+/// spelling since `0.33.0`, Phase 287 — `Wire`'s `EncodingProfile.V2`); `StreamConfig.legacyEscape` is
+/// the same envelope with `\n`, `\r` and `\t` spelled short (`0.30.0` through `0.32.0` — `V1`); and
+/// `StreamConfig.legacyActor` is the pre-Phase-320 envelope, which folded the actor as a bare string.
+/// A store reads the profile it declares as one of these values, and migrates by `OpStream.rehash`
+/// between two streams built over them.
 type StreamConfig =
     {
         /// `seq -> actor -> encodedOp -> payload`: the text the `HashFn` digests, after the previous
@@ -137,6 +139,28 @@ type StreamConfig =
         Payload: int -> Actor -> string -> string
         /// The `PrevHash` of the first record, and the `head` of an empty stream.
         Genesis: string
+        /// The JSON string spelling of the strings this package embeds in a pre-image it builds itself
+        /// (Phase 516): the actor inside a DAG node id (`StreamConfig.spellActor`) and a capture's effect
+        /// and determinism tags. `StreamConfig.canonical.Quote` spells every control character as
+        /// lower-case `\u00xx`; `StreamConfig.legacyEscape.Quote` spells `\n`, `\r` and `\t` short. A
+        /// host's own config takes the canonical one unless its store was written under another.
+        Quote: string -> string
+    }
+
+/// An op stream's whole configuration as ONE value (Phase 516): how its records are hashed
+/// (`Config`), the chain hash (`HashFn`) and the domain witness (`Witness`). Every chain verb takes
+/// it once, so a stream cannot be appended under one config and verified, compacted or attested under
+/// another — the `…With cfg` twin each verb used to carry is the verb. Built with
+/// `OpStream.canonical hashFn w` (the canonical config) or `OpStream.ofConfig cfg hashFn w` (a legacy
+/// profile's config, or a host's own).
+type Stream<'Op, 'State, 'Rej> =
+    {
+        /// The payload binding, genesis and string spelling every record is hashed under.
+        Config: StreamConfig
+        /// The chain hash, folded as `HashFn prevHash payload`.
+        HashFn: HashFn
+        /// The domain reducer and op codec.
+        Witness: StreamWitness<'Op, 'State, 'Rej>
     }
 
 /// The boundary a chained run of records hangs from (Phase 530): the sequence its first record
@@ -278,6 +302,77 @@ module Anchor =
     /// A stream's own anchor under `cfg`: sequence zero, linked to the config's genesis.
     let genesis (cfg: StreamConfig) : Anchor = { Seq = 0; PrevHash = cfg.Genesis }
 
+/// The encoding profiles as constructors (Phase 516) — the configs a store declares its chain by, and
+/// the spelling a profile gives the actor. Each is the whole `StreamConfig`: a stream built over one
+/// hashes, verifies and re-mints under it, and `OpStream.rehash` moves a stream between two of them.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module StreamConfig =
+
+    /// The canonical `{seq, actor, op}` payload the chain hash is computed over. Since Phase 320 the
+    /// `actor` is the typed `Actor` *object* (`Actor.encode`), so altering the attribution changes the
+    /// hash — attribution is folded into the integrity chain. Since Phase 287 the actor's strings carry
+    /// every control character as `\u00xx`, the spelling the UI host's DAG chain and the TypeScript twin
+    /// already fold, so the linear hash of a record agrees with both.
+    let private payloadAs (quote: string -> string) (seq: int) (actor: Actor) (opJson: string) : string =
+        "{\"seq\":"
+        + string seq
+        + ",\"actor\":"
+        + Actor.encodeWith quote actor
+        + ",\"op\":"
+        + opJson
+        + "}"
+
+    /// The canonical config — the `{seq,actor,op}` envelope over the typed actor, the `""` genesis, and
+    /// every control character in a pre-image's strings spelled `\u00xx` (the spelling since `0.33.0`,
+    /// `Wire`'s `EncodingProfile.V2`). What `OpStream.canonical` builds a stream over.
+    let canonical: StreamConfig =
+        { Payload = payloadAs JsonString.quote
+          Genesis = ""
+          Quote = JsonString.quote }
+
+    /// The **pre-Phase-287** config (`0.30.0` through `0.32.0`; `Wire`'s `EncodingProfile.V1`) — the
+    /// same `{seq,actor,op}` envelope over the same typed `Actor` object, but with `\n`, `\r` and `\t`
+    /// inside the strings it spells written as the short escapes rather than `\u000a` / `\u000d` /
+    /// `\u0009`, in the actor of the chain payload, the actor of a DAG node id and a capture's tags
+    /// alike. The `from` stream of a migration for a store persisted between Phase 320 and Phase 287:
+    /// verify under it, then `OpStream.rehash` to canonical.
+    ///
+    /// A record whose actor holds no control character has the SAME payload under both configs, so for
+    /// such a stream the rehash is a no-op that reproduces every hash — which is the case for every
+    /// store this package's own tests and consumers have written. The rehash proves that rather than
+    /// assuming it: verifying an unmigrated control-free store under `canonical` already passes.
+    let legacyEscape: StreamConfig =
+        { Payload = payloadAs JsonString.quoteLegacy
+          Genesis = ""
+          Quote = JsonString.quoteLegacy }
+
+    /// The **pre-Phase-320** config — it folded the actor as a *bare JSON string* (`"actor":"alice"`)
+    /// rather than the typed object. The `from` stream of a migration for a store persisted before the
+    /// typed-actor change: read it with `Jsonl.readLegacyActor` (which lifts each bare-string actor to
+    /// `Human`), verify under it, then `OpStream.rehash` to canonical — the standard Phase-255
+    /// migration shape. Pre-320 streams only ever held `Human` actors; an `Agent` reaching this payload
+    /// is migration misuse, so it folds in just the id (best effort). The bare string keeps the pre-287
+    /// short escapes: this payload reproduces the bytes a pre-320 writer produced, and that writer
+    /// wrote `\n`.
+    let legacyActor: StreamConfig =
+        { Payload =
+            fun seq actor opJson ->
+                "{\"seq\":"
+                + string seq
+                + ",\"actor\":"
+                + JsonString.quoteLegacy (Actor.id actor)
+                + ",\"op\":"
+                + opJson
+                + "}"
+          Genesis = ""
+          Quote = JsonString.quoteLegacy }
+
+    /// The actor's pre-image under `cfg`'s spelling: `Actor.encode` under `canonical`, and under
+    /// `legacyEscape` the same object with `\n`, `\r` and `\t` spelled short — the bytes `0.30.0`
+    /// folded into every chain hash and DAG node id.
+    let spellActor (cfg: StreamConfig) (actor: Actor) : string = Actor.encodeWith cfg.Quote actor
+
 /// The chain verbs, written once over a record kind's shape (Phase 530). `OpStream`'s op-stream
 /// verbs, the capture journals', the snapshot and the compacted stream's are each one of these over
 /// its own instance, so a break is found the same way in an op stream, a journal, a snapshot's tail or
@@ -287,7 +382,8 @@ module Anchor =
 module ChainShape =
 
     /// The op record's shape (Phase 530): the payload `cfg` binds over `{seq, actor, encode op}`.
-    /// `ChainShape.records OpStream.canonicalConfig w.Encode` is the shape `OpStream.verifyChain` walks.
+    /// `ChainShape.records StreamConfig.canonical w.Encode` is the shape `OpStream.verifyChain` walks under
+    /// the canonical stream.
     let records (cfg: StreamConfig) (encode: 'Op -> string) : ChainShape<OpRecord<'Op>> =
         { SeqOf = fun r -> r.Seq
           PrevOf = fun r -> r.PrevHash
@@ -365,22 +461,23 @@ module ChainShape =
         let at = tip shape anchor items
         items @ [ linkAt shape hashFn at (make at.Seq) ]
 
-    /// Re-chain a run (Phase 255's migration, over a shape since Phase 530): `items` verified under
-    /// `from` hung from `anchor` — the first break is the `Error`, and nothing is re-chained — then each
-    /// record mapped by `map` and linked under `into`, hung from `{ anchor with PrevHash = intoPrev }`.
-    /// Each record keeps its sequence; only its link and hash change. `OpStream.tryRehash` is this
-    /// with `map = id` from a genesis to a genesis; a stream whose ops are re-scoped is this with the
-    /// re-scoping as `map`.
+    /// Re-chain a run (Phase 255's migration, over a shape since Phase 530; a hash per side since Phase
+    /// 516): `items` verified under `from` and `fromHash`, hung from `anchor` — the first break is the
+    /// `Error`, and nothing is re-chained — then each record mapped by `map` and linked under `into` and
+    /// `intoHash`, hung from `{ anchor with PrevHash = intoPrev }`. Each record keeps its sequence; only
+    /// its link and hash change. `OpStream.rehash` is this with `map = id` from one stream's genesis to
+    /// another's; a stream whose ops are re-scoped is this with the re-scoping as `map`.
     let rehash
         (from: ChainShape<'R>)
+        (fromHash: HashFn)
         (into: ChainShape<'S>)
-        (hashFn: HashFn)
+        (intoHash: HashFn)
         (anchor: Anchor)
         (intoPrev: string)
         (map: 'R -> 'S)
         (items: 'R list)
         : Result<'S list, ChainBreak> =
-        match walk from hashFn anchor items with
+        match walk from fromHash anchor items with
         | Some b -> Error b
         | None ->
             let rec go (prev: string) acc =
@@ -388,16 +485,18 @@ module ChainShape =
                 | [] -> List.rev acc
                 | r :: rest ->
                     let m = map r
-                    let r' = into.Link m prev (hashFn prev (into.PayloadOf m))
+                    let r' = into.Link m prev (intoHash prev (into.PayloadOf m))
                     go (into.HashOf r') (r' :: acc) rest
 
             Ok(go intoPrev [] items)
 
-/// The bodies of the `OpStream` chain members (Phase 332): the chain hashes, the payload configs,
-/// append, verification, rehash, replay, the chain head, compare-and-append and idempotent append.
-/// Internal: a consumer reaches each one through its forward in `OpStream` (OpStream.fs), which
-/// carries the member's contract and documentation.
-module internal OpStreamChain =
+/// Append-only hash-chained op stream + deterministic replay, generic over the `StreamWitness` — the
+/// highest-genericity core layer. Since Phase 516 the chain verbs live here with their bodies, and each
+/// takes the stream's whole configuration as one `Stream` value; the JSONL readers and writer are
+/// `Jsonl`'s, the snapshot family `Snapshots`', the compacted stream `Compacted`'s, determinism
+/// capture `Capture`'s and `KeyedCapture`'s, attestation `Attestation`'s and the attributed lift
+/// `Attributed`'s.
+module OpStream =
 
     // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `OpStream` is standalone
     // by design — it takes no `Tree` dependency (DECISIONS D2), and this is the one hash the layer
@@ -424,8 +523,6 @@ module internal OpStreamChain =
             h <- ((lo * 403u) + (cross * 65536u)) &&& 0xFFFFFFFFu
 
         h.ToString("x8")
-
-    let defaultHash: HashFn = fun prev payload -> fnv1a (prev + "|" + payload)
 
     // ---- Phase 315: the named SHA-256 chain hash ----
     // A DELIBERATE COPY of `Hash.utf8Bytes` + `Hash.sha256HexOfBytes` (`Fuaran.Core.Tree`), for the
@@ -639,71 +736,43 @@ module internal OpStreamChain =
 
             sb.ToString()
 
+    /// The default portable hash: FNV-1a over `prevHash | payload`. **Portable is meant literally** —
+    /// value-identical on .NET and under Fable, so a browser replaying a chain a server wrote
+    /// computes the same hashes. That was not true before `0.6.0`; see the copy note at `fnv1a`.
+    let defaultHash: HashFn = fun prev payload -> fnv1a (prev + "|" + payload)
+
+    /// The named SHA-256 chain hash (Phase 315): lower-case hex SHA-256 over the UTF-8 bytes of
+    /// `prevHash + "|" + payload` — the same join `defaultHash` folds, under a cryptographic digest.
+    /// The `HashFn` a host passes where a chain must resist a forged second pre-image, which FNV-1a
+    /// cannot. It is byte-for-byte `fun prev payload -> Hash.sha256Hex (prev + "|" + payload)`, the
+    /// function several consumers wrote by hand, so each copy is replaceable by this name without
+    /// moving one persisted hash.
+    ///
+    /// **Over ill-formed text it inherits the platform's replacement**, as `Hash.sha256Hex` does: a
+    /// lone surrogate in an actor or an op's encoding is hashed as U+FFFD, so two records differing
+    /// only there share a digest. A `HashFn` is total and cannot refuse; a writer that must rule
+    /// that out checks its strings before it appends (`Hash.trySha256Hex` names the unit).
     let sha256Hash: HashFn = fun prev payload -> Sha256.hex (prev + "|" + payload)
 
-    /// The canonical `{seq, actor, op}` payload the chain hash is computed over. Since Phase 320
-    /// the `actor` is the typed `Actor` *object* (`Actor.encode`), so altering the attribution
-    /// changes the hash — attribution is folded into the integrity chain. Since Phase 287 the
-    /// actor's strings carry every control character as `\u00xx`, the spelling the UI host's DAG
-    /// chain and the TypeScript twin already fold, so the linear hash of a record agrees with both.
-    let private payloadOf (seq: int) (actor: Actor) (opJson: string) : string =
-        "{\"seq\":"
-        + string seq
-        + ",\"actor\":"
-        + Actor.encode actor
-        + ",\"op\":"
-        + opJson
-        + "}"
+    /// A stream over an explicit config (Phase 516): a legacy profile's (`StreamConfig.legacyEscape`,
+    /// `StreamConfig.legacyActor`) or a host's own. The `Stream` record spelled as a function, so the
+    /// type is never left to inference over its field labels.
+    let ofConfig
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        : Stream<'Op, 'State, 'Rej> =
+        { Config = cfg
+          HashFn = hashFn
+          Witness = w }
 
-    let canonicalConfig: StreamConfig = { Payload = payloadOf; Genesis = "" }
+    /// The canonical stream (Phase 516): `w` hashed by `hashFn` under `StreamConfig.canonical` — what
+    /// every stream a host writes today is.
+    let canonical (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) : Stream<'Op, 'State, 'Rej> =
+        ofConfig StreamConfig.canonical hashFn w
 
-    /// The **pre-Phase-287** canonical payload — the same `{seq,actor,op}` envelope over the same
-    /// typed `Actor` object, but with `\n`, `\r` and `\t` inside the actor's strings spelled as the
-    /// short escapes `\n` / `\r` / `\t` rather than `\u000a` / `\u000d` / `\u0009`. The migration
-    /// entry point for a stream persisted between Phase 320 and Phase 287: `verifyChainWith
-    /// legacyEscapeConfig` to confirm it is intact, then `rehash legacyEscapeConfig canonicalConfig`
-    /// to cut over — the Phase-255 shape, beside `legacyActorConfig`.
-    ///
-    /// A record whose actor holds no control character has the SAME payload under both configs, so
-    /// for such a stream the rehash is a no-op that reproduces every hash — which is the case for
-    /// every store this package's own tests and consumers have written. The rehash proves that
-    /// rather than assuming it: `verifyChainWith canonicalConfig` over an unmigrated control-free
-    /// store already passes.
-    let private legacyEscapePayload (seq: int) (actor: Actor) (opJson: string) : string =
-        "{\"seq\":"
-        + string seq
-        + ",\"actor\":"
-        + Actor.encodeWith JsonString.quoteLegacy actor
-        + ",\"op\":"
-        + opJson
-        + "}"
-
-    let legacyEscapeConfig: StreamConfig =
-        { Payload = legacyEscapePayload
-          Genesis = "" }
-
-    /// The **pre-Phase-320** canonical payload — it folded the actor as a *bare JSON string*
-    /// (`"actor":"alice"`) rather than the typed object. The migration entry point for a stream
-    /// persisted before the typed-actor change: read it with `fromJsonlLegacyActor` (which lifts
-    /// each bare-string actor to `Human`), `verifyChainWith legacyActorConfig` to confirm it is
-    /// intact, then `rehash legacyActorConfig canonicalConfig` to cut over — the standard
-    /// Phase-255 migration shape. Pre-320 streams only ever held `Human` actors; an `Agent`
-    /// reaching this payload is migration misuse, so it folds in just the id (best effort). The
-    /// bare string keeps the pre-287 short escapes (`JsonString.quoteLegacy`): this payload
-    /// reproduces the bytes a pre-320 writer produced, and that writer wrote `\n`.
-    let private legacyActorPayload (seq: int) (actor: Actor) (opJson: string) : string =
-        "{\"seq\":"
-        + string seq
-        + ",\"actor\":"
-        + JsonString.quoteLegacy (Actor.id actor)
-        + ",\"op\":"
-        + opJson
-        + "}"
-
-    let legacyActorConfig: StreamConfig =
-        { Payload = legacyActorPayload
-          Genesis = "" }
-
+    /// The stream with no records. Its `head` is the config's genesis, and the first `append` onto it
+    /// chains a record at `Seq` 0.
     let empty: OpRecord<'Op> list = []
 
     /// The tip of an op stream chained from `cfg`'s genesis: its length and its last hash.
@@ -713,6 +782,12 @@ module internal OpStreamChain =
 
         at.Seq, at.PrevHash
 
+    /// THE hash of one chained record (Phase 315): `hashFn prev (cfg.Payload seq actor encodedOp)`,
+    /// the value every `append` stores as `Hash` and every verifier recomputes. Public for an adapter
+    /// that keeps its own record type, or appends without the domain state (`appendChainOnly`), and
+    /// used to rebuild the payload by hand to get it — a copy that silently stops verifying the day
+    /// the payload binding moves. `encodedOp` is the witness's `Encode` of the op; `prev` is the
+    /// predecessor's `Hash`, or `cfg.Genesis` for the first record.
     let chainHashOf
         (cfg: StreamConfig)
         (hashFn: HashFn)
@@ -727,22 +802,20 @@ module internal OpStreamChain =
     /// record's shape, Phase 530): the state after it and the record it chained, or the witness's
     /// rejection. The single-op appends call this directly, so the record
     /// they return is the one chained here, never one read back out of a list (Phase 496).
-    let chainOne
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+    let internal chainOne
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (seq: int)
         (prev: string)
         (op: 'Op)
         (state: 'State)
         : Result<'State * OpRecord<'Op>, 'Rej> =
-        w.Apply op state
+        s.Witness.Apply op state
         |> Result.map (fun state' ->
             state',
             ChainShape.linkAt
-                (ChainShape.records cfg w.Encode)
-                hashFn
+                (ChainShape.records s.Config s.Witness.Encode)
+                s.HashFn
                 { Seq = seq; PrevHash = prev }
                 { Seq = seq
                   Actor = actor
@@ -754,9 +827,7 @@ module internal OpStreamChain =
     /// op in turn: the new records in order and the final state, or the first rejection with its index
     /// in `ops`. Nothing is copied; the caller splices the new records on once.
     let private chainOps
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (seq0: int)
         (prev0: string)
@@ -767,71 +838,66 @@ module internal OpStreamChain =
             function
             | [] -> Ok(st, List.rev acc)
             | op :: rest ->
-                match chainOne cfg hashFn w actor (seq0 + i) prev op st with
+                match chainOne s actor (seq0 + i) prev op st with
                 | Error e -> Error(i, e)
                 | Ok(st', r) -> go (i + 1) r.Hash st' (r :: acc) rest
 
         go 0 prev0 state [] ops
 
-    let appendWith
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+    /// Apply an op to the state; on success, chain a record onto the stream under `s`'s config and
+    /// hash. Returns the new state and the extended record list, or the domain rejection unchanged.
+    /// A stream in a legacy chain format is extended in its own format by a `Stream` built over that
+    /// format's config (`OpStream.ofConfig`).
+    ///
+    /// **Cost (Phase 296).** One walk of `records` and one copy — the list's end is where a record
+    /// goes, and an immutable list reaches its end only by walking it, so a single `append` is linear
+    /// in the stream and a loop of them is quadratic. A caller chaining several ops chains them with
+    /// `appendMany`, which walks and copies ONCE for the batch.
+    let append
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, 'Rej> =
-        let n, last = tip cfg records
+        let n, last = tip s.Config records
 
-        chainOne cfg hashFn w actor n last op state
+        chainOne s actor n last op state
         |> Result.map (fun (state', r) -> state', records @ [ r ])
 
-    let append
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (actor: Actor)
-        (op: 'Op)
-        (state: 'State)
-        (records: OpRecord<'Op> list)
-        : Result<'State * OpRecord<'Op> list, 'Rej> =
-        appendWith canonicalConfig hashFn w actor op state records
-
-    let appendManyWith
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+    /// Chain several ops by one actor in ONE walk of the stream (Phase 296): the same records, byte for
+    /// byte, as folding `append` over `ops`, at the cost of one `append` rather than `List.length ops`
+    /// of them. All or nothing: the first op the domain rejects is `Error(index in ops, rejection)` and
+    /// nothing is chained.
+    let appendMany
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (ops: 'Op list)
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, int * 'Rej> =
-        let n, last = tip cfg records
+        let n, last = tip s.Config records
 
-        chainOps cfg hashFn w actor n last ops state
+        chainOps s actor n last ops state
         |> Result.map (fun (state', added) -> state', records @ added)
 
-    let appendMany
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (actor: Actor)
-        (ops: 'Op list)
-        (state: 'State)
-        (records: OpRecord<'Op> list)
-        : Result<'State * OpRecord<'Op> list, int * 'Rej> =
-        appendManyWith canonicalConfig hashFn w actor ops state records
-
+    /// Chain one op onto the stream WITHOUT applying it (Phase 315) — no state in, no state out, no
+    /// domain rejection. For an adapter whose apply runs somewhere else (at `replay`, or in its own
+    /// reducer before it calls here), which used to recompute the payload and hash by hand to get the
+    /// record `append` would have written. The record is exactly that one — `chainHashOf` under `s`'s
+    /// config and hash, so a stream built with it verifies under `s` — and it carries nothing `append`
+    /// would have checked: an op the domain would refuse is chained all the same, and `replay` is where
+    /// it is refused. Only the witness's `Encode` is read. One walk and one copy, as `append`.
     let appendChainOnly
-        (hashFn: HashFn)
-        (encode: 'Op -> string)
+        (s: Stream<'Op, 'State, 'Rej>)
         (actor: Actor)
         (op: 'Op)
         (records: OpRecord<'Op> list)
         : OpRecord<'Op> list =
         ChainShape.append
-            (ChainShape.records canonicalConfig encode)
-            hashFn
-            (Anchor.genesis canonicalConfig)
+            (ChainShape.records s.Config s.Witness.Encode)
+            s.HashFn
+            (Anchor.genesis s.Config)
             (fun n ->
                 { Seq = n
                   Actor = actor
@@ -840,84 +906,49 @@ module internal OpStreamChain =
                   Hash = "" })
             records
 
-    /// The walker as `(genesis, seq0)` and four projections — `ChainShape.walk` at that anchor. Kept
-    /// for the facade's encoding-profile walk alone, which Phase 516 retires with the facade.
-    let walkChain
-        (hashFn: HashFn)
-        (genesis: string)
-        (seq0: int)
-        (seqOf: 'R -> int)
-        (prevOf: 'R -> string)
-        (hashOf: 'R -> string)
-        (payloadOf: 'R -> string)
-        (items: 'R list)
-        : ChainBreak option =
-        ChainShape.walk
-            { SeqOf = seqOf
-              PrevOf = prevOf
-              HashOf = hashOf
-              PayloadOf = payloadOf
-              Link = fun r _ _ -> r }
-            hashFn
-            { Seq = seq0; PrevHash = genesis }
-            items
+    /// The first integrity fault in a chain under `s` (Phase 21; under the stream's own config since
+    /// Phase 516) — the localising verifier. Walks the chain from `s`'s genesis and returns the first
+    /// record whose sequence, prev-link, or hash fails; `None` for an intact chain.
+    let firstChainBreak (s: Stream<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : ChainBreak option =
+        ChainShape.walk (ChainShape.records s.Config s.Witness.Encode) s.HashFn (Anchor.genesis s.Config) records
 
-    let firstChainBreakWith
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (records: OpRecord<'Op> list)
-        : ChainBreak option =
-        ChainShape.walk (ChainShape.records cfg w.Encode) hashFn (Anchor.genesis cfg) records
+    /// Recompute the chain from the records under `s` and confirm every link. Detects reordering,
+    /// tampering with an op or its attribution, and a broken prev-link. The migration entry point too:
+    /// a domain verifies its persisted legacy streams under a stream over their own config before
+    /// `rehash`ing them. One definition of integrity, localising (`firstChainBreak`) or boolean.
+    let verifyChain (s: Stream<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : bool =
+        firstChainBreak s records |> Option.isNone
 
-    let firstChainBreak
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (records: OpRecord<'Op> list)
-        : ChainBreak option =
-        firstChainBreakWith canonicalConfig hashFn w records
-
-    let verifyChainWith
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (records: OpRecord<'Op> list)
-        : bool =
-        firstChainBreakWith cfg hashFn w records |> Option.isNone
-
-    let verifyChain (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : bool =
-        verifyChainWith canonicalConfig hashFn w records
-
-    let tryRehash
-        (fromCfg: StreamConfig)
-        (toCfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+    /// Migrate a chain from one stream to another (Phase 255; typed break, Phase 296; one verb over two
+    /// streams since Phase 516). Verifies `records` under `from` first — a chain that does not verify
+    /// under its declared format is a migration the caller must not silently re-bless, so it is `Error`
+    /// carrying the first `ChainBreak` — then re-derives every `PrevHash` / `Hash` under `into`, from
+    /// `into`'s genesis. The ops, actors and sequence numbers are the source of truth; only the hash
+    /// chain changes. The result verifies under `into`, and rehashing it back is `records` again.
+    ///
+    /// The two streams may differ in any part: the config (a payload envelope or string spelling, the
+    /// legacy-actor and legacy-escape migrations), the hash (FNV-1a to SHA-256), or the witness's
+    /// `Encode` (a store whose op encoder rendered through `Json.renderWith EncodingProfile.V1` before
+    /// `0.33.0` verifies with its OLD encoder and re-mints with its new one). Only the witnesses'
+    /// `Encode` is read. A host that keys heads, snapshots or attestations by hash maps each old hash
+    /// to the new one by position: the result has one record per source record, in order.
+    let rehash
+        (from: Stream<'Op, 'State, 'Rej>)
+        (into: Stream<'Op, 'State, 'Rej>)
         (records: OpRecord<'Op> list)
         : Result<OpRecord<'Op> list, ChainBreak> =
         ChainShape.rehash
-            (ChainShape.records fromCfg w.Encode)
-            (ChainShape.records toCfg w.Encode)
-            hashFn
-            (Anchor.genesis fromCfg)
-            toCfg.Genesis
+            (ChainShape.records from.Config from.Witness.Encode)
+            from.HashFn
+            (ChainShape.records into.Config into.Witness.Encode)
+            into.HashFn
+            (Anchor.genesis from.Config)
+            into.Config.Genesis
             id
             records
 
-    let rehash
-        (fromCfg: StreamConfig)
-        (toCfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (records: OpRecord<'Op> list)
-        : Result<OpRecord<'Op> list, string> =
-        tryRehash fromCfg toCfg hashFn w records
-        |> Result.mapError (fun b ->
-            sprintf
-                "OpStream.rehash: source chain does not verify under fromCfg (record %d — %s)"
-                b.Index
-                (ChainBreakReason.toString b.Reason))
-
+    /// Re-apply every op over a base state. Replay is a fold of `Apply` — op-stream
+    /// replay is a special case of re-derivation.
     let replay
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (state0: 'State)
@@ -933,6 +964,13 @@ module internal OpStreamChain =
 
         go 0 state0 records
 
+    /// Best-effort replay: fold `Apply` over the records, **skipping** any op that rejects rather
+    /// than halting at the first failure. The projection semantics a *partial* / *filtered* stream
+    /// needs — e.g. a subjective view (Worldbuilder's `extract`) whose surviving ops reference a
+    /// node the projection never admitted: that op is dropped, not fatal. `replay` is fail-fast;
+    /// this is fail-soft. Returns the folded state **and** the `(index, rejection)` pairs that were
+    /// skipped, so a caller can inspect what was dropped (a domain that discards them — as
+    /// Worldbuilder's own lenient replay does — just ignores the list).
     let replayLenient
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (state0: 'State)
@@ -950,75 +988,96 @@ module internal OpStreamChain =
 
     // ---- the chain head (Phase 296; what an attestation signs, Phase 320) ----
 
-    let headWith (cfg: StreamConfig) (records: OpRecord<'Op> list) : string = snd (tip cfg records)
-
-    let head (records: OpRecord<'Op> list) : string = headWith canonicalConfig records
+    /// The current head of a chain — the last record's `Hash`, or `cfg`'s genesis for an empty chain:
+    /// the seed every chain walker starts from, so an empty stream appended under a non-empty genesis
+    /// has the head its first record's `PrevHash` names (the class of defect Phase 227 fixed in the
+    /// snapshot entry points). The thing an attestation signs (the hash chain attests the whole
+    /// prefix).
+    let head (cfg: StreamConfig) (records: OpRecord<'Op> list) : string = snd (tip cfg records)
 
     // ---- compare-and-append / optimistic concurrency (Phase 79) ----
 
     /// Append at the tip `(n, head)` of `records`: the extended stream AND the entry it chained, so the
     /// idempotent forms index the new record without walking the stream again.
     let private appendAt
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (n: int, head: string)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list * EntryRef, 'Rej> =
-        chainOne cfg hashFn w actor n head op state
+        chainOne s actor n head op state
         |> Result.map (fun (state', r) -> state', records @ [ r ], { Seq = r.Seq; Hash = r.Hash })
 
     /// The compare-and-append core: `appendAt` behind the head check.
     let private appendIfCore
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (expectedHead: string)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list * EntryRef, AppendRejection<'Rej>> =
-        let n, actualHead = tip cfg records
+        let n, actualHead = tip s.Config records
 
         if expectedHead <> actualHead then
             Error(AppendRejection.StaleHead(expectedHead, actualHead))
         else
-            appendAt cfg hashFn w (n, actualHead) actor op state records
+            appendAt s (n, actualHead) actor op state records
             |> Result.mapError AppendRejection.Domain
 
-    let appendIfWith
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (expectedHead: string)
-        (actor: Actor)
-        (op: 'Op)
-        (state: 'State)
-        (records: OpRecord<'Op> list)
-        : Result<'State * OpRecord<'Op> list, AppendRejection<'Rej>> =
-        appendIfCore cfg hashFn w expectedHead actor op state records
-        |> Result.map (fun (state', records', _) -> state', records')
-
+    /// Compare-and-append: chain `op` **only if** the stream's current head matches `expectedHead`
+    /// (Phase 79). On a match, behaviourally identical to `append` — the op is applied, the record is
+    /// chained, and `Ok (state', records')` is returned; a domain-reducer rejection is forwarded as
+    /// `Error (AppendRejection.Domain rej)`. On a mismatch (another writer advanced the chain since the
+    /// caller read the head), NO mutation happens — `records` is an immutable value the caller still
+    /// holds, so there is no partial write — and the result is
+    /// `Error (AppendRejection.StaleHead (expectedHead, actualHead))`, naming both heads so the caller
+    /// can re-read, rebase (or re-derive independence via `Ops.footprint`), and retry (GP5). Total —
+    /// never throws (GP4).
+    ///
+    /// **Value-level CAS only.** The guard is over the logical chain head (`head`); file-level atomicity
+    /// for a persisted stream (the lock that serialises read-check-append against a JSONL file) stays
+    /// host-side (GP3/GP6) — see `AppendRejection`. `appendIf` is the primitive a single-writer host (the
+    /// viewer/CLI single-mutation surface) builds that serialisation on: it makes "I expected the chain
+    /// to be here" a typed library outcome instead of a lost write. Composes with the idempotent append
+    /// (Phase 82) — CAS + idempotency key in one retry loop.
+    ///
+    /// **One walk (Phase 296)** for the head check and the append together, where there were four.
     let appendIf
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (expectedHead: string)
         (actor: Actor)
         (op: 'Op)
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, AppendRejection<'Rej>> =
-        appendIfWith canonicalConfig hashFn w expectedHead actor op state records
+        appendIfCore s expectedHead actor op state records
+        |> Result.map (fun (state', records', _) -> state', records')
 
     // ---- idempotent append (Phase 82) ----
 
+    /// Idempotent append (Phase 82): chain `op` **only if** `key` has not already produced an entry
+    /// in this stream — the at-least-once retry primitive. Agents retry: a session that times out
+    /// mid-append re-sends its op under the same invocation key (the Phase 27
+    /// `Function.invocationKey` shape), and this makes the re-send *converge* instead of
+    /// double-applying. A fresh key appends **chain-identically to `append`** (same state, same
+    /// records — the idempotency guard adds nothing to the chain, GP2) and returns the
+    /// incrementally-updated `KeyIndex`; a seen key returns `AppendOutcome.Duplicate` naming the
+    /// entry the key already produced (GP5), with the caller's stream and index untouched. A
+    /// domain-reducer rejection is forwarded verbatim on the error channel, exactly as `append`
+    /// forwards it (a rejected op indexes nothing — the key stays fresh for a corrected retry).
+    /// Total — never throws (GP4).
+    ///
+    /// **The index is caller-threaded pure state.** Core holds no seen-key registry (GP6): the
+    /// caller threads the `KeyIndex` alongside the stream (`KeyIndex.ofStream` rebuilds it from any
+    /// stream; the returned index maintains it incrementally — the two agree). Key uniqueness scope
+    /// is per-stream; storage and locking stay host-side (GP3/GP6). For the full agent retry loop —
+    /// idempotency **and** lost-update protection — compose with the Phase 79 CAS via
+    /// `appendIdempotentIf`.
     let appendIdempotent
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (key: string)
         (actor: Actor)
         (op: 'Op)
@@ -1029,13 +1088,23 @@ module internal OpStreamChain =
         match KeyIndex.tryFind key index with
         | Some existing -> Ok(AppendOutcome.Duplicate existing)
         | None ->
-            appendAt canonicalConfig hashFn w (tip canonicalConfig records) actor op state records
+            appendAt s (tip s.Config records) actor op state records
             |> Result.map (fun (state', records', entry) ->
                 AppendOutcome.Appended(state', records', KeyIndex.add key entry index))
 
+    /// The combined idempotency-then-CAS call shape (Phase 82 ∘ Phase 79) — the full agent retry
+    /// loop in one primitive. **The idempotency check runs first, deliberately**: when a retry's
+    /// earlier attempt actually landed (the ack was lost, not the write), the head has advanced, so
+    /// a bare `appendIf` would return `StaleHead` forever — checking the key first lets the retry
+    /// converge on `AppendOutcome.Duplicate` regardless of head staleness. Only a *fresh* key
+    /// reaches the CAS: a stale head is `AppendRejection.StaleHead` (re-read the stream, rebuild
+    /// the index via `KeyIndex.ofStream` — the re-read picks up any own-earlier append — and
+    /// retry); a matched head appends chain-identically to `append` and returns the updated index;
+    /// a domain rejection is `AppendRejection.Domain`, forwarded as `appendIf` forwards it. Total
+    /// (GP4); every non-success names its valid alternative (GP5). Value-level like `appendIf` —
+    /// the host still owns the critical section that serialises read-check-append (GP3/GP6).
     let appendIdempotentIf
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (s: Stream<'Op, 'State, 'Rej>)
         (key: string)
         (expectedHead: string)
         (actor: Actor)
@@ -1047,6 +1116,6 @@ module internal OpStreamChain =
         match KeyIndex.tryFind key index with
         | Some existing -> Ok(AppendOutcome.Duplicate existing)
         | None ->
-            appendIfCore canonicalConfig hashFn w expectedHead actor op state records
+            appendIfCore s expectedHead actor op state records
             |> Result.map (fun (state', records', entry) ->
                 AppendOutcome.Appended(state', records', KeyIndex.add key entry index))

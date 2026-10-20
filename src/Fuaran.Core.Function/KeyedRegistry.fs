@@ -49,7 +49,7 @@ type CapturedDispatch<'v, 'e> =
         /// Exactly what the un-journalled dispatch answers.
         Outcome: Result<Deferred<'v>, 'e>
         /// The invocation key and occurrence the attempt was journalled under — the ticket
-        /// `OpStream.settleEffectKeyed` settles a `Pending` answer with later. `None` when nothing
+        /// `KeyedCapture.settleEffectKeyed` settles a `Pending` answer with later. `None` when nothing
         /// was journalled: a refusal before the body, or a deterministic declaration.
         Ticket: (string * int) option
         /// The journal, with the attempt and its settlement appended when one was journalled.
@@ -293,14 +293,15 @@ module internal KeyedRegistry =
             let decl = gated x
             let det = c.Label decl
 
-            if det = OpStream.deterministicTag then
+            if det = EffectCapture.deterministicTag then
                 unjournalled (run x)
             else
                 let key = c.Key decl args
                 let mutable answered: Result<Deferred<'r>, 'E> = Ok Pending
 
                 let captured =
-                    OpStream.captureEffectKeyed
+                    KeyedCapture.captureEffectKeyed
+                        StreamConfig.canonical
                         hashFn
                         encode
                         det
@@ -344,11 +345,11 @@ module internal KeyedRegistry =
             let decl = gated x
             let det = c.Label decl
 
-            if det = OpStream.deterministicTag then
+            if det = EffectCapture.deterministicTag then
                 { Outcome = run x |> Result.mapError ReplayFailure.Refused
                   Cursor = cursor }
             else
-                match OpStream.replayEffectKeyed decode det (c.Key decl args) (fun () -> None) cursor journal with
+                match KeyedCapture.replayEffectKeyed decode det (c.Key decl args) (fun () -> None) cursor journal with
                 | Error fault ->
                     { Outcome = Error(ReplayFailure.Unanswered fault)
                       Cursor = cursor }
@@ -493,7 +494,7 @@ module Seam =
 
     /// `dispatch`, journalled in the keyed capture journal as `capture` says: the attempt after the
     /// invocation was admitted and before `run`, settled by `run`'s answer; a `Pending` answer leaves
-    /// it open under the returned `Ticket`, which `OpStream.settleEffectKeyed` settles later. A
+    /// it open under the returned `Ticket`, which `KeyedCapture.settleEffectKeyed` settles later. A
     /// refusal before `run`, or the `deterministic` label, journals nothing. The `Outcome` is exactly
     /// `dispatch`'s.
     [<MethodImpl(MethodImplOptions.NoInlining)>]

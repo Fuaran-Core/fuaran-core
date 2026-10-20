@@ -552,7 +552,7 @@ module internal LawKit =
         for _ in 1..n do
             let op = rng.Draw gen.Op
 
-            match OpStream.append hashFn sw (Human "conf") op state recs with
+            match OpStream.append (OpStream.canonical hashFn sw) (Human "conf") op state recs with
             | Ok(s', recs') ->
                 accepted <- accepted + 1
                 state <- s'
