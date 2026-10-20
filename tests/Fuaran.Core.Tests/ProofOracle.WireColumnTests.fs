@@ -104,96 +104,56 @@ module private FieldDiff =
         | WireColumn.Good f -> "ok " + showField (ofModelField f)
         | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
 
-    type Tally =
-        { Fields: int
-          WithUnit: int
-          WithExt: int
-          ExtMulti: int
-          Docs: int
-          Refusals: Set<string>
-          Tables: int
-          Valid: int
-          OutsideNormalForm: int
-          LiteralLost: int
-          Diffs: string list }
+    /// The field tally: the fields drawn, those stating a unit, those with extension members and
+    /// those with two or more; the documents read by both; the tables drawn, those `validate`
+    /// accepts and those outside the normal form; the go-red's lost fields; and the refusal classes.
+    let tally: Tally =
+        Tally.empty
+            [ "Fields"
+              "WithUnit"
+              "WithExt"
+              "ExtMulti"
+              "Docs"
+              "Tables"
+              "Valid"
+              "OutsideNormalForm"
+              "LiteralLost" ]
+        |> Tally.sets [ "Refusals" ]
 
-    let empty =
-        { Fields = 0
-          WithUnit = 0
-          WithExt = 0
-          ExtMulti = 0
-          Docs = 0
-          Refusals = Set.empty
-          Tables = 0
-          Valid = 0
-          OutsideNormalForm = 0
-          LiteralLost = 0
-          Diffs = [] }
-
-    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                :: t.Diffs }
+    let private compareText = ColumnDiff.compareText
 
     /// One document, asked of `decodeField` and of the model's `decode_field`.
     let probeDoc (label: string) (el: JVal) (t: Tally) : Tally =
-        let t = { t with Docs = t.Docs + 1 }
+        let t = Tally.bump "Docs" t
         let prod = ColumnCodec.decodeField el
         let model = WireColumn.decode_field (canonToModel el)
 
         let t =
             match prod with
-            | Result.Error e ->
-                { t with
-                    Refusals = t.Refusals.Add((ColumnDiff.prodClass e).Split(' ')[0]) }
+            | Result.Error e -> Tally.reach "Refusals" ((ColumnDiff.prodClass e).Split(' ')[0]) t
             | Result.Ok _ -> t
 
-        if showProdField prod = showModelField model then
-            t
-        else
-            diff label "decodeField" (showProdField prod) (showModelField model) t
+        compareText label "decodeField" (showProdField prod) (showModelField model) t
 
     /// One field: `fieldJson` beside `field_json` byte for byte, then the document back through
     /// both readers. `reverseExt` is the go-red: the model handed the extension members reversed.
     let probeField (reverseExt: bool) (label: string) (f: Field) (t: Tally) : Tally =
-        let t = { t with Fields = t.Fields + 1 }
-
         let t =
-            if f.Unit.IsSome then
-                { t with WithUnit = t.WithUnit + 1 }
-            else
-                t
-
-        let t =
-            if f.Ext.IsEmpty then
-                t
-            else
-                { t with WithExt = t.WithExt + 1 }
-
-        let t =
-            if f.Ext.Count >= 2 then
-                { t with ExtMulti = t.ExtMulti + 1 }
-            else
-                t
+            t
+            |> Tally.bump "Fields"
+            |> Tally.bumpIf f.Unit.IsSome "WithUnit"
+            |> Tally.bumpIf (not f.Ext.IsEmpty) "WithExt"
+            |> Tally.bumpIf (f.Ext.Count >= 2) "ExtMulti"
 
         let prodJson = ColumnCodec.fieldJson f
         let modelJson = canonOfModel (WireColumn.field_json (toModelFieldWith reverseExt f))
 
         if reverseExt then
-            if Json.render prodJson = Json.render modelJson then
-                t
-            else
-                { t with
-                    LiteralLost = t.LiteralLost + 1 }
+            Tally.bumpIf (Json.render prodJson <> Json.render modelJson) "LiteralLost" t
         else
-            let t =
-                if Json.render prodJson = Json.render modelJson then
-                    t
-                else
-                    diff label "fieldJson" (Json.render prodJson) (Json.render modelJson) t
-
-            probeDoc label prodJson t
+            t
+            |> compareText label "fieldJson" (Json.render prodJson) (Json.render modelJson)
+            |> probeDoc label prodJson
 
     // ---- tables with metadata ----
 
@@ -231,7 +191,7 @@ module private FieldDiff =
     /// `normal_table_f` — the columns in schema order, every field intact.
     let probeTable (label: string) (table: Table) (t: Tally) : Tally =
         let m = toModelTable table
-        let t = { t with Tables = t.Tables + 1 }
+        let t = Tally.bump "Tables" t
         let prodValid = Table.validate table
         let modelValid = WireColumn.validate_f host m
 
@@ -245,53 +205,26 @@ module private FieldDiff =
             | WireColumn.Good _ -> "ok"
             | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
 
-        let t =
-            if prodV = modelV then
-                t
-            else
-                diff label "validate" prodV modelV t
-
-        let t =
-            (match prodValid with
-             | Result.Ok() -> { t with Valid = t.Valid + 1 }
-             | _ -> t)
-
         let prodJson = ColumnCodec.encodeJson (Embedded table)
         let modelJson = WireColumn.encode_json_f host (WireColumn.Embedded_f m)
-
-        let t =
-            if Json.render prodJson = Json.render (canonOfModel modelJson) then
-                t
-            else
-                diff label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson)) t
-
         let prodBack = ColumnCodec.decodeJson prodJson
         let modelBack = WireColumn.decode_json_f host modelJson
 
         let t =
-            if showProdSource prodBack = showModelSource modelBack then
-                t
-            else
-                diff label "decodeJson (encodeJson t)" (showProdSource prodBack) (showModelSource modelBack) t
+            t
+            |> compareText label "validate" prodV modelV
+            |> Tally.bumpIf (Result.isOk prodValid) "Valid"
+            |> compareText label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson))
+            |> compareText label "decodeJson (encodeJson t)" (showProdSource prodBack) (showModelSource modelBack)
 
         match prodValid with
         | Result.Error _ -> t
         | Result.Ok() ->
             let normal = ofModelTable (WireColumn.normal_table_f host m)
 
-            let t =
-                if showTable normal = showTable table then
-                    t
-                else
-                    { t with
-                        OutsideNormalForm = t.OutsideNormalForm + 1 }
-
-            let expected = "ok " + showTable normal
-
-            if showProdSource prodBack = expected then
-                t
-            else
-                diff label "the round trip" (showProdSource prodBack) expected t
+            t
+            |> Tally.bumpIf (showTable normal <> showTable table) "OutsideNormalForm"
+            |> compareText label "the round trip" (showProdSource prodBack) ("ok " + showTable normal)
 
     // ---- the pools ----
 
@@ -433,18 +366,12 @@ module private FieldDiff =
               { Schema = schema; Columns = columns } ]
 
     let generated (reverseExt: bool) (seed: int) (count: int) : Tally =
-        let t =
-            drawnFields seed count
-            |> List.fold (fun t f -> probeField reverseExt "drawn field" f t) empty
-
-        if reverseExt then
-            t
-        else
-            handWritten |> List.fold (fun t (label, el) -> probeDoc label el t) t
+        tally
+        |> Differential.over (drawnFields seed count) (probeField reverseExt "drawn field")
+        |> Differential.over (if reverseExt then [] else handWritten) (fun (label, el) -> probeDoc label el)
 
     let generatedTables (seed: int) (count: int) : Tally =
-        drawnTables seed count
-        |> List.fold (fun t table -> probeTable "drawn table" table t) empty
+        tally |> Differential.over (drawnTables seed count) (probeTable "drawn table")
 
 [<Tests>]
 let tests =
@@ -468,21 +395,22 @@ let tests =
               let wild = onBigStack (fun () -> ColumnDiff.generated false 3064 3000 1)
 
               for (name, t) in [ "the valid pool", valid; "the wild pool", wild ] do
-                  Expect.isEmpty
-                      t.Diffs
-                      (sprintf "%s: the column oracle disagreed with production:\n%s" name (renderCanonDiffs t.Diffs))
+                  Differential.expectAgrees (name + ": the column oracle") t
 
-              Expect.equal valid.Valid valid.Tables "every table of the first pool is one validate accepts"
+              Expect.equal
+                  (Tally.count "Valid" valid)
+                  (Tally.count "Tables" valid)
+                  "every table of the first pool is one validate accepts"
 
               Expect.isGreaterThan
-                  valid.OutsideNormalForm
+                  (Tally.count "OutsideNormalForm" valid)
                   150
                   (sprintf
                       "valid tables OUTSIDE the normal form — where the round trip is not the literal one (%d)"
-                      valid.OutsideNormalForm)
+                      (Tally.count "OutsideNormalForm" valid))
 
               Expect.isGreaterThan
-                  (valid.Valid - valid.OutsideNormalForm)
+                  ((Tally.count "Valid" valid) - (Tally.count "OutsideNormalForm" valid))
                   200
                   "and valid tables already in it, where it is"
 
@@ -493,26 +421,27 @@ let tests =
                     "NonFiniteFloat"
                     "MalformedShape" ] do
                   Expect.isTrue
-                      (wild.Refusals.Contains cls)
-                      (sprintf "the wild pool reached a %s refusal (reached: %A)" cls wild.Refusals)
+                      ((Tally.reached "Refusals" wild).Contains cls)
+                      (sprintf "the wild pool reached a %s refusal (reached: %A)" cls (Tally.reached "Refusals" wild))
 
-              Expect.isGreaterThan wild.Valid 200 (sprintf "the wild pool still holds valid tables (%d)" wild.Valid)
+              Expect.isGreaterThan
+                  (Tally.count "Valid" wild)
+                  200
+                  (sprintf "the wild pool still holds valid tables (%d)" (Tally.count "Valid" wild))
 
           testCase
               "… and over documents no encoder writes — the decode-only acceptances, and the arms the model declines"
           <| fun _ ->
               let t =
-                  ColumnDiff.handWritten
-                  |> List.fold (fun acc (label, text) -> ColumnDiff.decodeProbe label text acc) ColumnDiff.empty
+                  ColumnDiff.tally
+                  |> Differential.over ColumnDiff.handWritten (fun (label, text) -> ColumnDiff.decodeProbe label text)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the column oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the column oracle" t
 
               // The five lenient-ingest arms are the model's `OutOfModel` and nothing else is: a
               // probe that skipped more would be comparing less than it says.
-              Expect.equal t.OutOfModel 5 "exactly the five lenient-ingest documents are declined"
-              Expect.equal t.Decoded (ColumnDiff.handWritten.Length - 5) "and every other is compared"
+              Expect.equal (Tally.count "OutOfModel" t) 5 "exactly the five lenient-ingest documents are declined"
+              Expect.equal (Tally.count "Decoded" t) (ColumnDiff.handWritten.Length - 5) "and every other is compared"
 
               for cls in
                   [ "Malformed"
@@ -523,8 +452,8 @@ let tests =
                     "UnknownType"
                     "LengthMismatch" ] do
                   Expect.isTrue
-                      (t.Refusals.Contains cls)
-                      (sprintf "a %s refusal was reached (reached: %A)" cls t.Refusals)
+                      ((Tally.reached "Refusals" t).Contains cls)
+                      (sprintf "a %s refusal was reached (reached: %A)" cls (Tally.reached "Refusals" t))
 
           testCase "a comparison against the table ITSELF loses — on exactly the tables outside the normal form"
           <| fun _ ->
@@ -536,11 +465,14 @@ let tests =
 
               // The same pool as above: 192 tables outside the normal form, all by column order
               // since Phase 417 (see the measurement there).
-              Expect.isGreaterThan t.OutsideNormalForm 150 "the pool holds tables outside the normal form"
+              Expect.isGreaterThan
+                  (Tally.count "OutsideNormalForm" t)
+                  150
+                  "the pool holds tables outside the normal form"
 
               Expect.equal
-                  (List.length t.Diffs)
-                  (2 * t.OutsideNormalForm)
+                  (List.length (Tally.disagreements t))
+                  (2 * (Tally.count "OutsideNormalForm" t))
                   "the literal comparison lost on those tables, at both levels, and on no other"
 
           testCase
@@ -595,24 +527,25 @@ let tests =
                     "-000.000"
                     "x" ]
 
-              let mutable canonicalised = 0
-              let mutable refused = 0
+              let t =
+                  Tally.empty [ "Canonicalised"; "Refused" ]
+                  |> Differential.over texts (fun s t ->
+                      let model =
+                          match WireColumn.try_canonical (canonToChs s) with
+                          | FStar_Pervasives_Native.Some c -> Some(canonFromChs c)
+                          | FStar_Pervasives_Native.None -> None
 
-              for s in texts do
-                  let model =
-                      match WireColumn.try_canonical (canonToChs s) with
-                      | FStar_Pervasives_Native.Some c -> Some(canonFromChs c)
-                      | FStar_Pervasives_Native.None -> None
+                      t
+                      |> Differential.compare
+                          Differential.structural<string option>
+                          (sprintf "tryCanonical %A" s)
+                          (DecimalText.tryCanonical s)
+                          model
+                      |> Tally.bump (if model.IsSome then "Canonicalised" else "Refused"))
 
-                  Expect.equal model (DecimalText.tryCanonical s) (sprintf "tryCanonical %A" s)
-
-                  if model.IsSome then
-                      canonicalised <- canonicalised + 1
-                  else
-                      refused <- refused + 1
-
-              Expect.isGreaterThan canonicalised 8 "texts the canonicaliser read"
-              Expect.isGreaterThan refused 8 "and texts it refused"
+              Differential.expectAgrees "the decimal canonicaliser" t
+              Expect.isGreaterThan (Tally.count "Canonicalised" t) 8 "texts the canonicaliser read"
+              Expect.isGreaterThan (Tally.count "Refused" t) 8 "and texts it refused"
 
           testCase
               "the field oracle agrees with fieldJson and decodeField over drawn fields and the hand-written documents"
@@ -623,18 +556,24 @@ let tests =
               // non-canonical and aliased unit spellings it reads, and the member it reads past.
               let t = onBigStack (fun () -> FieldDiff.generated false 4280 800)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the field oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the field oracle" t
 
-              Expect.isGreaterThan t.WithUnit 300 (sprintf "fields stating a unit (%d)" t.WithUnit)
-              Expect.isGreaterThan t.WithExt 400 (sprintf "fields with extension members (%d)" t.WithExt)
-              Expect.equal t.Docs (800 + FieldDiff.handWritten.Length) "every document was read by both"
+              Expect.isGreaterThan
+                  (Tally.count "WithUnit" t)
+                  300
+                  (sprintf "fields stating a unit (%d)" (Tally.count "WithUnit" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "WithExt" t)
+                  400
+                  (sprintf "fields with extension members (%d)" (Tally.count "WithExt" t))
+
+              Expect.equal (Tally.count "Docs" t) (800 + FieldDiff.handWritten.Length) "every document was read by both"
 
               for cls in [ "MissingField"; "UnknownType"; "MalformedShape" ] do
                   Expect.isTrue
-                      (t.Refusals.Contains cls)
-                      (sprintf "the documents reached a %s refusal (reached: %A)" cls t.Refusals)
+                      ((Tally.reached "Refusals" t).Contains cls)
+                      (sprintf "the documents reached a %s refusal (reached: %A)" cls (Tally.reached "Refusals" t))
 
           testCase
               "the field codec oracle agrees with encodeJson and decodeJson over tables with metadata, and the round trip keeps every field"
@@ -645,16 +584,14 @@ let tests =
               // schema order, every field's metadata intact.
               let t = onBigStack (fun () -> FieldDiff.generatedTables 4281 300)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the field codec oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the field codec oracle" t
 
-              Expect.equal t.Valid t.Tables "every drawn table is one validate accepts"
+              Expect.equal (Tally.count "Valid" t) (Tally.count "Tables" t) "every drawn table is one validate accepts"
 
               Expect.isGreaterThan
-                  t.OutsideNormalForm
+                  (Tally.count "OutsideNormalForm" t)
                   60
-                  (sprintf "tables outside the normal form, by column order (%d)" t.OutsideNormalForm)
+                  (sprintf "tables outside the normal form, by column order (%d)" (Tally.count "OutsideNormalForm" t))
 
           testCase
               "a bridge that drops the extension order loses - on exactly the fields with two or more extension members"
@@ -664,11 +601,17 @@ let tests =
               // the fields with two or more members, and on no other.
               let t = onBigStack (fun () -> FieldDiff.generated true 4280 800)
 
-              Expect.isGreaterThan t.ExtMulti 200 (sprintf "fields with two or more extension members (%d)" t.ExtMulti)
+              Expect.isGreaterThan
+                  (Tally.count "ExtMulti" t)
+                  200
+                  (sprintf "fields with two or more extension members (%d)" (Tally.count "ExtMulti" t))
 
               Expect.isGreaterThan
-                  (t.Fields - t.ExtMulti)
+                  ((Tally.count "Fields" t) - (Tally.count "ExtMulti" t))
                   300
-                  (sprintf "fields with fewer (%d)" (t.Fields - t.ExtMulti))
+                  (sprintf "fields with fewer (%d)" ((Tally.count "Fields" t) - (Tally.count "ExtMulti" t)))
 
-              Expect.equal t.LiteralLost t.ExtMulti "the reversed bridge lost on those fields, and on no other" ]
+              Expect.equal
+                  (Tally.count "LiteralLost" t)
+                  (Tally.count "ExtMulti" t)
+                  "the reversed bridge lost on those fields, and on no other" ]

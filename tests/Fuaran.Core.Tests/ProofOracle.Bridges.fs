@@ -1842,6 +1842,12 @@ let genCapSignature (name: string) (r: ConfRng.T) : Signature * ConfRng.T =
 
 module ColumnDiff =
 
+    /// The comparison every differential of the column family (and the unit and temporal ones
+    /// beside it) makes: two answers already rendered as text, under the standard message, the
+    /// finding located as `<label>: <what>`.
+    let compareText (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        Differential.compare Differential.text (label + ": " + what) prod model t
+
     /// The model's host record: what a host computes about a number and about temporal text.
     /// `finite` is `System.Double.IsFinite`, not production's `JVal.nonFiniteToken`, so the model
     /// is not handed the function it is compared with.
@@ -2178,35 +2184,12 @@ module ColumnDiff =
         { Schema = picked |> List.map (fun (n, ty) -> Field.create n ty)
           Columns = columns }
 
-    type Tally =
-        {
-            Tables: int
-            Diffs: string list
-            /// Tables `validate` accepted, and of those the ones NOT in normal form.
-            Valid: int
-            OutsideNormalForm: int
-            /// Refusals reached, by class name (the first word of the class).
-            Refusals: Set<string>
-            /// Decode probes the model declined as a lenient-ingest arm.
-            OutOfModel: int
-            /// Decode probes compared.
-            Decoded: int
-        }
-
-    let empty =
-        { Tables = 0
-          Diffs = []
-          Valid = 0
-          OutsideNormalForm = 0
-          Refusals = Set.empty
-          OutOfModel = 0
-          Decoded = 0 }
-
-    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                :: t.Diffs }
+    /// The column tally: the tables drawn; those `validate` accepted, and of those the ones NOT in
+    /// normal form; the decode probes the model declined as a lenient-ingest arm, and those
+    /// compared; and the refusals reached, by class name (the first word of the class).
+    let tally: Tally =
+        Tally.empty [ "Tables"; "Valid"; "OutsideNormalForm"; "OutOfModel"; "Decoded" ]
+        |> Tally.sets [ "Refusals" ]
 
     /// One table, asked of production and of the model: `validate`; `encodeJson`; `decodeJson` of
     /// that encoding; and — for a table `validate` accepts — the round trip against the model's
@@ -2215,7 +2198,7 @@ module ColumnDiff =
     /// (the literal form the theorem refutes — the go-red).
     let probe (literal: bool) (label: string) (table: Table) (t: Tally) : Tally =
         let m = toModelTable table
-        let t = { t with Tables = t.Tables + 1 }
+        let t = Tally.bump "Tables" t
 
         // validate
         let prodValid = Table.validate table
@@ -2231,28 +2214,19 @@ module ColumnDiff =
             | WireColumn.Good _ -> "ok"
             | WireColumn.Bad e -> "refused " + modelClass e
 
-        let t =
-            if prodV = modelV then
-                t
-            else
-                diff label "validate" prodV modelV t
+        let t = compareText label "validate" prodV modelV t
 
         let t =
             match prodValid with
-            | Result.Error e ->
-                { t with
-                    Refusals = t.Refusals.Add((prodClass e).Split(' ')[0]) }
-            | Result.Ok() -> { t with Valid = t.Valid + 1 }
+            | Result.Error e -> Tally.reach "Refusals" ((prodClass e).Split(' ')[0]) t
+            | Result.Ok() -> Tally.bump "Valid" t
 
         // encode — of ANY table, valid or not: `encodeJson` is total and papers over a malformed one
         let prodJson = ColumnCodec.encodeJson (Embedded table)
         let modelJson = WireColumn.encode_json host (WireColumn.Embedded m)
 
         let t =
-            if Json.render prodJson = Json.render (canonOfModel modelJson) then
-                t
-            else
-                diff label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson)) t
+            compareText label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson)) t
 
         // decode of the encoding. A NaN the encoder wrote is a `JFloat nan`, which the model's
         // decoder is handed as it is.
@@ -2263,12 +2237,11 @@ module ColumnDiff =
         // or a decimal column is one of its lenient-ingest arms — and that one is skipped.)
         let t =
             match modelBack with
-            | WireColumn.Bad WireColumn.OutOfModel -> { t with OutOfModel = t.OutOfModel + 1 }
+            | WireColumn.Bad WireColumn.OutOfModel -> Tally.bump "OutOfModel" t
             | _ ->
-                if showProd prodBack = showModel modelBack then
-                    { t with Decoded = t.Decoded + 1 }
-                else
-                    diff label "decodeJson (encodeJson t)" (showProd prodBack) (showModel modelBack) t
+                t
+                |> Tally.bumpIf (showProd prodBack = showModel modelBack) "Decoded"
+                |> compareText label "decodeJson (encodeJson t)" (showProd prodBack) (showModel modelBack)
 
         // the round trip, for a table validate accepts
         match prodValid with
@@ -2277,36 +2250,21 @@ module ColumnDiff =
             let normal = ofModelTable (WireColumn.normal_table host m)
 
             let t =
-                if showSource (Embedded normal) = showSource (Embedded table) then
-                    t
-                else
-                    { t with
-                        OutsideNormalForm = t.OutsideNormalForm + 1 }
+                Tally.bumpIf (showSource (Embedded normal) <> showSource (Embedded table)) "OutsideNormalForm" t
 
             let expected = "ok " + showSource (Embedded(if literal then table else normal))
 
             let t =
-                if showProd prodBack = expected then
-                    t
-                else
-                    diff label "the round trip at the JVal" (showProd prodBack) expected t
+                compareText label "the round trip at the JVal" (showProd prodBack) expected t
 
             // … and the round trip a consumer performs: the canonical string, then the parser.
             let viaString = ColumnCodec.decode (ColumnCodec.encode (Embedded table))
-
-            if showProd viaString = expected then
-                t
-            else
-                diff label "the round trip through the canonical string" (showProd viaString) expected t
+            compareText label "the round trip through the canonical string" (showProd viaString) expected t
 
     let generated (literal: bool) (seed: int) (trials: int) (wild: int) : Tally =
-        let r = ref seed
-        let mutable t = empty
-
-        for i in 1..trials do
-            t <- probe literal (sprintf "generated seed=%d iteration=%d" seed i) (genTable r wild) t
-
-        t
+        tally
+        |> Differential.seeded trials (ref seed) (fun i r t ->
+            r, probe literal (sprintf "generated seed=%d iteration=%d" seed i) (genTable r wild) t)
 
     /// Documents no encoder writes, each decoded by production and by the model: the decode-only
     /// acceptances the model's own lemmas name, and the lenient-ingest arms it declines.
@@ -2365,21 +2323,18 @@ module ColumnDiff =
             let model = WireColumn.decode_json host (canonToModel el)
 
             match model with
-            | WireColumn.Bad WireColumn.OutOfModel -> { t with OutOfModel = t.OutOfModel + 1 }
+            | WireColumn.Bad WireColumn.OutOfModel -> Tally.bump "OutOfModel" t
             | _ ->
                 let prod = ColumnCodec.decodeJson el
 
                 let t =
                     match prod with
-                    | Result.Error e ->
-                        { t with
-                            Refusals = t.Refusals.Add((prodClass e).Split(' ')[0]) }
+                    | Result.Error e -> Tally.reach "Refusals" ((prodClass e).Split(' ')[0]) t
                     | Result.Ok _ -> t
 
-                if showProd prod = showModel model then
-                    { t with Decoded = t.Decoded + 1 }
-                else
-                    diff label "decodeJson" (showProd prod) (showModel model) t
+                t
+                |> Tally.bumpIf (showProd prod = showModel model) "Decoded"
+                |> compareText label "decodeJson" (showProd prod) (showModel model)
 
 module UnitDiff =
 
@@ -2623,70 +2578,44 @@ module UnitDiff =
         | ModelUnit.PrefixNotAllowed(token, position) -> at "PrefixNotAllowed" token position
         | ModelUnit.NumericFactor(token, position) -> at "NumericFactor" token position
 
-    type Tally =
-        { Texts: int
-          Parsed: int
-          NotCanonical: int
-          Refusals: Set<string>
-          Pairs: int
-          Compatible: int
-          Overflowed: int
-          Reordered: int
-          LiteralLost: int
-          Diffs: string list }
+    /// The unit tally: the texts asked of both parsers, those both parsed, and the units the model
+    /// found not canonical; the pairs asked of the algebra, the compatible ones, and those whose big
+    /// power overflowed; for the go-red, the reordered pairs and those the concatenation lost; and
+    /// the refusal classes reached.
+    let tally: Tally =
+        Tally.empty
+            [ "Texts"
+              "Parsed"
+              "NotCanonical"
+              "Pairs"
+              "Compatible"
+              "Overflowed"
+              "Reordered"
+              "LiteralLost" ]
+        |> Tally.sets [ "Refusals" ]
 
-    let empty =
-        { Texts = 0
-          Parsed = 0
-          NotCanonical = 0
-          Refusals = Set.empty
-          Pairs = 0
-          Compatible = 0
-          Overflowed = 0
-          Reordered = 0
-          LiteralLost = 0
-          Diffs = [] }
-
-    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                :: t.Diffs }
+    let private compareText = ColumnDiff.compareText
 
     /// One text, asked of `Unit.parse` and of the model's: a unit on both sides renders to one text
     /// and is canonical in the model's sense; a refusal on both sides is one class, token, position
     /// and expectation.
     let probeText (label: string) (text: string) (t: Tally) : Tally =
-        let t = { t with Texts = t.Texts + 1 }
+        let t = Tally.bump "Texts" t
 
         match Unit.parse text, ModelUnit.parse (toText text) with
         | Ok pu, ModelUnit.Ok mu ->
-            let t = { t with Parsed = t.Parsed + 1 }
-
-            let t =
-                if Unit.render pu = modelRender mu then
-                    t
-                else
-                    diff label ("render of " + text) (Unit.render pu) (modelRender mu) t
-
-            if ModelUnit.canonical mu then
-                t
-            else
-                { t with
-                    NotCanonical = t.NotCanonical + 1 }
+            t
+            |> Tally.bump "Parsed"
+            |> compareText label ("render of " + text) (Unit.render pu) (modelRender mu)
+            |> Tally.bumpIf (not (ModelUnit.canonical mu)) "NotCanonical"
         | Error pr, ModelUnit.Refused mr ->
-            let t =
-                { t with
-                    Refusals = t.Refusals.Add((prodRefusal pr).Split(' ')[0]) }
-
-            if prodRefusal pr = modelRefusal text mr then
-                t
-            else
-                diff label ("refusal of " + text) (prodRefusal pr) (modelRefusal text mr) t
+            t
+            |> Tally.reach "Refusals" ((prodRefusal pr).Split(' ')[0])
+            |> compareText label ("refusal of " + text) (prodRefusal pr) (modelRefusal text mr)
         | Ok pu, ModelUnit.Refused mr ->
-            diff label ("parse of " + text) ("ok " + Unit.render pu) ("refused " + modelRefusal text mr) t
+            compareText label ("parse of " + text) ("ok " + Unit.render pu) ("refused " + modelRefusal text mr) t
         | Error pr, ModelUnit.Ok mu ->
-            diff label ("parse of " + text) ("refused " + prodRefusal pr) ("ok " + modelRender mu) t
+            compareText label ("parse of " + text) ("refused " + prodRefusal pr) ("ok " + modelRender mu) t
 
     let private prodUnit (f: unit -> UnitOfMeasure) : string =
         try
@@ -2720,45 +2649,21 @@ module UnitDiff =
     let probePair (label: string) (a: UnitOfMeasure) (b: UnitOfMeasure) (n: int) (t: Tally) : Tally =
         let am = toModel a
         let bm = toModel b
-        let t = { t with Pairs = t.Pairs + 1 }
-
-        let check (what: string) (prod: string) (model: string) (t: Tally) =
-            if prod = model then t else diff label what prod model t
-
-        let t =
-            check "mul" (prodUnit (fun () -> Unit.mul a b)) (modelUnit (ModelUnit.mul am bm)) t
-
-        let t =
-            check "div" (prodUnit (fun () -> Unit.div a b)) (modelUnit (ModelUnit.div am bm)) t
-
-        let t =
-            check (sprintf "pow %d" n) (prodUnit (fun () -> Unit.pow a n)) (modelUnit (ModelUnit.pow am (bigint n))) t
-
+        let check = compareText label
         let big = 1000000000
         let powBig = prodUnit (fun () -> Unit.pow a big)
 
-        let t =
-            check (sprintf "pow %d" big) powBig (modelUnit (ModelUnit.pow am (bigint big))) t
-
-        let t =
-            if powBig = "overflow" then
-                { t with Overflowed = t.Overflowed + 1 }
-            else
-                t
-
-        let t =
-            check "compatible" (string (Unit.compatible a b)) (string (ModelUnit.compatible am bm)) t
-
-        let t =
-            if Unit.compatible a b then
-                { t with Compatible = t.Compatible + 1 }
-            else
-                t
-
-        let t =
-            check "conversionFactor" (prodFactor a b) (modelFactor (ModelUnit.conversion_factor am bm)) t
-
-        check "conversionFactor reversed" (prodFactor b a) (modelFactor (ModelUnit.conversion_factor bm am)) t
+        t
+        |> Tally.bump "Pairs"
+        |> check "mul" (prodUnit (fun () -> Unit.mul a b)) (modelUnit (ModelUnit.mul am bm))
+        |> check "div" (prodUnit (fun () -> Unit.div a b)) (modelUnit (ModelUnit.div am bm))
+        |> check (sprintf "pow %d" n) (prodUnit (fun () -> Unit.pow a n)) (modelUnit (ModelUnit.pow am (bigint n)))
+        |> check (sprintf "pow %d" big) powBig (modelUnit (ModelUnit.pow am (bigint big)))
+        |> Tally.bumpIf (powBig = "overflow") "Overflowed"
+        |> check "compatible" (string (Unit.compatible a b)) (string (ModelUnit.compatible am bm))
+        |> Tally.bumpIf (Unit.compatible a b) "Compatible"
+        |> check "conversionFactor" (prodFactor a b) (modelFactor (ModelUnit.conversion_factor am bm))
+        |> check "conversionFactor reversed" (prodFactor b a) (modelFactor (ModelUnit.conversion_factor bm am))
 
     /// The GO-RED: the canonicaliser that SKIPS THE MERGE. The model's `render` is handed the
     /// CONCATENATION of the two factor lists where `mul` merges them, and compared with production's
@@ -2785,13 +2690,7 @@ module UnitDiff =
         let reordered =
             shared || outOfOrder (fun e -> e > 0I) || outOfOrder (fun e -> e < 0I)
 
-        let t = { t with Pairs = t.Pairs + 1 }
-
-        let t =
-            if reordered then
-                { t with Reordered = t.Reordered + 1 }
-            else
-                t
+        let t = t |> Tally.bump "Pairs" |> Tally.bumpIf reordered "Reordered"
 
         match
             (try
@@ -2800,12 +2699,7 @@ module UnitDiff =
                  None)
         with
         | None -> t
-        | Some p ->
-            if Unit.render p = modelRender concat then
-                t
-            else
-                { t with
-                    LiteralLost = t.LiteralLost + 1 }
+        | Some p -> Tally.bumpIf (Unit.render p <> modelRender concat) "LiteralLost" t
 
     // ---- the pools ----
 
@@ -2950,15 +2844,7 @@ module UnitDiff =
     /// texts and in pairs.
     let generated (seed: int) (count: int) : Tally =
         let units = drawn seed count
-        let t = atomTexts |> List.fold (fun t text -> probeText "atom" text t) empty
-        let t = corpus |> List.fold (fun t text -> probeText "corpus" text t) t
-        let t = units |> List.fold (fun t u -> probeText "drawn" (Unit.render u) t) t
         let rng = System.Random(seed + 1)
-
-        let t =
-            units
-            |> List.pairwise
-            |> List.fold (fun t (a, b) -> probePair "pair" a b (rng.Next 9 - 4) t) t
 
         // Consecutive draws are rarely compatible, so every unit is also paired with itself scaled
         // by a per cent — one dimension, factor 100 — which is where the factor's exactness is asked.
@@ -2967,10 +2853,13 @@ module UnitDiff =
             | Ok u -> u
             | Error e -> failtestf "the per cent does not parse: %A" e
 
-        units
-        |> List.fold (fun t u -> probePair "scaled" u (Unit.mul u percent) (rng.Next 9 - 4) t) t
+        tally
+        |> Differential.over atomTexts (probeText "atom")
+        |> Differential.over corpus (probeText "corpus")
+        |> Differential.over units (fun u -> probeText "drawn" (Unit.render u))
+        |> Differential.over (List.pairwise units) (fun (a, b) -> probePair "pair" a b (rng.Next 9 - 4))
+        |> Differential.over units (fun u -> probePair "scaled" u (Unit.mul u percent) (rng.Next 9 - 4))
 
     let concatenated (seed: int) (count: int) : Tally =
-        drawn seed count
-        |> List.pairwise
-        |> List.fold (fun t (a, b) -> probeConcat "pair" a b t) empty
+        tally
+        |> Differential.over (drawn seed count |> List.pairwise) (fun (a, b) -> probeConcat "pair" a b)
