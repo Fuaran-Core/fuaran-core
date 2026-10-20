@@ -962,26 +962,9 @@ let private queryDifferential
 // ---- Phase 455 — the query codec, whole: the declaration, the result page, the async result and
 //      the typed refusal, beside `QueryCodec` over its own column codec ----
 
-let private segRender (s: PathSegment) =
-    match s with
-    | PathSegment.Key k -> "k:" + k
-    | PathSegment.Index n -> "i:" + string n
-
-let private pErrRender (e: DecodeError) : string =
-    sprintf "%A@%s" e.Code (e.Path |> List.map segRender |> String.concat "/")
-
-let private mErrRender (e: ModelCap.decode_error) : string =
-    sprintf
-        "%A@%s"
-        e.d_code
-        (e.d_path
-         |> List.map (function
-             | ModelCap.Key k -> "k:" + k
-             | ModelCap.Index n -> "i:" + string n)
-         |> String.concat "/")
-
-/// The decode refusal's render pair: its code and its path.
-let private decodeError = Differential.pair pErrRender mErrRender
+/// The decode refusal's render pair — its code and its path — is the capability codec's: the two
+/// seams share `DecodeError`, and one render of it is the comparison both read.
+let private decodeError = CapabilityTests.decodeError
 
 let private qColOfModel (t: ModelQuery.column_type) : ColumnType =
     match t with

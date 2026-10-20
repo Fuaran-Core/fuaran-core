@@ -1534,7 +1534,8 @@ let private modelDecodeErrRender (e: ModelCap.decode_error) : string =
              | ModelCap.Index n -> "i:" + string n)
          |> String.concat "/")
 
-let private decodeError: Differential<DecodeError, ModelCap.decode_error> =
+/// The decode refusal's render pair: its code and its path. The query codec reads it too.
+let decodeError: Differential<DecodeError, ModelCap.decode_error> =
     Differential.pair prodDecodeErrRender modelDecodeErrRender
 
 /// The codecs' tally: the capabilities encoded, the documents read and their verdicts, the

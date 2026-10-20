@@ -1304,9 +1304,6 @@ let showKinds (kinds: Set<string>) =
     else
         kinds |> Set.toList |> String.concat "+"
 
-let renderDiffs (diffs: string list) =
-    diffs |> List.truncate 5 |> String.concat "\n"
-
 //  Phase 149 — the CANONICAL ENCODER. `proofs/WireCanon.fst`'s extracted `render`
 //  beside `Fuaran.Core.Canonical.write Fuaran.Core.Rendering.CrossHost`, byte for byte.
 //
@@ -1495,9 +1492,6 @@ let onBigStack (f: unit -> 'a) : 'a =
     result
 
 let nextCanonSeed (r: int) : int = (r * 1103515245 + 12345) &&& 0x3FFFFFFF
-
-let renderCanonDiffs (diffs: string list) : string =
-    diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
 
 // ---------------------------------------------------------------------------
 //  Phase 177 — the FUNCTION SEAM: the extracted model of `Fuaran.Core.Function`'s effect
