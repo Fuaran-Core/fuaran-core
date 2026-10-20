@@ -60,10 +60,6 @@ module internal FSharpCodec =
           ClosureApplied = fun _ -> "JStr \"<closure>\""
           OpaqueApplied = fun _ -> "JStr \"<opaque>\"" }
 
-    /// Point-free encoder *function* for a type (`'a -> JVal`) — used where an encoder
-    /// must be passed (a generic union's type-parameter codec).
-    let encFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.slotFn encPrinter.Slot t
-
     /// The applied JVal expression for a value of `t` bound to `var`.
     let encApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
         SlotTraversal.encApplied encPrinter var t
@@ -387,9 +383,6 @@ let private encFloat (f: float) : JVal =
                                     h.Decode
                         ) }
 
-    /// The decoder expression for a type — a `JVal -> Result<'T, DecodeError>`.
-    let decFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.slotFn decPrinter t
-
     /// Phase 524 — the F# printer of a member READ back out ([[MemberTraversal.decMember]]): a
     /// sentinel slot decodes to `()` or its `TFn` placeholder, a host-only member to its declared
     /// placeholder, an omit-at-default one to [[fsDefaultLit]]'s literal.
@@ -618,9 +611,6 @@ let private encFloat (f: float) : JVal =
                 List = sprintf "(cList %s)"
                 Map = sprintf "(cMap %s)" }
 
-    /// The collecting decoder expression for a type — a `JVal -> Result<'T, DecodeError list>`.
-    let colFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.slotFn colPrinter t
-
     /// The F# collecting member reader: [[memberDecPrinter]]'s presence, read through
     /// [[colPrinter]].
     let colMemberPrinter (idl: Idl) : MemberDecPrinter =
@@ -629,13 +619,6 @@ let private encFloat (f: float) : JVal =
             Req = sprintf "cReq %s __fs %s"
             Opt = sprintf "cOpt %s __fs %s"
             Def = sprintf "cDef %s __fs %s (%s)" }
-
-    /// Every member read collecting ([[MemberTraversal.colMembers]]), bound to its field name. A
-    /// leaf member (and a host-only one, which reads nothing) is [[decField]]'s expression lifted
-    /// (`cOne`), so its presence rules are the short-circuiting decoder's by construction.
-    let colBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
-        MemberTraversal.colMembers (memberDecPrinter idl) (colMemberPrinter idl) (sprintf "cOne (%s)") fs
-        |> Result.map (List.map (fun (f, e) -> ident f.Name, e))
 
     /// Read every member (in declaration order — the order the defects are reported in), then
     /// build `final` when all of them decoded, else answer every member's defects, concatenated in
@@ -804,7 +787,7 @@ let private encFloat (f: float) : JVal =
             k.Tag + "Spec" + objParams msg (k.Tag + "Spec") []
 
         // A generic union has no monomorphic field: its instantiations are read through the
-        // record by its own decoder (see [[colFn]]). A projected kind's decoder is the host
+        // record by its own decoder (see [[colPrinter]]). A projected kind's decoder is the host
         // projection's, a leaf with no position beneath it.
         let slots =
             [ yield "Node", "Node" + nodeTy

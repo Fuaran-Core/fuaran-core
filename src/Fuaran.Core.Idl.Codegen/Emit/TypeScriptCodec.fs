@@ -196,11 +196,6 @@ module internal TypeScriptCodec =
           ClosureApplied = fun var -> closure + "(" + var + ")"
           OpaqueApplied = fun var -> opaque + "(" + var + ")" }
 
-    /// The point-free TS encoder reference for a type (used where a codec must be
-    /// passed — a generic union's type-parameter codec).
-    let tsEncFn (t: IdlType) : Result<string, CodegenError> =
-        SlotTraversal.slotFn tsEncPrinter.Slot t
-
     /// The applied TS encode expression for a value of `t` bound to `var`.
     let tsEncApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
         SlotTraversal.encApplied tsEncPrinter var t
@@ -489,9 +484,6 @@ module internal TypeScriptCodec =
                                 | None -> d
                         )
                 | None -> HostedSlot.Verbatim "((x) => x)" }
-
-    /// The point-free TS decoder reference for a type.
-    let tsDecFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.slotFn tsDecPrinter t
 
     /// The TS literal for an omit-when-default value, in its WIRE representation —
     /// refilled on decode so the encoder's omit test fires again and the bytes match.
