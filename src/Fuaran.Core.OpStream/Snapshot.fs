@@ -60,35 +60,129 @@ type SnapshotBreak =
     /// The snapshot verified but its tail did not; the break's `Index` is the position in the tail.
     | Tail of ChainBreak
 
-/// The bodies of the `OpStream` snapshot members (Phase 332): the `OpStream.Snapshots` family.
-/// Internal: a consumer reaches each one through its forward in `OpStream` (OpStream.fs), which
-/// carries the member's contract and documentation. (The pre-Phase-296 matrix that was forwarded
-/// over it left at `0.37.0`, Phase 386.)
+/// A state sealed at an anchor (Phase 530) — the one shape a linear `Snapshot`, the compacted stream's
+/// snapshot and the op-DAG's checkpoint each are: `State` folded up to the boundary `Anchor`, and
+/// `Seal` the hash binding the two by `Mode` (`Sealed.seal`). A snapshot is the sealed state at its
+/// stream boundary (`Sealed.ofSnapshot`); a DAG checkpoint is the strict sealed state at sequence zero
+/// with its node's id as the anchor's hash. The seal bytes are the snapshot hash's, unchanged.
+type Sealed<'State> =
+    {
+        /// The boundary the state stands at — the tail above it hangs from the same anchor.
+        Anchor: Anchor
+        /// The state folded up to the boundary.
+        State: 'State
+        /// Whether `Seal` covers the state (`Strict`) or binds the boundary alone (`ChainOnly`).
+        Mode: SnapshotMode
+        /// `hashFn Anchor.PrevHash` over the seal payload for `Mode`.
+        Seal: string
+    }
+
+/// The sealing verbs, written once over `Sealed` (Phase 530): `OpStream.Snapshots`, the compacted
+/// stream and the op-DAG's checkpoints seal, verify and replay through these.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Sealed =
+
+    /// The hash pre-image binding a sealed state to its anchor, by its mode. `Strict` folds the state
+    /// in; `ChainOnly` carries the `stateHashed` discriminator instead, so a chain-only seal can never
+    /// collide with a strict one at the same boundary. Byte-identical to the snapshot pre-images.
+    let private payload (stateEncode: 'State -> string) (s: Sealed<'State>) : string =
+        match s.Mode with
+        | SnapshotMode.Strict ->
+            "{\"snapshot\":true,\"seq\":"
+            + string s.Anchor.Seq
+            + ",\"state\":"
+            + stateEncode s.State
+            + "}"
+        | SnapshotMode.ChainOnly -> "{\"snapshot\":true,\"seq\":" + string s.Anchor.Seq + ",\"stateHashed\":false}"
+
+    /// A sealed state as a one-record chain hung from its own anchor — so its seal is verified by the
+    /// one chain walker, as every other chained record is.
+    let private shape (stateEncode: 'State -> string) : ChainShape<Sealed<'State>> =
+        { SeqOf = fun s -> s.Anchor.Seq
+          PrevOf = fun s -> s.Anchor.PrevHash
+          HashOf = fun s -> s.Seal
+          PayloadOf = payload stateEncode
+          Link = fun s _ seal -> { s with Seal = seal } }
+
+    /// `state` sealed at `anchor` by `mode` — the one sealing step a snapshot, a re-compaction and a
+    /// DAG checkpoint share, so each mints the bytes the others do.
+    let seal
+        (mode: SnapshotMode)
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (anchor: Anchor)
+        (state: 'State)
+        : Sealed<'State> =
+        ChainShape.linkAt
+            (shape stateEncode)
+            hashFn
+            anchor
+            { Anchor = anchor
+              State = state
+              Mode = mode
+              Seal = "" }
+
+    /// Where a sealed state and the tail above it fail to verify: the seal first
+    /// (`SnapshotBreak.SnapshotHash`, the recomputed seal and the carried one; the tail is not walked),
+    /// then the first break in `tail` walked by `tailShape` from the same anchor (`SnapshotBreak.Tail`,
+    /// indexed by position in the tail). An empty tail checks the seal alone.
+    let firstBreak
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (tailShape: ChainShape<'R>)
+        (sv: Sealed<'State>)
+        (tail: 'R list)
+        : SnapshotBreak option =
+        match ChainShape.walk (shape stateEncode) hashFn sv.Anchor [ sv ] with
+        | Some b -> Some(SnapshotBreak.SnapshotHash(b.Expected, b.Got))
+        | None -> ChainShape.walk tailShape hashFn sv.Anchor tail |> Option.map SnapshotBreak.Tail
+
+    /// Resume replay from a sealed state: fold `tail` from `State`, refusing a tail whose first record
+    /// is not at the anchor's sequence. The seal is not checked here — `firstBreak` is that act.
+    let replayFrom
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (sv: Sealed<'State>)
+        (tail: OpRecord<'Op> list)
+        : Result<'State, SnapshotFault<'Rej>> =
+        match tail with
+        | r :: _ when r.Seq <> sv.Anchor.Seq -> Error(SnapshotFault.TailSeqMismatch(sv.Anchor.Seq, r.Seq))
+        | _ ->
+            match OpStreamChain.replay w sv.State tail with
+            | Ok st -> Ok st
+            | Error(i, e) -> Error(SnapshotFault.TailRejected(i, e))
+
+    /// A snapshot as the state it seals at its boundary.
+    let ofSnapshot (snap: Snapshot<'State>) : Sealed<'State> =
+        { Anchor =
+            { Seq = snap.Seq
+              PrevHash = snap.PrevHash }
+          State = snap.State
+          Mode = snap.Mode
+          Seal = snap.Hash }
+
+    /// The snapshot a sealed state is — the record `OpStream.Snapshots` and its line carry.
+    let toSnapshot (sv: Sealed<'State>) : Snapshot<'State> =
+        { Seq = sv.Anchor.Seq
+          State = sv.State
+          PrevHash = sv.Anchor.PrevHash
+          Hash = sv.Seal
+          Mode = sv.Mode }
+
+/// The bodies of the `OpStream` snapshot members (Phase 332): the `OpStream.Snapshots` family, each
+/// over `Sealed` since Phase 530. Internal: a consumer reaches each one through its forward in
+/// `OpStream` (OpStream.fs), which carries the member's contract and documentation. (The pre-Phase-296
+/// matrix that was forwarded over it left at `0.37.0`, Phase 386.)
 module internal OpStreamSnapshot =
     open Fuaran.Core.OpStreamChain
     open Fuaran.Core.OpStreamJsonl
 
-    // ---- snapshot / compaction (Phase 244; one family since Phase 296) ----
+    // ---- snapshot / compaction (Phase 244; one family since Phase 296; over `Sealed` since 530) ----
 
     module Snapshots =
 
-        /// The hash pre-image binding a snapshot to its boundary, by its mode. `Strict` folds the
-        /// state in; `ChainOnly` carries the `stateHashed` discriminator instead, so a chain-only
-        /// snapshot can never collide with a strict one at the same boundary. Byte-identical to the
-        /// two pre-images the matrix computed.
-        let private payload (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
-            match snap.Mode with
-            | SnapshotMode.Strict ->
-                "{\"snapshot\":true,\"seq\":"
-                + string snap.Seq
-                + ",\"state\":"
-                + stateEncode snap.State
-                + "}"
-            | SnapshotMode.ChainOnly -> "{\"snapshot\":true,\"seq\":" + string snap.Seq + ",\"stateHashed\":false}"
-
         /// The snapshot of `state` at boundary `seq` whose boundary hash is `prevHash`, hashed by
-        /// `mode` — the one sealing step `take` and the compacted stream's `compactFrom` (Phase 301)
-        /// share, so a re-compaction mints the same snapshot a compaction of the full stream does.
+        /// `mode` — `Sealed.seal` at that anchor.
         let seal
             (mode: SnapshotMode)
             (hashFn: HashFn)
@@ -97,15 +191,8 @@ module internal OpStreamSnapshot =
             (state: 'State)
             (prevHash: string)
             : Snapshot<'State> =
-            let snap0 =
-                { Seq = seq
-                  State = state
-                  PrevHash = prevHash
-                  Hash = ""
-                  Mode = mode }
-
-            { snap0 with
-                Hash = hashFn prevHash (payload stateEncode snap0) }
+            Sealed.seal mode hashFn stateEncode { Seq = seq; PrevHash = prevHash } state
+            |> Sealed.toSnapshot
 
         let take
             (mode: SnapshotMode)
@@ -122,16 +209,17 @@ module internal OpStreamSnapshot =
             if atSeq < 0 || atSeq > n then
                 Error(SnapshotFault.SeqOutOfRange(atSeq, n))
             else
-                match replay w state0 (List.truncate atSeq records) with
+                let prefix = List.truncate atSeq records
+
+                match replay w state0 prefix with
                 | Error(i, e) -> Error(SnapshotFault.PrefixRejected(i, e))
                 | Ok state ->
-                    let prevHash =
-                        if atSeq = 0 then
-                            cfg.Genesis
-                        else
-                            (List.item (atSeq - 1) records).Hash
+                    // The boundary is the tip of the prefix just replayed, read from it rather than
+                    // from the record list by index.
+                    let at =
+                        ChainShape.tip (ChainShape.records cfg w.Encode) (Anchor.genesis cfg) prefix
 
-                    Ok(seal mode hashFn stateEncode atSeq state prevHash)
+                    Ok(seal mode hashFn stateEncode atSeq state at.PrevHash)
 
         let compact
             (mode: SnapshotMode)
@@ -154,13 +242,7 @@ module internal OpStreamSnapshot =
             (snap: Snapshot<'State>)
             (tail: OpRecord<'Op> list)
             : SnapshotBreak option =
-            let expected = hashFn snap.PrevHash (payload stateEncode snap)
-
-            if snap.Hash <> expected then
-                Some(SnapshotBreak.SnapshotHash(expected, snap.Hash))
-            else
-                walkRecords cfg hashFn w snap.PrevHash snap.Seq tail
-                |> Option.map SnapshotBreak.Tail
+            Sealed.firstBreak hashFn stateEncode (ChainShape.records cfg w.Encode) (Sealed.ofSnapshot snap) tail
 
         let verify
             (cfg: StreamConfig)
@@ -177,26 +259,23 @@ module internal OpStreamSnapshot =
             (snap: Snapshot<'State>)
             (tail: OpRecord<'Op> list)
             : Result<'State, SnapshotFault<'Rej>> =
-            match tail with
-            | (r: OpRecord<'Op>) :: _ when r.Seq <> snap.Seq -> Error(SnapshotFault.TailSeqMismatch(snap.Seq, r.Seq))
-            | _ ->
-                match replay w snap.State tail with
-                | Ok st -> Ok st
-                | Error(i, e) -> Error(SnapshotFault.TailRejected(i, e))
+            Sealed.replayFrom w (Sealed.ofSnapshot snap) tail
 
+        /// The snapshot line: the chained line (`linked`) over the snapshot's members — its strict seal
+        /// payload, or for a chain-only snapshot the same members with the state carried and
+        /// `stateHashed` false, since a chain-only seal does not hold the state the line must.
         let private lineOf (snap: Snapshot<'State>) (stateJson: string) : string =
-            "{\"snapshot\":true,\"seq\":"
-            + string snap.Seq
-            + ",\"state\":"
-            + stateJson
-            + (match snap.Mode with
-               | SnapshotMode.Strict -> ""
-               | SnapshotMode.ChainOnly -> ",\"stateHashed\":false")
-            + ",\"prevHash\":"
-            + jstr snap.PrevHash
-            + ",\"hash\":"
-            + jstr snap.Hash
-            + "}"
+            linked
+                ("{\"snapshot\":true,\"seq\":"
+                 + string snap.Seq
+                 + ",\"state\":"
+                 + stateJson
+                 + (match snap.Mode with
+                    | SnapshotMode.Strict -> ""
+                    | SnapshotMode.ChainOnly -> ",\"stateHashed\":false")
+                 + "}")
+                snap.PrevHash
+                snap.Hash
 
         let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
             lineOf snap (stateEncode snap.State)
@@ -223,14 +302,8 @@ module internal OpStreamSnapshot =
 
                 mode
                 |> bindR (fun mode ->
-                    Jsonl.intField "seq" l
-                    |> bindR (fun seq ->
-                        Jsonl.rawField "state" l
-                        |> bindR (fun stateRaw ->
-                            Jsonl.stringField "prevHash" l
-                            |> bindR (fun prevHash ->
-                                Jsonl.stringField "hash" l
-                                |> Result.map (fun hash -> mode, seq, stateRaw, prevHash, hash))))))
+                    linkedOf l (fun _ -> Jsonl.rawField "state" l)
+                    |> Result.map (fun (seq, stateRaw, prevHash, hash) -> mode, seq, stateRaw, prevHash, hash)))
             |> Result.mapError spanFault
             |> Result.bind (fun (mode, seq, stateRaw, prevHash, hash) ->
                 stateDecode stateRaw

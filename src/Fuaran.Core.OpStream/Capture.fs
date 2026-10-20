@@ -189,6 +189,14 @@ module internal OpStreamCapture =
         + value
         + "}"
 
+    /// The positional capture's shape (Phase 530): the chain verbs' instance for the journal.
+    let private captureShape: ChainShape<EffectCapture> =
+        { SeqOf = fun c -> c.Seq
+          PrevOf = fun c -> c.PrevHash
+          HashOf = fun c -> c.Hash
+          PayloadOf = fun c -> capturePayload c.Seq c.Eff c.Determinism c.Value
+          Link = fun c prev hash -> { c with PrevHash = prev; Hash = hash } }
+
     let captureEffectWith
         (cfg: StreamConfig)
         (hashFn: HashFn)
@@ -203,20 +211,21 @@ module internal OpStreamCapture =
         if det = deterministicTag then
             v, captures
         else
-            // One walk for the length and the tip (Phase 296) where there were two.
-            let seq, prev = tipOf (fun (c: EffectCapture) -> c.Hash) cfg.Genesis captures
-
             let value = encode v
-            let h = hashFn prev (capturePayload seq eff det value)
 
             v,
-            captures
-            @ [ { Seq = seq
-                  Eff = eff
-                  Determinism = det
-                  Value = value
-                  PrevHash = prev
-                  Hash = h } ]
+            ChainShape.append
+                captureShape
+                hashFn
+                (Anchor.genesis cfg)
+                (fun seq ->
+                    { Seq = seq
+                      Eff = eff
+                      Determinism = det
+                      Value = value
+                      PrevHash = ""
+                      Hash = "" })
+                captures
 
     let captureEffect
         (hashFn: HashFn)
@@ -305,15 +314,7 @@ module internal OpStreamCapture =
         captures |> List.tryPick (fun c -> if c.Eff = eff then Some c.Value else None)
 
     let firstCaptureBreakWith (cfg: StreamConfig) (hashFn: HashFn) (captures: EffectCapture list) : ChainBreak option =
-        walkChain
-            hashFn
-            cfg.Genesis
-            0
-            (fun (c: EffectCapture) -> c.Seq)
-            _.PrevHash
-            _.Hash
-            (fun c -> capturePayload c.Seq c.Eff c.Determinism c.Value)
-            captures
+        ChainShape.walk captureShape hashFn (Anchor.genesis cfg) captures
 
     let firstCaptureBreak (hashFn: HashFn) (captures: EffectCapture list) : ChainBreak option =
         firstCaptureBreakWith canonicalConfig hashFn captures
@@ -325,20 +326,9 @@ module internal OpStreamCapture =
         firstCaptureBreakWith cfg hashFn captures |> Option.isNone
         && captureHeadWith cfg captures = head
 
+    /// The capture line: the chained line (`linked`) over the capture's payload with `value` embedded.
     let private captureLine (c: EffectCapture) (value: string) : string =
-        "{\"capture\":true,\"seq\":"
-        + string c.Seq
-        + ",\"eff\":"
-        + jstr c.Eff
-        + ",\"det\":"
-        + jstr c.Determinism
-        + ",\"value\":"
-        + value
-        + ",\"prevHash\":"
-        + jstr c.PrevHash
-        + ",\"hash\":"
-        + jstr c.Hash
-        + "}"
+        linked (capturePayload c.Seq c.Eff c.Determinism value) c.PrevHash c.Hash
 
     let captureToJsonl (captures: EffectCapture list) : string =
         captures |> List.map (fun c -> captureLine c c.Value) |> String.concat "\n"
@@ -358,29 +348,23 @@ module internal OpStreamCapture =
     let captureFromJsonl (text: string) : Result<EffectCapture list, string> =
         text
         |> Jsonl.scanRecords (fun l ->
-            Jsonl.intField "seq" l
-            |> bindR (fun seq ->
+            linkedOf l (fun _ ->
                 Jsonl.stringField "eff" l
                 |> bindR (fun eff ->
                     Jsonl.stringField "det" l
-                    |> bindR (fun det ->
-                        Jsonl.rawField "value" l
-                        |> bindR (fun value ->
-                            Jsonl.stringField "prevHash" l
-                            |> bindR (fun prevHash ->
-                                Jsonl.stringField "hash" l
-                                |> Result.map (fun hash ->
-                                    { Seq = seq
-                                      Eff = eff
-                                      Determinism = det
-                                      Value = value
-                                      PrevHash = prevHash
-                                      Hash = hash })))))))
+                    |> bindR (fun det -> Jsonl.rawField "value" l |> Result.map (fun value -> eff, det, value))))
+            |> Result.map (fun (seq, (eff, det, value), prevHash, hash) ->
+                { Seq = seq
+                  Eff = eff
+                  Determinism = det
+                  Value = value
+                  PrevHash = prevHash
+                  Hash = hash }))
         |> Result.mapError JsonlFault.toString
 
     // ---- the keyed capture journal (Phase 318) ----
 
-    let private phaseTag (p: CapturePhase) : string =
+    let phaseTag (p: CapturePhase) : string =
         match p with
         | CapturePhase.Attempted -> "attempted"
         | CapturePhase.Completed -> "completed"
@@ -388,14 +372,7 @@ module internal OpStreamCapture =
 
     /// The keyed record's hash pre-image. The tag `"keyed"` keeps it disjoint from a positional
     /// capture's (`"capture":true`), so a record of one journal never verifies in the other.
-    let private keyedPayload
-        (seq: int)
-        (key: string)
-        (occ: int)
-        (det: string)
-        (phase: CapturePhase)
-        (value: string)
-        : string =
+    let keyedPayload (seq: int) (key: string) (occ: int) (det: string) (phase: CapturePhase) (value: string) : string =
         "{\"capture\":\"keyed\",\"seq\":"
         + string seq
         + ",\"key\":"
@@ -410,6 +387,14 @@ module internal OpStreamCapture =
         + value
         + "}"
 
+    /// The keyed record's shape (Phase 530): the chain verbs' instance for the keyed journal.
+    let keyedShape: ChainShape<KeyedCapture> =
+        { SeqOf = fun c -> c.Seq
+          PrevOf = fun c -> c.PrevHash
+          HashOf = fun c -> c.Hash
+          PayloadOf = fun c -> keyedPayload c.Seq c.Key c.Occurrence c.Determinism c.Phase c.Value
+          Link = fun c prev hash -> { c with PrevHash = prev; Hash = hash } }
+
     /// Append one keyed record at the journal's tip.
     let private appendKeyed
         (cfg: StreamConfig)
@@ -421,17 +406,20 @@ module internal OpStreamCapture =
         (value: string)
         (captures: KeyedCapture list)
         : KeyedCapture list =
-        let seq, prev = tipOf (fun (c: KeyedCapture) -> c.Hash) cfg.Genesis captures
-
-        captures
-        @ [ { Seq = seq
-              Key = key
-              Occurrence = occ
-              Determinism = det
-              Phase = phase
-              Value = value
-              PrevHash = prev
-              Hash = hashFn prev (keyedPayload seq key occ det phase value) } ]
+        ChainShape.append
+            keyedShape
+            hashFn
+            (Anchor.genesis cfg)
+            (fun seq ->
+                { Seq = seq
+                  Key = key
+                  Occurrence = occ
+                  Determinism = det
+                  Phase = phase
+                  Value = value
+                  PrevHash = ""
+                  Hash = "" })
+            captures
 
     /// How many attempts the journal holds under `key`.
     let private attemptsOf (key: string) (captures: KeyedCapture list) : int =
@@ -511,12 +499,6 @@ module internal OpStreamCapture =
                   Occurrence = occ
                   Journal = appendKeyed cfg hashFn key occ det phase value attempted }
 
-    /// A JSON string literal's text (the inverse of `jstr` over what `jstr` writes), or `None`.
-    let private unquote (raw: string) : string option =
-        Jsonl.parseLine 1 ("{\"s\":" + raw + "}")
-        |> Result.bind (Jsonl.stringField "s")
-        |> Result.toOption
-
     let replayEffectKeyed
         (decode: string -> Result<'v, string>)
         (det: string)
@@ -556,9 +538,11 @@ module internal OpStreamCapture =
                         | Ok v -> Ok(Some(Ok v), next)
                         | Error reason -> Error(KeyedCaptureFault.Undecodable reason)
                     | Some c ->
-                        match unquote c.Value with
-                        | Some reason -> Ok(Some(Error reason), next)
-                        | None ->
+                        // The scanner's own `unquote` (Phase 530): the value is ONE JSON string, read to its
+                        // last character, where a private copy wrapped it in an object and parsed a line.
+                        match Jsonl.unquote c.Value with
+                        | Ok reason -> Ok(Some(Error reason), next)
+                        | Error _ ->
                             Error(KeyedCaptureFault.Undecodable("a refusal's reason is not a JSON string: " + c.Value))
 
     let firstKeyedCaptureBreakWith
@@ -566,15 +550,7 @@ module internal OpStreamCapture =
         (hashFn: HashFn)
         (captures: KeyedCapture list)
         : ChainBreak option =
-        walkChain
-            hashFn
-            cfg.Genesis
-            0
-            (fun (c: KeyedCapture) -> c.Seq)
-            _.PrevHash
-            _.Hash
-            (fun c -> keyedPayload c.Seq c.Key c.Occurrence c.Determinism c.Phase c.Value)
-            captures
+        ChainShape.walk keyedShape hashFn (Anchor.genesis cfg) captures
 
     /// The journal's PAIRING is well formed: under each key the attempts carry occurrences 0, 1, …
     /// in journal order, every settlement follows the attempt it settles, carries its label, and no
@@ -622,3 +598,72 @@ module internal OpStreamCapture =
 
     let verifyAttestation (sink: IAttestationSink) (attestation: Attestation) (records: OpRecord<'Op> list) : bool =
         sink.Verify attestation (head records)
+
+/// Companion helpers for `KeyedCapture` (Phase 530): the keyed journal's JSONL, which until this phase
+/// only the positional journal had. One line per record, the chained line over the record's hash
+/// payload — `{"capture":"keyed","seq":…,"key":…,"occ":…,"det":…,"phase":…,"value":…,"prevHash":…,
+/// "hash":…}` — so the bytes a line carries are the bytes its hash covers, and a journal read back
+/// verifies (`OpStream.verifyKeyedCaptures`) exactly as the one written.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module KeyedCapture =
+    open Fuaran.Core.OpStreamJsonl
+    open OpStreamCapture
+
+    let private lineOf (c: KeyedCapture) (value: string) : string =
+        linked (keyedPayload c.Seq c.Key c.Occurrence c.Determinism c.Phase value) c.PrevHash c.Hash
+
+    /// The journal as JSONL, one line per record, joined by `\n`. Unchecked: a `Value` that is not one
+    /// JSON value on one line is embedded as-is and will not read back; `tryToJsonl` refuses it.
+    let toJsonl (captures: KeyedCapture list) : string =
+        captures |> List.map (fun c -> lineOf c c.Value) |> String.concat "\n"
+
+    /// `toJsonl` through the checked writer (`Jsonl.checkedLines`): every member a line carries is
+    /// checked before any line is built, and the first the reader could not read back is the `Error`,
+    /// by its 1-based line and member. On `Ok`, `toJsonl`'s text byte for byte.
+    let tryToJsonl (captures: KeyedCapture list) : Result<string, JsonlWriteFault> =
+        checkedLines
+            "value"
+            (fun (c: KeyedCapture) ->
+                [ "key", jstr c.Key
+                  "det", jstr c.Determinism
+                  "phase", jstr (phaseTag c.Phase)
+                  "value", c.Value
+                  "prevHash", jstr c.PrevHash
+                  "hash", jstr c.Hash ])
+            lineOf
+            captures
+
+    /// Read a keyed journal back through the one scanner: structural only — verify it
+    /// (`OpStream.verifyKeyedCaptures`) before trusting it. A malformed line, a member of the wrong kind
+    /// or a phase other than `attempted` / `completed` / `refused` is the `JsonlFault`, by its 1-based
+    /// line; the `value` span is kept byte for byte.
+    let ofJsonl (text: string) : Result<KeyedCapture list, JsonlFault> =
+        text
+        |> Jsonl.scanRecords (fun l ->
+            linkedOf l (fun _ ->
+                Jsonl.stringField "key" l
+                |> bindR (fun key ->
+                    Jsonl.intField "occ" l
+                    |> bindR (fun occ ->
+                        Jsonl.stringField "det" l
+                        |> bindR (fun det ->
+                            Jsonl.stringField "phase" l
+                            |> bindR (fun tag ->
+                                match tag with
+                                | "attempted" -> Ok CapturePhase.Attempted
+                                | "completed" -> Ok CapturePhase.Completed
+                                | "refused" -> Ok CapturePhase.Refused
+                                | other -> Error(Jsonl.refuse l (sprintf "unknown capture phase \"%s\"" other)))
+                            |> bindR (fun phase ->
+                                Jsonl.rawField "value" l
+                                |> Result.map (fun value -> key, occ, det, phase, value))))))
+            |> Result.map (fun (seq, (key, occ, det, phase, value), prevHash, hash) ->
+                { Seq = seq
+                  Key = key
+                  Occurrence = occ
+                  Determinism = det
+                  Phase = phase
+                  Value = value
+                  PrevHash = prevHash
+                  Hash = hash }))

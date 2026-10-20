@@ -1688,3 +1688,235 @@ let streamLoadFaultTests =
                    && probe.GetGenericTypeDefinition() = typedefof<Result<int, int>>
                    && probe.GetGenericArguments()[1] = typeof<string>)
                   "the predicate recognises a stringly load" ]
+
+// ---- Phase 530: the chain verbs over a shape, an anchor, and the keyed journal's JSONL ----
+
+let private shapeOf = ChainShape.records OpStream.canonicalConfig encodeOp
+
+let private okOf (r: Result<'a, 'e>) : 'a =
+    match r with
+    | Ok v -> v
+    | Error e -> failwithf "expected Ok, got %A" e
+
+let private keyedJournal () =
+    let h = OpStream.defaultHash
+    let o1, j1 = OpStream.beginEffectKeyed h "clock" "k1" []
+    let j2 = OpStream.settleEffectKeyed h encInt "k1" o1 (Ok 42) j1 |> okOf
+
+    let ce =
+        OpStream.captureEffectKeyed h encInt "random" "k\"2" (fun () -> Some(Error "why\nnot")) j2
+
+    (OpStream.captureEffectKeyed h encInt "network" "k3" (fun () -> None) ce.Journal).Journal
+
+let private doubleOp (op: CounterOp) =
+    match op with
+    | Inc n -> Inc(2 * n)
+    | Dec n -> Dec(2 * n)
+
+[<Tests>]
+let chainShapeTests =
+    testList
+        "Phase 530 - ChainShape, Anchor and the keyed journal's JSONL"
+        [ test "the walk over the op record's shape from the genesis anchor is firstChainBreak" {
+              let _, recs = build () |> okOf
+
+              let tampered =
+                  recs |> List.mapi (fun i r -> if i = 1 then { r with Op = Inc 9 } else r)
+
+              for rs in [ recs; tampered; List.rev recs ] do
+                  Expect.equal
+                      (ChainShape.walk shapeOf OpStream.defaultHash (Anchor.genesis OpStream.canonicalConfig) rs)
+                      (OpStream.firstChainBreak OpStream.defaultHash sw rs)
+                      "one walker"
+          }
+
+          test "a segment walked from its anchor agrees with the whole stream's walk, at every cut" {
+              let _, recs = build () |> okOf
+
+              let tampered =
+                  recs |> List.mapi (fun i r -> if i = 2 then { r with Op = Inc 7 } else r)
+
+              for rs in [ recs; tampered ] do
+                  for k in 0 .. rs.Length do
+                      let at =
+                          ChainShape.tip shapeOf (Anchor.genesis OpStream.canonicalConfig) (List.truncate k rs)
+
+                      Expect.equal at.Seq k "the tip's sequence is the prefix length"
+
+                      let whole = OpStream.firstChainBreak OpStream.defaultHash sw rs
+
+                      let segment =
+                          ChainShape.walk shapeOf OpStream.defaultHash at (List.skip k rs)
+                          |> Option.map (fun b -> { b with Index = b.Index + k })
+
+                      // a break in the prefix is the whole walk's alone; one in the tail, both walks'
+                      match whole with
+                      | Some b when b.Index < k -> ()
+                      | _ -> Expect.equal segment whole (sprintf "the segment above %d" k)
+          }
+
+          test "rehash with the identity map is tryRehash, and a map re-chains a mapped stream that verifies" {
+              let _, recs = buildWith legacyCfg |> okOf
+              let from = ChainShape.records legacyCfg encodeOp
+
+              let rehashBy f rs =
+                  ChainShape.rehash from shapeOf OpStream.defaultHash (Anchor.genesis legacyCfg) "" f rs
+
+              Expect.equal
+                  (rehashBy id recs)
+                  (OpStream.tryRehash legacyCfg OpStream.canonicalConfig OpStream.defaultHash sw recs)
+                  "id"
+
+              let doubled = rehashBy (fun r -> { r with Op = doubleOp r.Op }) recs |> okOf
+              Expect.isTrue (OpStream.verifyChain OpStream.defaultHash sw doubled) "the mapped stream verifies"
+              Expect.equal (doubled |> List.map _.Op) [ Inc 10; Inc 6; Dec 4 ] "each op mapped"
+
+              let broken =
+                  recs |> List.mapi (fun i r -> if i = 0 then { r with Op = Inc 1 } else r)
+
+              Expect.isError (rehashBy id broken) "a source that does not verify is refused"
+          }
+
+          test "append over the shape mints the record appendChainOnly mints" {
+              let _, recs = build () |> okOf
+
+              let viaShape =
+                  ChainShape.append
+                      shapeOf
+                      OpStream.defaultHash
+                      (Anchor.genesis OpStream.canonicalConfig)
+                      (fun n ->
+                          { Seq = n
+                            Actor = Human "z"
+                            Op = Inc 1
+                            PrevHash = ""
+                            Hash = "" })
+                      recs
+
+              Expect.equal
+                  viaShape
+                  (OpStream.appendChainOnly OpStream.defaultHash encodeOp (Human "z") (Inc 1) recs)
+                  "one append"
+
+              let at = ChainShape.tip shapeOf (Anchor.genesis OpStream.canonicalConfig) recs
+
+              Expect.equal
+                  (ChainShape.linkAt
+                      shapeOf
+                      OpStream.defaultHash
+                      at
+                      { List.last viaShape with
+                          PrevHash = ""
+                          Hash = "" })
+                  (List.last viaShape)
+                  "the record linked at the tip"
+          }
+
+          test "the keyed journal writes one chained line per record and reads back the journal it wrote" {
+              let j = keyedJournal ()
+              let text = KeyedCapture.toJsonl j
+
+              Expect.equal (KeyedCapture.tryToJsonl j) (Ok text) "the checked writer agrees"
+              Expect.equal (KeyedCapture.ofJsonl text) (Ok j) "round trip"
+              Expect.isTrue (OpStream.verifyKeyedCaptures OpStream.defaultHash j) "the journal verifies"
+
+              let first = List.head j
+
+              Expect.equal
+                  (text.Split('\n')[0])
+                  ("{\"capture\":\"keyed\",\"seq\":0,\"key\":\"k1\",\"occ\":0,\"det\":\"clock\",\"phase\":\"attempted\",\"value\":null,\"prevHash\":\"\",\"hash\":"
+                   + OpStream.Jsonl.quote first.Hash
+                   + "}")
+                  "the line is the hash payload with its link"
+
+              let reread = KeyedCapture.ofJsonl text |> okOf
+              Expect.isTrue (OpStream.verifyKeyedCaptures OpStream.defaultHash reread) "read back, it verifies"
+          }
+
+          test "the keyed reader refuses an unknown phase and the checked writer a value it cannot read back" {
+              let j = keyedJournal ()
+
+              let text =
+                  (KeyedCapture.toJsonl j).Replace("\"phase\":\"attempted\"", "\"phase\":\"maybe\"")
+
+              match KeyedCapture.ofJsonl text with
+              | Error f ->
+                  Expect.equal f.Line 1 "the first line"
+                  Expect.equal f.Reason (JsonlFaultReason.Refused "unknown capture phase \"maybe\"") "named"
+              | Ok _ -> failtest "an unknown phase reads"
+
+              let bad =
+                  j
+                  |> List.mapi (fun i c -> if i = 1 then { c with Value = "{\"a\":\n1}" } else c)
+
+              match KeyedCapture.tryToJsonl bad with
+              | Error f -> Expect.equal (f.Line, f.Member) (2, "value") "the value, by its line"
+              | Ok _ -> failtest "a multi-line value was written"
+          }
+
+          test "Jsonl.settle names EVERY refused read, in read order, and decodes the rest" {
+              let reads = [ 1, Ok "a"; 2, Error "x"; 3, Ok "c"; 4, Error "y" ]
+
+              let site (line: int, _: Result<string, string>) (why: string) : UndecodableOp =
+                  { Lane = None
+                    Line = line
+                    NodeId = string line
+                    Reason = why }
+
+              Expect.equal
+                  (Jsonl.settle snd site reads
+                   |> Result.mapError (List.map (fun s -> s.Line, s.Reason)))
+                  (Error [ 2, "x"; 4, "y" ])
+                  "every site"
+
+              Expect.equal (Jsonl.settle snd site [ 1, Ok "a"; 2, Ok "b" ]) (Ok [ "a"; "b" ]) "all decoded"
+          }
+
+          test "Jsonl.carry never refuses, and re-encodes an undecoded op as its stored text" {
+              let cw = Jsonl.carry sw
+              let undecoded = cw.Decode "{\"kind\":\"nope\"}" |> okOf
+              Expect.isError (snd undecoded) "the real witness refuses it"
+              Expect.equal (cw.Encode undecoded) "{\"kind\":\"nope\"}" "its stored text"
+              let decoded = cw.Decode(encodeOp (Inc 2)) |> okOf
+              Expect.equal (cw.Encode decoded) (encodeOp (Inc 2)) "a decoded op encodes by the witness"
+          }
+
+          test "Jsonl.checkedLines refuses the first unreadable member by its line and member" {
+              let lines =
+                  Jsonl.checkedLines "v" (fun (v: string) -> [ "v", v ]) (fun _ v -> "{\"v\":" + v + "}") [ "1"; "[2]" ]
+
+              Expect.equal lines (Ok "{\"v\":1}\n{\"v\":[2]}") "written"
+
+              match Jsonl.checkedLines "v" (fun (v: string) -> [ "v", v ]) (fun _ v -> v) [ "1"; " 2" ] with
+              | Error f ->
+                  Expect.equal (f.Line, f.Member, f.Reason) (2, "v", JsonlWriteFaultReason.NotTrimStable) "refused"
+              | Ok _ -> failtest "a value with leading whitespace was written"
+          }
+
+          test "a keyed refusal's reason is read by the scanner's unquote: one JSON string, to its last character" {
+              let h = OpStream.defaultHash
+
+              let j =
+                  (OpStream.captureEffectKeyed h encInt "random" "k" (fun () -> Some(Error "no")) []).Journal
+
+              let replay (j: KeyedCapture list) =
+                  OpStream.replayEffectKeyed decInt "random" "k" (fun () -> None) Map.empty j
+                  |> Result.map fst
+
+              Expect.equal (replay j) (Ok(Some(Error "no"))) "the reason"
+
+              // A value that is a string FOLLOWED by more members no longer reads as that string: the
+              // private copy this replaced wrapped it in an object and parsed a line, reading the tail
+              // as members of that object.
+              let spliced =
+                  j
+                  |> List.map (fun c ->
+                      if c.Phase = CapturePhase.Refused then
+                          { c with Value = "\"no\",\"x\":1" }
+                      else
+                          c)
+
+              match replay spliced with
+              | Error(KeyedCaptureFault.Undecodable _) -> ()
+              | other -> failtestf "a spliced reason read as %A" other
+          } ]

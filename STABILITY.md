@@ -900,7 +900,7 @@ is the genesis every chain walker starts from. `OpStream.Snapshots.take` and `co
 snapshot byte is unchanged. A stream appended under a config with any other genesis must be
 compacted under that config; a snapshot at zero taken under the canonical config does not verify
 across such a stream. (The pre-Phase-296 entry points this paragraph named — `snapshotAt`,
-`compactWith` and the rest — left at `0.37.0`.)
+`compactWith` and the rest — left at `0.37.0`.) **Since `0.39.0` one chain over every record kind (Phase 530, DECISIONS.md D<n>, additive):** `ChainShape` (`walk` / `tip` / `append` / `rehash`, each at an `Anchor`) is the op record's, both capture journals' and a sealed state's verbs, and `Sealed` (`seal` / `firstBreak` / `replayFrom`) is a snapshot, a compacted stream's snapshot and a DAG checkpoint (strict, anchored at `{ Seq = 0; PrevHash = node }`); no seal, hash, line or refusal position moved. Every chained line is its hash payload with `prevHash` and `hash` spliced in last, and the keyed journal gains that JSONL (`KeyedCapture.toJsonl` / `tryToJsonl` / `ofJsonl`); `Jsonl.checkedLines` / `carry` / `settle` are public and the DAG's load reads through them. A keyed refusal's reason is read by `Jsonl.unquote`, one JSON string to its last character, so a hand-built value with anything after the string (which read as the string) is now `Undecodable`. Changing a shape's payload, the line rule or the seal pre-image is breaking.
 
 ### Chain pre-image portability
 

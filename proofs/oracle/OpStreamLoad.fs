@@ -1142,12 +1142,20 @@ let rec key_in : Prims.list<JsonParse.och>  ->  Prims.list<member1>  ->  Prims.b
      end))
 
 
-let rec members_loop : Prims.nat  ->  Prims.list<JsonParse.ch>  ->  Prims.list<member1>  ->  Prims.list<JsonParse.ch>  ->  sres<Prims.list<member1>> = (fun ( off  :  Prims.nat ) ( whole  :  Prims.list<JsonParse.ch> ) ( acc  :  Prims.list<member1> ) ( s  :  Prims.list<JsonParse.ch> ) -> (
+let rec members_loop : Prims.nat  ->  Prims.list<JsonParse.ch>  ->  Prims.list<member1>  ->  Prims.bool  ->  Prims.list<JsonParse.ch>  ->  sres<Prims.list<member1>> = (fun ( off  :  Prims.nat ) ( whole  :  Prims.list<JsonParse.ch> ) ( acc  :  Prims.list<member1> ) ( first  :  Prims.bool ) ( s  :  Prims.list<JsonParse.ch> ) -> (
 
 let w = (JsonParse.skip_ws s)
 in (match (w) with
 | [] -> begin
      SErr (Truncated, [])
+     end
+| (JsonParse.CRBrace)::t -> begin
+      
+if first then begin
+     SOk ((JsonParse.rev acc), t)
+     end else begin
+     SErr (ExpectedKey, w)
+     end
      end
 | (JsonParse.CQuote)::t -> begin
      (match ((string_tail [] w [] t)) with
@@ -1191,7 +1199,7 @@ in (match (w3) with
      SErr (Truncated, [])
      end
 | (JsonParse.CComma)::t3 -> begin
-     (members_loop off whole ((m)::acc) t3)
+     (members_loop off whole ((m)::acc) false t3)
      end
 | (JsonParse.CRBrace)::t3 -> begin
      SOk ((JsonParse.rev ((m)::acc)), t3)
@@ -1227,25 +1235,13 @@ let members_of : Prims.nat  ->  Prims.list<JsonParse.ch>  ->  res<Prims.list<mem
 let w = (JsonParse.skip_ws s)
 in (match (w) with
 | (JsonParse.CLBrace)::t -> begin
-     (
-
-let w1 = (JsonParse.skip_ws t)
-in (match (w1) with
-| [] -> begin
-     Error ((((off + (pos_in s []))), (Truncated)))
-     end
-| (JsonParse.CRBrace)::t1 -> begin
-     (members_end off s [] t1)
-     end
-| uu___ -> begin
-     (match ((members_loop off s [] w1)) with
+     (match ((members_loop off s [] true t)) with
 | SErr (why, at) -> begin
      Error ((((off + (pos_in s at))), (why)))
      end
 | SOk (ms, r) -> begin
      (members_end off s ms r)
      end)
-     end))
      end
 | uu___ -> begin
      Error ((((off + (pos_in s w))), (NotAnObject)))
@@ -1493,127 +1489,65 @@ let int_field : Prims.list<JsonParse.ch>  ->  jline  ->  res<Prims.int, fault> =
      end))
 
 
-let rec skip_ws1 : Prims.list<JsonParse.ch>  ->  Prims.list<JsonParse.ch> = (fun ( s  :  Prims.list<JsonParse.ch> ) -> (match (s) with
-| (c)::t -> begin
-     (match (t) with
+let rec items_loop : Prims.list<JsonParse.ch>  ->  Prims.nat  ->  Prims.bool  ->  Prims.list<Prims.list<JsonParse.ch>>  ->  Prims.list<JsonParse.ch>  ->  sres<Prims.list<Prims.list<JsonParse.ch>>> = (fun ( start  :  Prims.list<JsonParse.ch> ) ( i  :  Prims.nat ) ( first  :  Prims.bool ) ( acc  :  Prims.list<Prims.list<JsonParse.ch>> ) ( s  :  Prims.list<JsonParse.ch> ) -> (
+
+let w = (JsonParse.skip_ws s)
+in (match (w) with
 | [] -> begin
-     s
+     SErr (UnterminatedContainer, start)
      end
-| uu___ -> begin
+| (JsonParse.CRBrack)::t -> begin
       
-if (JsonParse.is_ws c) then begin
-     (skip_ws1 t)
+if first then begin
+     SOk ((JsonParse.rev acc), t)
      end else begin
-     s
+     SErr (MissingValue, w)
      end
-     end)
-     end
-| [] -> begin
-     s
-     end))
-
-type sitems =
-| Items of Prims.list<Prims.list<JsonParse.och>>
-| Bad
-| ScanFault of Prims.nat * reason
-
-
-let uu___is_Items : sitems  ->  Prims.bool = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| Items (xs) -> begin
-     true
      end
 | uu___ -> begin
-     false
-     end))
-
-
-let __proj__Items__item__xs : sitems  ->  Prims.list<Prims.list<JsonParse.och>> = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| Items (xs) -> begin
-     xs
-     end))
-
-
-let uu___is_Bad : sitems  ->  Prims.bool = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| Bad -> begin
-     true
+     (match ((skip_val ((SIdx (i))::[]) start w)) with
+| SErr (why, at) -> begin
+     SErr (why, at)
      end
-| uu___ -> begin
-     false
-     end))
-
-
-let uu___is_ScanFault : sitems  ->  Prims.bool = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| ScanFault (at, why) -> begin
-     true
-     end
-| uu___ -> begin
-     false
-     end))
-
-
-let __proj__ScanFault__item__at : sitems  ->  Prims.nat = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| ScanFault (at, why) -> begin
-     at
-     end))
-
-
-let __proj__ScanFault__item__why : sitems  ->  reason = (fun ( projectee  :  sitems ) -> (match (projectee) with
-| ScanFault (at, why) -> begin
-     why
-     end))
-
-
-let rec ends_with_rbrack : Prims.list<JsonParse.ch>  ->  Prims.bool = (fun ( s  :  Prims.list<JsonParse.ch> ) -> (match (s) with
-| [] -> begin
-     false
-     end
-| (c)::[] -> begin
-     (Prims.op_Equals c JsonParse.CRBrack)
-     end
-| (uu___)::t -> begin
-     (ends_with_rbrack t)
-     end))
-
-
-let rec items_loop : Prims.nat  ->  Prims.list<JsonParse.ch>  ->  Prims.bool  ->  Prims.list<Prims.list<JsonParse.och>>  ->  Prims.list<JsonParse.ch>  ->  sitems = (fun ( p  :  Prims.nat ) ( v  :  Prims.list<JsonParse.ch> ) ( expect_item  :  Prims.bool ) ( acc  :  Prims.list<Prims.list<JsonParse.och>> ) ( s  :  Prims.list<JsonParse.ch> ) -> (match (s) with
-| (uu___)::(uu___1)::uu___2 -> begin
+| SOk (uu___1, r) -> begin
      (
 
-let w = (skip_ws1 s)
-in (match (w) with
-| (JsonParse.CQuote)::t -> begin
-      
-if expect_item then begin
-     (match ((string_tail [] w [] t)) with
-| SErr (why, at) -> begin
-     ScanFault ((p + (pos_in v at)), why)
+let item = (take_n (sub (ListAlgebra.len w) (ListAlgebra.len r)) w)
+in (
+
+let w3 = (JsonParse.skip_ws r)
+in (match (w3) with
+| [] -> begin
+     SErr (UnterminatedContainer, start)
      end
-| SOk (item, r) -> begin
-     (items_loop p v false ((item)::acc) (skip_ws1 r))
+| (JsonParse.CComma)::t3 -> begin
+     (items_loop start (i + (Prims.parse_int "1")) false ((item)::acc) t3)
+     end
+| (JsonParse.CRBrack)::t3 -> begin
+     SOk ((JsonParse.rev ((item)::acc)), t3)
+     end
+| uu___2 -> begin
+     SErr (ExpectedCommaOrBracket, w3)
+     end)))
      end)
-     end else begin
-     Bad
+     end)))
+
+
+let rec item_strings : Prims.list<Prims.list<JsonParse.ch>>  ->  FStar_Pervasives_Native.option<Prims.list<Prims.list<JsonParse.och>>> = (fun ( items  :  Prims.list<Prims.list<JsonParse.ch>> ) -> (match (items) with
+| [] -> begin
+     FStar_Pervasives_Native.Some ([])
      end
-     end
-| (JsonParse.CComma)::t -> begin
-      
-if expect_item then begin
-     Bad
-     end else begin
-     (items_loop p v true acc (skip_ws1 t))
-     end
-     end
-| uu___3 -> begin
-     Bad
-     end))
+| ((JsonParse.CQuote)::t)::rest -> begin
+     (match ((((string_tail [] ((JsonParse.CQuote)::t) [] t)), ((item_strings rest)))) with
+| (SOk (x, []), FStar_Pervasives_Native.Some (xs)) -> begin
+     FStar_Pervasives_Native.Some ((x)::xs)
      end
 | uu___ -> begin
-      
-if expect_item then begin
-     Bad
-     end else begin
-     Items ((JsonParse.rev acc))
+     FStar_Pervasives_Native.None
+     end)
      end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
      end))
 
 
@@ -1627,27 +1561,22 @@ let strings_field : Prims.list<JsonParse.ch>  ->  jline  ->  res<Prims.list<Prim
 let bad = Error ((fault_at l.lnum p (ExpectedStringArray (key))))
 in (match (v) with
 | (JsonParse.CLBrack)::t -> begin
-      
-if (ends_with_rbrack t) then begin
-     (match ((skip_ws1 t)) with
-| (JsonParse.CRBrack)::[] -> begin
-     Ok ([])
+     (match ((items_loop v (Prims.parse_int "0") true [] t)) with
+| SErr (why, at) -> begin
+     Error ((fault_at l.lnum (p + (pos_in v at)) why))
      end
-| w -> begin
-     (match ((items_loop p v true [] w)) with
-| Items (xs) -> begin
+| SOk (items, []) -> begin
+     (match ((item_strings items)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
      Ok (xs)
      end
-| Bad -> begin
+| FStar_Pervasives_Native.None -> begin
      bad
+     end)
      end
-| ScanFault (at, why) -> begin
-     Error ((fault_at l.lnum at why))
-     end)
-     end)
-     end else begin
+| SOk (uu___, uu___1) -> begin
      bad
-     end
+     end)
      end
 | uu___ -> begin
      bad

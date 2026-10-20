@@ -139,6 +139,41 @@ type StreamConfig =
         Genesis: string
     }
 
+/// The boundary a chained run of records hangs from (Phase 530): the sequence its first record
+/// carries and the hash that record links to. A stream's own anchor is its genesis (`Anchor.genesis`:
+/// sequence zero, the config's `Genesis`); a tail kept above a snapshot hangs from the snapshot's
+/// boundary (`{ Seq = snap.Seq; PrevHash = snap.PrevHash }`); a DAG checkpoint stands at sequence zero
+/// with its node's id as the boundary hash. The tip of a run is the anchor the next record hangs from
+/// (`ChainShape.tip`).
+type Anchor =
+    {
+        /// The `Seq` the run's first record must carry — the number of records before it.
+        Seq: int
+        /// The hash the run's first record must name as its `PrevHash`.
+        PrevHash: string
+    }
+
+/// What makes a list of records a hash chain (Phase 530): where each record says it sits, what it
+/// links to, what it hashes to, the payload its hash is computed over, and the record re-linked. The
+/// chain verbs are written ONCE over a shape (`ChainShape.walk`, `tip`, `append`, `rehash`), and every
+/// chained record kind in this package is an instance of it — the op record (`ChainShape.records`),
+/// the positional and keyed capture journals, and a sealed state (`Sealed`), whose one-record chain
+/// hangs from its anchor. A host's own record kind joins the same verbs by supplying its shape.
+type ChainShape<'R> =
+    {
+        /// The record's zero-based position in its stream.
+        SeqOf: 'R -> int
+        /// The hash the record names as its predecessor's.
+        PrevOf: 'R -> string
+        /// The record's own hash, the next record's `PrevOf`.
+        HashOf: 'R -> string
+        /// The text the record's hash is computed over, after its predecessor's hash (`hashFn prev
+        /// payload`). It must not read the record's link: re-linking a record never changes it.
+        PayloadOf: 'R -> string
+        /// The record with its predecessor's hash and its own hash set, every other field kept.
+        Link: 'R -> string -> string -> 'R
+    }
+
 /// The recoverable outcome of a compare-and-append (`OpStream.appendIf`, Phase 79) — the CAS envelope
 /// that turns the dispatcher's single-writer *process* convention into a *library* guarantee.
 /// `StaleHead` means the caller's `expectedHead` no longer matched the stream's actual head: another
@@ -234,6 +269,129 @@ module KeyIndex =
     let ofStream (keyOf: 'Op -> string) (records: OpRecord<'Op> list) : KeyIndex =
         (empty, records)
         ||> List.fold (fun idx r -> add (keyOf r.Op) { Seq = r.Seq; Hash = r.Hash } idx)
+
+/// Companion helpers for `Anchor` (Phase 530).
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Anchor =
+
+    /// A stream's own anchor under `cfg`: sequence zero, linked to the config's genesis.
+    let genesis (cfg: StreamConfig) : Anchor = { Seq = 0; PrevHash = cfg.Genesis }
+
+/// The chain verbs, written once over a record kind's shape (Phase 530). `OpStream`'s op-stream
+/// verbs, the capture journals', the snapshot and the compacted stream's are each one of these over
+/// its own instance, so a break is found the same way in an op stream, a journal, a snapshot's tail or
+/// a host's own records.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ChainShape =
+
+    /// The op record's shape (Phase 530): the payload `cfg` binds over `{seq, actor, encode op}`.
+    /// `ChainShape.records OpStream.canonicalConfig w.Encode` is the shape `OpStream.verifyChain` walks.
+    let records (cfg: StreamConfig) (encode: 'Op -> string) : ChainShape<OpRecord<'Op>> =
+        { SeqOf = fun r -> r.Seq
+          PrevOf = fun r -> r.PrevHash
+          HashOf = fun r -> r.Hash
+          PayloadOf = fun r -> cfg.Payload r.Seq r.Actor (encode r.Op)
+          Link = fun r prev hash -> { r with PrevHash = prev; Hash = hash } }
+
+    /// THE chain walker (Phase 296; over a shape since Phase 530) — the first record of `items`, hung
+    /// from `anchor`, whose sequence, prev-link or hash fails, `Index` being its position in `items`.
+    /// The checks run in that order and the digest is computed only after the two cheap ones pass. A
+    /// whole stream is walked from its genesis anchor; a segment from the anchor it hangs from.
+    let walk (shape: ChainShape<'R>) (hashFn: HashFn) (anchor: Anchor) (items: 'R list) : ChainBreak option =
+        let rec go (prev: string) (i: int) =
+            function
+            | [] -> None
+            | r :: rest ->
+                let expectedSeq = anchor.Seq + i
+
+                if shape.SeqOf r <> expectedSeq then
+                    Some
+                        { Index = i
+                          Reason = ChainBreakReason.SequenceMismatch
+                          Expected = string expectedSeq
+                          Got = string (shape.SeqOf r) }
+                elif shape.PrevOf r <> prev then
+                    Some
+                        { Index = i
+                          Reason = ChainBreakReason.PrevHashLinkBroken
+                          Expected = prev
+                          Got = shape.PrevOf r }
+                else
+                    let expectedHash = hashFn prev (shape.PayloadOf r)
+
+                    if shape.HashOf r <> expectedHash then
+                        Some
+                            { Index = i
+                              Reason = ChainBreakReason.HashMismatch
+                              Expected = expectedHash
+                              Got = shape.HashOf r }
+                    else
+                        go (shape.HashOf r) (i + 1) rest
+
+        go anchor.PrevHash 0 items
+
+    /// `tip` by a hash projection — the ONE tip body (Phase 296's `tipOf`, Phase 388's one body every
+    /// log reads its tip through). Inline, so a projection that is a field read stays one rather than a
+    /// closure call per record: a recursive walk, or one through a closure, cost more than the three
+    /// library walks it replaced (measured, Phase 296).
+    let inline internal tipBy ([<InlineIfLambda>] hashOf: 'R -> string) (anchor: Anchor) (items: 'R list) : Anchor =
+        let mutable n = 0
+        let mutable last = anchor.PrevHash
+        let mutable rest = items
+
+        while not rest.IsEmpty do
+            last <- hashOf rest.Head
+            n <- n + 1
+            rest <- rest.Tail
+
+        { Seq = anchor.Seq + n
+          PrevHash = last }
+
+    /// The anchor the next record hangs from: the run's anchor advanced past `items` — its sequence
+    /// plus their count, and the last one's hash (the anchor's own `PrevHash` when there are none). One
+    /// walk of the list.
+    let tip (shape: ChainShape<'R>) (anchor: Anchor) (items: 'R list) : Anchor = tipBy shape.HashOf anchor items
+
+    /// `record` linked at `at`: its predecessor's hash is `at.PrevHash` and its own hash is computed
+    /// over its payload. The record must already carry `at.Seq` — the payload binds it.
+    let linkAt (shape: ChainShape<'R>) (hashFn: HashFn) (at: Anchor) (record: 'R) : 'R =
+        shape.Link record at.PrevHash (hashFn at.PrevHash (shape.PayloadOf record))
+
+    /// Chain one record onto `items` (hung from `anchor`): `make seq` builds it at the tip's sequence,
+    /// and it is linked to the tip. The whole extended list.
+    let append (shape: ChainShape<'R>) (hashFn: HashFn) (anchor: Anchor) (make: int -> 'R) (items: 'R list) : 'R list =
+        let at = tip shape anchor items
+        items @ [ linkAt shape hashFn at (make at.Seq) ]
+
+    /// Re-chain a run (Phase 255's migration, over a shape since Phase 530): `items` verified under
+    /// `from` hung from `anchor` — the first break is the `Error`, and nothing is re-chained — then each
+    /// record mapped by `map` and linked under `into`, hung from `{ anchor with PrevHash = intoPrev }`.
+    /// Each record keeps its sequence; only its link and hash change. `OpStream.tryRehash` is this
+    /// with `map = id` from a genesis to a genesis; a stream whose ops are re-scoped is this with the
+    /// re-scoping as `map`.
+    let rehash
+        (from: ChainShape<'R>)
+        (into: ChainShape<'S>)
+        (hashFn: HashFn)
+        (anchor: Anchor)
+        (intoPrev: string)
+        (map: 'R -> 'S)
+        (items: 'R list)
+        : Result<'S list, ChainBreak> =
+        match walk from hashFn anchor items with
+        | Some b -> Error b
+        | None ->
+            let rec go (prev: string) acc =
+                function
+                | [] -> List.rev acc
+                | r :: rest ->
+                    let m = map r
+                    let r' = into.Link m prev (hashFn prev (into.PayloadOf m))
+                    go (into.HashOf r') (r' :: acc) rest
+
+            Ok(go intoPrev [] items)
 
 /// The bodies of the `OpStream` chain members (Phase 332): the chain hashes, the payload configs,
 /// append, verification, rehash, replay, the chain head, compare-and-append and idempotent append.
@@ -548,29 +706,12 @@ module internal OpStreamChain =
 
     let empty: OpRecord<'Op> list = []
 
-    /// A hash-chained log's length and tip hash in ONE walk (Phase 296) — `genesis` when the log
-    /// is empty. The one body every log in this package reads its tip through (Phase 388): the op
-    /// stream, the compacted tail (from the snapshot's hash), and both capture journals. `append`
-    /// used to walk the list three times per call (`List.length`, `List.tryLast`, then the copy `@`
-    /// makes) and `appendIf` four.
-    let inline tipOf ([<InlineIfLambda>] hashOf: 'R -> string) (genesis: string) (records: 'R list) : int * string =
-        // A plain loop: a recursive walk carrying an option per record, or compiled to `.tail`
-        // calls, cost more than the three library walks it replaced (measured, Phase 296). Inline,
-        // so the projection is the field read it names rather than a closure call per record.
-        let mutable n = 0
-        let mutable last = genesis
-        let mutable rest = records
-
-        while not rest.IsEmpty do
-            last <- hashOf rest.Head
-            n <- n + 1
-            rest <- rest.Tail
-
-        n, last
-
-    /// `tipOf` over an op stream chained from `cfg`'s genesis.
+    /// The tip of an op stream chained from `cfg`'s genesis: its length and its last hash.
     let private tip (cfg: StreamConfig) (records: OpRecord<'Op> list) : int * string =
-        tipOf (fun (r: OpRecord<'Op>) -> r.Hash) cfg.Genesis records
+        let at =
+            ChainShape.tipBy (fun (r: OpRecord<'Op>) -> r.Hash) (Anchor.genesis cfg) records
+
+        at.Seq, at.PrevHash
 
     let chainHashOf
         (cfg: StreamConfig)
@@ -582,10 +723,11 @@ module internal OpStreamChain =
         : string =
         hashFn prev (cfg.Payload seq actor encodedOp)
 
-    /// Chain ONE op at sequence number `seq` onto tip hash `prev`: the state after it and the record
-    /// it chained, or the witness's rejection. The single-op appends call this directly, so the record
+    /// Chain ONE op at sequence number `seq` onto tip hash `prev` (`ChainShape.linkAt` over the op
+    /// record's shape, Phase 530): the state after it and the record it chained, or the witness's
+    /// rejection. The single-op appends call this directly, so the record
     /// they return is the one chained here, never one read back out of a list (Phase 496).
-    let private chainOne
+    let chainOne
         (cfg: StreamConfig)
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -598,11 +740,15 @@ module internal OpStreamChain =
         w.Apply op state
         |> Result.map (fun state' ->
             state',
-            { Seq = seq
-              Actor = actor
-              Op = op
-              PrevHash = prev
-              Hash = chainHashOf cfg hashFn seq actor (w.Encode op) prev })
+            ChainShape.linkAt
+                (ChainShape.records cfg w.Encode)
+                hashFn
+                { Seq = seq; PrevHash = prev }
+                { Seq = seq
+                  Actor = actor
+                  Op = op
+                  PrevHash = prev
+                  Hash = "" })
 
     /// Chain `ops` onto a stream whose length is `seq0` and whose tip hash is `prev0`, applying each
     /// op in turn: the new records in order and the final state, or the first rejection with its index
@@ -682,20 +828,20 @@ module internal OpStreamChain =
         (op: 'Op)
         (records: OpRecord<'Op> list)
         : OpRecord<'Op> list =
-        let n, prev = tip canonicalConfig records
+        ChainShape.append
+            (ChainShape.records canonicalConfig encode)
+            hashFn
+            (Anchor.genesis canonicalConfig)
+            (fun n ->
+                { Seq = n
+                  Actor = actor
+                  Op = op
+                  PrevHash = ""
+                  Hash = "" })
+            records
 
-        records
-        @ [ { Seq = n
-              Actor = actor
-              Op = op
-              PrevHash = prev
-              Hash = chainHashOf canonicalConfig hashFn n actor (encode op) prev } ]
-
-    /// THE chain walker (Phase 296) — the one loop `firstChainBreakWith`, `rehash`, the snapshot
-    /// boundary verifier and `firstCaptureBreak` share, where four copies were written. Walks `items`
-    /// from sequence `seq0` and prev-link `genesis` and returns the first item whose sequence,
-    /// prev-link, or hash fails, `Index` being its position in `items`. The digest is computed only
-    /// after the cheap sequence and link checks pass.
+    /// The walker as `(genesis, seq0)` and four projections — `ChainShape.walk` at that anchor. Kept
+    /// for the facade's encoding-profile walk alone, which Phase 516 retires with the facade.
     let walkChain
         (hashFn: HashFn)
         (genesis: string)
@@ -706,57 +852,15 @@ module internal OpStreamChain =
         (payloadOf: 'R -> string)
         (items: 'R list)
         : ChainBreak option =
-        let rec go (prev: string) (i: int) =
-            function
-            | [] -> None
-            | r :: rest ->
-                let expectedSeq = seq0 + i
-
-                if seqOf r <> expectedSeq then
-                    Some
-                        { Index = i
-                          Reason = ChainBreakReason.SequenceMismatch
-                          Expected = string expectedSeq
-                          Got = string (seqOf r) }
-                elif prevOf r <> prev then
-                    Some
-                        { Index = i
-                          Reason = ChainBreakReason.PrevHashLinkBroken
-                          Expected = prev
-                          Got = prevOf r }
-                else
-                    let expectedHash = hashFn prev (payloadOf r)
-
-                    if hashOf r <> expectedHash then
-                        Some
-                            { Index = i
-                              Reason = ChainBreakReason.HashMismatch
-                              Expected = expectedHash
-                              Got = hashOf r }
-                    else
-                        go (hashOf r) (i + 1) rest
-
-        go genesis 0 items
-
-    /// The op-record instance of the walker: from `seq0` and `genesis`, each record's payload under
-    /// `cfg`.
-    let walkRecords
-        (cfg: StreamConfig)
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (genesis: string)
-        (seq0: int)
-        (records: OpRecord<'Op> list)
-        : ChainBreak option =
-        walkChain
+        ChainShape.walk
+            { SeqOf = seqOf
+              PrevOf = prevOf
+              HashOf = hashOf
+              PayloadOf = payloadOf
+              Link = fun r _ _ -> r }
             hashFn
-            genesis
-            seq0
-            (fun (r: OpRecord<'Op>) -> r.Seq)
-            _.PrevHash
-            _.Hash
-            (fun r -> cfg.Payload r.Seq r.Actor (w.Encode r.Op))
-            records
+            { Seq = seq0; PrevHash = genesis }
+            items
 
     let firstChainBreakWith
         (cfg: StreamConfig)
@@ -764,7 +868,7 @@ module internal OpStreamChain =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (records: OpRecord<'Op> list)
         : ChainBreak option =
-        walkRecords cfg hashFn w cfg.Genesis 0 records
+        ChainShape.walk (ChainShape.records cfg w.Encode) hashFn (Anchor.genesis cfg) records
 
     let firstChainBreak
         (hashFn: HashFn)
@@ -791,21 +895,14 @@ module internal OpStreamChain =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (records: OpRecord<'Op> list)
         : Result<OpRecord<'Op> list, ChainBreak> =
-        match firstChainBreakWith fromCfg hashFn w records with
-        | Some b -> Error b
-        | None ->
-            let rec go (prev: string) acc =
-                function
-                | [] -> List.rev acc
-                | (r: OpRecord<'Op>) :: rest ->
-                    let payload = toCfg.Payload r.Seq r.Actor (w.Encode r.Op)
-                    let h = hashFn prev payload
-
-                    let r' = { r with PrevHash = prev; Hash = h }
-
-                    go h (r' :: acc) rest
-
-            Ok(go toCfg.Genesis [] records)
+        ChainShape.rehash
+            (ChainShape.records fromCfg w.Encode)
+            (ChainShape.records toCfg w.Encode)
+            hashFn
+            (Anchor.genesis fromCfg)
+            toCfg.Genesis
+            id
+            records
 
     let rehash
         (fromCfg: StreamConfig)

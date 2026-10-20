@@ -54,10 +54,14 @@ module internal OpStreamCompacted =
             | Some k -> KeyIndex.add k { Seq = r.Seq; Hash = r.Hash } idx
             | None -> idx)
 
-    /// The next sequence and the head, in one walk of the tail (`tipOf`, from the snapshot's hash).
-    let private tip (c: Compacted<'Op, 'State>) : int * string =
-        let n, last = tipOf (fun (r: OpRecord<'Op>) -> r.Hash) c.Snapshot.PrevHash c.Tail
-        c.Snapshot.Seq + n, last
+    /// The anchor the tail hangs from: the snapshot's boundary (Phase 530).
+    let private anchorOf (c: Compacted<'Op, 'State>) : Anchor =
+        { Seq = c.Snapshot.Seq
+          PrevHash = c.Snapshot.PrevHash }
+
+    /// The anchor the next record hangs from: the tail's tip, from the snapshot's boundary, in one walk.
+    let private tip (c: Compacted<'Op, 'State>) : Anchor =
+        ChainShape.tipBy (fun (r: OpRecord<'Op>) -> r.Hash) (anchorOf c) c.Tail
 
     let compactAt
         (mode: SnapshotMode)
@@ -97,18 +101,15 @@ module internal OpStreamCompacted =
             match replay w snap.State cut with
             | Error(i, e) -> Error(SnapshotFault.PrefixRejected(snap.Seq + i, e))
             | Ok state ->
-                let prevHash =
-                    if k = 0 then
-                        snap.PrevHash
-                    else
-                        (List.item (k - 1) c.Tail).Hash
+                // The new boundary is the tip of the part of the tail just replayed (Phase 530).
+                let at = ChainShape.tipBy (fun (r: OpRecord<'Op>) -> r.Hash) (anchorOf c) cut
 
                 Ok
-                    { Snapshot = Snapshots.seal snap.Mode hashFn stateEncode atSeq state prevHash
+                    { Snapshot = Sealed.seal snap.Mode hashFn stateEncode at state |> Sealed.toSnapshot
                       Tail = List.skip k c.Tail
                       Keys = indexOnto keyOf c.Keys cut }
 
-    let head (c: Compacted<'Op, 'State>) : string = snd (tip c)
+    let head (c: Compacted<'Op, 'State>) : string = (tip c).PrevHash
 
     let appendTo
         (cfg: StreamConfig)
@@ -119,19 +120,10 @@ module internal OpStreamCompacted =
         (state: 'State)
         (c: Compacted<'Op, 'State>)
         : Result<'State * Compacted<'Op, 'State>, 'Rej> =
-        let seq, prev = tip c
+        let at = tip c
 
-        match w.Apply op state with
-        | Error e -> Error e
-        | Ok state' ->
-            let r =
-                { Seq = seq
-                  Actor = actor
-                  Op = op
-                  PrevHash = prev
-                  Hash = chainHashOf cfg hashFn seq actor (w.Encode op) prev }
-
-            Ok(state', { c with Tail = c.Tail @ [ r ] })
+        chainOne cfg hashFn w actor at.Seq at.PrevHash op state
+        |> Result.map (fun (state', r) -> state', { c with Tail = c.Tail @ [ r ] })
 
     let appendIfTo
         (cfg: StreamConfig)

@@ -2262,6 +2262,38 @@
       ],
       "class": "trivial",
       "reason": "The engine's two records' builders and readers (Phase 517): each constructs a scope or a policy from what the caller hands it, picks the walk the scope declares, or reads ids along it. What the records MEAN is the engine's, and is on the ladder under `Ops.apply`."
+    },
+    {
+      "members": [
+        "Anchor.genesis",
+        "ChainShape.append",
+        "ChainShape.linkAt",
+        "ChainShape.records",
+        "ChainShape.rehash",
+        "ChainShape.tip",
+        "ChainShape.walk",
+        "Jsonl.carry",
+        "Jsonl.checkedLines",
+        "Jsonl.settle",
+        "KeyedCapture.ofJsonl",
+        "KeyedCapture.toJsonl",
+        "KeyedCapture.tryToJsonl"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The chain verbs written once over a record kind's shape, and the JSONL load's public building blocks (Phase 530): every op-stream, capture and snapshot verb is one of these over its instance, so the chain law families and the op-stream-load model reach them through those verbs; the stand-in calls each by name against the verb it generalises (walk = firstChainBreak at every anchor, rehash id = tryRehash, append = appendChainOnly) and round-trips the keyed journal.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "Sealed.firstBreak",
+        "Sealed.ofSnapshot",
+        "Sealed.replayFrom",
+        "Sealed.seal",
+        "Sealed.toSnapshot"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The sealed state over its anchor (Phase 530): `OpStream.Snapshots`, the compacted stream and the DAG checkpoint seal, verify and replay through these, so the snapshot and checkpoint law families reach them; the stand-in holds each to the snapshot verb it is, at every boundary and in both modes.",
+      "standIn": "tests/Fuaran.Core.Tests/SnapshotTests.fs"
     }
   ]
 }

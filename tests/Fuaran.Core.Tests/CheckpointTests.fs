@@ -607,3 +607,29 @@ let checkedWriterTests =
                   Expect.equal f.Line 2 "the second sidecar line"
                   Expect.equal f.Member "state" "the state member"
               | Ok v -> failtestf "accepted a state with a line break: %A" v ]
+
+// Phase 530 — a checkpoint is the strict state sealed at the anchor { Seq = 0; PrevHash = node }.
+[<Tests>]
+let checkpointSealedTests =
+    testList
+        "Phase 530 - Checkpoint over Anchor"
+        [ test "a checkpoint's seal is Sealed.seal, strict, at sequence zero with its node as the anchor's hash" {
+              let g, a, _, m, y, dag = forkMergeTail ()
+
+              for node in [ g; a; m; y ] do
+                  let cp = Dag.checkpointAt h enc sw 0 dag node |> ok
+                  let sv = Sealed.seal SnapshotMode.Strict h enc { Seq = 0; PrevHash = node } cp.State
+                  Expect.equal cp.Hash sv.Seal "the same seal bytes"
+                  Expect.equal (Dag.sealAt h enc sw node cp.State) cp "sealAt agrees"
+                  Expect.equal (Dag.verifyCheckpoint h enc sw cp dag) (Ok()) "verifies"
+
+                  Expect.equal
+                      (Dag.verifyCheckpoint h enc sw { cp with State = cp.State + 1 } dag)
+                      (Error(
+                          Dag.CheckpointBreak.Seal(
+                              (Sealed.seal SnapshotMode.Strict h enc { Seq = 0; PrevHash = node } (cp.State + 1)).Seal,
+                              cp.Hash
+                          )
+                      ))
+                      "a changed state is the seal's break"
+          } ]
