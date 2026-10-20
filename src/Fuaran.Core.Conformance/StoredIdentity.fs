@@ -152,10 +152,10 @@ module StoredIdentity =
 
                     match Dag.rehash stored current dag with
                     | Error f -> Error(sprintf "the forward rehash refused: %A" f)
-                    | Ok(migrated, there) ->
+                    | Ok { Dag = migrated; Ids = there } ->
                         match Dag.rehash current stored migrated with
                         | Error f -> Error(sprintf "the rehash back refused: %A" f)
-                        | Ok(back, home) ->
+                        | Ok { Dag = back; Ids = home } ->
                             Ok(
                                 Map.keys back.Nodes |> Set.ofSeq = (Map.keys dag.Nodes |> Set.ofSeq)
                                 && firstStray there home = None,

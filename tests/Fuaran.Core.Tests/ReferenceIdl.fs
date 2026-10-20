@@ -40,6 +40,7 @@ module Fuaran.Core.Tests.ReferenceIdl
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
@@ -277,10 +278,10 @@ let unsortedCoverageIdl: Idl =
 
 // ---------------------------------------------------------------------------
 // The declared-support record + the host-prelude declaration — members 2 and 3 of
-// the regeneration triple, small but exercising every channel `Gen.GenSupport` has.
+// the regeneration triple, small but exercising every channel `GenSupport` has.
 // ---------------------------------------------------------------------------
 
-let private noteProjection: Gen.KindProjection =
+let private noteProjection: KindProjection =
     { SpecDecl =
         """NoteSpec =
     { Body: Text }"""

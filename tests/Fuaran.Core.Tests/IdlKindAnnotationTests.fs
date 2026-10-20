@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.IdlKindAnnotationTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 /// `Declare.enumAnnotate` over a well-formed fixture: its refusal (an error list since Phase 384)
 /// is a defect of the suite.
@@ -132,7 +133,7 @@ let private emitTsModule (idl: Idl) (tags: string list) : string =
 let private emitTs (idl: Idl) = emitTsModule idl [ "Legacy"; "Note" ]
 
 let private snapshotOf (idl: Idl) =
-    match Diff.parse (Artifact.render idl) with
+    match Diff.parse (Artifact.render idl) None with
     | Ok s -> s
     | Error e -> failtestf "snapshot: %s" e
 
@@ -142,7 +143,7 @@ let private classifyAll (before: Idl) (after: Idl) =
 /// The one classification whose change matches `pick`, or a failure naming what
 /// was actually produced — an assertion that silently found nothing would pass
 /// for the wrong reason.
-let private theOne (pick: Diff.Change -> bool) (cs: Diff.Classification list) =
+let private theOne (pick: Change -> bool) (cs: Classification list) =
     match cs |> List.filter (fun c -> pick c.Change) with
     | [ one ] -> one
     | other ->
@@ -396,12 +397,12 @@ let tests =
               let c =
                   classifyAll plainIdl (withKindAnn (deprecated (Some "Note") None))
                   |> theOne (function
-                      | Diff.KindAnnotationsChanged(Diff.OKind "Legacy", _, _) -> true
+                      | KindAnnotationsChanged(OKind "Legacy", _, _) -> true
                       | _ -> false)
 
               Expect.equal
                   c.Severity
-                  Diff.Additive
+                  Additive
                   "marking a whole kind breaks nothing — that is what makes the charter's two-release
                    retirement affordable"
 
@@ -411,20 +412,20 @@ let tests =
               let c =
                   classifyAll (withKindAnn (deprecated (Some "Note") None)) plainIdl
                   |> theOne (function
-                      | Diff.KindAnnotationsChanged _ -> true
+                      | KindAnnotationsChanged _ -> true
                       | _ -> false)
 
-              Expect.equal c.Severity Diff.HostSurfaceOnly "un-retiring a kind is not a breaking event"
+              Expect.equal c.Severity HostSurfaceOnly "un-retiring a kind is not a breaking event"
               Expect.stringContains c.Rationale "WITHDRAWN" "and the rationale says which direction it moved")
 
           testCase "diff: an OP's marking grades the same, and describes itself as an op" (fun _ ->
               let c =
                   classifyAll plainIdl (withOpAnn (deprecated None None))
                   |> theOne (function
-                      | Diff.KindAnnotationsChanged(Diff.OOp "Replace", _, _) -> true
+                      | KindAnnotationsChanged(OOp "Replace", _, _) -> true
                       | _ -> false)
 
-              Expect.equal c.Severity Diff.Additive "marking an op breaks nothing either"
+              Expect.equal c.Severity Additive "marking an op breaks nothing either"
               Expect.stringContains c.Rationale "op Replace" "and it is described as an op, not as a kind")
 
           testCase "diff: MARKING an enum case is additive; withdrawing it is host-surface" (fun _ ->
@@ -433,18 +434,18 @@ let tests =
               let gained =
                   classifyAll plainIdl marked
                   |> theOne (function
-                      | Diff.EnumCaseAnnotationsChanged("Tone", "Quiet", _, _) -> true
+                      | EnumCaseAnnotationsChanged("Tone", "Quiet", _, _) -> true
                       | _ -> false)
 
-              Expect.equal gained.Severity Diff.Additive "marking an enum case breaks nothing"
+              Expect.equal gained.Severity Additive "marking an enum case breaks nothing"
 
               let withdrawn =
                   classifyAll marked plainIdl
                   |> theOne (function
-                      | Diff.EnumCaseAnnotationsChanged _ -> true
+                      | EnumCaseAnnotationsChanged _ -> true
                       | _ -> false)
 
-              Expect.equal withdrawn.Severity Diff.HostSurfaceOnly "and withdrawing it is a plain change")
+              Expect.equal withdrawn.Severity HostSurfaceOnly "and withdrawing it is a plain change")
 
           testCase "diff: a marking reports NOTHING about the shape" (fun _ ->
               // The failure this guards is the classifier pricing a retirement
@@ -458,18 +459,18 @@ let tests =
 
               Expect.isFalse
                   (cs
-                   |> List.exists (fun c -> c.Severity = Diff.BreakingWire || c.Severity = Diff.BreakingForEmitters))
+                   |> List.exists (fun c -> c.Severity = BreakingWire || c.Severity = BreakingForEmitters))
                   "no annotation change may ever grade as breaking"
 
               Expect.isFalse
                   (cs
                    |> List.exists (fun c ->
                        match c.Change with
-                       | Diff.KindAdded _
-                       | Diff.KindRemoved _
-                       | Diff.EnumCaseAdded _
-                       | Diff.EnumCaseRemoved _
-                       | Diff.KindCategoryChanged _ -> true
+                       | KindAdded _
+                       | KindRemoved _
+                       | EnumCaseAdded _
+                       | EnumCaseRemoved _
+                       | KindCategoryChanged _ -> true
                        | _ -> false))
                   "and none of it may be reported as the kind or the case itself moving")
 
@@ -482,7 +483,7 @@ let tests =
               let markGrades = classifyAll plainIdl marked |> List.map _.Severity
 
               Expect.isTrue
-                  (markGrades |> List.forall (fun s -> s = Diff.Additive))
+                  (markGrades |> List.forall (fun s -> s = Additive))
                   "release 1 costs nothing — the marking alone is additive"
 
               // Release 2 removes it. THAT is the breaking event, and it is priced
@@ -494,7 +495,7 @@ let tests =
               let c =
                   classifyAll marked removed
                   |> theOne (function
-                      | Diff.KindRemoved "Legacy" -> true
+                      | KindRemoved "Legacy" -> true
                       | _ -> false)
 
-              Expect.notEqual c.Severity Diff.Additive "removing the kind is where the cost lands") ]
+              Expect.notEqual c.Severity Additive "removing the kind is where the cost lands") ]

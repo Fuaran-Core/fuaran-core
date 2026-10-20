@@ -13,6 +13,7 @@ module Fuaran.Core.Tests.IdlCanonicalFormTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 let private idl = CanonicalFormVectorExport.idl
 let private kinds = [ "Grid"; "Select"; "Notify" ]
@@ -42,8 +43,8 @@ let private refusedWith (phrase: string) (v: Idl) =
         (fs |> List.exists (fun f -> f.Contains phrase))
         (sprintf "expected a fault containing %A, got %A" phrase fs)
 
-let private severities (before: Idl) (after: Idl) : Diff.Severity list =
-    match Diff.parse (Artifact.render before), Diff.parse (Artifact.render after) with
+let private severities (before: Idl) (after: Idl) : Severity list =
+    match Diff.parse (Artifact.render before) None, Diff.parse (Artifact.render after) None with
     | Ok b, Ok a -> Diff.changes b a |> List.map (fun c -> (Diff.classify c).Severity)
     | Error e, _
     | _, Error e -> failtestf "the artifact did not read back: %s" e
@@ -275,14 +276,14 @@ let tests =
 
               Expect.equal
                   (severities (aliases [ "source" ]) (aliases [ "source"; "data" ]))
-                  [ Diff.Additive ]
+                  [ Additive ]
                   "an alias added"
 
-              Expect.equal (severities (aliases [ "source" ]) (aliases [])) [ Diff.BreakingWire ] "an alias withdrawn"
+              Expect.equal (severities (aliases [ "source" ]) (aliases [])) [ BreakingWire ] "an alias withdrawn"
 
               Expect.equal
                   (severities idl (withField "Grid" "cols" (fun f -> { f with Presence = None })))
-                  [ Diff.BreakingWire ]
+                  [ BreakingWire ]
                   "a presence condition withdrawn"
 
               Expect.equal
@@ -290,5 +291,5 @@ let tests =
                       { idl with
                           Enums = idl.Enums |> List.map (fun e -> { e with Aliases = [] }) }
                       idl)
-                  [ Diff.Additive; Diff.Additive ]
+                  [ Additive; Additive ]
                   "enum case aliases declared" ]

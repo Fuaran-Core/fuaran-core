@@ -4,6 +4,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.ReferenceIdl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 700 — the IDL diff classifier + host-strand report.
@@ -60,22 +61,38 @@ let private f name ty opt : IdlField =
 
 /// Diff two `Idl` values through the artifact, as the CLI does.
 let private diffOf (before: Idl) (after: Idl) =
-    match Diff.parse (art before), Diff.parse (art after) with
+    match Diff.parse (art before) None, Diff.parse (art after) None with
     | Ok b, Ok a -> Diff.changes b a |> List.map Diff.classify
     | Error e, _
     | _, Error e -> failtestf "artifact did not read back: %s" e
 
 let private reportOf (before: Idl) (after: Idl) =
-    match Diff.run None (art before) (art after) with
-    | Ok text -> text
+    match Diff.run None (art before, None) (art after, None) with
+    | Ok(text, _) -> text
     | Error e -> failtestf "idl-diff: %s" e
 
-let private severities (cs: Diff.Classification list) = cs |> List.map _.Severity
+let private severities (cs: Classification list) = cs |> List.map _.Severity
+
+/// The UI vocabulary's §11.0 roster, as its manifest declares it — the roster these cases
+/// read the UI tier's rows against. Phase 524 moved it here: `Diff.declaredRoster` hard-coded
+/// one vocabulary's hosts in the generic classifier and had no caller outside this suite.
+let private uiRoster: Host list =
+    [ "fuaran", "F#", CodecHost
+      "fuaran-ts", "TypeScript", CodecHost
+      "fuaran-py", "Python", CodecHost
+      "fuaran-go", "Go", CodecHost
+      "fuaran-rs", "Rust", CodecHost
+      "fuaran-swift", "Swift", RenderProjection
+      "fuaran-kt", "Kotlin", RenderProjection ]
+    |> List.map (fun (id, language, role) ->
+        { Id = id
+          Language = language
+          Role = role })
 
 /// The surfaces the consolidated obligation set names, at any strength.
 let private surfaces (before: Idl) (after: Idl) =
     diffOf before after
-    |> List.collect (Diff.obligations Diff.declaredRoster)
+    |> List.collect (Diff.obligations uiRoster)
     |> List.map _.Surface
     |> List.distinct
 
@@ -126,7 +143,7 @@ let tests =
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
 
               let cs = diffOf oneKind after
-              Expect.equal (severities cs) [ Diff.Additive ] "adding a kind is a minor, not a break"
+              Expect.equal (severities cs) [ Additive ] "adding a kind is a minor, not a break"
 
               let ss = surfaces oneKind after
 
@@ -155,7 +172,7 @@ let tests =
 
               Expect.contains
                   (severities cs)
-                  Diff.BreakingWire
+                  BreakingWire
                   "retiring a $type discriminator is a /v2/ major (VOCABULARY.md §4.2)"
 
               Expect.stringContains (reportOf oneKind empty) "/v2/` MAJOR" "and the profile recommendation says so"
@@ -169,9 +186,9 @@ let tests =
               let cs = diffOf oneKind after
               let kinds = cs |> List.map _.Change
 
-              Expect.contains kinds (Diff.KindRenamed("Heading", "Title")) "the identical signature pairs uniquely"
-              Expect.contains kinds (Diff.KindRemoved "Heading") "and the removal still stands on its own"
-              Expect.contains kinds (Diff.KindAdded "Title") "as does the addition"
+              Expect.contains kinds (KindRenamed("Heading", "Title")) "the identical signature pairs uniquely"
+              Expect.contains kinds (KindRemoved "Heading") "and the removal still stands on its own"
+              Expect.contains kinds (KindAdded "Title") "as does the addition"
 
           testCase "field-less kinds do not pair as renames"
           <| fun _ ->
@@ -184,7 +201,7 @@ let tests =
                   diffOf before after
                   |> List.map _.Change
                   |> List.filter (function
-                      | Diff.KindRenamed _ -> true
+                      | KindRenamed _ -> true
                       | _ -> false)
 
               Expect.isEmpty renames "an empty signature matches everything, so it must match nothing"
@@ -205,7 +222,7 @@ let tests =
                   diffOf before after
                   |> List.map _.Change
                   |> List.filter (function
-                      | Diff.KindRenamed _ -> true
+                      | KindRenamed _ -> true
                       | _ -> false)
 
               Expect.isEmpty renames "two candidates on each side is not a rename, it is a guess"
@@ -221,7 +238,7 @@ let tests =
                       Kinds = [ kind "Heading" [ f "text" TStr Required; f "level" TInt Required ] ] }
 
               let cs = diffOf oneKind after
-              Expect.equal (severities cs) [ Diff.BreakingWire ] "old documents are refused: a /v2/ event"
+              Expect.equal (severities cs) [ BreakingWire ] "old documents are refused: a /v2/ event"
 
               Expect.stringContains
                   (cs |> List.head |> _.Rationale)
@@ -237,10 +254,7 @@ let tests =
                   { empty with
                       Kinds = [ kind "Heading" [ f "text" TStr Required; f "level" TInt Optional ] ] }
 
-              Expect.equal
-                  (severities (diffOf oneKind after))
-                  [ Diff.Additive ]
-                  "omitted when absent, so nothing breaks"
+              Expect.equal (severities (diffOf oneKind after)) [ Additive ] "omitted when absent, so nothing breaks"
 
               Expect.stringContains
                   (reportOf oneKind after)
@@ -257,7 +271,7 @@ let tests =
 
               Expect.equal
                   (severities cs)
-                  [ Diff.BreakingWire ]
+                  [ BreakingWire ]
                   "omit-at-default is wire-visible: every document sitting on the old default changes bytes"
 
               Expect.stringContains
@@ -277,7 +291,7 @@ let tests =
                       Kinds = [ kind "Heading" [ f "text" TStr Optional ] ] }
 
               let cs = diffOf oneKind after
-              Expect.equal (severities cs) [ Diff.Additive ] "old documents are untouched"
+              Expect.equal (severities cs) [ Additive ] "old documents are untouched"
 
               Expect.stringContains
                   (cs |> List.head |> _.Rationale)
@@ -291,7 +305,7 @@ let tests =
                       Kinds = [ kind "Heading" [ f "text" TStr (OmitDefault(VStr "")) ] ] }
 
               let cs = diffOf oneKind after
-              Expect.equal (severities cs) [ Diff.BreakingWire ] "omit-at-default is wire-visible"
+              Expect.equal (severities cs) [ BreakingWire ] "omit-at-default is wire-visible"
 
               Expect.stringContains
                   (cs |> List.head |> _.Rationale)
@@ -320,7 +334,7 @@ let tests =
 
               Expect.equal
                   (severities cs)
-                  [ Diff.HostSurfaceOnly ]
+                  [ HostSurfaceOnly ]
                   "the generated declaration moved; the wire form is the same `<closure>` sentinel"
 
               let ss = surfaces before after
@@ -374,12 +388,12 @@ let tests =
                   cs
                   |> List.find (fun c ->
                       match c.Change with
-                      | Diff.FieldTypeChanged _ -> true
+                      | FieldTypeChanged _ -> true
                       | _ -> false)
 
               Expect.equal
                   typeChange.Severity
-                  Diff.Unclassifiable
+                  Unclassifiable
                   "the artifact does not state what a hosted slot admits, so it cannot say whether the sets differ"
 
               Expect.stringContains typeChange.Rationale "CHECK:" "and it must name the check that would settle it"
@@ -400,7 +414,7 @@ let tests =
 
               Expect.equal
                   (severities (diffOf (ty TInt) (ty TStr)))
-                  [ Diff.BreakingWire ]
+                  [ BreakingWire ]
                   "int -> str is fully described by the artifact and decodes differently"
 
           testCase "a category re-classification is metadata, never serialised"
@@ -412,7 +426,7 @@ let tests =
                                 Category = "layout"
                                 Annotations = Annotations.Empty } ] }
 
-              Expect.equal (severities (diffOf oneKind after)) [ Diff.HostSurfaceOnly ] "Category is IDL metadata"
+              Expect.equal (severities (diffOf oneKind after)) [ HostSurfaceOnly ] "Category is IDL metadata"
 
           // --- the other discriminator families --------------------------------
 
@@ -439,11 +453,11 @@ let tests =
               let before, after = union [ stat ], union [ stat; state ]
               let cs = diffOf before after
 
-              Expect.contains (severities cs) Diff.Additive "additive on the wire"
+              Expect.contains (severities cs) Additive "additive on the wire"
 
               Expect.stringContains
                   (cs
-                   |> List.find (fun c -> c.Change = Diff.UnionCaseAdded("Binding", "State"))
+                   |> List.find (fun c -> c.Change = UnionCaseAdded("Binding", "State"))
                    |> _.Rationale)
                   "IDENTICAL"
                   "the quiet-churn caveat: cheaper on confusion, EQUAL on wire coupling"
@@ -464,7 +478,7 @@ let tests =
               let before, after = e [ "Neutral" ], e [ "Neutral"; "Positive" ]
               let cs = diffOf before after
 
-              Expect.equal (severities cs) [ Diff.Additive ] "a wider closed set admits every old document"
+              Expect.equal (severities cs) [ Additive ] "a wider closed set admits every old document"
 
               Expect.stringContains
                   (cs |> List.head |> _.Rationale)
@@ -488,13 +502,13 @@ let tests =
               // Identity -> lower-case wire string: the admitted set moved.
               Expect.contains
                   (severities (diffOf identity remappedWire))
-                  Diff.BreakingWire
+                  BreakingWire
                   "\"Polite\" is no longer admitted and \"polite\" newly is"
 
               // Same wire strings, different F# case names: hostSurface only.
               Expect.equal
                   (severities (diffOf remappedWire remappedHost))
-                  [ Diff.HostSurfaceOnly ]
+                  [ HostSurfaceOnly ]
                   "hostCases is a §13 hostSurface key — a source-compat event, not a wire one"
 
           testCase "an op addition is additive; an op removal is worse than a kind removal"
@@ -515,16 +529,14 @@ let tests =
 
               Expect.equal
                   (severities (diffOf (ops [ insert ]) (ops [ insert; edit ])))
-                  [ Diff.Additive ]
+                  [ Additive ]
                   "a new op branch leaves every existing stream valid"
 
               let removal = diffOf (ops [ insert; edit ]) (ops [ insert ])
-              Expect.contains (severities removal) Diff.BreakingWire "removing one invalidates persisted streams"
+              Expect.contains (severities removal) BreakingWire "removing one invalidates persisted streams"
 
               Expect.stringContains
-                  (removal
-                   |> List.find (fun c -> c.Change = Diff.OpRemoved "EditNode")
-                   |> _.Rationale)
+                  (removal |> List.find (fun c -> c.Change = OpRemoved "EditNode") |> _.Rationale)
                   "hash-chained archive"
                   "an op stream is not a live message — the rationale must say which it is"
 
@@ -535,7 +547,7 @@ let tests =
               let env fs = { empty with NodeFields = fs }
 
               let cs = diffOf (env []) (env [ f "style" TJson Optional ])
-              Expect.equal (severities cs) [ Diff.Additive ] "optional envelope slot, omitted when absent"
+              Expect.equal (severities cs) [ Additive ] "optional envelope slot, omitted when absent"
 
               Expect.stringContains
                   (cs
@@ -558,7 +570,7 @@ let tests =
 
               Expect.equal
                   (severities cs)
-                  [ Diff.BreakingForEmitters ]
+                  [ BreakingForEmitters ]
                   "authoring sites that omitted the field now emit different bytes"
 
               Expect.stringContains
@@ -583,8 +595,8 @@ let tests =
                   { oneKind with
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
 
-              match Diff.run (Some manifest) (art oneKind) (art after) with
-              | Ok text ->
+              match Diff.run (Some manifest) (art oneKind, None) (art after, None) with
+              | Ok(text, _) ->
                   Expect.stringContains text "manifest.json `hosts`" "the report names where the roster came from"
                   Expect.stringContains text "codec: fuaran-zig (Zig)" "and obligates the host it found"
 
@@ -622,19 +634,20 @@ let tests =
               match
                   Diff.run
                       (Some(Canonical.write Rendering.CrossHost (JObj [ "kinds", JArr [] ])))
-                      (art oneKind)
-                      (art after)
+                      (art oneKind, None)
+                      (art after, None)
               with
-              | Ok text ->
+              | Ok(text, _) ->
                   Expect.stringContains text "none declared (the manifest carries no `hosts` key)" "names the cause"
                   Expect.isFalse (text.Contains "codec: fuaran") "no default roster"
               | Error e -> failtestf "idl-diff: %s" e
 
-          testCase "Phase 348 — `run` is `runWith` with no support documents, on every roster source"
+          testCase "Phase 524 — `run` renders the one verdict `ofArtifacts` computes, on every roster source"
           <| fun _ ->
-              // One place resolves the roster. `run` carried a copy of it until Phase 348; the
-              // copies agreed, and this pins that the two entries cannot drift apart again: the
-              // same report, or the same refusal, for each way a manifest can name a roster.
+              // One place resolves the roster and one computes the verdict. `run` carried a copy of
+              // the roster until Phase 348 and parsed each side twice until Phase 524; this pins that
+              // the pipeline and the door cannot drift apart: the same verdict, or the same refusal,
+              // for each way a manifest can name a roster, and the report ends in its verdict block.
               let after =
                   { oneKind with
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
@@ -654,13 +667,20 @@ let tests =
 
               for m in manifests do
                   for before, afterText in [ art oneKind, art after; art oneKind, "{"; "{", art after ] do
-                      Expect.equal
-                          (Diff.run m before afterText)
-                          (Diff.runWith m before afterText None None)
-                          (sprintf "run and runWith agree (manifest %A)" m)
+                      let run = Diff.run m (before, None) (afterText, None)
 
-              match Diff.run (Some withHosts) (art oneKind) (art after) with
-              | Ok text -> Expect.stringContains text "codec: fuaran-zig (Zig)" "the probe compared a real report"
+                      Expect.equal
+                          (run |> Result.map snd)
+                          (Diff.ofArtifacts (before, None) (afterText, None))
+                          (sprintf "run and ofArtifacts agree (manifest %A)" m)
+
+                      match run with
+                      | Ok(text, v) ->
+                          Expect.isTrue (text.EndsWith(Diff.verdictBlock v)) "the report ends in the verdict's block"
+                      | Error _ -> ()
+
+              match Diff.run (Some withHosts) (art oneKind, None) (art after, None) with
+              | Ok(text, _) -> Expect.stringContains text "codec: fuaran-zig (Zig)" "the probe compared a real report"
               | Error e -> failtestf "idl-diff: %s" e
 
           testCase "the UI tier's rows follow its reference host, passed explicitly"
@@ -687,7 +707,7 @@ let tests =
 
           testCase "a whole vocabulary reads back through the artifact"
           <| fun _ ->
-              match Diff.parse (art refIdl) with
+              match Diff.parse (art refIdl) None with
               | Ok s ->
                   Expect.equal (Map.count s.Kinds) refIdl.Kinds.Length "every kind survives the artifact round-trip"
                   Expect.equal (Map.count s.Ops) refIdl.Ops.Length "every op too"
@@ -707,7 +727,7 @@ let tests =
 
               let cs = diffOf refIdl after
               Expect.equal (List.length cs) 1 "one change, not a re-listing of the vocabulary"
-              Expect.equal (severities cs) [ Diff.Additive ] "and it is additive" ]
+              Expect.equal (severities cs) [ Additive ] "and it is additive" ]
 
 // ---------------------------------------------------------------------------
 // Phase 252 — two classifier rules corrected.
@@ -737,7 +757,7 @@ let private consequencesOf (before: Idl) (after: Idl) =
     diffOf before after |> List.collect Diff.consequences |> List.distinct
 
 let private exitOf (before: Idl) (after: Idl) =
-    match Diff.classifyDiff before after with
+    match Diff.ofValues (before, None) (after, None) with
     | Ok v -> Diff.exitCode (Diff.verdictClass v)
     | Error e -> failtestf "classify: %s" e
 
@@ -746,11 +766,11 @@ let correctedRuleTests =
     testList
         "Phase 252 — int-to-float widening and the hosted codec"
         [ testCase "int to float is an additive widening, a construction break, exit 0" (fun _ ->
-              Expect.equal (severities (diffOf (oneField TInt) (oneField TFloat))) [ Diff.Additive ] "additive"
+              Expect.equal (severities (diffOf (oneField TInt) (oneField TFloat))) [ Additive ] "additive"
 
               Expect.contains
                   (consequencesOf (oneField TInt) (oneField TFloat))
-                  Diff.FullLiteralConstruction
+                  FullLiteralConstruction
                   "the generated field moved from int to float"
 
               Expect.equal (exitOf (oneField TInt) (oneField TFloat)) 0 "a gate absorbs it")
@@ -758,22 +778,16 @@ let correctedRuleTests =
           testCase "the widening reaches a list element, and nothing else widens" (fun _ ->
               Expect.equal
                   (severities (diffOf (oneField (TList TInt)) (oneField (TList TFloat))))
-                  [ Diff.Additive ]
+                  [ Additive ]
                   "list<int> to list<float>"
 
-              Expect.equal
-                  (severities (diffOf (oneField TFloat) (oneField TInt)))
-                  [ Diff.BreakingWire ]
-                  "narrowing breaks"
+              Expect.equal (severities (diffOf (oneField TFloat) (oneField TInt))) [ BreakingWire ] "narrowing breaks"
 
-              Expect.equal
-                  (severities (diffOf (oneField TInt) (oneField TStr)))
-                  [ Diff.BreakingWire ]
-                  "a retype breaks"
+              Expect.equal (severities (diffOf (oneField TInt) (oneField TStr))) [ BreakingWire ] "a retype breaks"
 
               Expect.equal
                   (severities (diffOf (oneField (TList TInt)) (oneField (TMap TFloat))))
-                  [ Diff.BreakingWire ]
+                  [ BreakingWire ]
                   "a widening inside a different container is not a widening")
 
           testCase "a hosted slot's codec swap is undecided, exit 4, and moves no generated shape" (fun _ ->
@@ -785,9 +799,9 @@ let correctedRuleTests =
                           Encode = "HostDate.encodeEpochDays"
                           Decode = "HostDate.decodeEpochDays" }
 
-              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided"
+              Expect.equal (severities (diffOf before after)) [ Unclassifiable ] "undecided"
               Expect.equal (exitOf before after) 4 "a gate stops"
-              Expect.equal (consequencesOf before after) [ Diff.NoGeneratedShapeChange ] "the F# type did not move")
+              Expect.equal (consequencesOf before after) [ NoGeneratedShapeChange ] "the F# type did not move")
 
           testCase "a hosted slot's host-type change is undecided too, and a construction break" (fun _ ->
               let before = hostedField dateCodec
@@ -797,8 +811,8 @@ let correctedRuleTests =
                       { dateCodec with
                           FSharp = "System.DateTime" }
 
-              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided"
-              Expect.contains (consequencesOf before after) Diff.FullLiteralConstruction "the field's type moved")
+              Expect.equal (severities (diffOf before after)) [ Unclassifiable ] "undecided"
+              Expect.contains (consequencesOf before after) FullLiteralConstruction "the field's type moved")
 
           testCase "a closure's signature stays host-surface only" (fun _ ->
               let fn ts =
@@ -811,12 +825,12 @@ let correctedRuleTests =
 
               Expect.equal
                   (severities (diffOf (fn "() => void") (fn "() => unknown")))
-                  [ Diff.HostSurfaceOnly ]
+                  [ HostSurfaceOnly ]
                   "host-surface"
 
               Expect.equal
                   (consequencesOf (fn "() => void") (fn "() => unknown"))
-                  [ Diff.NoGeneratedShapeChange ]
+                  [ NoGeneratedShapeChange ]
                   "a TypeScript-only move leaves the F# shape where it was") ]
 
 // ---------------------------------------------------------------------------
@@ -826,7 +840,7 @@ let correctedRuleTests =
 // ---------------------------------------------------------------------------
 
 let private verdictOf (before: Idl) (after: Idl) =
-    match Diff.classifyDiff before after with
+    match Diff.ofValues (before, None) (after, None) with
     | Ok v -> v
     | Error e -> failtestf "classify: %s" e
 
@@ -846,7 +860,7 @@ let descriptorTableTests =
                   // nothing, which the generated `docs/` table must not omit either).
                   let cases =
                       Microsoft.FSharp.Reflection.FSharpType.GetUnionCases(
-                          typeof<Diff.Change>,
+                          typeof<Change>,
                           System.Reflection.BindingFlags.Public
                       )
                       |> Array.map _.Name
@@ -871,35 +885,69 @@ let descriptorTableTests =
                   Expect.equal (Set.difference cases ruled) Set.empty "every Change case has a rule"
                   Expect.equal (Set.difference ruled cases) Set.empty "and every rule names a Change case")
 
+          testCase "Phase 524 — `Diff.verdict` over two parsed snapshots IS the verdict `ofArtifacts` answers" (fun _ ->
+              let after =
+                  { oneKind with
+                      Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Optional ] ] }
+
+              match Diff.parse (art oneKind) None, Diff.parse (art after) None with
+              | Ok b, Ok a ->
+                  let v = Diff.verdict b a
+                  Expect.equal (Ok v) (Diff.ofArtifacts (art oneKind, None) (art after, None)) "one computation"
+                  Expect.equal v.Encoding (b.Version, a.Version) "the verdict carries both encodings"
+                  Expect.isNonEmpty v.Changes "the probe compared a real change"
+              | _ -> failtest "the artifacts did not read back")
+
+          testCase
+              "Phase 524 — the rule is ONE match, and its exemplars name every Change case exactly once, each by its own name"
+              (fun _ ->
+                  // `mappingTable` enumerates `DiffRules.exemplars` through `ruleOf`, so the table above is
+                  // complete exactly when the exemplars are: every case once, and each arm labels itself
+                  // with its own case (an arm copied from its neighbour and not relabelled is caught here).
+                  let caseOf (c: Change) =
+                      (Microsoft.FSharp.Reflection.FSharpValue.GetUnionFields(c, typeof<Change>) |> fst).Name
+
+                  let cases =
+                      Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<Change>
+                      |> Array.map _.Name
+                      |> List.ofArray
+
+                  let exemplars = Fuaran.Core.Idl.Emit.DiffRules.exemplars |> List.map caseOf
+                  Expect.isGreaterThan cases.Length 10 "the reflection read the union"
+                  Expect.equal (List.sort exemplars) (List.sort cases) "every case exactly once"
+
+                  for e in Fuaran.Core.Idl.Emit.DiffRules.exemplars do
+                      Expect.equal
+                          (Fuaran.Core.Idl.Emit.DiffRules.ruleOf e).Case
+                          (caseOf e)
+                          "the arm names its own case")
+
           testCase "a type change across a NESTED erased slot is undecided, exit 4, and shape-unreadable" (fun _ ->
               // The rule used to test the top-level tag alone, so a list of hosted values
               // moving to a list of verbatim JSON reported `breaking-wire` where the document
               // said undecided — the artifact states nothing about what either slot admits.
               let before = oneField (TList(THosted dateCodec))
               let after = oneField (TList TJson)
-              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided, not breaking"
+              Expect.equal (severities (diffOf before after)) [ Unclassifiable ] "undecided, not breaking"
               Expect.equal (exitOf before after) 4 "exit 4"
 
               Expect.equal
                   (consequencesOf before after)
-                  [ Diff.GeneratedShapeUnreadable ]
+                  [ GeneratedShapeUnreadable ]
                   "and the F# axis is reported unreadable rather than guessed")
 
           testCase "a nested type change that crosses no erased slot is still decided" (fun _ ->
               let before = oneField (TList TStr)
               let after = oneField (TList TInt)
 
-              Expect.equal
-                  (severities (diffOf before after))
-                  [ Diff.BreakingWire ]
-                  "a value that decoded no longer does"
+              Expect.equal (severities (diffOf before after)) [ BreakingWire ] "a value that decoded no longer does"
 
               Expect.equal (exitOf before after) 3 "exit 3")
 
           testCase "a map value and a union argument are walked too" (fun _ ->
               let before = oneField (TMap(THosted dateCodec))
               let after = oneField (TMap TOpaque)
-              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "a map's value slot")
+              Expect.equal (severities (diffOf before after)) [ Unclassifiable ] "a map's value slot")
 
           testCase
               "an authoring default on a REQUIRED field is a construction break — `mk<Kind>` loses the parameter"
@@ -917,19 +965,19 @@ let descriptorTableTests =
 
                   Expect.contains
                       v.FSharpConsequences
-                      Diff.FullLiteralConstruction
+                      FullLiteralConstruction
                       "every `mkWeight` call site stops compiling: the parameter is gone"
 
                   Expect.contains
                       v.FSharpConsequences
-                      Diff.StalePackageSlot
+                      StalePackageSlot
                       "a shape change carries the stale-slot consequence"
 
                   let removed = verdictOf after before
 
                   Expect.contains
                       removed.FSharpConsequences
-                      Diff.FullLiteralConstruction
+                      FullLiteralConstruction
                       "and removing it brings the parameter back, which breaks every call site again")
 
           testCase "an authoring default on an OPTIONAL field moves no generated shape" (fun _ ->
@@ -946,17 +994,17 @@ let descriptorTableTests =
 
               Expect.equal
                   (verdictOf before after).FSharpConsequences
-                  [ Diff.NoGeneratedShapeChange ]
+                  [ NoGeneratedShapeChange ]
                   "the constructor's body moves; its parameter list does not")
 
           testCase
               "without a snapshot to ask, the context-free `consequences` reads a default as a required field's"
               (fun _ ->
-                  let c = Diff.classify (Diff.DefaultAdded("Weight", "grams", "0"))
+                  let c = Diff.classify (DefaultAdded("Weight", "grams", "0"))
 
                   Expect.equal
                       (Diff.consequences c)
-                      [ Diff.FullLiteralConstruction; Diff.StalePackageSlot ]
+                      [ FullLiteralConstruction; StalePackageSlot ]
                       "the answer that costs a rebuild rather than a surprise")
 
           testCase
@@ -974,7 +1022,7 @@ let descriptorTableTests =
                           Kinds = [ kind "Weight" [ f "grams" TInt Required; f "when" TJson Required ] ] }
 
                   let v = verdictOf before after
-                  Expect.equal (Diff.verdictClass v) Diff.VerdictClass.Undecided "undecided heads the class"
+                  Expect.equal (Diff.verdictClass v) VerdictClass.Undecided "undecided heads the class"
 
                   Expect.equal
                       v.StabilityImpact
@@ -1005,7 +1053,7 @@ let descriptorTableTests =
 
                   Expect.equal
                       cs
-                      [ Diff.KindAdded "B"; Diff.EnumAdded "E" ]
+                      [ KindAdded "B"; EnumAdded "E" ]
                       "a kind (rank 10) sorts before an enum (rank 40), as the table ranks them") ]
 
 // ---------------------------------------------------------------------------
@@ -1013,9 +1061,9 @@ let descriptorTableTests =
 // ---------------------------------------------------------------------------
 
 let private supportVerdict (before: SupportDocument option) (after: SupportDocument option) =
-    match Diff.classifyDiffWith refIdl refIdl before after with
+    match Diff.ofValues (refIdl, before) (refIdl, after) with
     | Ok v -> v
-    | Error e -> failtestf "classifyDiffWith: %s" e
+    | Error e -> failtestf "ofValues: %s" e
 
 [<Tests>]
 let supportInputTests =
@@ -1026,10 +1074,10 @@ let supportInputTests =
               (fun _ ->
                   Expect.equal
                       (Diff.verdictClass (supportVerdict (Some support) (Some support)))
-                      Diff.VerdictClass.Unchanged
+                      VerdictClass.Unchanged
                       "same support"
 
-                  Expect.equal (Diff.verdictClass (supportVerdict None None)) Diff.VerdictClass.Unchanged "no support")
+                  Expect.equal (Diff.verdictClass (supportVerdict None None)) VerdictClass.Unchanged "no support")
 
           testCase
               "a kind projection edited beside an unchanged vocabulary is a host-surface row with a construction consequence, not `unchanged`"
@@ -1046,17 +1094,17 @@ let supportInputTests =
 
                   let v = supportVerdict (Some support) (Some edited)
 
-                  Expect.equal (v.Changes |> List.map _.Severity) [ Diff.HostSurfaceOnly ] "host-surface, never wire"
+                  Expect.equal (v.Changes |> List.map _.Severity) [ HostSurfaceOnly ] "host-surface, never wire"
 
-                  Expect.equal (Diff.verdictClass v) Diff.VerdictClass.HostSurface "the class a gate reads"
+                  Expect.equal (Diff.verdictClass v) VerdictClass.HostSurface "the class a gate reads"
 
                   Expect.contains
                       v.FSharpConsequences
-                      Diff.FullLiteralConstruction
+                      FullLiteralConstruction
                       "a projection supplies the generated record, so a move there moves declarations"
 
                   match v.Changes.Head.Change with
-                  | Diff.SupportChanged(key, Some _, Some _) ->
+                  | SupportChanged(key, Some _, Some _) ->
                       Expect.equal key "projection:Note" "keyed by the projected kind"
                   | other -> failtestf "expected a projection change, got %A" other)
 
@@ -1068,11 +1116,11 @@ let supportInputTests =
                               CaseRefines = support.Support.CaseRefines |> Map.map (fun _ e -> e + " (* refined *)") } }
 
               let v = supportVerdict (Some support) (Some edited)
-              Expect.equal (v.Changes |> List.map _.Severity) [ Diff.HostSurfaceOnly ] "host-surface"
+              Expect.equal (v.Changes |> List.map _.Severity) [ HostSurfaceOnly ] "host-surface"
 
               Expect.equal
                   v.FSharpConsequences
-                  [ Diff.NoGeneratedShapeChange ]
+                  [ NoGeneratedShapeChange ]
                   "a decoder arm's final expression moves no declaration")
 
           testCase
@@ -1083,16 +1131,16 @@ let supportInputTests =
 
                   for c in v.Changes do
                       match c.Change with
-                      | Diff.SupportChanged(_, None, Some _) -> ()
+                      | SupportChanged(_, None, Some _) -> ()
                       | other -> failtestf "expected an added support entry, got %A" other
 
-                  match Diff.classifyDiff refIdl refIdl with
+                  match Diff.ofValues (refIdl, None) (refIdl, None) with
                   | Ok plain ->
                       Expect.equal
                           (Diff.verdictClass plain)
-                          Diff.VerdictClass.Unchanged
+                          VerdictClass.Unchanged
                           "the door with no support sees none"
-                  | Error e -> failtestf "classifyDiff: %s" e)
+                  | Error e -> failtestf "ofValues: %s" e)
 
           testCase "the mapping table carries the support row" (fun _ ->
               Expect.stringContains Diff.mappingTable "`SupportChanged`" "a row for the case") ]
@@ -1140,20 +1188,20 @@ let private typed (family: string) (typeAnn: Annotations) (fieldAnn: Annotations
             [ { Declare.enumOf "Tone" [ "Quiet"; "Loud" ] with
                   Annotations = on "enum" } ] }
 
-let private typeMoves (cs: Diff.Classification list) =
+let private typeMoves (cs: Classification list) =
     cs
     |> List.filter (fun c ->
         match c.Change with
-        | Diff.TypeAnnotationsChanged _ -> true
+        | TypeAnnotationsChanged _ -> true
         | _ -> false)
 
 /// The grade the same annotation move takes on the record's `value` field.
-let private memberGrade (before: Annotations) (after: Annotations) : Diff.Severity =
+let private memberGrade (before: Annotations) (after: Annotations) : Severity =
     match
         diffOf (typed "" Annotations.Empty before) (typed "" Annotations.Empty after)
         |> List.filter (fun c ->
             match c.Change with
-            | Diff.FieldAnnotationsChanged(Diff.ORecord "Span", "value", _, _) -> true
+            | FieldAnnotationsChanged(ORecord "Span", "value", _, _) -> true
             | _ -> false)
     with
     | [ c ] -> c.Severity
@@ -1177,7 +1225,7 @@ let typeAnnotationTests =
                       match typeMoves cs with
                       | [ c ] ->
                           match c.Change with
-                          | Diff.TypeAnnotationsChanged(fam, n, _, _) ->
+                          | TypeAnnotationsChanged(fam, n, _, _) ->
                               Expect.equal (fam, n) (family, name) "the type is named by family and name"
                           | other -> failtestf "unexpected %A" other
 
@@ -1185,7 +1233,7 @@ let typeAnnotationTests =
 
                           Expect.equal
                               (Diff.consequences c)
-                              [ Diff.NoGeneratedShapeChange ]
+                              [ NoGeneratedShapeChange ]
                               "an annotation moves no generated shape"
 
                           Expect.hasLength cs 1 "and nothing else is reported"
@@ -1197,8 +1245,8 @@ let typeAnnotationTests =
                   |> typeMoves
                   |> List.map _.Severity
 
-              Expect.equal (grade Annotations.Empty marked) [ Diff.Additive ] "marking a whole type breaks nothing"
-              Expect.equal (grade marked Annotations.Empty) [ Diff.HostSurfaceOnly ] "un-retiring it is a plain change")
+              Expect.equal (grade Annotations.Empty marked) [ Additive ] "marking a whole type breaks nothing"
+              Expect.equal (grade marked Annotations.Empty) [ HostSurfaceOnly ] "un-retiring it is a plain change")
 
           testCase "an unannotated pair of artifacts yields no new change" (fun _ ->
               let plain = typed "" Annotations.Empty Annotations.Empty
@@ -1228,10 +1276,10 @@ let typeAnnotationTests =
               let cs = diffOf plain grown
               Expect.isEmpty (typeMoves cs) "no annotation row for a type the old revision lacks"
 
-              Expect.exists cs (fun c -> c.Change = Diff.RecordAdded "Extra") "it is reported as the addition it is")
+              Expect.exists cs (fun c -> c.Change = RecordAdded "Extra") "it is reported as the addition it is")
 
           testCase "a pre-542 artifact (no type-level key) reads as unannotated" (fun _ ->
-              match Diff.parse (art (typed "union" marked Annotations.Empty)) with
+              match Diff.parse (art (typed "union" marked Annotations.Empty)) None with
               | Ok snap ->
                   Expect.equal
                       (snap.TypeAnnotations |> Map.find ("union", "Source") <> "")

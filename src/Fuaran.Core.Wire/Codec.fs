@@ -242,6 +242,154 @@ module Codec =
           ReadAll = readAll
           Schema = c.Schema }
 
+    /// An object whose member NAMES are data (Phase 527) — a map keyed by strings, in authored
+    /// order: every member read through `c` under its own key, every member's defects reported.
+    /// Written in the order given; the schema admits any member name, each value `c`'s.
+    let entries (c: Codec<'T>) : Codec<(string * 'T) list> =
+        let readAll (j: JVal) =
+            match j with
+            | JObj members ->
+                let results =
+                    members
+                    |> List.map (fun (k, v) -> c.ReadAll v |> under (PathSegment.Key k) |> Result.map (fun x -> k, x))
+
+                match
+                    results
+                    |> List.collect (fun r ->
+                        match r with
+                        | Ok _ -> []
+                        | Error es -> es)
+                with
+                | [] -> Ok(results |> List.choose Result.toOption)
+                | errors -> Error errors
+            | other -> Error [ Decoder.wrongKind "object" other ]
+
+        let rec write (acc: (string * JVal) list) (xs: (string * 'T) list) =
+            match xs with
+            | [] -> Ok(JObj(List.rev acc))
+            | (k, x) :: rest ->
+                match c.Write x with
+                | Ok j -> write ((k, j) :: acc) rest
+                | Error f -> Error(CodecDeclarationFault.under (PathSegment.Key k) f)
+
+        { Write = write []
+          ReadAll = readAll
+          Schema = JObj [ "type", JStr "object"; "additionalProperties", c.Schema ] }
+
+    /// The codec of a refinement of `'T` whose refusals point INSIDE the value (Phase 527): `check`
+    /// admits a read value or answers every defect it finds, each as the path below the value, the
+    /// root code, what the position expected and what was found there. Each is raised by WALKING
+    /// its path in the document (`Decoder.at` to `Decoder.fail`, D151's shape), so a refusal
+    /// resolves where it says it does — a path the document does not hold is refused where the walk
+    /// stops. `back` is total; the schema is the base codec's.
+    let narrow
+        (check: 'T -> Result<'U, (PathSegment list * RootDecodeCode * string * string) list>)
+        (back: 'U -> 'T)
+        (c: Codec<'T>)
+        : Codec<'U> =
+        let raise (j: JVal) (path, code, expected, detail) : DecodeError =
+            match Decoder.at path (Decoder.fail code expected detail) j with
+            | Error e -> e
+            // `fail` answers no value, so the walk ends in a refusal at the path or short of it.
+            | Ok() -> DecodeError.make DecodeCode.SchemaFault expected detail
+
+        let readAll (j: JVal) =
+            c.ReadAll j
+            |> Result.bind (fun v ->
+                match check v with
+                | Ok u -> Ok u
+                | Error faults -> Error(faults |> List.map (raise j)))
+
+        { Write = back >> c.Write
+          ReadAll = readAll
+          Schema = c.Schema }
+
+    /// A RECURSIVE codec (Phase 527): `define` is handed the codec being defined, to use where the
+    /// type refers to itself, and answers its body. The body's schema is published once, as the
+    /// definition `name` under `$defs`, and every use of it — the self-references and the codec
+    /// itself — is `{"$ref": "#/$defs/<name>"}`. The `$defs` member sits beside the reference until
+    /// [[schemaDocument]] hoists every definition to the document's root, which is where a
+    /// `#/$defs/...` reference resolves; `name` is the definition's identity in that document.
+    /// `define` declares and nothing more: a write or read through its argument before it returns
+    /// has no body to reach, and is refused as a misuse of the declaration.
+    let recursive (name: string) (define: Codec<'T> -> Codec<'T>) : Codec<'T> =
+        let defined: Codec<'T> option ref = ref None
+        let reference = "#/$defs/" + name
+
+        let body () =
+            match defined.Value with
+            | Some c -> c
+            | None -> invalidOp ("Codec.recursive '" + name + "' was used while it was being declared")
+
+        let self =
+            { Write = fun v -> (body ()).Write v
+              ReadAll = fun j -> (body ()).ReadAll j
+              Schema = JObj [ "$ref", JStr reference ] }
+
+        let c = define self
+        defined.Value <- Some c
+
+        { c with
+            Schema = JObj [ "$defs", JObj [ name, c.Schema ]; "$ref", JStr reference ] }
+
+    /// The codec's schema as a standalone JSON Schema document (Phase 527): `$schema` names the
+    /// 2020-12 dialect, and every `$defs` member a [[recursive]] codec carries is hoisted into one
+    /// `$defs` at the root, where its `#/$defs/...` references resolve — each definition once, the
+    /// first met in document order where two carry one name. A codec with no recursive part
+    /// answers its own schema with the dialect named.
+    let schemaDocument (c: Codec<'T>) : JVal =
+        let rec strip (defs: (string * JVal) list) (j: JVal) : JVal * (string * JVal) list =
+            match j with
+            | JObj members ->
+                let kept, defs =
+                    members
+                    |> List.fold
+                        (fun (kept, defs) (k, v) ->
+                            match k, v with
+                            | "$defs", JObj ds ->
+                                let defs =
+                                    ds
+                                    |> List.fold
+                                        (fun defs (n, d) ->
+                                            let d, defs = strip defs d
+
+                                            if defs |> List.exists (fun (m, _) -> m = n) then
+                                                defs
+                                            else
+                                                defs @ [ n, d ])
+                                        defs
+
+                                kept, defs
+                            | _ ->
+                                let v, defs = strip defs v
+                                kept @ [ k, v ], defs)
+                        ([], defs)
+
+                JObj kept, defs
+            | JArr xs ->
+                let xs, defs =
+                    xs
+                    |> List.fold
+                        (fun (acc, defs) x ->
+                            let x, defs = strip defs x
+                            acc @ [ x ], defs)
+                        ([], defs)
+
+                JArr xs, defs
+            | scalar -> scalar, defs
+
+        let root, defs = strip [] c.Schema
+
+        let members =
+            match root with
+            | JObj ms -> ms
+            | other -> [ "allOf", JArr [ other ] ]
+
+        JObj(
+            ("$schema", JStr "https://json-schema.org/draft/2020-12/schema") :: members
+            @ (if List.isEmpty defs then [] else [ "$defs", JObj defs ])
+        )
+
     // ---- objects ----
 
     /// Begin an object declaration with its constructor, curried over the members in the order
@@ -253,23 +401,37 @@ module Codec =
           Required = []
           Names = [] }
 
+    /// The members written so far, then `name` written through `c` — a refusal under `name`.
+    let private writeMember
+        (name: string)
+        (c: Codec<'A>)
+        (before: 'R -> Result<(string * JVal) list, CodecDeclarationFault>)
+        (r: 'R)
+        (a: 'A)
+        : Result<(string * JVal) list, CodecDeclarationFault> =
+        before r
+        |> Result.bind (fun written ->
+            c.Write a
+            |> Result.mapError (CodecDeclarationFault.under (PathSegment.Key name))
+            |> Result.map (fun j -> written @ [ name, j ]))
+
+    /// The member `name` read through `c` under its key, or `absent ()` when the object lacks it.
+    let private readMember
+        (name: string)
+        (c: Codec<'A>)
+        (absent: unit -> Result<'A, DecodeError list>)
+        (members: (string * JVal) list)
+        : Result<'A, DecodeError list> =
+        match memberOf name members with
+        | Some v -> c.ReadAll v |> under (PathSegment.Key name)
+        | None -> absent ()
+
     /// Declare a REQUIRED member: written from `get`, read through `c`; absent is `MissingField`.
     let field (name: string) (get: 'R -> 'A) (c: Codec<'A>) (fs: CodecFields<'R, 'A -> 'C>) : CodecFields<'R, 'C> =
-        { WriteFields =
-            fun r ->
-                fs.WriteFields r
-                |> Result.bind (fun before ->
-                    c.Write(get r)
-                    |> Result.mapError (CodecDeclarationFault.under (PathSegment.Key name))
-                    |> Result.map (fun j -> before @ [ name, j ]))
+        { WriteFields = fun r -> writeMember name c fs.WriteFields r (get r)
           ReadFields =
             fun members ->
-                let this =
-                    match memberOf name members with
-                    | Some v -> c.ReadAll v |> under (PathSegment.Key name)
-                    | None -> Error [ Decoder.missing name ]
-
-                both (fs.ReadFields members) this
+                both (fs.ReadFields members) (readMember name c (fun () -> Error [ Decoder.missing name ]) members)
           Properties = fs.Properties @ [ name, c.Schema ]
           Required = fs.Required @ [ name ]
           Names = fs.Names @ [ name ] }
@@ -282,24 +444,48 @@ module Codec =
         (c: Codec<'A>)
         (fs: CodecFields<'R, 'A option -> 'C>)
         : CodecFields<'R, 'C> =
+        let some: Codec<'A option> =
+            { Write =
+                fun a ->
+                    match a with
+                    | Some x -> c.Write x
+                    | None -> Error(CodecDeclarationFault.Unrecognised [])
+              ReadAll = c.ReadAll >> Result.map Some
+              Schema = c.Schema }
+
         { WriteFields =
             fun r ->
                 match get r with
-                | Some a ->
-                    fs.WriteFields r
-                    |> Result.bind (fun before ->
-                        c.Write a
-                        |> Result.mapError (CodecDeclarationFault.under (PathSegment.Key name))
-                        |> Result.map (fun j -> before @ [ name, j ]))
+                | Some a -> writeMember name c fs.WriteFields r a
                 | None -> fs.WriteFields r
-          ReadFields =
-            fun members ->
-                let this =
-                    match memberOf name members with
-                    | Some v -> c.ReadAll v |> under (PathSegment.Key name) |> Result.map Some
-                    | None -> Ok None
+          ReadFields = fun members -> both (fs.ReadFields members) (readMember name some (fun () -> Ok None) members)
+          Properties = fs.Properties @ [ name, c.Schema ]
+          Required = fs.Required
+          Names = fs.Names @ [ name ] }
 
-                both (fs.ReadFields members) this
+    /// Declare a member that always has a VALUE and is omitted at a default (Phase 527): written
+    /// from `get` unless `omit` holds of it, read as `fallback` when absent. The omit-at-default
+    /// rule a byte-stable document grows by — a member added later is omitted at the value every
+    /// earlier document meant by its absence — stated once per member, where it was a write-side
+    /// test and a read-side mirror kept equal by hand. `omit` answering `false` everywhere declares
+    /// a member that is always written and still read leniently. Not `required` in the schema.
+    let defaultField
+        (name: string)
+        (fallback: 'A)
+        (omit: 'A -> bool)
+        (get: 'R -> 'A)
+        (c: Codec<'A>)
+        (fs: CodecFields<'R, 'A -> 'C>)
+        : CodecFields<'R, 'C> =
+        { WriteFields =
+            fun r ->
+                let a = get r
+
+                if omit a then
+                    fs.WriteFields r
+                else
+                    writeMember name c fs.WriteFields r a
+          ReadFields = fun members -> both (fs.ReadFields members) (readMember name c (fun () -> Ok fallback) members)
           Properties = fs.Properties @ [ name, c.Schema ]
           Required = fs.Required
           Names = fs.Names @ [ name ] }

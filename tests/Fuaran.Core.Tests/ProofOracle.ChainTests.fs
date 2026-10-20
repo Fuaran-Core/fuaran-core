@@ -61,7 +61,7 @@ let private tamperedPlanOp (op: PlanOp) : PlanOp =
 let private firstBreakWalk (dag: Dag.T<'Op>) : string list =
     match Dag.totalOrderBy (fun _ -> 0) dag with
     | Ok order -> order
-    | Error(Dag.TotalOrderFault.Cyclic unplaced) ->
+    | Error { Unplaced = unplaced } ->
         let rest: Dag.T<'Op> =
             DagOf.nodes (dag.Nodes |> Map.filter (fun k _ -> not (List.contains k unplaced)))
 
@@ -138,7 +138,8 @@ let private dagUnder
     (lanes: 'Op list list)
     : Dag.T<'Op> =
     let baseId, d0 =
-        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> Reference.built
+        Dag.append (OpStream.canonical hashFn w) (Human "base") baseOp "" Dag.empty
+        |> Reference.built
 
     let mutable d = d0
 
@@ -147,7 +148,9 @@ let private dagUnder
         let mutable h = baseId
 
         for op in ops do
-            let id, d' = Dag.append hashFn w actor op h d |> Reference.built
+            let id, d' =
+                Dag.append (OpStream.canonical hashFn w) actor op h d |> Reference.built
+
             h <- id
             d <- d'
 
@@ -1748,12 +1751,16 @@ let tests =
                               let id, d =
                                   match s.CorpusParents |> List.map coreIdOf with
                                   | [] ->
-                                      Dag.append OpStream.defaultHash rawW s.Actor s.OpJson "" dag |> Reference.built
+                                      Dag.append (OpStream.canonical OpStream.defaultHash rawW) s.Actor s.OpJson "" dag
+                                      |> Reference.built
                                   | [ Some p ] ->
-                                      Dag.append OpStream.defaultHash rawW s.Actor s.OpJson p dag |> Reference.built
+                                      Dag.append (OpStream.canonical OpStream.defaultHash rawW) s.Actor s.OpJson p dag
+                                      |> Reference.built
                                   | [ Some l; Some r ] ->
                                       merges <- merges + 1
-                                      Dag.merge OpStream.defaultHash rawW s.Actor s.OpJson l r dag |> Reference.built
+
+                                      Dag.merge (OpStream.canonical OpStream.defaultHash rawW) s.Actor s.OpJson l r dag
+                                      |> Reference.built
                                   | _ -> failtestf "%s: it names a parent no earlier fixture built" s.Fixture
 
                               dag <- d
@@ -1794,10 +1801,12 @@ let tests =
                   match built with
                   | (_, _, a) :: (_, _, b) :: _ ->
                       let lr, _ =
-                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b dag |> Reference.built
+                          Dag.merge (OpStream.canonical OpStream.defaultHash rawW) (Human "m") "{}" a b dag
+                          |> Reference.built
 
                       let rl, _ =
-                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a dag |> Reference.built
+                          Dag.merge (OpStream.canonical OpStream.defaultHash rawW) (Human "m") "{}" b a dag
+                          |> Reference.built
 
                       Expect.equal lr rl "merge(A,B) and merge(B,A) converge to one content id"
 
@@ -1924,9 +1933,19 @@ let tests =
               // refused with a typed fault, so the premise holds of everything production BUILDS.
               let ambiguous = List.head keys + "," + List.item 1 keys
 
-              match Dag.append OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag with
+              match
+                  Dag.append
+                      (OpStream.canonical OpStream.defaultHash planW)
+                      (Human "w")
+                      planLaneGen.BaseOp
+                      ambiguous
+                      dag
+              with
               | Error(DagAppendFault.CommaInParentId p) -> Expect.equal p ambiguous "the refusal names the offending id"
-              | other -> failtestf "a comma-bearing parent id must be refused, got %A" (Result.map fst other)
+              | other ->
+                  failtestf
+                      "a comma-bearing parent id must be refused, got %A"
+                      (Result.map (fun (w: Dag.Written<PlanOp>) -> w.Id) other)
 
               // What such an append WOULD have minted is exactly the merge of the two ids — the
               // splice, measured: a node carrying the merge's content id and the one comma-bearing
@@ -1934,8 +1953,7 @@ let tests =
               // built here (a hand-made or loaded one) is the walk's second clause: it names no node.
               let mergeId, _ =
                   Dag.merge
-                      OpStream.defaultHash
-                      planW
+                      (OpStream.canonical OpStream.defaultHash planW)
                       (Human "w")
                       planLaneGen.BaseOp
                       (List.head keys)

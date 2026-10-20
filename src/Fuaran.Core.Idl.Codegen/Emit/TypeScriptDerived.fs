@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpDefaults
@@ -16,9 +17,10 @@ module internal TypeScriptDerived =
     // Phase 380 — the STRUCTURAL DERIVATIONS (Phase 374) and the COLLECTING DECODERS (Phase 377)
     // in the TypeScript host. Every derivation is opt-in exactly as on the F# side, and is stated
     // over the SAME analysis rather than a second one: which positions are structural children
-    // (`FSharpDerive.structuralField`), which declarations hold a node (`Decl.NodeHolders`),
+    // (`Derive.structural`), which declarations hold a node (`Decl.NodeHolders`),
     // which fields a fold descends (`Decl.foldSelfIn`), when a defect is a leaf's
-    // (`FSharpCodec.collectsOver`). ADMISSIBILITY IS THE F# PATH'S: the requests are run through
+    // (`SlotTraversal.collectsOver`). Phase 524 — the plans and walks are `Derive`'s, one per
+    // derivation, and this file prints them. ADMISSIBILITY IS THE F# PATH'S: the requests are run through
     // the F# derivation first and its refusal is this path's refusal, so the two hosts accept and
     // refuse the same requests with the same typed error.
     //
@@ -47,11 +49,6 @@ module internal TypeScriptDerived =
     /// The kind object of the node bound to `n` — the node itself under the flat envelope.
     let private tsKindOf (flat: bool) (n: string) = if flat then n else n + ".kind"
 
-    /// The structural children of a kind, by wire field name: `(name, isList)`.
-    let private tsStructuralFields (k: IdlKind) : (string * bool) list =
-        k.Fields
-        |> List.choose (fun f -> FSharpDerive.structuralField f |> Option.map (fun (_, isList) -> f.Name, isList))
-
     /// The `switch` over the kind tag of `k` — one arm per entry, then `fallback`.
     let private tsKindSwitch (disc: string) (indent: string) (arms: (string * string) list) (fallback: string) =
         [ yield indent + "switch (" + tsDiscProp disc "k" + ") {"
@@ -64,9 +61,17 @@ module internal TypeScriptDerived =
     /// Emission 1 — public `wireTag`, `allWireTags`, `children`, `withChildren` (kids first, so
     /// `withChildren(children(n), n)` is `n` rebuilt), and `nodeWitness` over them: the four members
     /// of Core's `NodeWitness`, as a plain object, since this host has no Core runtime to type it.
-    let private tsStructuralDecl (disc: string) (flat: bool) (kinds: IdlKind list) : string * string list =
+    let private tsStructuralDecl
+        (disc: string)
+        (flat: bool)
+        (kinds: IdlKind list)
+        : Result<string * string list, CodegenError> =
         let bearing =
-            kinds |> List.filter (fun k -> not (List.isEmpty (tsStructuralFields k)))
+            kinds
+            |> List.choose (fun k ->
+                match Derive.structuralFields k.Fields with
+                | [] -> None
+                | fs -> Some(k, fs))
 
         let rebuild (assigns: string) =
             if flat then
@@ -76,302 +81,300 @@ module internal TypeScriptDerived =
 
         let childArms =
             bearing
-            |> List.map (fun k ->
+            |> List.map (fun (k, fs) ->
                 let items =
-                    tsStructuralFields k
-                    |> List.map (fun (name, isList) -> (if isList then "..." else "") + tsProp "k" name)
+                    fs
+                    |> List.map (fun (f, isList) -> (if isList then "..." else "") + tsProp "k" f.Name)
                     |> String.concat ", "
 
                 k.Tag, sprintf "return [%s];" items)
 
         let replaceArms =
             bearing
-            |> List.map (fun k ->
-                let assigns =
-                    match tsStructuralFields k with
-                    | [ (name, true) ] -> SourceLit.tsKey name + ": kids"
-                    | fs ->
-                        fs
-                        |> List.mapi (fun i (name, _) -> sprintf "%s: kids[%d]" (SourceLit.tsKey name) i)
-                        |> String.concat ", "
+            |> List.map (fun (k, fs) ->
+                Derive.childLayout k.Tag fs
+                |> Result.map (fun layout ->
+                    let assigns =
+                        match layout with
+                        | ChildLayout.Whole f -> SourceLit.tsKey f.Name + ": kids"
+                        | ChildLayout.Positional fs ->
+                            fs
+                            |> List.mapi (fun i f -> sprintf "%s: kids[%d]" (SourceLit.tsKey f.Name) i)
+                            |> String.concat ", "
 
-                k.Tag, sprintf "return %s;" (rebuild assigns))
+                    k.Tag, sprintf "return %s;" (rebuild assigns)))
+            |> sequenceR
 
         let allTags =
             "const allWireTags = ["
             + (kinds |> List.map (fun k -> SourceLit.tsString k.Tag) |> String.concat ", ")
             + "];"
 
-        [ "// Phase 380 — STRUCTURAL ACCESS. The kind's wire tag — the discriminator it is encoded under."
-          "function wireTag(n) {"
-          "  return " + tsDiscProp disc (tsKindOf flat "n") + ";"
-          "}"
-          ""
-          "// Every wire tag this module's kinds are encoded under, in declaration order."
-          allTags
-          ""
-          "// The node's ordered structural children, in field order: a node or node list a kind always"
-          "// carries. An optional node is a keyed position, not a child."
-          "function children(n) {"
-          "  const k = " + tsKindOf flat "n" + ";"
-          tsKindSwitch disc "  " childArms "return [];"
-          "}"
-          ""
-          "// The node with exactly this structural child list, its id and kind kept."
-          "function withChildren(kids, n) {"
-          "  const k = " + tsKindOf flat "n" + ";"
-          tsKindSwitch disc "  " replaceArms "return n;"
-          "}"
-          ""
-          "// The structural witness — Core's `NodeWitness` members over this module's node."
-          "const nodeWitness = {"
-          "  id: (n) => n.id,"
-          "  kindTag: wireTag,"
-          "  children: children,"
-          "  replaceChildren: (n, kids) => withChildren(kids, n),"
-          "};" ]
-        |> String.concat "\n",
-        [ "wireTag"; "allWireTags"; "children"; "withChildren"; "nodeWitness" ]
+        replaceArms
+        |> Result.map (fun replaceArms ->
+            [ "// Phase 380 — STRUCTURAL ACCESS. The kind's wire tag — the discriminator it is encoded under."
+              "function wireTag(n) {"
+              "  return " + tsDiscProp disc (tsKindOf flat "n") + ";"
+              "}"
+              ""
+              "// Every wire tag this module's kinds are encoded under, in declaration order."
+              allTags
+              ""
+              "// The node's ordered structural children, in field order: a node or node list a kind always"
+              "// carries. An optional node is a keyed position, not a child."
+              "function children(n) {"
+              "  const k = " + tsKindOf flat "n" + ";"
+              tsKindSwitch disc "  " childArms "return [];"
+              "}"
+              ""
+              "// The node with exactly this structural child list, its id and kind kept."
+              "function withChildren(kids, n) {"
+              "  const k = " + tsKindOf flat "n" + ";"
+              tsKindSwitch disc "  " replaceArms "return n;"
+              "}"
+              ""
+              "// The structural witness — Core's `NodeWitness` members over this module's node."
+              "const nodeWitness = {"
+              "  id: (n) => n.id,"
+              "  kindTag: wireTag,"
+              "  children: children,"
+              "  replaceChildren: (n, kids) => withChildren(kids, n),"
+              "};" ]
+            |> String.concat "\n",
+            [ "wireTag"; "allWireTags"; "children"; "withChildren"; "nodeWitness" ])
+
+    /// The TypeScript lister of the nodes a value holds, in declaration order; a map in Ordinal key
+    /// order, the order the F# host's `Map` iterates in.
+    let private tsLister: PositionPrinter =
+        { Node = sprintf "[%s]"
+          List = fun e x b -> sprintf "%s.flatMap((%s) => %s)" e x b
+          MapItem = fun e x -> sprintf "%s[%s]" e x
+          Map = fun e x b _ -> sprintf "Object.keys(%s).sort().flatMap((%s) => %s)" e x b
+          Named = sprintf "nodesIn%s(%s)"
+          Other = fun _ -> "[]"
+          OptionalVar = id
+          Optional = fun e b -> sprintf "(%s === undefined ? [] : %s)" e b }
+
+    /// The TypeScript rebuilder of a value with `f` applied to every node it holds.
+    let private tsMapper: PositionPrinter =
+        { Node = sprintf "f(%s)"
+          List = fun e x b -> sprintf "%s.map((%s) => %s)" e x b
+          MapItem = fun _ x -> x
+          Map = fun e x b _ -> sprintf "keyedMapEntries(%s, (%s) => %s)" e x b
+          Named = sprintf "mapNodesIn%s(f, %s)"
+          Other = id
+          OptionalVar = id
+          Optional = fun e b -> sprintf "(%s === undefined ? undefined : %s)" e b }
 
     /// Emission 2 — the keyed walk: per-declaration node listers and rebuilders, the node-level
     /// `keyedChildren` / `withKeyedChildren` (arity-preserving), the full walk, and `keyedWitness`
     /// (Core's `KeyedWitness` members). Every node position that is not a structural child: an
     /// optional node, a node in a record, a union case, a list or a map, and the node envelope.
-    let private tsKeyedDecl (disc: string) (flat: bool) (ctx: Decl) : string * string list =
+    let private tsKeyedDecl (disc: string) (flat: bool) (ctx: Decl) : Result<string * string list, CodegenError> =
         let hs = ctx.NodeHolders
-        let holdsF (f: IdlField) = Decl.holdsIn hs f.Type
-
-        // A node held through a generic union's type argument never reaches here: the F# analysis
-        // refused it first.
-        let rec collect (t: IdlType) (e: string) (d: int) : string =
-            let x = sprintf "__x%d" d
-
-            match t with
-            | TNode -> sprintf "[%s]" e
-            | TList i -> sprintf "%s.flatMap((%s) => %s)" e x (collect i x (d + 1))
-            | TMap i ->
-                sprintf "Object.keys(%s).sort().flatMap((%s) => %s)" e x (collect i (sprintf "%s[%s]" e x) (d + 1))
-            | TRecord n
-            | TUnion(n, _) -> sprintf "nodesIn%s(%s)" n e
-            | _ -> "[]"
-
-        let rec mapNodes (t: IdlType) (e: string) (d: int) : string =
-            let x = sprintf "__x%d" d
-
-            match t with
-            | TNode -> sprintf "f(%s)" e
-            | TList i -> sprintf "%s.map((%s) => %s)" e x (mapNodes i x (d + 1))
-            | TMap i -> sprintf "keyedMapEntries(%s, (%s) => %s)" e x (mapNodes i x (d + 1))
-            | TRecord n
-            | TUnion(n, _) -> sprintf "mapNodesIn%s(f, %s)" n e
-            | _ -> e
-
-        let collectField (f: IdlField) (e: string) =
-            match f.Opt with
-            | Optional -> sprintf "(%s === undefined ? [] : %s)" e (collect f.Type e 0)
-            | _ -> collect f.Type e 0
-
-        let mapField (f: IdlField) (e: string) =
-            match f.Opt with
-            | Optional -> sprintf "(%s === undefined ? undefined : %s)" e (mapNodes f.Type e 0)
-            | _ -> mapNodes f.Type e 0
+        let collectField (f: IdlField) e = Derive.positionsOf tsLister hs f e
+        let mapField (f: IdlField) e = Derive.positionsOf tsMapper hs f e
 
         /// `const __m<i> = …;` per field, then the object of the rebuilt members.
         let rebuilt (indent: string) (fs: IdlField list) (access: IdlField -> string) =
-            let lets =
-                fs
-                |> List.mapi (fun i f -> sprintf "%sconst __m%d = %s;\n" indent i (mapField f (access f)))
-                |> String.concat ""
+            fs
+            |> List.mapi (fun i f -> mapField f (access f) |> Result.map (fun b -> i, f, b))
+            |> sequenceR
+            |> Result.map (fun xs ->
+                let lets =
+                    xs
+                    |> List.map (fun (i, _, b) -> sprintf "%sconst __m%d = %s;\n" indent i b)
+                    |> String.concat ""
 
-            let assigns =
-                fs
-                |> List.mapi (fun i f -> sprintf "%s: __m%d" (SourceLit.tsKey f.Name) i)
-                |> String.concat ", "
+                let assigns =
+                    xs
+                    |> List.map (fun (i, f, _) -> sprintf "%s: __m%d" (SourceLit.tsKey f.Name) i)
+                    |> String.concat ", "
 
-            lets, assigns
+                lets, assigns)
 
-        let recordHelpers (r: IdlRecord) =
-            let fs = r.Fields |> List.filter holdsF
-            let lets, assigns = rebuilt "  " fs (fun f -> tsProp "v" f.Name)
+        let listed (access: IdlField -> string) (fs: IdlField list) =
+            fs
+            |> List.map (fun f -> collectField f (access f))
+            |> sequenceR
+            |> Result.map tsAppend
 
-            [ sprintf
-                  "function nodesIn%s(v) {\n  return %s;\n}"
-                  r.Name
-                  (tsAppend (fs |> List.map (fun f -> collectField f (tsProp "v" f.Name))))
-              sprintf "function mapNodesIn%s(f, v) {\n%s  return { ...v, %s };\n}" r.Name lets assigns ]
+        let recordHelpers (r: IdlRecord, fs: IdlField list) =
+            match listed (tsProp "v" << _.Name) fs, rebuilt "  " fs (tsProp "v" << _.Name) with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok items, Ok(lets, assigns) ->
+                Ok
+                    [ sprintf "function nodesIn%s(v) {\n  return %s;\n}" r.Name items
+                      sprintf "function mapNodesIn%s(f, v) {\n%s  return { ...v, %s };\n}" r.Name lets assigns ]
 
-        let unionHelpers (u: IdlUnion) =
-            let holding = u.Cases |> List.filter (fun c -> c.Fields |> List.exists holdsF)
-
+        let unionHelpers (u: IdlUnion, holding: (IdlUnionCase * (int * IdlField) list) list, _: bool) =
             let tag = tsDiscProp ctx.Idl.Wire.Discriminator "v"
 
             let listerArms =
                 holding
-                |> List.map (fun c ->
-                    let fs = c.Fields |> List.filter holdsF
-
-                    sprintf
-                        "    case %s: return %s;"
-                        (SourceLit.tsString c.Tag)
-                        (tsAppend (fs |> List.map (fun f -> collectField f (tsProp "v" f.Name)))))
+                |> List.map (fun (c, fs) ->
+                    listed (tsProp "v" << _.Name) (List.map snd fs)
+                    |> Result.map (sprintf "    case %s: return %s;" (SourceLit.tsString c.Tag)))
+                |> sequenceR
 
             let mapperArms =
                 holding
-                |> List.map (fun c ->
-                    let fs = c.Fields |> List.filter holdsF
-                    let lets, assigns = rebuilt "      " fs (fun f -> tsProp "v" f.Name)
+                |> List.map (fun (c, fs) ->
+                    rebuilt "      " (List.map snd fs) (tsProp "v" << _.Name)
+                    |> Result.map (fun (lets, assigns) ->
+                        sprintf
+                            "    case %s: {\n%s      return { ...v, %s };\n    }"
+                            (SourceLit.tsString c.Tag)
+                            lets
+                            assigns))
+                |> sequenceR
 
-                    sprintf
-                        "    case %s: {\n%s      return { ...v, %s };\n    }"
-                        (SourceLit.tsString c.Tag)
-                        lets
-                        assigns)
+            match listerArms, mapperArms with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok listerArms, Ok mapperArms ->
+                Ok
+                    [ sprintf "function nodesIn%s(v) {\n  switch (%s) {\n" u.Name tag
+                      + String.concat "\n" (listerArms @ [ "    default: return [];" ])
+                      + "\n  }\n}"
+                      sprintf "function mapNodesIn%s(f, v) {\n  switch (%s) {\n" u.Name tag
+                      + String.concat "\n" (mapperArms @ [ "    default: return v;" ])
+                      + "\n  }\n}" ]
 
-            let lister =
-                sprintf "function nodesIn%s(v) {\n  switch (%s) {\n" u.Name tag
-                + String.concat "\n" (listerArms @ [ "    default: return [];" ])
-                + "\n  }\n}"
+        // This host holds the WIRE shape, so a kind's keyed positions are its wire fields.
+        Derive.keyedPlan ctx (fun k -> Ok k.Fields)
+        |> Result.bind (fun plan ->
+            let helpers =
+                (plan.Records |> List.map recordHelpers)
+                @ (plan.Unions |> List.map unionHelpers)
+                |> sequenceR
+                |> Result.map List.concat
 
-            let mapper =
-                sprintf "function mapNodesIn%s(f, v) {\n  switch (%s) {\n" u.Name tag
-                + String.concat "\n" (mapperArms @ [ "    default: return v;" ])
-                + "\n  }\n}"
+            let listerArms =
+                plan.Kinds
+                |> List.map (fun (k, fs) ->
+                    listed (tsProp "k" << _.Name) fs
+                    |> Result.map (fun items -> k.Tag, sprintf "ofKind = %s; break;" items))
+                |> sequenceR
 
-            [ lister; mapper ]
+            let envListers =
+                plan.Envelope
+                |> List.map (fun f -> collectField f (tsProp "n" f.Name))
+                |> sequenceR
 
-        let helpers =
-            (ctx.Records
-             |> List.filter (fun r -> hs.Contains r.Name)
-             |> List.collect recordHelpers)
-            @ (ctx.Unions
-               |> List.filter (fun u -> hs.Contains u.Name)
-               |> List.collect unionHelpers)
+            let mapperArms =
+                plan.Kinds
+                |> List.map (fun (k, fs) ->
+                    rebuilt "      " fs (tsProp "k" << _.Name)
+                    |> Result.map (fun (lets, assigns) ->
+                        k.Tag, sprintf "{\n%s      kind = { %s };\n      break;\n    }" lets assigns))
+                |> sequenceR
 
-        let keyedFields (k: IdlKind) =
-            k.Fields
-            |> List.filter (fun f -> holdsF f && (FSharpDerive.structuralField f).IsNone)
+            let envMappers =
+                plan.Envelope
+                |> List.mapi (fun i f -> mapField f (tsProp "n" f.Name) |> Result.map (fun b -> i, f, b))
+                |> sequenceR
 
-        let keyedKinds =
-            ctx.Kinds |> List.filter (fun k -> not (List.isEmpty (keyedFields k)))
+            match helpers, listerArms, envListers, mapperArms, envMappers with
+            | Error e, _, _, _, _
+            | _, Error e, _, _, _
+            | _, _, Error e, _, _
+            | _, _, _, Error e, _
+            | _, _, _, _, Error e -> Error e
+            | Ok helpers, Ok listerArms, Ok envListers, Ok mapperArms, Ok envMappers ->
+                let envLets =
+                    envMappers
+                    |> List.map (fun (i, _, b) -> sprintf "  const __e%d = %s;\n" i b)
+                    |> String.concat ""
 
-        let envFields = ctx.Idl.NodeFields |> List.filter holdsF
-        let disc = ctx.Idl.Wire.Discriminator
+                let envAssigns =
+                    envMappers
+                    |> List.map (fun (i, f, _) -> sprintf ", %s: __e%d" (SourceLit.tsKey f.Name) i)
+                    |> String.concat ""
 
-        let listerArms =
-            keyedKinds
-            |> List.map (fun k ->
-                k.Tag,
-                sprintf
-                    "ofKind = %s; break;"
-                    (tsAppend (keyedFields k |> List.map (fun f -> collectField f (tsProp "k" f.Name)))))
+                let mapKeyedReturn =
+                    if flat then
+                        sprintf "  return { ...n, ...kind%s };" envAssigns
+                    else
+                        sprintf "  return { ...n, kind: { ...k, ...kind }%s };" envAssigns
 
-        let envListers = envFields |> List.map (fun f -> collectField f (tsProp "n" f.Name))
+                let text =
+                    [ yield
+                          "// Phase 380 — KEYED POSITIONS. A map is rebuilt entry by entry in Ordinal key order — the\n// order `keyedChildren` lists its nodes in.\nconst keyedMapEntries = (m, f) => {\n  const out = Object.create(null);\n  for (const key of Object.keys(m).sort()) out[key] = f(m[key]);\n  return out;\n};"
+                      yield! helpers
+                      yield
+                          [ "// The nodes this node holds in keyed, non-structural positions, in declaration order."
+                            "function keyedChildren(n) {"
+                            "  const k = " + tsKindOf flat "n" + ";"
+                            "  let ofKind;"
+                            tsKindSwitch disc "  " listerArms "ofKind = [];"
+                            "  return " + tsAppend ("ofKind" :: envListers) + ";"
+                            "}" ]
+                          |> String.concat "\n"
+                      yield
+                          [ "function mapKeyed(f, n) {"
+                            "  const k = " + tsKindOf flat "n" + ";"
+                            "  let kind = {};"
+                            tsKindSwitch disc "  " mapperArms "break;"
+                            envLets + mapKeyedReturn
+                            "}" ]
+                          |> String.concat "\n"
+                      yield
+                          [ "// The node with these nodes in its keyed positions, position for position (arity-preserving)."
+                            "function withKeyedChildren(kids, n) {"
+                            "  let i = 0;"
+                            "  return mapKeyed((old) => (i < kids.length ? kids[i++] : old), n);"
+                            "}"
+                            ""
+                            "// The generated full walk: every node position the vocabulary declares, structural and keyed."
+                            "function idsUniqueFullWalk(root) {"
+                            "  const seen = new Set();"
+                            "  const stack = [root];"
+                            "  while (stack.length > 0) {"
+                            "    const x = stack.pop();"
+                            "    if (seen.has(x.id)) return false;"
+                            "    seen.add(x.id);"
+                            "    stack.push(...children(x), ...keyedChildren(x));"
+                            "  }"
+                            "  return true;"
+                            "}"
+                            ""
+                            "// The keyed witness — Core's `KeyedWitness` members over this module's node."
+                            "const keyedWitness = {"
+                            "  surface: \"the generated full walk over every node position the vocabulary declares\","
+                            "  keyedChildren: keyedChildren,"
+                            "  replaceKeyedChildren: (n, kids) => withKeyedChildren(kids, n),"
+                            "  placeKeyedChild: (n, id) => {"
+                            "    const ks = keyedChildren(n);"
+                            "    return ks.length === 0 ? undefined : withKeyedChildren([{ ...ks[0], id: id }, ...ks.slice(1)], n);"
+                            "  },"
+                            "  idsUnique: idsUniqueFullWalk,"
+                            "};" ]
+                          |> String.concat "\n" ]
+                    |> String.concat "\n\n"
 
-        let mapperArms =
-            keyedKinds
-            |> List.map (fun k ->
-                let lets, assigns = rebuilt "      " (keyedFields k) (fun f -> tsProp "k" f.Name)
-                k.Tag, sprintf "{\n%s      kind = { %s };\n      break;\n    }" lets assigns)
-
-        let envLets, envAssigns =
-            let lets =
-                envFields
-                |> List.mapi (fun i f -> sprintf "  const __e%d = %s;\n" i (mapField f (tsProp "n" f.Name)))
-                |> String.concat ""
-
-            let assigns =
-                envFields
-                |> List.mapi (fun i f -> sprintf ", %s: __e%d" (SourceLit.tsKey f.Name) i)
-                |> String.concat ""
-
-            lets, assigns
-
-        let mapKeyedReturn =
-            if flat then
-                sprintf "  return { ...n, ...kind%s };" envAssigns
-            else
-                sprintf "  return { ...n, kind: { ...k, ...kind }%s };" envAssigns
-
-        let text =
-            [ yield
-                  "// Phase 380 — KEYED POSITIONS. A map is rebuilt entry by entry in Ordinal key order — the\n// order `keyedChildren` lists its nodes in.\nconst keyedMapEntries = (m, f) => {\n  const out = Object.create(null);\n  for (const key of Object.keys(m).sort()) out[key] = f(m[key]);\n  return out;\n};"
-              yield! helpers
-              yield
-                  [ "// The nodes this node holds in keyed, non-structural positions, in declaration order."
-                    "function keyedChildren(n) {"
-                    "  const k = " + tsKindOf flat "n" + ";"
-                    "  let ofKind;"
-                    tsKindSwitch disc "  " listerArms "ofKind = [];"
-                    "  return " + tsAppend ("ofKind" :: envListers) + ";"
-                    "}" ]
-                  |> String.concat "\n"
-              yield
-                  [ "function mapKeyed(f, n) {"
-                    "  const k = " + tsKindOf flat "n" + ";"
-                    "  let kind = {};"
-                    tsKindSwitch disc "  " mapperArms "break;"
-                    envLets + mapKeyedReturn
-                    "}" ]
-                  |> String.concat "\n"
-              yield
-                  [ "// The node with these nodes in its keyed positions, position for position (arity-preserving)."
-                    "function withKeyedChildren(kids, n) {"
-                    "  let i = 0;"
-                    "  return mapKeyed((old) => (i < kids.length ? kids[i++] : old), n);"
-                    "}"
-                    ""
-                    "// The generated full walk: every node position the vocabulary declares, structural and keyed."
-                    "function idsUniqueFullWalk(root) {"
-                    "  const seen = new Set();"
-                    "  const stack = [root];"
-                    "  while (stack.length > 0) {"
-                    "    const x = stack.pop();"
-                    "    if (seen.has(x.id)) return false;"
-                    "    seen.add(x.id);"
-                    "    stack.push(...children(x), ...keyedChildren(x));"
-                    "  }"
-                    "  return true;"
-                    "}"
-                    ""
-                    "// The keyed witness — Core's `KeyedWitness` members over this module's node."
-                    "const keyedWitness = {"
-                    "  surface: \"the generated full walk over every node position the vocabulary declares\","
-                    "  keyedChildren: keyedChildren,"
-                    "  replaceKeyedChildren: (n, kids) => withKeyedChildren(kids, n),"
-                    "  placeKeyedChild: (n, id) => {"
-                    "    const ks = keyedChildren(n);"
-                    "    return ks.length === 0 ? undefined : withKeyedChildren([{ ...ks[0], id: id }, ...ks.slice(1)], n);"
-                    "  },"
-                    "  idsUnique: idsUniqueFullWalk,"
-                    "};" ]
-                  |> String.concat "\n" ]
-            |> String.concat "\n\n"
-
-        text, [ "keyedChildren"; "withKeyedChildren"; "keyedWitness" ]
+                Ok(text, [ "keyedChildren"; "withKeyedChildren"; "keyedWitness" ]))
 
     /// Emission 3 — `slotsOf<T>(n)`: every `[field name, value]` pair the node holds at the declared
     /// type `T` (directly, optional or in a list), kind fields first, then the envelope's.
     let private tsSlotsDecl (disc: string) (flat: bool) (ctx: Decl) (typeName: string) : string * string list =
-        let isT (t: IdlType) =
-            match t with
-            | TEnum n
-            | TRecord n
-            | TUnion(n, _) -> n = typeName
-            | _ -> false
-
         let ofField (owner: string) (f: IdlField) : string option =
             let e = tsProp owner f.Name
             let key = SourceLit.tsString f.Name
 
-            let direct =
-                match f.Type with
-                | t when isT t -> Some(sprintf "[[%s, %s]]" key e)
-                | TList t when isT t -> Some(sprintf "%s.map((__v) => [%s, __v])" e key)
-                | _ -> None
+            Derive.slotPosition typeName f
+            |> Option.map (fun at ->
+                let direct =
+                    if at.List then
+                        sprintf "%s.map((__v) => [%s, __v])" e key
+                    else
+                        sprintf "[[%s, %s]]" key e
 
-            match f.Opt with
-            | Optional -> direct |> Option.map (sprintf "(%s === undefined ? [] : %s)" e)
-            | _ -> direct
+                if at.Optional then
+                    sprintf "(%s === undefined ? [] : %s)" e direct
+                else
+                    direct)
 
         let arms =
             ctx.Kinds
@@ -399,135 +402,88 @@ module internal TypeScriptDerived =
     /// exported under the union's name (`Rule.fold`, `Trigger.owner`), as the F# host's `module`
     /// is. The object is declared as `<Union>$` and exported `as <Union>`, so a union named like a
     /// global the module reads (`Map`, `Object`, `Error`) shadows nothing inside the module.
-    let private tsUnionModulesDecl (ctx: Decl) (requests: FSharpDerive.Request list) : (string * string list) list =
+    let private tsUnionModulesDecl
+        (ctx: Decl)
+        (requests: Derivation list)
+        : Result<(IdlUnion * bool * string list * (string * string list)) list, CodegenError> =
         let disc = ctx.Idl.Wire.Discriminator
-
-        let named =
-            requests
-            |> List.choose (fun r ->
-                match r with
-                | FSharpDerive.Request.Fold n -> Some n
-                | FSharpDerive.Request.Projections(n, _) -> Some n
-                | _ -> None)
-            |> List.distinct
-
-        let recursesIn (u: IdlUnion) (seen: Set<string>) (t: IdlType) = Decl.foldSelfIn ctx u seen t = Ok true
 
         let foldMember (u: IdlUnion) =
             let self = u.Name + "$"
 
-            let rec foldE (t: IdlType) (e: string) (st: string) (d: int) : string =
-                let x = sprintf "__x%d" d
-                let s = sprintf "__s%d" d
+            let folder: FoldPrinter =
+                { Self = fun st e -> sprintf "%s.fold(folder, %s, %s)" self st e
+                  List = fun e x s b st -> sprintf "%s.reduce((%s, %s) => %s, %s)" e s x b st
+                  MapItem = fun e x -> sprintf "%s[%s]" e x
+                  Map = fun e x s b st -> sprintf "Object.keys(%s).sort().reduce((%s, %s) => %s, %s)" e s x b st
+                  Access = fun e f -> tsProp e f.Name
+                  OptionalVar = fun e _ -> e
+                  Optional = fun e _ b st -> sprintf "(%s === undefined ? %s : %s)" e st b
+                  StepState = fun d _ _ -> sprintf "__c%d" d
+                  Thread =
+                    fun d st bodies ->
+                        let c = sprintf "__c%d" d
 
-                match t with
-                | TUnion(n, _) when n = u.Name -> sprintf "%s.fold(folder, %s, %s)" self st e
-                | TList i -> sprintf "%s.reduce((%s, %s) => %s, %s)" e s x (foldE i x s (d + 1)) st
-                | TMap i ->
-                    sprintf
-                        "Object.keys(%s).sort().reduce((%s, %s) => %s, %s)"
-                        e
-                        s
-                        x
-                        (foldE i (sprintf "%s[%s]" e x) s (d + 1))
-                        st
-                | TRecord n ->
-                    let fs =
-                        Decl.tryRecord ctx n
-                        |> Option.map _.Fields
-                        |> Option.defaultValue []
-                        |> List.filter (fun f -> recursesIn u (Set.singleton n) f.Type)
+                        sprintf
+                            "(() => { let %s = %s; %sreturn %s; })()"
+                            c
+                            st
+                            (bodies |> List.map (fun b -> sprintf "%s = %s; " c b) |> String.concat "")
+                            c }
 
-                    foldFields fs (fun f -> tsProp e f.Name) st (d + 1)
-                | _ -> st
-
-            and foldField (f: IdlField) (e: string) (st: string) (d: int) =
-                match f.Opt with
-                | Optional -> sprintf "(%s === undefined ? %s : %s)" e st (foldE f.Type e st (d + 1))
-                | _ -> foldE f.Type e st d
-
-            /// Thread the state through several fields, left to right.
-            and foldFields (fs: IdlField list) (access: IdlField -> string) (st: string) (d: int) =
-                match fs with
-                | [] -> st
-                | [ f ] -> foldField f (access f) st d
-                | _ ->
-                    let c = sprintf "__c%d" d
-
-                    let steps =
-                        fs
-                        |> List.map (fun f -> sprintf "%s = %s; " c (foldField f (access f) c (d + 1)))
-                        |> String.concat ""
-
-                    sprintf "(() => { let %s = %s; %sreturn %s; })()" c st steps c
-
-            let arms =
-                u.Cases
-                |> List.choose (fun c ->
-                    match c.Fields |> List.filter (fun f -> recursesIn u Set.empty f.Type) with
-                    | [] -> None
-                    | fs ->
-                        Some(
-                            sprintf
-                                "      case %s: return %s;"
-                                (SourceLit.tsString c.Tag)
-                                (foldFields fs (fun f -> tsProp "v" f.Name) "state" 0)
-                        ))
-
-            [ sprintf "  // Fold `folder` over this value and every nested `%s` it holds, in preorder." u.Name
-              "  fold(folder, state, v) {"
-              "    state = folder(state, v);"
-              "    switch (" + tsDiscProp disc "v" + ") {" ]
-            @ arms
-            @ [ "      default: return state;"; "    }"; "  }," ]
-            |> String.concat "\n"
+            Derive.foldPlan ctx u
+            |> Result.bind (fun recursive ->
+                recursive
+                |> List.map (fun (c, fs) ->
+                    Derive.foldMembers folder ctx u (List.map snd fs) (tsProp "v" << _.Name) "state" 0
+                    |> Result.map (sprintf "      case %s: return %s;" (SourceLit.tsString c.Tag)))
+                |> sequenceR)
+            |> Result.map (fun arms ->
+                [ sprintf "  // Fold `folder` over this value and every nested `%s` it holds, in preorder." u.Name
+                  "  fold(folder, state, v) {"
+                  "    state = folder(state, v);"
+                  "    switch (" + tsDiscProp disc "v" + ") {" ]
+                @ arms
+                @ [ "      default: return state;"; "    }"; "  }," ]
+                |> String.concat "\n")
 
         let projectionMember (u: IdlUnion) (field: string) =
-            let carriers =
-                u.Cases
-                |> List.filter (fun c -> c.Fields |> List.exists (fun f -> f.Name = field))
+            Derive.projectionPlan u field
+            |> Result.map (fun (carriers, total) ->
+                [ yield
+                      sprintf
+                          "  // The `%s` field, %s."
+                          field
+                          (if total then
+                               "which every case carries"
+                           else
+                               "where the case carries one (`undefined` where it does not)")
+                  yield "  " + SourceLit.tsKey field + "(v) {"
+                  yield "    switch (" + tsDiscProp disc "v" + ") {"
+                  for c, _, _ in carriers do
+                      yield sprintf "      case %s: return %s;" (SourceLit.tsString c.Tag) (tsProp "v" field)
+                  yield "      default: return undefined;"
+                  yield "    }"
+                  yield "  }," ]
+                |> String.concat "\n")
 
-            let total = List.length carriers = List.length u.Cases
-
-            [ yield
-                  sprintf
-                      "  // The `%s` field, %s."
-                      field
-                      (if total then
-                           "which every case carries"
-                       else
-                           "where the case carries one (`undefined` where it does not)")
-              yield "  " + SourceLit.tsKey field + "(v) {"
-              yield "    switch (" + tsDiscProp disc "v" + ") {"
-              for c in carriers do
-                  yield sprintf "      case %s: return %s;" (SourceLit.tsString c.Tag) (tsProp "v" field)
-              yield "      default: return undefined;"
-              yield "    }"
-              yield "  }," ]
-            |> String.concat "\n"
-
-        named
-        |> List.choose (fun name -> Decl.tryUnion ctx name)
-        |> List.map (fun u ->
-            let folds = requests |> List.contains (FSharpDerive.Request.Fold u.Name)
-
-            let fields =
-                requests
-                |> List.collect (fun r ->
-                    match r with
-                    | FSharpDerive.Request.Projections(n, fs) when n = u.Name -> fs
-                    | _ -> [])
-                |> List.distinct
-
-            let members =
-                (if folds then [ foldMember u ] else [])
-                @ (fields |> List.map (projectionMember u))
-
-            sprintf "// Phase 380 — derived members of `%s`, exported as `%s`.\n" u.Name u.Name
-            + sprintf "const %s$ = {\n" u.Name
-            + String.concat "\n\n" members
-            + "\n};",
-            [ sprintf "%s$ as %s" u.Name u.Name ])
+        Derive.unionModules ctx requests
+        |> Result.bind (fun unions ->
+            unions
+            |> List.map (fun (u, folds, fields) ->
+                ((if folds then [ foldMember u ] else [])
+                 @ (fields |> List.map (projectionMember u)))
+                |> sequenceR
+                |> Result.map (fun members ->
+                    u,
+                    folds,
+                    fields,
+                    (sprintf "// Phase 380 — derived members of `%s`, exported as `%s`.\n" u.Name u.Name
+                     + sprintf "const %s$ = {\n" u.Name
+                     + String.concat "\n\n" members
+                     + "\n};",
+                     [ sprintf "%s$ as %s" u.Name u.Name ])))
+            |> sequenceR)
 
     /// Emission 7 — `default<Tag>Spec` / `default<Record>` for every kind and record whose every
     /// field has a value without the caller, in the shape the generated decoder produces: an
@@ -538,14 +494,6 @@ module internal TypeScriptDerived =
         (disc: string)
         (ctx: Decl)
         : Result<string * string list, CodegenError> =
-        let defaultFor (tag: string) (field: string) =
-            idl.Defaults
-            |> List.tryPick (fun d ->
-                if d.Kind = tag && d.Field = field then
-                    Some d.Value
-                else
-                    None)
-
         let sentinel (t: IdlType) =
             match t with
             | TClosure
@@ -553,61 +501,44 @@ module internal TypeScriptDerived =
             | TOpaque -> true
             | _ -> false
 
-        /// `None`: no value without the caller. `Some(Ok None)`: the member is absent.
-        let fieldValue (declared: IdlValue option) (f: IdlField) : Result<string option, CodegenError> option =
-            match declared, f.Opt with
-            | _, OmitDefault d ->
+        /// A member's value, or `None` where the member is absent. Phase 524 (511.t4) — the
+        /// TypeScript printer of the one presence rule's CONSTRUCTOR site.
+        let fieldValue (f: IdlField) (mv: MemberValue) : Result<string option, CodegenError> =
+            match mv with
+            | MemberValue.IdentityDefault d ->
                 if sentinel f.Type then
-                    Some(Ok(Some "null"))
+                    Ok(Some "null")
                 else
-                    Some(tsDefaultLit idl disc f.Type d |> Result.map Some)
-            | Some v, Required
-            | Some v, Optional -> Some(typescriptValue idl f.Type v |> Result.map Some)
-            | None, Required -> None
-            | None, Optional
-            | _, HostOnly -> Some(Ok None)
+                    tsDefaultLit idl disc f.Type d |> Result.map Some
+            | MemberValue.Carries v
+            | MemberValue.Optional v -> typescriptValue idl f.Type v |> Result.map Some
+            | MemberValue.Absent
+            | MemberValue.Placeholder
+            | MemberValue.Parameter -> Ok None
+            | MemberValue.Refused v -> Error(CodegenError.UnsupportedDefault(f.Type, v))
 
-        let value
-            (name: string)
-            (extra: (string * string) list)
-            (declared: IdlField -> IdlValue option)
-            (fs: IdlField list)
-            =
-            let parts = fs |> List.map (fun f -> f, fieldValue (declared f) f)
+        Derive.defaultRecords ctx (fun _ -> true)
+        |> Result.bind (fun records ->
+            records
+            |> List.map (fun r ->
+                let extra =
+                    match r.Kind with
+                    | Some k -> [ tsDiscKey disc + ": " + SourceLit.tsString k.Tag ]
+                    | None -> []
 
-            if parts |> List.exists (fun (_, v) -> v.IsNone) then
-                None
-            else
-                parts
-                |> List.map (fun (f, v) ->
-                    v.Value
+                r.Members
+                |> List.map (fun (f, mv) ->
+                    fieldValue f mv
                     |> Result.map (Option.map (fun lit -> SourceLit.tsString f.Name + ": " + lit)))
                 |> sequenceR
                 |> Result.map (fun pieces ->
-                    let pairs = (extra |> List.map (fun (k, v) -> k + ": " + v)) @ List.choose id pieces
-
                     sprintf
                         "// `%s` with every field at the value a caller need not pass.\nconst default%s = { %s };"
-                        name
-                        name
-                        (String.concat ", " pairs),
-                    "default" + name)
-                |> Some
-
-        let kinds =
-            ctx.Kinds
-            |> List.choose (fun k ->
-                value
-                    (k.Tag + "Spec")
-                    [ tsDiscKey disc, SourceLit.tsString k.Tag ]
-                    (fun f -> defaultFor k.Tag f.Name)
-                    k.Fields)
-
-        let records =
-            ctx.Records |> List.choose (fun r -> value r.Name [] (fun _ -> None) r.Fields)
-
-        (kinds @ records)
-        |> sequenceR
+                        r.Name
+                        r.Name
+                        (String.concat ", " (extra @ List.choose id pieces)),
+                    "default" + r.Name))
+            |> sequenceR)
         |> Result.map (fun xs -> xs |> List.map fst |> String.concat "\n\n", xs |> List.map snd)
 
     /// Emission 8 — `kindCategories`, `kindFieldNames`, `opFieldNames` as `Map`s of `Set`s and
@@ -637,235 +568,132 @@ module internal TypeScriptDerived =
                    |> String.concat ", ")
                 + "])"
 
-        let categories =
-            ctx.Kinds
-            |> List.map _.Category
-            |> List.distinct
-            |> List.map (fun c -> c, ctx.Kinds |> List.filter (fun k -> k.Category = c) |> List.map _.Tag)
-
-        let fieldsOf (ks: IdlKind list) =
-            ks |> List.map (fun k -> k.Tag, k.Fields |> List.map _.Name)
+        let c = Derive.constants ctx
 
         [ "// Phase 380 — VOCABULARY CONSTANTS. The kind tags of each declared category."
-          "const kindCategories = " + mapLit categories + ";"
+          "const kindCategories = " + mapLit c.Categories + ";"
           ""
           "// The wire field names of each kind."
-          "const kindFieldNames = " + mapLit (fieldsOf ctx.Kinds) + ";"
+          "const kindFieldNames = " + mapLit c.KindFields + ";"
           ""
           "// The wire field names of the node envelope."
-          "const envelopeFieldNames = "
-          + setLit (ctx.Idl.NodeFields |> List.map _.Name)
-          + ";"
+          "const envelopeFieldNames = " + setLit c.Envelope + ";"
           ""
           "// The wire field names of each tree op."
-          "const opFieldNames = " + mapLit (fieldsOf ctx.Idl.Ops) + ";" ]
+          "const opFieldNames = " + mapLit c.OpFields + ";" ]
         |> String.concat "\n",
         [ "kindCategories"; "kindFieldNames"; "envelopeFieldNames"; "opFieldNames" ]
 
     // ---- the collecting decoders (Phase 377's `SpecDecoders`) ----
 
-    /// The collecting decoder reference for a type — [[tsDecFn]]'s, arm for arm, where the type has
-    /// independent positions to collect over; a leaf is [[tsDecFn]]'s decoder, which refuses once.
-    let rec private tsColFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TVar v -> Ok("col" + v)
-        | TUnion(n, []) -> Ok("col" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map tsColFn
-            |> concatR ", "
-            |> Result.map (fun a -> "((x) => col" + n + "(" + a + ", x))")
-        | TNode -> Ok "colNode"
-        | TList inner -> tsColFn inner |> Result.map (fun c -> "cList(" + c + ")")
-        | TMap vt -> tsColFn vt |> Result.map (fun c -> "cMap(" + c + ")")
-        | TRecord n -> Ok("col" + n)
-        | _ -> tsDecFn t
+    /// Phase 524 — the TypeScript COLLECTING decoder printer, derived from [[tsDecPrinter]]
+    /// ([[SlotTraversal.collecting]]): a leaf is the short-circuiting decoder, which refuses once.
+    let private tsColPrinter: SlotPrinter =
+        SlotTraversal.collecting
+            tsDecPrinter
+            id
+            { tsDecPrinter with
+                Var = fun v -> "col" + v
+                Named = fun n -> "col" + n
+                Union = fun n args -> "((x) => col" + n + "(" + String.concat ", " args + ", x))"
+                Node = "colNode"
+                List = fun c -> "cList(" + c + ")"
+                Map = fun c -> "cMap(" + c + ")" }
 
-    /// One member read back under [[tsDecField]]'s presence rules, collecting. A leaf member (and a
-    /// host-only one) IS [[tsDecField]]'s expression, so its presence rules are the short-circuiting
-    /// decoder's by construction.
-    let private tsColField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
-        let key = SourceLit.tsString f.Name
-
-        match f.Opt with
-        | HostOnly -> tsDecField idl disc f
-        | _ when not (FSharpCodec.collectsOver f.Type) -> tsDecField idl disc f
-        | Required -> tsColFn f.Type |> Result.map (fun c -> "cReq(" + key + ", fs, " + c + ")")
-        | Optional -> tsColFn f.Type |> Result.map (fun c -> "cOpt(" + key + ", fs, " + c + ")")
-        | OmitDefault d ->
-            tsDefaultLit idl disc f.Type d
-            |> Result.bind (fun lit ->
-                tsColFn f.Type
-                |> Result.map (fun c -> "cDef(" + key + ", fs, " + c + ", " + lit + ")"))
+    /// The collecting member reader: [[tsMemberDecPrinter]]'s presence, read through
+    /// [[tsColPrinter]].
+    let private tsColMemberPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
+        { tsMemberDecPrinter idl disc with
+            Slot = tsColPrinter
+            Req = fun key o c -> "cReq(" + key + ", " + o + ", " + c + ")"
+            Opt = fun key o c -> "cOpt(" + key + ", " + o + ", " + c + ")"
+            Def = fun key o c lit -> "cDef(" + key + ", " + o + ", " + c + ", " + lit + ")" }
 
     /// Read every member in declaration order, then build the object [[tsFieldObject]] builds — the
     /// same keys in the same order — or throw every member's refusals, in that order.
-    let private tsColObject
-        (idl: Idl)
+    let private tsColObject (indent: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+        let pairs =
+            (extra |> List.map (fun (k, v) -> k + ": " + v))
+            @ (members
+               |> List.mapi (fun i (f, _) -> SourceLit.tsString f.Name + ": v[" + string i + "]"))
+
+        let literal = "{ " + String.concat ", " pairs + " }"
+
+        match members with
+        | [] -> indent + "return " + literal + ";"
+        | _ ->
+            indent
+            + "const v = cAll(["
+            + (members |> List.map (fun (_, r) -> "() => " + r) |> String.concat ", ")
+            + "]);\n"
+            + indent
+            + "return "
+            + literal
+            + ";"
+
+    let private tsColUnion
+        (decl: Decl)
         (disc: string)
-        (indent: string)
-        (extra: (string * string) list)
-        (fields: IdlField list)
-        : Result<string, CodegenError> =
-        fields
-        |> List.map (tsColField idl disc)
-        |> sequenceR
-        |> Result.map (fun reads ->
-            let pairs =
-                (extra |> List.map (fun (k, v) -> k + ": " + v))
-                @ (fields
-                   |> List.mapi (fun i f -> SourceLit.tsString f.Name + ": v[" + string i + "]"))
-
-            let literal = "{ " + String.concat ", " pairs + " }"
-
-            match reads with
-            | [] -> indent + "return " + literal + ";"
-            | _ ->
-                indent
-                + "const v = cAll(["
-                + (reads |> List.map (fun r -> "() => " + r) |> String.concat ", ")
-                + "]);\n"
-                + indent
-                + "return "
-                + literal
-                + ";")
-
-    let private tsColUnion (decl: Decl) (disc: string) (u: IdlUnion) =
-        let idl = decl.Idl
-
+        (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
+        (u: IdlUnion)
+        =
         let argList =
             match u.Params with
             | [] -> "j"
             | ps -> (ps |> List.map (fun p -> "col" + p) |> String.concat ", ") + ", j"
 
-        let arm (c: IdlUnionCase) =
-            tsColObject idl disc "        " [ tsDiscKey disc, SourceLit.tsString c.Tag ] c.Fields
-            |> Result.map (fun body -> "      case " + SourceLit.tsString c.Tag + ": {\n" + body + "\n      }")
-
-        let taggedR =
-            u.Cases
-            |> List.map arm
-            |> concatR "\n"
-            |> Result.map (fun arms ->
-                "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
-                + arms
-                + "\n      default: return dUnknown("
-                + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
-                + ", "
-                + SourceLit.tsString ("unknown " + u.Name + " case: ")
-                + " + "
-                + tsDiscProp disc "j"
-                + ");\n    }\n  }")
-
-        // A transparent union reads its single-field case bare, collecting through it.
-        let untagged =
-            match Decl.transparentTag decl u with
-            | Some ttag ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
-                | Some({ Fields = [ f ] }) ->
-                    tsColFn f.Type
-                    |> Result.map (fun cfn ->
-                        "  return { "
-                        + tsDiscKey disc
-                        + ": "
-                        + SourceLit.tsString ttag
-                        + ", "
-                        + SourceLit.tsString f.Name
-                        + ": "
-                        + cfn
-                        + "(j) };")
-                | _ -> Error(transparentArity u.Name ttag)
-            | None ->
-                Ok(
+        UnionTraversal.decoder
+            { Read = read
+              Slot = tsColPrinter
+              Arm =
+                fun _ c members ->
+                    "      case "
+                    + SourceLit.tsString c.Tag
+                    + ": {\n"
+                    + tsColObject "        " [ tsDiscKey disc, SourceLit.tsString c.Tag ] members
+                    + "\n      }"
+              // A transparent union reads its single-field case bare, collecting through it.
+              Bare =
+                fun _ c f cfn ->
+                    "  return { "
+                    + tsDiscKey disc
+                    + ": "
+                    + SourceLit.tsString c.Tag
+                    + ", "
+                    + SourceLit.tsString f.Name
+                    + ": "
+                    + cfn
+                    + "(j) };"
+              NoBare =
+                fun _ ->
                     "  return dFail('WrongKind', 'object', "
                     + SourceLit.tsString ("expected a " + u.Name + " object")
                     + ");"
-                )
-
-        taggedR
-        |> Result.bind (fun tagged ->
-            untagged
-            |> Result.map (fun untagged ->
-                "function col"
-                + u.Name
-                + "("
-                + argList
-                + ") {\n"
-                + tagged
-                + "\n"
-                + untagged
-                + "\n}"))
+              Union =
+                fun _ arms untagged ->
+                    "function col"
+                    + u.Name
+                    + "("
+                    + argList
+                    + ") {\n"
+                    + "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
+                    + String.concat "\n" arms
+                    + "\n      default: return dUnknown("
+                    + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
+                    + ", "
+                    + SourceLit.tsString ("unknown " + u.Name + " case: ")
+                    + " + "
+                    + tsDiscProp disc "j"
+                    + ");\n    }\n  }"
+                    + "\n"
+                    + untagged
+                    + "\n}" }
+            decl
+            u
 
     /// The collecting prelude: the refusal LIST a collecting decoder throws, and the readers that
     /// gather it. It states the defect order, which a test pins.
-    let private tsCollectingPrelude =
-        """// ---------------------------------------------------------------------------
-// Phase 380 — COLLECTING DECODERS. Beside every short-circuiting `dec*` decoder above, a `col*`
-// decoder answers EVERY defect it finds, in one deterministic order — the F# host's:
-//   - an object's members in FIELD DECLARATION ORDER (a node: `id`, its kind, then its envelope
-//     fields), each member's defects at that member's position, its nested defects included
-//     (depth-first);
-//   - a list's items in index order, and a map's entries in document order;
-//   - a leaf (a scalar, an enum, a sentinel, a hosted slot, verbatim JSON) reports at most one
-//     defect, and so does a value of the wrong kind or an absent or unknown discriminator, whose
-//     members are never read.
-// The first defect of a collecting decoder is the defect its short-circuiting twin reports, and on
-// a clean input both answer the same value. Codes and paths are Core's `DecodeError`'s.
-// ---------------------------------------------------------------------------
-// Several refusals at once — what a collecting decoder throws when a position it read refused.
-class DecodeFaults extends Error {
-  constructor(faults) {
-    super(faults.length + ' decode faults');
-    this.faults = faults;
-  }
-}
-// One read: its value, or its refusals (one for a short-circuiting refusal, every one for a
-// collecting one).
-const cRun = (read) => {
-  try {
-    return { ok: true, value: read() };
-  } catch (e) {
-    if (e instanceof DecodeFault) return { ok: false, faults: [e] };
-    if (e instanceof DecodeFaults) return { ok: false, faults: e.faults };
-    throw e;
-  }
-};
-// Every read, in order: their values when all decoded, else every read's refusals, in that order.
-const cAll = (reads) => {
-  const results = reads.map(cRun);
-  const faults = results.flatMap((r) => (r.ok ? [] : r.faults));
-  if (faults.length > 0) throw new DecodeFaults(faults);
-  return results.map((r) => r.value);
-};
-// One step further from the root, for every refusal a member or an item raised.
-const cAt = (step, f) => {
-  try {
-    return f();
-  } catch (e) {
-    if (e instanceof DecodeFault) e.path.unshift(step);
-    else if (e instanceof DecodeFaults) for (const x of e.faults) x.path.unshift(step);
-    throw e;
-  }
-};
-const cList = (dec) => (j) => {
-  if (!Array.isArray(j)) return dFail('WrongKind', 'array', 'expected an array');
-  return cAll(j.map((_, i) => () => cAt(i, () => dec(dRead(j, i)))));
-};
-// Every entry is checked, in document order; a repeated key keeps its FIRST value, as `dMap` does.
-const cMap = (dec) => (j) => {
-  const o = dObj(j);
-  const members = dMembersOf.get(o);
-  const entries = (members === undefined)
-    ? Object.keys(o).map((k) => [k, () => cAt(k, () => dec(dRead(o, k)))])
-    : members.map(([k, v, floatTok]) => [k, () => cAt(k, () => { dFloatTok = floatTok; return dec(v); })]);
-  const values = cAll(entries.map(([, read]) => read));
-  const out = Object.create(null);
-  entries.forEach(([k], i) => { if (!hasOwn(out, k)) out[k] = values[i]; });
-  return out;
-};
-const cReq = (name, fs, dec) => hasOwn(fs, name) ? cAt(name, () => dec(dRead(fs, name))) : dMissing(name, "missing required field '" + name + "'");
-const cOpt = (name, fs, dec) => hasOwn(fs, name) ? cAt(name, () => dec(dRead(fs, name))) : undefined;
-const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRead(fs, name))) : dflt;"""
+    let private tsCollectingPrelude = (Template.text "ts-collecting-prelude.js")
 
     /// The collecting prelude, the collecting decoders (node kind, node, unions, records, specs)
     /// and the public entries: per kind `decode<Tag>Spec` / `decode<Tag>SpecAll` over the kind's
@@ -873,7 +701,7 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
     /// `decodeNodeAll` over text — each answering `decodeNode`'s `{ ok, value }` / `{ ok, error }`,
     /// the collecting ones `{ ok: false, errors }`.
     let private tsCollectingDecl (decl: Decl) (disc: string) : Result<string * string list, CodegenError> =
-        let idl, kinds, unions, records = decl.Idl, decl.Kinds, decl.Unions, decl.Records
+        let idl, kinds = decl.Idl, decl.Kinds
 
         let colKind =
             "function colKind(j) {\n  if (!isObj(j)) return dFail('WrongKind', 'object', 'expected a kind object');\n  switch (dTag(j)) {\n"
@@ -886,50 +714,58 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
             + tsDiscProp disc "j"
             + ");\n  }\n}"
 
-        let colNode =
-            decl.Envelope.Members
-            |> List.map (tsColField idl disc)
-            |> sequenceR
-            |> Result.map (fun envelope ->
-                let kindRead =
-                    match decl.Envelope.Kind with
-                    | KindPlacement.NestedUnder key -> "cReq(" + SourceLit.tsStringSingle key + ", fs, colKind)"
-                    | KindPlacement.Merged -> "colKind(j)"
+        let colNode (envelope: (IdlField * string) list) =
+            let kindRead =
+                match decl.Envelope.Kind with
+                | KindPlacement.NestedUnder key -> "cReq(" + SourceLit.tsStringSingle key + ", fs, colKind)"
+                | KindPlacement.Merged -> "colKind(j)"
 
-                let reads =
-                    [ "dReq('id', fs, dStr)"; kindRead ] @ envelope
-                    |> List.map (fun r -> "() => " + r)
-                    |> String.concat ", "
+            let reads =
+                [ "dReq('id', fs, dStr)"; kindRead ] @ (envelope |> List.map snd)
+                |> List.map (fun r -> "() => " + r)
+                |> String.concat ", "
 
-                let envelopeAssigns =
-                    decl.Envelope.Members
-                    |> List.mapi (fun i f -> sprintf ", %s: v[%d]" (SourceLit.tsKey f.Name) (i + 2))
-                    |> String.concat ""
+            let envelopeAssigns =
+                decl.Envelope.Members
+                |> List.mapi (fun i f -> sprintf ", %s: v[%d]" (SourceLit.tsKey f.Name) (i + 2))
+                |> String.concat ""
 
-                let build =
-                    match decl.Envelope.Kind with
-                    | KindPlacement.NestedUnder key ->
-                        "{ id: v[0], " + SourceLit.tsKey key + ": v[1]" + envelopeAssigns + " }"
-                    | KindPlacement.Merged -> "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
+            let build =
+                match decl.Envelope.Kind with
+                | KindPlacement.NestedUnder key ->
+                    "{ id: v[0], " + SourceLit.tsKey key + ": v[1]" + envelopeAssigns + " }"
+                | KindPlacement.Merged -> "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
 
-                "function colNode(j) {\n  const fs = dObj(j);\n  const v = cAll(["
-                + reads
-                + "]);\n  return "
-                + build
-                + ";\n}")
+            "function colNode(j) {\n  const fs = dObj(j);\n  const v = cAll(["
+            + reads
+            + "]);\n  return "
+            + build
+            + ";\n}"
 
-        let objectDecoder (name: string) (extra: (string * string) list) (fields: IdlField list) =
-            tsColObject idl disc "  " extra fields
-            |> Result.map (fun body -> "function col" + name + "(j) {\n  const fs = dObj(j);\n" + body + "\n}")
+        let objectDecoder (name: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+            "function col"
+            + name
+            + "(j) {\n  const fs = dObj(j);\n"
+            + tsColObject "  " extra members
+            + "\n}"
 
         let group =
-            [ Ok colKind; colNode ]
-            @ (unions |> List.map (tsColUnion decl disc))
-            @ (records |> List.map (fun r -> objectDecoder r.Name [] r.Fields))
-            @ (kinds
-               |> List.map (fun k ->
-                   objectDecoder (k.Tag + "Spec") [ tsDiscKey disc, SourceLit.tsString k.Tag ] k.Fields))
-            |> concatR "\n\n"
+            CollectingTraversal.group
+                { Dec = tsMemberDecPrinter idl disc
+                  Col = tsColMemberPrinter idl disc
+                  Lift = id
+                  Union = tsColUnion decl disc
+                  NodeKind = colKind
+                  Node = colNode
+                  Record = fun r members -> objectDecoder r.Name [] members
+                  ReadsSpec = fun _ -> true
+                  Spec =
+                    fun k members ->
+                        objectDecoder
+                            (k.Tag + "Spec")
+                            [ tsDiscKey disc, SourceLit.tsString k.Tag ]
+                            (defaultArg members []) }
+                decl
 
         let entries =
             [ yield
@@ -1119,12 +955,10 @@ const cEveryOf = (read) => {
 
     /// Phase 380/381 — the requested derivations as parts, admitted exactly when the F# path
     /// admits them. `None` when nothing is requested: the plain module and the plain declarations.
-    let private tsDerivedParts
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (ctx: Decl)
-        : Result<DerivedPart list option, CodegenError> =
-        if List.isEmpty requests && not decoders then
+    let private tsDerivedParts (requests: Derivation list) (ctx: Decl) : Result<DerivedPart list option, CodegenError> =
+        let decoders = List.contains Derivation.SpecDecoders requests
+
+        if List.isEmpty requests then
             Ok None
         else
             let idl, kinds = ctx.Idl, ctx.Kinds
@@ -1133,9 +967,7 @@ const cEveryOf = (read) => {
 
             let has r = List.contains r requests
 
-            let publicAccess =
-                has FSharpDerive.Request.StructuralAccess
-                || has FSharpDerive.Request.KeyedPositions
+            let publicAccess = has Derivation.StructuralAccess || has Derivation.KeyedPositions
 
             // Phase 511 (S12) — admission is the one derivation admission, over this host's
             // resolution: no host projections, because a projection is F# source.
@@ -1145,7 +977,7 @@ const cEveryOf = (read) => {
                 requests
                 |> List.choose (fun r ->
                     match r with
-                    | FSharpDerive.Request.SlotsOf t -> Some t
+                    | Derivation.SlotsOf t -> Some t
                     | _ -> None)
                 |> List.distinct
 
@@ -1154,30 +986,13 @@ const cEveryOf = (read) => {
                   Names = names
                   Decls = decls }
 
-            // `tsUnionModulesDecl` answers one entry per requested union, in this same order.
             let unionModules () =
-                let named =
-                    requests
-                    |> List.choose (fun r ->
-                        match r with
-                        | FSharpDerive.Request.Fold n -> Some n
-                        | FSharpDerive.Request.Projections(n, _) -> Some n
-                        | _ -> None)
-                    |> List.distinct
-                    |> List.choose (fun name -> Decl.tryUnion ctx name)
-
-                let fieldsOf (u: IdlUnion) =
-                    requests
-                    |> List.collect (fun r ->
-                        match r with
-                        | FSharpDerive.Request.Projections(n, fs) when n = u.Name -> fs
-                        | _ -> [])
-                    |> List.distinct
-
-                List.zip named (tsUnionModulesDecl ctx requests)
-                |> List.map (fun (u, emitted) ->
-                    unionModuleDecls u (has (FSharpDerive.Request.Fold u.Name)) (fieldsOf u)
-                    |> Result.map (part emitted))
+                match tsUnionModulesDecl ctx requests with
+                | Error e -> [ Error e ]
+                | Ok modules ->
+                    modules
+                    |> List.map (fun (u, folds, fields, emitted) ->
+                        unionModuleDecls u folds fields |> Result.map (part emitted))
 
             // `default<N>` is a value of the declared type `N`: a `<Tag>Spec` or a record.
             let defaultDecls (names: string list) =
@@ -1187,21 +1002,22 @@ const cEveryOf = (read) => {
             admitted
             |> Result.bind (fun () ->
                 [ (if publicAccess then
-                       [ Ok(part (tsStructuralDecl disc flat kinds) (structuralDecls kinds)) ]
+                       [ tsStructuralDecl disc flat kinds
+                         |> Result.map (fun e -> part e (structuralDecls kinds)) ]
                    else
                        [])
-                  (if has FSharpDerive.Request.KeyedPositions then
-                       [ Ok(part (tsKeyedDecl disc flat ctx) keyedDecls) ]
+                  (if has Derivation.KeyedPositions then
+                       [ tsKeyedDecl disc flat ctx |> Result.map (fun e -> part e keyedDecls) ]
                    else
                        [])
                   slots
                   |> List.map (fun t -> Ok(part (tsSlotsDecl disc flat ctx t) (slotsDecls ctx t)))
-                  (if has FSharpDerive.Request.DefaultRecords then
+                  (if has Derivation.DefaultRecords then
                        [ tsDefaultRecordsDecl idl disc ctx
                          |> Result.map (fun (text, names) -> part (text, names) (defaultDecls names)) ]
                    else
                        [])
-                  (if has FSharpDerive.Request.VocabularyConstants then
+                  (if has Derivation.VocabularyConstants then
                        [ Ok(part (tsConstantsDecl ctx) (constantsDecls kinds)) ]
                    else
                        [])
@@ -1216,18 +1032,14 @@ const cEveryOf = (read) => {
                 |> Result.map Some)
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, appended after its members
-    /// with one further `export` naming them; no request and no decoders IS `typescriptModule`,
+    /// with one further `export` naming them; no request IS `typescriptModule`,
     /// byte for byte. A request the F# path refuses is refused here with the F# path's error.
-    let typescriptModuleDerived
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (decl: Decl)
-        : Result<string, CodegenError> =
+    let typescriptModuleDerived (requests: Derivation list) (decl: Decl) : Result<string, CodegenError> =
         let idl = decl.Idl
 
         typescriptModuleBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders decl
+            tsDerivedParts requests decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsModuleStamp idl baseText
@@ -1244,23 +1056,19 @@ const cEveryOf = (read) => {
                     |> tsModuleStamp idl))
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member the derived module
-    /// exports, appended after the file's own; no request and no decoders IS
+    /// exports, appended after the file's own; no request IS
     /// `typescriptDeclarations`, byte for byte, and a request is refused exactly as
     /// [[typescriptModuleDerived]] refuses it. The parts are the module's own, so the members the
     /// module exports and the members this file declares are chosen by one request list.
     ///
     /// A requested `MapMsg` is not declared, because the module exports nothing for it; the file's
     /// header comment says why.
-    let typescriptDeclarationsDerived
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (decl: Decl)
-        : Result<string, CodegenError> =
+    let typescriptDeclarationsDerived (requests: Derivation list) (decl: Decl) : Result<string, CodegenError> =
         let idl = decl.Idl
 
         typescriptDeclarationsBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders decl
+            tsDerivedParts requests decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsDeclarationsStamp idl baseText
@@ -1268,7 +1076,7 @@ const cEveryOf = (read) => {
                     let header =
                         [ yield
                               "// Phase 381 — the derived members the module was generated with are declared after its own, one declaration per exported name."
-                          if List.contains FSharpDerive.Request.MapMsg requests then
+                          if List.contains Derivation.MapMsg requests then
                               yield
                                   "// `mapMsg` is not declared: the module emits no `mapMsg`, because this host holds a handler slot as its sentinel's `null` and carries no message type, so a message map has nothing to rewrite." ]
                         |> String.concat "\n"

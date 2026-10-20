@@ -147,14 +147,17 @@ let private forkDag (a: SkeletonOp<RNode, string> list) (b: SkeletonOp<RNode, st
         let mutable d = d0
 
         for op in ops do
-            let id, d' = Dag.append h sw (Human "x") op head d |> Reference.built
+            let id, d' =
+                Dag.append (OpStream.canonical h sw) (Human "x") op head d |> Reference.built
+
             head <- id
             d <- d'
 
         head, d
 
     let baseId, d1 =
-        Dag.append h sw (Human "x") (RemoveNode "root") "" Dag.empty |> Reference.built
+        Dag.append (OpStream.canonical h sw) (Human "x") (RemoveNode "root") "" Dag.empty
+        |> Reference.built
 
     let headA, d2 = chain a baseId d1
     let headB, dag = chain b baseId d2

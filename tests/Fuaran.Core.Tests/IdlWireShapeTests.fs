@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.IdlWireShapeTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phases 108/109 — the declared wire shape, exercised on the two axes the
@@ -232,20 +233,20 @@ let tests =
 
           test "a wire-shape change diffs as BREAKING (wire)" {
               let before =
-                  match Diff.parse (Artifact.render baseIdl) with
+                  match Diff.parse (Artifact.render baseIdl) None with
                   | Ok s -> s
                   | Error e -> failtestf "before: %s" e
 
               let after =
                   match
-                      Diff.parse (
-                          Artifact.render
+                      Diff.parse
+                          (Artifact.render
                               { baseIdl with
                                   Wire =
                                       { WireShape.Default with
                                           Discriminator = "tag"
-                                          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
-                      )
+                                          NodeEnvelope = NodeEnvelopeShape.FlatKind } })
+                          None
                   with
                   | Ok s -> s
                   | Error e -> failtestf "after: %s" e
@@ -258,11 +259,11 @@ let tests =
                   |> List.map Diff.classify
                   |> List.filter (fun c ->
                       match c.Change with
-                      | Diff.WireShapeChanged _ -> true
+                      | WireShapeChanged _ -> true
                       | _ -> false)
 
               match shapeChanges with
-              | [ c ] -> Expect.equal c.Severity Diff.BreakingWire "a shape move is a breaking wire event"
+              | [ c ] -> Expect.equal c.Severity BreakingWire "a shape move is a breaking wire event"
               | other -> failtestf "expected exactly one WireShapeChanged, got %A" other
           }
 

@@ -378,13 +378,14 @@ module Trust =
     /// owners, and only the first belongs in `idl.json`.
     ///
     /// **This is the CHECKED path, and Phase 180 is what made it the only one.** Phase
-    /// 178 shipped the check as [[hardenOrRefuse]] beside an unchecked `harden`,
+    /// 178 shipped the check as `hardenOrRefuse` beside an unchecked `harden`,
     /// because `HardenPolicy.Default` meant every vocabulary declared every member
     /// whether it had said so or not, and a refusal no default could raise did not
     /// justify a breaking signature. Retiring the default removes that guarantee: an
     /// undeclared policy is now reachable by saying nothing, so the difference between
     /// the two entry points is the difference between a refusal and a silent
     /// fail-open, and the safe one has to be the one a caller reaches by default.
+    /// The alias Phase 180 kept under the old name was removed at Phase 524.
     ///
     /// BREAKING: the return type widened from `IdlValue` to `Result<_, CodegenError>`.
     /// A caller that has measured its vocabulary and wants the value adapts with
@@ -392,12 +393,6 @@ module Trust =
     let harden (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> =
         checkHardenPolicy idl policy
         |> Result.map (fun () -> hardenUnchecked idl policy v)
-
-    /// [[harden]], under the name Phase 178 shipped it as. Kept as an ALIAS rather than
-    /// deleted: it is the spelling every caller written between 178 and 180 uses, and
-    /// the two now mean the same thing, so removing it would break source for no gain
-    /// beyond having one name. New code says `harden`.
-    let hardenOrRefuse (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> = harden idl policy v
 
     /// Harden then scaffold an authored node to F# source (the codegen boundary
     /// end to end): the emitted source constructs an inert-by-construction,

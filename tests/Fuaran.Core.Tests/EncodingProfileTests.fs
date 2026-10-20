@@ -279,7 +279,7 @@ let tests =
 
               match Dag.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.ofConfig pV2 h jvalWitness) d with
               | Error f -> failtestf "refused: %A" f
-              | Ok(migrated, ids) ->
+              | Ok { Dag = migrated; Ids = ids } ->
                   Expect.isTrue
                       (Dag.verifyDag (OpStream.canonical h jvalWitness) migrated)
                       "the result verifies under the current profile"
@@ -291,7 +291,7 @@ let tests =
                       Dag.rehash (OpStream.ofConfig pV2 h jvalWitness) (OpStream.ofConfig pV1 h v1Witness) migrated
                   with
                   | Error f -> failtestf "the rehash back refused: %A" f
-                  | Ok(back, _) -> Expect.equal back d "the rehash back is the source again"
+                  | Ok { Dag = back } -> Expect.equal back d "the rehash back is the source again"
 
               let loaded: Dag.Loaded<JVal> =
                   { Dag = d
@@ -299,14 +299,16 @@ let tests =
 
               match Dag.rehash (OpStream.ofConfig pV1 h v1Witness) (OpStream.ofConfig pV2 h jvalWitness) loaded.Dag with
               | Error f -> failtestf "lanes refused: %A" f
-              | Ok(d', ids) ->
+              | Ok { Dag = d'; Ids = ids } ->
                   let laneOf =
                       loaded.LaneOf |> Map.toList |> List.map (fun (k, l) -> ids[k], l) |> Map.ofList
 
                   Expect.equal laneOf[ids[dagHead030]] "merge" "the head's lane moves with its id"
 
                   Expect.isTrue
-                      (Dag.verifyLanes h jvalWitness ({ Dag = d'; LaneOf = laneOf }: Dag.Loaded<JVal>)
+                      (Dag.verifyLanes
+                          (OpStream.canonical h jvalWitness)
+                          ({ Dag = d'; LaneOf = laneOf }: Dag.Loaded<JVal>)
                        |> Result.isOk)
                       "the re-keyed lane store verifies"
 

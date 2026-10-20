@@ -284,7 +284,9 @@ let private lanes (lanes: Op list list) =
     let hashFn = OpStream.defaultHash
     let w = FoldFixtures.treeW
 
-    let baseId, d0 = Dag.append hashFn w (Human "base") (Batch []) "" Dag.empty |> built
+    let baseId, d0 =
+        Dag.append (OpStream.canonical hashFn w) (Human "base") (Batch []) "" Dag.empty
+        |> built
 
     let heads, dag =
         lanes
@@ -295,7 +297,9 @@ let private lanes (lanes: Op list list) =
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> built) (baseId, d)
+                    |> List.fold
+                        (fun (h, dd) op -> Dag.append (OpStream.canonical hashFn w) actor op h dd |> built)
+                        (baseId, d)
 
                 hs @ [ head ], d')
             ([], d0)
@@ -376,14 +380,27 @@ let dagInTests =
               // edits `n`, which is absent from the base and present after the shared history.
               let hashFn = OpStream.defaultHash
               let w = FoldFixtures.treeW
-              let baseId, d0 = Dag.append hashFn w (Human "base") (Batch []) "" Dag.empty |> built
 
-              let sharedId, d1 =
-                  Dag.append hashFn w (Human "shared") (InsertChild("b", RNode.leaf "n" "para" "")) baseId d0
+              let baseId, d0 =
+                  Dag.append (OpStream.canonical hashFn w) (Human "base") (Batch []) "" Dag.empty
                   |> built
 
-              let h1, d2 = Dag.append hashFn w (Human "l1") (upd "n" "v") sharedId d1 |> built
-              let h2, dag = Dag.append hashFn w (Human "l2") (upd "a1" "x'") sharedId d2 |> built
+              let sharedId, d1 =
+                  Dag.append
+                      (OpStream.canonical hashFn w)
+                      (Human "shared")
+                      (InsertChild("b", RNode.leaf "n" "para" ""))
+                      baseId
+                      d0
+                  |> built
+
+              let h1, d2 =
+                  Dag.append (OpStream.canonical hashFn w) (Human "l1") (upd "n" "v") sharedId d1
+                  |> built
+
+              let h2, dag =
+                  Dag.append (OpStream.canonical hashFn w) (Human "l2") (upd "a1" "x'") sharedId d2
+                  |> built
 
               match Dag.reconcileManyIn w fpAt dag baseId (sample ()) [ h1; h2 ] with
               | Ok script ->

@@ -1,6 +1,7 @@
 module Fuaran.Core.Tests.SpecDecodersIdl
 
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 377 — the collecting decoders over the support channel. The reference vocabulary under
@@ -14,7 +15,7 @@ open Fuaran.Core.Idl
 // documents as reachable from a placeholder in BOTH emitters. Until 460 the collecting emitter
 // bound only `colT`, so this module did not compile.
 //
-// `SpecDecodersGenerated.fs` is the F# emitted from it with `Gen.Derivation.SpecDecoders`
+// `SpecDecodersGenerated.fs` is the F# emitted from it with `Derivation.SpecDecoders`
 // requested, committed and checked for drift by `IdlSpecDecoderTests`. The derivations
 // vocabulary (`DeriveIdl`) requests the decoders as well; that module carries the field-shape
 // laws, this one the support channel.
@@ -79,7 +80,7 @@ let generatedFile = "tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs"
 let generate () : Result<string, CodegenError> =
     Gen.fsharpModuleDerived
         ReferenceIdl.support.Support
-        [ Gen.Derivation.SpecDecoders ]
+        [ Derivation.SpecDecoders ]
         moduleName
         idl
         (idl.Kinds |> List.map _.Tag)

@@ -2,6 +2,7 @@ module Fuaran.Core.Tests.IdlCodegenEolTests
 
 open Expecto
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 129 — the emitted artefact's line endings belong to the GENERATOR.
@@ -80,7 +81,7 @@ let private annotatedIdl: Idl =
 /// Declared support carrying the CRLF on both of its verbatim channels — a doc
 /// block attached to a declaration, and a splice appended to the type group.
 let private crSupport =
-    { Gen.GenSupport.Empty with
+    { GenSupport.Empty with
         Docs = Map.ofList [ "type:HeadingVariant", [ "/// " + crProbe ] ]
         TypeSplice = Some("// " + crProbe) }
 

@@ -1,5 +1,6 @@
 namespace Fuaran.Core.Idl
 
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit
 
 /// The source generators over an `Idl`: the F# structural layer (`fsharpTypes`,
@@ -7,115 +8,11 @@ open Fuaran.Core.Idl.Emit
 /// scaffold values — each a source string a consumer compiles or publishes, refused as a
 /// typed `CodegenError` wherever the vocabulary asks for something the backend cannot emit.
 ///
-/// Phase 293 — a FACADE. The published types (`KindProjection`, `GenSupport`) are declared
-/// here, and every entry point is a one-line forward to the `internal` emitter modules under
-/// `Emit/` (`Core`, `Reach`, `Annotations`, `FSharpTypes`, `FSharpDefaults`, `FSharpCodec`,
-/// `JsonSchema`, `TypeScript`, `Scaffold`), so the public surface is exactly this file and the
-/// baseline `api/Fuaran.Core.Idl.Codegen.txt` reads it.
+/// Phase 293 — a FACADE: every entry point is a one-line forward to the `internal` emitter
+/// modules under `Emit/`, each over the one `Decl` resolution. The types it takes and answers
+/// (`GenSupport`, `KindProjection`, `Derivation`) are declared in `Fuaran.Core.Idl.Codegen.Types`
+/// since Phase 524, ahead of every emitter, so no emitter reads a mirror of them.
 module Gen =
-
-
-    /// Phase 945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
-    /// node kind are supplied verbatim instead of being derived from the kind's IDL fields.
-    /// The IDL fields REMAIN the wire truth (the artifact, the schema and the diff still
-    /// read them); the projection changes only what the generated F# looks like — the
-    /// escape for a kind whose ergonomic host shape is narrower than its wire shape
-    /// (`Switch` merges the `on` / `stateKey` wire keys into one required `On` binding).
-    type KindProjection =
-        {
-            /// Keyword-less type-group member body — the `and` keyword and RQA attribute
-            /// are the assembler's.
-            SpecDecl: string
-            /// The full `and private enc<Tag>Spec …` member, verbatim.
-            Encoder: string
-            /// The full `and private dec<Tag>Spec …` member, verbatim. Since Phase 337 it
-            /// answers `Result<<Tag>Spec, DecodeError>`, as the generated decoders it composes
-            /// with do.
-            Decoder: string
-            /// The full `let mk<Tag> …` smart constructor, or None to emit none — the
-            /// generated ctor would construct the IDL-derived record, which under a
-            /// projection is not the record that exists.
-            Mk: string option
-            /// Phase 403 — the full `and private mapMsg<Tag>Spec …` member, verbatim, or None.
-            /// `Derivation.MapMsg` joins it to the derived message map's recursion group in
-            /// place of the record mapper it cannot construct (the projected record is host
-            /// source), so it may call `mapMsg f` and every derived `mapMsg<Decl> f`. Its
-            /// signature is `('Msg -> 'Msg2) -> <Tag>Spec<'Msg> -> <Tag>Spec<'Msg2>`. With None, a
-            /// message map over this kind is refused — the generator does not guess a map.
-            MapMsg: string option
-            /// Phase 403 — the projected record's fields at their HOST shapes (name, type,
-            /// optionality), or None. Each `Name` is spelled as a wire field is, the record's
-            /// member being its PascalCase (`on` → `On`), and each type names a declaration the
-            /// module emits. The emissions that read a kind's fields — the node witness, the
-            /// keyed walk, the slot enumerators — read these in place of the kind's wire fields.
-            /// With None they refuse by name wherever they would read the projected record: the
-            /// node positions when the kind's wire holds a node directly or within, the slot
-            /// enumerators always, because a host record may hold a value its wire spells
-            /// otherwise.
-            RecordFields: IdlField list option
-        }
-
-    /// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
-    /// verbatim splices and host projections that were previously HAND-EDITS to the
-    /// generated artefact (the "hand-added ahead of the IDL backfill" regions). Everything
-    /// here is versioned data beside the IDL, so the emission is reproducible and the
-    /// tier sync is a byte-copy again. `Docs` is keyed by declaration path —
-    /// `type:Name` / `case:Union.Tag` / `field:Owner.Field` / `enc:Name` / `dec:Name` /
-    /// `encarm:Union.Tag` / `decarm:Union.Tag` — each value the comment lines VERBATIM
-    /// (including their `///` or `//` markers), indented by the emitter.
-    type GenSupport =
-        {
-            /// Declaration path (`type:Name`, `case:Union.Tag`, `field:Owner.Field`, …) → the
-            /// comment lines emitted above it, markers included; a path with no entry emits none.
-            Docs: Map<string, string list>
-            /// Verbatim `and …` member(s) appended to the type-recursion group.
-            TypeSplice: string option
-            /// Verbatim `and private …` member(s) appended to the encoder group.
-            EncodeSplice: string option
-            /// Verbatim `and private …` member(s) appended to the decoder group. A member that
-            /// composes with a generated decoder answers `DecodeError`, as they do (Phase 337).
-            DecodeSplice: string option
-            /// Verbatim module-level lets emitted after the JVal accessor block.
-            AccessorSplice: string option
-            /// `"Union.Tag"` → the full final expression replacing `Ok(Case(…))` in that
-            /// case's decoder — decode POLICY (e.g. `SetState`'s value-XOR-valueFrom) that
-            /// the structural inversion cannot express. Field binder names are in scope. The
-            /// expression answers `Result<Case, string>`; since Phase 337 its refusal reaches
-            /// the caller as `OutOfRange` at the case's object, its sentence unchanged.
-            CaseRefines: Map<string, string>
-            /// Kind tag → the host projection that replaces that kind's derived record, encoder
-            /// and decoder; a kind with no entry is emitted from its IDL fields.
-            KindProjections: Map<string, KindProjection>
-        }
-
-        /// No docs, no splices, no refines, no projections: `fsharpModuleWith` under this record
-        /// emits byte-identically to the generator before the support channel existed.
-        static member Empty =
-            { Docs = Map.empty
-              TypeSplice = None
-              EncodeSplice = None
-              DecodeSplice = None
-              AccessorSplice = None
-              CaseRefines = Map.empty
-              KindProjections = Map.empty }
-
-    /// The emitters' view of the declared support, field for field.
-    let private toProjection (p: KindProjection) : Core.Projection =
-        { SpecDecl = p.SpecDecl
-          Encoder = p.Encoder
-          Decoder = p.Decoder
-          Mk = p.Mk
-          MapMsg = p.MapMsg
-          RecordFields = p.RecordFields }
-
-    let private toSupport (sup: GenSupport) : Core.Support =
-        { Docs = sup.Docs
-          TypeSplice = sup.TypeSplice
-          EncodeSplice = sup.EncodeSplice
-          DecodeSplice = sup.DecodeSplice
-          AccessorSplice = sup.AccessorSplice
-          CaseRefines = sup.CaseRefines
-          KindProjections = sup.KindProjections |> Map.map (fun _ p -> toProjection p) }
 
     /// Which declarations are generic in `'Msg` — see `Decl.msgCarrying`.
     let internal msgCarrying (idl: Idl) : Set<string> = Decl.msgCarrying idl
@@ -133,70 +30,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        let sup = toSupport sup
         FSharpCodec.fsharpModuleWith sup moduleName (Decl.resolve idl sup.KindProjections kindTags)
-
-    /// Phase 374 — a STRUCTURAL DERIVATION the F# module emits on request: a member that follows
-    /// mechanically from what the generator already knows about every kind (which fields hold
-    /// nodes, which hold a given declared type, which declarations carry the message parameter,
-    /// what each field defaults to, what each kind is tagged with) and that a consuming domain
-    /// would otherwise write by hand. Requesting none is `fsharpModuleWith`, byte for byte. A
-    /// request the vocabulary cannot honour is refused as a typed `UnsupportedConstruct`.
-    [<RequireQualifiedAccess>]
-    type Derivation =
-        /// Public `wireTag`, `allWireTags`, `children` and `withChildren` (kids first:
-        /// `withChildren (children n) n = n`), with `nodeWitness` built on them. A child is a
-        /// node or node list a kind always carries; an optional node is a keyed position.
-        | StructuralAccess
-        /// `keyedChildren`, `withKeyedChildren` (arity-preserving) and `keyedWitness`, a
-        /// `KeyedWitness` over every node position that is not a structural child: an optional
-        /// node, a node inside a record, a union case, a list or a map, and the node envelope.
-        /// Implies `StructuralAccess`.
-        | KeyedPositions
-        /// `slotsOf<T> : Node -> (string * T) list` — every kind and envelope field declared at
-        /// the named enum, record or union `T` (directly, optional or in a list), by wire field
-        /// name; `(string * obj) list` when `T` is a generic union.
-        | SlotsOf of typeName: string
-        /// `mapMsg : ('Msg -> 'Msg2) -> Node<'Msg> -> Node<'Msg2>`, rebuilding every declaration
-        /// generic in the message parameter.
-        | MapMsg
-        /// `<Union>.fold : ('S -> U -> 'S) -> 'S -> U -> 'S` over a self-recursive union: the
-        /// value and every nested value of its own type, in preorder.
-        | Fold of unionName: string
-        /// `<Union>.<field>` for each named field: `U -> T` where every case carries it at one
-        /// type, `U -> T option` where only some do.
-        | Projections of unionName: string * fieldNames: string list
-        /// `default<Tag>Spec` / `default<Record>` for every kind and record whose every field has
-        /// a value without the caller — the values the `mk<Kind>` constructors fill.
-        | DefaultRecords
-        /// `kindCategories`, `kindFieldNames`, `envelopeFieldNames` and `opFieldNames` as `Set`
-        /// values.
-        | VocabularyConstants
-        /// Phase 377 — a COLLECTING decoder beside every short-circuiting one, answering every
-        /// defect as a `DecodeError list` in a stated order (field declaration order, each
-        /// member's nested defects at its position; list items by index; map entries in document
-        /// order — the order is written above the collecting prelude), and the public entries
-        /// over them: per kind `decode<Tag>Spec` (the first defect) and `decode<Tag>SpecAll`
-        /// (every defect), per node `decodeNodeJson`, `decodeNodeJsonAll` and `decodeNodeAll`.
-        /// A collecting decoder's first defect is its short-circuiting twin's defect.
-        /// Phase 541 — every nested position is read through a `CollectingDecoders` record
-        /// (`collectingDecoders` is the generated one), and `decode<Tag>SpecAllWith`,
-        /// `decodeNodeJsonAllWith` and `decodeNodeAllWith` take a host's copy, so a host decoder
-        /// at a type applies at every depth (DECISIONS.md D175).
-        | SpecDecoders
-
-    let private toRequest (d: Derivation) : FSharpDerive.Request option =
-        match d with
-        | Derivation.StructuralAccess -> Some FSharpDerive.Request.StructuralAccess
-        | Derivation.KeyedPositions -> Some FSharpDerive.Request.KeyedPositions
-        | Derivation.SlotsOf t -> Some(FSharpDerive.Request.SlotsOf t)
-        | Derivation.MapMsg -> Some FSharpDerive.Request.MapMsg
-        | Derivation.Fold u -> Some(FSharpDerive.Request.Fold u)
-        | Derivation.Projections(u, fs) -> Some(FSharpDerive.Request.Projections(u, fs))
-        | Derivation.DefaultRecords -> Some FSharpDerive.Request.DefaultRecords
-        | Derivation.VocabularyConstants -> Some FSharpDerive.Request.VocabularyConstants
-        // The decoders are the codec emitter's own, not a structural derivation's.
-        | Derivation.SpecDecoders -> None
 
     /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
     /// `Derivation.SpecDecoders`, the collecting decoders and public per-spec entries (Phase 377),
@@ -209,14 +43,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        let sup = toSupport sup
-
-        FSharpCodec.fsharpModuleDerived
-            sup
-            (derivations |> List.choose toRequest)
-            (derivations |> List.contains Derivation.SpecDecoders)
-            moduleName
-            (Decl.resolve idl sup.KindProjections kindTags)
+        FSharpCodec.fsharpModuleDerived sup derivations moduleName (Decl.resolve idl sup.KindProjections kindTags)
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
@@ -266,10 +93,7 @@ module Gen =
         : Result<string, CodegenError> =
         tsCodecAdmits idl
         |> Result.bind (fun () ->
-            TypeScriptDerived.typescriptModuleDerived
-                (derivations |> List.choose toRequest)
-                (derivations |> List.contains Derivation.SpecDecoders)
-                (Decl.resolve idl Map.empty kindTags))
+            TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags))
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
@@ -290,10 +114,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        TypeScriptDerived.typescriptDeclarationsDerived
-            (derivations |> List.choose toRequest)
-            (derivations |> List.contains Derivation.SpecDecoders)
-            (Decl.resolve idl Map.empty kindTags)
+        TypeScriptDerived.typescriptDeclarationsDerived derivations (Decl.resolve idl Map.empty kindTags)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.

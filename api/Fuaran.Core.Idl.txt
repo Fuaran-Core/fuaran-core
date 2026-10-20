@@ -14,7 +14,7 @@ attribute Fuaran.Core.Idl.SourceLit RequireQualifiedAccess
 attribute Fuaran.Core.Idl.TypeParams RequireQualifiedAccess
 attribute Fuaran.Core.Idl.VocabularyFaultModule RequireQualifiedAccess
 ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
-ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String)
+ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.Deprecation..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.HardenPolicy..ctor(System.String, System.String, System.String, System.String, System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
@@ -93,8 +93,9 @@ field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerOp : System.Int32 (literal)
 field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerRecord : System.Int32 (literal)
 field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerUnionCase : System.Int32 (literal)
 method Fuaran.Core.Idl.Artifact.canonicalise(Fuaran.Core.Idl.Idl) : Fuaran.Core.Idl.Idl
-method Fuaran.Core.Idl.Artifact.identityOf(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Artifact+Identity, System.String>
-method Fuaran.Core.Idl.Artifact.identityOfJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Artifact+Identity, System.String>
+method Fuaran.Core.Idl.Artifact.codecWith(Fuaran.Core.Idl.Artifact+Identity) : Fuaran.Core.Codec`1<Fuaran.Core.Idl.Idl>
+method Fuaran.Core.Idl.Artifact.identityOf(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Artifact+Identity, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
+method Fuaran.Core.Idl.Artifact.identityOfJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Artifact+Identity, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
 method Fuaran.Core.Idl.Artifact.json(Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.jsonWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
@@ -159,8 +160,10 @@ method Fuaran.Core.Idl.TypeParams.substitute(Microsoft.FSharp.Collections.FSharp
 method Fuaran.Core.Idl.VocabularyFaultModule.describe(Fuaran.Core.Idl.VocabularyFault) : System.String
 property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get } (static)
 property Fuaran.Core.Idl.Annotations.IsEmpty : System.Boolean { get }
-property Fuaran.Core.Idl.Artifact.defaultDescription : System.String { get }
-property Fuaran.Core.Idl.Artifact.defaultIdentity : Fuaran.Core.Idl.Artifact+Identity { get }
+property Fuaran.Core.Idl.Artifact.codec : Fuaran.Core.Codec`1<Fuaran.Core.Idl.Idl> { get }
+property Fuaran.Core.Idl.Artifact.omitted : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
+property Fuaran.Core.Idl.Artifact.schema : Fuaran.Core.JVal { get }
+property Fuaran.Core.Idl.Artifact.unnamed : Fuaran.Core.Idl.Artifact+Identity { get }
 property Fuaran.Core.Idl.HardenPolicy.Undeclared : Fuaran.Core.Idl.HardenPolicy { get } (static)
 property Fuaran.Core.Idl.HostedFormatModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.HostedFormat> { get }
 property Fuaran.Core.Idl.HostedFormatModule.known : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
@@ -173,7 +176,7 @@ record-field Fuaran.Core.Idl.Annotations.Deprecated #0 : Microsoft.FSharp.Core.F
 record-field Fuaran.Core.Idl.Annotations.Doc #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Annotations.InProcessOnly #1 : System.Boolean
 record-field Fuaran.Core.Idl.Annotations.Since #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
-record-field Fuaran.Core.Idl.Artifact+Identity.Description #1 : System.String
+record-field Fuaran.Core.Idl.Artifact+Identity.Description #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Artifact+Identity.Name #0 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.ClosureSig.FSharp #0 : System.String
 record-field Fuaran.Core.Idl.ClosureSig.Placeholder #2 : System.String

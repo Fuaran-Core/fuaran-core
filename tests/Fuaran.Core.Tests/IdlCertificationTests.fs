@@ -5,6 +5,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.ReferenceIdl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 114 — the engine's certification, WITHOUT a domain vocabulary.
@@ -466,7 +467,7 @@ let valueCarryingDefaults =
                   { probeIdl with
                       Kinds = [ oneKind [ badMapField ] ] }
 
-              let projection: Gen.KindProjection =
+              let projection: KindProjection =
                   { SpecDecl = "ProbeSpec = { Bag: Map<string, string> }"
                     Encoder = "and private encProbeSpec (s: ProbeSpec) : JVal = JObj []"
                     Decoder = "and private decProbeSpec (j: JVal) : Result<ProbeSpec, string> = Ok { Bag = Map.empty }"
@@ -475,7 +476,7 @@ let valueCarryingDefaults =
                     RecordFields = None }
 
               let support =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       KindProjections = Map.ofList [ "Probe", projection ] }
 
               Gen.fsharpModuleWith support "Phase124.Projected" idl (probeTags idl)
@@ -766,7 +767,7 @@ let declarationTriple =
           // scale is that domain's own gate, in that domain's repository — which is
           // the point of the claim, not an omission from it (DECISIONS.md D14).
           testCase "a vocabulary + support document loaded FROM BYTES regenerates the same module" (fun _ ->
-              let emit (idl: Idl) (s: Gen.GenSupport) =
+              let emit (idl: Idl) (s: GenSupport) =
                   Gen.fsharpModuleWith s "Fuaran.Core.Tests.ReferenceGenerated" idl (idl.Kinds |> List.map _.Tag)
 
               let fromMemory = emit refIdl support.Support
@@ -1278,12 +1279,13 @@ let hostedSourceTrustBoundary =
 // refusal on every formerly-silent path, and certified it BY CASE: a
 // payload-carrying fixture, plus a go-red probe per path. A case proves a case.
 // What a case cannot prove is that the two backends AGREE on a shape nobody
-// thought to write a case for — and they must, because `tsDefaultLit` takes its
-// admissibility from `tsIsDefault` while `fsDefaultLit` decides its own, so the
-// two admissibility rules are written twice and can drift apart in either
-// direction. One drift emits an F# encoder whose omit test has no TypeScript
-// counterpart; the other refuses a module in one language and ships it in the
-// other. Both are green builds.
+// thought to write a case for — and they must. When this property was written
+// `tsDefaultLit` took its admissibility from `tsIsDefault` while `fsDefaultLit`
+// decided its own; since Phase 524 the rule is shared by construction: both are
+// printers of the one `LiteralTraversal` over `Decl.literal`. The property stays
+// as the go-red for that sharing being undone, in either direction. One drift
+// emits an F# encoder whose omit test has no TypeScript counterpart; the other
+// refuses a module in one language and ships it in the other. Both are green builds.
 //
 // So this walks the neutral vocabularies, plants a DRAWN default at a drawn
 // field, and asserts the two answers agree — over hundreds of (type, value)
@@ -1521,7 +1523,7 @@ let declaredDefaultProperty =
               Expect.isEmpty
                   disagreements
                   (sprintf
-                      "the F# and TypeScript backends disagreed about whether a declared default is renderable. `tsDefaultLit` takes its admissibility from `tsIsDefault` and `fsDefaultLit` decides its own, so the rule is written twice — a disagreement means one of them has moved. Cases: %A"
+                      "the F# and TypeScript backends disagreed about whether a declared default is renderable. Both are printers of the one `LiteralTraversal` over `Decl.literal` (Phase 524), so the rule is shared by construction — a disagreement means that sharing has been undone. Cases: %A"
                       disagreements)
 
               Expect.isEmpty

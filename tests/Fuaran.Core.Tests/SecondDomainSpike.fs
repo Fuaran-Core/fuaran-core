@@ -5,6 +5,7 @@ open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Second-vocabulary readiness spike — throwaway code, keep-the-findings.
@@ -707,7 +708,7 @@ let tests =
               let generated =
                   match
                       Gen.fsharpModuleWith
-                          Gen.GenSupport.Empty
+                          GenSupport.Empty
                           "Fuaran.Core.Tests.DocGenerated"
                           docIdl
                           (docIdl.Kinds |> List.map _.Tag)

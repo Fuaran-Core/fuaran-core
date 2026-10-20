@@ -305,30 +305,34 @@ let private liveVerdicts () : string * (string * Verdict) list =
 // it over EVERY shipped package, read from the built assemblies by reflection, so a package
 // added later is covered without being named. It is not a major-gated law: the rule binds the
 // surface as it stands, at every major.
+//
+// Phase 529 (D140 completed) extends it over the WHOLE of `OpStream.Dag`'s surface: there no
+// public function answers a tuple of ANY width — the DAG's writes answer `Dag.Written`, and every
+// pair it answered became a record named for what it holds — so a new pair there is red by name.
 
-/// Every tuple of three or more positions inside `t`, outermost first: `t` itself, the type
+/// Every tuple of `width` or more positions inside `t`, outermost first: `t` itself, the type
 /// arguments of a generic answer (`Result`, `option`, `list`, `Map`, …), an array's element, and
 /// the RANGE of a function-typed answer — what a returned function answers in its turn. A
 /// function's domain is an input, not an answer, and is not read.
-let rec internal wideTuplesIn (t: Type) : Type list =
+let rec internal tuplesIn (width: int) (t: Type) : Type list =
     if FSharp.Reflection.FSharpType.IsTuple t then
         let elements = FSharp.Reflection.FSharpType.GetTupleElements t |> Array.toList
-        let own = if elements.Length >= 3 then [ t ] else []
-        own @ (elements |> List.collect wideTuplesIn)
+        let own = if elements.Length >= width then [ t ] else []
+        own @ (elements |> List.collect (tuplesIn width))
     elif FSharp.Reflection.FSharpType.IsFunction t then
-        wideTuplesIn (snd (FSharp.Reflection.FSharpType.GetFunctionElements t))
+        tuplesIn width (snd (FSharp.Reflection.FSharpType.GetFunctionElements t))
     elif t.IsArray || t.IsByRef || t.IsPointer then
-        wideTuplesIn (t.GetElementType())
+        tuplesIn width (t.GetElementType())
     elif t.IsGenericType then
-        t.GetGenericArguments() |> Array.toList |> List.collect wideTuplesIn
+        t.GetGenericArguments() |> Array.toList |> List.collect (tuplesIn width)
     else
         []
 
-/// What the tuple scan read and found in one assembly: the public functions it read — every
-/// public method that is not a property accessor or other special-named member, and every
-/// public property of a function type — and each one whose answer carries a tuple of three or
+/// What the tuple scan read and found in one assembly at `width`: the public functions it read —
+/// every public method that is not a property accessor or other special-named member, and every
+/// public property of a function type — and each one whose answer carries a tuple of `width` or
 /// more positions, as `Type.member : answer`.
-let internal wideTupleAnswers (asm: Assembly) : int * string list =
+let internal tupleAnswersAt (width: int) (asm: Assembly) : int * string list =
     let flags =
         BindingFlags.Public
         ||| BindingFlags.Static
@@ -348,13 +352,34 @@ let internal wideTupleAnswers (asm: Assembly) : int * string list =
     let offenders =
         answers
         |> List.choose (fun (name, answer) ->
-            match wideTuplesIn answer with
+            match tuplesIn width answer with
             | [] -> None
             | _ -> Some(sprintf "%s : %s" name (answer.ToString())))
         |> List.distinct
         |> List.sort
 
     answers.Length, offenders
+
+/// The rule across every package: no answer carries a tuple of three or more positions.
+let internal wideTupleAnswers (asm: Assembly) : int * string list = tupleAnswersAt 3 asm
+
+/// The rule over `OpStream.Dag` (Phase 529): no answer carries a tuple of any width.
+let internal pairAnswers (asm: Assembly) : int * string list = tupleAnswersAt 2 asm
+
+/// The pair rule's verdict over `functions` public functions of `OpStream.Dag` (Phase 529).
+let internal pairRuleVerdict (functions: int) (offenders: string list) : Verdict =
+    if functions = 0 then
+        Broken
+            "the pair scan read no public function of Fuaran.Core.OpStream.Dag — a scan that read nothing must not read as one that found nothing"
+    elif List.isEmpty offenders then
+        Held(sprintf "no public function of Fuaran.Core.OpStream.Dag answers a tuple (%d function(s))" functions)
+    else
+        Broken(
+            sprintf
+                "%d public function(s) of Fuaran.Core.OpStream.Dag answer a tuple — every DAG answer is a record named for what it holds (DECISIONS D140, Phase 529):\n       %s"
+                offenders.Length
+                (String.concat "\n       " offenders)
+        )
 
 /// The tuple rule's verdict over `functions` public functions read from `assemblies` assemblies.
 let internal tupleRuleVerdict (assemblies: int) (functions: int) (offenders: string list) : Verdict =
@@ -548,6 +573,36 @@ let tests =
               | Vacuous why -> failtestf "the tuple rule is never vacuous: %s" why
 
               Expect.contains ids "Fuaran.Core.OpStream.Dag" "the scan reads the package Phase 410 reshaped"
+          }
+
+          test "no public function of OpStream.Dag answers a tuple of any width (Phase 529)" {
+              let read, found =
+                  pairAnswers (Assembly.Load(AssemblyName "Fuaran.Core.OpStream.Dag"))
+
+              match pairRuleVerdict read found with
+              | Held e -> printfn "  HELD     %s" e
+              | Broken d -> failtest d
+              | Vacuous why -> failtestf "the pair rule is never vacuous: %s" why
+          }
+
+          test "go-red: the pair scan finds the planted pair the wide scan does not reach" {
+              let read, found = pairAnswers (Assembly.GetExecutingAssembly())
+              let decoy = typeof<OneDotZeroTupleDecoy>.FullName
+
+              let named (m: string) =
+                  found |> List.exists _.StartsWith(decoy + "." + m + " ")
+
+              Expect.isTrue (named "Pair") "a pair answered directly"
+              Expect.isTrue (named "Triple") "a triple is a tuple of any width too"
+              Expect.isFalse (named "Data") "a data property is not a function"
+
+              match pairRuleVerdict read found with
+              | Broken d -> Expect.stringContains d "OneDotZeroTupleDecoy.Pair" "the red names the function"
+              | v -> failtestf "a planted pair must be red, got %A" v
+
+              match pairRuleVerdict 0 [] with
+              | Broken _ -> ()
+              | v -> failtestf "a scan that read nothing must be red, got %A" v
           }
 
           test "go-red: the tuple scan finds the planted triples and is red on them" {

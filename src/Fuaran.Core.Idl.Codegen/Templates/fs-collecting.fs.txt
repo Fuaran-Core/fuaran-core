@@ -1,18 +1,4 @@
-namespace Fuaran.Core.Idl.Emit
-
 // ---------------------------------------------------------------------------
-// The F# collecting decoders' runtime prelude (Phase 377), as the text the generator emits. It is
-// data with no dependency on the emitters, so it sits before `FSharpCodec`, which splices it into
-// every module that requests `Gen.Derivation.SpecDecoders` (Phase 541 moved it out of that file,
-// which the 2,000-line rule of D141 holds).
-// ---------------------------------------------------------------------------
-
-module internal FSharpCollecting =
-
-    /// The collecting prelude, emitted once per module that requests the collecting decoders. It
-    /// states the defect order, which a test pins.
-    let helpers: string =
-        """// ---------------------------------------------------------------------------
 // Phase 377 — COLLECTING DECODERS. Beside every short-circuiting `dec*` decoder above, a `col*`
 // decoder answers EVERY defect it finds, as a `DecodeError list`, in one deterministic order:
 //   - an object's members in FIELD DECLARATION ORDER (a node: `id`, its kind, then its envelope
@@ -98,18 +84,4 @@ let private cOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<
 let private cDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) (dflt: 'T) : Result<'T, DecodeError list> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
-    | None -> Ok dflt"""
-
-    /// Phase 541 — the refine helper of the collecting decoders, emitted when the support declares
-    /// a case refine: `FSharpCodec.collectRefined` hands it the collected members, and a refusal is
-    /// `dRefine`'s, code, expectation and position included.
-    let refineHelper: string =
-        """// A declared case refine over the COLLECTED members: every member decoded, and the refine's
-// refusal is `dRefine`'s — `OutOfRange` at the case's object, its sentence unchanged.
-let private cRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError list>) : Result<'U, DecodeError list> =
-    match r with
-    | Error es -> Error es
-    | Ok v ->
-        match f v with
-        | Ok u -> Ok u
-        | Error m -> cOne (dFail DecodeCode.OutOfRange "a case its refinement admits" m)"""
+    | None -> Ok dflt

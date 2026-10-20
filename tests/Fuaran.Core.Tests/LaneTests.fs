@@ -22,19 +22,29 @@ let private ok (r: Result<'a, 'e>) : 'a =
 
 /// genesis g; a and b fork off g; c extends a; m merges c and b.
 let private forkMerge () =
-    let g, d1 = Dag.append h sw x (Inc 1) "" Dag.empty |> Reference.built
-    let a, d2 = Dag.append h sw x (Inc 2) g d1 |> Reference.built
-    let b, d3 = Dag.append h sw x (Inc 3) g d2 |> Reference.built
-    let c, d4 = Dag.append h sw x (Inc 4) a d3 |> Reference.built
-    let m, d5 = Dag.merge h sw x (Inc 5) c b d4 |> Reference.built
+    let g, d1 =
+        Dag.append (OpStream.canonical h sw) x (Inc 1) "" Dag.empty |> Reference.built
+
+    let a, d2 = Dag.append (OpStream.canonical h sw) x (Inc 2) g d1 |> Reference.built
+    let b, d3 = Dag.append (OpStream.canonical h sw) x (Inc 3) g d2 |> Reference.built
+    let c, d4 = Dag.append (OpStream.canonical h sw) x (Inc 4) a d3 |> Reference.built
+    let m, d5 = Dag.merge (OpStream.canonical h sw) x (Inc 5) c b d4 |> Reference.built
     g, a, b, c, m, d5
 
 /// A three-headed DAG: genesis g, and three lanes forked off it.
 let private threeHeads () =
-    let g, d1 = Dag.append h sw x (Inc 1) "" Dag.empty |> Reference.built
-    let p, d2 = Dag.append h sw (Human "p") (Inc 2) g d1 |> Reference.built
-    let q, d3 = Dag.append h sw (Human "q") (Inc 3) g d2 |> Reference.built
-    let r, d4 = Dag.append h sw (Human "r") (Inc 4) g d3 |> Reference.built
+    let g, d1 =
+        Dag.append (OpStream.canonical h sw) x (Inc 1) "" Dag.empty |> Reference.built
+
+    let p, d2 =
+        Dag.append (OpStream.canonical h sw) (Human "p") (Inc 2) g d1 |> Reference.built
+
+    let q, d3 =
+        Dag.append (OpStream.canonical h sw) (Human "q") (Inc 3) g d2 |> Reference.built
+
+    let r, d4 =
+        Dag.append (OpStream.canonical h sw) (Human "r") (Inc 4) g d3 |> Reference.built
+
     g, [ p; q; r ], d4
 
 let private ordinal (xs: string list) =
@@ -142,7 +152,11 @@ let private fixtureStore () : Dag.Loaded<CounterOp> =
     let mutable tips: Map<string, string> = Map.empty
 
     let write lane op (parents: string list) =
-        let id, s = Dag.appendOnLane h sw (Human lane) op parents lane store |> ok
+        let id, s =
+            Dag.appendOnLane (OpStream.canonical h sw) (Human lane) op parents lane store
+            |> ok
+            |> fun r -> r.Written.Id, r.Loaded
+
         store <- s
         tips <- Map.add lane id tips
 
@@ -204,11 +218,17 @@ let private foldRank (op: ModelOp) =
 /// order decides whether the fork sees the state alive. `salt` varies the seed's actor, and so every id.
 let private killAndFork (salt: int) =
     let s, d1 =
-        Dag.append h modelWitness (Human("seed-" + string salt)) Seed "" Dag.empty
+        Dag.append (OpStream.canonical h modelWitness) (Human("seed-" + string salt)) Seed "" Dag.empty
         |> Reference.built
 
-    let f, d2 = Dag.append h modelWitness (Human "w") (Fork "S") s d1 |> Reference.built
-    let k, d3 = Dag.append h modelWitness (Human "w") (Kill "S") s d2 |> Reference.built
+    let f, d2 =
+        Dag.append (OpStream.canonical h modelWitness) (Human "w") (Fork "S") s d1
+        |> Reference.built
+
+    let k, d3 =
+        Dag.append (OpStream.canonical h modelWitness) (Human "w") (Kill "S") s d2
+        |> Reference.built
+
     s, f, k, d3
 
 /// A recording sink: signs `sig:<subject>` and accepts exactly that.
@@ -240,15 +260,26 @@ let tests =
                 <| fun _ ->
                     let g, a, b, _, _, dag = forkMerge ()
 
-                    Expect.equal (Dag.appendOn h sw x (Inc 9) [] dag) (Dag.append h sw x (Inc 9) "" dag) "genesis"
-                    Expect.equal (Dag.appendOn h sw x (Inc 9) [ a ] dag) (Dag.append h sw x (Inc 9) a dag) "one parent"
+                    Expect.equal
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [] dag)
+                        (Dag.append (OpStream.canonical h sw) x (Inc 9) "" dag)
+                        "genesis"
 
                     Expect.equal
-                        (Dag.appendOn h sw x (Inc 9) [ a; b ] dag)
-                        (Dag.merge h sw x (Inc 9) a b dag)
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ a ] dag)
+                        (Dag.append (OpStream.canonical h sw) x (Inc 9) a dag)
+                        "one parent"
+
+                    Expect.equal
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ a; b ] dag)
+                        (Dag.merge (OpStream.canonical h sw) x (Inc 9) a b dag)
                         "two parents"
 
-                    let id, d = Dag.appendOn h sw x (Inc 9) [ g; a; b ] dag |> ok
+                    let id, d =
+                        Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ g; a; b ] dag
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
                     Expect.equal d.Nodes[id].Parents [ g; a; b ] "the parents are stored as given"
 
                     Expect.equal
@@ -263,42 +294,70 @@ let tests =
                     let _, a, _, _, _, dag = forkMerge ()
 
                     Expect.equal
-                        (Dag.appendOn h sw x (Inc 9) [ a; "" ] dag)
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ a; "" ] dag)
                         (Error DagAppendFault.EmptyParentId)
                         "an empty parent id"
 
                     Expect.equal
-                        (Dag.appendOn h sw x (Inc 9) [ a; "p,q"; "zz" ] dag)
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ a; "p,q"; "zz" ] dag)
                         (Error(DagAppendFault.CommaInParentId "p,q"))
                         "the first refusal in order"
 
                     Expect.equal
-                        (Dag.appendOn h sw x (Inc 9) [ "zz"; a ] dag)
+                        (Dag.appendOn (OpStream.canonical h sw) x (Inc 9) [ "zz"; a ] dag)
                         (Error(DagAppendFault.UnknownParent "zz"))
                         "an unknown parent"
 
                 testCase "mergeAll is a function of the head set and is the node appendOn mints over it"
                 <| fun _ ->
                     let _, hs, dag = threeHeads ()
-                    let m, d = Dag.mergeAll h sw x (Inc 7) hs dag |> ok
+
+                    let m, d =
+                        Dag.mergeAll (OpStream.canonical h sw) x (Inc 7) hs dag
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
 
                     for perm in [ hs; List.rev hs; [ hs[1]; hs[2]; hs[0]; hs[1] ] ] do
-                        let m', d' = Dag.mergeAll h sw x (Inc 7) perm dag |> ok
+                        let m', d' =
+                            Dag.mergeAll (OpStream.canonical h sw) x (Inc 7) perm dag
+                            |> ok
+                            |> fun w -> w.Id, w.Dag
+
                         Expect.equal m' m "the same id"
                         Expect.equal d'.Nodes[m'].Parents (ordinal hs) "the same stored parents"
 
                     for perm in [ hs; List.rev hs ] do
-                        Expect.equal (Dag.appendOn h sw x (Inc 7) perm dag |> ok |> fst) m "appendOn's id"
+                        Expect.equal
+                            (Dag.appendOn (OpStream.canonical h sw) x (Inc 7) perm dag
+                             |> ok
+                             |> fun w -> w.Id)
+                            m
+                            "appendOn's id"
 
                     Expect.equal (Dag.heads d) [ m ] "one head"
                     Expect.equal (Dag.tryReplayTo sw 0 d m) (Ok 17) "every lane once, then the merge op"
-                    let one, _ = Dag.mergeAll h sw x (Inc 7) [ hs[0] ] dag |> ok
-                    Expect.equal one (Dag.append h sw x (Inc 7) hs[0] dag |> ok |> fst) "one head is an append"
+
+                    let one, _ =
+                        Dag.mergeAll (OpStream.canonical h sw) x (Inc 7) [ hs[0] ] dag
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    Expect.equal
+                        one
+                        (Dag.append (OpStream.canonical h sw) x (Inc 7) hs[0] dag
+                         |> ok
+                         |> fun w -> w.Id)
+                        "one head is an append"
 
                 testCase "mergeWith records the script as the merge node and a chain after it"
                 <| fun _ ->
                     let _, a, b, _, _, dag = forkMerge ()
-                    let ids, d = Dag.mergeWith h sw x [ Inc 10; Dec 3; Inc 20 ] a b dag |> ok
+
+                    let ids, d =
+                        Dag.mergeWith (OpStream.canonical h sw) x [ Inc 10; Dec 3; Inc 20 ] a b dag
+                        |> ok
+                        |> fun ws -> (ws |> List.map (fun w -> w.Id)), (List.last ws).Dag
+
                     Expect.equal (List.length ids) 3 "three nodes"
                     Expect.equal d.Nodes[ids[0]].Parents [ a; b ] "the first is the merge"
                     Expect.equal d.Nodes[ids[2]].Parents [ ids[1] ] "the rest a chain"
@@ -308,10 +367,13 @@ let tests =
                         (Ok(1 + 2 + 3 + 10 - 3 + 20))
                         "union, then the script"
 
-                    Expect.equal (Dag.mergeWith h sw x [] a b dag) (Ok([], dag)) "an empty script records nothing"
+                    Expect.equal
+                        (Dag.mergeWith (OpStream.canonical h sw) x [] a b dag)
+                        (Ok [])
+                        "an empty script records nothing"
 
                     Expect.equal
-                        (Dag.mergeWith h sw x [] a "zz" dag)
+                        (Dag.mergeWith (OpStream.canonical h sw) x [] a "zz" dag)
                         (Error(DagAppendFault.UnknownParent "zz"))
                         "the parents are judged whatever the script"
 
@@ -323,10 +385,26 @@ let tests =
                     Expect.equal (Dag.commonBase dag []) None "no heads"
                     Expect.equal (Dag.commonBase dag [ c; "zz" ]) None "an absent head"
                     // a criss-cross: two merges of the same two lanes, a lane off each, and a third lane
-                    let m1, d1 = Dag.merge h sw x (Inc 11) a b dag |> ok
-                    let m2, d2 = Dag.merge h sw x (Inc 12) a b d1 |> ok
-                    let l1, d3 = Dag.append h sw x (Inc 13) m1 d2 |> ok
-                    let l2, d4 = Dag.append h sw x (Inc 14) m2 d3 |> ok
+                    let m1, d1 =
+                        Dag.merge (OpStream.canonical h sw) x (Inc 11) a b dag
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let m2, d2 =
+                        Dag.merge (OpStream.canonical h sw) x (Inc 12) a b d1
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let l1, d3 =
+                        Dag.append (OpStream.canonical h sw) x (Inc 13) m1 d2
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let l2, d4 =
+                        Dag.append (OpStream.canonical h sw) x (Inc 14) m2 d3
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
                     let hs = [ l1; l2; c ]
                     let cb = Dag.commonBase d4 hs
 
@@ -368,9 +446,20 @@ let tests =
                     let mutable descendantFirst = 0
 
                     for salt in 0..30 do
-                        let g, d1 = Dag.append h sw (Human("t" + string salt)) (Inc 1) "" Dag.empty |> ok
-                        let a, d2 = Dag.append h sw x (Inc 2) g d1 |> ok
-                        let b, d3 = Dag.append h sw x (Inc 3) a d2 |> ok
+                        let g, d1 =
+                            Dag.append (OpStream.canonical h sw) (Human("t" + string salt)) (Inc 1) "" Dag.empty
+                            |> ok
+                            |> fun w -> w.Id, w.Dag
+
+                        let a, d2 =
+                            Dag.append (OpStream.canonical h sw) x (Inc 2) g d1
+                            |> ok
+                            |> fun w -> w.Id, w.Dag
+
+                        let b, d3 =
+                            Dag.append (OpStream.canonical h sw) x (Inc 3) a d2
+                            |> ok
+                            |> fun w -> w.Id, w.Dag
 
                         if System.String.CompareOrdinal(b, a) < 0 then
                             descendantFirst <- descendantFirst + 1
@@ -463,21 +552,25 @@ let tests =
 
                     Expect.equal
                         (Dag.totalOrderBy (fun _ -> 0) cyclic)
-                        (Error(Dag.TotalOrderFault.Cyclic expected))
+                        (Error({ Unplaced = expected }: Dag.Cyclic))
                         "order"
 
-                    Expect.equal (Dag.ranks cyclic) (Error(Dag.TotalOrderFault.Cyclic expected)) "ranks"
+                    Expect.equal (Dag.ranks cyclic) (Error({ Unplaced = expected }: Dag.Cyclic)) "ranks"
 
                     Expect.equal
                         (Dag.replayAllBy (fun _ -> 0) sw 0 cyclic)
-                        (Error(Dag.ReplayAllFault.Cyclic expected))
+                        (Error(Dag.ReplayAllFault.Cyclic { Unplaced = expected }))
                         "replay"
 
                 testCase "replayAllBy folds every node once and names the first rejection"
                 <| fun _ ->
                     let _, _, _, _, _, dag = forkMerge ()
                     Expect.equal (Dag.replayAllBy (fun _ -> 0) sw 0 dag) (Ok 15) "every op once"
-                    let m, d = Dag.append h sw x (Dec 100) (Dag.heads dag |> List.head) dag |> ok
+
+                    let m, d =
+                        Dag.append (OpStream.canonical h sw) x (Dec 100) (Dag.heads dag |> List.head) dag
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
 
                     Expect.equal
                         (Dag.replayAllBy (fun _ -> 0) sw 0 d)
@@ -516,7 +609,7 @@ let tests =
                 <| fun _ ->
                     let loaded = fixtureStore ()
                     let texts = Dag.lanesToJsonl sw.Encode loaded
-                    Expect.equal (texts |> List.map fst) [ "alpha"; "beta"; "gamma" ] "one file per lane"
+                    Expect.equal (texts |> List.map (fun l -> l.Lane)) [ "alpha"; "beta"; "gamma" ] "one file per lane"
 
                     for perm in [ texts; List.rev texts; [ texts[1]; texts[2]; texts[0] ] ] do
                         let l = Dag.loadLanes sw perm |> ok
@@ -526,7 +619,8 @@ let tests =
                         Expect.equal (Dag.replayAll sw 0 l) (Dag.replayAll sw 0 loaded) "the replay"
 
                     let concatenated =
-                        Dag.fromJsonl sw (texts |> List.map snd |> String.concat "\n") |> ok
+                        Dag.fromJsonl sw (texts |> List.map (fun l -> l.Text) |> String.concat "\n")
+                        |> ok
 
                     Expect.equal (Dag.toJsonl sw.Encode concatenated) (Dag.toJsonl sw.Encode loaded.Dag) "concatenated"
                     Expect.equal (Dag.tryLanesToJsonl sw.Encode loaded) (Ok texts) "the checked writer agrees"
@@ -541,7 +635,7 @@ let tests =
                         (Error(StreamLoadFault.DuplicateLane "alpha"))
                         "duplicate"
 
-                    match Dag.loadLanes sw (texts @ [ "zeta", "{not json" ]) with
+                    match Dag.loadLanes sw (texts @ [ { Lane = "zeta"; Text = "{not json" } ]) with
                     | Error(StreamLoadFault.Unreadable(Some "zeta", f)) ->
                         Expect.equal f.Line 1 "the typed fault names the lane's line"
                     | other -> failtestf "expected Unreadable zeta, got %A" other
@@ -552,15 +646,17 @@ let tests =
                         |> List.find (fun (id, _) -> loaded.LaneOf[id] = "beta")
                         |> snd
 
-                    let copy =
-                        "zeta", Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, some ]))
+                    let copy: Dag.LaneText =
+                        { Lane = "zeta"
+                          Text = Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, some ])) }
 
                     let l = Dag.loadLanes sw (copy :: texts) |> ok
                     Expect.equal l.LaneOf[some.Id] "beta" "an identical node keeps the smaller lane"
 
-                    let forged =
-                        "aardvark",
-                        Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, { some with Op = Inc 1000 } ]))
+                    let forged: Dag.LaneText =
+                        { Lane = "aardvark"
+                          Text =
+                            Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, { some with Op = Inc 1000 } ])) }
 
                     Expect.equal
                         (Dag.loadLanes sw (texts @ [ forged ]))
@@ -570,7 +666,7 @@ let tests =
                 testCase "verifyLanes names the lane of the earliest faulty node"
                 <| fun _ ->
                     let loaded = fixtureStore ()
-                    Expect.equal (Dag.verifyLanes h sw loaded) (Ok()) "intact"
+                    Expect.equal (Dag.verifyLanes (OpStream.canonical h sw) loaded) (Ok()) "intact"
 
                     let victim =
                         loaded.Dag.Nodes
@@ -589,7 +685,7 @@ let tests =
                                             Op = Inc 77 }
                                 ) }
 
-                    match Dag.verifyLanes h sw tampered with
+                    match Dag.verifyLanes (OpStream.canonical h sw) tampered with
                     | Error b ->
                         Expect.equal b.Lane "gamma" "the lane"
                         Expect.equal b.Break.NodeId victim "the node"
@@ -613,25 +709,51 @@ let tests =
                     let parents = loaded.Dag.Nodes[gammaTip].Parents
 
                     let sib, forked =
-                        Dag.appendOnLane h sw (Human "gamma") (Inc 555) parents "gamma" loaded |> ok
+                        Dag.appendOnLane (OpStream.canonical h sw) (Human "gamma") (Inc 555) parents "gamma" loaded
+                        |> ok
+                        |> fun r -> r.Written.Id, r.Loaded
 
-                    Expect.equal (Dag.laneCollisions forked) [ "gamma", ordinal [ gammaTip; sib ] ] "two heads in gamma"
+                    Expect.equal
+                        (Dag.laneCollisions forked)
+                        [ { Lane = "gamma"
+                            Heads = ordinal [ gammaTip; sib ] } ]
+                        "two heads in gamma"
 
                 testCase "disjointRoots names every head and its root when the heads share nothing"
                 <| fun _ ->
-                    let r1, d1 = Dag.append h sw (Human "one") (Inc 1) "" Dag.empty |> ok
-                    let a1, d2 = Dag.append h sw (Human "one") (Inc 2) r1 d1 |> ok
-                    let r2, d3 = Dag.append h sw (Human "two") (Inc 3) "" d2 |> ok
-                    let a2, d4 = Dag.append h sw (Human "two") (Inc 4) r2 d3 |> ok
+                    let r1, d1 =
+                        Dag.append (OpStream.canonical h sw) (Human "one") (Inc 1) "" Dag.empty
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let a1, d2 =
+                        Dag.append (OpStream.canonical h sw) (Human "one") (Inc 2) r1 d1
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let r2, d3 =
+                        Dag.append (OpStream.canonical h sw) (Human "two") (Inc 3) "" d2
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
+                    let a2, d4 =
+                        Dag.append (OpStream.canonical h sw) (Human "two") (Inc 4) r2 d3
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
 
                     let expected =
-                        [ a1, r1; a2, r2 ]
-                        |> List.sortWith (fun (p, _) (q, _) -> System.String.CompareOrdinal(p, q))
+                        [ ({ Head = a1; Root = r1 }: Dag.DisjointRoot); { Head = a2; Root = r2 } ]
+                        |> List.sortWith (fun p q -> System.String.CompareOrdinal(p.Head, q.Head))
 
                     Expect.equal (Dag.disjointRoots d4) expected "disjoint"
                     let _, _, _, _, _, dag = forkMerge ()
                     Expect.equal (Dag.disjointRoots dag) [] "one history"
-                    let m, d5 = Dag.merge h sw x (Inc 5) a1 a2 d4 |> ok
+
+                    let m, d5 =
+                        Dag.merge (OpStream.canonical h sw) x (Inc 5) a1 a2 d4
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
                     ignore m
                     Expect.equal (Dag.disjointRoots d5) [] "merged"
 
@@ -673,6 +795,7 @@ let tests =
                     let there, ids =
                         Dag.rehash (OpStream.canonical h sw) (OpStream.canonical OpStream.sha256Hash sw) loaded.Dag
                         |> ok
+                        |> fun r -> r.Dag, r.Ids
 
                     Expect.isTrue
                         (Dag.verifyDag (OpStream.canonical OpStream.sha256Hash sw) there)
@@ -683,6 +806,7 @@ let tests =
                     let back, ids' =
                         Dag.rehash (OpStream.canonical OpStream.sha256Hash sw) (OpStream.canonical h sw) there
                         |> ok
+                        |> fun r -> r.Dag, r.Ids
 
                     Expect.equal (Dag.toJsonl sw.Encode back) (Dag.toJsonl sw.Encode loaded.Dag) "round trip"
 
@@ -692,11 +816,15 @@ let tests =
                     let relaned, _ =
                         Dag.rehashLanes (OpStream.canonical h sw) (OpStream.canonical OpStream.sha256Hash sw) loaded
                         |> ok
-
-                    Expect.equal (Dag.verifyLanes OpStream.sha256Hash sw relaned) (Ok()) "the lanes carried"
+                        |> fun r -> r.Loaded, r.Ids
 
                     Expect.equal
-                        (Dag.lanesToJsonl sw.Encode relaned |> List.map fst)
+                        (Dag.verifyLanes (OpStream.canonical OpStream.sha256Hash sw) relaned)
+                        (Ok())
+                        "the lanes carried"
+
+                    Expect.equal
+                        (Dag.lanesToJsonl sw.Encode relaned |> List.map (fun l -> l.Lane))
                         [ "alpha"; "beta"; "gamma" ]
                         "lanes"
 
@@ -763,7 +891,11 @@ let tests =
                 <| fun _ ->
                     let g, a, b, c, _, dag0 = forkMerge ()
                     // an abandoned branch off b
-                    let z, dag = Dag.append h sw (Human "abandoned") (Inc 40) b dag0 |> ok
+                    let z, dag =
+                        Dag.append (OpStream.canonical h sw) (Human "abandoned") (Inc 40) b dag0
+                        |> ok
+                        |> fun w -> w.Id, w.Dag
+
                     let heads = Dag.heads dag
                     let keepRoots = heads |> List.filter (fun hd -> hd <> z)
                     let reach = Dag.Reach.ofDag dag
@@ -778,7 +910,10 @@ let tests =
                     for r in keepRoots do
                         Expect.equal (Dag.tryReplayTo sw 0 pruned r) (Dag.tryReplayTo sw 0 dag r) "replays as before"
 
-                    Expect.equal (Dag.prunable reach [ "zz" ]) (Error "zz") "an unknown root"
+                    Expect.equal
+                        (Dag.prunable reach [ "zz" ])
+                        (Error(Dag.PruneFault.UnknownRoot "zz"))
+                        "an unknown root"
 
                     Expect.equal
                         (Dag.prunable reach [ c ] |> ok |> List.sort)
@@ -792,26 +927,33 @@ let tests =
                     let _, hs, dag = threeHeads ()
                     let state = Dag.replayAllBy (fun _ -> 0) sw 0 dag |> ok
 
-                    let written = Dag.appendIf h sw (List.rev hs) x (Inc 5) state dag |> ok
-                    let st', id, d = written.State, written.Id, written.Dag
+                    let written =
+                        Dag.appendIf (OpStream.canonical h sw) (List.rev hs) x (Inc 5) state dag |> ok
+
+                    let st', id, d = written.State, written.Written.Id, written.Written.Dag
                     Expect.equal st' (state + 5) "applied at the caller's state"
-                    Expect.equal id (Dag.mergeAll h sw x (Inc 5) hs dag |> ok |> fst) "mergeAll's node"
+
+                    Expect.equal
+                        id
+                        (Dag.mergeAll (OpStream.canonical h sw) x (Inc 5) hs dag |> ok |> (fun w -> w.Id))
+                        "mergeAll's node"
+
                     Expect.equal (Dag.heads d) [ id ] "converged"
 
                     Expect.equal
-                        (Dag.appendIf h sw hs x (Inc 6) st' d)
+                        (Dag.appendIf (OpStream.canonical h sw) hs x (Inc 6) st' d)
                         (Error(Dag.DagAppendIfRejection.StaleHeads(ordinal hs, [ id ])))
                         "stale"
 
                     Expect.equal
-                        (Dag.appendIf h sw [ id ] x (Dec 1000) st' d)
+                        (Dag.appendIf (OpStream.canonical h sw) [ id ] x (Dec 1000) st' d)
                         (Error(Dag.DagAppendIfRejection.Domain "would go negative"))
                         "the domain's rejection"
 
-                    let genesis = Dag.appendIf h sw [] x (Inc 1) 0 Dag.empty |> ok
+                    let genesis = Dag.appendIf (OpStream.canonical h sw) [] x (Inc 1) 0 Dag.empty |> ok
 
                     Expect.equal genesis.State 1 "genesis on an empty DAG"
-                    Expect.equal (Dag.heads genesis.Dag) [ genesis.Id ] "one node" ] ]
+                    Expect.equal (Dag.heads genesis.Written.Dag) [ genesis.Written.Id ] "one node" ] ]
 
 /// The `Conformance.laneLaws` cases — the suite `proofs.json`'s Phase 311 tested row cites.
 [<Tests>]
@@ -863,7 +1005,11 @@ let private newerStore () =
     let mutable tips: Map<string, string> = Map.empty
 
     let write lane op (parents: string list) =
-        let id, s = Dag.appendOnLane h nw (Human lane) op parents lane store |> ok
+        let id, s =
+            Dag.appendOnLane (OpStream.canonical h nw) (Human lane) op parents lane store
+            |> ok
+            |> fun r -> r.Written.Id, r.Loaded
+
         store <- s
         tips <- Map.add lane id tips
         id
@@ -889,7 +1035,7 @@ let newerStoreTests =
           <| fun _ ->
               let store, reset = newerStore ()
               let texts = Dag.lanesToJsonl OpStreamTests.Newer.witness.Encode store
-              let beta = texts |> List.find (fun (l, _) -> l = "beta") |> snd
+              let beta = (texts |> List.find (fun l -> l.Lane = "beta")).Text
 
               let site =
                   { Lane = Some "beta"
@@ -897,16 +1043,24 @@ let newerStoreTests =
                     NodeId = reset
                     Reason = OpStreamTests.Newer.refusal }
 
-              Expect.equal (Dag.loadLanesVerified h sw texts) (Error(StreamLoadFault.Undecodable [ site ])) "verified"
+              Expect.equal
+                  (Dag.loadLanesVerified (OpStream.canonical h sw) texts)
+                  (Error(StreamLoadFault.Undecodable [ site ]))
+                  "verified"
+
               Expect.equal (Dag.loadLanes sw texts) (Error(StreamLoadFault.Undecodable [ site ])) "structural"
 
               Expect.equal
-                  (Dag.loadLanesVerified h sw texts |> Result.mapError Dag.laneLoadFaultToString)
+                  (Dag.loadLanesVerified (OpStream.canonical h sw) texts
+                   |> Result.mapError Dag.laneLoadFaultToString)
                   (Error(sprintf "lane beta: line %d: %s (position 0)" site.Line OpStreamTests.Newer.refusal))
                   "the site renders with its lane"
 
               // the newer host reads its own store, verified and attributed
-              let back = Dag.loadLanesVerified h OpStreamTests.Newer.witness texts |> ok
+              let back =
+                  Dag.loadLanesVerified (OpStream.canonical h OpStreamTests.Newer.witness) texts
+                  |> ok
+
               Expect.equal back.LaneOf store.LaneOf "the newer witness reads it"
 
           testCase "the same store with one byte flipped in a content id answers the chain break, not Undecodable"
@@ -919,12 +1073,13 @@ let newerStoreTests =
 
               let tampered =
                   texts
-                  |> List.map (fun (lane, text) ->
-                      lane, text.Replace("\"id\":\"" + reset + "\"", "\"id\":\"" + flipped + "\""))
+                  |> List.map (fun l ->
+                      { l with
+                          Text = l.Text.Replace("\"id\":\"" + reset + "\"", "\"id\":\"" + flipped + "\"") })
 
               Expect.notEqual tampered texts "the probe flipped a byte"
 
-              match Dag.loadLanesVerified h sw tampered with
+              match Dag.loadLanesVerified (OpStream.canonical h sw) tampered with
               | Error(StreamLoadFault.Broken lb) -> Expect.equal lb.Lane "beta" "the break is in the lane holding it"
               | other -> failtestf "expected the chain break, got %A" other
 
@@ -937,7 +1092,7 @@ let newerStoreTests =
           <| fun _ ->
               let loaded = fixtureStore ()
               let texts = Dag.lanesToJsonl sw.Encode loaded
-              let verified = Dag.loadLanesVerified h sw texts |> ok
+              let verified = Dag.loadLanesVerified (OpStream.canonical h sw) texts |> ok
               Expect.equal verified.LaneOf loaded.LaneOf "the attribution"
               Expect.equal verified.Dag.Nodes loaded.Dag.Nodes "the nodes"
 
@@ -949,11 +1104,13 @@ let newerStoreTests =
 
               let tampered =
                   texts
-                  |> List.map (fun (lane, text) ->
-                      lane, text.Replace("\"id\":\"" + victim + "\"", "\"id\":\"" + victim + "x\""))
+                  |> List.map (fun l ->
+                      { l with
+                          Text = l.Text.Replace("\"id\":\"" + victim + "\"", "\"id\":\"" + victim + "x\"") })
 
-              let viaVerify = Dag.loadLanes sw tampered |> ok |> Dag.verifyLanes h sw
+              let viaVerify =
+                  Dag.loadLanes sw tampered |> ok |> Dag.verifyLanes (OpStream.canonical h sw)
 
-              match Dag.loadLanesVerified h sw tampered, viaVerify with
+              match Dag.loadLanesVerified (OpStream.canonical h sw) tampered, viaVerify with
               | Error(StreamLoadFault.Broken lb), Error b -> Expect.equal lb b "the same break"
               | other -> failtestf "expected both to break, got %A" other ]

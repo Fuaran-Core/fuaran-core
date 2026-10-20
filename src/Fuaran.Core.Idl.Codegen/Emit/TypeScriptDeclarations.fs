@@ -33,13 +33,11 @@ module internal TypeScriptDeclarations =
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         let disc = tsDiscKey idl.Wire.Discriminator
 
-        let mismatch (what: string) =
-            Error(
-                CodegenError.UnsupportedConstruct(
-                    what,
-                    "GP5: the scaffold leg names what it cannot construct rather than emitting a value the encoder mis-writes",
-                    "author the value against the vocabulary's declaration (Encode.encode refuses the same value)"
-                )
+        let mismatchOf (what: string) =
+            CodegenError.UnsupportedConstruct(
+                what,
+                "GP5: the scaffold leg names what it cannot construct rather than emitting a value the encoder mis-writes",
+                "author the value against the vocabulary's declaration (Encode.encode refuses the same value)"
             )
 
         let objectOf (pairs: (string * string) list) =
@@ -47,108 +45,76 @@ module internal TypeScriptDeclarations =
             + (pairs |> List.map (fun (k, e) -> k + ": " + e) |> String.concat ", ")
             + " }"
 
-        let rec go (subst: Map<string, IdlType>) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-            match TypeParams.substitute subst t, v with
-            | TStr, VStr s -> Ok(SourceLit.tsString s)
-            | TInt, VInt i -> Ok(string i)
-            | TBool, VBool b -> Ok(if b then "true" else "false")
-            | TFloat, VFloat f -> Ok(invariantFloat f)
-            | TFloat, VInt i -> Ok(string i)
-            | TEnum n, VEnum wire ->
-                match CodegenLookup.tryEnum idl n with
-                | Some e when List.contains wire e.WireCases -> Ok(SourceLit.tsString wire)
-                | _ -> mismatch (sprintf "the wire string %A at enum '%s'" wire n)
-            | TList inner, VList xs ->
-                xs
-                |> List.map (go subst inner)
-                |> sequenceR
-                |> Result.map (fun items -> "[" + String.concat ", " items + "]")
-            | TMap vt, VMap entries ->
-                entries
-                |> List.map (fun (k, ev) -> go subst vt ev |> Result.map (fun e -> SourceLit.tsString k, e))
-                |> sequenceR
-                |> Result.map objectOf
-            // A hosted slot that declares its wire form takes that type's decoded shape (a
-            // record's omit-at-default members filled, as for any record); the JSON is read
-            // through the interpreter's decoder, so a value outside the form is refused.
-            | THosted { Wire = Some w }, VJson j ->
-                match Decode.value idl w j with
-                | Ok wv -> go subst w wv
-                | Error m -> mismatch (sprintf "a hosted value outside its declared wire form (%s)" m)
-            | (TJson | THosted _), VJson j -> Ok(Canonical.write Rendering.CrossHost j)
-            // The encoder never reads a sentinel slot; a PRESENT stand-in keeps an optional
-            // one's presence test honest (see [[typescriptValueWith]]).
-            | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Ok "(() => undefined)"
-            | TRecord n, VRecord authored ->
-                match CodegenLookup.tryRecord idl n with
-                | None -> mismatch (sprintf "a value of the undeclared record '%s'" n)
-                | Some r -> members subst ("record '" + n + "'") r.Fields authored |> Result.map objectOf
-            | TUnion(n, args), VUnion(tag, authored) ->
-                match CodegenLookup.tryUnion idl n with
-                | None -> mismatch (sprintf "a value of the undeclared union '%s'" n)
-                | Some u when List.length u.Params <> List.length args ->
-                    mismatch (sprintf "union '%s' applied to %d type arguments" n (List.length args))
-                | Some u ->
-                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                    | None -> mismatch (sprintf "the case '%s', which union '%s' does not declare" tag n)
-                    | Some c ->
-                        let caseSubst = TypeParams.bind u args |> Option.defaultValue Map.empty
+        let keyed (members: (IdlField * string) list) =
+            members |> List.map (fun (f, e) -> SourceLit.tsKey f.Name, e)
 
-                        members caseSubst (sprintf "union case '%s.%s'" n tag) c.Fields authored
-                        |> Result.map (fun ms -> objectOf ((disc, SourceLit.tsString tag) :: ms))
-            | TNode, VNode(id, kindTag, fields) -> node id [] kindTag fields
-            | TNode, VNodeEnv(id, envelope, kindTag, fields) -> node id envelope kindTag fields
-            | _, VAbsent -> mismatch "an absent value (VAbsent) in a value position"
-            | t', _ -> mismatch (sprintf "a value that does not match IDL type %A" t')
-
-        /// The members of an object under its declared fields' presence rules.
-        and members
-            (subst: Map<string, IdlType>)
-            (where: string)
-            (declared: IdlField list)
-            (authored: (string * IdlValue) list)
-            : Result<(string * string) list, CodegenError> =
-            declared
-            |> List.map (fun f ->
-                let value =
-                    authored
-                    |> List.tryPick (fun (n, av) -> if n = f.Name && av <> VAbsent then Some av else None)
-
-                match f.Opt, value with
-                // Never on the wire, and `undefined` in the decoder's shape.
-                | HostOnly, _ -> Ok None
-                | _, Some av -> go subst f.Type av |> Result.map (fun e -> Some(SourceLit.tsKey f.Name, e))
-                | Optional, None -> Ok None
-                | OmitDefault d, None -> go subst f.Type d |> Result.map (fun e -> Some(SourceLit.tsKey f.Name, e))
-                | Required, None -> mismatch (sprintf "%s without its required field '%s'" where f.Name))
-            |> sequenceR
-            |> Result.map (List.choose id)
-
-        and node (id: string) envelope (kindTag: string) fields : Result<string, CodegenError> =
-            match CodegenLookup.tryKind idl kindTag with
-            | None -> mismatch (sprintf "a node of the undeclared kind '%s'" kindTag)
-            | Some k ->
-                match
-                    members Map.empty ("kind '" + kindTag + "'") k.Fields fields,
-                    members Map.empty "node envelope" idl.NodeFields envelope
-                with
-                | Error e, _
-                | _, Error e -> Error e
-                | Ok kindMembers, Ok envMembers ->
-                    let tagged = (disc, SourceLit.tsString kindTag)
+        // Phase 524 — the TypeScript printer of an authored value ([[ValueTraversal]]).
+        let printer: ValuePrinter =
+            { Mismatch = mismatchOf
+              Leaf =
+                fun walk t v ->
+                    match t, v with
+                    | TStr, VStr s -> Some(Ok(SourceLit.tsString s))
+                    | TInt, VInt i -> Some(Ok(string i))
+                    | TBool, VBool b -> Some(Ok(if b then "true" else "false"))
+                    | TFloat, VFloat f -> Some(Ok(invariantFloat f))
+                    | TFloat, VInt i -> Some(Ok(string i))
+                    | TMap vt, VMap entries ->
+                        entries
+                        |> List.map (fun (k, ev) -> walk.Value vt ev |> Result.map (fun e -> SourceLit.tsString k, e))
+                        |> sequenceR
+                        |> Result.map objectOf
+                        |> Some
+                    // A hosted slot that declares its wire form takes that type's decoded shape (a
+                    // record's omit-at-default members filled, as for any record); the JSON is read
+                    // through the interpreter's decoder, so a value outside the form is refused.
+                    | THosted { Wire = Some w }, VJson j ->
+                        match Decode.value idl w j with
+                        | Ok wv -> Some(walk.Value w wv)
+                        | Error m ->
+                            Some(Error(mismatchOf (sprintf "a hosted value outside its declared wire form (%s)" m)))
+                    | (TJson | THosted _), VJson j -> Some(Ok(Canonical.write Rendering.CrossHost j))
+                    // The encoder never reads a sentinel slot; a PRESENT stand-in keeps an optional
+                    // one's presence test honest (see [[typescriptValueWith]]).
+                    | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Some(Ok "(() => undefined)")
+                    | _ -> None
+              // A case IS its wire string on this host.
+              Enum =
+                fun _ v ->
+                    match v with
+                    | VEnum wire -> Ok(SourceLit.tsString wire)
+                    | _ -> Error(mismatchOf "an enum value that is not a wire string")
+              List = fun items -> "[" + String.concat ", " items + "]"
+              // Every omit-at-default member is PRESENT, filled from its declared default; an
+              // absent optional and a host-only member (never on the wire, and `undefined` in the
+              // decoder's shape) are absent.
+              Member =
+                fun _ mv walk ->
+                    match mv with
+                    | MemberValue.Carries v
+                    | MemberValue.Optional v
+                    | MemberValue.IdentityDefault v -> walk v |> Result.map Some
+                    | _ -> Ok None
+              Record = fun _ members -> objectOf (keyed members)
+              Union = fun _ c members -> objectOf ((disc, SourceLit.tsString c.Tag) :: keyed members)
+              Node =
+                fun id k kindMembers envMembers ->
+                    let tagged = (disc, SourceLit.tsString k.Tag)
 
                     match idl.Wire.NodeEnvelope with
                     | NodeEnvelopeShape.NestedKind ->
-                        Ok(
-                            objectOf (
-                                (("id", SourceLit.tsString id) :: envMembers)
-                                @ [ "kind", objectOf (tagged :: kindMembers) ]
-                            )
+                        objectOf (
+                            (("id", SourceLit.tsString id) :: keyed envMembers)
+                            @ [ "kind", objectOf (tagged :: keyed kindMembers) ]
                         )
                     | NodeEnvelopeShape.FlatKind ->
-                        Ok(objectOf ((tagged :: ("id", SourceLit.tsString id) :: envMembers) @ kindMembers))
+                        objectOf (
+                            (tagged :: ("id", SourceLit.tsString id) :: keyed envMembers)
+                            @ keyed kindMembers
+                        )
+              Unmatched = fun t _ -> mismatchOf (sprintf "a value that does not match IDL type %A" t) }
 
-        go Map.empty t v
+        ValueTraversal.value printer idl t v
 
     /// The name the declaration file gives a decode refusal (Phase 348).
     let internal refusalTypeName = "DecodeRefusal"

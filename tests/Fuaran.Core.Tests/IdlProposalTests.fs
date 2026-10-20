@@ -567,3 +567,102 @@ let tests =
 
                         let decoded = System.Text.UTF8Encoding(false, true).GetString bytes
                         Expect.stringContains decoded "fuaran-core-idl — the IDL" "the bytes decode strictly as UTF-8") ] ]
+
+// ---------------------------------------------------------------------------
+// Phase 527 — a proposal is read by the artifact's codecs under an admission policy.
+//
+// One reader of the encoding, and the refusals kept: what a proposal may not mint is
+// `NotAdmitted` at the member that mints it, wherever it sits in the type. And a proposal may
+// carry the doc of what it mints (the 2026-10-01 generator follow-ups' item 3), on a field and
+// on a new kind or union case, and nothing else an annotation set says.
+// ---------------------------------------------------------------------------
+
+let private refusalOf (text: string) : DecodeCode * PathSegment list =
+    match Proposal.parseDetailed text with
+    | Ok _ -> failtest "the document was admitted"
+    | Error e -> e.Code, e.Path
+
+let private fieldPath (rest: PathSegment list) : PathSegment list =
+    [ PathSegment.Key "delta"; PathSegment.Index 0; PathSegment.Key "field" ] @ rest
+
+let private withField (fieldJson: string) : string =
+    completeJson
+        (sprintf """{ "op": "addField", "owner": { "$type": "kind", "name": "Badge" }, "field": %s }""" fieldJson)
+        candidateWire
+
+[<Tests>]
+let admissionTests =
+    testList
+        "Phase 527 — proposals read through the artifact, under admit"
+        [ testCase "a host-surface type nested in a list is refused at its own tag" (fun _ ->
+              Expect.equal
+                  (refusalOf (
+                      withField
+                          """{ "name": "hooks", "type": { "$type": "list", "of": { "$type": "opaque" } }, "optionality": { "$type": "optional" } }"""
+                  ))
+                  (DecodeCode.NotAdmitted,
+                   fieldPath [ PathSegment.Key "type"; PathSegment.Key "of"; PathSegment.Key "$type" ])
+                  "NotAdmitted at the nested tag")
+
+          testCase "a composite default is refused at the default's tag" (fun _ ->
+              Expect.equal
+                  (refusalOf (
+                      withField
+                          """{ "name": "tags", "type": { "$type": "list", "of": { "$type": "str" } }, "optionality": { "$type": "omitDefault", "default": { "$type": "list", "items": [] } } }"""
+                  ))
+                  (DecodeCode.NotAdmitted,
+                   fieldPath
+                       [ PathSegment.Key "optionality"
+                         PathSegment.Key "default"
+                         PathSegment.Key "$type" ])
+                  "NotAdmitted at the default")
+
+          testCase "a field may carry its doc, and the doc reaches the vocabulary" (fun _ ->
+              let p =
+                  parseOrFail (
+                      withField
+                          """{ "name": "tooltip", "type": { "$type": "str" }, "optionality": { "$type": "optional" }, "annotations": { "doc": "A hover hint." } }"""
+                  )
+
+              match p.Delta with
+              | [ AddField(_, f) ] -> Expect.equal f.Annotations.Doc (Some "A hover hint.") "the doc is read"
+              | other -> failtestf "one field addition: %A" other
+
+              match Proposal.applyDelta Mini.miniIdl p.Delta with
+              | Ok idl ->
+                  let badge = idl.Kinds |> List.find (fun k -> k.Tag = "Badge")
+                  let tooltip = badge.Fields |> List.find (fun f -> f.Name = "tooltip")
+
+                  Expect.equal
+                      tooltip.Annotations.Doc
+                      (Some "A hover hint.")
+                      "and is carried by the post-delta vocabulary"
+              | Error e -> failtestf "the delta did not apply: %s" e)
+
+          testCase "any other annotation on a minted member is refused at that annotation" (fun _ ->
+              for name, block in
+                  [ "deprecated", """{ "deprecated": {} }"""
+                    "inProcessOnly", """{ "inProcessOnly": true }"""
+                    "since", """{ "since": "2" }""" ] do
+                  Expect.equal
+                      (refusalOf (
+                          withField (
+                              """{ "name": "tooltip", "type": { "$type": "str" }, "optionality": { "$type": "optional" }, "annotations": """
+                              + block
+                              + " }"
+                          )
+                      ))
+                      (DecodeCode.NotAdmitted, fieldPath [ PathSegment.Key "annotations"; PathSegment.Key name ])
+                      (sprintf "'%s' is not admitted" name))
+
+          testCase "a new kind may carry its doc" (fun _ ->
+              let p =
+                  parseOrFail (
+                      completeJson
+                          """{ "op": "addKind", "kind": { "tag": "Hint", "annotations": { "doc": "A hint." }, "fields": [] } }"""
+                          candidateWire
+                  )
+
+              match p.Delta with
+              | [ AddKind k ] -> Expect.equal k.Annotations.Doc (Some "A hint.") "the kind's doc is read"
+              | other -> failtestf "one kind addition: %A" other) ]

@@ -39,6 +39,7 @@ open Expecto
 open Microsoft.FSharp.Reflection
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // The value normal form.
@@ -610,7 +611,7 @@ let private report (name: string) (findings: string list) =
 // The drift guards for the two compiled fixtures this phase adds.
 // ---------------------------------------------------------------------------
 
-let private driftGuard (rel: string) (modName: string) (sup: Gen.GenSupport) (idl: Idl) =
+let private driftGuard (rel: string) (modName: string) (sup: GenSupport) (idl: Idl) =
     let path = Snapshots.repoFile rel
 
     if not (File.Exists path) then
@@ -636,7 +637,7 @@ let compiledFixtures =
               driftGuard
                   "tests/Fuaran.Core.Tests/ScoreGenerated.fs"
                   "Fuaran.Core.Tests.ScoreGenerated"
-                  Gen.GenSupport.Empty
+                  GenSupport.Empty
                   ScoreDomainSpike.scoreIdl)
 
           testCase "drift guard: the generator still reproduces the committed ReferenceGenerated.fs" (fun _ ->
@@ -1148,7 +1149,7 @@ let private hostileKey (wire: string) =
     [ ""; "a\"b"; "\\"; "\u0000"; "10"; "9"; "0" ]
     |> List.exists (fun k -> wire.Contains(Canonical.write Rendering.CrossHost (JStr k) + ":"))
 
-let private vectorModels () : FStarTarget.VectorModel list =
+let private vectorModels () : VectorModel list =
     let wires = certificationWires ()
 
     [ "DocVocabulary", "D", "document"
@@ -1157,7 +1158,7 @@ let private vectorModels () : FStarTarget.VectorModel list =
     |> List.map (fun (model, prefix, name) ->
         let _, idl, ws = wires |> List.find (fun (n, _, _) -> n = name)
 
-        let one (w: string) : FStarTarget.VectorModel =
+        let one (w: string) : VectorModel =
             { Model = model
               Prefix = prefix
               Idl = idl

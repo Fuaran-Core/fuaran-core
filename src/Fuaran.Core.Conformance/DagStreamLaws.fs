@@ -117,7 +117,7 @@ module internal DagStreamLaws =
             // answers the merge node's id for everything makes the next append collide with it.
             let colliding: HashFn = fun _ _ -> m
 
-            match Dag.append colliding sw (Human "collider") tnode.Op m dag with
+            match Dag.append (OpStream.canonical colliding sw) (Human "collider") tnode.Op m dag with
             | Error(DagAppendFault.ContentIdCollision id) when id = m -> collision.Saw()
             | other ->
                 collision.Check(false, fun () -> at (sprintf "an append whose id collides with %s gave %A" m other))
@@ -128,7 +128,10 @@ module internal DagStreamLaws =
             | Ok headState ->
                 let probe = rng.Draw gen.Op
 
-                match sw.Apply probe headState, Dag.appendChecked hashFn sw (Human "probe") probe headState m dag with
+                match
+                    sw.Apply probe headState,
+                    Dag.appendChecked (OpStream.canonical hashFn sw) (Human "probe") probe headState m dag
+                with
                 | Error _, Error(DagAppendRejection.Domain _)
                 | Ok _, Ok _ -> rejectedOp.Saw()
                 | applied, checkedAppend ->
@@ -214,20 +217,20 @@ module internal DagStreamLaws =
                 | _ -> ()
 
             let appendOnto p =
-                fun st -> Dag.appendVerified hashFn sw s0 verifier probe st p dag
+                fun st -> Dag.appendVerified (OpStream.canonical hashFn sw) s0 verifier probe st p dag
 
             for p in [ ""; g; a; b; m ] do
                 agrees
                     (sprintf "an append onto %s" (if p = "" then "genesis" else p))
                     (replayOf p)
                     (appendOnto p)
-                    (fun st -> Dag.appendChecked hashFn sw verifier probe st p dag)
+                    (fun st -> Dag.appendChecked (OpStream.canonical hashFn sw) verifier probe st p dag)
 
             agrees
                 "a merge of the fork heads"
                 unionOfHeads
-                (fun st -> Dag.mergeVerified hashFn sw s0 verifier probe st a b dag)
-                (fun st -> Dag.mergeChecked hashFn sw verifier probe st a b dag)
+                (fun st -> Dag.mergeVerified (OpStream.canonical hashFn sw) s0 verifier probe st a b dag)
+                (fun st -> Dag.mergeChecked (OpStream.canonical hashFn sw) verifier probe st a b dag)
 
             refuses "an append onto a fork head holding its sibling's state" (replayOf b) (replayOf a) (appendOnto a)
             refuses "an append onto a fork head holding its sibling's state" (replayOf a) (replayOf b) (appendOnto b)
@@ -242,7 +245,7 @@ module internal DagStreamLaws =
 
             for side in [ a; b ] do
                 refuses "a merge handed one head's state" (replayOf side) unionOfHeads (fun st ->
-                    Dag.mergeVerified hashFn sw s0 verifier probe st a b dag))
+                    Dag.mergeVerified (OpStream.canonical hashFn sw) s0 verifier probe st a b dag))
 
         LawKit.results
             [ verify
@@ -260,7 +263,7 @@ module internal DagStreamLaws =
     type private ReachAsker<'State, 'Rej> =
         { Ancestors: string -> Set<string>
           Reaches: string -> string -> bool
-          Order: string -> Result<string list, string>
+          Order: string -> Result<string list, Dag.Cyclic>
           MergeBase: string -> string -> string option
           Between: string -> string -> string list
           Replay: string -> Result<'State, Dag.ReplayFault<'Rej>> }
@@ -411,10 +414,10 @@ module internal DagStreamLaws =
 
             let note (built: Result<Dag.IndexedAppend<'Op>, DagAppendFault>) =
                 match built with
-                | Ok x -> Some(x.Id, x.Reach)
+                | Ok x -> Some(x.Written.Id, x.Reach)
                 | Error _ -> None // a content-id collision under the caller's hash: the step is skipped
 
-            match note (Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) "" reach) with
+            match note (Dag.appendIndexed (OpStream.canonical hashFn sw) actor (rng.Draw gen.Op) "" reach) with
             | Some(id, r) ->
                 reach <- r
                 nodes <- [ id ]
@@ -430,13 +433,19 @@ module internal DagStreamLaws =
 
                 let step =
                     if List.isEmpty nodes || kind = 9 then
-                        Dag.appendIndexed hashFn sw actor op "" reach
+                        Dag.appendIndexed (OpStream.canonical hashFn sw) actor op "" reach
                     elif kind >= 5 && kind <= 7 && List.length heads >= 2 then
                         let l = rng.Choose heads
                         let r = rng.Choose(heads |> List.filter (fun h -> h <> l))
-                        Dag.mergeIndexed hashFn sw actor op l r reach
+                        Dag.mergeIndexed (OpStream.canonical hashFn sw) actor op l r reach
                     elif kind = 8 then
-                        Dag.mergeIndexed hashFn sw actor op (rng.Choose nodes) (rng.Choose nodes) reach
+                        Dag.mergeIndexed
+                            (OpStream.canonical hashFn sw)
+                            actor
+                            op
+                            (rng.Choose nodes)
+                            (rng.Choose nodes)
+                            reach
                     else
                         let onto =
                             if rng.IntBelow 2 = 0 then
@@ -444,7 +453,7 @@ module internal DagStreamLaws =
                             else
                                 rng.Choose nodes
 
-                        Dag.appendIndexed hashFn sw actor op onto reach
+                        Dag.appendIndexed (OpStream.canonical hashFn sw) actor op onto reach
 
                 match note step with
                 | Some(id, r) ->
@@ -557,18 +566,21 @@ module internal DagStreamLaws =
                 let minted: HashFn = fun _ _ -> "cyc-missing"
 
                 let extensions =
-                    [ Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) "cyc-z" forgedReach
-                      Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) last forgedReach
-                      Dag.appendIndexed minted sw actor (rng.Draw gen.Op) last forgedReach ]
+                    [ Dag.appendIndexed (OpStream.canonical hashFn sw) actor (rng.Draw gen.Op) "cyc-z" forgedReach
+                      Dag.appendIndexed (OpStream.canonical hashFn sw) actor (rng.Draw gen.Op) last forgedReach
+                      Dag.appendIndexed (OpStream.canonical minted sw) actor (rng.Draw gen.Op) last forgedReach ]
 
                 for e in extensions do
                     match e with
                     | Ok extended ->
                         let ids' =
                             forgedIds
-                            @ (Dag.heads extended.Dag |> List.filter (fun h -> not (List.contains h forgedIds)))
+                            @ (Dag.heads extended.Written.Dag
+                               |> List.filter (fun h -> not (List.contains h forgedIds)))
 
-                        match anyMismatch (indexed extended.Reach) (indexed (Dag.Reach.ofDag extended.Dag)) ids' with
+                        match
+                            anyMismatch (indexed extended.Reach) (indexed (Dag.Reach.ofDag extended.Written.Dag)) ids'
+                        with
                         | None -> extensionCell.Saw()
                         | Some m -> extensionCell.Check(false, fun () -> at ("extended cyclic load, " + m))
                     | Error _ -> ()) // a collision under the caller's hash, as in the growth above
@@ -684,24 +696,25 @@ module internal DagStreamLaws =
         let asFault (r: Result<'State, Dag.ReplayFault<'Rej>>) : Result<'State, Dag.CheckpointFault<'Rej>> =
             r |> Result.mapError Dag.CheckpointFault.Replay
 
-        let rendered (r: Result<Dag.Checkpoint<'State> * Dag.T<'Op>, Dag.CheckpointFault<'Rej>>) =
-            r |> Result.map (fun (cp, d) -> cp, d.Nodes |> Map.toList |> List.map fst)
+        let rendered (r: Result<Dag.Compaction<'State, 'Op>, Dag.CheckpointFault<'Rej>>) =
+            r
+            |> Result.map (fun c -> c.Checkpoint, c.Dag.Nodes |> Map.toList |> List.map fst)
 
         LawKit.run runner iterations (fun rng i at ->
             // ---- grow a DAG on a kit-drawn shape ----
             let mutable dag: Dag.T<'Op> = Dag.empty
             let mutable nodes: string list = []
 
-            let add (built: Result<string * Dag.T<'Op>, DagAppendFault>) =
+            let add (built: Result<Dag.Written<'Op>, DagAppendFault>) =
                 match built with
-                | Ok(id, d) ->
+                | Ok { Id = id; Dag = d } ->
                     dag <- d
 
                     if not (List.contains id nodes) then
                         nodes <- nodes @ [ id ]
                 | Error _ -> () // a content-id collision under the caller's hash: the step is skipped
 
-            add (Dag.append hashFn sw actor (rng.Draw gen.Op) "" dag)
+            add (Dag.append (OpStream.canonical hashFn sw) actor (rng.Draw gen.Op) "" dag)
 
             for _ in 1 .. 2 + rng.IntBelow 11 do
                 let heads = Dag.heads dag
@@ -709,13 +722,13 @@ module internal DagStreamLaws =
                 let kind = rng.IntBelow 12
 
                 if List.isEmpty nodes || kind = 11 then
-                    add (Dag.append hashFn sw actor op "" dag)
+                    add (Dag.append (OpStream.canonical hashFn sw) actor op "" dag)
                 elif kind >= 6 && kind <= 9 && List.length heads >= 2 then
                     let l = rng.Choose heads
                     let r = rng.Choose(heads |> List.filter (fun h -> h <> l))
-                    add (Dag.merge hashFn sw actor op l r dag)
+                    add (Dag.merge (OpStream.canonical hashFn sw) actor op l r dag)
                 elif kind = 10 then
-                    add (Dag.merge hashFn sw actor op (rng.Choose nodes) (rng.Choose nodes) dag)
+                    add (Dag.merge (OpStream.canonical hashFn sw) actor op (rng.Choose nodes) (rng.Choose nodes) dag)
                 else
                     let onto =
                         if rng.IntBelow 2 = 0 then
@@ -723,7 +736,7 @@ module internal DagStreamLaws =
                         else
                             rng.Choose nodes
 
-                    add (Dag.append hashFn sw actor op onto dag)
+                    add (Dag.append (OpStream.canonical hashFn sw) actor op onto dag)
 
             let full = dag
             let reach = Dag.Reach.ofDag full
@@ -878,7 +891,7 @@ module internal DagStreamLaws =
                             false,
                             fun () -> at (sprintf "compactAt %s refused %A after checkpointAt took it" c other)
                         )
-                    | Ok(cp2, small) ->
+                    | Ok { Checkpoint = cp2; Dag = small } ->
                         let sameNode (id: string) (n: DagNode<'Op>) =
                             match Map.tryFind id full.Nodes with
                             | Some m -> m.Parents = n.Parents && m.Actor = n.Actor && sw.Encode m.Op = sw.Encode n.Op
@@ -974,8 +987,11 @@ module internal DagStreamLaws =
 
                         let op = rng.Draw gen.Op
 
-                        match Dag.append hashFn sw actor op c small, Dag.append hashFn sw actor op c full with
-                        | Ok(id1, small'), Ok(id2, full') ->
+                        match
+                            Dag.append (OpStream.canonical hashFn sw) actor op c small,
+                            Dag.append (OpStream.canonical hashFn sw) actor op c full
+                        with
+                        | Ok { Id = id1; Dag = small' }, Ok { Id = id2; Dag = full' } ->
                             let onSmall = Dag.replayFrom sw cp2 small' id1
                             let onFull = asFault (Dag.tryReplayTo sw gen.State0 full' id2)
 
@@ -1003,8 +1019,8 @@ module internal DagStreamLaws =
                                         sprintf
                                             "an append onto %s: the compacted DAG gave %A, the full one %A"
                                             c
-                                            (Result.map fst a)
-                                            (Result.map fst b)
+                                            (Result.map (fun (w: Dag.Written<'Op>) -> w.Id) a)
+                                            (Result.map (fun (w: Dag.Written<'Op>) -> w.Id) b)
                                     )
                             )
 
@@ -1019,7 +1035,7 @@ module internal DagStreamLaws =
                             )
 
                         // ---- the sidecar beside the lane ----
-                        let lane, _ = Dag.toJsonlWithCheckpoints sw.Encode stateEncode small [ cp2 ]
+                        let lane = (Dag.toJsonlWithCheckpoints sw.Encode stateEncode small [ cp2 ]).Lane
 
                         laneCell.Check(
                             (lane = Dag.toJsonl sw.Encode small),
@@ -1152,8 +1168,10 @@ module internal DagStreamLaws =
             let actorOf (lane: string) = Human lane
 
             let write (lane: string) (parents: string list) =
-                match Dag.appendOnLane hashFn sw (actorOf lane) (rng.Draw gen.Op) parents lane store with
-                | Ok(id, s) ->
+                match
+                    Dag.appendOnLane (OpStream.canonical hashFn sw) (actorOf lane) (rng.Draw gen.Op) parents lane store
+                with
+                | Ok { Written = { Id = id }; Loaded = s } ->
                     store <- s
                     tips <- Map.add lane id tips
                 | Error _ -> () // a content-id collision under the caller's hash: the step is skipped
@@ -1197,7 +1215,7 @@ module internal DagStreamLaws =
             let reloaded = Dag.loadLanes sw texts
 
             let concatenated =
-                Dag.fromJsonl sw (texts |> List.map snd |> List.filter (fun t -> t <> "") |> String.concat "\n")
+                Dag.fromJsonl sw (texts |> List.map _.Text |> List.filter (fun t -> t <> "") |> String.concat "\n")
                 |> Result.map (Dag.toJsonl sw.Encode)
 
             loadCell.Check(
@@ -1221,14 +1239,14 @@ module internal DagStreamLaws =
                         render l = render store
                         && Dag.totalOrder l = order0
                         && Dag.replayAll sw state0 l = replay0,
-                        fun () -> at (sprintf "lane files in the order %A" (shuffled |> List.map fst))
+                        fun () -> at (sprintf "lane files in the order %A" (shuffled |> List.map _.Lane))
                     )
                 | Error f -> permCell.Check(false, fun () -> at (sprintf "a shuffled load refused: %A" f))
 
             // ---- a linear extension at every key ----
             let drawn = ids |> List.map (fun id -> id, rng.IntBelow 4) |> Map.ofList
 
-            let isExtension (order: Result<string list, Dag.TotalOrderFault>) =
+            let isExtension (order: Result<string list, Dag.Cyclic>) =
                 match order with
                 | Error _ -> false
                 | Ok o ->
@@ -1279,13 +1297,17 @@ module internal DagStreamLaws =
 
                 match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode tipNode.Op) with
                 | Some op ->
-                    match Dag.appendOnLane hashFn sw tipNode.Actor op tipNode.Parents lane store with
-                    | Ok(sibling, forkedStore) when sibling <> tip && not (dag.Nodes.ContainsKey sibling) ->
+                    match
+                        Dag.appendOnLane (OpStream.canonical hashFn sw) tipNode.Actor op tipNode.Parents lane store
+                    with
+                    | Ok { Written = { Id = sibling }
+                           Loaded = forkedStore } when sibling <> tip && not (dag.Nodes.ContainsKey sibling) ->
                         forked <- forked + 1
                         let reported = Dag.laneCollisions forkedStore
 
-                        let expected =
-                            [ lane, List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) [ tip; sibling ] ]
+                        let expected: Dag.LaneCollision list =
+                            [ { Lane = lane
+                                Heads = List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) [ tip; sibling ] } ]
 
                         collisionCell.Check(
                             (reported = expected),
@@ -1297,7 +1319,10 @@ module internal DagStreamLaws =
 
                 // a second lane file holding a node of this lane: identically, and with its op changed
                 let held = tipNode
-                let copy = "zz-copy", Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, held ]))
+
+                let copy: Dag.LaneText =
+                    { Lane = "zz-copy"
+                      Text = Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, held ])) }
 
                 collisionCell.Check(
                     renderLoad (Dag.loadLanes sw (texts @ [ copy ])) = Ok(render store),
@@ -1308,8 +1333,9 @@ module internal DagStreamLaws =
                 | Some op ->
                     collided <- collided + 1
 
-                    let forged =
-                        "zz-forged", Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, { held with Op = op } ]))
+                    let forged: Dag.LaneText =
+                        { Lane = "zz-forged"
+                          Text = Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, { held with Op = op } ])) }
 
                     let expected =
                         Error(
@@ -1341,9 +1367,10 @@ module internal DagStreamLaws =
                 let actor = Human "merge"
 
                 match
-                    Dag.mergeAll hashFn sw actor op heads dag, Dag.appendOn hashFn sw actor op (rng.Shuffle heads) dag
+                    Dag.mergeAll (OpStream.canonical hashFn sw) actor op heads dag,
+                    Dag.appendOn (OpStream.canonical hashFn sw) actor op (rng.Shuffle heads) dag
                 with
-                | Ok(m, dm), Ok(m', _) ->
+                | Ok { Id = m; Dag = dm }, Ok { Id = m' } ->
                     let hs = rng.Shuffle heads
 
                     let folded =
@@ -1351,8 +1378,8 @@ module internal DagStreamLaws =
                         ||> List.fold (fun acc h ->
                             acc
                             |> Result.bind (fun (left, d, merges) ->
-                                Dag.merge hashFn sw actor op left h d
-                                |> Result.map (fun (id, d') -> id, d', id :: merges)))
+                                Dag.merge (OpStream.canonical hashFn sw) actor op left h d
+                                |> Result.map (fun w -> w.Id, w.Dag, w.Id :: merges)))
 
                     match folded with
                     | Ok(last, df, merges) ->
@@ -1398,13 +1425,13 @@ module internal DagStreamLaws =
 
             // ---- rehash round trip ----
             match Dag.rehash (OpStream.canonical hashFn sw) (OpStream.canonical OpStream.sha256Hash sw) dag with
-            | Ok(there, ids1) ->
+            | Ok { Dag = there; Ids = ids1 } ->
                 let back =
                     Dag.rehash (OpStream.canonical OpStream.sha256Hash sw) (OpStream.canonical hashFn sw) there
 
                 let roundTrip =
                     match back with
-                    | Ok(d, ids2) ->
+                    | Ok { Dag = d; Ids = ids2 } ->
                         Dag.toJsonl sw.Encode d = Dag.toJsonl sw.Encode dag
                         && ids |> List.forall (fun id -> ids2[ids1[id]] = id)
                     | Error _ -> false
@@ -1413,17 +1440,20 @@ module internal DagStreamLaws =
                     Dag.verifyDag (OpStream.canonical OpStream.sha256Hash sw) there && roundTrip,
                     fun () ->
                         at (
-                            sprintf
-                                "rehash round trip: %A"
-                                (back |> Result.map fst |> Result.map (Dag.toJsonl sw.Encode))
+                            sprintf "rehash round trip: %A" (back |> Result.map (fun r -> Dag.toJsonl sw.Encode r.Dag))
                         )
                 )
             | Error f -> rehashCell.Check(false, fun () -> at (sprintf "a verified store refused: %A" f))
 
             // ---- verifyLanes names the lane ----
             verifyCell.Check(
-                Dag.verifyLanes hashFn sw store = Ok(),
-                fun () -> at (sprintf "the drawn store does not verify: %A" (Dag.verifyLanes hashFn sw store))
+                Dag.verifyLanes (OpStream.canonical hashFn sw) store = Ok(),
+                fun () ->
+                    at (
+                        sprintf
+                            "the drawn store does not verify: %A"
+                            (Dag.verifyLanes (OpStream.canonical hashFn sw) store)
+                    )
             )
 
             let victim = rng.Choose ids
@@ -1438,11 +1468,17 @@ module internal DagStreamLaws =
                 let lane = store.LaneOf[victim]
 
                 verifyCell.Check(
-                    (match Dag.verifyLanes hashFn sw tampered with
+                    (match Dag.verifyLanes (OpStream.canonical hashFn sw) tampered with
                      | Error b -> b.Lane = lane && b.Break.NodeId = victim
                      | Ok() -> false),
                     fun () ->
-                        at (sprintf "node %s of lane %s changed: %A" victim lane (Dag.verifyLanes hashFn sw tampered))
+                        at (
+                            sprintf
+                                "node %s of lane %s changed: %A"
+                                victim
+                                lane
+                                (Dag.verifyLanes (OpStream.canonical hashFn sw) tampered)
+                        )
                 )
 
                 rehashCell.Check(
@@ -1465,7 +1501,8 @@ module internal DagStreamLaws =
                 | hs -> List.truncate (1 + rng.IntBelow(List.length hs)) hs
 
             match Dag.prunable reach roots with
-            | Error r -> pruneCell.Check(false, fun () -> at (sprintf "a held root %s was refused" r))
+            | Error(Dag.PruneFault.UnknownRoot r) ->
+                pruneCell.Check(false, fun () -> at (sprintf "a held root %s was refused" r))
             | Ok dropped ->
                 let kept =
                     roots
@@ -1481,7 +1518,7 @@ module internal DagStreamLaws =
                        |> List.forall (fun r ->
                            Dag.tryReplayTo sw state0 pruned r = Dag.tryReplayTo sw state0 dag r
                            && Dag.tryTopoOrder pruned r = Dag.tryTopoOrder dag r)
-                    && Dag.prunable reach [ "absent-root" ] = Error "absent-root",
+                    && Dag.prunable reach [ "absent-root" ] = Error(Dag.PruneFault.UnknownRoot "absent-root"),
                     fun () -> at (sprintf "roots %A dropped %A" roots dropped)
                 ))
 

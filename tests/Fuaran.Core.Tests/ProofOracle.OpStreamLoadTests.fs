@@ -149,6 +149,10 @@ let private pReason (r: JsonlFaultReason) : string =
     | JsonlFaultReason.RepeatedKey path -> "RepeatedKey(" + path + ")"
     | JsonlFaultReason.RawControl path -> "RawControl(" + path + ")"
     | JsonlFaultReason.LoneSurrogate path -> "LoneSurrogate(" + path + ")"
+    | JsonlFaultReason.CheckpointNotAtSeqZero seq -> "CheckpointNotAtSeqZero(" + string seq + ")"
+    | JsonlFaultReason.CheckpointWithoutNode -> "CheckpointWithoutNode"
+    | JsonlFaultReason.CheckpointChainOnly -> "CheckpointChainOnly"
+    | JsonlFaultReason.NotACheckpoint -> "NotACheckpoint"
 
 /// A model path as production renders one (Phase 466): `$`, then each key under the host's quote
 /// of its decoded spelling, or each index.

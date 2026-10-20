@@ -278,10 +278,17 @@ let tests =
           <| fun _ ->
               let sink = testSink "kms-secret"
               // a branch+merge op-DAG with mixed human/agent attribution
-              let g, d1 = Dag.append h sw alice (Inc 5) "" Dag.empty |> Reference.built
-              let b, d2 = Dag.append h sw bot (Inc 3) g d1 |> Reference.built
-              let c, d3 = Dag.append h sw alice (Inc 4) g d2 |> Reference.built
-              let m, dag = Dag.merge h sw bot (Inc 0) b c d3 |> Reference.built
+              let g, d1 =
+                  Dag.append (OpStream.canonical h sw) alice (Inc 5) "" Dag.empty
+                  |> Reference.built
+
+              let b, d2 = Dag.append (OpStream.canonical h sw) bot (Inc 3) g d1 |> Reference.built
+
+              let c, d3 =
+                  Dag.append (OpStream.canonical h sw) alice (Inc 4) g d2 |> Reference.built
+
+              let m, dag =
+                  Dag.merge (OpStream.canonical h sw) bot (Inc 0) b c d3 |> Reference.built
 
               // the head is a content hash; attest it
               let att = sink.Sign m |> Option.get

@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.Program
 open System
 open System.IO
 open Expecto
+open Fuaran.Core.Idl.Codegen.Types
 
 /// Phase 400 - the skip report. Expecto already counts the legs a missing prerequisite ignores; this
 /// names them, one family (the test list's first name segment, which Expecto joins with a dot) at a time, so a green run says how much
@@ -114,8 +115,8 @@ let main argv =
         let manifest =
             rest |> List.tryHead |> Option.filter System.IO.File.Exists |> Option.map read
 
-        match Fuaran.Core.Idl.Diff.run manifest (read oldPath) (read newPath) with
-        | Ok text ->
+        match Fuaran.Core.Idl.Diff.run manifest (read oldPath, None) (read newPath, None) with
+        | Ok(text, _) ->
             printf "%s" text
             0
         | Error e ->
@@ -132,13 +133,7 @@ let main argv =
 
         // Rewrite the committed generated F# modules (their encoders embed the
         // omit-when-default emission, so they change with the schema).
-        let writeGen
-            (rel: string)
-            (modName: string)
-            (sup: Fuaran.Core.Idl.Gen.GenSupport)
-            (idl: Fuaran.Core.Idl.Idl)
-            (kinds: string list)
-            =
+        let writeGen (rel: string) (modName: string) (sup: GenSupport) (idl: Fuaran.Core.Idl.Idl) (kinds: string list) =
             match Fuaran.Core.Idl.Gen.fsharpModuleWith sup modName idl kinds with
             | Ok src ->
                 let p = Snapshots.repoFile rel
@@ -149,7 +144,7 @@ let main argv =
         writeGen
             "tests/Fuaran.Core.Tests/MiniGenerated.fs"
             "Fuaran.Core.Tests.MiniGenerated"
-            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            GenSupport.Empty
             Fuaran.Core.Tests.MiniIdl.miniIdl
             [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
 
@@ -159,7 +154,7 @@ let main argv =
         writeGen
             "tests/Fuaran.Core.Tests/DocGenerated.fs"
             "Fuaran.Core.Tests.DocGenerated"
-            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            GenSupport.Empty
             SecondDomainSpike.docIdl
             (SecondDomainSpike.docIdl.Kinds |> List.map _.Tag)
 
@@ -171,7 +166,7 @@ let main argv =
         writeGen
             "tests/Fuaran.Core.Tests/ScoreGenerated.fs"
             "Fuaran.Core.Tests.ScoreGenerated"
-            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            GenSupport.Empty
             ScoreDomainSpike.scoreIdl
             (ScoreDomainSpike.scoreIdl.Kinds |> List.map _.Tag)
 
@@ -189,7 +184,7 @@ let main argv =
         writeGen
             DecodeVectorsIdl.generatedFile
             DecodeVectorsIdl.moduleName
-            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            GenSupport.Empty
             decodeIdl
             (decodeIdl.Kinds |> List.map _.Tag)
 
@@ -198,7 +193,7 @@ let main argv =
         writeGen
             RefusalCornersIdl.generatedFile
             RefusalCornersIdl.moduleName
-            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            GenSupport.Empty
             RefusalCornersIdl.idl
             (RefusalCornersIdl.idl.Kinds |> List.map _.Tag)
 

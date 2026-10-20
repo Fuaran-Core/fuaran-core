@@ -25,6 +25,7 @@ open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Tests.DeriveGenerated
 
 let private idw: IdWitness<string> =
@@ -109,16 +110,16 @@ let rec private handRules (r: Rule) : Rule list =
        | Rule.Equals _ -> []
 
 /// The in-repository vocabularies the generator emits, under the support each is emitted with.
-let private vocabularies () : (string * Gen.GenSupport * Idl) list =
+let private vocabularies () : (string * GenSupport * Idl) list =
     let decodeIdl, _, _ = DecodeVectorsIdl.current ()
 
-    [ "mini", Gen.GenSupport.Empty, MiniIdl.miniIdl
-      "doc", Gen.GenSupport.Empty, SecondDomainSpike.docIdl
-      "score", Gen.GenSupport.Empty, ScoreDomainSpike.scoreIdl
+    [ "mini", GenSupport.Empty, MiniIdl.miniIdl
+      "doc", GenSupport.Empty, SecondDomainSpike.docIdl
+      "score", GenSupport.Empty, ScoreDomainSpike.scoreIdl
       "reference", ReferenceIdl.support.Support, ReferenceIdl.refIdl
-      "decode-vectors", Gen.GenSupport.Empty, decodeIdl
-      "refusal-corners", Gen.GenSupport.Empty, RefusalCornersIdl.idl
-      "derive", Gen.GenSupport.Empty, DeriveIdl.deriveIdl ]
+      "decode-vectors", GenSupport.Empty, decodeIdl
+      "refusal-corners", GenSupport.Empty, RefusalCornersIdl.idl
+      "derive", GenSupport.Empty, DeriveIdl.deriveIdl ]
 
 let private tags (idl: Idl) = idl.Kinds |> List.map _.Tag
 
@@ -128,8 +129,8 @@ let private refusedAs (r: Result<string, CodegenError>) : string =
     | Error e -> failtestf "expected UnsupportedConstruct, got %A" e
     | Ok _ -> failtest "expected a refusal, got a module"
 
-let private derive (ds: Gen.Derivation list) (idl: Idl) =
-    Gen.fsharpModuleDerived Gen.GenSupport.Empty ds "Probe" idl (tags idl)
+let private derive (ds: Derivation list) (idl: Idl) =
+    Gen.fsharpModuleDerived GenSupport.Empty ds "Probe" idl (tags idl)
 
 /// The derivations vocabulary with a handler whose signature takes the message — contravariant.
 let private contravariantIdl =
@@ -187,12 +188,10 @@ let tests =
 
                 testCase "a derived member is appended, never interleaved: the plain module is a prefix" (fun _ ->
                     let plain =
-                        Gen.fsharpModuleWith Gen.GenSupport.Empty "M" DeriveIdl.deriveIdl (tags DeriveIdl.deriveIdl)
+                        Gen.fsharpModuleWith GenSupport.Empty "M" DeriveIdl.deriveIdl (tags DeriveIdl.deriveIdl)
 
                     let derived =
-                        derive
-                            [ Gen.Derivation.VocabularyConstants; Gen.Derivation.DefaultRecords ]
-                            DeriveIdl.deriveIdl
+                        derive [ Derivation.VocabularyConstants; Derivation.DefaultRecords ] DeriveIdl.deriveIdl
 
                     match plain, derived with
                     | Ok p, Ok d ->
@@ -405,43 +404,42 @@ let tests =
           testList
               "refusals and reach"
               [ testCase "a fold over a union that does not recurse is refused" (fun _ ->
-                    let c = refusedAs (derive [ Gen.Derivation.Fold "Measure" ] DeriveIdl.deriveIdl)
+                    let c = refusedAs (derive [ Derivation.Fold "Measure" ] DeriveIdl.deriveIdl)
                     Expect.stringContains c "Measure" "names the union")
 
                 testCase "a projection no case carries is refused" (fun _ ->
                     let c =
-                        refusedAs (derive [ Gen.Derivation.Projections("Trigger", [ "colour" ]) ] DeriveIdl.deriveIdl)
+                        refusedAs (derive [ Derivation.Projections("Trigger", [ "colour" ]) ] DeriveIdl.deriveIdl)
 
                     Expect.stringContains c "colour" "names the field")
 
                 testCase "a projection whose cases disagree on its type is refused" (fun _ ->
                     let c =
-                        refusedAs (derive [ Gen.Derivation.Projections("Trigger", [ "fire" ]) ] DeriveIdl.deriveIdl)
+                        refusedAs (derive [ Derivation.Projections("Trigger", [ "fire" ]) ] DeriveIdl.deriveIdl)
 
                     Expect.stringContains c "different types" "says why")
 
                 testCase "a slot enumerator over an undeclared type is refused" (fun _ ->
-                    let c = refusedAs (derive [ Gen.Derivation.SlotsOf "Nothing" ] DeriveIdl.deriveIdl)
+                    let c = refusedAs (derive [ Derivation.SlotsOf "Nothing" ] DeriveIdl.deriveIdl)
                     Expect.stringContains c "Nothing" "names the type")
 
                 testCase "a message map over a vocabulary with no message parameter is refused" (fun _ ->
-                    refusedAs (derive [ Gen.Derivation.MapMsg ] ScoreDomainSpike.scoreIdl) |> ignore)
+                    refusedAs (derive [ Derivation.MapMsg ] ScoreDomainSpike.scoreIdl) |> ignore)
 
                 testCase "a message map through a contravariant signature is refused" (fun _ ->
-                    let c = refusedAs (derive [ Gen.Derivation.MapMsg ] contravariantIdl)
+                    let c = refusedAs (derive [ Derivation.MapMsg ] contravariantIdl)
                     Expect.stringContains c "'Msg -> string" "names the signature")
 
                 testCase
                     "every derivation but the message map is expressible for the score and document vocabularies"
                     (fun _ ->
                         let common =
-                            [ Gen.Derivation.StructuralAccess
-                              Gen.Derivation.KeyedPositions
-                              Gen.Derivation.VocabularyConstants ]
+                            [ Derivation.StructuralAccess
+                              Derivation.KeyedPositions
+                              Derivation.VocabularyConstants ]
 
                         for idl, extra in
-                            [ ScoreDomainSpike.scoreIdl,
-                              [ Gen.Derivation.SlotsOf "Duration"; Gen.Derivation.DefaultRecords ]
+                            [ ScoreDomainSpike.scoreIdl, [ Derivation.SlotsOf "Duration"; Derivation.DefaultRecords ]
                               SecondDomainSpike.docIdl, [] ] do
                             match derive (common @ extra) idl with
                             | Ok _ -> ()
@@ -523,7 +521,7 @@ let lineMap (lines: string list) : Map<string, string> =
         l.Substring(0, i), l.Substring(i + 1))
     |> Map.ofList
 
-let private tsDerive (ds: Gen.Derivation list) (idl: Idl) =
+let private tsDerive (ds: Derivation list) (idl: Idl) =
     Gen.typescriptModuleDerived ds idl (tags idl)
 
 /// A union value's case name.
@@ -679,7 +677,7 @@ let typescriptTests =
 
           testCase "a derived member is appended, never interleaved: the plain module is a prefix" (fun _ ->
               let cases =
-                  [ for name, _, idl in vocabularies () -> name, [ Gen.Derivation.SpecDecoders ], idl ]
+                  [ for name, _, idl in vocabularies () -> name, [ Derivation.SpecDecoders ], idl ]
                   @ [ "derive (every request)", DeriveIdl.derivations, DeriveIdl.deriveIdl ]
 
               for name, ds, idl in cases do
@@ -693,29 +691,25 @@ let typescriptTests =
 
           testCase "a request is admitted, or refused with the same typed error, exactly as on the F# path" (fun _ ->
               let common =
-                  [ Gen.Derivation.StructuralAccess
-                    Gen.Derivation.KeyedPositions
-                    Gen.Derivation.VocabularyConstants ]
+                  [ Derivation.StructuralAccess
+                    Derivation.KeyedPositions
+                    Derivation.VocabularyConstants ]
 
               let cases =
-                  [ "fold, not recursive", [ Gen.Derivation.Fold "Measure" ], DeriveIdl.deriveIdl
-                    "fold, undeclared", [ Gen.Derivation.Fold "Nothing" ], DeriveIdl.deriveIdl
-                    "projection, no carrier",
-                    [ Gen.Derivation.Projections("Trigger", [ "colour" ]) ],
-                    DeriveIdl.deriveIdl
-                    "projection, types differ",
-                    [ Gen.Derivation.Projections("Trigger", [ "fire" ]) ],
-                    DeriveIdl.deriveIdl
+                  [ "fold, not recursive", [ Derivation.Fold "Measure" ], DeriveIdl.deriveIdl
+                    "fold, undeclared", [ Derivation.Fold "Nothing" ], DeriveIdl.deriveIdl
+                    "projection, no carrier", [ Derivation.Projections("Trigger", [ "colour" ]) ], DeriveIdl.deriveIdl
+                    "projection, types differ", [ Derivation.Projections("Trigger", [ "fire" ]) ], DeriveIdl.deriveIdl
                     "fold beside a projection named fold",
-                    [ Gen.Derivation.Fold "Rule"; Gen.Derivation.Projections("Rule", [ "fold" ]) ],
+                    [ Derivation.Fold "Rule"; Derivation.Projections("Rule", [ "fold" ]) ],
                     DeriveIdl.deriveIdl
-                    "slots, undeclared", [ Gen.Derivation.SlotsOf "Nothing" ], DeriveIdl.deriveIdl
-                    "slots, unheld", [ Gen.Derivation.SlotsOf "Guard" ], DeriveIdl.deriveIdl
-                    "message map, no parameter", [ Gen.Derivation.MapMsg ], ScoreDomainSpike.scoreIdl
-                    "message map, contravariant", [ Gen.Derivation.MapMsg ], contravariantIdl
+                    "slots, undeclared", [ Derivation.SlotsOf "Nothing" ], DeriveIdl.deriveIdl
+                    "slots, unheld", [ Derivation.SlotsOf "Guard" ], DeriveIdl.deriveIdl
+                    "message map, no parameter", [ Derivation.MapMsg ], ScoreDomainSpike.scoreIdl
+                    "message map, contravariant", [ Derivation.MapMsg ], contravariantIdl
                     "every request", DeriveIdl.derivations, DeriveIdl.deriveIdl
                     "score",
-                    common @ [ Gen.Derivation.SlotsOf "Duration"; Gen.Derivation.DefaultRecords ],
+                    common @ [ Derivation.SlotsOf "Duration"; Derivation.DefaultRecords ],
                     ScoreDomainSpike.scoreIdl
                     "document", common, SecondDomainSpike.docIdl ]
 
@@ -757,7 +751,7 @@ let typescriptTests =
                   Expect.equal actual.Count expected.Count "no extra answers")
 
           testCase "the message map has no TypeScript counterpart, and emits nothing" (fun _ ->
-              match tsDerive [] DeriveIdl.deriveIdl, tsDerive [ Gen.Derivation.MapMsg ] DeriveIdl.deriveIdl with
+              match tsDerive [] DeriveIdl.deriveIdl, tsDerive [ Derivation.MapMsg ] DeriveIdl.deriveIdl with
               | Ok plain, Ok mapped -> Expect.equal mapped plain "an admitted MapMsg adds no member"
               | p, m -> failtestf "plain %A, mapped %A" p m) ]
 
@@ -768,7 +762,7 @@ let typescriptTests =
 // and a typed consumer of every derived member checks against them.
 // ---------------------------------------------------------------------------
 
-let private tsDeclare (ds: Gen.Derivation list) (idl: Idl) =
+let private tsDeclare (ds: Derivation list) (idl: Idl) =
     Gen.typescriptDeclarationsDerived ds idl (tags idl)
 
 /// Every name the module's `export { … }` statements name, as a consumer imports it (`U$ as U`
@@ -799,14 +793,14 @@ let private declaredNames (declarations: string) : string list =
 /// Every request a vocabulary could be asked for: each general request, a `SlotsOf` per declared
 /// type, a `Fold` and a projection of every field per union, singly — the admitted ones are what
 /// the agreement test covers, and refusal parity covers the rest.
-let private candidateRequests (idl: Idl) : Gen.Derivation list list =
+let private candidateRequests (idl: Idl) : Derivation list list =
     let general =
-        [ Gen.Derivation.StructuralAccess
-          Gen.Derivation.KeyedPositions
-          Gen.Derivation.MapMsg
-          Gen.Derivation.DefaultRecords
-          Gen.Derivation.VocabularyConstants
-          Gen.Derivation.SpecDecoders ]
+        [ Derivation.StructuralAccess
+          Derivation.KeyedPositions
+          Derivation.MapMsg
+          Derivation.DefaultRecords
+          Derivation.VocabularyConstants
+          Derivation.SpecDecoders ]
 
     let typeNames =
         (idl.Enums |> List.map _.Name)
@@ -816,11 +810,11 @@ let private candidateRequests (idl: Idl) : Gen.Derivation list list =
     let perUnion =
         idl.Unions
         |> List.collect (fun u ->
-            [ yield Gen.Derivation.Fold u.Name
+            [ yield Derivation.Fold u.Name
               for f in u.Cases |> List.collect _.Fields |> List.map _.Name |> List.distinct do
-                  yield Gen.Derivation.Projections(u.Name, [ f ]) ])
+                  yield Derivation.Projections(u.Name, [ f ]) ])
 
-    (general @ (typeNames |> List.map Gen.Derivation.SlotsOf) @ perUnion
+    (general @ (typeNames |> List.map Derivation.SlotsOf) @ perUnion
      |> List.map List.singleton)
     @ [ general ]
 
@@ -1050,7 +1044,7 @@ let declarationTests =
               | p, d -> failtestf "plain %A, derived %A" p d)
 
           testCase "the message map is not declared, and the header comment says why" (fun _ ->
-              match tsDeclare [ Gen.Derivation.MapMsg ] DeriveIdl.deriveIdl with
+              match tsDeclare [ Derivation.MapMsg ] DeriveIdl.deriveIdl with
               | Ok d ->
                   Expect.isFalse (declaredNames d |> List.contains "mapMsg") "mapMsg is not declared"
                   let header = d.Substring(0, d.IndexOf "\n\n")
@@ -1192,7 +1186,7 @@ module internal Projected =
         "and private mapMsgGateSpec<'Msg, 'Msg2> (f: 'Msg -> 'Msg2) (v: GateSpec<'Msg>) : GateSpec<'Msg2> =\n"
         + "    ({ Body = mapMsg f v.Body; Steps = List.map (mapMsgStep f) v.Steps; Rule = v.Rule; Trigger = mapMsgTrigger f v.Trigger }: GateSpec<'Msg2>)"
 
-    let projection (map: string option) (fields: IdlField list option) : Gen.KindProjection =
+    let projection (map: string option) (fields: IdlField list option) : KindProjection =
         { SpecDecl =
             "GateSpec<'Msg> =\n    { Body: Node<'Msg>\n      Steps: Step<'Msg> list\n      Rule: Rule\n      Trigger: Trigger<'Msg> }"
           Encoder =
@@ -1210,8 +1204,8 @@ module internal Projected =
           MapMsg = map
           RecordFields = fields }
 
-    let supportWith (map: string option) (fields: IdlField list option) : Gen.GenSupport =
-        { Gen.GenSupport.Empty with
+    let supportWith (map: string option) (fields: IdlField list option) : GenSupport =
+        { GenSupport.Empty with
             KindProjections = Map.ofList [ "Gate", projection map fields ] }
 
     /// The projection as a host supplies it in full.
@@ -1219,7 +1213,7 @@ module internal Projected =
 
     let tags = [ "Gate"; "Leaf" ]
 
-    let derive (sup: Gen.GenSupport) (ds: Gen.Derivation list) (idl: Idl) =
+    let derive (sup: GenSupport) (ds: Derivation list) (idl: Idl) =
         Gen.fsharpModuleDerived sup ds "Projected" idl tags
 
     let refusal (r: Result<string, CodegenError>) : string * string =
@@ -1268,10 +1262,10 @@ module internal Projected =
     let script = scriptOf "Projected"
 
     let derivations =
-        [ Gen.Derivation.StructuralAccess
-          Gen.Derivation.KeyedPositions
-          Gen.Derivation.SlotsOf "Rule"
-          Gen.Derivation.MapMsg ]
+        [ Derivation.StructuralAccess
+          Derivation.KeyedPositions
+          Derivation.SlotsOf "Rule"
+          Derivation.MapMsg ]
 
     /// What the compiled module is asked: the walks, the rule slot, and the mapped handler.
     let probe =
@@ -1302,7 +1296,7 @@ let projectedKindTests =
         "Phase 403 - a projected kind under the derivations"
         [ testCase "with its map supplied, MapMsg over a projected kind composes it" (fun _ ->
               let src =
-                  Projected.emitted (Projected.derive Projected.support [ Gen.Derivation.MapMsg ] Projected.idl)
+                  Projected.emitted (Projected.derive Projected.support [ Derivation.MapMsg ] Projected.idl)
 
               Expect.stringContains src Projected.gateMap "the projection's map, verbatim, in the message map's group"
 
@@ -1316,7 +1310,7 @@ let projectedKindTests =
                   Projected.refusal (
                       Projected.derive
                           (Projected.supportWith None (Some Projected.recordFields))
-                          [ Gen.Derivation.MapMsg ]
+                          [ Derivation.MapMsg ]
                           Projected.idl
                   )
 
@@ -1329,9 +1323,7 @@ let projectedKindTests =
 
           testCase "the slot enumerator reads the RECORD's shape: a required member, not the wire's option" (fun _ ->
               let src =
-                  Projected.emitted (
-                      Projected.derive Projected.support [ Gen.Derivation.SlotsOf "Rule" ] Projected.idl
-                  )
+                  Projected.emitted (Projected.derive Projected.support [ Derivation.SlotsOf "Rule" ] Projected.idl)
 
               Expect.stringContains
                   src
@@ -1354,9 +1346,7 @@ let projectedKindTests =
                   "the witness, in the plain module"
 
               Expect.equal
-                  (fst (
-                      Projected.refusal (Projected.derive undeclared [ Gen.Derivation.StructuralAccess ] Projected.idl)
-                  ))
+                  (fst (Projected.refusal (Projected.derive undeclared [ Derivation.StructuralAccess ] Projected.idl)))
                   "the structural children of the projected kind 'Gate'"
                   "the public structural access"
 
@@ -1368,7 +1358,7 @@ let projectedKindTests =
                   "no direct node on the wire: the witness reads nothing of the record"
 
               Expect.equal
-                  (fst (Projected.refusal (Projected.derive undeclared [ Gen.Derivation.KeyedPositions ] keyedOnly)))
+                  (fst (Projected.refusal (Projected.derive undeclared [ Derivation.KeyedPositions ] keyedOnly)))
                   "the keyed node positions of the projected kind 'Gate'"
                   "the keyed walk"
 
@@ -1377,14 +1367,11 @@ let projectedKindTests =
               let nodeFree = without [ "body"; "steps" ]
 
               Expect.isOk
-                  (Projected.derive
-                      undeclared
-                      [ Gen.Derivation.StructuralAccess; Gen.Derivation.KeyedPositions ]
-                      nodeFree)
+                  (Projected.derive undeclared [ Derivation.StructuralAccess; Derivation.KeyedPositions ] nodeFree)
                   "a node-free wire: no node position to read"
 
               Expect.equal
-                  (fst (Projected.refusal (Projected.derive undeclared [ Gen.Derivation.SlotsOf "Rule" ] nodeFree)))
+                  (fst (Projected.refusal (Projected.derive undeclared [ Derivation.SlotsOf "Rule" ] nodeFree)))
                   "a slot enumerator over 'Rule' through the projected kind 'Gate'"
                   "the slot enumerator, always")
 
@@ -1463,11 +1450,11 @@ let projectedKindTests =
               Expect.isFalse (bare.Contains "mapMsg" || bare.Contains "recordFields") "neither key when undeclared")
 
           testCase "the diff sees a change to either member as a support change" (fun _ ->
-              let snap (sup: Gen.GenSupport) =
+              let snap (sup: GenSupport) =
                   match
-                      Diff.snapshotWith
-                          (Artifact.json Projected.idl)
-                          (Some(SupportArtifact.json { Support = sup; HostPrelude = None }))
+                      Diff.parse
+                          (Artifact.render Projected.idl)
+                          (Some(SupportArtifact.render { Support = sup; HostPrelude = None }))
                   with
                   | Ok s -> s.Support
                   | Error e -> failtestf "snapshot: %s" e
@@ -1741,7 +1728,7 @@ let declLaws =
           each "a host projection changes no reach and withdraws only its own kind from wire equality" (fun idl ->
               let plain = DeclLaws.all idl
 
-              let projection: Fuaran.Core.Idl.Emit.Core.Projection =
+              let projection: KindProjection =
                   { SpecDecl = ""
                     Encoder = ""
                     Decoder = ""
@@ -1839,7 +1826,7 @@ let typescriptAdmission =
     testList
         "Phase 511 — TypeScript derivation admission (S12)"
         [ testCase "a projection that refuses the F# keyed walk does not reach the TypeScript backend" (fun () ->
-              let request = [ Gen.Derivation.KeyedPositions ]
+              let request = [ Derivation.KeyedPositions ]
 
               let construct, _ =
                   Projected.refusal (Projected.derive (Projected.supportWith None None) request Projected.idl)
@@ -1852,11 +1839,11 @@ let typescriptAdmission =
 
           testCase "without the projection, the two backends admit and refuse alike" (fun () ->
               for request in
-                  [ [ Gen.Derivation.KeyedPositions ]
-                    [ Gen.Derivation.Fold "Trigger" ]
-                    [ Gen.Derivation.StructuralAccess ]
-                    [ Gen.Derivation.DefaultRecords ] ] do
-                  let fs = Projected.derive Gen.GenSupport.Empty request Projected.idl
+                  [ [ Derivation.KeyedPositions ]
+                    [ Derivation.Fold "Trigger" ]
+                    [ Derivation.StructuralAccess ]
+                    [ Derivation.DefaultRecords ] ] do
+                  let fs = Projected.derive GenSupport.Empty request Projected.idl
                   let ts = Gen.typescriptModuleDerived request Projected.idl Projected.tags
 
                   match fs, ts with
@@ -1921,8 +1908,8 @@ module private NullChecked =
     let emitted () =
         Projected.emitted (
             Gen.fsharpModuleDerived
-                Gen.GenSupport.Empty
-                [ Gen.Derivation.KeyedPositions; Gen.Derivation.SlotsOf "Binding" ]
+                GenSupport.Empty
+                [ Derivation.KeyedPositions; Derivation.SlotsOf "Binding" ]
                 "NullChecked"
                 idl
                 [ "Text"; "Leaf" ]
@@ -2078,8 +2065,8 @@ module private Overrides =
         Projected
             .emitted(
                 Gen.fsharpModuleDerived
-                    Gen.GenSupport.Empty
-                    [ Gen.Derivation.StructuralAccess; Gen.Derivation.SpecDecoders ]
+                    GenSupport.Empty
+                    [ Derivation.StructuralAccess; Derivation.SpecDecoders ]
                     name
                     idl
                     (idl.Kinds |> List.map _.Tag)
@@ -2225,7 +2212,7 @@ module TypeAnnotated =
             Enums = base'.Enums |> List.map (fun e -> { e with Annotations = enumAnnotations }) }
 
     let fsharp (idl: Idl) =
-        Projected.emitted (Gen.fsharpModuleWith Gen.GenSupport.Empty "TypeAnnotated" idl (tags idl))
+        Projected.emitted (Gen.fsharpModuleWith GenSupport.Empty "TypeAnnotated" idl (tags idl))
 
     let typescript (idl: Idl) =
         Projected.emitted (Gen.typescriptDeclarations idl (tags idl))
@@ -2430,8 +2417,8 @@ module private OptionalNode =
           Wire = WireShape.Default
           Harden = HardenPolicy.Undeclared }
 
-    let emitted (ds: Gen.Derivation list) =
-        Projected.emitted (Gen.fsharpModuleDerived Gen.GenSupport.Empty ds "OptionalNode" idl [ "Box"; "Tip"; "Leaf" ])
+    let emitted (ds: Derivation list) =
+        Projected.emitted (Gen.fsharpModuleDerived GenSupport.Empty ds "OptionalNode" idl [ "Box"; "Tip"; "Leaf" ])
 
     let probe =
         String.concat
@@ -2456,7 +2443,7 @@ let optionalNodeWitnessTests =
         "Phase 545 - the node witness treats an optional node field as a keyed position"
         [ for label, ds in
               [ "without StructuralAccess", []
-                "with StructuralAccess", [ Gen.Derivation.StructuralAccess ] ] do
+                "with StructuralAccess", [ Derivation.StructuralAccess ] ] do
               testCase (sprintf "%s, the children arm holds only the required node" label) (fun _ ->
                   let src = OptionalNode.emitted ds
                   Expect.stringContains src "| NodeKind.Box s -> [ s.Child ]" "the box's child, and not its hint"

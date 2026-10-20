@@ -80,7 +80,8 @@ module CanonicalFormVectorExport =
     let private identity: Artifact.Identity =
         { Name = Some "canonical-form-fixture"
           Description =
-            "The Phase 539 fixture vocabulary: one kind per canonical-form declaration (a presence test, two equality tests, field aliases, an empty-map and an empty-JSON default) and an enum with case aliases." }
+            Some
+                "The Phase 539 fixture vocabulary: one kind per canonical-form declaration (a presence test, two equality tests, field aliases, an empty-map and an empty-JSON default) and an enum with case aliases." }
 
     /// One authored input: the vector's id, the law it exercises, the kind body as JSON text.
     let inputs: (string * string * string) list =

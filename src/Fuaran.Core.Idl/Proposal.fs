@@ -201,23 +201,17 @@ module Proposal =
     // -- reading -------------------------------------------------------------
     //
     // Phase 310 — every member is read through the typed decode layer, so a refusal carries a
-    // code and the path to the value at fault ([[ofJsonDetailed]]). One reading changed then: an
-    // OPTIONAL member that is present and ill-typed (a `count` that is a string) is refused, where
-    // the hand-rolled readers this replaced took it for absent and read the default in its place.
-    // Since Phase 520 the readers are `Decoder`'s combinators and nothing else: the private layer
-    // that re-spelled each refusal in this reader's own sentence is gone, so a refusal's sentence is
-    // the projection of its code (`DecodeError.sentence`) and its code and path are unchanged.
-
-    let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
-        r |> Result.mapError (DecodeError.under step)
+    // code and the path to the value at fault ([[ofJsonDetailed]]). Since Phase 520 a refusal's
+    // sentence is the projection of its code (`DecodeError.sentence`).
+    //
+    // Phase 527 — a proposal's types, defaults, optionalities and annotations are read by the
+    // ARTIFACT's codecs, the one reader of that encoding, and what a proposal may not mint is
+    // refused as a POLICY over the read ([[admitField]]): `NotAdmitted` at the offending `$type`
+    // or annotation member, raised by walking its path in the document (D151's shape). A policy
+    // parameter is what lets one reader keep the refusals.
 
     /// The `$type` discriminator, if present — a present non-string one is refused.
     let private tag (v: JVal) : Result<string option, DecodeError> = Decoder.optField "$type" Decoder.str v
-
-    /// A discriminator naming a case this reader knows and does not admit: `NotAdmitted` at it.
-    let private notAdmitted (expected: string) (detail: string) : Result<'T, DecodeError> =
-        Error(DecodeError.make DecodeCode.NotAdmitted expected detail)
-        |> under (PathSegment.Key "$type")
 
     /// A discriminator naming no case of the position: `UnknownTag` at it, naming the known ones.
     let private unknownTag (known: string list) (tagValue: string) : Result<'T, DecodeError> =
@@ -227,88 +221,142 @@ module Proposal =
                 ("one of " + (known |> List.map (fun k -> "'" + k + "'") |> String.concat ", "))
                 ("$type '" + tagValue + "'")
         )
-        |> under (PathSegment.Key "$type")
+        |> Result.mapError (DecodeError.under (PathSegment.Key "$type"))
 
     let private str (name: string) (v: JVal) : Result<string, DecodeError> = Decoder.field name Decoder.str v
 
-    /// The host-surface type tags a proposal is refused by name: known to the vocabulary, not
-    /// admitted in a data-only delta.
-    let private hostSurfaceTypes = [ "closure"; "fn"; "opaque"; "hosted"; "var"; "op" ]
+    /// One refusal of the admission policy: the path to the member at fault within the value
+    /// read, what the position admits, and what was found there.
+    type private Refusal = PathSegment list * string * string
 
-    /// Read an IDL type from the artifact's own `type` vocabulary.
+    /// Every host-surface type inside `t`, at the path of its `$type`.
     ///
-    /// **The wire-expressible subset only.** `closure`, `fn`, `opaque`, `hosted`,
-    /// `var` and `op` are refused by name rather than silently mapped: each of
-    /// them is a HOST declaration decision (what signature the slot has, which
-    /// codec owns its content, what placeholder a decoder puts there) that a
-    /// data-only proposal has no business making and that no reviewer could check
-    /// from the proposal document. A demand that genuinely needs one of them is a
-    /// design conversation, not a delta.
-    let rec private readType (v: JVal) : Result<IdlType, DecodeError> =
-        match tag v with
-        | Error e -> Error e
-        | Ok(Some "str") -> Ok TStr
-        | Ok(Some "int") -> Ok TInt
-        | Ok(Some "bool") -> Ok TBool
-        | Ok(Some "float") -> Ok TFloat
-        | Ok(Some "json") -> Ok TJson
-        | Ok(Some "node") -> Ok TNode
-        | Ok(Some "kind") -> Ok TKind
-        | Ok(Some "enum") -> str "name" v |> Result.map TEnum
-        | Ok(Some "record") -> str "name" v |> Result.map TRecord
-        | Ok(Some "list") -> Decoder.field "of" readType v |> Result.map TList
-        | Ok(Some "map") -> Decoder.field "values" readType v |> Result.map TMap
-        | Ok(Some "union") ->
-            str "name" v
-            |> Result.bind (fun n ->
-                Decoder.fieldOr "args" [] (Decoder.list readType) v
-                |> Result.map (fun args -> TUnion(n, args)))
-        | Ok(Some other) when List.contains other hostSurfaceTypes ->
-            notAdmitted "a wire-data type" ("the host-surface type '" + other + "'")
-        | Ok(Some other) ->
-            unknownTag
-                [ "str"
-                  "int"
-                  "bool"
-                  "float"
-                  "json"
-                  "node"
-                  "kind"
-                  "enum"
-                  "record"
-                  "list"
-                  "map"
-                  "union" ]
-                other
-        | Ok None -> Error(Decoder.missing "$type")
+    /// **The wire-expressible subset only.** `closure`, `fn`, `opaque`, `hosted`, `var` and `op`
+    /// are each a HOST declaration decision (what signature the slot has, which codec owns its
+    /// content, what placeholder a decoder puts there) that a data-only proposal has no business
+    /// making and no reviewer could check from the proposal document. A demand that genuinely
+    /// needs one of them is a design conversation, not a delta.
+    let rec private hostSurface (at: PathSegment list) (t: IdlType) : Refusal list =
+        let refused (name: string) =
+            [ at @ [ PathSegment.Key "$type" ], "a wire-data type", "the host-surface type '" + name + "'" ]
 
-    /// Read an authored default value. Scalars and enum cases only — the same set
-    /// the F# generator can emit a default expression for, so a proposal cannot
-    /// declare a default the generated layer would then fail to compile.
-    let private readValue (v: JVal) : Result<IdlValue, DecodeError> =
-        match tag v with
-        | Error e -> Error e
-        | Ok(Some "str") -> Decoder.field "value" Decoder.str v |> Result.map VStr
-        | Ok(Some "int") -> Decoder.field "value" Decoder.int v |> Result.map VInt
-        | Ok(Some "bool") -> Decoder.field "value" Decoder.bool v |> Result.map VBool
-        | Ok(Some "float") -> Decoder.field "value" Decoder.float v |> Result.map VFloat
-        | Ok(Some "enum") -> str "case" v |> Result.map VEnum
-        | Ok(Some other) -> notAdmitted "a scalar or enum default" ("a default value of kind '" + other + "'")
-        | Ok None -> Error(Decoder.missing "$type")
+        match t with
+        | TClosure -> refused "closure"
+        | TFn _ -> refused "fn"
+        | TOpaque -> refused "opaque"
+        | THosted _ -> refused "hosted"
+        | TVar _ -> refused "var"
+        | TOp -> refused "op"
+        | TList inner -> hostSurface (at @ [ PathSegment.Key "of" ]) inner
+        | TMap inner -> hostSurface (at @ [ PathSegment.Key "values" ]) inner
+        | TUnion(_, args) ->
+            args
+            |> List.mapi (fun i a -> hostSurface (at @ [ PathSegment.Key "args"; PathSegment.Index i ]) a)
+            |> List.concat
+        | TStr
+        | TInt
+        | TBool
+        | TFloat
+        | TEnum _
+        | TRecord _
+        | TNode
+        | TKind
+        | TJson -> []
 
-    let private readOptionality (v: JVal) : Result<Optionality, DecodeError> =
-        match tag v with
-        | Error e -> Error e
-        | Ok(Some "required") -> Ok Required
-        | Ok(Some "optional") -> Ok Optional
-        | Ok(Some "omitDefault") -> Decoder.field "default" readValue v |> Result.map OmitDefault
-        // A host-only slot is wire-invisible by definition, so proposing one proposes nothing a
-        // consumer can observe — and it requires a declared host signature this format
-        // deliberately cannot carry.
-        | Ok(Some "hostOnly") ->
-            notAdmitted "a wire-visible optionality" "'hostOnly', a host slot with no wire projection"
-        | Ok(Some other) -> unknownTag [ "required"; "optional"; "omitDefault" ] other
-        | Ok None -> Error(Decoder.missing "$type")
+    /// A default the proposal may declare: scalars and enum cases only — the set the F# generator
+    /// can emit a default expression for, so a proposal cannot declare a default the generated
+    /// layer would then fail to compile.
+    let private defaultRefusals (at: PathSegment list) (d: IdlValue) : Refusal list =
+        let refused (kind: string) =
+            [ at @ [ PathSegment.Key "$type" ], "a scalar or enum default", "a default value of kind '" + kind + "'" ]
+
+        match d with
+        | VStr _
+        | VInt _
+        | VBool _
+        | VFloat _
+        | VEnum _ -> []
+        | VUnion _ -> refused "union"
+        | VList _ -> refused "list"
+        | VNode _
+        | VNodeEnv _ -> refused "node"
+        | VAbsent -> refused "absent"
+        | VClosure -> refused "closure"
+        | VOpaque -> refused "opaque"
+        | VJson _ -> refused "json"
+        | VRecord _ -> refused "record"
+        | VMap _ -> refused "map"
+
+    /// Phase 527 — a proposal MAY carry the doc of what it mints (the authored summary a reader of
+    /// the generated layer sees), and nothing else an annotation set says. The rest are
+    /// statements about a member that already exists — its retirement, its in-process-only use,
+    /// the version it arrived in — so a delta that MINTS a member has nothing to say with them.
+    let private annotationRefusals (at: PathSegment list) (a: Annotations) : Refusal list =
+        let refused (name: string) =
+            [ at @ [ PathSegment.Key name ],
+              "a doc annotation",
+              "the annotation '" + name + "' on a member the proposal mints" ]
+
+        [ if a.Deprecated.IsSome then
+              yield! refused "deprecated"
+          if a.InProcessOnly then
+              yield! refused "inProcessOnly"
+          if a.Since.IsSome then
+              yield! refused "since" ]
+
+    /// The first refusal, raised by walking its path in the value (`NotAdmitted`), or the value.
+    let private admit (refusals: Refusal list) (value: 'T) : Decoder<'T> =
+        match refusals with
+        | [] -> Decoder.succeed value
+        | (path, expected, detail) :: _ -> Decoder.at path (Decoder.fail RootDecodeCode.NotAdmitted expected detail)
+
+    /// What a proposal may mint of a field: a wire-data type, a wire-visible optionality, a scalar
+    /// or enum default, and a doc. A host-only slot is wire-invisible by definition, so proposing
+    /// one proposes nothing a consumer can observe — and it requires a declared host signature
+    /// this format deliberately cannot carry.
+    let private admitField (f: IdlField) : Decoder<IdlField> =
+        let optionality =
+            match f.Opt with
+            | HostOnly ->
+                [ [ PathSegment.Key "optionality"; PathSegment.Key "$type" ],
+                  "a wire-visible optionality",
+                  "'hostOnly', a host slot with no wire projection" ]
+            | OmitDefault d -> defaultRefusals [ PathSegment.Key "optionality"; PathSegment.Key "default" ] d
+            | Required
+            | Optional -> []
+
+        // Phase 539 — an alias is a RETIRED spelling of a member that already exists, and a presence
+        // condition a canonical-form rule over one: a delta that mints a member has neither to state
+        // (the proposal reader before the codec read neither, and minted the member without them).
+        let canonicalForm =
+            (if List.isEmpty f.Aliases then
+                 []
+             else
+                 [ [ PathSegment.Key "aliases" ], "no aliases on a minted member", "an alias list" ])
+            @ (match f.Presence with
+               | None -> []
+               | Some _ ->
+                   [ [ PathSegment.Key "presence" ], "no presence condition on a minted member", "a presence condition" ])
+
+        admit
+            (hostSurface [ PathSegment.Key "type" ] f.Type
+             @ optionality
+             @ canonicalForm
+             @ annotationRefusals [ PathSegment.Key "annotations" ] f.Annotations)
+            f
+
+    /// One proposed field — `Artifact`'s field reader, under the admission policy.
+    let private readField: Decoder<IdlField> =
+        Codec.decoder Artifact.field |> Decoder.bind admitField
+
+    /// The annotations a proposed kind or union case carries under `annotations` — `Artifact`'s
+    /// reader, under the admission policy; absent is [[Annotations.Empty]].
+    let private readAnnotations: Decoder<Annotations> =
+        Decoder.fieldOr
+            "annotations"
+            Annotations.Empty
+            (Codec.decoder Artifact.annotations
+             |> Decoder.bind (fun a -> admit (annotationRefusals [] a) a))
 
     /// Each named member is PRESENT — the first absent one is `MissingField`, a non-object
     /// `WrongKind` — before any is read, so an entry missing one reports the missing one whatever
@@ -316,25 +364,6 @@ module Proposal =
     let private present (names: string list) : Decoder<unit> =
         Decoder.sequence (names |> List.map (fun n -> Decoder.field n Decoder.json))
         |> Decoder.map ignore
-
-    let private readField (v: JVal) : Result<IdlField, DecodeError> =
-        present [ "name"; "type"; "optionality" ] v
-        |> Result.bind (fun () -> str "name" v)
-        |> Result.bind (fun name ->
-            Decoder.field "type" readType v
-            |> Result.bind (fun ty ->
-                Decoder.field "optionality" readOptionality v
-                |> Result.map (fun opt ->
-                    // Phase 113 — a proposal proposes a SHAPE. Annotations are
-                    // statements about a member that already exists (retirement,
-                    // in-process-only, the version it arrived in), so a delta that
-                    // MINTS a member has nothing to say with them.
-                    { Name = name
-                      Type = ty
-                      Opt = opt
-                      Aliases = []
-                      Presence = None
-                      Annotations = Annotations.Empty })))
 
     let private readFields (owner: JVal) : Result<IdlField list, DecodeError> =
         Decoder.fieldOr "fields" [] (Decoder.list readField) owner
@@ -366,12 +395,14 @@ module Proposal =
                         readFields k
                         |> Result.bind (fun fs ->
                             Decoder.fieldOr "category" "proposed" Decoder.str k
-                            |> Result.map (fun category ->
-                                AddKind
-                                    { Tag = t
-                                      Category = category
-                                      Fields = fs
-                                      Annotations = Annotations.Empty }))))
+                            |> Result.bind (fun category ->
+                                readAnnotations k
+                                |> Result.map (fun ann ->
+                                    AddKind
+                                        { Tag = t
+                                          Category = category
+                                          Fields = fs
+                                          Annotations = ann })))))
                 v
         | Ok(Some "addUnionCase") ->
             str "union" v
@@ -382,13 +413,15 @@ module Proposal =
                         str "tag" c
                         |> Result.bind (fun t ->
                             readFields c
-                            |> Result.map (fun fs ->
-                                AddUnionCase(
-                                    u,
-                                    { Tag = t
-                                      Fields = fs
-                                      Annotations = Annotations.Empty }
-                                ))))
+                            |> Result.bind (fun fs ->
+                                readAnnotations c
+                                |> Result.map (fun ann ->
+                                    AddUnionCase(
+                                        u,
+                                        { Tag = t
+                                          Fields = fs
+                                          Annotations = ann }
+                                    )))))
                     v)
         | Ok(Some "addEnumCase") ->
             str "enum" v
@@ -410,7 +443,7 @@ module Proposal =
                     ("one of " + (ops |> List.map (fun o -> "'" + o + "'") |> String.concat ", "))
                     ("op '" + other + "'")
             )
-            |> under (PathSegment.Key "op")
+            |> Result.mapError (DecodeError.under (PathSegment.Key "op"))
         | Ok None -> Error(Decoder.missing "op")
 
     let private readEvidence (v: JVal) : Result<ProposalEvidence, DecodeError> =

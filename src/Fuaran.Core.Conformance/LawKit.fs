@@ -21,9 +21,9 @@ module internal LawKit =
     /// The stamp every counterexample opens with: the seed and the iteration that reproduce it.
     /// A DAG node the kit builds itself — fresh actors, parents it just appended — cannot be refused
     /// (Phase 296); a refusal here is a defect in the kit, raised with the fault's own text.
-    let dagBuilt (r: Result<string * Dag.T<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
+    let dagBuilt (r: Result<Dag.Written<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
         match r with
-        | Ok built -> built
+        | Ok built -> built.Id, built.Dag
         | Error f -> invalidOp ("the law kit built a DAG node the DAG refused: " + DagAppendFault.toString f)
 
     let failAt (seed: int) (i: int) (msg: string) : string =
@@ -605,19 +605,21 @@ module internal LawKit =
         (opM: 'Op)
         : string * string * string * string * Dag.T<'Op> =
         let actor = Human "conf"
-        let g, d1 = Dag.append hashFn sw actor op0 "" Dag.empty |> dagBuilt
+
+        let g, d1 =
+            Dag.append (OpStream.canonical hashFn sw) actor op0 "" Dag.empty |> dagBuilt
 
         let a, b, d3 =
             if bFirst then
-                let b, d2 = Dag.append hashFn sw actor opB g d1 |> dagBuilt
-                let a, d3 = Dag.append hashFn sw actor opA g d2 |> dagBuilt
+                let b, d2 = Dag.append (OpStream.canonical hashFn sw) actor opB g d1 |> dagBuilt
+                let a, d3 = Dag.append (OpStream.canonical hashFn sw) actor opA g d2 |> dagBuilt
                 a, b, d3
             else
-                let a, d2 = Dag.append hashFn sw actor opA g d1 |> dagBuilt
-                let b, d3 = Dag.append hashFn sw actor opB g d2 |> dagBuilt
+                let a, d2 = Dag.append (OpStream.canonical hashFn sw) actor opA g d1 |> dagBuilt
+                let b, d3 = Dag.append (OpStream.canonical hashFn sw) actor opB g d2 |> dagBuilt
                 a, b, d3
 
-        let m, dag = Dag.merge hashFn sw actor opM a b d3 |> dagBuilt
+        let m, dag = Dag.merge (OpStream.canonical hashFn sw) actor opM a b d3 |> dagBuilt
         g, a, b, m, dag
 
     // ---- the dispatch-seam runner ----------------------------------------------------------------

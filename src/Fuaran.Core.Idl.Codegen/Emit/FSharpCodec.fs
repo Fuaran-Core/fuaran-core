@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpTypes
@@ -21,56 +22,48 @@ module internal FSharpCodec =
     // that the generator — not just the interpreter — covers the whole surface.
     // -----------------------------------------------------------------------
 
-    /// Point-free encoder *function* for a type (`'a -> JVal`) — used where an encoder
-    /// must be passed (a generic union's type-parameter codec).
-    let rec encFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "JStr"
-        | TInt -> Ok "JInt"
-        | TBool -> Ok "JBool"
-        // NOT the bare `JFloat` constructor: a non-finite double has no JSON number
-        // spelling and rides as a quoted sentinel string (`encodeHelpers` below).
-        // `TInt` keeps its constructor — WIRE_FORMAT §7 truncates at a float slot.
-        | TFloat -> Ok "encFloat"
-        | TEnum n -> Ok("enc" + n)
-        | TVar v -> Ok("enc" + v)
-        | TUnion(n, []) -> Ok("enc" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map encFn
-            |> concatR " "
-            |> Result.map (fun a -> "(enc" + n + " " + a + ")")
-        | TNode -> Ok "encNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the F# encoder emitter" t)
-        | TList inner -> encFn inner |> Result.map (sprintf "(fun __xs -> JArr(List.map %s __xs))")
-        // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure
-        | TFn _ -> Ok "(fun _ -> JStr \"<closure>\")"
-        | TOpaque -> Ok "(fun _ -> JStr \"<opaque>\")"
-        // Phase 676 — verbatim passthrough. `Canonical.write Rendering.CrossHost` already sorts keys Ordinal,
-        // escapes per rule 6 and lays floats out per rule 5, so identity inherits all
-        // three rather than re-implementing them — the risk this phase named.
-        | TJson -> Ok "id"
-        // The named host encode expression, verbatim ('host -> JVal). Canonicality is
-        // inherited: the host codec builds a JVal that renders through the same Canon.
-        | THosted h -> Ok h.Encode
-        | TRecord n -> Ok("enc" + n)
-        | TMap vt ->
-            encFn vt
-            |> Result.map (sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))")
+    /// Phase 524 — the F# ENCODER printer over the one slot traversal ([[SlotTraversal]]): `JVal`
+    /// constructors and `enc<Name>` functions.
+    let encPrinter: AppliedPrinter =
+        let closure = "(fun _ -> JStr \"<closure>\")"
+        let opaque = "(fun _ -> JStr \"<opaque>\")"
+
+        { Slot =
+            { Backend = "the F# encoder emitter"
+              Str = "JStr"
+              Int = "JInt"
+              Bool = "JBool"
+              // NOT the bare `JFloat` constructor: a non-finite double has no JSON number spelling
+              // and rides as a quoted sentinel string (`encodeHelpers`). `TInt` keeps its
+              // constructor — WIRE_FORMAT §7 truncates at a float slot.
+              Float = "encFloat"
+              Enum = fun n -> "enc" + n
+              Var = fun v -> "enc" + v
+              Named = fun n -> "enc" + n
+              Node = "encNode"
+              Union = fun n args -> "(enc" + n + " " + String.concat " " args + ")"
+              List = sprintf "(fun __xs -> JArr(List.map %s __xs))"
+              Map = sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))"
+              // A closure/opaque codec ignores its argument and emits the fixed sentinel.
+              Closure = closure
+              Fn = fun _ -> closure
+              Opaque = opaque
+              // Phase 676 — the canonical renderer already sorts keys, escapes and lays floats
+              // out, so identity inherits all three.
+              Json = "id"
+              // The named host encode expression, verbatim ('host -> JVal). Canonicality is
+              // inherited: the host codec builds a JVal that renders through the same renderer.
+              Hosted = fun h -> HostedSlot.Verbatim h.Encode }
+          Apply = sprintf "%s %s"
+          ListApplied = sprintf "JArr(List.map %s %s)"
+          NodeApplied = sprintf "encNode %s"
+          UnionApplied = fun n args var -> "(enc" + n + " " + String.concat " " args + ") " + var
+          ClosureApplied = fun _ -> "JStr \"<closure>\""
+          OpaqueApplied = fun _ -> "JStr \"<opaque>\"" }
 
     /// The applied JVal expression for a value of `t` bound to `var`.
     let encApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TList inner -> encFn inner |> Result.map (fun e -> sprintf "JArr(List.map %s %s)" e var)
-        | TNode -> Ok(sprintf "encNode %s" var)
-        | TClosure
-        | TFn _ -> Ok "JStr \"<closure>\""
-        | TOpaque -> Ok "JStr \"<opaque>\""
-        | _ -> encFn t |> Result.map (fun e -> sprintf "%s %s" e var)
+        SlotTraversal.encApplied encPrinter var t
 
     /// The encode-side helper prelude, emitted once per module — the mirror of
     /// [[decodeHelpers]]. Only the float slot needs one: every other primitive is
@@ -105,103 +98,80 @@ let private encFloat (f: float) : JVal =
                 (SourceLit.fsString idl.Wire.Discriminator)
 
 
-    /// The omit-at-default `(string * JVal) option` piece, shared by the spec/record encoder and
-    /// the union-case encoder — they differ only in how the value is BOUND (`s.Field` vs a
-    /// positional binding), never in how the default is tested, and keeping one copy is what
-    /// stops the two halves from drifting apart under a widening like Phase 124's.
-    let omitPiece (idl: Idl) (src: string) (f: IdlField) (d: IdlValue) : Result<string, CodegenError> =
-        fsDefaultLit idl f.Type d
-        |> Result.bind (fun dexpr ->
-            encApplied src f.Type
-            |> Result.map (fun enc ->
-                match f.Type with
-                // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
-                // closure slot gives its owning union a function-typed field, and F#
-                // functions support no equality, so the union stops supporting the
-                // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
-                // broke `s.Format = CellFormat.None` for every column. A match is also
-                // simply the better test: it needs no constraint, and reads as what it is.
-                // Phase 124 — this is also why a value-carrying default works at all: the
-                // rendered literal is a legal PATTERN as well as a legal expression.
-                | TUnion _ ->
-                    sprintf
-                        "(match %s with | %s -> None | _ -> Some(%s, %s))"
-                        src
-                        dexpr
-                        (SourceLit.fsString f.Name)
-                        enc
-                // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
-                // `= []`, and for the same reason the union arm above exists: an element
-                // type that reaches a closure carries no equality, so `SrcSetEntry`
-                // (whose `src` is a `Binding`) fails the constraint the moment the
-                // generated encoder is compiled. `List.isEmpty` imposes none, and it is
-                // the better test anyway — it says what it means. (`fsDefaultLit` admits
-                // only the EMPTY list, so there is no non-empty case to answer for.)
-                | TList _ ->
-                    sprintf "(if List.isEmpty %s then None else Some(%s, %s))" src (SourceLit.fsString f.Name) enc
-                // Phase 539 — the empty-map default, tested as the list one is (`Map.isEmpty` needs no
-                // equality at the value type; [[Decl.literal]] admits only the EMPTY map).
-                | TMap _ ->
-                    sprintf "(if Map.isEmpty %s then None else Some(%s, %s))" src (SourceLit.fsString f.Name) enc
-                // Phase 539 — a JSON default is compared as the interpreter compares it, by canonical
-                // bytes, so a value holding the default's members in another order is still at it.
-                | TJson ->
-                    match d with
-                    | VJson j ->
-                        sprintf
-                            "(if Canonical.write Rendering.CrossHost %s = %s then None else Some(%s, %s))"
-                            src
-                            (SourceLit.fsString (Canonical.write Rendering.CrossHost j))
-                            (SourceLit.fsString f.Name)
-                            enc
-                    | _ ->
-                        sprintf "(if %s = %s then None else Some(%s, %s))" src dexpr (SourceLit.fsString f.Name) enc
-                | _ -> sprintf "(if %s = %s then None else Some(%s, %s))" src dexpr (SourceLit.fsString f.Name) enc))
-
-    /// Phase 511 — THE F# PRESENCE RULE: one field's encoder piece as a `(string * JVal) option`
-    /// for `List.choose id`, under the field's presence (Required → always `Some`; Optional →
-    /// omit-on-`None`; HostOnly → never on the wire, in any state (Phase 691); OmitDefault →
-    /// omit-at-default). `src` is the expression the field's value is read from — `s.Field` in a
-    /// spec or record encoder, `n.Field` on the node envelope (Phase 690), the positional binding
-    /// in a union case — which is the ONLY thing the call sites differ in, so the rule is one
-    /// function rather than one copy per binding.
-    let presencePiece (idl: Idl) (src: string) (f: IdlField) : Result<string, CodegenError> =
-        match f.Opt with
-        | Required ->
-            encApplied src f.Type
-            |> Result.map (fun e -> sprintf "Some(%s, %s)" (SourceLit.fsString f.Name) e)
-        | Optional ->
-            encApplied "v" f.Type
-            |> Result.map (fun e -> sprintf "(%s |> Option.map (fun v -> %s, %s))" src (SourceLit.fsString f.Name) e)
-        | HostOnly -> Ok "None"
-        | OmitDefault d -> omitPiece idl src f d
-
-    /// [[presencePiece]] under the field's presence condition (Phase 539): a member whose condition
-    /// fails is omitted whatever it holds, as the interpreter omits it.
-    let memberPiece
-        (idl: Idl)
-        (fields: IdlField list)
-        (srcOf: string -> string)
-        (f: IdlField)
-        : Result<string, CodegenError> =
-        presencePiece idl (srcOf f.Name) f
-        |> Result.bind (fun piece ->
-            match f.Presence with
-            | None -> Ok piece
-            | Some c ->
+    /// Phase 524 — the F# printer of a member WRITTEN under its presence
+    /// ([[MemberEncTraversal.encMember]]): a `(string * JVal) option` piece for `List.choose id`.
+    /// `src` is the expression the member's value is read from — `s.Field` in a spec or record
+    /// encoder, `n.Field` on the node envelope (Phase 690), the positional binding in a union case.
+    let memberEncPrinter (idl: Idl) : MemberEncPrinter =
+        { Applied = encPrinter
+          Key = SourceLit.fsString
+          Access = fun recv f -> recv + "." + pascal f.Name
+          Present = sprintf "Some(%s, %s)"
+          OptionalVar = fun _ -> "v"
+          Optional = sprintf "(%s |> Option.map (fun v -> %s, %s))"
+          Absent = "None"
+          // The omit-at-default test, from the ONE declared-default literal the decoder restores
+          // ([[fsDefaultLit]]), so the two halves cannot drift apart under a widening like
+          // Phase 124's.
+          OmitAt =
+            fun src t d ->
+                fsDefaultLit idl t d
+                |> Result.map (fun dexpr present ->
+                    match t with
+                    // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
+                    // closure slot gives its owning union a function-typed field, and F#
+                    // functions support no equality, so the union stops supporting the
+                    // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
+                    // broke `s.Format = CellFormat.None` for every column. A match is also
+                    // simply the better test: it needs no constraint, and reads as what it is.
+                    // Phase 124 — this is also why a value-carrying default works at all: the
+                    // rendered literal is a legal PATTERN as well as a legal expression.
+                    | TUnion _ -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
+                    // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
+                    // `= []`, and for the same reason the union arm above exists: an element
+                    // type that reaches a closure carries no equality, so `SrcSetEntry`
+                    // (whose `src` is a `Binding`) fails the constraint the moment the
+                    // generated encoder is compiled. `List.isEmpty` imposes none, and it is
+                    // the better test anyway — it says what it means. (`fsDefaultLit` admits
+                    // only the EMPTY list, so there is no non-empty case to answer for.)
+                    | TList _ -> sprintf "(if List.isEmpty %s then None else %s)" src present
+                    // Phase 539 — the empty-map default, tested as the list one is (`Map.isEmpty`
+                    // needs no equality at the value type; [[Decl.literal]] admits only the EMPTY map).
+                    | TMap _ -> sprintf "(if Map.isEmpty %s then None else %s)" src present
+                    // Phase 539 — a JSON default is compared as the interpreter compares it, by
+                    // canonical bytes, so a value holding the default's members in another order is
+                    // still at it.
+                    | TJson ->
+                        match d with
+                        | VJson j ->
+                            sprintf
+                                "(if Canonical.write Rendering.CrossHost %s = %s then None else %s)"
+                                src
+                                (SourceLit.fsString (Canonical.write Rendering.CrossHost j))
+                                present
+                        | _ -> sprintf "(if %s = %s then None else %s)" src dexpr present
+                    | _ -> sprintf "(if %s = %s then None else %s)" src dexpr present)
+          // Phase 539 — a member whose presence condition fails is omitted whatever it holds, as the
+          // interpreter omits it.
+          When =
+            fun fields srcOf c ->
                 presenceTest idl fields srcOf c
-                |> Result.map (fun test -> sprintf "(if %s then %s else None)" test piece))
+                |> Result.map (fun test piece -> sprintf "(if %s then %s else None)" test piece) }
 
-    /// A field read off a bound record variable `recv` (`s` for a spec/record encoder, `n` for
-    /// the node envelope), under [[memberPiece]].
+    /// A member read off the bound record variable `recv` (`s` for a spec/record encoder, `n` for
+    /// the node envelope), as its piece of a `List.choose id` list.
     let specPieceOf (idl: Idl) (recv: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
-        memberPiece idl fields (fun name -> recv + "." + pascal name) f
+        let p = memberEncPrinter idl
 
-    /// One `"key", <enc>` pair of a *required* union-case field (positional binding; the wire
-    /// key is the raw field name, the value reference is keyword-escaped).
-    let casePair (f: IdlField) : Result<string, CodegenError> =
-        encApplied (ident f.Name) f.Type
-        |> Result.map (fun e -> sprintf "%s, %s" (SourceLit.fsString f.Name) e)
+        MemberEncTraversal.encMember p fields (p.Access recv) f
+        |> Result.map (MemberEncTraversal.print p)
+
+    /// The members of a spec or record read off `s`, as the body of a `List.choose id` list.
+    let private objectPieces (idl: Idl) (fields: IdlField list) : Result<string, CodegenError> =
+        let p = memberEncPrinter idl
+
+        MemberEncTraversal.encMembers p "s" fields
+        |> Result.map (List.map (MemberEncTraversal.print p) >> String.concat "; ")
 
     /// Phase 511 — a decoder's binder for the node's kind, read from the envelope layout: the kind
     /// object under its key (`<req> "kind" __fs <dispatch>`), or — merged — the node object itself,
@@ -225,7 +195,8 @@ let private encFloat (f: float) : JVal =
     /// `encX : 'X -> JVal` codec per type parameter. `typedName` is the emitted
     /// discriminated-object builder — `Canonical.typed` on a default-shape IDL
     /// (byte-identical to every pre-declarable emission), the module-local
-    /// `typedTag` when the vocabulary declares another key (Phase 108).
+    /// `typedTag` when the vocabulary declares another key (Phase 108). Phase 524 — the cases,
+    /// their layouts and their members are [[UnionEncTraversal.encoder]]'s.
     let unionEncoder
         (typedName: string)
         (docFn: string -> string -> string)
@@ -241,78 +212,68 @@ let private encFloat (f: float) : JVal =
 
         let tyArgs = declParams msg u.Name u.Params
 
-        let arm (c: IdlUnionCase) =
-            let pat =
-                match c.Fields with
-                | [] -> ""
-                | [ f ] -> " " + ident f.Name
-                | fs -> " (" + (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ") + ")"
+        let pat (c: IdlUnionCase) =
+            match c.Fields with
+            | [] -> ""
+            | [ f ] -> " " + ident f.Name
+            | fs -> " (" + (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ") + ")"
 
-            // A DECLARED transparent case emits its single field's value BARE — no
-            // `Canonical.typed` wrapper — the bare-string canonical literal shape.
-            match Decl.caseLayout decl u c with
-            | CaseLayout.Bare(Ok f) ->
-                encApplied (ident f.Name) f.Type
-                |> Result.map (fun e -> sprintf "    | %s.%s%s -> %s" u.Name c.Tag pat e)
-            | CaseLayout.Bare(Error e) -> Error e
-            | CaseLayout.Tagged ->
-                // All-required cases keep the simple literal list (byte-identical to the pre-optional
-                // emission); any optional field switches to the `List.choose id` omit-on-absence form.
-                if c.Fields |> List.forall (fun f -> f.Opt = Required) then
-                    c.Fields
-                    |> List.map casePair
-                    |> concatR "; "
-                    |> Result.map (fun pairs ->
-                        sprintf
-                            "    | %s.%s%s -> %s %s [ %s ]"
-                            u.Name
-                            c.Tag
-                            pat
-                            typedName
-                            (SourceLit.fsString c.Tag)
-                            pairs)
-                else
-                    c.Fields
-                    |> List.map (memberPiece idl c.Fields ident)
-                    |> concatR "; "
-                    |> Result.map (fun pieces ->
-                        sprintf
-                            "    | %s.%s%s -> %s %s ([ %s ] |> List.choose id)"
-                            u.Name
-                            c.Tag
-                            pat
-                            typedName
-                            (SourceLit.fsString c.Tag)
-                            pieces)
+        let member' = memberEncPrinter idl
 
-        let armsR =
-            u.Cases
-            |> List.map (fun c ->
-                arm c
-                |> Result.map (fun a -> docFn ("encarm:" + u.Name + "." + c.Tag) "    " + a))
-            |> concatR "\n"
-        // The explicit `<'T>` type-parameter list (not just `'T` free in the signature) is
-        // load-bearing for a generic union: `Binding.Format.source` is a fixed `Binding<float>`
-        // *inside* `Binding<'T>`, so the generated `encBinding` recurses at a concrete type ≠ the
-        // ambient `'T` — **polymorphic recursion**, which F# permits only under an explicit
-        // generic-parameter declaration. Without it, `encBinding` monomorphises to the first use
-        // (string) and the `float` recursion fails to type-check.
-        armsR
-        |> Result.map (fun arms ->
-            sprintf
-                "and private enc%s%s%s (v: %s%s) : JVal =\n    match v with\n%s"
-                u.Name
-                tyArgs
-                encArgs
-                u.Name
-                tyArgs
-                arms)
+        let arm (c: IdlUnionCase) (body: string) =
+            docFn ("encarm:" + u.Name + "." + c.Tag) "    "
+            + sprintf "    | %s.%s%s -> %s" u.Name c.Tag (pat c) body
+
+        UnionEncTraversal.encoder
+            { Member = member'
+              CaseVar = fun f -> ident f.Name
+              // A DECLARED transparent case emits its single field's value BARE — no
+              // `Canonical.typed` wrapper — the bare-string canonical literal shape.
+              Bare = fun _ c e -> arm c e
+              Tagged =
+                fun _ c pieces ->
+                    let always =
+                        pieces
+                        |> List.choose (function
+                            | MemberPiece.Always(key, e) -> Some(key + ", " + e)
+                            | MemberPiece.Conditional _ -> None)
+
+                    // All-required cases keep the simple literal list (byte-identical to the
+                    // pre-optional emission); any other member switches to the `List.choose id`
+                    // omit-on-absence form.
+                    if List.length always = List.length pieces then
+                        arm c (sprintf "%s %s [ %s ]" typedName (SourceLit.fsString c.Tag) (String.concat "; " always))
+                    else
+                        arm
+                            c
+                            (sprintf
+                                "%s %s ([ %s ] |> List.choose id)"
+                                typedName
+                                (SourceLit.fsString c.Tag)
+                                (pieces |> List.map (MemberEncTraversal.print member') |> String.concat "; "))
+              // The explicit `<'T>` type-parameter list (not just `'T` free in the signature) is
+              // load-bearing for a generic union: `Binding.Format.source` is a fixed
+              // `Binding<float>` *inside* `Binding<'T>`, so the generated `encBinding` recurses at a
+              // concrete type ≠ the ambient `'T` — **polymorphic recursion**, which F# permits only
+              // under an explicit generic-parameter declaration. Without it, `encBinding`
+              // monomorphises to the first use (string) and the `float` recursion fails to
+              // type-check.
+              Union =
+                fun _ arms ->
+                    sprintf
+                        "and private enc%s%s%s (v: %s%s) : JVal =\n    match v with\n%s"
+                        u.Name
+                        tyArgs
+                        encArgs
+                        u.Name
+                        tyArgs
+                        (String.concat "\n" arms) }
+            decl
+            u
 
     let specEncoder (typedName: string) (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
-        k.Fields
-        |> List.map (specPieceOf idl "s" k.Fields)
-        |> concatR "; "
+        objectPieces idl k.Fields
         |> Result.map (fun pieces ->
             sprintf
                 "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    %s %s ([ %s ] |> List.choose id)"
@@ -326,14 +287,12 @@ let private encFloat (f: float) : JVal =
 
     /// A non-discriminated *record* encoder — a plain `JObj` (no `$type`), fields via `List.choose
     /// id` (omit-on-absence for optionals). `Canonical.write Rendering.CrossHost` Ordinal-sorts keys, so emission order is
-    /// irrelevant. Reuses [[specPieceOf]] (`s.<Pascal>` field access). New for the real tier
-    /// (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, …).
+    /// irrelevant. New for the real tier (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`,
+    /// `ColumnErased`, `ContentHash`, …).
     let recordEncoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
         let ps = declParams msg r.Name []
 
-        r.Fields
-        |> List.map (specPieceOf idl "s" r.Fields)
-        |> concatR "; "
+        objectPieces idl r.Fields
         |> Result.map (fun pieces ->
             sprintf
                 "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)"
@@ -373,67 +332,61 @@ let private encFloat (f: float) : JVal =
     //     back as `JInt` — `dFloat` accepts both.
     // -----------------------------------------------------------------------
 
-    /// The decoder expression for a type — a `JVal -> Result<'T, DecodeError>`.
-    /// Mirrors [[encFn]] arm for arm.
-    let rec decFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "dStr"
-        | TInt -> Ok "dInt"
-        | TBool -> Ok "dBool"
-        | TFloat -> Ok "dFloat"
-        | TEnum n -> Ok("dec" + n)
-        | TVar v -> Ok("dec" + v)
-        | TUnion(n, []) -> Ok("dec" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map decFn
-            |> concatR " "
-            |> Result.map (fun a -> "(dec" + n + " " + a + ")")
-        | TNode -> Ok "decNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the F# decoder emitter" t)
-        | TList inner -> decFn inner |> Result.map (sprintf "(dList %s)")
-        // Phase 347 — the sentinel is checked (`dSentinel`), as the interpreter checks it.
-        | TClosure -> Ok "(dSentinel \"<closure>\")"
-        | TOpaque -> Ok "(dSentinel \"<opaque>\")"
-        // Phase 689 — a `TFn` slot decodes to its declared placeholder. There is
-        // nothing on the wire to rebuild a closure from, so the decoded tree is the
-        // storage shape and the placeholder is what a host re-attaches over.
-        //
-        // Phase 460 — WHAT A PLACEHOLDER MAY NAME (contract). The placeholder is spliced
-        // verbatim into the short-circuiting `dec*` decoder AND, under
-        // `Gen.Derivation.SpecDecoders`, into its collecting `col*` twin (as a lifted leaf),
-        // so it may reference only what both scopes bind:
-        //   * the module's prelude and its generated `dec*` decoders (`decNode`, `dec<Union>`,
-        //     `dec<Record>`, `dec<Enum>`);
-        //   * inside a parameterised union, each type parameter's short-circuiting decoder,
-        //     `dec<V>: JVal -> Result<'V, DecodeError>` — the short-circuiting decoder's
-        //     parameter, and a local the collecting decoder binds under the same name.
-        // `col<V>`, `__j`, `__fs`, `j` and every member binding are emitter internals, not
-        // contract (some differ between the two decoders or between field positions); a
-        // placeholder naming one is outside the contract.
-        | TFn s ->
-            Ok(sprintf "(fun (__j: JVal) -> dSentinel \"<closure>\" __j |> Result.map (fun () -> %s))" s.Placeholder)
-        // Phase 676 — accept any JSON verbatim; a shape check would contradict the
-        // field's contract.
-        | TJson -> Ok "dJson"
-        // The named host decode expression, verbatim (JVal -> Result<'host, string>).
-        // Phase 252 — a declared wire form is checked FIRST (its type, then its format),
-        // so this host refuses exactly what the interpreter and the TypeScript host refuse,
-        // whatever the codec itself would admit.
-        // Phase 337 — the codec's own refusal is a SENTENCE (its contract is unchanged), lifted
-        // by `dHosted` to `OutOfRange` at the slot.
-        | THosted h ->
-            match hostedWireRefusal "the F# decoder emitter" h with
-            | Some e -> Error e
-            | None ->
-                match h.Wire with
-                | None -> Ok(sprintf "(fun (__j: JVal) -> dHosted ((%s) __j))" h.Decode)
-                | Some w ->
-                    decFn w
-                    |> Result.map (fun wd ->
+    /// Phase 524 — the F# DECODER printer over the one slot traversal ([[SlotTraversal]]): each
+    /// slot's `JVal -> Result<'T, DecodeError>`, the mirror of [[encPrinter]] arm for arm.
+    let decPrinter: SlotPrinter =
+        let backend = "the F# decoder emitter"
+
+        { Backend = backend
+          Str = "dStr"
+          Int = "dInt"
+          Bool = "dBool"
+          Float = "dFloat"
+          Enum = fun n -> "dec" + n
+          Var = fun v -> "dec" + v
+          Named = fun n -> "dec" + n
+          Node = "decNode"
+          Union = fun n args -> "(dec" + n + " " + String.concat " " args + ")"
+          List = sprintf "(dList %s)"
+          Map = sprintf "(dMap %s)"
+          // Phase 347 — the sentinel is checked (`dSentinel`), as the interpreter checks it.
+          Closure = "(dSentinel \"<closure>\")"
+          Opaque = "(dSentinel \"<opaque>\")"
+          // Phase 689 — a `TFn` slot decodes to its declared placeholder. There is nothing on the
+          // wire to rebuild a closure from, so the decoded tree is the storage shape and the
+          // placeholder is what a host re-attaches over.
+          //
+          // Phase 460 — WHAT A PLACEHOLDER MAY NAME (contract). The placeholder is spliced
+          // verbatim into the short-circuiting `dec*` decoder AND, under
+          // `Derivation.SpecDecoders`, into its collecting `col*` twin (as a lifted leaf), so it
+          // may reference only what both scopes bind:
+          //   * the module's prelude and its generated `dec*` decoders (`decNode`, `dec<Union>`,
+          //     `dec<Record>`, `dec<Enum>`);
+          //   * inside a parameterised union, each type parameter's short-circuiting decoder,
+          //     `dec<V>: JVal -> Result<'V, DecodeError>` — the short-circuiting decoder's
+          //     parameter, and a local the collecting decoder binds under the same name.
+          // `col<V>`, `__j`, `__fs`, `j` and every member binding are emitter internals, not
+          // contract (some differ between the two decoders or between field positions); a
+          // placeholder naming one is outside the contract.
+          Fn =
+            fun s ->
+                sprintf "(fun (__j: JVal) -> dSentinel \"<closure>\" __j |> Result.map (fun () -> %s))" s.Placeholder
+          // Phase 676 — accept any JSON verbatim; a shape check would contradict the field's
+          // contract.
+          Json = "dJson"
+          // The named host decode expression, verbatim (JVal -> Result<'host, string>). Phase 252 —
+          // a declared wire form is checked FIRST (its type, then its format), so this host
+          // refuses exactly what the interpreter and the TypeScript host refuse, whatever the
+          // codec itself would admit. Phase 337 — the codec's own refusal is a SENTENCE (its
+          // contract is unchanged), lifted by `dHosted` to `OutOfRange` at the slot.
+          Hosted =
+            fun h ->
+                match hostedWireRefusal backend h with
+                | Some e -> HostedSlot.Refused e
+                | None ->
+                    match h.Wire with
+                    | None -> HostedSlot.Verbatim(sprintf "(fun (__j: JVal) -> dHosted ((%s) __j))" h.Decode)
+                    | Some w ->
                         let format =
                             match h.Format with
                             | Some f ->
@@ -442,69 +395,34 @@ let private encFloat (f: float) : JVal =
                                     (SourceLit.fsString (HostedFormat.name f))
                             | None -> ""
 
-                        sprintf
-                            "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> dHosted ((%s) __j)))"
-                            wd
-                            format
-                            h.Decode)
-        | TRecord n -> Ok("dec" + n)
-        | TMap vt -> decFn vt |> Result.map (sprintf "(dMap %s)")
+                        HostedSlot.Through(
+                            w,
+                            fun wd ->
+                                sprintf
+                                    "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> dHosted ((%s) __j)))"
+                                    wd
+                                    format
+                                    h.Decode
+                        ) }
 
-    /// Reading one field back out, honouring the presence rules [[presencePiece]]
-    /// wrote it under — over [[memberView]]'s reading of the object when the field declares an alias
-    /// or a presence condition (Phase 539).
-    let decField (idl: Idl) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
-        let fsx = memberView idl fields f |> Option.defaultValue "__fs"
-
-        match f.Type with
-        // The VALUE is a sentinel and carries nothing, so what decodes is `()` — or, for a
-        // `TFn` slot (Phase 689), its declared placeholder. An OPTIONAL slot's PRESENCE is real
-        // wire information — the encoder omits the key when `None` and emits the sentinel when
-        // `Some` — so reading it is what makes the decode a structural inverse (a flat `Ok None`
-        // silently dropped the field, caught by the corpus round-trip gate on `grid-1`'s
-        // optional `rowKey`).
-        //
-        // Phase 347 — and the slot is READ like any other, as the interpreter reads it: a
-        // required one absent is `MissingField`, a present one must be its sentinel (`dSentinel`:
-        // another string is `OutOfRange`, another kind `WrongKind`). Until 347 a required slot
-        // was never looked for and an optional one was read for its presence only.
-        | TClosure
-        | TOpaque
-        | TFn _ ->
-            let name = SourceLit.fsString f.Name
-
-            let placeholder =
-                match f.Type with
-                | TFn s -> s.Placeholder
-                | _ -> "()"
-
-            decFn f.Type
-            |> Result.map (fun d ->
-                match f.Opt with
-                | Required -> sprintf "dReq %s %s %s" name fsx d
-                | Optional -> sprintf "dOpt %s %s %s" name fsx d
-                | OmitDefault _ -> sprintf "dDef %s %s %s (%s)" name fsx d placeholder
-                // Never on the wire — nothing to read, so take the placeholder.
-                | HostOnly -> sprintf "Ok (%s)" placeholder)
-        | _ ->
-            match f.Opt with
-            | Required ->
-                decFn f.Type
-                |> Result.map (fun d -> sprintf "dReq %s %s %s" (SourceLit.fsString f.Name) fsx d)
-            | Optional ->
-                decFn f.Type
-                |> Result.map (fun d -> sprintf "dOpt %s %s %s" (SourceLit.fsString f.Name) fsx d)
-            // Never on the wire — nothing to read, so take the declared placeholder.
-            | HostOnly -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
-            // Phase 124 — the decoder's optional arm and the encoder's omit test are now
-            // rendered from ONE literal, so they cannot disagree. Before this, an
-            // unrenderable default fell through to `dReq` here and to always-emit there —
-            // consistent with each other and with nothing else, least of all the IDL.
-            | OmitDefault d ->
-                fsDefaultLit idl f.Type d
-                |> Result.bind (fun dexpr ->
-                    decFn f.Type
-                    |> Result.map (fun dfn -> sprintf "dDef %s %s %s (%s)" (SourceLit.fsString f.Name) fsx dfn dexpr))
+    /// Phase 524 — the F# printer of a member READ back out ([[MemberTraversal.decMember]]): a
+    /// sentinel slot decodes to `()` or its `TFn` placeholder, a host-only member to its declared
+    /// placeholder, an omit-at-default one to [[fsDefaultLit]]'s literal.
+    let memberDecPrinter (idl: Idl) : MemberDecPrinter =
+        { Slot = decPrinter
+          Key = SourceLit.fsString
+          // Phase 539 — a member declaring an alias or a presence condition reads its canonical view.
+          Object = fun fields f -> memberView idl fields f |> Option.defaultValue "__fs"
+          Req = sprintf "dReq %s %s %s"
+          Opt = sprintf "dOpt %s %s %s"
+          Def = sprintf "dDef %s %s %s (%s)"
+          Placeholder =
+            function
+            | TFn s -> s.Placeholder
+            | _ -> "()"
+          HostOnlySentinel = sprintf "Ok (%s)"
+          HostOnly = fun f -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
+          DefaultLit = fsDefaultLit idl }
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -534,9 +452,8 @@ let private encFloat (f: float) : JVal =
         (opens @ [ indent + final + String.replicate count ")" ]) |> String.concat "\n"
 
     let fieldBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
-        fs
-        |> List.map (fun f -> decField idl fs f |> Result.map (fun e -> ident f.Name, e))
-        |> sequenceR
+        MemberTraversal.decMembers (memberDecPrinter idl) fs
+        |> Result.map (List.map (fun (f, e) -> ident f.Name, e))
 
     /// An enum decoder (Phase 337): a string naming no case is `UnknownTag`, anything else
     /// `WrongKind` — the interpreter's split, and since Phase 520 the interpreter's detail, so the
@@ -563,10 +480,10 @@ let private encFloat (f: float) : JVal =
     /// A union decoder. Generic unions take one `decX` codec per type parameter,
     /// with the explicit type-parameter list [[unionEncoder]] needs for the same
     /// polymorphic-recursion reason (`Binding.Format.source` recurses at `float`).
+    /// Phase 524 — the cases and the transparent fallthrough are [[UnionTraversal.decoder]]'s.
     let unionDecoder
         (docFn: string -> string -> string)
         (refines: Map<string, string>)
-        (disc: string)
         (decl: Decl)
         (u: IdlUnion)
         : Result<string, CodegenError> =
@@ -591,7 +508,7 @@ let private encFloat (f: float) : JVal =
             | [] -> sprintf "%s.%s" u.Name c.Tag
             | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
 
-        let arm (c: IdlUnionCase) =
+        let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
             // Phase 945 — a declared refine replaces the plain `Ok(Case(…))` final with a
             // policy expression (field binder names in scope); the binder chain around it
             // is untouched, so a refine cannot change WHICH fields decode, only what is
@@ -601,6 +518,7 @@ let private encFloat (f: float) : JVal =
             // case's last member and lifts the refine's refusal to `OutOfRange` at the case's
             // object (see [[bindChainRefined]]).
             let refine = refines.TryFind(u.Name + "." + c.Tag)
+            let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
             let final =
                 match refine with
@@ -609,99 +527,85 @@ let private encFloat (f: float) : JVal =
 
             let body =
                 if List.isEmpty c.Fields then
-                    Ok(sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c))
+                    sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c)
                 else
-                    fieldBinders idl c.Fields
-                    |> Result.map (fun binders ->
-                        sprintf
-                            "        | %s ->\n%s"
-                            (SourceLit.fsString c.Tag)
-                            (match refine with
-                             | Some _ -> bindChainRefined "            " binders final
-                             | None -> bindChain "            " binders final 0))
+                    sprintf
+                        "        | %s ->\n%s"
+                        (SourceLit.fsString c.Tag)
+                        (match refine with
+                         | Some _ -> bindChainRefined "            " binders final
+                         | None -> bindChain "            " binders final 0)
 
-            body
-            |> Result.map (fun b -> docFn ("decarm:" + u.Name + "." + c.Tag) "        " + b)
+            docFn ("decarm:" + u.Name + "." + c.Tag) "        " + body
 
         // The declared transparent case is on the wire BARE, so it is recognised as a
         // value that is not an object. Every object goes to the tag dispatch, as the
         // interpreter's does (Phase 337: an object with no discriminator is `MissingField`
         // at it, never a payload; Phase 303 refuses a transparent case whose payload can be
         // an object, so no bare payload is lost).
-        let transparent: Result<string option, CodegenError> =
-            match Decl.transparentCase decl u |> Option.map (fun c -> c, Decl.caseLayout decl u c) with
-            | Some(c, CaseLayout.Bare(Ok f)) ->
-                decFn f.Type
-                |> Result.map (fun dfn ->
-                    Some(
+        UnionTraversal.decoder
+            { Read = MemberTraversal.decMembers (memberDecPrinter idl)
+              Slot = decPrinter
+              Arm = fun _ c members -> arm c members
+              Bare =
+                fun _ c f dfn ->
+                    sprintf
+                        "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
+                        dfn
+                        (ident f.Name)
+                        (ctor c)
+              NoBare = fun _ -> "    | __j -> Error(Decoder.wrongKind \"object\" __j)"
+              Union =
+                fun _ arms fall ->
+                    let tagged =
                         sprintf
-                            "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
-                            dfn
-                            (ident f.Name)
-                            (ctor c)
-                    ))
-            | _ -> Ok None
+                            "    | JObj __fs ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> dUnknown %s (%s + __other + \"'\"))"
+                            (String.concat "\n" arms)
+                            (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
+                            (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
-        let taggedR =
-            u.Cases
-            |> List.map arm
-            |> concatR "\n"
-            |> Result.map (fun arms ->
-                sprintf
-                    "    | JObj __fs ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> dUnknown %s (%s + __other + \"'\"))"
-                    arms
-                    (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
-                    (SourceLit.fsString (idl.Wire.Discriminator + " '")))
+                    sprintf
+                        "and private dec%s%s%s (j: JVal) : Result<%s%s, DecodeError> =\n    match j with\n%s\n%s"
+                        u.Name
+                        declArgs
+                        decArgs
+                        u.Name
+                        tyArgs
+                        tagged
+                        fall }
+            decl
+            u
 
-        let fallthrough =
-            transparent
-            |> Result.map (function
-                | Some t -> t
-                | None -> "    | __j -> Error(Decoder.wrongKind \"object\" __j)")
-
-        taggedR
-        |> Result.bind (fun tagged ->
-            fallthrough
-            |> Result.map (fun fall ->
-                sprintf
-                    "and private dec%s%s%s (j: JVal) : Result<%s%s, DecodeError> =\n    match j with\n%s\n%s"
-                    u.Name
-                    declArgs
-                    decArgs
-                    u.Name
-                    tyArgs
-                    tagged
-                    fall))
-
-    let specDecoder (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
+    /// An object's decoder — a kind's spec record or a declared record: its members read in
+    /// declaration order ([[fieldBinders]]), then the record built.
+    let objectDecoder
+        (decName: string)
+        (typeName: string)
+        (msg: Set<string>)
+        (idl: Idl)
+        (fields: IdlField list)
+        : Result<string, CodegenError> =
         let assigns =
-            k.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+            fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
 
-        fieldBinders idl k.Fields
-        |> Result.map (fun binders ->
-            sprintf
-                "and private dec%sSpec (j: JVal) : Result<%sSpec%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
-                k.Tag
-                k.Tag
-                (objParams msg (k.Tag + "Spec") [])
-                (bindChain "    " binders ("Ok " + recordLit (k.Tag + "Spec") assigns) 1))
-
-    let recordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
-        let assigns =
-            r.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
-
-        fieldBinders idl r.Fields
+        fieldBinders idl fields
         |> Result.map (fun binders ->
             sprintf
                 "and private dec%s (j: JVal) : Result<%s%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
-                r.Name
-                r.Name
-                (objParams msg r.Name [])
-                (bindChain "    " binders ("Ok " + recordLit r.Name assigns) 1))
+                decName
+                typeName
+                (objParams msg typeName [])
+                (bindChain "    " binders ("Ok " + recordLit typeName assigns) 1))
+
+    let specDecoder (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
+        objectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg idl k.Fields
+
+    let recordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
+        objectDecoder r.Name r.Name msg idl r.Fields
 
     // -----------------------------------------------------------------------
     // Phase 377 — the COLLECTING decoders and the public per-spec entries, emitted on request
-    // (`Gen.Derivation.SpecDecoders`). Each `dec*` decoder above is a `Result.bind` chain and
+    // (`Derivation.SpecDecoders`). Each `dec*` decoder above is a `Result.bind` chain and
     // reports ONE defect; its `col*` twin walks the same positions in the same order and answers
     // every defect as a `DecodeError list`. Mirroring the walk is what makes the twin a
     // conservative extension: its first defect is the short-circuiting decoder's defect, and on a
@@ -712,63 +616,34 @@ let private encFloat (f: float) : JVal =
     // an object, a list and a map have independent positions to collect over.
     // -----------------------------------------------------------------------
 
-    /// Whether a type has independent positions a collecting decoder walks (an object, a list, a
-    /// map, a type parameter's codec); every other type is a leaf.
-    let collectsOver (t: IdlType) : bool =
-        match t with
-        | TList _
-        | TMap _
-        | TRecord _
-        | TUnion _
-        | TNode
-        | TVar _ -> true
-        | _ -> false
-
-    /// The collecting decoder expression for a type — a `JVal -> Result<'T, DecodeError list>`.
-    /// Mirrors [[decFn]] arm for arm; a leaf is [[decFn]]'s decoder, lifted.
+    /// Phase 524 — the F# COLLECTING decoder printer, derived from [[decPrinter]]
+    /// ([[SlotTraversal.collecting]]): a leaf is the short-circuiting decoder lifted (`cLift`).
     ///
     /// Phase 541 — a node, a non-generic union and a record are read through the overridable
     /// decoders `__ov` (the emitted `CollectingDecoders` record, see [[collectingDecl]]), handed
     /// the same record, so a host's decoder at that type is the one applied at EVERY depth. A
     /// generic union has no monomorphic slot in the record: its own decoder is called with the
     /// record threaded through, so every position beneath it is still read through `__ov`.
-    let rec colFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TVar v -> Ok("col" + v)
-        | TUnion(n, []) -> Ok("(__ov." + n + " __ov)")
-        | TUnion(n, args) ->
-            args
-            |> List.map colFn
-            |> concatR " "
-            |> Result.map (fun a -> "(col" + n + " __ov " + a + ")")
-        | TNode -> Ok "(__ov.Node __ov)"
-        | TList inner -> colFn inner |> Result.map (sprintf "(cList %s)")
-        | TMap vt -> colFn vt |> Result.map (sprintf "(cMap %s)")
-        | TRecord n -> Ok("(__ov." + n + " __ov)")
-        | _ -> decFn t |> Result.map (sprintf "(cLift %s)")
+    let colPrinter: SlotPrinter =
+        SlotTraversal.collecting
+            decPrinter
+            (sprintf "(cLift %s)")
+            { decPrinter with
+                Var = fun v -> "col" + v
+                Named = fun n -> "(__ov." + n + " __ov)"
+                Union = fun n args -> "(col" + n + " __ov " + String.concat " " args + ")"
+                Node = "(__ov.Node __ov)"
+                List = sprintf "(cList %s)"
+                Map = sprintf "(cMap %s)" }
 
-    /// Reading one field back out under [[decField]]'s presence rules, collecting. A leaf field (and
-    /// a host-only one, which reads nothing) is [[decField]]'s expression lifted, so its presence
-    /// rules are the short-circuiting decoder's by construction.
-    let colField (idl: Idl) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
-        let name = SourceLit.fsString f.Name
-        let fsx = memberView idl fields f |> Option.defaultValue "__fs"
-
-        match f.Opt with
-        | HostOnly -> decField idl fields f |> Result.map (sprintf "cOne (%s)")
-        | _ when not (collectsOver f.Type) -> decField idl fields f |> Result.map (sprintf "cOne (%s)")
-        | Required -> colFn f.Type |> Result.map (sprintf "cReq %s %s %s" name fsx)
-        | Optional -> colFn f.Type |> Result.map (sprintf "cOpt %s %s %s" name fsx)
-        | OmitDefault d ->
-            fsDefaultLit idl f.Type d
-            |> Result.bind (fun dexpr ->
-                colFn f.Type
-                |> Result.map (fun c -> sprintf "cDef %s %s %s (%s)" name fsx c dexpr))
-
-    let colBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
-        fs
-        |> List.map (fun f -> colField idl fs f |> Result.map (fun e -> ident f.Name, e))
-        |> sequenceR
+    /// The F# collecting member reader: [[memberDecPrinter]]'s presence, read through
+    /// [[colPrinter]].
+    let colMemberPrinter (idl: Idl) : MemberDecPrinter =
+        { memberDecPrinter idl with
+            Slot = colPrinter
+            Req = sprintf "cReq %s %s %s"
+            Opt = sprintf "cOpt %s %s %s"
+            Def = sprintf "cDef %s %s %s (%s)" }
 
     /// Read every member (in declaration order — the order the defects are reported in), then
     /// build `final` when all of them decoded, else answer every member's defects, concatenated in
@@ -811,7 +686,12 @@ let private encFloat (f: float) : JVal =
     /// the refine to them ([[collectRefined]]) — the refine is a sentence over the decoded members,
     /// so it adds at most one defect, only once they all decoded, and at the position the
     /// short-circuiting decoder reports it.
-    let colUnionDecoder (refines: Map<string, string>) (decl: Decl) (u: IdlUnion) : Result<string, CodegenError> =
+    let colUnionDecoder
+        (refines: Map<string, string>)
+        (decl: Decl)
+        (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
+        (u: IdlUnion)
+        : Result<string, CodegenError> =
         let msg, idl = decl.Msg, decl.Idl
 
         let colArgs =
@@ -829,8 +709,8 @@ let private encFloat (f: float) : JVal =
 
         // Phase 460 — each type parameter's SHORT-CIRCUITING decoder, bound under the name the
         // short-circuiting emitter gives its parameter (`dec<V>`), so a placeholder that names it
-        // compiles in both decoders (the contract is stated at [[decFn]]'s `TFn` arm); the refined
-        // case's twin below takes the same bindings.
+        // compiles in both decoders (the contract is stated at [[decPrinter]]'s `TFn` arm); the
+        // refined case's twin below takes the same bindings.
         let decBindings =
             u.Params
             |> List.map (fun p -> sprintf "    let dec%s (__j: JVal) = cFirst (col%s __j)\n" p p)
@@ -841,84 +721,73 @@ let private encFloat (f: float) : JVal =
             | [] -> sprintf "%s.%s" u.Name c.Tag
             | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
 
-        let arm (c: IdlUnionCase) =
+        let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
             if List.isEmpty c.Fields then
-                Ok(sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c))
+                sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c)
             else
-                colBinders idl c.Fields
-                |> Result.map (fun binders ->
-                    let body =
-                        match refines.TryFind(u.Name + "." + c.Tag) with
-                        | Some r -> collectRefined "            " binders r
-                        | None -> collectAll "            " binders (sprintf "Ok(%s)" (ctor c))
+                let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
-                    sprintf "        | %s ->\n%s" (SourceLit.fsString c.Tag) body)
+                let body =
+                    match refines.TryFind(u.Name + "." + c.Tag) with
+                    | Some r -> collectRefined "            " binders r
+                    | None -> collectAll "            " binders (sprintf "Ok(%s)" (ctor c))
 
-        let transparent: Result<string option, CodegenError> =
-            match Decl.transparentCase decl u |> Option.map (fun c -> c, Decl.caseLayout decl u c) with
-            | Some(c, CaseLayout.Bare(Ok f)) ->
-                colFn f.Type
-                |> Result.map (fun cfn ->
-                    Some(
+                sprintf "        | %s ->\n%s" (SourceLit.fsString c.Tag) body
+
+        UnionTraversal.decoder
+            { Read = read
+              Slot = colPrinter
+              Arm = fun _ c members -> arm c members
+              Bare =
+                fun _ c f cfn ->
+                    sprintf
+                        "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
+                        cfn
+                        (ident f.Name)
+                        (ctor c)
+              NoBare = fun _ -> "    | __j -> cOne (Error(Decoder.wrongKind \"object\" __j))"
+              Union =
+                fun _ arms fall ->
+                    let tagged =
                         sprintf
-                            "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
-                            cfn
-                            (ident f.Name)
-                            (ctor c)
-                    ))
-            | _ -> Ok None
+                            "    | JObj __fs ->\n        dTag __fs |> cOne |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> cOne (dUnknown %s (%s + __other + \"'\")))"
+                            (String.concat "\n" arms)
+                            (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
+                            (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
-        let taggedR =
-            u.Cases
-            |> List.map arm
-            |> concatR "\n"
-            |> Result.map (fun arms ->
-                sprintf
-                    "    | JObj __fs ->\n        dTag __fs |> cOne |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> cOne (dUnknown %s (%s + __other + \"'\")))"
-                    arms
-                    (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
-                    (SourceLit.fsString (idl.Wire.Discriminator + " '")))
+                    sprintf
+                        "and private col%s%s (__ov: CollectingDecoders)%s (j: JVal) : Result<%s%s, DecodeError list> =\n%s    match j with\n%s\n%s"
+                        u.Name
+                        declArgs
+                        colArgs
+                        u.Name
+                        tyArgs
+                        decBindings
+                        tagged
+                        fall }
+            decl
+            u
 
-        let fallthrough =
-            transparent
-            |> Result.map (function
-                | Some t -> t
-                | None -> "    | __j -> cOne (Error(Decoder.wrongKind \"object\" __j))")
-
-        taggedR
-        |> Result.bind (fun tagged ->
-            fallthrough
-            |> Result.map (fun fall ->
-                sprintf
-                    "and private col%s%s (__ov: CollectingDecoders)%s (j: JVal) : Result<%s%s, DecodeError list> =\n%s    match j with\n%s\n%s"
-                    u.Name
-                    declArgs
-                    colArgs
-                    u.Name
-                    tyArgs
-                    decBindings
-                    tagged
-                    fall))
-
-    /// An object's collecting decoder — a kind's spec record or a declared record.
+    /// An object's collecting decoder — a kind's spec record or a declared record — from its
+    /// members as read.
     let colObjectDecoder
         (decName: string)
         (typeName: string)
         (msg: Set<string>)
-        (idl: Idl)
         (fields: IdlField list)
-        : Result<string, CodegenError> =
+        (members: (IdlField * string) list)
+        : string =
         let assigns =
             fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
 
-        colBinders idl fields
-        |> Result.map (fun binders ->
-            sprintf
-                "and private col%s (__ov: CollectingDecoders) (j: JVal) : Result<%s%s, DecodeError list> =\n    cObj j |> Result.bind (fun __fs ->\n%s)"
-                decName
-                typeName
-                (objParams msg typeName [])
-                (collectAll "        " binders ("Ok " + recordLit typeName assigns)))
+        let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
+
+        sprintf
+            "and private col%s (__ov: CollectingDecoders) (j: JVal) : Result<%s%s, DecodeError list> =\n    cObj j |> Result.bind (fun __fs ->\n%s)"
+            decName
+            typeName
+            (objParams msg typeName [])
+            (collectAll "        " binders ("Ok " + recordLit typeName assigns))
 
     /// Phase 377 — the collecting prelude, the collecting decoder group (mirroring the decoder
     /// group: node kind, node, unions, records, specs) and the public entries: per kind
@@ -932,7 +801,7 @@ let private encFloat (f: float) : JVal =
     /// no reflection, Fable-clean). `collectingDecoders` is the record of the generated decoders;
     /// the `decode*All` entries read through it, unchanged, and their `decode*AllWith` twins take
     /// a host's record, so a host decoder at a type is applied at every depth that type occurs.
-    let collectingDecl (sup: Support) (decl: Decl) : Result<string, CodegenError> =
+    let collectingDecl (sup: GenSupport) (decl: Decl) : Result<string, CodegenError> =
         let idl, msg, kinds, unions, records =
             decl.Idl, decl.Msg, decl.Kinds, decl.Unions, decl.Records
 
@@ -943,7 +812,7 @@ let private encFloat (f: float) : JVal =
             k.Tag + "Spec" + objParams msg (k.Tag + "Spec") []
 
         // A generic union has no monomorphic field: its instantiations are read through the
-        // record by its own decoder (see [[colFn]]). A projected kind's decoder is the host
+        // record by its own decoder (see [[colPrinter]]). A projected kind's decoder is the host
         // projection's, a leaf with no position beneath it.
         let slots =
             [ yield "Node", "Node" + nodeTy
@@ -1001,42 +870,43 @@ let private encFloat (f: float) : JVal =
                 (SourceLit.fsString (oneOf (kinds |> List.map _.Tag)))
                 (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
-        let colNodeDecl =
+        let colNodeDecl (envelope: (IdlField * string) list) =
             let envelopeAssigns =
                 decl.Envelope.Members
                 |> List.map (fun f -> sprintf "; %s = %s" (pascal f.Name) (ident f.Name))
                 |> String.concat ""
 
             let final = sprintf "Ok { Id = id; Kind = kind%s }" envelopeAssigns
-
             let kindBinder = envelopeKindBinder decl.Envelope "cReq" "(colNodeKind __ov)"
 
-            colBinders idl decl.Envelope.Members
-            |> Result.map (fun envelopeBinders ->
-                let binders =
-                    [ "id", "cOne (dReq \"id\" __fs dStr)"; "kind", kindBinder ] @ envelopeBinders
+            let binders =
+                [ "id", "cOne (dReq \"id\" __fs dStr)"; "kind", kindBinder ]
+                @ (envelope |> List.map (fun (f, e) -> ident f.Name, e))
 
-                sprintf
-                    "and private colNode (__ov: CollectingDecoders) (j: JVal) : Result<Node%s, DecodeError list> =\n"
-                    nodeTy
-                + "    cObj j |> Result.bind (fun __fs ->\n"
-                + collectAll "        " binders final
-                + ")")
-
-        let specDecl (k: IdlKind) =
-            // A projected kind's decoder is the projection's short-circuiting one, lifted.
-            if projected k then
-                Ok(sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag)
-            else
-                colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg idl k.Fields
+            sprintf
+                "and private colNode (__ov: CollectingDecoders) (j: JVal) : Result<Node%s, DecodeError list> =\n"
+                nodeTy
+            + "    cObj j |> Result.bind (fun __fs ->\n"
+            + collectAll "        " binders final
+            + ")"
 
         let groupR =
-            (Ok colNodeKindDecl
-             :: colNodeDecl
-             :: (unions |> List.map (colUnionDecoder sup.CaseRefines decl))
-             @ (records |> List.map (fun r -> colObjectDecoder r.Name r.Name msg idl r.Fields))
-             @ (kinds |> List.map specDecl))
-            |> concatR "\n\n"
+            CollectingTraversal.group
+                { Dec = memberDecPrinter idl
+                  Col = colMemberPrinter idl
+                  Lift = sprintf "cOne (%s)"
+                  Union = fun read u -> colUnionDecoder sup.CaseRefines decl read u
+                  NodeKind = colNodeKindDecl
+                  Node = colNodeDecl
+                  Record = fun r members -> colObjectDecoder r.Name r.Name msg r.Fields members
+                  // A projected kind's decoder is the projection's short-circuiting one, lifted.
+                  ReadsSpec = fun k -> not (projected k)
+                  Spec =
+                    fun k members ->
+                        match members with
+                        | Some ms -> colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg k.Fields ms
+                        | None -> sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag }
+                decl
 
         let generatedDecl =
             "/// Phase 541 — the generated collecting decoders: what every `decode*All` entry reads through, and\n"
@@ -1097,9 +967,10 @@ let private encFloat (f: float) : JVal =
 
         let helpers =
             if sup.CaseRefines.IsEmpty then
-                [ FSharpCollecting.helpers ]
+                [ Template.text "fs-collecting.fs.txt" ]
             else
-                [ FSharpCollecting.helpers; FSharpCollecting.refineHelper ]
+                [ Template.text "fs-collecting.fs.txt"
+                  Template.text "fs-collecting-refine.fs.txt" ]
 
         groupR
         |> Result.map (fun group ->
@@ -1116,192 +987,19 @@ let private encFloat (f: float) : JVal =
     /// declares a hosted slot and `dRefine` when the support declares a case refine — the two
     /// places a verbatim expression answers a sentence rather than a typed refusal.
     let decodeHelpers (disc: string) (hosted: bool) (refines: bool) : string =
-        let discLit = SourceLit.fsString disc
-
-        [ yield
-              """// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
-// path from the value the outermost decoder was handed, what the position expected, and a
-// sentence. The code, the path, the expectation and the detail are the ones the IDL interpreter
-// reports for the same document, so the sentence — `DecodeError.sentence`'s projection of them
-// (Phase 520) — is the interpreter's too.
-let private dFail (code: DecodeCode) (expected: string) (detail: string) : Result<'T, DecodeError> =
-    Error(DecodeError.make code expected detail)"""
-          yield
-              """// One step further from the root — what a refusal gains as it leaves a member or an item.
-let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
-    match r with
-    | Ok v -> Ok v
-    | Error e -> Error(DecodeError.under step e)"""
-          yield
-              """let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
-    match j with
-    | JObj fs -> Ok fs
-    | other -> Error(Decoder.wrongKind "object" other)"""
-          yield
-              """// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
-let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = __DISC__) with
-    | Some(_, JStr t) -> Ok t
-    | Some(_, other) -> Error(Decoder.wrongKind "string" other) |> dUnder (PathSegment.Key __DISC__)
-    | None -> Error(Decoder.missing __DISC__)"""
-                  .Replace("__DISC__", discLit)
-          yield
-              """// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
-let private dUnknown (expected: string) (detail: string) : Result<'T, DecodeError> =
-    dFail DecodeCode.UnknownTag expected detail |> dUnder (PathSegment.Key __DISC__)"""
-                  .Replace("__DISC__", discLit)
-          yield
-              """let private dStr (j: JVal) : Result<string, DecodeError> =
-    match j with
-    | JStr s -> Ok s
-    | other -> Error(Decoder.wrongKind "string" other)"""
-          yield
-              """let private dInt (j: JVal) : Result<int, DecodeError> =
-    match j with
-    | JInt i -> Ok i
-    | other -> Error(Decoder.wrongKind "int" other)"""
-          yield
-              """let private dBool (j: JVal) : Result<bool, DecodeError> =
-    match j with
-    | JBool b -> Ok b
-    | other -> Error(Decoder.wrongKind "bool" other)"""
-          yield
-              """// A whole-valued float renders without a decimal point, so it parses back as JInt.
-// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
-// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never
-// to the string: a host that answered the string would hand a consumer a different tree on
-// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
-// the float slot.
-let private dFloat (j: JVal) : Result<float, DecodeError> =
-    match j with
-    | JFloat f -> Ok f
-    | JInt i -> Ok(float i)
-    | JStr "NaN" -> Ok System.Double.NaN
-    | JStr "Infinity" -> Ok System.Double.PositiveInfinity
-    | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
-    | other -> Error(Decoder.wrongKind "number" other)"""
-          yield
-              """// Phase 347 — a closure / opaque slot holds one fixed sentinel string, read BY VALUE as the
-// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
-// takes), any other kind `WrongKind`. The sentinel carries nothing, so it decodes to `()`.
-let private dSentinel (sentinel: string) (j: JVal) : Result<unit, DecodeError> =
-    match j with
-    | JStr s when s = sentinel -> Ok()
-    | JStr s -> dFail DecodeCode.OutOfRange "string" ("'" + s + "'")
-    | other -> Error(Decoder.wrongKind "string" other)"""
-          yield
-              """// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
-// contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j"""
-          yield
-              """let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
-    match j with
-    | JArr xs ->
-        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
-            match rest with
-            | [] -> Ok(List.rev acc)
-            | x :: tail ->
-                match dec x with
-                | Ok v -> go (i + 1) (v :: acc) tail
-                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
-
-        go 0 [] xs
-    | other -> Error(Decoder.wrongKind "array" other)"""
-          yield
-              """// Every entry is checked, in document order; a repeated key keeps its FIRST value, as every
-// member read does (Phase 347 — `Map.ofList` kept the last, as `JSON.parse` does).
-let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
-    match j with
-    | JObj fs ->
-        (Ok Map.empty, fs)
-        ||> List.fold (fun acc (k, v) ->
-            match acc with
-            | Error e -> Error e
-            | Ok items ->
-                dec v
-                |> dUnder (PathSegment.Key k)
-                |> Result.map (fun d -> if Map.containsKey k items then items else Map.add k d items))
-    | other -> Error(Decoder.wrongKind "object" other)"""
-          yield
-              """let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
-    | None -> Error(Decoder.missing name)"""
-          yield
-              """let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
-    | None -> Ok None"""
-          yield
-              """let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
-    | None -> Ok dflt"""
+        [ yield Template.text "fs-decode-helpers.fs.txt"
           if hosted then
-              yield
-                  """// A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is
-// `OutOfRange` at the slot — any declared wire form has already been checked, so the value is
-// of the kind the slot takes and the codec does not admit it.
-let private dHosted (r: Result<'T, string>) : Result<'T, DecodeError> =
-    match r with
-    | Ok v -> Ok v
-    | Error m -> dFail DecodeCode.OutOfRange "a value the slot's host codec admits" m"""
+              yield Template.text "fs-decode-hosted.fs.txt"
           if refines then
-              yield
-                  """// A declared case refine answers a SENTENCE over the members it reads: `dRefine` binds the
-// case's last member and lifts the refine's refusal to `OutOfRange` at the case's object —
-// every member decoded, and together they are a value the case does not admit.
-let private dRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError>) : Result<'U, DecodeError> =
-    match r with
-    | Error e -> Error e
-    | Ok v ->
-        match f v with
-        | Ok u -> Ok u
-        | Error m -> dFail DecodeCode.OutOfRange "a case its refinement admits" m""" ]
+              yield Template.text "fs-decode-refine.fs.txt" ]
         |> String.concat "\n\n"
+        |> fun text -> text.Replace("__DISC__", SourceLit.fsString disc)
 
     /// Phase 252 — the generated F# check of a hosted slot's declared FORMAT, emitted only
     /// when the vocabulary declares one ([[declaresHostedFormat]]). It restates
     /// [[HostedFormat.admits]] because the generated module carries no reference to this
     /// package; a test holds the two to the same answers.
-    let fsFormatHelper =
-        """// Phase 252 — a hosted slot's declared string format, checked before its host codec runs,
-// exactly as the interpreter and the TypeScript host check it.
-let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
-    let day (y: int) (m: int) (d: int) =
-        y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
-
-    let num (m: System.Text.RegularExpressions.Match) (i: int) = int m.Groups[i].Value
-
-    let ok =
-        match format, j with
-        | "date", JStr s ->
-            let m = System.Text.RegularExpressions.Regex.Match(s, "^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
-            m.Success && day (num m 1) (num m 2) (num m 3)
-        | "date-time", JStr s ->
-            let m =
-                System.Text.RegularExpressions.Regex.Match(
-                    s,
-                    "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$"
-                )
-
-            m.Success
-            && day (num m 1) (num m 2) (num m 3)
-            && num m 4 <= 23
-            && num m 5 <= 59
-            && num m 6 <= 59
-            && (not m.Groups[9].Success || (num m 9 <= 23 && num m 10 <= 59))
-        | "uuid", JStr s ->
-            System.Text.RegularExpressions.Regex.IsMatch(
-                s,
-                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-            )
-        | _ -> false
-
-    if ok then
-        Ok()
-    else
-        dFail DecodeCode.OutOfRange ("a '" + format + "' string") (Canonical.write Rendering.CrossHost j)"""
+    let fsFormatHelper = (Template.text "fs-format-helper.fs.txt")
 
 
     // -----------------------------------------------------------------------
@@ -1310,7 +1008,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     // structural layer plugs straight into `Fuaran.Core.Tree` / `.Validator` /
     // `.Observer` — the "serves every domain via the Core witness, not just UI"
     // promise. `Children` / `ReplaceChildren` are derived from the IDL: a field
-    // is a child position iff `FSharpDerive.structuralField` says so — a node or
+    // is a child position iff `Derive.structural` says so — a node or
     // node list the kind always carries (Phase 545: an optional node is a keyed
     // position, on both the private and the public emission).
     // -----------------------------------------------------------------------
@@ -1339,7 +1037,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// refused by name, because nothing says which member of the host record holds it.
     let witnessDecl
         (publicAccess: bool)
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (msg: Set<string>)
         (kinds: IdlKind list)
         : Result<string, CodegenError> =
@@ -1373,7 +1071,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
 
         let childBearing =
             kinds
-            |> List.filter (fun k -> fieldsOf k |> List.exists (FSharpDerive.structuralField >> Option.isSome))
+            |> List.filter (fun k -> not (List.isEmpty (Derive.structuralFields (fieldsOf k))))
 
         let allBearing = List.length childBearing = List.length kinds
 
@@ -1384,40 +1082,42 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
 
         let childArm (k: IdlKind) =
             let exprs =
-                fieldsOf k
-                |> List.choose FSharpDerive.structuralField
-                |> List.map (fun (name, isList) -> if isList then "s." + name else "[ s." + name + " ]")
+                Derive.structuralFields (fieldsOf k)
+                |> List.map (fun (f, isList) ->
+                    if isList then
+                        "s." + pascal f.Name
+                    else
+                        "[ s." + pascal f.Name + " ]")
                 |> String.concat " @ "
 
             sprintf "    | NodeKind.%s s -> %s" k.Tag exprs
 
         let replaceArm (k: IdlKind) : Result<string, CodegenError> =
-            match fieldsOf k |> List.choose FSharpDerive.structuralField with
-            | [ (name, true) ] ->
-                Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }" k.Tag k.Tag name)
-            | [ (name, false) ] ->
-                Ok(
+            Derive.childLayout k.Tag (Derive.structuralFields (fieldsOf k))
+            |> Result.map (fun layout ->
+                match layout with
+                | ChildLayout.Whole f ->
+                    sprintf
+                        "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }"
+                        k.Tag
+                        k.Tag
+                        (pascal f.Name)
+                | ChildLayout.Positional [ f ] ->
                     sprintf
                         "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = List.head kids } }"
                         k.Tag
                         k.Tag
-                        name
-                )
-            | fields when fields |> List.forall (fun (_, isList) -> not isList) ->
-                // Several single-`Node` fields (real tier: `ErrorBoundary` has `child` + `fallback`).
-                // `witnessChildren` returns them in field order, so re-assign `kids` positionally.
-                let assigns =
-                    fields
-                    |> List.mapi (fun i (name, _) -> sprintf "%s = List.item %d kids" name i)
-                    |> String.concat "; "
+                        (pascal f.Name)
+                | ChildLayout.Positional fs ->
+                    // Several single-`Node` fields (real tier: `ErrorBoundary` has `child` +
+                    // `fallback`). `witnessChildren` returns them in field order, so re-assign `kids`
+                    // positionally.
+                    let assigns =
+                        fs
+                        |> List.mapi (fun i f -> sprintf "%s = List.item %d kids" (pascal f.Name) i)
+                        |> String.concat "; "
 
-                Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s } }" k.Tag k.Tag assigns)
-            | _ ->
-                // A kind mixing a `Node list` field with other node-bearing fields has no
-                // unambiguous positional split; none exists in the vocabulary, so the generator
-                // refuses at generation time (GP4) rather than emitting a runtime throwing
-                // guard into the generated code.
-                Error(CodegenError.MultiChildFieldKind k.Tag)
+                    sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s } }" k.Tag k.Tag assigns)
 
         let childArms =
             (childBearing |> List.map childArm)
@@ -1519,12 +1219,12 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
     /// entry point, which is this composed with it.
     let fsharpModuleUnnormalised
-        (sup: Support)
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
+        (sup: GenSupport)
+        (requests: Derivation list)
         (moduleName: string)
         (decl: Decl)
         : Result<string, CodegenError> =
+        let decoders = List.contains Derivation.SpecDecoders requests
         // Phase 945 — declared-doc lookup: a block of comment lines (markers included,
         // "///" or "//" alike) attached to the named declaration path, indented to the
         // emission site. Absent path ⇒ empty string, so an IDL with no docs emits
@@ -1725,8 +1425,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
 
             (Ok decNodeKindDecl
              :: decNodeDecl
-             :: (unions
-                 |> List.map (unionDecoder doc sup.CaseRefines idl.Wire.Discriminator decl))
+             :: (unions |> List.map (unionDecoder doc sup.CaseRefines decl))
              @ (records |> List.map (recordDecoder msg idl))
              @ (kinds
                 |> List.map (fun k ->
@@ -1742,9 +1441,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         // An empty request list leaves the witness private and appends nothing.
         let publicAccess =
             requests
-            |> List.exists (fun r ->
-                r = FSharpDerive.Request.StructuralAccess
-                || r = FSharpDerive.Request.KeyedPositions)
+            |> List.exists (fun r -> r = Derivation.StructuralAccess || r = Derivation.KeyedPositions)
 
         let witnessAndDerived =
             Decl.projectionsDeclared decl
@@ -1779,21 +1476,15 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               // Phase 694 — JVal-level accessors for host codecs that splice
               // generated encodings into a larger canonical document (the
               // tier's TreeOp codec re-points at these when the hand-written
-              // node encoder is deleted). Node + kind always; the two envelope
-              // records only when the vocabulary declares them (the spike
-              // vocabulary has neither).
+              // node encoder is deleted): the node and its kind, for every
+              // vocabulary. An accessor for any other declaration is the
+              // vocabulary's to declare through the accessor splice — Phase 524
+              // removed the two this generic emitter wrote by one vocabulary's
+              // record NAMES (C93).
               [ sprintf
                     "/// JVal-level accessors (Phase 694) — for host codecs that splice generated\n/// encodings into a larger canonical document (e.g. a TreeOp codec).\nlet encodeNodeJson (n: Node%s) : JVal = encNode n"
                     nodeArgs
                 sprintf "let encodeNodeKindJson (k: NodeKind%s) : JVal = encNodeKind k" nodeArgs ]
-              (if records |> List.exists (fun r -> r.Name = "StateBehaviour") then
-                   [ sprintf "let encodeStateBehaviourJson (s: StateBehaviour%s) : JVal = encStateBehaviour s" nodeArgs ]
-               else
-                   [])
-              (if records |> List.exists (fun r -> r.Name = "SemanticStyle") then
-                   [ "let encodeSemanticStyleJson (s: SemanticStyle) : JVal = encSemanticStyle s" ]
-               else
-                   [])
               (sup.AccessorSplice |> Option.toList)
               decodeHelpers idl.Wire.Discriminator decl.Hosted (not sup.CaseRefines.IsEmpty)
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])
@@ -1889,21 +1580,20 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     ///
     /// The emitted text is LF-terminated whatever the generator was built from and whatever the
     /// declared support carries — see [[normalizeEol]].
-    let fsharpModuleWith (sup: Support) (moduleName: string) (decl: Decl) : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup [] false moduleName decl
+    let fsharpModuleWith (sup: GenSupport) (moduleName: string) (decl: Decl) : Result<string, CodegenError> =
+        fsharpModuleUnnormalised sup [] moduleName decl
         |> Result.map (normalizeEol >> fsharpStamp decl.Idl)
 
     /// Phase 374 — `fsharpModuleWith` plus the requested structural derivations
     /// ([[FSharpDerive]]), and (Phase 377) the collecting decoders and public per-spec entries
-    /// when `decoders` is set. No request and no decoders IS `fsharpModuleWith`, byte for byte.
+    /// under `Derivation.SpecDecoders`. No request IS `fsharpModuleWith`, byte for byte.
     let fsharpModuleDerived
-        (sup: Support)
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
+        (sup: GenSupport)
+        (requests: Derivation list)
         (moduleName: string)
         (decl: Decl)
         : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup requests decoders moduleName decl
+        fsharpModuleUnnormalised sup requests moduleName decl
         |> Result.map (normalizeEol >> fsharpStamp decl.Idl)
 
     /// Phase 511 (S12) — THE admission of a derivation request, for every backend that derives:
@@ -1914,12 +1604,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// texts; the TypeScript backend calls this, over a resolution with no host projections
     /// (a projection is F# source, so the TypeScript host declares none), and so admits exactly
     /// what the F# path admits for the vocabulary's wire surface.
-    let admitDerivations (decl: Decl) (requests: FSharpDerive.Request list) : Result<unit, CodegenError> =
+    let admitDerivations (decl: Decl) (requests: Derivation list) : Result<unit, CodegenError> =
         let publicAccess =
             requests
-            |> List.exists (fun r ->
-                r = FSharpDerive.Request.StructuralAccess
-                || r = FSharpDerive.Request.KeyedPositions)
+            |> List.exists (fun r -> r = Derivation.StructuralAccess || r = Derivation.KeyedPositions)
 
         Decl.projectionsDeclared decl
         |> Result.bind (fun () ->
