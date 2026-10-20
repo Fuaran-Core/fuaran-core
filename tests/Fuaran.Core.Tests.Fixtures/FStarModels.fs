@@ -23,7 +23,7 @@ type Generated =
 /// What every header says about the remedy, once — the command and the family that holds
 /// the committed file to it. The origin paragraph of each provenance ends with this.
 let remedyLines =
-    [ "DO NOT EDIT: `dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` regenerates"
+    [ "DO NOT EDIT: `dotnet run --project tools/Fuaran.Core.Tools -- render fstar` regenerates"
       "it, and the `Proofs.Vocabulary` family holds this file to a fresh generation from that"
       "source — a vocabulary that moves without a regeneration is VOCABULARY DRIFT, and"
       "`proofs/check.ps1` names it." ]
@@ -47,7 +47,7 @@ let generated: Generated list =
         Idl = ReferenceIdl.refIdl
         Provenance =
           { Origin =
-              [ "the engine's REFERENCE vocabulary — `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, the"
+              [ "the engine's REFERENCE vocabulary — `tests/Fuaran.Core.Tests.Fixtures/ReferenceIdl.fs`, the"
                 "domain-neutral `Idl` Phase 114 authored to reach the part of the type model no"
                 "vendored sample uses (fuaran-core Phase 173, applying D14 to `proofs/`)." ]
               @ remedyLines
@@ -56,7 +56,7 @@ let generated: Generated list =
         Idl = SecondDomainIdl.docIdl
         Provenance =
           { Origin =
-              [ "the vendored SECOND-DOMAIN sample — `tests/Fuaran.Core.Tests/SecondDomainSpike.fs`,"
+              [ "the vendored SECOND-DOMAIN sample — `tests/Fuaran.Core.Tests.Fixtures/SecondDomainIdl.fs`,"
                 "a document vocabulary with a corpus written outside this repository, on the"
                 "declared non-default wire shape the reference vocabulary does not use"
                 "(fuaran-core Phase 173, applying D14 to `proofs/`)." ]
@@ -66,7 +66,7 @@ let generated: Generated list =
         Idl = ScoreDomainIdl.scoreIdl
         Provenance =
           { Origin =
-              [ "the vendored THIRD-DOMAIN sample — `tests/Fuaran.Core.Tests/ScoreDomainSpike.fs`,"
+              [ "the vendored THIRD-DOMAIN sample — `tests/Fuaran.Core.Tests.Fixtures/ScoreDomainIdl.fs`,"
                 "a notation vocabulary with a corpus written outside this repository: records and"
                 "omit-at-default at scale, on the same declared non-default wire shape"
                 "(fuaran-core Phase 173, applying D14 to `proofs/`)." ]

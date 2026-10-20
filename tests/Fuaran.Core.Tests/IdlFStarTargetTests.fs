@@ -1026,7 +1026,7 @@ let idlFStarTargetTests =
                               (lf (File.ReadAllText path))
                               (sprintf "proofs/%s has drifted from a fresh generation.\n%s" name remedy)
 
-          testCase "no committed model was generated from anything but this project — the header names its source"
+          testCase "no committed model was generated from anything but this repository — the header names its source"
           <| fun _ ->
               // The generation diff above already implies this; it is stated on its own because
               // it is the sentence Phase 173 exists for. A model whose header named the shared
@@ -1038,8 +1038,8 @@ let idlFStarTargetTests =
 
                       Expect.stringContains
                           text
-                          "tests/Fuaran.Core.Tests/"
-                          (sprintf "proofs/%s names a source inside this project" name)
+                          "tests/Fuaran.Core.Tests.Fixtures/"
+                          (sprintf "proofs/%s names a source inside this repository (the fixtures library)" name)
 
                       Expect.isFalse
                           (text.Contains "pinned wire-format IDL" || text.Contains "idl.json")

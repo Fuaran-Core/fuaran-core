@@ -928,7 +928,7 @@ module Families =
           "against the roster and names the command that rewrites it:_"
           ""
           "```"
-          "dotnet run --project tests/Fuaran.Core.Tests -- --emit-families"
+          "dotnet run --project tools/Fuaran.Core.Tools -- render families"
           "```"
           ""
           "_The machine-readable half is `conformance-families.json` beside it; `STABILITY.md`"

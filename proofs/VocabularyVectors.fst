@@ -3,11 +3,11 @@
    vocabulary: sha256:587bb7678b2b29ba684110454ffbc42eb3f4bad98388f4cdd0d8ad4523627a36
    vocabulary: sha256:48d2a518690b3f650a2a80e6fed48a571996ff40df48a630fd3a0f35f44927dc
    vocabulary: sha256:8834c0249dad3698aebf9163acb71ffd35543a7d0c8df0dd45510f173b632dc2
-   emission: sha256:f77fb2ed97f34f39a366725d792b37d8c28461cc8fe2a4fce726852f6e4dd7f4
+   emission: sha256:7cbc3a4a904d6668ee5d8ec24c618d5db306a90ae9a7a57c749a21e61baa1732
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
-   DO NOT EDIT: the test project's `--emit-fstar` regenerates it from the three-way
+   DO NOT EDIT: `FStarTarget.vectorsModule` regenerates it from the three-way
    differential's vectors, and a generation diff holds it to that.
 
    For each vector, the reference interpreter's canonical bytes are parsed into the model's

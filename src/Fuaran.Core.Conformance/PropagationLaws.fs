@@ -21,7 +21,7 @@ module internal PropagationLaws =
     /// can reproduce the sample with its own `ConfRng`: one `intBelow 6` (`n` = that + 2); then, for
     /// each node `k` ascending, one `intBelow 3` per `j < k` ascending (`0` means `k` reads `j`); then
     /// one `intBelow 100` per node ascending (its base); then one `intBelow n` (the changed node).
-    /// Changing it changes that file, which is re-emitted in the same change-set (`--emit-laws`).
+    /// Changing it changes that file, which is re-emitted in the same change-set (`render laws`).
     type DagDraw =
         { Ids: string list
           Deps: Map<string, Set<string>>

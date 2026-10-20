@@ -370,7 +370,7 @@ module internal FStarVectors =
                   "   "
                   + moduleName
                   + " — the interpreter's vectors over the generated models (Phase 303)."
-                  "   DO NOT EDIT: the test project's `--emit-fstar` regenerates it from the three-way"
+                  "   DO NOT EDIT: `FStarTarget.vectorsModule` regenerates it from the three-way"
                   "   differential's vectors, and a generation diff holds it to that."
                   ""
                   "   For each vector, the reference interpreter's canonical bytes are parsed into the model's"
