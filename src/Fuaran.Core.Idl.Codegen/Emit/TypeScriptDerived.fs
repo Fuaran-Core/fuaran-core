@@ -667,137 +667,110 @@ module internal TypeScriptDerived =
 
     // ---- the collecting decoders (Phase 377's `SpecDecoders`) ----
 
-    /// The collecting decoder reference for a type — [[tsDecFn]]'s, arm for arm, where the type has
-    /// independent positions to collect over; a leaf is [[tsDecFn]]'s decoder, which refuses once.
-    let rec private tsColFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TVar v -> Ok("col" + v)
-        | TUnion(n, []) -> Ok("col" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map tsColFn
-            |> concatR ", "
-            |> Result.map (fun a -> "((x) => col" + n + "(" + a + ", x))")
-        | TNode -> Ok "colNode"
-        | TList inner -> tsColFn inner |> Result.map (fun c -> "cList(" + c + ")")
-        | TMap vt -> tsColFn vt |> Result.map (fun c -> "cMap(" + c + ")")
-        | TRecord n -> Ok("col" + n)
-        | _ -> tsDecFn t
+    /// Phase 524 — the TypeScript COLLECTING decoder printer, derived from [[tsDecPrinter]]
+    /// ([[SlotTraversal.collecting]]): a leaf is the short-circuiting decoder, which refuses once.
+    let private tsColPrinter: SlotPrinter =
+        SlotTraversal.collecting
+            tsDecPrinter
+            id
+            { tsDecPrinter with
+                Var = fun v -> "col" + v
+                Named = fun n -> "col" + n
+                Union = fun n args -> "((x) => col" + n + "(" + String.concat ", " args + ", x))"
+                Node = "colNode"
+                List = fun c -> "cList(" + c + ")"
+                Map = fun c -> "cMap(" + c + ")" }
 
-    /// One member read back under [[tsDecField]]'s presence rules, collecting. A leaf member (and a
-    /// host-only one) IS [[tsDecField]]'s expression, so its presence rules are the short-circuiting
-    /// decoder's by construction.
-    let private tsColField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
-        let key = SourceLit.tsString f.Name
-
-        match f.Opt with
-        | HostOnly -> tsDecField idl disc f
-        | _ when not (FSharpCodec.collectsOver f.Type) -> tsDecField idl disc f
-        | Required -> tsColFn f.Type |> Result.map (fun c -> "cReq(" + key + ", fs, " + c + ")")
-        | Optional -> tsColFn f.Type |> Result.map (fun c -> "cOpt(" + key + ", fs, " + c + ")")
-        | OmitDefault d ->
-            tsDefaultLit idl disc f.Type d
-            |> Result.bind (fun lit ->
-                tsColFn f.Type
-                |> Result.map (fun c -> "cDef(" + key + ", fs, " + c + ", " + lit + ")"))
+    /// The collecting member reader: [[tsMemberDecPrinter]]'s presence, read through
+    /// [[tsColPrinter]].
+    let private tsColMemberPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
+        { tsMemberDecPrinter idl disc with
+            Slot = tsColPrinter
+            Req = fun key c -> "cReq(" + key + ", fs, " + c + ")"
+            Opt = fun key c -> "cOpt(" + key + ", fs, " + c + ")"
+            Def = fun key c lit -> "cDef(" + key + ", fs, " + c + ", " + lit + ")" }
 
     /// Read every member in declaration order, then build the object [[tsFieldObject]] builds — the
     /// same keys in the same order — or throw every member's refusals, in that order.
-    let private tsColObject
-        (idl: Idl)
+    let private tsColObject (indent: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+        let pairs =
+            (extra |> List.map (fun (k, v) -> k + ": " + v))
+            @ (members
+               |> List.mapi (fun i (f, _) -> SourceLit.tsString f.Name + ": v[" + string i + "]"))
+
+        let literal = "{ " + String.concat ", " pairs + " }"
+
+        match members with
+        | [] -> indent + "return " + literal + ";"
+        | _ ->
+            indent
+            + "const v = cAll(["
+            + (members |> List.map (fun (_, r) -> "() => " + r) |> String.concat ", ")
+            + "]);\n"
+            + indent
+            + "return "
+            + literal
+            + ";"
+
+    let private tsColUnion
+        (decl: Decl)
         (disc: string)
-        (indent: string)
-        (extra: (string * string) list)
-        (fields: IdlField list)
-        : Result<string, CodegenError> =
-        fields
-        |> List.map (tsColField idl disc)
-        |> sequenceR
-        |> Result.map (fun reads ->
-            let pairs =
-                (extra |> List.map (fun (k, v) -> k + ": " + v))
-                @ (fields
-                   |> List.mapi (fun i f -> SourceLit.tsString f.Name + ": v[" + string i + "]"))
-
-            let literal = "{ " + String.concat ", " pairs + " }"
-
-            match reads with
-            | [] -> indent + "return " + literal + ";"
-            | _ ->
-                indent
-                + "const v = cAll(["
-                + (reads |> List.map (fun r -> "() => " + r) |> String.concat ", ")
-                + "]);\n"
-                + indent
-                + "return "
-                + literal
-                + ";")
-
-    let private tsColUnion (decl: Decl) (disc: string) (u: IdlUnion) =
-        let idl = decl.Idl
-
+        (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
+        (u: IdlUnion)
+        =
         let argList =
             match u.Params with
             | [] -> "j"
             | ps -> (ps |> List.map (fun p -> "col" + p) |> String.concat ", ") + ", j"
 
-        let arm (c: IdlUnionCase) =
-            tsColObject idl disc "        " [ tsDiscKey disc, SourceLit.tsString c.Tag ] c.Fields
-            |> Result.map (fun body -> "      case " + SourceLit.tsString c.Tag + ": {\n" + body + "\n      }")
-
-        let taggedR =
-            u.Cases
-            |> List.map arm
-            |> concatR "\n"
-            |> Result.map (fun arms ->
-                "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
-                + arms
-                + "\n      default: return dUnknown("
-                + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
-                + ", "
-                + SourceLit.tsString ("unknown " + u.Name + " case: ")
-                + " + "
-                + tsDiscProp disc "j"
-                + ");\n    }\n  }")
-
-        // A transparent union reads its single-field case bare, collecting through it.
-        let untagged =
-            match Decl.transparentTag decl u with
-            | Some ttag ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
-                | Some({ Fields = [ f ] }) ->
-                    tsColFn f.Type
-                    |> Result.map (fun cfn ->
-                        "  return { "
-                        + tsDiscKey disc
-                        + ": "
-                        + SourceLit.tsString ttag
-                        + ", "
-                        + SourceLit.tsString f.Name
-                        + ": "
-                        + cfn
-                        + "(j) };")
-                | _ -> Error(transparentArity u.Name ttag)
-            | None ->
-                Ok(
+        UnionTraversal.decoder
+            { Read = read
+              Slot = tsColPrinter
+              Arm =
+                fun _ c members ->
+                    "      case "
+                    + SourceLit.tsString c.Tag
+                    + ": {\n"
+                    + tsColObject "        " [ tsDiscKey disc, SourceLit.tsString c.Tag ] members
+                    + "\n      }"
+              // A transparent union reads its single-field case bare, collecting through it.
+              Bare =
+                fun _ c f cfn ->
+                    "  return { "
+                    + tsDiscKey disc
+                    + ": "
+                    + SourceLit.tsString c.Tag
+                    + ", "
+                    + SourceLit.tsString f.Name
+                    + ": "
+                    + cfn
+                    + "(j) };"
+              NoBare =
+                fun _ ->
                     "  return dFail('WrongKind', 'object', "
                     + SourceLit.tsString ("expected a " + u.Name + " object")
                     + ");"
-                )
-
-        taggedR
-        |> Result.bind (fun tagged ->
-            untagged
-            |> Result.map (fun untagged ->
-                "function col"
-                + u.Name
-                + "("
-                + argList
-                + ") {\n"
-                + tagged
-                + "\n"
-                + untagged
-                + "\n}"))
+              Union =
+                fun _ arms untagged ->
+                    "function col"
+                    + u.Name
+                    + "("
+                    + argList
+                    + ") {\n"
+                    + "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
+                    + String.concat "\n" arms
+                    + "\n      default: return dUnknown("
+                    + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
+                    + ", "
+                    + SourceLit.tsString ("unknown " + u.Name + " case: ")
+                    + " + "
+                    + tsDiscProp disc "j"
+                    + ");\n    }\n  }"
+                    + "\n"
+                    + untagged
+                    + "\n}" }
+            decl
+            u
 
     /// The collecting prelude: the refusal LIST a collecting decoder throws, and the readers that
     /// gather it. It states the defect order, which a test pins.
@@ -876,7 +849,7 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
     /// `decodeNodeAll` over text — each answering `decodeNode`'s `{ ok, value }` / `{ ok, error }`,
     /// the collecting ones `{ ok: false, errors }`.
     let private tsCollectingDecl (decl: Decl) (disc: string) : Result<string * string list, CodegenError> =
-        let idl, kinds, unions, records = decl.Idl, decl.Kinds, decl.Unions, decl.Records
+        let idl, kinds = decl.Idl, decl.Kinds
 
         let colKind =
             "function colKind(j) {\n  if (!isObj(j)) return dFail('WrongKind', 'object', 'expected a kind object');\n  switch (dTag(j)) {\n"
@@ -889,50 +862,58 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
             + tsDiscProp disc "j"
             + ");\n  }\n}"
 
-        let colNode =
-            decl.Envelope.Members
-            |> List.map (tsColField idl disc)
-            |> sequenceR
-            |> Result.map (fun envelope ->
-                let kindRead =
-                    match decl.Envelope.Kind with
-                    | KindPlacement.NestedUnder key -> "cReq(" + SourceLit.tsStringSingle key + ", fs, colKind)"
-                    | KindPlacement.Merged -> "colKind(j)"
+        let colNode (envelope: (IdlField * string) list) =
+            let kindRead =
+                match decl.Envelope.Kind with
+                | KindPlacement.NestedUnder key -> "cReq(" + SourceLit.tsStringSingle key + ", fs, colKind)"
+                | KindPlacement.Merged -> "colKind(j)"
 
-                let reads =
-                    [ "dReq('id', fs, dStr)"; kindRead ] @ envelope
-                    |> List.map (fun r -> "() => " + r)
-                    |> String.concat ", "
+            let reads =
+                [ "dReq('id', fs, dStr)"; kindRead ] @ (envelope |> List.map snd)
+                |> List.map (fun r -> "() => " + r)
+                |> String.concat ", "
 
-                let envelopeAssigns =
-                    decl.Envelope.Members
-                    |> List.mapi (fun i f -> sprintf ", %s: v[%d]" (SourceLit.tsKey f.Name) (i + 2))
-                    |> String.concat ""
+            let envelopeAssigns =
+                decl.Envelope.Members
+                |> List.mapi (fun i f -> sprintf ", %s: v[%d]" (SourceLit.tsKey f.Name) (i + 2))
+                |> String.concat ""
 
-                let build =
-                    match decl.Envelope.Kind with
-                    | KindPlacement.NestedUnder key ->
-                        "{ id: v[0], " + SourceLit.tsKey key + ": v[1]" + envelopeAssigns + " }"
-                    | KindPlacement.Merged -> "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
+            let build =
+                match decl.Envelope.Kind with
+                | KindPlacement.NestedUnder key ->
+                    "{ id: v[0], " + SourceLit.tsKey key + ": v[1]" + envelopeAssigns + " }"
+                | KindPlacement.Merged -> "Object.assign({}, v[1], { id: v[0]" + envelopeAssigns + " })"
 
-                "function colNode(j) {\n  const fs = dObj(j);\n  const v = cAll(["
-                + reads
-                + "]);\n  return "
-                + build
-                + ";\n}")
+            "function colNode(j) {\n  const fs = dObj(j);\n  const v = cAll(["
+            + reads
+            + "]);\n  return "
+            + build
+            + ";\n}"
 
-        let objectDecoder (name: string) (extra: (string * string) list) (fields: IdlField list) =
-            tsColObject idl disc "  " extra fields
-            |> Result.map (fun body -> "function col" + name + "(j) {\n  const fs = dObj(j);\n" + body + "\n}")
+        let objectDecoder (name: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+            "function col"
+            + name
+            + "(j) {\n  const fs = dObj(j);\n"
+            + tsColObject "  " extra members
+            + "\n}"
 
         let group =
-            [ Ok colKind; colNode ]
-            @ (unions |> List.map (tsColUnion decl disc))
-            @ (records |> List.map (fun r -> objectDecoder r.Name [] r.Fields))
-            @ (kinds
-               |> List.map (fun k ->
-                   objectDecoder (k.Tag + "Spec") [ tsDiscKey disc, SourceLit.tsString k.Tag ] k.Fields))
-            |> concatR "\n\n"
+            CollectingTraversal.group
+                { Dec = tsMemberDecPrinter idl disc
+                  Col = tsColMemberPrinter idl disc
+                  Lift = id
+                  Union = tsColUnion decl disc
+                  NodeKind = colKind
+                  Node = colNode
+                  Record = fun r members -> objectDecoder r.Name [] members
+                  ReadsSpec = fun _ -> true
+                  Spec =
+                    fun k members ->
+                        objectDecoder
+                            (k.Tag + "Spec")
+                            [ tsDiscKey disc, SourceLit.tsString k.Tag ]
+                            (defaultArg members []) }
+                decl
 
         let entries =
             [ yield
