@@ -1252,3 +1252,382 @@ let decoderHelperTests =
                    |> Result.mapError (fun e -> e.Code, e.Path))
                   (Error(DecodeCode.WrongKind, [ PathSegment.Index 1 ]))
                   "an item that is not a string, under its index" ]
+
+// ---------------------------------------------------------------------------
+// Phase 528 - the query-side seam baselines, and defect 6's tag-naming guard. As on the capability
+// side (`FunctionTests.seamBaselineTests528`), every case is pinned by its exact bytes and every reader
+// by the refusal it answers, so the derived codecs (fuaran-core#551) are held to what is already
+// written.
+// ---------------------------------------------------------------------------
+
+/// The decode refusal `UnreadableArgs` carries in its baseline.
+let private unreadable528 =
+    DecodeError.under (PathSegment.Key "year") (DecodeError.make DecodeCode.WrongKind "int" "array")
+
+/// Every `QueryError` case (and, through `predicateNotHonoured`, every `ColumnPredicate` case) with
+/// the exact document `QueryCodec.encodeQueryError` writes for it.
+let internal queryBaselines528: (QueryError * string) list =
+    [ NoSuchQuery("x", [ "a"; "b" ]), "{\"$type\":\"noSuchQuery\",\"id\":\"x\",\"known\":[\"a\",\"b\"]}"
+      DuplicateQuery "x", "{\"$type\":\"duplicateQuery\",\"id\":\"x\"}"
+      UnknownParam("p", [ "a" ]), "{\"$type\":\"unknownParam\",\"declared\":[\"a\"],\"name\":\"p\"}"
+      ParamTypeMismatch("p", IntType, StringType),
+      "{\"$type\":\"paramTypeMismatch\",\"expected\":\"int\",\"got\":\"string\",\"name\":\"p\"}"
+      RequiredParamsUnbound [ "a"; "b" ], "{\"$type\":\"requiredParamsUnbound\",\"names\":[\"a\",\"b\"]}"
+      SourceNotResolved "s", "{\"$type\":\"sourceNotResolved\",\"ref\":\"s\"}"
+      ExecutionFailed("d", [ "a" ]), "{\"$type\":\"executionFailed\",\"detail\":\"d\",\"recoverable\":[\"a\"]}"
+      Timeout, "{\"$type\":\"timeout\"}"
+      RequiredParamsNull [ "a" ], "{\"$type\":\"requiredParamsNull\",\"names\":[\"a\"]}"
+      DuplicateParam "a", "{\"$type\":\"duplicateParam\",\"name\":\"a\"}"
+      QueryPolicyRefused("p", "r", [ "a" ]),
+      "{\"$type\":\"queryPolicyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
+      QueryApprovalRequired "p", "{\"$type\":\"queryApprovalRequired\",\"policy\":\"p\"}"
+      UnreadableArgs unreadable528,
+      "{\"$type\":\"unreadableArgs\",\"error\":{\"code\":\"WrongKind\",\"expected\":\"int\",\"message\":\"expected int, got array\",\"path\":[\"year\"]}}"
+      UnknownColumn("c", [ "a" ]), "{\"$type\":\"unknownColumn\",\"declared\":[\"a\"],\"name\":\"c\"}"
+      PredicateTypeMismatch("c", IntType, (TimestampType TimeUnit.Milliseconds)),
+      "{\"$type\":\"predicateTypeMismatch\",\"column\":\"c\",\"expected\":\"int\",\"got\":\"timestamp_ms\"}"
+      PredicateNotApplicable("contains", "c", DecimalType),
+      "{\"$type\":\"predicateNotApplicable\",\"column\":\"c\",\"columnType\":\"decimal\",\"predicate\":\"contains\"}"
+      IllFormedLiteral("c", "why"), "{\"$type\":\"illFormedLiteral\",\"column\":\"c\",\"reason\":\"why\"}"
+      DuplicateSortColumn "c", "{\"$type\":\"duplicateSortColumn\",\"column\":\"c\"}"
+      PredicateNotHonoured(ColumnPredicate.EqualTo("c", Int 1)),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"equalTo\",\"column\":\"c\",\"type\":\"int\",\"value\":1}}"
+      PredicateNotHonoured(ColumnPredicate.GreaterThan("c", Float 1.5)),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"greaterThan\",\"column\":\"c\",\"type\":\"float\",\"value\":1.5}}"
+      PredicateNotHonoured(ColumnPredicate.AtLeast("c", Date "2026-10-20")),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"atLeast\",\"column\":\"c\",\"type\":\"date\",\"value\":\"2026-10-20\"}}"
+      PredicateNotHonoured(ColumnPredicate.LessThan("c", Str "m")),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"lessThan\",\"column\":\"c\",\"type\":\"string\",\"value\":\"m\"}}"
+      PredicateNotHonoured(ColumnPredicate.AtMost("c", Bool true)),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"atMost\",\"column\":\"c\",\"type\":\"bool\",\"value\":true}}"
+      PredicateNotHonoured(ColumnPredicate.Contains("c", "t")),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"contains\",\"column\":\"c\",\"text\":\"t\"}}"
+      PredicateNotHonoured(ColumnPredicate.IsNull "c"),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"isNull\",\"column\":\"c\"}}"
+      PredicateNotHonoured(ColumnPredicate.IsNotNull "c"),
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"isNotNull\",\"column\":\"c\"}}"
+      OrderNotHonoured "c", "{\"$type\":\"orderNotHonoured\",\"column\":\"c\"}" ]
+
+/// What `QueryCodec.decodeQueryError` answers for malformed documents, sentence for sentence.
+let private queryRefusals528: (string * string) list =
+    [ "[]", "expected object, got array"
+      "{}", "missing property: $type"
+      "{\"$type\":\"nope\"}",
+      "unknown $type 'nope'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+      "{\"$type\":\"policyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}",
+      "unknown $type 'policyRefused'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+      "{\"$type\":\"paramTypeMismatch\",\"name\":\"p\",\"expected\":\"int\",\"got\":\"blob\"}",
+      "unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'"
+      "{\"$type\":\"predicateNotApplicable\",\"predicate\":\"like\",\"column\":\"c\",\"columnType\":\"string\"}",
+      "unknown value 'like'; expected one of 'equalTo', 'greaterThan', 'atLeast', 'lessThan', 'atMost', 'contains', 'isNull', 'isNotNull'"
+      "{\"$type\":\"unreadableArgs\",\"error\":{\"code\":\"Nope\",\"path\":[],\"expected\":\"e\",\"message\":\"m\"}}",
+      "unknown value 'Nope'; expected one of 'InvalidJson', 'MissingField', 'WrongKind', 'UnknownTag', 'OutOfRange', 'UndeclaredMember', 'LimitExceeded', 'NotAdmitted', 'SchemaFault'"
+      "{\"$type\":\"unreadableArgs\",\"error\":{\"code\":\"WrongKind\",\"path\":{},\"expected\":\"e\",\"message\":\"m\"}}",
+      "expected an array of member names and item indices, got not a decode path"
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"equalTo\",\"column\":\"c\",\"type\":\"int\",\"value\":\"x\"}}",
+      "out of range: the filter on column 'c' compares with a value a int column cannot carry; expected a int value"
+      "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"between\",\"column\":\"c\"}}",
+      "unknown $type 'between'; expected one of 'equalTo', 'greaterThan', 'atLeast', 'lessThan', 'atMost', 'contains', 'isNull', 'isNotNull'"
+      "{\"$type\":\"executionFailed\",\"detail\":\"d\",\"recoverable\":[1]}", "expected string, got int" ]
+
+/// A declaration carrying a `Where` (three predicate shapes) and an `OrderBy` (both directions).
+let private shapeHost528 =
+    "{\"$type\":\"query\",\"effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"id\":\"q\",\"orderBy\":[{\"column\":\"revenue\",\"direction\":\"descending\"},{\"column\":\"region\",\"direction\":\"ascending\"}],\"params\":[{\"name\":\"year\",\"required\":true,\"type\":\"int\"}],\"resultSchema\":[{\"name\":\"region\",\"type\":\"string\"},{\"name\":\"revenue\",\"type\":\"float\"}],\"source\":{\"ref\":\"s\",\"schema\":[]},\"where\":[{\"$type\":\"contains\",\"column\":\"region\",\"text\":\"U\"},{\"$type\":\"atLeast\",\"column\":\"revenue\",\"type\":\"float\",\"value\":1.5},{\"$type\":\"isNotNull\",\"column\":\"region\"}]}"
+
+/// A replacement planted into `shapeHost528`, then the typed refusal under `Lenient` and `Strict`
+/// (`DecodeError.render`: code, path, sentence; "OK" for an accepted document).
+let private shapeRefusals528: (string * string * string * string) list =
+    [ "\"$type\":\"contains\"",
+      "\"$type\":\"like\"",
+      "UnknownTag at $[\"where\"][0][\"$type\"]: unknown $type 'like'; expected one of 'equalTo', 'greaterThan', 'atLeast', 'lessThan', 'atMost', 'contains', 'isNull', 'isNotNull'",
+      "UndeclaredMember at $[\"where\"][0][\"text\"]: undeclared member: 'text'; expected one of the members '$type', 'column', 'type', 'value'"
+      "\"text\":\"U\"",
+      "\"text\":1",
+      "WrongKind at $[\"where\"][0][\"text\"]: expected string, got int",
+      "WrongKind at $[\"where\"][0][\"text\"]: expected string, got int"
+      "\"value\":1.5",
+      "\"value\":\"x\"",
+      "OutOfRange at $[\"where\"][1][\"value\"]: out of range: the filter on column 'revenue' compares with a value a float column cannot carry; expected a float value",
+      "OutOfRange at $[\"where\"][1][\"value\"]: out of range: the filter on column 'revenue' compares with a value a float column cannot carry; expected a float value"
+      "\"type\":\"float\",\"value\"",
+      "\"type\":\"blob\",\"value\"",
+      "UnknownTag at $[\"where\"][1][\"type\"]: unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'",
+      "UnknownTag at $[\"where\"][1][\"type\"]: unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'"
+      "\"direction\":\"descending\"",
+      "\"direction\":\"down\"",
+      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown value 'down'; expected one of 'ascending', 'descending'",
+      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown value 'down'; expected one of 'ascending', 'descending'"
+      "{\"column\":\"revenue\",\"direction\":\"descending\"}",
+      "{\"direction\":\"descending\"}",
+      "MissingField at $[\"orderBy\"][0][\"column\"]: missing property: column",
+      "MissingField at $[\"orderBy\"][0][\"column\"]: missing property: column"
+      "\"$type\":\"isNotNull\"",
+      "\"$type\":\"isNotNull\",\"x\":1",
+      "OK",
+      "UndeclaredMember at $[\"where\"][2][\"x\"]: undeclared member: 'x'; expected one of the members '$type', 'column'"
+      "\"direction\":\"ascending\"",
+      "\"direction\":\"ascending\",\"x\":1",
+      "OK",
+      "UndeclaredMember at $[\"orderBy\"][1][\"x\"]: undeclared member: 'x'; expected one of the members 'column', 'direction'" ]
+
+/// The keyed capture journal a completion (`year = 2026`) and a resolver failure (`year = 2027`)
+/// write on the query seam.
+let private queryJournal528: string list =
+    [ "0|q#e4e409c2|0|network|Attempted|null||71abe50a"
+      "1|q#e4e409c2|0|network|Completed|{\"$type\":\"queryResult\",\"pageNum\":0,\"rows\":{\"columns\":{\"region\":{\"validity\":[true],\"values\":[\"UK\"]},\"revenue\":{\"validity\":[true],\"values\":[2.5]}},\"schema\":[{\"name\":\"region\",\"type\":\"string\"},{\"name\":\"revenue\",\"type\":\"float\"}]},\"totalRowCount\":1}|71abe50a|31ae0b02"
+      "2|q#c0e1927f|0|network|Attempted|null|31ae0b02|d3353e65"
+      "3|q#c0e1927f|0|network|Refused|\"{\\\"$type\\\":\\\"executionFailed\\\",\\\"detail\\\":\\\"down\\\",\\\"recoverable\\\":[]}\"|d3353e65|0b5b016b" ]
+
+let private shapeQuery528: Query =
+    { Id = "q"
+      Params =
+        [ { Name = "year"
+            Type = IntType
+            Required = true } ]
+      ResultSchema = [ Field.create "region" StringType; Field.create "revenue" FloatType ]
+      Effect =
+        { Host = ReadsHost
+          Determinism = Effect.network }
+      Source = Ref "s"
+      TimeoutMs = None
+      PageSize = None
+      Where =
+        [ ColumnPredicate.Contains("region", "U")
+          ColumnPredicate.AtLeast("revenue", Float 1.5)
+          ColumnPredicate.IsNotNull "region" ]
+      OrderBy =
+        [ { Column = "revenue"
+            Direction = SortDirection.Descending }
+          { Column = "region"
+            Direction = SortDirection.Ascending } ] }
+
+let private journalQuery528 =
+    { shapeQuery528 with
+        Where = []
+        OrderBy = [] }
+
+let private journalRows528: QueryResult =
+    { Rows =
+        { Schema = journalQuery528.ResultSchema
+          Columns =
+            [ Column.ofStrs "region" (Vector.ofList [ "UK" ]) AllValid
+              Column.ofFloats "revenue" (Vector.ofList [ 2.5 ]) AllValid ] }
+      PageNum = 0
+      TotalRowCount = Some 1
+      NextPageToken = None }
+
+// ---- defect 6: the tag-naming rule (D163), held over the refusal unions ----
+
+/// D163's rule: a seam refusal case's `$type` is its case name with the first letter lowered, so a
+/// case-name prefix given to keep two seams' cases apart is carried onto the wire.
+let internal tagOf528 (caseName: string) : string =
+    string (System.Char.ToLowerInvariant caseName[0]) + caseName.Substring 1
+
+/// Reflection over a union whatever its accessibility (the planted union below is private).
+let private anyAccess528 =
+    System.Reflection.BindingFlags.Public
+    ||| System.Reflection.BindingFlags.NonPublic
+
+/// The case names of a union type, in declaration order.
+let private caseNames528 (t: System.Type) : string list =
+    Microsoft.FSharp.Reflection.FSharpType.GetUnionCases(t, anyAccess528)
+    |> Array.map _.Name
+    |> List.ofArray
+
+/// The case name of a union value.
+let private caseOf528 (v: obj) : string =
+    let case, _ =
+        Microsoft.FSharp.Reflection.FSharpValue.GetUnionFields(v, v.GetType(), anyAccess528)
+
+    case.Name
+
+/// The `$type` a document leads with.
+let private docTag528 (doc: string) : string =
+    match Json.parse doc with
+    | Ok(JObj ms) ->
+        match ms |> List.tryFind (fun (k, _) -> k = "$type") with
+        | Some(_, JStr t) -> t
+        | _ -> ""
+    | _ -> ""
+
+/// Every pinned `(value, document)` whose `$type` is not `tagOf528` of the value's case name.
+let internal namingViolations528 (rows: (obj * string) list) : (string * string) list =
+    rows
+    |> List.choose (fun (v, doc) ->
+        let case = caseOf528 v
+
+        if docTag528 doc = tagOf528 case then
+            None
+        else
+            Some(case, docTag528 doc))
+
+/// Every tag two of the named unions share, as `(tag, first union, second union)`. A union's tags
+/// are DERIVED from its case names by the rule, so two seams can share a tag only by sharing a case
+/// name, which D101 already keeps apart.
+let internal sharedTags528 (unions: (string * System.Type) list) : (string * string * string) list =
+    let tagged =
+        unions |> List.map (fun (name, t) -> name, caseNames528 t |> List.map tagOf528)
+
+    [ for i, (a, ta) in List.indexed tagged do
+          for b, tb in List.skip (i + 1) tagged do
+              for t in ta do
+                  if List.contains t tb then
+                      yield t, a, b ]
+
+/// The seams' refusal unions: no two of them may share a `$type` tag (D163).
+let private refusalUnions528: (string * System.Type) list =
+    [ "InvokeError", typeof<InvokeError>
+      "QueryError", typeof<QueryError>
+      "DeclarationFault", typeof<DeclarationFault>
+      "Rejection", typeof<Rejection<string>> ]
+
+/// A planted seam refusal union that re-uses the capability seam's case names: the collision
+/// fuaran-core#497 removed by hand, re-introduced to show the guard reds on it.
+[<RequireQualifiedAccess>]
+type private PlantedSeamError528 =
+    | PolicyRefused of policy: string
+    | ApprovalRequired of policy: string
+
+[<Tests>]
+let seamBaselineTests528 =
+    testList
+        "Phase 528 - query-side seam baselines and the tag-naming guard"
+        [ testCase "every QueryError and ColumnPredicate case writes its pinned bytes and reads back"
+          <| fun _ ->
+              for e, doc in queryBaselines528 do
+                  Expect.equal (QueryCodec.encodeQueryError e) doc (sprintf "%A" e)
+                  Expect.equal (QueryCodec.decodeQueryError doc) (Ok e) doc
+
+          testCase "the query-error reader answers each malformed document as pinned"
+          <| fun _ ->
+              for doc, refusal in queryRefusals528 do
+                  Expect.equal (QueryCodec.decodeQueryError doc) (Error refusal) doc
+
+          testCase "a declaration's Where and OrderBy write their pinned bytes and read back"
+          <| fun _ ->
+              Expect.equal (QueryCodec.encode shapeQuery528) shapeHost528 "bytes"
+              Expect.equal (QueryCodec.decode shapeHost528) (Ok shapeQuery528) "round trip"
+
+          testCase "a planted predicate or sort key is refused with its pinned code and path, under both policies"
+          <| fun _ ->
+              let render policy doc =
+                  match QueryCodec.decodeDetailedWith policy doc with
+                  | Ok _ -> "OK"
+                  | Error e -> DecodeError.render e
+
+              for from, into, lenient, strict in shapeRefusals528 do
+                  let doc = shapeHost528.Replace(from, into)
+                  Expect.notEqual doc shapeHost528 ("the plant landed: " + from)
+                  Expect.equal (render ReadPolicy.Lenient doc) lenient ("lenient " + into)
+                  Expect.equal (render ReadPolicy.Strict doc) strict ("strict " + into)
+
+          testCase "the query seam's captured journal is pinned, and a pinned journal replays to the same answers"
+          <| fun _ ->
+              let reg =
+                  QueryRegistry.register journalQuery528 QueryRegistry.empty
+                  |> Result.toOption
+                  |> Option.get
+
+              let dispatch year resolve journal =
+                  (QueryRegistry.dispatchCaptured
+                      OpStream.defaultHash
+                      QueryCodec.encodeResult
+                      reg
+                      "q"
+                      [ "year", Int year ]
+                      resolve
+                      journal)
+                      .Journal
+
+              let journal =
+                  []
+                  |> dispatch 2026 (fun _ -> Ready journalRows528)
+                  |> dispatch 2027 (fun _ -> Failed "down")
+
+              Expect.equal (FunctionTests.journalLines528 journal) queryJournal528 "the journal, byte for byte"
+
+              let pinned = FunctionTests.journalOfLines528 queryJournal528
+
+              let replay year =
+                  (QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      reg
+                      "q"
+                      [ "year", Int year ]
+                      None
+                      (fun _ _ -> Failed "live")
+                      Map.empty
+                      pinned)
+                      .Outcome
+
+              Expect.equal (replay 2026) (Ok(Ready journalRows528)) "the completion"
+
+              Expect.equal
+                  (replay 2027)
+                  (Error(ReplayFailure.Refused(ExecutionFailed("down", []))))
+                  "the recorded refusal"
+
+          testCase "every refusal union's cases are pinned, and every pinned tag is its case name lowered (D163)"
+          <| fun _ ->
+              let pinned (rows: ('T * string) list) =
+                  rows |> List.map (fun (v, doc) -> box v, doc)
+
+              let faults =
+                  FunctionTests.invokeBaselines528
+                  |> List.choose (fun (e, doc) ->
+                      match e, Json.parse doc with
+                      | IllFormedCapability(_, f), Ok(JObj ms) ->
+                          ms
+                          |> List.tryPick (fun (k, v) ->
+                              if k = "fault" then
+                                  Some(box f, Canonical.write Rendering.CrossHost v)
+                              else
+                                  None)
+                      | _ -> None)
+
+              let predicates =
+                  queryBaselines528
+                  |> List.choose (fun (e, doc) ->
+                      match e, Json.parse doc with
+                      | PredicateNotHonoured p, Ok(JObj ms) ->
+                          ms
+                          |> List.tryPick (fun (k, v) ->
+                              if k = "predicate" then
+                                  Some(box p, Canonical.write Rendering.CrossHost v)
+                              else
+                                  None)
+                      | _ -> None)
+
+              for name, t, rows in
+                  [ "InvokeError", typeof<InvokeError>, pinned FunctionTests.invokeBaselines528
+                    "QueryError", typeof<QueryError>, pinned queryBaselines528
+                    "DeclarationFault", typeof<DeclarationFault>, faults
+                    "Rejection", typeof<Rejection<string>>, pinned FunctionTests.rejectionBaselines528
+                    "ColumnPredicate", typeof<ColumnPredicate>, predicates ] do
+                  Expect.equal
+                      (rows |> List.map (fst >> caseOf528) |> List.distinct |> List.sort)
+                      (caseNames528 t |> List.sort)
+                      (name + ": a case added without a pinned document")
+
+                  Expect.isEmpty (namingViolations528 rows) (name + ": a tag that is not its case name lowered")
+
+          testCase "no two seam refusal unions share a $type tag"
+          <| fun _ -> Expect.isEmpty (sharedTags528 refusalUnions528) "the refusal unions' tags are disjoint"
+
+          // The guard shown red on the two plants it exists to catch, then restored: the pre-497
+          // spelling (the query seam writing the capability seam's `policyRefused`) breaks the naming
+          // rule, and a seam whose cases re-use the capability seam's names collides by construction.
+          testCase "a planted collision and a planted mis-named tag are both refused"
+          <| fun _ ->
+              Expect.equal
+                  (namingViolations528
+                      [ box (QueryPolicyRefused("p", "r", [])),
+                        "{\"$type\":\"policyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}" ])
+                  [ "QueryPolicyRefused", "policyRefused" ]
+                  "the pre-497 tag breaks the rule"
+
+              Expect.equal
+                  (sharedTags528 (refusalUnions528 @ [ "PlantedSeamError", typeof<PlantedSeamError528> ]))
+                  [ "policyRefused", "InvokeError", "PlantedSeamError"
+                    "approvalRequired", "InvokeError", "PlantedSeamError" ]
+                  "a planted seam re-using the capability seam's case names collides" ]
