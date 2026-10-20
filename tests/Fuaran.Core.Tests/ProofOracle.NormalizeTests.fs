@@ -12,6 +12,14 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
 
+/// The normalised script's render pair: production's script carried across the faithful bridge and
+/// the model's, each rendered op by op through the model's own rendering.
+let private normalized: Differential<SkeletonOp<RNode, string> list, TreeOps.op list> =
+    let render ops =
+        ops |> List.map renderModelOp |> String.concat " ; "
+
+    Differential.pair (List.map (toModelOpWith toModelTree) >> render) render
+
 [<Tests>]
 let tests =
     testList
@@ -33,27 +41,20 @@ let tests =
 
           testCase "the normalize oracle agrees with Ops.normalize over scripts with adjacent-collapse bias"
           <| fun _ ->
-              let rng = System.Random 30305
-              let mutable collapsed = 0
-              let mutable disagreements = []
-
-              for i in 1..600 do
+              let step (i: int) (rng: System.Random) (t: Tally) =
                   let tree = ContentDiffTests.drawTree rng ContentDiffTests.pool
                   let script, reached = ContentDiffTests.drawScript rng tree 8
                   let mscript = script |> List.map (toModelOpWith toModelTree)
-                  let prod = Ops.normalize nodew idw script |> List.map (toModelOpWith toModelTree)
                   let model = Normalize.normalize mscript
 
-                  if List.length model < List.length mscript then
-                      collapsed <- collapsed + 1
-
-                  let render ops =
-                      ops |> List.map renderModelOp |> String.concat " ; "
-
-                  if render prod <> render model then
-                      disagreements <-
-                          sprintf "#%d\n  production: %s\n  oracle:     %s" i (render prod) (render model)
-                          :: disagreements
+                  let t =
+                      t
+                      |> Tally.bumpIf (List.length model < List.length mscript) "Collapsed"
+                      |> Differential.compareWith
+                          normalized
+                          (fun p m -> sprintf "#%d\n  production: %s\n  oracle:     %s" i p m)
+                          (Ops.normalize nodew idw script)
+                          model
 
                   // the theorems, instantiated on the extracted model over this sample
                   let mtree = toModelTree tree
@@ -71,16 +72,15 @@ let tests =
                   Expect.equal (Normalize.normalize model) model (sprintf "#%d: the oracle's normalize is idempotent" i)
                   Expect.isLessThanOrEqual (List.length model) (List.length mscript) (sprintf "#%d: never longer" i)
 
-              match disagreements with
-              | [] -> ()
-              | ds ->
-                  failtestf
-                      "Ops.normalize and the extracted model DISAGREE on %d script(s):\n%s"
-                      (List.length ds)
-                      (String.concat "\n" (List.rev ds))
+                  rng, t
+
+              let t =
+                  Differential.seeded 600 (System.Random 30305) step (Tally.empty [ "Collapsed" ])
+
+              Differential.expectAgrees "Ops.normalize and the extracted model" t
 
               Expect.isGreaterThan
-                  collapsed
+                  (Tally.count "Collapsed" t)
                   150
                   "the bias reached the collapses (a differential over scripts that never collapse measures nothing)"
 
@@ -108,13 +108,7 @@ let tests =
 
                   go None script
 
-              let rng = System.Random 30306
-              let mutable withPair = 0
-              let mutable lost = 0
-              let mutable withoutPair = 0
-              let mutable agreed = 0
-
-              for _ in 1..400 do
+              let step _ (rng: System.Random) (t: Tally) =
                   let tree = ContentDiffTests.drawTree rng ContentDiffTests.pool
                   let script, _ = ContentDiffTests.drawScript rng tree 8
 
@@ -127,25 +121,37 @@ let tests =
                           | UpdateNode n, RemoveNode t -> n.Id = t
                           | _ -> false)
 
-                  let prod =
-                      Ops.normalize nodew idw script
-                      |> List.map (toModelOpWith toModelTree)
-                      |> List.map renderModelOp
+                  let agree =
+                      normalized.Production(Ops.normalize nodew idw script) = normalized.Model(
+                          Normalize.normalize (blind script)
+                      )
 
-                  let model = Normalize.normalize (blind script) |> List.map renderModelOp
-
+                  rng,
                   if hasPair then
-                      withPair <- withPair + 1
-
-                      if prod <> model then
-                          lost <- lost + 1
+                      t |> Tally.bump "WithPair" |> Tally.bumpIf (not agree) "Lost"
                   else
-                      withoutPair <- withoutPair + 1
+                      t |> Tally.bump "WithoutPair" |> Tally.bumpIf agree "Agreed"
 
-                      if prod = model then
-                          agreed <- agreed + 1
+              let t =
+                  Differential.seeded
+                      400
+                      (System.Random 30306)
+                      step
+                      (Tally.empty [ "WithPair"; "Lost"; "WithoutPair"; "Agreed" ])
 
-              Expect.isGreaterThan withPair 50 "the sample reached an insert/remove or rewrite/remove pair"
-              Expect.equal lost withPair "every script carrying a cancelling pair lost under the blind bridge"
-              Expect.isGreaterThan withoutPair 50 "the sample also drew scripts with no such pair"
-              Expect.equal agreed withoutPair "and on those the blind bridge is the faithful one" ]
+              Expect.isGreaterThan
+                  (Tally.count "WithPair" t)
+                  50
+                  "the sample reached an insert/remove or rewrite/remove pair"
+
+              Expect.equal
+                  (Tally.count "Lost" t)
+                  (Tally.count "WithPair" t)
+                  "every script carrying a cancelling pair lost under the blind bridge"
+
+              Expect.isGreaterThan (Tally.count "WithoutPair" t) 50 "the sample also drew scripts with no such pair"
+
+              Expect.equal
+                  (Tally.count "Agreed" t)
+                  (Tally.count "WithoutPair" t)
+                  "and on those the blind bridge is the faithful one" ]
