@@ -923,45 +923,38 @@ module JsonParseDiff =
     /// all, and a run that only ever accepted has measured none of the classification. EVERY
     /// disagreement counts: Phase 299's grammar and surrogate refusals were carved out of this
     /// comparison until Phase 306 restated the model to make them, and the carve-out is gone.
-    let sweep (policy: NullPolicy) (maxDepth: int) (inputs: (string * string) list) =
-        let mutable accepted = 0
-        let mutable refused = 0
-        let bad = ResizeArray<string>()
-
-        for (name, input) in inputs do
+    let sweep (policy: NullPolicy) (maxDepth: int) (inputs: (string * string) list) : Tally =
+        Tally.empty [ "Accepted"; "Refused" ]
+        |> Differential.over inputs (fun (name, input) t ->
             let p = prodAnswer policy maxDepth input
             let m = modelAnswer toChs policy maxDepth (budget maxDepth) input
 
-            if p.StartsWith "ok " then
-                accepted <- accepted + 1
-            else
-                refused <- refused + 1
-
-            if p <> m then
-                bad.Add(sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
-
+            t
+            |> Tally.bump (if p.StartsWith "ok " then "Accepted" else "Refused")
+            |> Differential.compareWith
+                Differential.text
+                (fun p m -> sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
+                p
+                m
             // The sweep compares in the regime the differential was written for — an unbounded-
             // equivalent parser — so its cap sits above every input it is handed, and an input
             // that reaches it is a defect of the pool, not an agreement (Phase 519). The cap's own
             // boundary is the deep/wide family's, which straddles it on purpose.
-            if p.StartsWith "limit " then
-                bad.Add(
-                    sprintf "%s: input %s reached the sweep's cap %d — the pool left its regime" name input maxDepth
-                )
+            |> Differential.check (not (p.StartsWith "limit ")) (fun () ->
+                sprintf "%s: input %s reached the sweep's cap %d — the pool left its regime" name input maxDepth))
 
-        List.ofSeq bad, accepted, refused
+    let expectAgreement (label: string) (t: Tally) =
+        Differential.expectAgrees label t
 
-    let expectAgreement (label: string) (bad: string list, accepted: int, refused: int) =
-        if not bad.IsEmpty then
-            failtestf
-                "%s: the model and production disagree on %d input(s). First 5:\n%s"
-                label
-                bad.Length
-                (bad |> List.truncate 5 |> String.concat "\n")
+        Expect.isGreaterThan
+            (Tally.count "Accepted" t)
+            0
+            (label + ": no input was ACCEPTED — the accept path measured nothing")
 
-        Expect.isGreaterThan accepted 0 (label + ": no input was ACCEPTED — the accept path measured nothing")
-
-        Expect.isGreaterThan refused 0 (label + ": no input was REFUSED — the classification measured nothing")
+        Expect.isGreaterThan
+            (Tally.count "Refused" t)
+            0
+            (label + ": no input was REFUSED — the classification measured nothing")
 
     // ---- the pools ----
 
