@@ -338,7 +338,7 @@ let rec mem_app_right (#a:eqtype) (x:a) (l m:list a)
    the single ops `Batch a.script` and `Batch b.script`: both apply at the base, and at a
    well-formed base each applies after the other and the two orders reach the same tree
    (`TreeOps.wstep`, discharged by `tree_independence_diamond`). The N-script any-order claim is
-   `DagFold.fold_confluence` at `Skeleton`'s instantiation; this is the pair that theorem's
+   `DagFold.fold_confluence_total` at `Skeleton`'s instantiation; this is the pair that theorem's
    hypothesis asks for, shown to hold of what `arbitrate` accepts. *)
 let accepted_pair_commutes (base:tree) (ps:list proposal)
                            (l1:list proposal) (a:proposal) (l2:list proposal) (b:proposal)

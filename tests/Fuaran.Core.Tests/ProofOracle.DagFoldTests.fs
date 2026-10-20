@@ -3,7 +3,9 @@ module Fuaran.Core.Tests.ProofOracle.DagFoldTests
 // Phase 131 — the F* oracle as a corpus host.
 //
 // `proofs/DagFold.fst` is an F* model of the N-lane DAG fold with fold confluence proved as a
-// theorem; `proofs/oracle/DagFold.fs` is that model extracted to F# by F*'s own code generator.
+// theorem, and `proofs/DagClosure.fst` (its sections 11 to 21 until Phase 534) the DAG beneath it;
+// `proofs/oracle/DagFold.fs` and `proofs/oracle/DagClosure.fs` are the two extracted to F# by F*'s
+// own code generator.
 // This file runs the extracted model BESIDE the production fold — `Dag.reconcileMany` through a
 // real DAG, rendered exactly as `FoldConfluence.foldOnce` renders it — over the same generated lane
 // sets the Phase 100 pack certifies production against, and over the wire corpus's `ops/` fixtures.
@@ -357,23 +359,23 @@ let private treeDiamondSample
 
 /// A production `Dag.T` as the model reads it: the same nodes, the same content ids, the same
 /// parent lists.
-let private toModelDag (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
-    { DagFold.nodes =
+let private toModelDag (dag: Dag.T<'Op>) : DagClosure.dag<'Op> =
+    { DagClosure.nodes =
         dag.Nodes
         |> Map.toList
         |> List.map (fun (_, n) ->
-            { DagFold.nid = n.Id
-              DagFold.nparents = n.Parents
-              DagFold.nop = n.Op }) }
+            { DagClosure.nid = n.Id
+              DagClosure.nparents = n.Parents
+              DagClosure.nop = n.Op }) }
 
 /// The faithful bridge — what every real run uses.
-let private unperturbed (_: string) (_: string list) (dag: Dag.T<'Op>) : DagFold.dag<'Op> = toModelDag dag
+let private unperturbed (_: string) (_: string list) (dag: Dag.T<'Op>) : DagClosure.dag<'Op> = toModelDag dag
 
 /// The go-red instrument, and the fold family's blind-footprint counterpart for this layer: every
 /// lane's FIRST node is re-parented from the base onto the PREVIOUS lane's head, so the model
 /// walks a spine the DAG does not have. The ids are untouched, so every lookup still succeeds and
 /// the only thing that has moved is the shape the recovery walks — which is the thing under test.
-let private reparented (baseId: string) (heads: string list) (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
+let private reparented (baseId: string) (heads: string list) (dag: Dag.T<'Op>) : DagClosure.dag<'Op> =
     let previousHead (actor: Actor) =
         match actor with
         | Human name when name.StartsWith "lane-" ->
@@ -382,7 +384,7 @@ let private reparented (baseId: string) (heads: string list) (dag: Dag.T<'Op>) :
             | _ -> None
         | _ -> None
 
-    { DagFold.nodes =
+    { DagClosure.nodes =
         dag.Nodes
         |> Map.toList
         |> List.map (fun (_, n) ->
@@ -394,15 +396,15 @@ let private reparented (baseId: string) (heads: string list) (dag: Dag.T<'Op>) :
                 else
                     n.Parents
 
-            { DagFold.nid = n.Id
-              DagFold.nparents = parents
-              DagFold.nop = n.Op }) }
+            { DagClosure.nid = n.Id
+              DagClosure.nparents = parents
+              DagClosure.nop = n.Op }) }
 
 /// Every way production's per-lane delta recovery and the model's disagree on ONE lane set, plus
 /// how many ops were actually recovered — a run that recovered nothing has compared two empty
 /// lists and measured nothing at all.
 let private deltaDisagreements
-    (bridge: string -> string list -> Dag.T<'Op> -> DagFold.dag<'Op>)
+    (bridge: string -> string list -> Dag.T<'Op> -> DagClosure.dag<'Op>)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (baseOp: 'Op)
     (lanes: 'Op list list)
@@ -416,7 +418,7 @@ let private deltaDisagreements
         heads
         |> List.mapi (fun i head ->
             let p = Dag.betweenOps dag baseId head
-            let o = DagFold.between_ops model fuel baseId head
+            let o = DagClosure.between_ops model fuel baseId head
 
             if p <> o then
                 Some(
@@ -446,7 +448,7 @@ let private oracleFoldFromDag
     let baseId, heads, dag = productionDag w baseOp lanes
     let model = toModelDag dag
 
-    DagFold.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads
+    DagClosure.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads
     |> renderModelOutcome w hashState state0
 
 type private DeltaTally =
@@ -461,7 +463,7 @@ type private DeltaTally =
 /// Run the delta differential over `iterations` generated lane sets from one pool.
 let private deltaDifferential
     (label: string)
-    (bridge: string -> string list -> Dag.T<'Op> -> DagFold.dag<'Op>)
+    (bridge: string -> string list -> Dag.T<'Op> -> DagClosure.dag<'Op>)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (gen: LaneGen<'Op, 'State>)
     (laneCount: int)
@@ -506,7 +508,7 @@ let private expectDeltaAgreement (label: string) (t: DeltaTally) =
 // ---------------------------------------------------------------------------
 //  Phase 156 — the ID-ORDERED DRAIN over an abstract node set, beside production's own.
 //
-//  Section 13 of `proofs/DagFold.fst` proves the drain deterministic, a linear extension of the
+//  Section 13 of `proofs/DagClosure.fst` proves the drain deterministic, a linear extension of the
 //  parent relation, and total on an acyclic set — over an ABSTRACT node set and an ABSTRACT total
 //  order on ids. What ties that abstract order to production's is here and nowhere else:
 //  `Dag.topoCore` keeps its ready frontier sorted with `List.sort`, which on strings is F#'s
@@ -541,16 +543,16 @@ let private drainFuel (ns: 'a list) : 'a list =
 /// The model nodes of a production DAG restricted to one head's ancestor closure — "the union" the
 /// drain is over. Nothing is recomputed across the bridge: the ids are the content hashes
 /// production minted, so a disagreement can only be about the ORDER.
-let private modelClosure (dag: Dag.T<'Op>) (head: string) : DagFold.node<'Op> list =
+let private modelClosure (dag: Dag.T<'Op>) (head: string) : DagClosure.node<'Op> list =
     let anc = Dag.ancestorsOf dag head
 
     dag.Nodes
     |> Map.toList
     |> List.filter (fun (id, _) -> Set.contains id anc)
     |> List.map (fun (_, n) ->
-        { DagFold.nid = n.Id
-          DagFold.nparents = n.Parents
-          DagFold.nop = n.Op })
+        { DagClosure.nid = n.Id
+          DagClosure.nparents = n.Parents
+          DagClosure.nop = n.Op })
 
 /// One head whose closure is EVERY node: the lane heads folded together with `Dag.merge`. Returns
 /// the union head and the DAG carrying the merge nodes.
@@ -574,17 +576,19 @@ let private mergedUnion
                     |> Reference.built)
             (h0, dag)
 
-let private drainedOrder (r: DagFold.drain_result) : string list option =
+let private drainedOrder (r: DagClosure.drain_result) : string list option =
     match r with
-    | DagFold.Drained ord -> Some ord
-    | DagFold.Refused _ -> None
+    | DagClosure.Drained ord -> Some ord
+    | DagClosure.Refused _ -> None
 
 /// Every way the extracted drain and production's own topological order disagree over one head's
 /// closure, plus how wide the ready frontier ever got — a run whose frontier never passed one
 /// compared two spines and measured nothing the spine theorem did not already cover.
 let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) (head: string) : string list * int =
     let ns = modelClosure dag head
-    let model = drainedOrder (DagFold.drain DagFold.IgnoreDangling lt (drainFuel ns) ns)
+
+    let model =
+        drainedOrder (DagClosure.drain DagClosure.IgnoreDangling lt (drainFuel ns) ns)
 
     // The widest ready frontier the closure ever presents: the nodes whose in-closure parents are
     // all drained, at the step that has the most of them. Computed from the model's own `frontier`
@@ -593,15 +597,15 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
         match model with
         | None -> 0
         | Some ord ->
-            let closure = ns |> List.map (fun (n: DagFold.node<'Op>) -> n.nid)
+            let closure = ns |> List.map (fun (n: DagClosure.node<'Op>) -> n.nid)
 
-            let rec go (rest: DagFold.node<'Op> list) (emitted: string list) (pending: string list) best =
+            let rec go (rest: DagClosure.node<'Op> list) (emitted: string list) (pending: string list) best =
                 match pending with
                 | [] -> best
                 | id :: tl ->
-                    let f = DagFold.frontier rest closure emitted
+                    let f = DagClosure.frontier rest closure emitted
                     let best' = max best (List.length f)
-                    go (DagFold.remove_id rest id) (emitted @ [ id ]) tl best'
+                    go (DagClosure.remove_id rest id) (emitted @ [ id ]) tl best'
 
             go ns [] ord 0
 
@@ -619,7 +623,7 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
         [ sprintf "head %s: production reports a cyclic closure it cannot have: %A" head e.Unplaced ], widest
 
 // ---------------------------------------------------------------------------
-//  Phase 309 — `Dag.tryReplayTo` beside the extracted `replay_to` (DagFold.fst section 16).
+//  Phase 309 — `Dag.tryReplayTo` beside the extracted `replay_to` (DagClosure.fst section 16).
 //
 //  The model replays a head as production does: refuse a head the DAG does not hold, drain the
 //  head's closure with section 13's id-ordered drain, refuse a drain that did not place the whole
@@ -651,30 +655,30 @@ let private renderProductionReplay
 
 let private renderModelReplay
     (hashState: 'State -> string)
-    (r: DagFold.outcome<'State, DagFold.replay_fault<'Rej>>)
+    (r: DagFold.outcome<'State, DagClosure.replay_fault<'Rej>>)
     : string =
     match r with
     | DagFold.Ok s -> "ok " + hashState s
-    | DagFold.Error(DagFold.RUnknownHead h) -> "unknown-head " + h
-    | DagFold.Error(DagFold.RCyclicHistory h) -> "cyclic " + h
-    | DagFold.Error(DagFold.RRejected(id, e)) -> sprintf "rejected %s %A" id e
+    | DagFold.Error(DagClosure.RUnknownHead h) -> "unknown-head " + h
+    | DagFold.Error(DagClosure.RCyclicHistory h) -> "cyclic " + h
+    | DagFold.Error(DagClosure.RRejected(id, e)) -> sprintf "rejected %s %A" id e
 
 /// The extracted `replay_to` over a model DAG, at production's id order, with fuel for every node.
 let private modelReplay
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (state0: 'State)
-    (d: DagFold.dag<'Op>)
+    (d: DagClosure.dag<'Op>)
     (head: string)
-    : DagFold.outcome<'State, DagFold.replay_fault<'Rej>> =
+    : DagFold.outcome<'State, DagClosure.replay_fault<'Rej>> =
     let fuel = drainFuel d.nodes
-    DagFold.replay_to (modelApply w) ordLt fuel d fuel state0 head
+    DagClosure.replay_to (modelApply w) ordLt fuel d fuel state0 head
 
 /// One head, both sides: `None` when they agree, the disagreement otherwise; and which arm it was.
 let private replayDisagreement
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (hashState: 'State -> string)
     (state0: 'State)
-    (bridge: Dag.T<'Op> -> DagFold.dag<'Op>)
+    (bridge: Dag.T<'Op> -> DagClosure.dag<'Op>)
     (dag: Dag.T<'Op>)
     (head: string)
     : string option * string =
@@ -690,7 +694,7 @@ let private replayDisagreement
 /// The go-red bridge: the model is handed the DAG with ONE node of the head's closure dropped — the
 /// node the store would have lost to a silent `Map.add` replacement before Phase 296, which is the
 /// failure the `node-ids-distinct` row hid. Everything else is production's.
-let private droppingOneNode (head: string) (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
+let private droppingOneNode (head: string) (dag: Dag.T<'Op>) : DagClosure.dag<'Op> =
     let anc = Dag.ancestorsOf dag head
 
     let victim = anc |> Set.toList |> List.filter (fun id -> id <> head) |> List.tryHead
@@ -699,16 +703,16 @@ let private droppingOneNode (head: string) (dag: Dag.T<'Op>) : DagFold.dag<'Op> 
 
     match victim with
     | None -> m
-    | Some v -> { DagFold.nodes = m.nodes |> List.filter (fun n -> n.nid <> v) }
+    | Some v -> { DagClosure.nodes = m.nodes |> List.filter (fun n -> n.nid <> v) }
 
 // ---------------------------------------------------------------------------
 //  Phase 158 — delta recovery over a MERGED HEAD, and `Dag.mergeBase`, beside production's own.
 //
-//  Section 14 of `proofs/DagFold.fst` proves that over a head whose lane hangs off an already
+//  Section 14 of `proofs/DagClosure.fst` proves that over a head whose lane hangs off an already
 //  MERGED node, `Dag.between` returns that lane's own nodes in append order (`between_merged`),
 //  that the fold above it is the deltas-first fold (`reconcile_many_merged_eq`), and that
 //  `Dag.mergeBase` of two such heads is the merged node they diverged from
-//  (`merge_base_is_divergence`). What runs here is the other half: production's OWN
+//  (`DagPrimitives.merge_base_now_is_divergence`, over production's `deepest`). What runs here is the other half: production's OWN
 //  `Dag.mergeBase` / `Dag.betweenOps` / `Dag.reconcileMany` over the DAG a clone actually holds
 //  after it has folded, pulled and folded again — round one's lanes off a base, their heads folded
 //  into one convergent head with `Dag.merge`, and round two's lanes appended off THAT — against the
@@ -752,20 +756,25 @@ let private foldPullFold
 
     baseId, merged, heads1, heads2, dag2
 
-let private foundId (r: DagFold.found<string>) : string option =
+let private foundId (r: DagClosure.found<string>) : string option =
     match r with
-    | DagFold.Found id -> Some id
-    | DagFold.Missing -> None
+    | DagClosure.Found id -> Some id
+    | DagClosure.Missing -> None
 
 /// The go-red instrument for `mergeBase`: the model's own function at the REVERSED key — the same
 /// intersection, the same extracted `max_by`, with `deeper` flipped — so it returns the SHALLOWEST
 /// common ancestor, which over a fold-pull-fold union is the ORIGINAL BASE rather than the
 /// divergence point. It is as well-formed a `maxBy` as the model's own; what it breaks is agreement
 /// with production, and the delta recovered from the base it names.
-let private shallowestCommon (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (left: string) (right: string) =
-    match ListAlgebra.inter (DagFold.ancestors_of model fuel left) (DagFold.ancestors_of model fuel right) with
+let private shallowestCommon
+    (model: DagClosure.dag<'Op>)
+    (fuel: DagClosure.node<'Op> list)
+    (left: string)
+    (right: string)
+    =
+    match ListAlgebra.inter (DagClosure.ancestors_of model fuel left) (DagClosure.ancestors_of model fuel right) with
     | [] -> None
-    | c :: t -> Some(DagFold.max_by (fun x y -> DagFold.deeper ordLt model fuel y x) c t)
+    | c :: t -> Some(DagClosure.max_by (fun x y -> DagClosure.deeper ordLt model fuel y x) c t)
 
 type private MergedTally =
     {
@@ -787,7 +796,7 @@ type private MergedTally =
 /// (production, the model, and the merged head itself); and the model's computable premises, so a
 /// green run is known to be one the theorems are ABOUT.
 let private mergedDisagreements
-    (locate: DagFold.dag<'Op> -> DagFold.node<'Op> list -> string -> string -> string option)
+    (locate: DagClosure.dag<'Op> -> DagClosure.node<'Op> list -> string -> string -> string option)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (baseOp: 'Op)
     (round1: 'Op list list)
@@ -802,7 +811,7 @@ let private mergedDisagreements
 
     for (i, (head, lane)) in List.indexed (List.zip heads2 round2) do
         let p = Dag.betweenOps dag merged head
-        let o = DagFold.between_ops_drained ordLt kfuel model fuel merged head
+        let o = DagClosure.between_ops_drained ordLt kfuel model fuel merged head
         recovered <- recovered + List.length p
 
         if p <> o then
@@ -824,7 +833,7 @@ let private mergedDisagreements
             )
 
         // The FUEL premise of `merged_recovers`, evaluated: the walk below the lane completed.
-        if not (DagFold.walk_ok model (DagFold.drop_by fuel (List.rev lane)) merged) then
+        if not (DagClosure.walk_ok model (DagClosure.drop_by fuel (List.rev lane)) merged) then
             failures.Add(sprintf "round-two lane %d: the model's walk below the lane ran out of fuel — premise unmet" i)
 
     let mutable pairs = 0
@@ -860,9 +869,9 @@ let private mergedDisagreements
       MergeNodes = mergeNodes
       Pairs = pairs }
 
-/// The faithful locator — the extracted `merge_base` at production's id order.
-let private modelMergeBase (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (l: string) (r: string) =
-    foundId (DagFold.merge_base ordLt model fuel l r)
+/// The faithful locator — the extracted `merge_base_now` (production's `deepest`) at production's id order.
+let private modelMergeBase (model: DagClosure.dag<'Op>) (fuel: DagClosure.node<'Op> list) (l: string) (r: string) =
+    foundId (DagPrimitives.merge_base_now ordLt fuel model fuel l r)
 
 
 // ---------------------------------------------------------------------------
@@ -881,12 +890,12 @@ let private modelMergeBase (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> li
 let private modelReconcileOps (dag: Dag.T<'Op>) (baseId: string) (heads: string list) : 'Op list =
     let model = toModelDag dag
     let fuel = model.nodes
-    let cs = heads |> List.distinct |> List.map (DagFold.ancestors_of model fuel)
-    let baseC = DagFold.ancestors_of model fuel baseId
-    let union = DagFold.closure_nodes model.nodes (DagFold.concat cs)
-    let order = DagFold.drain_order ordLt (drainFuel union) union
+    let cs = heads |> List.distinct |> List.map (DagClosure.ancestors_of model fuel)
+    let baseC = DagClosure.ancestors_of model fuel baseId
+    let union = DagClosure.closure_nodes model.nodes (DagFold.concat cs)
+    let order = DagClosure.drain_order ordLt (drainFuel union) union
 
-    DagFold.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes[id].Op)
+    DagClosure.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes[id].Op)
 
 let private blindPlanFootprint (_: PlanOp) : Footprint =
     { Reads = Set.empty
@@ -937,7 +946,7 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
 //  Phase 437 — the lane-DAG primitives beside the model's sections 18 to 21: `Dag.mergeBase` over a
 //  criss-cross, `Dag.conflictsOfHeads`, the reachability index, and checkpoints with the truncation.
 //
-//  The theorems are proved in `proofs/DagFold.fst`; what runs here is the other half, production's
+//  The theorems are proved in `proofs/DagClosure.fst` and `proofs/DagPrimitives.fst`; what runs here is the other half, production's
 //  own functions beside the extracted ones over DAGs a clone actually holds. Each comparison renders
 //  both sides to one string, and each case carries a vacuity guard: the arm it exists to measure was
 //  reached.
@@ -981,13 +990,13 @@ let private crissCross
     let h2, d6 = chain "lane-d" d m2 d5
     h1, h2, d6
 
-/// The model's `merge_base` at production's id order, with fuel for every node.
+/// The model's `merge_base_now` at production's id order, with fuel for every node.
 let private modelMergeBaseOf (dag: Dag.T<'Op>) (left: string) (right: string) : string option =
     let model = toModelDag dag
 
-    match DagFold.merge_base ordLt model model.nodes left right with
-    | DagFold.Found id -> Some id
-    | DagFold.Missing -> None
+    match DagPrimitives.merge_base_now ordLt model.nodes model model.nodes left right with
+    | DagClosure.Found id -> Some id
+    | DagClosure.Missing -> None
 
 /// A conflict rendered by node ids, address and shape — the canonical reading both sides share.
 let private renderNodeConflict (left: string, right: string, address: string, shape: MergeConflictShape) =
@@ -1003,12 +1012,12 @@ let private productionHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (base
 let private modelHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (baseId: string) (heads: string list) =
     let model = toModelDag dag
     let fuel = model.nodes
-    let cs = heads |> List.distinct |> List.map (DagFold.ancestors_of model fuel)
-    let baseC = DagFold.ancestors_of model fuel baseId
-    let union = DagFold.closure_nodes model.nodes (DagFold.concat cs)
-    let order = DagFold.drain_order ordLt (drainFuel union) union
+    let cs = heads |> List.distinct |> List.map (DagClosure.ancestors_of model fuel)
+    let baseC = DagClosure.ancestors_of model fuel baseId
+    let union = DagClosure.closure_nodes model.nodes (DagFold.concat cs)
+    let order = DagClosure.drain_order ordLt (drainFuel union) union
 
-    DagFold.conflicts_of_heads (fp >> toModelFootprint) model order baseC cs
+    DagClosure.conflicts_of_heads (fp >> toModelFootprint) model order baseC cs
     |> List.map (fun c -> renderNodeConflict (c.left.nid, c.right.nid, c.address, ofModelShape c.shape))
     |> List.distinct
     |> List.sort
@@ -1028,30 +1037,30 @@ let private renderProductionFrom
     | Error(Dag.CheckpointFault.Unreached h) -> "unreached " + h
     | Error(Dag.CheckpointFault.Uncovered n) -> "uncovered " + n
 
-let private renderModelFrom (hashState: 'State -> string) (r: DagFold.outcome<'State, DagFold.ck_fault<'Rej>>) =
+let private renderModelFrom (hashState: 'State -> string) (r: DagFold.outcome<'State, DagClosure.ck_fault<'Rej>>) =
     match r with
     | DagFold.Ok s -> "ok " + hashState s
-    | DagFold.Error(DagFold.CUnknownNode n) -> "unknown-node " + n
-    | DagFold.Error(DagFold.CReplay(DagFold.RUnknownHead h)) -> "unknown-head " + h
-    | DagFold.Error(DagFold.CReplay(DagFold.RCyclicHistory h)) -> "cyclic " + h
-    | DagFold.Error(DagFold.CReplay(DagFold.RRejected(id, e))) -> sprintf "rejected %s %A" id e
-    | DagFold.Error(DagFold.CUnreached h) -> "unreached " + h
-    | DagFold.Error(DagFold.CUncovered n) -> "uncovered " + n
+    | DagFold.Error(DagClosure.CUnknownNode n) -> "unknown-node " + n
+    | DagFold.Error(DagClosure.CReplay(DagClosure.RUnknownHead h)) -> "unknown-head " + h
+    | DagFold.Error(DagClosure.CReplay(DagClosure.RCyclicHistory h)) -> "cyclic " + h
+    | DagFold.Error(DagClosure.CReplay(DagClosure.RRejected(id, e))) -> sprintf "rejected %s %A" id e
+    | DagFold.Error(DagClosure.CUnreached h) -> "unreached " + h
+    | DagFold.Error(DagClosure.CUncovered n) -> "uncovered " + n
 
-let private toModelCheckpoint (cp: Dag.Checkpoint<'State>) : DagFold.checkpoint<'State> =
-    { DagFold.cnode = cp.Node
-      DagFold.cstate = cp.State
-      DagFold.cseal = cp.Hash }
+let private toModelCheckpoint (cp: Dag.Checkpoint<'State>) : DagClosure.checkpoint<'State> =
+    { DagClosure.cnode = cp.Node
+      DagClosure.cstate = cp.State
+      DagClosure.cseal = cp.Hash }
 
 /// The extracted `replay_from` over a model DAG, at production's id order, with fuel for every node.
 let private modelReplayFrom
     (w: StreamWitness<'Op, 'State, 'Rej>)
-    (d: DagFold.dag<'Op>)
-    (cp: DagFold.checkpoint<'State>)
+    (d: DagClosure.dag<'Op>)
+    (cp: DagClosure.checkpoint<'State>)
     (head: string)
     =
     let fuel = drainFuel d.nodes
-    DagFold.replay_from (modelApply w) ordLt fuel d fuel cp head
+    DagClosure.replay_from (modelApply w) ordLt fuel d fuel cp head
 
 /// Fold, pull, fold — and then a SIDE MERGE: the first round-two head merged with the first round-one
 /// head, which names a parent behind the merged node, so a compaction at the merged node keeps a band.
@@ -1099,7 +1108,7 @@ let private checkpointDisagreements
     [ for c in (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ] do
           let p = Dag.checkpointAt h hashState w state0 dag c
 
-          let m = DagFold.checkpoint_at (modelApply w) ordLt fuel model fuel seal state0 c
+          let m = DagClosure.checkpoint_at (modelApply w) ordLt fuel model fuel seal state0 c
 
           match p, m with
           | Ok pc, DagFold.Ok mc ->
@@ -1130,10 +1139,10 @@ let private checkpointDisagreements
               | Ok { Checkpoint = cp; Dag = compacted } ->
                   let keep = compacted.Nodes |> Map.toList |> List.map fst
 
-                  if not (DagFold.truncation_ok model fuel c keep) then
+                  if not (DagClosure.truncation_ok model fuel c keep) then
                       yield sprintf "compactAt %s: the kept set does not meet the model's truncation contract" c
 
-                  let truncated = DagFold.truncate model keep
+                  let truncated = DagClosure.truncate model keep
 
                   if
                       (truncated.nodes |> List.map (fun n -> n.nid) |> List.sort)
@@ -1188,7 +1197,7 @@ let private checkpointDisagreements
 let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
     let model = toModelDag dag
     let fuel = drainFuel model.nodes
-    let idx = DagFold.reach_of_dag ordLt fuel model
+    let idx = DagClosure.reach_of_dag ordLt fuel model
     let reach = Dag.Reach.ofDag dag
     let ids = (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ]
     let mutable positives = 0
@@ -1196,7 +1205,7 @@ let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
     let failures =
         [ for d in ids do
               let walk = Dag.ancestorsOf dag d
-              let mAnc = DagFold.reach_ancestors model fuel idx d |> Set.ofList
+              let mAnc = DagClosure.reach_ancestors model fuel idx d |> Set.ofList
 
               if mAnc <> walk || Dag.Reach.ancestors reach d <> walk then
                   yield sprintf "ancestors %s: walk %A, model %A" d walk mAnc
@@ -1204,7 +1213,7 @@ let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
               for a in ids do
                   let truth = Set.contains a walk
                   let p = Dag.Reach.reaches reach a d
-                  let m = DagFold.reach_reaches model fuel idx a d
+                  let m = DagClosure.reach_reaches model fuel idx a d
 
                   if truth then
                       positives <- positives + 1
@@ -1223,10 +1232,10 @@ let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
 //  beside production's over every pair, every node and several head sets of the DAGs a clone holds.
 // ---------------------------------------------------------------------------
 
-let private ofFound (f: DagFold.found<string>) : string option =
+let private ofFound (f: DagClosure.found<string>) : string option =
     match f with
-    | DagFold.Found x -> Some x
-    | DagFold.Missing -> None
+    | DagClosure.Found x -> Some x
+    | DagClosure.Missing -> None
 
 let private renderTopo (r: Result<string list, Dag.Cyclic>) : string =
     match r with
@@ -1268,12 +1277,12 @@ let private boundaryDisagreements
     : string list =
     let model = toModelDag dag
     let fuel = drainFuel model.nodes
-    let idx = DagFold.reach_of_dag ordLt fuel model
-    let ord = DagFold.drain_order ordLt fuel model.nodes
+    let idx = DagClosure.reach_of_dag ordLt fuel model
+    let ord = DagClosure.drain_order ordLt fuel model.nodes
     let reach = Dag.Reach.ofDag dag
     let held = dag.Nodes |> Map.toList |> List.map fst
     let ids = held @ [ "no-such-node" ]
-    let nids (ns: DagFold.node<'Op> list) = ns |> List.map (fun n -> n.nid)
+    let nids (ns: DagClosure.node<'Op> list) = ns |> List.map (fun n -> n.nid)
 
     [ for a in ids do
           let pt = renderTopo (Dag.tryTopoOrder dag a)
@@ -1299,7 +1308,7 @@ let private boundaryDisagreements
                   tally.Disjoint <- tally.Disjoint + 1
 
               let pb = Dag.between dag a b |> List.map _.Id
-              let mb = DagFold.between_drained ordLt fuel model fuel a b |> nids
+              let mb = DagClosure.between_drained ordLt fuel model fuel a b |> nids
               let rb = DagPrimitives.reach_between ordLt fuel model fuel idx ord a b |> nids
 
               if mb <> pb || rb <> pb || (Dag.Reach.between reach a b |> List.map _.Id) <> pb then
@@ -1329,7 +1338,7 @@ let private boundaryDisagreements
               if Set.ofList k <> kept then
                   yield sprintf "cut %s: production keeps %A, the model %A" c kept (Set.ofList k)
 
-              if not (DagFold.truncation_ok model fuel c k) then
+              if not (DagClosure.truncation_ok model fuel c k) then
                   yield sprintf "cut %s: the model's kept set misses its own contract" c
 
               tally.Kept <- tally.Kept + 1
@@ -1812,7 +1821,7 @@ let tests =
 
           testCase "the drain is a function of the node SET — every arrival order gives one sequence"
           <| fun _ ->
-              // `drain_deterministic`, measured. `DagFold.frontier` answers in the WORK LIST's
+              // `drain_deterministic`, measured. `DagClosure.frontier` answers in the WORK LIST's
               // order, so permuting the node set hands the selector a permuted frontier; only an
               // order-invariant selector survives that, and this is the arm that would catch a
               // drain that took the head of an unsorted frontier instead of its minimum.
@@ -1825,7 +1834,7 @@ let tests =
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
                   let ns = modelClosure merged unionHead
-                  let canonical = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns
+                  let canonical = DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel ns) ns
 
                   // Three permutations, two of them fixed so the case cannot go quiet on a seed
                   // that happened to shuffle nothing, and one drawn.
@@ -1839,7 +1848,7 @@ let tests =
                          | h :: t -> t @ [ h ])
                         shuffled ] do
                       compared <- compared + 1
-                      let got = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel perm) perm
+                      let got = DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel perm) perm
 
                       if got <> canonical then
                           failtestf
@@ -1875,8 +1884,8 @@ let tests =
                       (Dag.verifyDag (OpStream.canonical OpStream.defaultHash planW) merged)
                       "the production DAG holds every parent it names"
 
-                  let ignored = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns
-                  let refused = DagFold.drain DagFold.RefuseDangling ordLt (drainFuel ns) ns
+                  let ignored = DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel ns) ns
+                  let refused = DagClosure.drain DagClosure.RefuseDangling ordLt (drainFuel ns) ns
 
                   if ignored <> refused then
                       failtestf "iter %d: the policies differ on a closure with no dangling parent" i
@@ -1887,24 +1896,24 @@ let tests =
                   // from outside the set.
                   let orphaned = ns |> List.filter (fun n -> n.nid <> baseId)
 
-                  match DagFold.drain DagFold.RefuseDangling ordLt (drainFuel orphaned) orphaned with
-                  | DagFold.Refused id ->
+                  match DagClosure.drain DagClosure.RefuseDangling ordLt (drainFuel orphaned) orphaned with
+                  | DagClosure.Refused id ->
                       refusals <- refusals + 1
 
                       Expect.isTrue
                           (orphaned |> List.exists (fun n -> n.nid = id && List.contains baseId n.nparents))
                           "the refusal names a node that really does name the dropped base"
-                  | DagFold.Drained _ -> failtestf "iter %d: RefuseDangling drained a set missing the base" i
+                  | DagClosure.Drained _ -> failtestf "iter %d: RefuseDangling drained a set missing the base" i
 
-                  match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel orphaned) orphaned with
-                  | DagFold.Drained ord ->
+                  match DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel orphaned) orphaned with
+                  | DagClosure.Drained ord ->
                       Expect.equal
                           (List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) ord)
                           (orphaned
                            |> List.map _.nid
                            |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)))
                           "IgnoreDangling places every remaining node — the dropped parent constrains nothing"
-                  | DagFold.Refused _ -> failtestf "iter %d: IgnoreDangling refused" i
+                  | DagClosure.Refused _ -> failtestf "iter %d: IgnoreDangling refused" i
 
               Expect.isGreaterThan agreements 0 "the policies were compared on a clean closure"
               Expect.isGreaterThan refusals 0 "the refusing policy was made to refuse"
@@ -1944,14 +1953,14 @@ let tests =
               let ns = modelClosure cyclic "d"
               Expect.equal (List.length ns) 4 "the closure is the whole hand-built set"
 
-              match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns with
-              | DagFold.Drained ord ->
+              match DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel ns) ns with
+              | DagClosure.Drained ord ->
                   Expect.equal ord [ "a" ] "the model drains the acyclic prefix and stops, as topoCore does"
 
                   Expect.isFalse
-                      (DagFold.is_topo_enum ns ord)
+                      (DagClosure.is_topo_enum ns ord)
                       "and a short drain is not a topological enumeration — which is the signal isAcyclic reads"
-              | DagFold.Refused _ -> failtest "the hand-built set holds every parent it names"
+              | DagClosure.Refused _ -> failtest "the hand-built set holds every parent it names"
 
               // … and the same set with the back edge removed drains completely and IS one, so the
               // comparison above is a discrimination rather than a refusal of everything.
@@ -1963,10 +1972,12 @@ let tests =
 
               let ns' = modelClosure acyclic "d"
 
-              match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns') ns', Dag.tryTopoOrder acyclic "d" with
-              | DagFold.Drained ord, Ok production ->
+              match
+                  DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel ns') ns', Dag.tryTopoOrder acyclic "d"
+              with
+              | DagClosure.Drained ord, Ok production ->
                   Expect.equal ord production "the model and production agree once the back edge is gone"
-                  Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
+                  Expect.isTrue (DagClosure.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
               | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
 
           // ---- Phase 309: Dag.tryReplayTo beside the extracted replay_to ----
@@ -2099,12 +2110,12 @@ let tests =
               let collide: HashFn = fun _ _ -> "same-id"
               let enc = planW.Encode
 
-              let mnode (p: string list) (op: PlanOp) : DagFold.node<PlanOp> =
-                  { DagFold.nid = "same-id"
-                    DagFold.nparents = p
-                    DagFold.nop = op }
+              let mnode (p: string list) (op: PlanOp) : DagClosure.node<PlanOp> =
+                  { DagClosure.nid = "same-id"
+                    DagClosure.nparents = p
+                    DagClosure.nop = op }
 
-              let same (a: DagFold.node<PlanOp>) (b: DagFold.node<PlanOp>) =
+              let same (a: DagClosure.node<PlanOp>) (b: DagClosure.node<PlanOp>) =
                   List.sort a.nparents = List.sort b.nparents && enc a.nop = enc b.nop
 
               let ops =
@@ -2131,28 +2142,28 @@ let tests =
               | other -> failtestf "production must refuse a differing node minting a held id: %A" other
 
               // The model.
-              let m0: DagFold.dag<PlanOp> = { DagFold.nodes = [] }
+              let m0: DagClosure.dag<PlanOp> = { DagClosure.nodes = [] }
 
               let m1 =
-                  match DagFold.add_node same (mnode [] op1) m0 with
-                  | DagFold.Appended(_, d) -> d
-                  | DagFold.Collision _ -> failtest "the model refused a node into an empty DAG"
+                  match DagClosure.add_node same (mnode [] op1) m0 with
+                  | DagClosure.Appended(_, d) -> d
+                  | DagClosure.Collision _ -> failtest "the model refused a node into an empty DAG"
 
-              match DagFold.add_node same (mnode [] op1) m1 with
-              | DagFold.Appended(id, d) ->
+              match DagClosure.add_node same (mnode [] op1) m1 with
+              | DagClosure.Appended(id, d) ->
                   Expect.equal id "same-id" "the model deduplicates"
                   Expect.equal d m1 "and leaves the DAG unchanged"
-              | DagFold.Collision _ -> failtest "the model refused an identical node"
+              | DagClosure.Collision _ -> failtest "the model refused an identical node"
 
-              match DagFold.add_node same (mnode [] op2) m1 with
-              | DagFold.Collision id -> Expect.equal id "same-id" "the model refuses the differing node by name"
-              | DagFold.Appended _ -> failtest "the model must refuse a differing node minting a held id"
+              match DagClosure.add_node same (mnode [] op2) m1 with
+              | DagClosure.Collision id -> Expect.equal id "same-id" "the model refuses the differing node by name"
+              | DagClosure.Appended _ -> failtest "the model must refuse a differing node minting a held id"
 
               // The go-red: a `same` that accepts everything is the pre-296 replacement's twin — it
               // admits the differing node, which production refuses.
-              match DagFold.add_node (fun _ _ -> true) (mnode [] op2) m1 with
-              | DagFold.Appended _ -> ()
-              | DagFold.Collision _ -> failtest "a permissive sameness admits the differing node"
+              match DagClosure.add_node (fun _ _ -> true) (mnode [] op2) m1 with
+              | DagClosure.Appended _ -> ()
+              | DagClosure.Collision _ -> failtest "a permissive sameness admits the differing node"
 
           // ---- Phase 158: delta recovery over a MERGED HEAD, and mergeBase, beside production's ----
 
@@ -2247,7 +2258,7 @@ let tests =
 
                   let fromDag =
                       match
-                          DagFold.reconcile_many_drained
+                          DagClosure.reconcile_many_drained
                               (planFootprint >> toModelFootprint)
                               ordLt
                               (drainFuel model.nodes)
@@ -2320,7 +2331,7 @@ let tests =
                           namedTheBase <- namedTheBase + 1
 
                           let fromWrong =
-                              DagFold.between_ops_drained ordLt (drainFuel model.nodes) model model.nodes wrong h0
+                              DagClosure.between_ops_drained ordLt (drainFuel model.nodes) model model.nodes wrong h0
 
                           if fromWrong <> Dag.betweenOps dag merged h0 then
                               longerDeltas <- longerDeltas + 1
@@ -2417,9 +2428,10 @@ let tests =
 
           // ---- Phase 437: the lane-DAG primitives beside sections 18 to 21 ----
 
-          testCase "the extracted merge_base is production's over CRISS-CROSS merges, and is a maximal common ancestor"
+          testCase
+              "the extracted merge_base_now is production's over CRISS-CROSS merges, and is a maximal common ancestor"
           <| fun _ ->
-              // `merge_base_maximal`, measured: production's `mergeBase` (and the index's) beside the
+              // `merge_base_now_maximal`, measured: production's `mergeBase` (and the index's) beside the
               // extracted one over two merges of the same two lanes, and the answer checked to be a
               // common ancestor no other common ancestor descends from. The guard: the pool reached
               // pairs with SEVERAL maximal common ancestors, where the tie-break genuinely decides.
@@ -2437,7 +2449,7 @@ let tests =
                   let production = Dag.mergeBase dag h1 h2
                   let model = modelMergeBaseOf dag h1 h2
 
-                  Expect.equal model production (sprintf "iter %d: the extracted merge_base is production's" i)
+                  Expect.equal model production (sprintf "iter %d: the extracted merge_base_now is production's" i)
 
                   Expect.equal
                       (Dag.Reach.mergeBase (Dag.Reach.ofDag dag) h1 h2)
@@ -2595,7 +2607,7 @@ let tests =
                   | Ok cp ->
                       let moved =
                           { toModelCheckpoint cp with
-                              DagFold.cnode = baseId }
+                              DagClosure.cnode = baseId }
 
                       for t in heads2 do
                           let p = renderProductionFrom planHash t (Dag.replayFrom planW cp dag t)
@@ -2609,7 +2621,7 @@ let tests =
 
           testCase "the extracted mergeBase, commonBase and index queries are production's over every pair and head set"
           <| fun _ ->
-              // Phase 457's theorems, measured: `merge_base_now_is_merge_base`, `common_base_maximal`
+              // Phase 457's theorems, measured: `merge_base_now_maximal`, `common_base_maximal`
               // and the four `reach_*_agrees`, over fold-pull-fold DAGs with a side merge and over
               // criss-crosses — every ordered pair of ids, an absent id, and head sets of three or
               // more, a repeated head and an absent head included. The guards: some pairs share a
@@ -2683,8 +2695,8 @@ let tests =
                   let _, _, _, _, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
                   let model = toModelDag dag
                   let fuel = drainFuel model.nodes
-                  let idx = DagFold.reach_of_dag ordLt fuel model
-                  let ord = DagFold.drain_order ordLt fuel model.nodes
+                  let idx = DagClosure.reach_of_dag ordLt fuel model
+                  let ord = DagClosure.drain_order ordLt fuel model.nodes
                   let reach = Dag.Reach.ofDag dag
                   let held = dag.Nodes |> Map.toList |> List.map fst
 

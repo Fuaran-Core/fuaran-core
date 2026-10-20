@@ -1763,7 +1763,7 @@ let proofsKitTemplateTests =
               // and the fixed text is a theorem, not a frame around two prose holes
               Expect.stringContains
                   body
-                  "fold_confluence {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p"
+                  "fold_confluence_total {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p"
                   "the theorem's discharge line is fixed text"
 
               Expect.stringContains body "{{DIAMOND}} ();" "the obligation's discharge is fixed text"
