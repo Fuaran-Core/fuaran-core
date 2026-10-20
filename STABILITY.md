@@ -1114,7 +1114,8 @@ the wire corpus (`Proofs.Oracle`), and the proof leg holds the committed oracle 
 extraction byte for byte. **No shipped surface changes**: the claim is about what the existing
 `reconcileMany` does, stated as a theorem on a model and tied to production by a differential
 test. The claims ladder — what is proved, what is only tested, what is assumed — is in
-`proofs/README.md`, and "formally verified" is spent on the theorem alone.
+`proofs/README.md`, and "formally verified" is spent on the theorem alone. **Since `0.40.0`** (Phase 534,
+no package surface) it is `fold_confluence_total`, the DAG beneath it `proofs/DagClosure.fst`; adopters re-copy both.
 
 ## Open-core posture
 

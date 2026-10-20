@@ -4,7 +4,7 @@
    `{{HOLE}}` replaced, is a complete F* module; this preamble is dropped and never reaches the
    instance.
 
-   WHAT IT INSTANTIATES. `DagFold.fold_confluence` is generic over an operation type, a state type,
+   WHAT IT INSTANTIATES. `DagFold.fold_confluence_total` is generic over an operation type, a state type,
    a rejection type, an apply function and a footprint function, and it carries ONE hypothesis about
    the domain — `independence_diamond fp apply`, the promise that footprint-independent operations
    which both apply at a state commute there. A domain that PROVES that promise for its own algebra
@@ -61,6 +61,10 @@
    lane of the set in hand applies cleanly from the base state. It is a statement about the lane
    set, not a promise about the domain, and it is the `lanes-apply` row of the ladder, sampled by
    `Conformance.concurrencyLaws` at the instance's witness exactly as it is at this repository's.
+   Since Phase 534 the instance is discharged by `fold_confluence_total`, which drops that premise
+   (the fold tests that every lane applies before it composes anything), so the proof does not use
+   it; it stays in the statement because it is the statement every instance was cut with, and
+   `fold_confluence`, the generic theorem that carried it, is retired.
 
    WHAT THIS TEMPLATE DOES NOT GIVE. The apply-engine preservation theorems (`Preservation.fst`),
    the diff theorems (`TreeDiff.fst`) and the tree algebra's own diamond (`TreeOps.fst`) are stated
@@ -104,11 +108,11 @@ val {{FOLD}}_confluence_halt
 let {{FOLD}}_confluence_halt s0 ls1 ls2 p =
   fold_confluence_halt {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p
 
-(* THE THEOREM. `DagFold.fold_confluence`'s domain hypothesis is discharged by
-   `{{DOMAIN}}.{{DIAMOND}}`, so what remains in the `requires` is `lanes_apply` — not a
-   promise about the domain but a statement about the lane set in hand, that every lane applies
-   cleanly from the base state, which is the lane set `{{PROD_FOLD}}`'s generators
-   produce and the only one the fold half was ever about. *)
+(* THE THEOREM. `DagFold.fold_confluence_total`'s one hypothesis, the domain's diamond, is
+   discharged by `{{DOMAIN}}.{{DIAMOND}}`, and the total theorem asks nothing of the lane set.
+   The `requires` still names `lanes_apply` — every lane applies cleanly from the base state, the
+   lane set `{{PROD_FOLD}}`'s generators produce — because that is the statement this
+   instance has carried since it was cut; the proof below does not use it. *)
 val {{FOLD}}_confluence
   (s0:{{STATE}}) (ls1 ls2:list (list {{OP}})) (p:perm (list {{OP}}) ls1 ls2)
   : Lemma (requires lanes_apply {{APPLY}} ls1 s0)
@@ -116,6 +120,6 @@ val {{FOLD}}_confluence
 
 let {{FOLD}}_confluence s0 ls1 ls2 p =
   {{DIAMOND}} ();
-  fold_confluence {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p
+  fold_confluence_total {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p
 
 {{TRAILER}}

@@ -71,12 +71,12 @@ let tests =
               // `pick_min` by everything the model asks of one (`picks_from_frontier`), and it is the
               // natural mis-extraction of a fold the backend got backwards — so the twin's input,
               // drained that way, must give a different order from the one the normaliser certified.
-              let ns = DagFold.twin_dag.nodes
+              let ns = DagClosure.twin_dag.nodes
 
-              let certified = DagFold.drain_order DagFold.twin_lt DagFold.twin_fuel ns
+              let certified = DagClosure.drain_order DagClosure.twin_lt DagClosure.twin_fuel ns
 
               let perturbed =
-                  DagFold.kahn DagFold.pick_head DagFold.twin_fuel ns (DagFold.ids_of ns) []
+                  DagClosure.kahn DagClosure.pick_head DagClosure.twin_fuel ns (DagClosure.ids_of ns) []
 
               Expect.equal certified [ "a"; "b"; "c"; "m" ] "the certified drain is the twin's expected order"
               Expect.notEqual perturbed certified "a selector taking the frontier's head must miss the fixture" ]

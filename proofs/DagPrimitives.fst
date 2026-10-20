@@ -1,10 +1,10 @@
 (*
    DagPrimitives — the lane DAG's remaining boundaries, modelled (fuaran-core Phase 457).
 
-   Phase 437 lifted the lane-DAG primitives to proved in `DagFold` sections 18 to 21 and named
-   what its model left out. This module closes those boundaries. It opens `DagFold` and adds no
-   premise of its own: every theorem below rests on that module's definitions and on its
-   acyclicity witness.
+   Phase 437 lifted the lane-DAG primitives to proved in `DagClosure` sections 18 to 21 (one module
+   with `DagFold` until Phase 534) and named what its model left out. This module closes those
+   boundaries. It opens `DagFold` and `DagClosure` and adds no premise of its own: every theorem
+   below rests on their definitions and on section 13's acyclicity witness.
 
    WHAT IS MODELLED, clause for clause with `src/Fuaran.Core.OpStream.Dag/DagOpStream.fs`:
      1. `Dag.mergeBase` as production computes it NOW — Phase 388's private `deepest`, which sizes
@@ -26,9 +26,13 @@
    premise; `Conformance.reachLaws` and the differential sample it.
 
    WHAT IS PROVED.
-     - `merge_base_now_is_merge_base`: over a witnessed closure, production's current
-       `mergeBase` answers what Phase 158's model answers, so `merge_base_maximal` is about the
-       code that runs (`merge_base_now_maximal`).
+     - `merge_base_now_maximal` (THEOREM 5): over a witnessed closure, production's `mergeBase`
+       either refuses exactly over two disjoint histories or returns a common ancestor no other
+       common ancestor descends from. `deepest` picks what the maximum over the whole common set
+       picks (`deepest_is_max_by`), and `DagClosure.max_common_is_maximal` is that maximum's fact.
+     - `merge_base_now_is_divergence` (Phase 158's theorem, stated over the code that runs since
+       Phase 534): `mergeBase` of two lane heads off a merged head is that head, for every `lt`;
+       `merge_base_now_is_divergence_acyclic` is it on section 13's witness.
      - `common_base_maximal`: `commonBase` over N heads either refuses exactly when no node is
        common to every head, or returns a node common to every head that no other such node
        descends from.
@@ -36,7 +40,7 @@
        `reach_between_agrees`: the index's four queries answer what the DAG-level functions
        answer.
      - `cut_keep_meets_contract`: the set `cut` keeps satisfies `truncation_ok`, so with
-       `DagFold.truncation_preserves_replay` truncation is proved end to end; its refusal names a
+       `DagClosure.truncation_preserves_replay` truncation is proved end to end; its refusal names a
        node that is neither behind nor after the checkpoint's node; and its fuel never runs out.
 
    WHAT IS NOT MODELLED. `Reach.extend`'s copy-and-shift of the order and position arrays (the
@@ -44,7 +48,7 @@
    `Conformance.reachLaws`), the word layout above, and which uncovered node production names
    beyond "the smallest id" (`Map.toList` order, read as `pick_min`).
 
-   NO SMT PATTERNS, for DagFold section 11's reason.
+   NO SMT PATTERNS, for DagClosure section 11's reason.
 
    Apache-2.0, like everything beside it.
 *)
@@ -53,6 +57,7 @@ module DagPrimitives
 open Twin
 open ListAlgebra
 open DagFold
+open DagClosure
 
 (* ======================================================================================
    1. `deepest`, and `Dag.mergeBase` as production computes it now (Phase 388)
@@ -278,17 +283,8 @@ let deepest_is_max_by (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (no
       max_by_is better b' r b
 #pop-options
 
-(* ---- 1.4 THEOREM: production's `mergeBase` is the modelled one, on a witnessed closure ---- *)
+(* ---- 1.4 THEOREM 5: production's `mergeBase` over ANY two heads, a criss-cross included ---- *)
 
-let merge_base_now_is_merge_base (#op:eqtype) (lt:string -> string -> bool)
-  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (left right:string) (wl:list string)
-  : Lemma (requires total_order lt /\ witnessed d fuel left wl)
-          (ensures merge_base_now lt kfuel d fuel left right == merge_base lt d fuel left right)
-  = match inter (ancestors_of d fuel left) (ancestors_of d fuel right) with
-    | [] -> ()
-    | c :: t -> deepest_is_max_by lt kfuel d fuel left wl c t
-
-(* THEOREM 5, restated over the code that runs. *)
 let merge_base_now_maximal (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
   (d:dag op) (fuel:list (node op)) (left right:string) (wl:list string)
   : Lemma (requires total_order lt /\ witnessed d fuel left wl)
@@ -298,8 +294,101 @@ let merge_base_now_maximal (#op:eqtype) (lt:string -> string -> bool) (kfuel:lis
                       common_anc d fuel left right b /\
                       (forall (c:string). common_anc d fuel left right c /\ c =!= b
                                           ==> not (mem b (ancestors_of d fuel c)))))
-  = merge_base_now_is_merge_base lt kfuel d fuel left right wl;
-    merge_base_maximal lt d fuel left right wl
+  = max_common_is_maximal lt d fuel left right wl;
+    match inter (ancestors_of d fuel left) (ancestors_of d fuel right) with
+    | [] -> ()
+    | c0 :: t -> deepest_is_max_by lt kfuel d fuel left wl c0 t
+
+(* ---- 1.5 THEOREM: the divergence point (Phase 158), over the code that runs ---- *)
+
+(* A member of a set whose node's parents reach `z` puts `z` below the whole set's parents. *)
+let rec anc_all_parents_of_all (#op:eqtype) (d:dag op) (f:list (node op)) (cs:list string)
+  (c:string) (n:node op) (z:string)
+  : Lemma (requires mem c cs /\ lookup d.nodes c == Found n /\ mem z (ancestors_all d f n.nparents))
+          (ensures mem z (ancestors_all d f (parents_of_all d cs)))
+          (decreases cs)
+  = match cs with
+    | [] -> ()
+    | x :: t ->
+      (match lookup d.nodes x with
+       | Found nx ->
+         anc_all_app d f nx.nparents (parents_of_all d t) z;
+         if x = c then () else anc_all_parents_of_all d f t c n z
+       | Missing -> anc_all_parents_of_all d f t c n z)
+
+(* THEOREM. `Dag.mergeBase` of two lane heads off a merged head `m` is `m` — the divergence point,
+   not the original base and not anything else the two heads share — for every `lt` whatsoever
+   and every drain fuel. The common set is exactly `m`'s closure and `m` is strictly the deepest of
+   it (`DagClosure.merged_common_is_the_closure`); every other member lies below a parent of `m`,
+   which is a member, so `deepest`'s filter keeps `m` alone or nothing, and either way the maximum
+   is `m`. The premises are Phase 158's, unchanged. *)
+#push-options "--z3rlimit 100"
+let merge_base_now_is_divergence (#op:eqtype) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (mint:string -> string -> op -> string) (m:node op)
+  (fuel:list (node op)) (ln1 ln2:lane op)
+  : Lemma (requires lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ln1 /\ merged_recovers d mint m fuel ln2 /\
+                    off_cycle d fuel m /\
+                    (forall (x:string).
+                       mem x (ids_of (lane_nodes mint ln1.lactor m.nid ln1.lops)) ==>
+                       not (mem x (ids_of (lane_nodes mint ln2.lactor m.nid ln2.lops)))))
+          (ensures merge_base_now lt kfuel d fuel (lane_head mint ln1.lactor m.nid ln1.lops)
+                                                  (lane_head mint ln2.lactor m.nid ln2.lops)
+                   == Found m.nid)
+  = let q = m.nid in
+    let a = ancestors_of d fuel q in
+    merged_common_is_the_closure lt d mint m fuel ln1 ln2;
+    let better = deeper lt d fuel in
+    match inter (ancestors_of d fuel (lane_head mint ln1.lactor q ln1.lops))
+                (ancestors_of d fuel (lane_head mint ln2.lactor q ln2.lops)) with
+    | [] -> assert (mem q a)
+    | c0 :: t ->
+      let common = c0 :: t in
+      assert (mem q common);
+      let top (y:string) : Lemma (mem y common /\ y =!= q ==> (better q y /\ not (better y q))) =
+        () in
+      FStar.Classical.forall_intro top;
+      match fuel with
+      | [] -> ()
+      | _ :: f' ->
+        let below = ancestors_all d f' (parents_of_all d common) in
+        let low (y:string) : Lemma (mem y common /\ y =!= q ==> mem y below) =
+          if mem y common && y <> q then begin
+            assert (a == q :: ancestors_all d f' m.nparents);
+            anc_all_parents_of_all d f' common q m y
+          end
+        in
+        FStar.Classical.forall_intro low;
+        let ns = closure_nodes d.nodes common in
+        if all_in (ids_of ns) (drain_order lt kfuel ns) then begin
+          let cands = keep (not_in below) common in
+          let only (y:string) : Lemma (mem y cands ==> y == q) = mem_keep (not_in below) common y in
+          FStar.Classical.forall_intro only;
+          match cands with
+          | [] -> max_by_is better c0 t q
+          | b :: r -> max_by_is better b r q
+        end
+        else max_by_is better c0 t q
+#pop-options
+
+(* THEOREM, on section 13's premises alone: the acyclicity witness of `m`'s closure gives
+   `off_cycle` (`DagClosure.off_cycle_of_witness`). *)
+let merge_base_now_is_divergence_acyclic (#op:eqtype) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (mint:string -> string -> op -> string) (m:node op)
+  (fuel:list (node op)) (ln1 ln2:lane op) (wm:list string)
+  : Lemma (requires lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ln1 /\ merged_recovers d mint m fuel ln2 /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel m.nid)) wm /\
+                    (forall (x:string).
+                       mem x (ids_of (lane_nodes mint ln1.lactor m.nid ln1.lops)) ==>
+                       not (mem x (ids_of (lane_nodes mint ln2.lactor m.nid ln2.lops)))))
+          (ensures merge_base_now lt kfuel d fuel (lane_head mint ln1.lactor m.nid ln1.lops)
+                                                  (lane_head mint ln2.lactor m.nid ln2.lops)
+                   == Found m.nid)
+  = at_least_drop fuel (rev ln1.lops);
+    anc_stable d (drop_by fuel (rev ln1.lops)) fuel m.nid;
+    off_cycle_of_witness d fuel m wm;
+    merge_base_now_is_divergence lt kfuel d mint m fuel ln1 ln2
 
 (* ======================================================================================
    2. `Dag.commonBase` over N heads (Phase 311)
@@ -590,7 +679,9 @@ let reach_merge_base_agrees (#op:eqtype) (lt:string -> string -> bool) (kfuel:li
                     walk_ok d fuel right)
           (ensures reach_merge_base lt kfuel d fuel r left right
                    == merge_base_now lt kfuel d fuel left right)
-  = merge_base_now_is_merge_base lt kfuel d fuel left right wl;
+  = (match inter (ancestors_of d fuel left) (ancestors_of d fuel right) with
+     | [] -> ()
+     | c0 :: t -> deepest_is_max_by lt kfuel d fuel left wl c0 t);
     let al = ancestors_of d fuel left in
     let ar = ancestors_of d fuel right in
     match lookup d.nodes left with
@@ -758,7 +849,7 @@ let rec slotted_in_order (#op:eqtype) (d:dag op) (r:list rslot) (ord:list string
     | [] -> ()
     | id :: t -> slotted_in_order d (reach_step d r id) t x
 
-(* `DagFold.drain_restricts` with the whole DAG in place of a head's closure: the whole DAG's
+(* `DagClosure.drain_restricts` with the whole DAG in place of a head's closure: the whole DAG's
    drain — the index's `Order` — kept to a node's closure IS that closure's drain. *)
 #push-options "--z3rlimit 150"
 let order_restricts (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
@@ -938,7 +1029,7 @@ type cut_result =
   | CutUncovered : string -> cut_result
   | CutUnderfuelled : cut_result
 
-(* F#: `cut`, the kept set rather than the DAG it filters to (that is `DagFold.truncate`). `behind`
+(* F#: `cut`, the kept set rather than the DAG it filters to (that is `DagClosure.truncate`). `behind`
    is `ancestorsOf dag node`, `later` is `after dag node` (`forwardFrom` from the node, the node
    removed), the refusal names the smallest uncovered id (`Map.toList` is in id order), and the
    band is `forwardFrom` from the side parents keeping to `behind`. *)
@@ -1198,7 +1289,7 @@ let cut_keep_meets_contract (#op:eqtype) (lt:string -> string -> bool) (d:dag op
 #pop-options
 
 (* THEOREM, end to end: a compaction preserves every replay at or after its checkpoint. `cut`'s
-   kept set meets the contract, and `DagFold.truncation_preserves_replay` does the rest. *)
+   kept set meets the contract, and `DagClosure.truncation_preserves_replay` does the rest. *)
 let compaction_preserves_replay (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
   (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (kept:list string)
