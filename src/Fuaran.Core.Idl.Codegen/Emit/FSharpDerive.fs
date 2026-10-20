@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.FSharpDefaults
 
@@ -22,18 +23,6 @@ open Fuaran.Core.Idl.Emit.FSharpDefaults
 /// takes the message as an argument. Each refusal is a typed `UnsupportedConstruct` naming the
 /// construct and the alternative.
 module internal FSharpDerive =
-
-    /// The emitters' view of `Gen.Derivation`, case for case.
-    [<RequireQualifiedAccess>]
-    type Request =
-        | StructuralAccess
-        | KeyedPositions
-        | SlotsOf of typeName: string
-        | MapMsg
-        | Fold of unionName: string
-        | Projections of unionName: string * fieldNames: string list
-        | DefaultRecords
-        | VocabularyConstants
 
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
@@ -57,7 +46,7 @@ module internal FSharpDerive =
     /// declared record fields, or — for a projected kind that declares none — `undeclared ()`,
     /// which says whether that derivation can proceed without them.
     let recordFields
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (k: IdlKind)
         (undeclared: unit -> Result<IdlField list, CodegenError>)
         : Result<IdlField list, CodegenError> =
@@ -72,7 +61,7 @@ module internal FSharpDerive =
     /// none and the kind has no position to walk. A wire that does hold one says nothing about
     /// which member of the record holds it, and is refused by name.
     let nodeFieldsOf
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (holds: IdlField -> bool)
         (construct: string)
         (orElse: string)
@@ -86,15 +75,6 @@ module internal FSharpDerive =
                     (declareRecord orElse)
             else
                 Ok [])
-
-    /// A STRUCTURAL child position: a node or node list a kind always carries. An optional node is
-    /// a keyed position — it is not an ordered list a structural edit may rebuild — and so is a
-    /// node held anywhere deeper (inside a record, a union case, a list of either, a map).
-    let structuralField (f: IdlField) : (string * bool) option =
-        match f.Opt, f.Type with
-        | (Required | OmitDefault _), TNode -> Some(pascal f.Name, false)
-        | (Required | OmitDefault _), TList TNode -> Some(pascal f.Name, true)
-        | _ -> None
 
     let private nodeT (ctx: Decl) = "Node" + declParams ctx.Msg "Node" []
 
@@ -111,64 +91,33 @@ module internal FSharpDerive =
         | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.mapi (fun i _ -> sprintf "__f%d" i) |> String.concat ", ")
 
     // -----------------------------------------------------------------------
-    // Node positions — the keyed walk (emission 2).
+    // Node positions — the keyed walk (emission 2), printed from [[Derive.keyedPlan]].
     // -----------------------------------------------------------------------
 
-    let private throughArgument (u: string) : Result<'a, CodegenError> =
-        refuse
-            (sprintf "a node held through a type argument of the generic union '%s'" u)
-            "the keyed walk is derived per declaration, and a generic union's argument has no one declaration to derive it from"
-            "hold the node in a non-generic record or union, or do not request KeyedPositions"
+    /// The F# lister of the nodes a value holds, in declaration order.
+    let private lister: PositionPrinter =
+        { Node = sprintf "[ %s ]"
+          List = fun e x b -> sprintf "List.collect (fun %s -> %s) %s" x b e
+          MapItem = fun _ x -> x
+          Map = fun e x b _ -> sprintf "(%s |> Map.toList |> List.collect (fun (_, %s) -> %s))" e x b
+          Named = sprintf "nodesIn%s %s"
+          Other = fun _ -> "[]"
+          OptionalVar = fun _ -> "__o"
+          Optional = sprintf "(match %s with Some __o -> %s | None -> [])" }
 
-    /// An expression listing the nodes a value of type `t` holds, in declaration order.
-    let rec private collect (hs: Set<string>) (t: IdlType) (e: string) (d: int) : Result<string, CodegenError> =
-        let x = sprintf "__x%d" d
-
-        match t with
-        | TNode -> Ok(sprintf "[ %s ]" e)
-        | TList i ->
-            collect hs i x (d + 1)
-            |> Result.map (fun b -> sprintf "List.collect (fun %s -> %s) %s" x b e)
-        | TMap i ->
-            collect hs i x (d + 1)
-            |> Result.map (fun b -> sprintf "(%s |> Map.toList |> List.collect (fun (_, %s) -> %s))" e x b)
-        | TRecord n -> Ok(sprintf "nodesIn%s %s" n e)
-        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
-        | TUnion(n, _) -> Ok(sprintf "nodesIn%s %s" n e)
-        | _ -> Ok "[]"
-
-    /// An expression rebuilding a value of type `t` with `f` applied to every node it holds, in
-    /// the order [[collect]] lists them.
-    let rec private mapNodes (hs: Set<string>) (t: IdlType) (e: string) (d: int) : Result<string, CodegenError> =
-        let x = sprintf "__x%d" d
-
-        match t with
-        | TNode -> Ok(sprintf "f %s" e)
-        | TList i ->
-            mapNodes hs i x (d + 1)
-            |> Result.map (fun b -> sprintf "List.map (fun %s -> %s) %s" x b e)
-        | TMap i ->
-            mapNodes hs i x (d + 1)
-            |> Result.map (fun b ->
-                sprintf "(%s |> Map.toList |> List.map (fun (__k%d, %s) -> __k%d, %s) |> Map.ofList)" e d x d b)
-        | TRecord n -> Ok(sprintf "mapNodesIn%s f %s" n e)
-        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
-        | TUnion(n, _) -> Ok(sprintf "mapNodesIn%s f %s" n e)
-        | _ -> Ok e
-
-    let private collectField (hs: Set<string>) (f: IdlField) (e: string) : Result<string, CodegenError> =
-        match f.Opt with
-        | Optional ->
-            collect hs f.Type "__o" 0
-            |> Result.map (sprintf "(match %s with Some __o -> %s | None -> [])" e)
-        | _ -> collect hs f.Type e 0
-
-    let private mapField (hs: Set<string>) (f: IdlField) (e: string) : Result<string, CodegenError> =
-        match f.Opt with
-        | Optional ->
-            mapNodes hs f.Type "__o" 0
-            |> Result.map (fun b -> sprintf "Option.map (fun __o -> %s) %s" b e)
-        | _ -> mapNodes hs f.Type e 0
+    /// The F# rebuilder of a value with `f` applied to every node it holds, in the order [[lister]]
+    /// lists them.
+    let private mapper: PositionPrinter =
+        { Node = sprintf "f %s"
+          List = fun e x b -> sprintf "List.map (fun %s -> %s) %s" x b e
+          MapItem = fun _ x -> x
+          Map =
+            fun e x b d ->
+                sprintf "(%s |> Map.toList |> List.map (fun (__k%d, %s) -> __k%d, %s) |> Map.ofList)" e d x d b
+          Named = sprintf "mapNodesIn%s f %s"
+          Other = id
+          OptionalVar = fun _ -> "__o"
+          Optional = fun e b -> sprintf "Option.map (fun __o -> %s) %s" b e }
 
     /// `a @ b @ c`, or `[]` for none.
     let private appendAll (xs: string list) =
@@ -181,23 +130,22 @@ module internal FSharpDerive =
     let keyedDecl (ctx: Decl) : Result<string, CodegenError> =
         let hs = ctx.NodeHolders
         let node = nodeT ctx
+        let collectField (f: IdlField) e = Derive.positionsOf lister hs f e
+        let mapField (f: IdlField) e = Derive.positionsOf mapper hs f e
 
-        let holdsF (f: IdlField) = Decl.holdsIn hs f.Type
-
-        let recordHelpers (r: IdlRecord) =
+        let recordHelpers (r: IdlRecord, fs: IdlField list) =
             let t = declT ctx r.Name []
-            let fs = r.Fields |> List.filter holdsF
 
             let lister =
                 fs
-                |> List.map (fun f -> collectField hs f ("v." + pascal f.Name))
+                |> List.map (fun f -> collectField f ("v." + pascal f.Name))
                 |> sequenceR
                 |> Result.map (fun xs ->
                     sprintf "and private nodesIn%s (v: %s) : %s list =\n    %s" r.Name t node (appendAll xs))
 
             let mapper =
                 fs
-                |> List.mapi (fun i f -> mapField hs f ("v." + pascal f.Name) |> Result.map (fun b -> i, f, b))
+                |> List.mapi (fun i f -> mapField f ("v." + pascal f.Name) |> Result.map (fun b -> i, f, b))
                 |> sequenceR
                 |> Result.map (fun xs ->
                     let lets =
@@ -222,21 +170,15 @@ module internal FSharpDerive =
 
             [ lister; mapper ]
 
-        let unionHelpers (u: IdlUnion) =
+        let unionHelpers (u: IdlUnion, holding: (IdlUnionCase * (int * IdlField) list) list, wild: bool) =
             let t = declT ctx u.Name u.Params
             let gen = declParams ctx.Msg u.Name u.Params
 
-            let holding = u.Cases |> List.filter (fun c -> c.Fields |> List.exists holdsF)
-
-            let wild = List.length holding < List.length u.Cases
-
             let lister =
                 holding
-                |> List.map (fun c ->
-                    c.Fields
-                    |> List.mapi (fun i f -> i, f)
-                    |> List.filter (fun (_, f) -> holdsF f)
-                    |> List.map (fun (i, f) -> collectField hs f (sprintf "__f%d" i))
+                |> List.map (fun (c, fs) ->
+                    fs
+                    |> List.map (fun (i, f) -> collectField f (sprintf "__f%d" i))
                     |> sequenceR
                     |> Result.map (fun xs -> sprintf "    | %s -> %s" (casePattern u c) (appendAll xs)))
                 |> sequenceR
@@ -246,13 +188,14 @@ module internal FSharpDerive =
 
             let mapper =
                 holding
-                |> List.map (fun c ->
+                |> List.map (fun (c, fs) ->
+                    let held = Map.ofList fs
+
                     c.Fields
-                    |> List.mapi (fun i f ->
-                        if holdsF f then
-                            mapField hs f (sprintf "__f%d" i) |> Result.map Some
-                        else
-                            Ok None)
+                    |> List.mapi (fun i _ ->
+                        match held.TryFind i with
+                        | Some f -> mapField f (sprintf "__f%d" i) |> Result.map Some
+                        | None -> Ok None)
                     |> sequenceR
                     |> Result.map (fun ms ->
                         let lets =
@@ -285,180 +228,160 @@ module internal FSharpDerive =
 
             [ lister; mapper ]
 
-        let helpers =
-            (ctx.Records
-             |> List.filter (fun r -> hs.Contains r.Name)
-             |> List.collect recordHelpers)
-            @ (ctx.Unions
-               |> List.filter (fun u -> hs.Contains u.Name)
-               |> List.collect unionHelpers)
-            |> sequenceR
-
         // Phase 403 — a projected kind's keyed positions are its declared record's.
-        let kindFields =
-            ctx.Kinds
-            |> List.map (fun k ->
-                nodeFieldsOf ctx.Projections holdsF "the keyed node positions" "do not request KeyedPositions" k
-                |> Result.map (fun fs -> k, fs |> List.filter (fun f -> holdsF f && (structuralField f).IsNone)))
-            |> sequenceR
+        Derive.keyedPlan ctx (fun k ->
+            nodeFieldsOf
+                ctx.Projections
+                (fun f -> Decl.holdsIn hs f.Type)
+                "the keyed node positions"
+                "do not request KeyedPositions"
+                k)
+        |> Result.bind (fun plan ->
+            let helpers =
+                (plan.Records |> List.collect recordHelpers)
+                @ (plan.Unions |> List.collect unionHelpers)
+                |> sequenceR
 
-        let keyedKinds =
-            kindFields
-            |> Result.map (List.filter (fun (_, fs) -> not (List.isEmpty fs)))
-            |> Result.defaultValue []
-
-        let kindWild = List.length keyedKinds < List.length ctx.Kinds
-        let envFields = ctx.Idl.NodeFields |> List.filter holdsF
-
-        let listerArms =
-            kindFields
-            |> Result.bind (fun _ ->
-                keyedKinds
+            let listerArms =
+                plan.Kinds
                 |> List.map (fun (k, fs) ->
                     fs
-                    |> List.map (fun f -> collectField hs f ("s." + pascal f.Name))
+                    |> List.map (fun f -> collectField f ("s." + pascal f.Name))
                     |> sequenceR
                     |> Result.map (fun xs -> sprintf "        | NodeKind.%s s -> %s" k.Tag (appendAll xs)))
-                |> sequenceR)
-
-        let envListers =
-            envFields
-            |> List.map (fun f -> collectField hs f ("n." + pascal f.Name))
-            |> sequenceR
-
-        let mapperArms =
-            keyedKinds
-            |> List.map (fun (k, fs) ->
-                fs
-                |> List.mapi (fun i f -> mapField hs f ("s." + pascal f.Name) |> Result.map (fun b -> i, f, b))
                 |> sequenceR
-                |> Result.map (fun xs ->
-                    let lets =
-                        xs
-                        |> List.map (fun (i, _, b) -> sprintf "            let __m%d = %s\n" i b)
-                        |> String.concat ""
 
-                    let assigns =
-                        xs
-                        |> List.map (fun (i, f, _) -> sprintf "%s = __m%d" (pascal f.Name) i)
-                        |> String.concat "; "
+            let envListers =
+                plan.Envelope
+                |> List.map (fun f -> collectField f ("n." + pascal f.Name))
+                |> sequenceR
 
-                    sprintf
-                        "        | NodeKind.%s s ->\n%s            NodeKind.%s { s with %s }"
-                        k.Tag
-                        lets
-                        k.Tag
-                        assigns))
-            |> sequenceR
+            let mapperArms =
+                plan.Kinds
+                |> List.map (fun (k, fs) ->
+                    fs
+                    |> List.mapi (fun i f -> mapField f ("s." + pascal f.Name) |> Result.map (fun b -> i, f, b))
+                    |> sequenceR
+                    |> Result.map (fun xs ->
+                        let lets =
+                            xs
+                            |> List.map (fun (i, _, b) -> sprintf "            let __m%d = %s\n" i b)
+                            |> String.concat ""
 
-        let envMappers =
-            envFields
-            |> List.mapi (fun i f -> mapField hs f ("n." + pascal f.Name) |> Result.map (fun b -> i, f, b))
-            |> sequenceR
+                        let assigns =
+                            xs
+                            |> List.map (fun (i, f, _) -> sprintf "%s = __m%d" (pascal f.Name) i)
+                            |> String.concat "; "
 
-        match helpers, listerArms, envListers, mapperArms, envMappers with
-        | Ok helpers, Ok listerArms, Ok envListers, Ok mapperArms, Ok envMappers ->
-            let helperGroup =
-                match helpers with
-                | [] -> []
-                | first :: rest ->
-                    // The group opens with `let rec`; every member after it is an `and`.
-                    [ "let rec " + first.Substring 4 :: rest |> String.concat "\n\n" ]
+                        sprintf
+                            "        | NodeKind.%s s ->\n%s            NodeKind.%s { s with %s }"
+                            k.Tag
+                            lets
+                            k.Tag
+                            assigns))
+                |> sequenceR
 
-            let ofKind =
-                if List.isEmpty keyedKinds then
-                    " []"
-                else
-                    "\n        match n.Kind with\n"
-                    + String.concat "\n" (listerArms @ (if kindWild then [ "        | _ -> []" ] else []))
+            let envMappers =
+                plan.Envelope
+                |> List.mapi (fun i f -> mapField f ("n." + pascal f.Name) |> Result.map (fun b -> i, f, b))
+                |> sequenceR
 
-            let lister =
-                sprintf "/// The nodes this node holds in keyed, non-structural positions, in declaration order.\n"
-                + sprintf "let keyedChildren (n: %s) : %s list =\n" node node
-                + sprintf "    let ofKind =%s\n\n" ofKind
-                + sprintf "    %s" (appendAll ("ofKind" :: envListers))
+            match helpers, listerArms, envListers, mapperArms, envMappers with
+            | Ok helpers, Ok listerArms, Ok envListers, Ok mapperArms, Ok envMappers ->
+                let helperGroup =
+                    match helpers with
+                    | [] -> []
+                    | first :: rest ->
+                        // The group opens with `let rec`; every member after it is an `and`.
+                        [ "let rec " + first.Substring 4 :: rest |> String.concat "\n\n" ]
 
-            let kindMap =
-                if List.isEmpty keyedKinds then
-                    " n.Kind"
-                else
-                    "\n        match n.Kind with\n"
-                    + String.concat "\n" (mapperArms @ (if kindWild then [ "        | k -> k" ] else []))
+                let ofKind =
+                    if List.isEmpty plan.Kinds then
+                        " []"
+                    else
+                        "\n        match n.Kind with\n"
+                        + String.concat "\n" (listerArms @ (if plan.KindWild then [ "        | _ -> []" ] else []))
 
-            let envLets =
-                envMappers
-                |> List.map (fun (i, _, b) -> sprintf "    let __e%d = %s\n" i b)
-                |> String.concat ""
+                let lister =
+                    sprintf "/// The nodes this node holds in keyed, non-structural positions, in declaration order.\n"
+                    + sprintf "let keyedChildren (n: %s) : %s list =\n" node node
+                    + sprintf "    let ofKind =%s\n\n" ofKind
+                    + sprintf "    %s" (appendAll ("ofKind" :: envListers))
 
-            let envAssigns =
-                envMappers
-                |> List.map (fun (i, f, _) -> sprintf "; %s = __e%d" (pascal f.Name) i)
-                |> String.concat ""
+                let kindMap =
+                    if List.isEmpty plan.Kinds then
+                        " n.Kind"
+                    else
+                        "\n        match n.Kind with\n"
+                        + String.concat "\n" (mapperArms @ (if plan.KindWild then [ "        | k -> k" ] else []))
 
-            let mapper =
-                sprintf "let private mapKeyed (f: %s -> %s) (n: %s) : %s =\n" node node node node
-                + sprintf "    let kind =%s\n\n" kindMap
-                + envLets
-                + sprintf "    { n with Kind = kind%s }" envAssigns
+                let envLets =
+                    envMappers
+                    |> List.map (fun (i, _, b) -> sprintf "    let __e%d = %s\n" i b)
+                    |> String.concat ""
 
-            let rest =
-                [ "/// The node with these nodes in its keyed positions, position for position (arity-preserving)."
-                  sprintf "let withKeyedChildren (kids: %s list) (n: %s) : %s =" node node node
-                  "    let rest = ref kids"
-                  ""
-                  sprintf "    let take (old: %s) =" node
-                  "        match rest.Value with"
-                  "        | h :: t ->"
-                  "            rest.Value <- t"
-                  "            h"
-                  "        | [] -> old"
-                  ""
-                  "    mapKeyed take n"
-                  ""
-                  "/// The generated full walk: every node position the vocabulary declares, structural and keyed."
-                  sprintf "let private idsUniqueFullWalk (root: %s) : bool =" node
-                  sprintf "    let rec go (seen: Set<string>) (stack: %s list) =" node
-                  "        match stack with"
-                  "        | [] -> true"
-                  "        | x :: rest ->"
-                  "            if Set.contains x.Id seen then"
-                  "                false"
-                  "            else"
-                  "                go (Set.add x.Id seen) (children x @ keyedChildren x @ rest)"
-                  ""
-                  "    go Set.empty [ root ]"
-                  ""
-                  sprintf "let keyedWitness: KeyedWitness<%s, string> =" node
-                  "    { Surface = \"the generated full walk over every node position the vocabulary declares\""
-                  "      KeyedChildren = keyedChildren"
-                  "      ReplaceKeyedChildren = fun n kids -> withKeyedChildren kids n"
-                  "      PlaceKeyedChild ="
-                  "        fun n id ->"
-                  "            match keyedChildren n with"
-                  "            | first :: others -> Some(withKeyedChildren ({ first with Id = id } :: others) n)"
-                  "            | [] -> None"
-                  "      IdsUnique = idsUniqueFullWalk }" ]
-                |> String.concat "\n"
+                let envAssigns =
+                    envMappers
+                    |> List.map (fun (i, f, _) -> sprintf "; %s = __e%d" (pascal f.Name) i)
+                    |> String.concat ""
 
-            Ok(String.concat "\n\n" (helperGroup @ [ lister; mapper; rest ]))
-        | Error e, _, _, _, _
-        | _, Error e, _, _, _
-        | _, _, Error e, _, _
-        | _, _, _, Error e, _
-        | _, _, _, _, Error e -> Error e
+                let mapper =
+                    sprintf "let private mapKeyed (f: %s -> %s) (n: %s) : %s =\n" node node node node
+                    + sprintf "    let kind =%s\n\n" kindMap
+                    + envLets
+                    + sprintf "    { n with Kind = kind%s }" envAssigns
+
+                let rest =
+                    [ "/// The node with these nodes in its keyed positions, position for position (arity-preserving)."
+                      sprintf "let withKeyedChildren (kids: %s list) (n: %s) : %s =" node node node
+                      "    let rest = ref kids"
+                      ""
+                      sprintf "    let take (old: %s) =" node
+                      "        match rest.Value with"
+                      "        | h :: t ->"
+                      "            rest.Value <- t"
+                      "            h"
+                      "        | [] -> old"
+                      ""
+                      "    mapKeyed take n"
+                      ""
+                      "/// The generated full walk: every node position the vocabulary declares, structural and keyed."
+                      sprintf "let private idsUniqueFullWalk (root: %s) : bool =" node
+                      sprintf "    let rec go (seen: Set<string>) (stack: %s list) =" node
+                      "        match stack with"
+                      "        | [] -> true"
+                      "        | x :: rest ->"
+                      "            if Set.contains x.Id seen then"
+                      "                false"
+                      "            else"
+                      "                go (Set.add x.Id seen) (children x @ keyedChildren x @ rest)"
+                      ""
+                      "    go Set.empty [ root ]"
+                      ""
+                      sprintf "let keyedWitness: KeyedWitness<%s, string> =" node
+                      "    { Surface = \"the generated full walk over every node position the vocabulary declares\""
+                      "      KeyedChildren = keyedChildren"
+                      "      ReplaceKeyedChildren = fun n kids -> withKeyedChildren kids n"
+                      "      PlaceKeyedChild ="
+                      "        fun n id ->"
+                      "            match keyedChildren n with"
+                      "            | first :: others -> Some(withKeyedChildren ({ first with Id = id } :: others) n)"
+                      "            | [] -> None"
+                      "      IdsUnique = idsUniqueFullWalk }" ]
+                    |> String.concat "\n"
+
+                Ok(String.concat "\n\n" (helperGroup @ [ lister; mapper; rest ]))
+            | Error e, _, _, _, _
+            | _, Error e, _, _, _
+            | _, _, Error e, _, _
+            | _, _, _, Error e, _
+            | _, _, _, _, Error e -> Error e)
 
     // -----------------------------------------------------------------------
     // Emission 3 — the typed slot enumerator.
     // -----------------------------------------------------------------------
 
     let slotsDecl (ctx: Decl) (typeName: string) : Result<string, CodegenError> =
-        let isT (t: IdlType) =
-            match t with
-            | TEnum n
-            | TRecord n
-            | TUnion(n, _) -> n = typeName
-            | _ -> false
-
         let generic = unionParams ctx typeName |> List.isEmpty |> not
 
         let declared =
@@ -473,22 +396,24 @@ module internal FSharpDerive =
         let wrap (v: string) =
             if generic then sprintf "(%s :> obj)" v else v
 
-        /// The pairs a field contributes, or `None` when it holds no slot of the type.
+        /// The pairs a field contributes ([[Derive.slotPosition]]), or `None` when it holds no slot
+        /// of the type.
         let ofField (owner: string) (f: IdlField) : string option =
             let e = owner + "." + pascal f.Name
             let key = SourceLit.fsString f.Name
 
-            let direct (e: string) =
-                match f.Type with
-                | t when isT t -> Some(sprintf "[ %s, %s ]" key (wrap e))
-                | TList t when isT t -> Some(sprintf "(%s |> List.map (fun __v -> %s, %s))" e key (wrap "__v"))
-                | _ -> None
+            Derive.slotPosition typeName f
+            |> Option.map (fun at ->
+                let direct (e: string) =
+                    if at.List then
+                        sprintf "(%s |> List.map (fun __v -> %s, %s))" e key (wrap "__v")
+                    else
+                        sprintf "[ %s, %s ]" key (wrap e)
 
-            match f.Opt with
-            | Optional ->
-                direct "__v"
-                |> Option.map (sprintf "(match %s with Some __v -> %s | None -> [])" e)
-            | _ -> direct e
+                if at.Optional then
+                    sprintf "(match %s with Some __v -> %s | None -> [])" e (direct "__v")
+                else
+                    direct e)
 
         // Phase 403 — a projected kind's slots are its declared record's. Undeclared, it is refused
         // whatever its wire says: a host record may hold a value of the type that its wire spells
@@ -826,106 +751,45 @@ module internal FSharpDerive =
     // module named after the union (`Rule.fold`, `Rule.owner`).
     // -----------------------------------------------------------------------
 
-    let private foldDecl (ctx: Decl) (u: IdlUnion) : Result<string, CodegenError> =
-        let selfIn = Decl.foldSelfIn ctx u
+    /// The F# fold over a value: `List.fold` / `Map` folds, the union's own `fold` recursing.
+    let private folder: FoldPrinter =
+        { Self = sprintf "fold folder %s %s"
+          List = fun e x s b st -> sprintf "List.fold (fun %s %s -> %s) %s %s" s x b st e
+          MapItem = fun _ x -> x
+          Map = fun e x s b st -> sprintf "(%s |> Map.toList |> List.fold (fun %s (_, %s) -> %s) %s)" e s x b st
+          Access = fun e f -> e + "." + pascal f.Name
+          OptionalVar = fun _ d -> sprintf "__o%d" d
+          Optional = fun e d b st -> sprintf "(match %s with Some __o%d -> %s | None -> %s)" e d b st
+          StepState = fun d i st -> if i = 0 then st else sprintf "__c%d_%d" d (i - 1)
+          Thread =
+            fun d _ bodies ->
+                let lets = bodies |> List.mapi (fun i b -> sprintf "let __c%d_%d = %s in" d i b)
+                sprintf "(%s __c%d_%d)" (String.concat " " lets) d (List.length bodies - 1) }
 
+    let private foldDecl (ctx: Decl) (u: IdlUnion) : Result<string, CodegenError> =
         let ut = declT ctx u.Name u.Params
 
-        let rec foldE (t: IdlType) (e: string) (st: string) (d: int) : Result<string, CodegenError> =
-            let x = sprintf "__x%d" d
-            let s = sprintf "__s%d" d
+        Derive.foldPlan ctx u
+        |> Result.bind (fun recursive ->
+            recursive
+            |> List.map (fun (c, fs) ->
+                let byName = fs |> List.map (fun (i, f) -> f.Name, i) |> Map.ofList
 
-            match t with
-            | TUnion(n, _) when n = u.Name -> Ok(sprintf "fold folder %s %s" st e)
-            | TList i ->
-                foldE i x s (d + 1)
-                |> Result.map (fun b -> sprintf "List.fold (fun %s %s -> %s) %s %s" s x b st e)
-            | TMap i ->
-                foldE i x s (d + 1)
-                |> Result.map (fun b -> sprintf "(%s |> Map.toList |> List.fold (fun %s (_, %s) -> %s) %s)" e s x b st)
-            | TRecord n ->
-                let fs =
-                    Decl.tryRecord ctx n
-                    |> Option.map _.Fields
-                    |> Option.defaultValue []
-                    |> List.filter (fun f ->
-                        (match selfIn (Set.singleton n) f.Type with
-                         | Ok b -> b
-                         | Error _ -> false))
-
-                foldFields fs (fun f -> e + "." + pascal f.Name) st (d + 1)
-            | _ -> Ok st
-
-        and foldField (f: IdlField) (e: string) (st: string) (d: int) =
-            match f.Opt with
-            | Optional ->
-                foldE f.Type (sprintf "__o%d" d) st (d + 1)
-                |> Result.map (fun b -> sprintf "(match %s with Some __o%d -> %s | None -> %s)" e d b st)
-            | _ -> foldE f.Type e st d
-
-        /// Thread the state through several fields, left to right.
-        and foldFields (fs: IdlField list) (access: IdlField -> string) (st: string) (d: int) =
-            match fs with
-            | [] -> Ok st
-            | [ f ] -> foldField f (access f) st d
-            | _ ->
-                fs
-                |> List.mapi (fun i f -> i, f)
-                |> List.fold
-                    (fun acc (i, f) ->
-                        acc
-                        |> Result.bind (fun (prev, lets) ->
-                            let next = sprintf "__c%d_%d" d i
-
-                            foldField f (access f) prev (d + 1)
-                            |> Result.map (fun b -> next, lets @ [ sprintf "let %s = %s in" next b ])))
-                    (Ok(st, []))
-                |> Result.map (fun (last, lets) -> sprintf "(%s %s)" (String.concat " " lets) last)
-
-        let cases =
-            u.Cases
-            |> List.map (fun c ->
-                c.Fields
-                |> List.mapi (fun i f -> selfIn Set.empty f.Type |> Result.map (fun b -> i, f, b))
-                |> sequenceR
-                |> Result.map (fun fs -> c, fs |> List.filter (fun (_, _, b) -> b)))
+                Derive.foldMembers folder ctx u (List.map snd fs) (fun f -> sprintf "__f%d" byName[f.Name]) "state" 0
+                |> Result.map (fun b -> sprintf "        | %s -> %s" (casePattern u c) b))
             |> sequenceR
+            |> Result.map (fun arms ->
+                let wild =
+                    if List.length recursive < List.length u.Cases then
+                        [ "        | _ -> state" ]
+                    else
+                        []
 
-        cases
-        |> Result.bind (fun cases ->
-            let recursive = cases |> List.filter (fun (_, fs) -> not (List.isEmpty fs))
-
-            if List.isEmpty recursive then
-                refuse
-                    (sprintf "a fold over '%s', which holds no value of its own type" u.Name)
-                    "a fold is derived for a union whose cases contain the union itself"
-                    "request the fold over a self-recursive union"
-            else
-                recursive
-                |> List.map (fun (c, fs) ->
-                    let byName = fs |> List.map (fun (i, f, _) -> f.Name, i) |> Map.ofList
-
-                    foldFields
-                        (fs |> List.map (fun (_, f, _) -> f))
-                        (fun f -> sprintf "__f%d" byName[f.Name])
-                        "state"
-                        0
-                    |> Result.map (fun b -> sprintf "        | %s -> %s" (casePattern u c) b))
-                |> sequenceR
-                |> Result.map (fun arms ->
-                    let wild =
-                        if List.length recursive < List.length u.Cases then
-                            [ "        | _ -> state" ]
-                        else
-                            []
-
-                    sprintf
-                        "    /// Fold `folder` over this value and every nested `%s` it holds, in preorder.\n"
-                        u.Name
-                    + sprintf "    let rec fold (folder: 'S -> %s -> 'S) (state: 'S) (v: %s) : 'S =\n" ut ut
-                    + "        let state = folder state v\n\n"
-                    + "        match v with\n"
-                    + String.concat "\n" (arms @ wild)))
+                sprintf "    /// Fold `folder` over this value and every nested `%s` it holds, in preorder.\n" u.Name
+                + sprintf "    let rec fold (folder: 'S -> %s -> 'S) (state: 'S) (v: %s) : 'S =\n" ut ut
+                + "        let state = folder state v\n\n"
+                + "        match v with\n"
+                + String.concat "\n" (arms @ wild)))
 
     let private projectionDecl (ctx: Decl) (u: IdlUnion) (field: string) : Result<string, CodegenError> =
         let fsType = fsTypeIn ctx.Msg
@@ -935,20 +799,10 @@ module internal FSharpDerive =
             | Optional -> fsType f.Type |> Result.map (fun s -> s + " option")
             | _ -> fsType f.Type
 
-        let carriers =
-            u.Cases
-            |> List.choose (fun c ->
-                c.Fields
-                |> List.tryFindIndex (fun f -> f.Name = field)
-                |> Option.map (fun i -> c, i, c.Fields[i]))
+        Derive.projectionPlan u field
+        |> Result.bind (fun (carriers, total) ->
+            let _, _, f0 = List.head carriers
 
-        match carriers with
-        | [] ->
-            refuse
-                (sprintf "a projection of '%s' over '%s', which no case carries" field u.Name)
-                "a projection reads a field the union's cases declare"
-                "name a field a case declares"
-        | (_, _, f0) :: _ ->
             carriers
             |> List.map (fun (_, _, f) -> hostType f)
             |> sequenceR
@@ -962,7 +816,6 @@ module internal FSharpDerive =
                         "a projection returns one type, so every case carrying the field must declare it at the same host type"
                         "declare the field at one type in every case, or drop it from the projection"
                 else
-                    let total = List.length carriers = List.length u.Cases
                     let ty = List.head types
                     let ut = declT ctx u.Name u.Params
 
@@ -974,7 +827,12 @@ module internal FSharpDerive =
                                 |> List.mapi (fun j _ -> if j = i then "__v" else "_")
                                 |> String.concat ", "
 
-                            sprintf "        | %s.%s(%s) -> %s" u.Name c.Tag pat (if total then "__v" else "Some __v"))
+                            sprintf
+                                "        | %s.%s(%s) -> %s"
+                                u.Name
+                                c.Tag
+                                pat
+                                (if total then "__v" else "Some __v"))
 
                     let arms = arms @ (if total then [] else [ "        | _ -> None" ])
 
@@ -986,107 +844,60 @@ module internal FSharpDerive =
                                  "which every case carries"
                              else
                                  "where the case carries one")
-                        + sprintf "    let %s (v: %s) : %s =\n" (ident field) ut (if total then ty else ty + " option")
+                        + sprintf
+                            "    let %s (v: %s) : %s =\n"
+                            (ident field)
+                            ut
+                            (if total then ty else ty + " option")
                         + "        match v with\n"
                         + String.concat "\n" arms
-                    ))
+                    )))
 
     /// One module per union named in a Fold or Projections request, holding all of them.
-    let unionModulesDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
-        let named =
-            requests
-            |> List.choose (fun r ->
-                match r with
-                | Request.Fold n -> Some n
-                | Request.Projections(n, _) -> Some n
-                | _ -> None)
-            |> List.distinct
-
-        named
-        |> List.map (fun name ->
-            match Decl.tryUnion ctx name with
-            | None ->
-                refuse
-                    (sprintf "a fold or projection over '%s'" name)
-                    "a union derivation is generated over a union this module emits"
-                    "name a union the selected kinds reach"
-            | Some u ->
-                let folds = requests |> List.exists (fun r -> r = Request.Fold name)
-
-                let fields =
-                    requests
-                    |> List.collect (fun r ->
-                        match r with
-                        | Request.Projections(n, fs) when n = name -> fs
-                        | _ -> [])
-                    |> List.distinct
-
-                let clash = folds && List.contains "fold" fields
-
-                if clash then
-                    refuse
-                        (sprintf "a projection of 'fold' over '%s' beside its fold" name)
-                        "the fold and the projections share the union's module, so a field named `fold` would shadow it"
-                        "drop one of the two requests"
-                else
-                    ((if folds then [ foldDecl ctx u ] else [])
-                     @ (fields |> List.map (projectionDecl ctx u)))
-                    |> sequenceR
-                    |> Result.map (fun members ->
-                        sprintf "/// Derived members of `%s`.\nmodule %s =\n" name name
-                        + String.concat "\n\n" members))
-        |> sequenceR
+    let unionModulesDecl (ctx: Decl) (requests: Derivation list) : Result<string list, CodegenError> =
+        Derive.unionModules ctx requests
+        |> Result.bind (fun unions ->
+            unions
+            |> List.map (fun (u, folds, fields) ->
+                ((if folds then [ foldDecl ctx u ] else [])
+                 @ (fields |> List.map (projectionDecl ctx u)))
+                |> sequenceR
+                |> Result.map (fun members ->
+                    sprintf "/// Derived members of `%s`.\nmodule %s =\n" u.Name u.Name
+                    + String.concat "\n\n" members))
+            |> sequenceR)
 
     // -----------------------------------------------------------------------
     // Emission 7 — default records as values.
     // -----------------------------------------------------------------------
 
     let defaultRecordsDecl (ctx: Decl) : Result<string, CodegenError> =
-        let defaultFor (tag: string) (field: string) =
-            ctx.Idl.Defaults
-            |> List.tryPick (fun d ->
-                if d.Kind = tag && d.Field = field then
-                    Some d.Value
-                else
-                    None)
+        // A projected kind's record is the projection's, which supplies its own values.
+        Derive.defaultRecords ctx (fun k -> not (ctx.Projections.ContainsKey k.Tag))
+        |> Result.bind (fun records ->
+            records
+            |> List.map (fun r ->
+                r.Members
+                |> List.map (fun (f, mv) ->
+                    let lit = fsDefaultLit ctx.Idl f.Type
 
-        let value (typeName: string) (declared: IdlField -> IdlValue option) (fs: IdlField list) =
-            let parts = fs |> List.map (fun f -> f, fieldValue ctx.Idl (declared f) f)
-
-            if parts |> List.exists (fun (_, v) -> v.IsNone) then
-                None
-            else
-                parts
-                |> List.map (fun (f, v) -> v.Value |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
+                    fsMember lit lit (fun v -> CodegenError.UnsupportedDefault(f.Type, v)) f mv
+                    |> Option.defaultValue (Ok(ident f.Name))
+                    |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
                 |> sequenceR
                 |> Result.map (fun assigns ->
-                    let gen = declParams ctx.Msg typeName []
+                    let gen = declParams ctx.Msg r.Name []
 
                     sprintf
                         "/// `%s` with every field at the value a caller need not pass.\nlet default%s%s: %s%s =\n    %s"
-                        typeName
-                        typeName
+                        r.Name
+                        r.Name
                         gen
-                        typeName
+                        r.Name
                         gen
-                        (recordLit typeName assigns))
-                |> Some
-
-        let kinds =
-            ctx.Kinds
-            |> List.filter (fun k -> not (ctx.Projections.ContainsKey k.Tag))
-            |> List.choose (fun k -> value (k.Tag + "Spec") (fun f -> defaultFor k.Tag f.Name) k.Fields)
-
-        let records =
-            ctx.Records |> List.choose (fun r -> value r.Name (fun _ -> None) r.Fields)
-
-        match kinds @ records with
-        | [] ->
-            refuse
-                "default records over a vocabulary none of whose kinds or records is fully defaulted"
-                "a default record is a value only where every field has one without the caller"
-                "declare defaults for the required fields, or drop the request"
-        | xs -> xs |> sequenceR |> Result.map (String.concat "\n\n")
+                        (recordLit r.Name assigns)))
+            |> sequenceR
+            |> Result.map (String.concat "\n\n"))
 
     // -----------------------------------------------------------------------
     // Emission 8 — the vocabulary constants.
@@ -1108,54 +919,50 @@ module internal FSharpDerive =
                    |> String.concat "; ")
                 + " ]"
 
-        let categories =
-            ctx.Kinds
-            |> List.map _.Category
-            |> List.distinct
-            |> List.map (fun c -> c, ctx.Kinds |> List.filter (fun k -> k.Category = c) |> List.map _.Tag)
-
-        let fieldsOf (ks: IdlKind list) =
-            ks |> List.map (fun k -> k.Tag, k.Fields |> List.map _.Name)
+        let c = Derive.constants ctx
 
         [ "/// The kind tags of each declared category."
           "let kindCategories: Map<string, Set<string>> ="
-          "    " + mapLit categories
+          "    " + mapLit c.Categories
           ""
           "/// The wire field names of each kind."
           "let kindFieldNames: Map<string, Set<string>> ="
-          "    " + mapLit (fieldsOf ctx.Kinds)
+          "    " + mapLit c.KindFields
           ""
           "/// The wire field names of the node envelope."
           "let envelopeFieldNames: Set<string> ="
-          "    " + setLit (ctx.Idl.NodeFields |> List.map _.Name)
+          "    " + setLit c.Envelope
           ""
           "/// The wire field names of each tree op."
           "let opFieldNames: Map<string, Set<string>> ="
-          "    " + mapLit (fieldsOf ctx.Idl.Ops) ]
+          "    " + mapLit c.OpFields ]
         |> String.concat "\n"
 
     /// Every requested derivation after the module's existing members, in a fixed order: keyed
     /// walk, slot enumerators, message map, default records, constants, then the union modules.
-    let derivedDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
+    let derivedDecl (ctx: Decl) (requests: Derivation list) : Result<string list, CodegenError> =
         let has r = List.contains r requests
 
         let slots =
             requests
             |> List.choose (fun r ->
                 match r with
-                | Request.SlotsOf t -> Some t
+                | Derivation.SlotsOf t -> Some t
                 | _ -> None)
             |> List.distinct
 
         let parts =
-            [ (if has Request.KeyedPositions then [ keyedDecl ctx ] else [])
+            [ (if has Derivation.KeyedPositions then
+                   [ keyedDecl ctx ]
+               else
+                   [])
               slots |> List.map (slotsDecl ctx)
-              (if has Request.MapMsg then [ mapMsgDecl ctx ] else [])
-              (if has Request.DefaultRecords then
+              (if has Derivation.MapMsg then [ mapMsgDecl ctx ] else [])
+              (if has Derivation.DefaultRecords then
                    [ defaultRecordsDecl ctx ]
                else
                    [])
-              (if has Request.VocabularyConstants then
+              (if has Derivation.VocabularyConstants then
                    [ Ok(constantsDecl ctx) ]
                else
                    []) ]

@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 
 /// Phase 511 — where a kind's object sits in the node envelope: under one key of the envelope
@@ -80,6 +81,44 @@ type internal Literal =
     | Record of IdlRecord * authored: (string * IdlValue) list
     | Union of IdlUnion * args: IdlType list * IdlUnionCase * authored: (string * IdlValue) list
 
+/// Phase 524 (carried from 511.t4) — WHERE a member's value is asked for. The sites differ in
+/// exactly two policies, and this is where they are stated, once: what a HOST-ONLY member takes,
+/// and what a REQUIRED member with no value is.
+[<RequireQualifiedAccess>]
+type internal ValueSite =
+    /// A member inside a declared default LITERAL (a record's or a union case's): the literal is
+    /// used in pattern position too, so a host-only member (its placeholder is an expression) and
+    /// a required member with no authored value are refused.
+    | Literal
+    /// A field of a smart constructor or a derived default record: a host-only member takes its
+    /// placeholder, a required member with no declared default is the caller's PARAMETER, and an
+    /// omit-default member takes its identity default whatever is declared beside it.
+    | Constructor
+    /// A field of a scaffolded authored VALUE: a host-only member takes its placeholder (a wire
+    /// value at its name is not its value), and a required member with no value is refused.
+    | Scaffold
+
+/// Phase 524 (511.t4) — the value one member takes at a [[ValueSite]], decided by
+/// [[Decl.memberValue]] and printed by each backend (F#, TypeScript, F*), so no backend restates
+/// a presence policy.
+[<RequireQualifiedAccess>]
+type internal MemberValue =
+    /// The member carries this value as it is (a required member's value, an omit-default
+    /// member's authored value).
+    | Carries of IdlValue
+    /// An OPTIONAL member carrying this value (F# `Some(…)`; TypeScript the value).
+    | Optional of IdlValue
+    /// An omit-default member at its identity default.
+    | IdentityDefault of IdlValue
+    /// An optional member with no value (F# `None`; TypeScript the member is omitted).
+    | Absent
+    /// A host-only member: its `TFn` placeholder (absent from the TypeScript object).
+    | Placeholder
+    /// A required member with no value at a constructor: the caller passes it.
+    | Parameter
+    /// The site refuses the member, naming the value it was offered (`VAbsent` when none).
+    | Refused of IdlValue
+
 /// Phase 511 — THE ONE RESOLUTION of a vocabulary for one kind selection (B §8 S2). Built once
 /// by [[Decl.resolve]] and handed to every emitter, which reads the declaration graph from here
 /// and never re-walks the `Idl`: what a selection reaches, which declarations carry the message
@@ -105,7 +144,7 @@ type internal Decl =
         Records: IdlRecord list
         /// Kind tag → declared host projection (empty for a backend with no host projections:
         /// a projection is host source, so only the F# module declares one).
-        Projections: Map<string, Projection>
+        Projections: Map<string, KindProjection>
         /// The type names emitted generic in `'Msg` (vocabulary-wide).
         Msg: Set<string>
         /// The declaration keys (`Node`, `R:<record>`, `S:<kind>`) that take wire equality.
@@ -578,13 +617,34 @@ module internal Decl =
             | _ -> refuse ()
         | _ -> refuse ()
 
+    /// Phase 524 (511.t4) — the ONE presence rule for a member's value: the member's declared
+    /// optionality and the value offered for it (authored, or declared as a default; `VAbsent`
+    /// reads as none) at the [[ValueSite]] asking. Every backend prints the answer; none decides it.
+    let memberValue (site: ValueSite) (opt: Optionality) (offered: IdlValue option) : MemberValue =
+        let value =
+            match offered with
+            | Some VAbsent
+            | None -> None
+            | Some v -> Some v
+
+        match opt, value with
+        | Optional, Some v -> MemberValue.Optional v
+        | Optional, None -> MemberValue.Absent
+        | OmitDefault _, Some v when site <> ValueSite.Constructor -> MemberValue.Carries v
+        | OmitDefault d, _ -> MemberValue.IdentityDefault d
+        | Required, Some v -> MemberValue.Carries v
+        | Required, None when site = ValueSite.Constructor -> MemberValue.Parameter
+        | Required, None -> MemberValue.Refused VAbsent
+        | HostOnly, v when site = ValueSite.Literal -> MemberValue.Refused(defaultArg v VAbsent)
+        | HostOnly, _ -> MemberValue.Placeholder
+
     // -----------------------------------------------------------------------
     // The resolution.
     // -----------------------------------------------------------------------
 
     let private build
         (idl: Idl)
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (kinds: IdlKind list)
         (enums: IdlEnum list, unions: IdlUnion list, records: IdlRecord list)
         : Decl =
@@ -613,7 +673,7 @@ module internal Decl =
     /// Resolve `idl` for the kinds named by `kindTags` (a tag the vocabulary does not declare
     /// selects nothing), with the host projections `projections` (empty where the target has
     /// none): the selected kinds and what they REACH. The module targets read this.
-    let resolve (idl: Idl) (projections: Map<string, Projection>) (kindTags: string list) : Decl =
+    let resolve (idl: Idl) (projections: Map<string, KindProjection>) (kindTags: string list) : Decl =
         let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
         build idl projections kinds (referenced idl kinds)
 

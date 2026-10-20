@@ -4,6 +4,7 @@ open System
 open System.IO
 open Expecto
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 /// `Declare.enumAnnotate` over a well-formed fixture: its refusal (an error list since Phase 384)
 /// is a defect of the suite.
@@ -298,7 +299,7 @@ let tests =
           <| fun _ ->
               let classes (before: Idl) (after: Idl) =
                   let snap (idl: Idl) =
-                      match Diff.parse (Artifact.render idl) with
+                      match Diff.parse (Artifact.render idl) None with
                       | Ok s -> s
                       | Error e -> failtestf "snapshot: %s" e
 
@@ -334,17 +335,14 @@ let tests =
                                         else
                                             c) } ] }
 
-              Expect.equal (classes undocumented onlyLit) [ Diff.Additive ] "a doc on a bare member is additive"
+              Expect.equal (classes undocumented onlyLit) [ Additive ] "a doc on a bare member is additive"
 
               Expect.equal
                   (classes undocumented onRef)
-                  [ Diff.HostSurfaceOnly ]
+                  [ HostSurfaceOnly ]
                   "a doc on an annotated member moves the host surface"
 
-              Expect.equal
-                  (classes onlyLit undocumented)
-                  [ Diff.HostSurfaceOnly ]
-                  "withdrawing a doc moves the host surface"
+              Expect.equal (classes onlyLit undocumented) [ HostSurfaceOnly ] "withdrawing a doc moves the host surface"
 
           testCase "a whitespace-only doc emits nothing, like an unsaid slot"
           <| fun _ ->

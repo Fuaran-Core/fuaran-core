@@ -148,191 +148,130 @@ module internal TypeScriptCodec =
         // Phase 676 — a JSON value emits as its canonical literal.
         | VJson j -> Canonical.write Rendering.CrossHost j
 
-    /// The point-free TS encoder reference for a type (used where a codec must be
-    /// passed — a generic union's type-parameter codec).
-    let rec tsEncFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "encStr"
-        | TInt -> Ok "encInt"
-        | TBool -> Ok "encBool"
-        | TFloat -> Ok "encFloat"
-        | TEnum _ -> Ok "encStr" // an enum value IS its wire string
-        | TVar v -> Ok("enc" + v)
-        | TNode -> Ok "encodeNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the TypeScript encoder backend" t)
-        | TUnion(n, []) -> Ok("enc" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map tsEncFn
-            |> concatR ", "
-            |> Result.map (fun a -> "((x) => enc" + n + "(" + a + ", x))")
-        | TList inner ->
-            tsEncFn inner
-            |> Result.map (fun e -> "((xs) => '[' + xs.map(" + e + ").join(',') + ']')")
-        // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure
-        | TFn _ -> Ok "(() => '\"<closure>\"')"
-        | TOpaque -> Ok "(() => '\"<opaque>\"')"
-        // Phase 252 — a hosted slot that declares its wire form is written THROUGH it, so
-        // the bytes are that type's canonical ones.
-        | THosted h when h.Wire.IsSome ->
-            match hostedWireRefusal "the TypeScript encoder backend" h with
-            | Some e -> Error e
-            | None -> tsEncFn h.Wire.Value
-        // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
-        // A hosted slot is verbatim JSON to the TS backend, like the interpreter.
-        | TJson
-        | THosted _ -> Ok "encJson"
-        | TRecord n -> Ok("enc" + n)
-        | TMap vt ->
-            tsEncFn vt
-            |> Result.map (fun e ->
-                "((m) => '{' + Object.keys(m).sort().map((k) => encStr(k) + ':' + ("
-                + e
-                + ")(m[k])).join(',') + '}')")
+    /// Phase 524 — the TypeScript ENCODER printer over the one slot traversal ([[SlotTraversal]]):
+    /// `enc<Name>` functions writing canonical JSON text.
+    let tsEncPrinter: AppliedPrinter =
+        let backend = "the TypeScript encoder backend"
+        let closure = "(() => '\"<closure>\"')"
+        let opaque = "(() => '\"<opaque>\"')"
+
+        { Slot =
+            { Backend = backend
+              Str = "encStr"
+              Int = "encInt"
+              Bool = "encBool"
+              Float = "encFloat"
+              // An enum value IS its wire string.
+              Enum = fun _ -> "encStr"
+              Var = fun v -> "enc" + v
+              Named = fun n -> "enc" + n
+              Node = "encodeNode"
+              Union = fun n args -> "((x) => enc" + n + "(" + String.concat ", " args + ", x))"
+              List = fun e -> "((xs) => '[' + xs.map(" + e + ").join(',') + ']')"
+              Map =
+                fun e ->
+                    "((m) => '{' + Object.keys(m).sort().map((k) => encStr(k) + ':' + ("
+                    + e
+                    + ")(m[k])).join(',') + '}')"
+              Closure = closure
+              Fn = fun _ -> closure
+              Opaque = opaque
+              // `encJson` renders the parsed value canonically (see the prelude).
+              Json = "encJson"
+              // Phase 252 — a hosted slot that declares its wire form is written THROUGH it, so the
+              // bytes are that type's canonical ones; one that does not is verbatim JSON to this
+              // backend, as to the interpreter.
+              Hosted =
+                fun h ->
+                    match h.Wire with
+                    | Some wire ->
+                        match hostedWireRefusal backend h with
+                        | Some e -> HostedSlot.Refused e
+                        | None -> HostedSlot.Through(wire, id)
+                    | None -> HostedSlot.Verbatim "encJson" }
+          Apply = fun e var -> e + "(" + var + ")"
+          ListApplied = fun e var -> "'[' + " + var + ".map(" + e + ").join(',') + ']'"
+          NodeApplied = fun var -> "encodeNode(" + var + ")"
+          UnionApplied = fun n args var -> "enc" + n + "(" + String.concat ", " args + ", " + var + ")"
+          ClosureApplied = fun var -> closure + "(" + var + ")"
+          OpaqueApplied = fun var -> opaque + "(" + var + ")" }
 
     /// The applied TS encode expression for a value of `t` bound to `var`.
     let tsEncApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TList inner ->
-            tsEncFn inner
-            |> Result.map (fun e -> "'[' + " + var + ".map(" + e + ").join(',') + ']'")
-        | TUnion(n, (_ :: _ as args)) ->
-            args
-            |> List.map tsEncFn
-            |> concatR ", "
-            |> Result.map (fun a -> "enc" + n + "(" + a + ", " + var + ")")
-        | TNode -> Ok("encodeNode(" + var + ")")
-        | _ -> tsEncFn t |> Result.map (fun e -> e + "(" + var + ")")
+        SlotTraversal.encApplied tsEncPrinter var t
 
-    /// TS boolean predicate: is `src` at the omit-when-default field's identity default?
+    /// Phase 524 — the TypeScript printer of a declared literal as a TEST
+    /// ([[LiteralTraversal]]): a boolean predicate that the value read from `src` is the literal.
     /// Enums render as wire strings (`s.tone === "Default"`); nullary unions as
     /// discriminator-tagged objects (`s.format.$type === "None"`); since Phase 124 a
     /// VALUE-CARRYING union case conjoins a test per declared field
-    /// (`s.value.$type === "Fixed" && s.value.value === 0`), nested to any depth.
+    /// (`s.value.$type === "Fixed" && s.value.value === 0`), nested to any depth. An absent
+    /// optional is a real conjunct (`s.value.name === undefined`), not a skip: the encoder omits
+    /// that key, so a value carrying it is NOT at the default and must not be.
     ///
-    /// **This predicate decides what the TS backend admits as a default at all**, because it is
-    /// the harder half: JS has no structural equality, so every admissible shape has to reduce to
-    /// a chain of `===` (plus the one `.length === 0` an empty array needs, arrays comparing by
-    /// reference). [[tsDefaultLit]] takes its admissibility from here rather than deciding
-    /// separately — an encoder that cannot TEST for a default must not have a decoder that
-    /// RESTORES it, or the two halves of the round trip disagree silently, which is the class
-    /// Phase 124 exists to close.
-    let rec tsIsDefault
-        (idl: Idl)
-        (disc: string)
-        (src: string)
-        (t: IdlType)
-        (d: IdlValue)
-        : Result<string, CodegenError> =
-        let refuse () =
-            Error(CodegenError.UnsupportedDefault(t, d))
+    /// JS has no structural equality, so every admitted shape reduces to a chain of `===` (plus
+    /// the one `.length === 0` an empty array needs, arrays comparing by reference). What is
+    /// admitted is [[Decl.literal]]'s, the admissibility the F# backend prints from too, so a
+    /// default the F# host honours is one this host can test for.
+    let tsPredicatePrinter (disc: string) : LiteralPrinter =
+        { Str = fun src s -> src + " === " + SourceLit.tsString s
+          Int = fun src i -> src + " === " + string i
+          Float = fun src f -> src + " === " + invariantFloat f
+          Bool = fun src b -> src + " === " + (if b then "true" else "false")
+          // A `VEnum` carries the WIRE string, which is what this host holds.
+          Enum = fun src _ _ wire -> src + " === " + SourceLit.tsString wire
+          // Phase 1080 — an omitted-when-empty repeated slot.
+          EmptyList = fun src -> src + ".length === 0"
+          Record = fun _ _ members -> members |> List.map snd |> String.concat " && "
+          Union =
+            fun src _ c members ->
+                (tsDiscProp disc src + " === " + SourceLit.tsString c.Tag)
+                :: (members |> List.map snd)
+                |> String.concat " && "
+          Some = id
+          Absent = fun src -> src + " === undefined"
+          Path = fun src f -> src + "." + f.Name }
 
-        match t, d with
-        // A `VEnum` carries the WIRE string; one the enum does not admit is refused, as the F#
-        // backend refuses it (Phase 292) and as the encoder refuses the value.
-        | TEnum n, VEnum c ->
-            if idl.Enums |> List.exists (fun e -> e.Name = n && List.contains c e.WireCases) then
-                Ok(src + " === " + SourceLit.tsString c)
-            else
-                refuse ()
-        // Refused as the F# backend refuses it, so the two agree (D33).
-        | TStr, VStr s when not (SourceLit.isWellFormed s) -> refuse ()
-        | TStr, VStr s -> Ok(src + " === " + SourceLit.tsString s)
-        | TInt, VInt i -> Ok(src + " === " + string i)
-        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(src + " === " + invariantFloat f)
-        | TFloat, VInt i -> Ok(src + " === " + invariantFloat (float i))
-        | TBool, VBool b -> Ok(src + " === " + (if b then "true" else "false"))
-        // Phase 1080 — an omitted-when-empty repeated slot. `.length === 0` rather
-        // than an equality test, because JS arrays compare by reference.
-        | TList _, VList [] -> Ok(src + ".length === 0")
-        | TRecord n, VRecord authored ->
-            match CodegenLookup.tryRecord idl n with
-            | None -> refuse ()
-            | Some r ->
-                r.Fields
-                |> List.map (fun rf -> tsIsDefaultField idl disc src Map.empty rf authored)
-                |> concatR " && "
-        | TUnion(n, args), VUnion(tag, authored) ->
-            match CodegenLookup.tryUnion idl n with
-            | None -> refuse ()
-            | Some u when List.length u.Params <> List.length args -> refuse ()
-            // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
-            // below nor the tagged literal [[tsDefaultLit]] renders would be about the value the
-            // encoder actually sees. Refused rather than guessed at. (Unreachable before Phase
-            // 124: a transparent case holds exactly one field, so it was never nullary.) Since
-            // the 2026-09-13 ruling the test is [[isDeclaredTransparentCase]], which `fsDefaultLit`
-            // calls too — the rule is about the WIRE, so it cannot belong to one backend.
-            | Some u when isDeclaredTransparentCase idl u tag -> refuse ()
-            | Some u ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None -> refuse ()
-                | Some c ->
-                    let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
+    /// TS boolean predicate: is `src` at the omit-when-default field's identity default? Printed by
+    /// [[tsPredicatePrinter]]. **This predicate decides what the TS backend admits as a default**,
+    /// and [[tsDefaultLit]] takes its admissibility from here: an encoder that cannot TEST for a
+    /// default must not have a decoder that RESTORES it (Phase 124).
+    let tsIsDefault (idl: Idl) (disc: string) (src: string) (t: IdlType) (d: IdlValue) : Result<string, CodegenError> =
+        LiteralTraversal.print (tsPredicatePrinter disc) idl src t d
 
-                    c.Fields
-                    |> List.map (fun cf -> tsIsDefaultField idl disc src subst cf authored)
-                    |> sequenceR
-                    |> Result.map (fun conjuncts ->
-                        (tsDiscProp disc src + " === " + SourceLit.tsString tag) :: conjuncts
-                        |> String.concat " && ")
-        | _ -> refuse ()
+    /// Phase 524 — the TypeScript printer of a member WRITTEN under its presence
+    /// ([[MemberEncTraversal.encMember]]): a `[key, enc]` pair, or `null` (filtered) where the
+    /// member is absent. `src` is the JS expression the value is read from (`s.f` in a spec or
+    /// record encoder, `n.f` on the node envelope, `v.f` in a union case). Phase 317's generative
+    /// conformance once caught the union-case copy ignoring presence entirely; one rule is what
+    /// keeps that from recurring.
+    let tsMemberEncPrinter (idl: Idl) (disc: string) : MemberEncPrinter =
+        { Applied = tsEncPrinter
+          Key = SourceLit.tsString
+          Access = fun recv f -> recv + "." + f.Name
+          Present = fun key e -> "[" + key + ", " + e + "]"
+          OptionalVar = id
+          Optional = fun src key e -> "(" + src + " === undefined ? null : [" + key + ", " + e + "])"
+          Absent = "null"
+          OmitAt =
+            fun src t d ->
+                tsIsDefault idl disc src t d
+                |> Result.map (fun pred present -> "(" + pred + " ? null : " + present + ")") }
 
-    /// One declared member of a union case or a record, as a conjunct of the predicate above.
-    /// An absent optional is a real conjunct (`s.value.name === undefined`), not a skip: the
-    /// encoder omits that key, so a value carrying it is NOT at the default and must not be.
-    and tsIsDefaultField
-        (idl: Idl)
-        (disc: string)
-        (src: string)
-        (subst: Map<string, IdlType>)
-        (f: IdlField)
-        (authored: (string * IdlValue) list)
-        : Result<string, CodegenError> =
-        let ft = TypeParams.substitute subst f.Type
-        let member' = src + "." + f.Name
-
-        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-        | Some(_, av) when av <> VAbsent ->
-            match f.Opt with
-            // A host-only slot never reaches the wire, so the JS object the encoder sees has no
-            // member to test — a default that depends on one is not testable at all.
-            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
-            | _ -> tsIsDefault idl disc member' ft av
-        | _ ->
-            match f.Opt with
-            | Optional -> Ok(member' + " === undefined")
-            | OmitDefault dd -> tsIsDefault idl disc member' ft dd
-            | HostOnly
-            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
-
-    /// Phase 511 — THE TYPESCRIPT PRESENCE RULE: one field's encoder piece, a `[key, enc]` pair
-    /// or `null` (filtered) where the field is absent — Required always; Optional omitted when
-    /// `undefined`; HostOnly never on the wire; OmitDefault omitted at its default. `src` is the
-    /// JS expression the value is read from (`s.f` in a spec or record encoder, `n.f` on the node
-    /// envelope, `v.f` in a union case) — the only thing the call sites differ in. Phase 317's
-    /// generative conformance once caught the union-case copy ignoring presence entirely; one
-    /// rule is what keeps that from recurring.
-    let tsPresencePiece (idl: Idl) (disc: string) (src: string) (f: IdlField) : Result<string, CodegenError> =
-        tsEncApplied src f.Type
-        |> Result.bind (fun enc ->
-            let pair = "[" + SourceLit.tsString f.Name + ", " + enc + "]"
-
-            match f.Opt with
-            | Required -> Ok pair
-            | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
-            | HostOnly -> Ok "null"
-            | OmitDefault d ->
-                tsIsDefault idl disc src f.Type d
-                |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")"))
-
-    /// A field read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
-    /// node envelope), under [[tsPresencePiece]] — the F# side's `specPieceOf`.
+    /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
+    /// node envelope) — the F# side's `specPieceOf`.
     let tsSpecPieceOf (idl: Idl) (disc: string) (recv: string) (f: IdlField) : Result<string, CodegenError> =
-        tsPresencePiece idl disc (recv + "." + f.Name) f
+        let p = tsMemberEncPrinter idl disc
+
+        MemberEncTraversal.encMember p (p.Access recv f) f
+        |> Result.map (MemberEncTraversal.print p)
+
+    /// The members of a spec or record read off `s`, as the body of a pairs array.
+    let private tsObjectPieces (idl: Idl) (disc: string) (fields: IdlField list) : Result<string, CodegenError> =
+        let p = tsMemberEncPrinter idl disc
+
+        MemberEncTraversal.encMembers p "s" fields
+        |> Result.map (List.map (MemberEncTraversal.print p) >> String.concat ", ")
 
     // -----------------------------------------------------------------------
     // Phase 113 — declared annotations in the TypeScript backend.
@@ -407,54 +346,51 @@ module internal TypeScriptCodec =
 
     let tsUnionEncoder (decl: Decl) (disc: string) (u: IdlUnion) =
         let idl = decl.Idl
+        let member' = tsMemberEncPrinter idl disc
 
         let argList =
             match u.Params with
             | [] -> "v"
             | ps -> (ps |> List.map (fun p -> "enc" + p) |> String.concat ", ") + ", v"
 
-        let arm (c: IdlUnionCase) =
+        let arm (c: IdlUnionCase) (body: string) =
             let ann =
                 match tsAnnotationLines "    " c.Tag c.Annotations with
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            (match Decl.caseLayout decl u c with
-             // Transparent case: return the single field's value bare (no `typed(...)`).
-             | CaseLayout.Bare(Ok f) ->
-                 tsEncApplied ("v." + f.Name) f.Type
-                 |> Result.map (fun enc -> "    case " + SourceLit.tsString c.Tag + ": return " + enc + ";")
-             | CaseLayout.Bare(Error e) -> Error e
-             | CaseLayout.Tagged ->
-                 c.Fields
-                 |> List.map (fun f -> tsPresencePiece idl disc ("v." + f.Name) f)
-                 |> concatR ", "
-                 |> Result.map (fun pairs ->
-                     "    case "
-                     + SourceLit.tsString c.Tag
-                     + ": return typed("
-                     + SourceLit.tsString c.Tag
-                     + ", ["
-                     + pairs
-                     + "]);"))
-            |> Result.map (fun body -> ann + body)
+            ann + "    case " + SourceLit.tsString c.Tag + ": return " + body + ";"
 
-        u.Cases
-        |> List.map arm
-        |> concatR "\n"
-        |> Result.map (fun arms ->
-            (u.Cases
-             |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
-             |> String.concat "")
-            + "function enc"
-            + u.Name
-            + "("
-            + argList
-            + ") {\n  switch ("
-            + tsDiscProp disc "v"
-            + ") {\n"
-            + arms
-            + "\n  }\n}")
+        UnionEncTraversal.encoder
+            { Member = member'
+              CaseVar = fun f -> "v." + f.Name
+              // Transparent case: return the single field's value bare (no `typed(...)`).
+              Bare = fun _ c e -> arm c e
+              Tagged =
+                fun _ c pieces ->
+                    arm
+                        c
+                        ("typed("
+                         + SourceLit.tsString c.Tag
+                         + ", ["
+                         + (pieces |> List.map (MemberEncTraversal.print member') |> String.concat ", ")
+                         + "])")
+              Union =
+                fun _ arms ->
+                    (u.Cases
+                     |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+                     |> String.concat "")
+                    + "function enc"
+                    + u.Name
+                    + "("
+                    + argList
+                    + ") {\n  switch ("
+                    + tsDiscProp disc "v"
+                    + ") {\n"
+                    + String.concat "\n" arms
+                    + "\n  }\n}" }
+            decl
+            u
 
     /// A non-discriminated *record* encoder — a plain object, no discriminator,
     /// mirroring `recordEncoder` on the F# side. Added by Phase 690: the TS backend
@@ -463,9 +399,7 @@ module internal TypeScriptCodec =
     /// backend ran on had no records, and a `ReferenceError` waiting for the first
     /// one — the node envelope is three of them.
     let tsRecordEncoder (idl: Idl) (disc: string) (r: IdlRecord) =
-        r.Fields
-        |> List.map (tsSpecPieceOf idl disc "s")
-        |> concatR ", "
+        tsObjectPieces idl disc r.Fields
         |> Result.map (fun pieces ->
             tsFieldAnnotationHeader r.Name r.Fields
             + "function enc"
@@ -481,9 +415,7 @@ module internal TypeScriptCodec =
     let tsSpecEncoder (idl: Idl) (disc: string) (flat: bool) (k: IdlKind) =
         let ann = tsKindAnnotationHeader k
 
-        k.Fields
-        |> List.map (tsSpecPieceOf idl disc "s")
-        |> concatR ", "
+        tsObjectPieces idl disc k.Fields
         |> Result.map (fun pieces ->
             if flat then
                 ann + "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
@@ -504,56 +436,54 @@ module internal TypeScriptCodec =
     // transparent union cases (re-wrapped so the encoder can re-flatten them), and
     // closure/opaque sentinels (which carry nothing, but are read by value — Phase 347).
 
-    /// The point-free TS decoder reference for a type.
-    let rec tsDecFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "dStr"
-        | TInt -> Ok "dInt"
-        | TBool -> Ok "dBool"
-        | TFloat -> Ok "dFloat"
-        | TEnum n -> Ok("dec" + n)
-        | TVar v -> Ok("dec" + v)
-        | TNode -> Ok "decNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the TypeScript decoder backend" t)
-        | TUnion(n, []) -> Ok("dec" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map tsDecFn
-            |> concatR ", "
-            |> Result.map (fun a -> "((x) => dec" + n + "(" + a + ", x))")
-        | TList inner -> tsDecFn inner |> Result.map (fun d -> "dList(" + d + ")")
-        // The value carries nothing, so it decodes to `null`; but it is READ (Phase 347): the
-        // slot holds its one sentinel string, as the interpreter checks. A `TFn` slot is the same
-        // on the wire — the TS tier has no `'Msg` to rebuild into, so it stays `null` there
-        // regardless of the declared signature.
-        | TClosure
-        | TFn _ -> Ok "dSentinel('<closure>')"
-        | TOpaque -> Ok "dSentinel('<opaque>')"
-        // Phase 252 — a hosted slot that declares its wire form is CHECKED against it (its
-        // type, then its format), which is what makes this host refuse what the F# host's
-        // codec refuses.
-        | THosted h when h.Wire.IsSome ->
-            match hostedWireRefusal "the TypeScript decoder backend" h with
-            | Some e -> Error e
-            | None ->
-                tsDecFn h.Wire.Value
-                |> Result.map (fun d ->
-                    match h.Format with
-                    | Some f ->
-                        "((x) => dFormat("
-                        + SourceLit.tsString (HostedFormat.name f)
-                        + ", "
-                        + d
-                        + "(x)))"
-                    | None -> d)
-        // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
-        | TJson
-        | THosted _ -> Ok "((x) => x)"
-        | TRecord n -> Ok("dec" + n)
-        | TMap vt -> tsDecFn vt |> Result.map (fun d -> "dMap(" + d + ")")
+    /// Phase 524 — the TypeScript DECODER printer over the one slot traversal ([[SlotTraversal]]).
+    let tsDecPrinter: SlotPrinter =
+        let backend = "the TypeScript decoder backend"
+
+        { Backend = backend
+          Str = "dStr"
+          Int = "dInt"
+          Bool = "dBool"
+          Float = "dFloat"
+          Enum = fun n -> "dec" + n
+          Var = fun v -> "dec" + v
+          Named = fun n -> "dec" + n
+          Node = "decNode"
+          Union = fun n args -> "((x) => dec" + n + "(" + String.concat ", " args + ", x))"
+          List = fun d -> "dList(" + d + ")"
+          Map = fun d -> "dMap(" + d + ")"
+          // The value carries nothing, so it decodes to `null`; but it is READ (Phase 347): the
+          // slot holds its one sentinel string, as the interpreter checks. A `TFn` slot is the same
+          // on the wire — the TS tier has no `'Msg` to rebuild into, so it stays `null` there
+          // regardless of the declared signature.
+          Closure = "dSentinel('<closure>')"
+          Fn = fun _ -> "dSentinel('<closure>')"
+          Opaque = "dSentinel('<opaque>')"
+          // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
+          Json = "((x) => x)"
+          // Phase 252 — a hosted slot that declares its wire form is CHECKED against it (its
+          // type, then its format), which is what makes this host refuse what the F# host's
+          // codec refuses.
+          Hosted =
+            fun h ->
+                match h.Wire with
+                | Some wire ->
+                    match hostedWireRefusal backend h with
+                    | Some e -> HostedSlot.Refused e
+                    | None ->
+                        HostedSlot.Through(
+                            wire,
+                            fun d ->
+                                match h.Format with
+                                | Some f ->
+                                    "((x) => dFormat("
+                                    + SourceLit.tsString (HostedFormat.name f)
+                                    + ", "
+                                    + d
+                                    + "(x)))"
+                                | None -> d
+                        )
+                | None -> HostedSlot.Verbatim "((x) => x)" }
 
     /// The TS literal for an omit-when-default value, in its WIRE representation —
     /// refilled on decode so the encoder's omit test fires again and the bytes match.
@@ -571,39 +501,31 @@ module internal TypeScriptCodec =
         // rather than left to each host's own reading of an absent key.
         |> Result.map (fun _ -> typescriptValueWith idl.Wire d)
 
-    let tsDecField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
-        let key = SourceLit.tsString f.Name
+    /// Phase 524 — the TypeScript printer of a member READ back out
+    /// ([[MemberTraversal.decMember]]): a sentinel slot decodes to `null`, a host-only member to
+    /// `undefined`, an omit-at-default one to [[tsDefaultLit]]'s literal.
+    let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
+        { Slot = tsDecPrinter
+          Key = SourceLit.tsString
+          Req = fun key d -> "dReq(" + key + ", fs, " + d + ")"
+          Opt = fun key d -> "dOpt(" + key + ", fs, " + d + ")"
+          Def = fun key d lit -> "dDef(" + key + ", fs, " + d + ", " + lit + ")"
+          Placeholder = fun _ -> "null"
+          HostOnlySentinel = id
+          HostOnly = fun _ -> Ok "undefined"
+          DefaultLit = tsDefaultLit idl disc }
 
-        match f.Type with
-        // Phase 347 — a sentinel slot is read like any other: a required one absent is
-        // `MissingField`, a present one is checked BY VALUE (`dSentinel`), and an optional one's
-        // presence is what decodes `null` rather than `undefined`. Until 347 a required slot was
-        // not read at all and an optional one was read for its presence only, so both hosts
-        // accepted documents the interpreter refuses.
-        | TClosure
-        | TFn _
-        | TOpaque ->
-            tsDecFn f.Type
-            |> Result.map (fun d ->
-                match f.Opt with
-                | Required -> "dReq(" + key + ", fs, " + d + ")"
-                | Optional -> "dOpt(" + key + ", fs, " + d + ")"
-                | OmitDefault _ -> "dDef(" + key + ", fs, " + d + ", null)"
-                | HostOnly -> "null")
-        | _ ->
-            match f.Opt with
-            | Required -> tsDecFn f.Type |> Result.map (fun d -> "dReq(" + key + ", fs, " + d + ")")
-            | Optional -> tsDecFn f.Type |> Result.map (fun d -> "dOpt(" + key + ", fs, " + d + ")")
-            | HostOnly -> Ok "undefined"
-            // Phase 124 — `dReq` here was the TS mirror of the F# decoder's own fallback: the
-            // encoder emitted the key unconditionally, so the decoder demanded it, and the pair
-            // agreed with each other while contradicting the IDL that declared the slot omitted
-            // at its default. There is no fallback now; an unrenderable default refuses the module.
-            | OmitDefault d ->
-                tsDefaultLit idl disc f.Type d
-                |> Result.bind (fun lit ->
-                    tsDecFn f.Type
-                    |> Result.map (fun dfn -> "dDef(" + key + ", fs, " + dfn + ", " + lit + ")"))
+    let tsDecField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
+        MemberTraversal.decMember (tsMemberDecPrinter idl disc) f
+
+    /// The object a TS decoder builds: `extra` (the discriminator, where one is written), then
+    /// every member as read, in declaration order.
+    let tsObjectLit (extra: (string * string) list) (members: (IdlField * string) list) : string =
+        let pairs =
+            (extra |> List.map (fun (k, v) -> k + ": " + v))
+            @ (members |> List.map (fun (f, e) -> SourceLit.tsString f.Name + ": " + e))
+
+        "{ " + String.concat ", " pairs + " }"
 
     let tsFieldObject
         (idl: Idl)
@@ -611,14 +533,8 @@ module internal TypeScriptCodec =
         (extra: (string * string) list)
         (fields: IdlField list)
         : Result<string, CodegenError> =
-        fields
-        |> List.map (fun f ->
-            tsDecField idl disc f
-            |> Result.map (fun e -> SourceLit.tsString f.Name + ": " + e))
-        |> sequenceR
-        |> Result.map (fun decoded ->
-            let pairs = (extra |> List.map (fun (k, v) -> k + ": " + v)) @ decoded
-            "{ " + String.concat ", " pairs + " }")
+        MemberTraversal.decMembers (tsMemberDecPrinter idl disc) fields
+        |> Result.map (tsObjectLit extra)
 
     let tsEnumDecoder (e: IdlEnum) =
         // TS holds an enum AS its wire string — there is no second representation
@@ -653,95 +569,101 @@ module internal TypeScriptCodec =
             | [] -> "j"
             | ps -> (ps |> List.map (fun p -> "dec" + p) |> String.concat ", ") + ", j"
 
-        let arm (c: IdlUnionCase) =
+        let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
             let ann =
                 match tsAnnotationLines "    " c.Tag c.Annotations with
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            tsFieldObject idl disc [ tsDiscKey disc, SourceLit.tsString c.Tag ] c.Fields
-            |> Result.map (fun obj -> ann + "    case " + SourceLit.tsString c.Tag + ": return " + obj + ";")
+            ann
+            + "    case "
+            + SourceLit.tsString c.Tag
+            + ": return "
+            + tsObjectLit [ tsDiscKey disc, SourceLit.tsString c.Tag ] members
+            + ";"
 
-        let taggedR =
-            u.Cases
-            |> List.map arm
-            |> concatR "\n"
-            |> Result.map (fun arms ->
-                // Phase 337 — every object is a tagged one, as the interpreter reads it: an
-                // absent or non-string discriminator is refused AT it (`dTag`), and an unknown
-                // case is `UnknownTag` there.
-                "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
-                + arms
-                + "\n      default: return dUnknown("
-                + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
-                + ", "
-                + SourceLit.tsString ("unknown " + u.Name + " case: ")
-                + " + "
-                + tsDiscProp disc "j"
-                + ");\n    }\n  }")
-
-        // A transparent union also accepts its single-field case bare, and re-wraps
-        // it so the encoder can flatten it back to the same bytes.
-        let untagged =
-            match Decl.transparentTag decl u with
-            | Some ttag ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
-                | Some({ Fields = [ f ] }) ->
-                    tsDecFn f.Type
-                    |> Result.map (fun dfn ->
-                        "  return { "
-                        + tsDiscKey disc
-                        + ": "
-                        + SourceLit.tsString ttag
-                        + ", "
-                        + SourceLit.tsString f.Name
-                        + ": "
-                        + dfn
-                        + "(j) };")
-                | _ -> Error(transparentArity u.Name ttag)
-            | None ->
-                Ok(
+        UnionTraversal.decoder
+            { Read = MemberTraversal.decMembers (tsMemberDecPrinter idl disc)
+              Slot = tsDecPrinter
+              Arm = fun _ c members -> arm c members
+              // A transparent union also accepts its single-field case bare, and re-wraps
+              // it so the encoder can flatten it back to the same bytes.
+              Bare =
+                fun _ c f dfn ->
+                    "  return { "
+                    + tsDiscKey disc
+                    + ": "
+                    + SourceLit.tsString c.Tag
+                    + ", "
+                    + SourceLit.tsString f.Name
+                    + ": "
+                    + dfn
+                    + "(j) };"
+              NoBare =
+                fun _ ->
                     "  return dFail('WrongKind', 'object', "
                     + SourceLit.tsString ("expected a " + u.Name + " object")
                     + ");"
-                )
+              Union =
+                fun _ arms untagged ->
+                    // Phase 337 — every object is a tagged one, as the interpreter reads it: an
+                    // absent or non-string discriminator is refused AT it (`dTag`), and an unknown
+                    // case is `UnknownTag` there.
+                    let tagged =
+                        "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
+                        + String.concat "\n" arms
+                        + "\n      default: return dUnknown("
+                        + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
+                        + ", "
+                        + SourceLit.tsString ("unknown " + u.Name + " case: ")
+                        + " + "
+                        + tsDiscProp disc "j"
+                        + ");\n    }\n  }"
 
-        taggedR
-        |> Result.bind (fun tagged ->
-            untagged
-            |> Result.map (fun untagged ->
-                (u.Cases
-                 |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
-                 |> String.concat "")
-                + "function dec"
-                + u.Name
-                + "("
-                + argList
-                + ") {\n"
-                + tagged
-                + "\n"
-                + untagged
-                + "\n}"))
+                    (u.Cases
+                     |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+                     |> String.concat "")
+                    + "function dec"
+                    + u.Name
+                    + "("
+                    + argList
+                    + ") {\n"
+                    + tagged
+                    + "\n"
+                    + untagged
+                    + "\n}" }
+            decl
+            u
 
-    let tsRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
-        tsFieldObject idl disc [] r.Fields
+    /// An object's decoder — a declared record, or a kind's spec under its discriminator.
+    let tsObjectDecoder
+        (idl: Idl)
+        (disc: string)
+        (header: string)
+        (name: string)
+        (extra: (string * string) list)
+        (fields: IdlField list)
+        =
+        tsFieldObject idl disc extra fields
         |> Result.map (fun obj ->
-            tsFieldAnnotationHeader r.Name r.Fields
+            header
             + "function dec"
-            + r.Name
+            + name
             + "(j) {\n  const fs = dObj(j);\n  return "
             + obj
             + ";\n}")
 
+    let tsRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
+        tsObjectDecoder idl disc (tsFieldAnnotationHeader r.Name r.Fields) r.Name [] r.Fields
+
     let tsSpecDecoder (idl: Idl) (disc: string) (k: IdlKind) =
-        tsFieldObject idl disc [ tsDiscKey disc, SourceLit.tsString k.Tag ] k.Fields
-        |> Result.map (fun obj ->
-            tsKindAnnotationHeader k
-            + "function dec"
-            + k.Tag
-            + "Spec(j) {\n  const fs = dObj(j);\n  return "
-            + obj
-            + ";\n}")
+        tsObjectDecoder
+            idl
+            disc
+            (tsKindAnnotationHeader k)
+            (k.Tag + "Spec")
+            [ tsDiscKey disc, SourceLit.tsString k.Tag ]
+            k.Fields
 
     /// The decode runtime prelude — the JS mirror of the F# `dObj`/`dReq`/… helpers.
     /// `dTag` reads the DECLARED discriminator (Phase 108).
@@ -759,115 +681,7 @@ module internal TypeScriptCodec =
     let tsDecodePrelude (disc: string) =
         let discLit = SourceLit.tsStringSingle disc
 
-        """// Phase 337 — a refusal: the code (the closed DecodeCode set), the path from the document root
-// (member keys and item indices), what the position expected, and a sentence.
-class DecodeFault extends Error {
-  constructor(code, expected, message) {
-    super(message);
-    this.code = code;
-    this.path = [];
-    this.expected = expected;
-  }
-}
-const dFail = (code, expected, m) => { throw new DecodeFault(code, expected, m); };
-// One step further from the root — what a refusal gains as it leaves a member or an item.
-const dAt = (step, f) => {
-  try {
-    return f();
-  } catch (e) {
-    if (e instanceof DecodeFault) e.path.unshift(step);
-    throw e;
-  }
-};
-const dMissing = (name, m) => {
-  const f = new DecodeFault('MissingField', "a member '" + name + "'", m);
-  f.path.push(name);
-  throw f;
-};
-const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-const isObj = (j) => j !== null && typeof j === 'object' && !Array.isArray(j);
-// Phase 347 — what the reader (`dParse`) knows and a JS value cannot carry, kept beside the value
-// for the decode that reads it: per object or array, the members and items whose WHOLE number was
-// written as a float token (an int slot refuses it); and per object whose JS form loses its document
-// order, its members as written — an index-like key (the object lists those first). A repeated key
-// no longer reaches here: the reader refuses it (Phase 462).
-const dFloatAt = new WeakMap();
-const dMembersOf = new WeakMap();
-// Whether the value being decoded was read as a float token: set by `dRead` as each member or item
-// is handed to its decoder, and read by `dInt` before any other value is.
-let dFloatTok = false;
-const dRead = (c, k) => {
-  const at = dFloatAt.get(c);
-  dFloatTok = at !== undefined && at.has(k);
-  return c[k];
-};
-const dDisc = __DISC__;
-// The discriminator: absent is MissingField naming it, a non-string WrongKind at it.
-const dTag = (j) => {
-  if (!hasOwn(j, dDisc)) return dMissing(dDisc, 'missing or non-string ' + dDisc);
-  const t = j[dDisc];
-  return (typeof t === 'string') ? t : dAt(dDisc, () => dFail('WrongKind', 'string', 'missing or non-string ' + dDisc));
-};
-// A tag naming no case this decoder knows: UnknownTag at the discriminator.
-const dUnknown = (expected, m) => dAt(dDisc, () => dFail('UnknownTag', expected, m));
-const dObj = (j) => isObj(j) ? j : dFail('WrongKind', 'object', 'expected an object');
-const dStr = (j) => (typeof j === 'string') ? j : dFail('WrongKind', 'string', 'expected a string');
-// An int slot is the interpreter's 32-bit int: an integral number outside it is refused here as
-// the interpreter and the compiled F# host refuse it (Phase 304), never read as a wider value.
-// Phase 347 — and only a number the reader met as an INTEGER token: `1.0` and `1e0` are float
-// tokens, which the F# reader reads as a float and an int slot refuses, though their value is whole.
-const dInt = (j) => (typeof j === 'number' && !dFloatTok && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('WrongKind', 'int', 'expected an int');
-// §7 — a float slot also accepts the three quoted non-finite sentinels `encFloat` emits
-// (§5), and decodes them to the NUMBER, never the string. `dInt` above is not widened:
-// §7 stops at the float slot.
-const dFloat = (j) => {
-  if (typeof j === 'number') return j;
-  if (j === 'NaN') return NaN;
-  if (j === 'Infinity') return Infinity;
-  if (j === '-Infinity') return -Infinity;
-  return dFail('WrongKind', 'number', 'expected a number');
-};
-const dBool = (j) => (typeof j === 'boolean') ? j : dFail('WrongKind', 'bool', 'expected a bool');
-const dList = (dec) => (j) => Array.isArray(j) ? j.map((_, i) => dAt(i, () => dec(dRead(j, i)))) : dFail('WrongKind', 'array', 'expected an array');
-// Phase 347 — a map decodes into a NULL-PROTOTYPE object: a key is data whatever it spells, so
-// `__proto__` is an entry like any other (on a plain object it replaced the prototype, and every
-// later read of the map went through the document's object), and no key reads one the prototype
-// has (`constructor`, `toString`). Its entries are read in DOCUMENT order, as the interpreter and
-// the F# host read them — an object lists an index-like key first. A repeated key in TEXT is the
-// reader's refusal (Phase 462); one handed in as a value keeps its first entry, as the F# host's
-// `dMap` does.
-const dMap = (dec) => (j) => {
-  const o = dObj(j);
-  const out = Object.create(null);
-  const members = dMembersOf.get(o);
-  if (members === undefined) {
-    for (const k of Object.keys(o)) out[k] = dAt(k, () => dec(dRead(o, k)));
-  } else {
-    for (const [k, v, floatTok] of members) {
-      const d = dAt(k, () => { dFloatTok = floatTok; return dec(v); });
-      if (!hasOwn(out, k)) out[k] = d;
-    }
-  }
-  return out;
-};
-const dEnum = (name, cases) => (j) => {
-  if (typeof j !== 'string') return dFail('WrongKind', 'string', 'not a ' + name);
-  return (cases.indexOf(j) >= 0) ? j : dFail('UnknownTag', 'one of ' + cases.map((c) => "'" + c + "'").join(', '), 'not a ' + name);
-};
-const dReq = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : dMissing(name, "missing required field '" + name + "'");
-const dOpt = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : undefined;
-const dDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : dflt;
-// Phase 347 — a closure / opaque slot holds one fixed sentinel string and is read BY VALUE, as the
-// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
-// takes), any other kind `WrongKind`. It decodes to `null` — the sentinel carries nothing — and an
-// optional slot's presence is still what tells `null` from `undefined`.
-const dSentinel = (sentinel) => (j) => {
-  if (j === sentinel) return null;
-  return (typeof j === 'string')
-    ? dFail('OutOfRange', 'string', 'expected the sentinel ' + sentinel)
-    : dFail('WrongKind', 'string', 'expected a string');
-};"""
-            .Replace("__DISC__", discLit)
+        (Template.text "ts-decode-prelude.js").Replace("__DISC__", discLit)
 
     /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
     /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
@@ -887,246 +701,13 @@ const dSentinel = (sentinel) => (j) => {
     /// JS value cannot carry (`dFloatAt`, `dMembersOf`). An object is built with every key as
     /// data: `__proto__` becomes an own member, never the object's prototype.
     let tsParseLeg =
-        """const dMaxDepth = __CAP__;
-const dParse = (s) => {
-  const n = s.length;
-  let i = 0;
-  // The path to the value being read, root first: a member's key or an item's index per open
-  // container (Phase 519) — where a container opened past the cap is refused.
-  const at = [];
-  // Whether the value just read was a WHOLE number written as a float token.
-  let floatTok = false;
-  const bad = (m) => { throw new DecodeFault('InvalidJson', 'JSON text', 'not valid JSON: ' + m); };
-  const ws = () => {
-    while (i < n) {
-      const c = s.charCodeAt(i);
-      if (c === 32 || c === 9 || c === 10 || c === 13) i++;
-      else break;
-    }
-  };
-  const expect = (c) => { if (i < n && s[i] === c) i++; else bad("expected '" + c + "'"); };
-  const markFloat = (c, k) => {
-    let at = dFloatAt.get(c);
-    if (at === undefined) {
-      at = new Set();
-      dFloatAt.set(c, at);
-    }
-    at.add(k);
-  };
-  // A string is well-formed UTF-16 or refused, whichever spelling a unit arrived in; a raw control
-  // character (U+0000-U+001F) is refused at the character (Phase 462); any other is read as itself.
-  const str = () => {
-    expect('"');
-    let out = '';
-    let run = i;
-    let high = false;
-    const unit = (u) => {
-      const low = u >= 0xDC00 && u <= 0xDFFF;
-      if (high && !low) bad('ill-formed string: a high surrogate not followed by a low surrogate');
-      if (!high && low) bad('ill-formed string: a low surrogate with no high surrogate before it');
-      high = u >= 0xD800 && u <= 0xDBFF;
-      out += String.fromCharCode(u);
-    };
-    for (;;) {
-      if (i >= n) bad('unterminated string');
-      const c = s.charCodeAt(i);
-      if (c < 0x20) bad('unescaped control character U+00' + (c < 16 ? '0' : '') + c.toString(16).toUpperCase() + ' in a string');
-      if (!high && c !== 34 && c !== 92 && (c < 0xD800 || c > 0xDFFF)) {
-        i++;
-        continue;
-      }
-      out += s.slice(run, i);
-      i++;
-      if (c === 34) {
-        if (high) bad('ill-formed string: a high surrogate not followed by a low surrogate');
-        return out;
-      }
-      if (c !== 92) unit(c);
-      else {
-        if (i >= n) bad('unterminated escape');
-        const e = s[i++];
-        if (e === '"') unit(34);
-        else if (e === '\\') unit(92);
-        else if (e === '/') unit(47);
-        else if (e === 'n') unit(10);
-        else if (e === 'r') unit(13);
-        else if (e === 't') unit(9);
-        else if (e === 'b') unit(8);
-        else if (e === 'f') unit(12);
-        else if (e === 'u') {
-          if (i + 4 > n) bad('truncated \\u escape');
-          const h = s.slice(i, i + 4);
-          if (!/^[0-9a-fA-F]{4}$/.test(h)) bad('bad hex digit in \\u escape');
-          i += 4;
-          unit(parseInt(h, 16));
-        } else bad("bad escape '\\" + e + "'");
-      }
-      run = i;
-    }
-  };
-  // The F# reader's number: the JSON grammar exactly; a float token finite; an integer token an
-  // int within Int32, else a float while |n| <= 2^53, else only the canonical layout of its double
-  // (which writes a 16- or 17-digit whole double in full, and every longer one with an exponent).
-  const num = () => {
-    const start = i;
-    let isFloat = false;
-    const digits = () => { while (i < n && s[i] >= '0' && s[i] <= '9') i++; };
-    if (s[i] === '-') i++;
-    digits();
-    if (s[i] === '.') {
-      isFloat = true;
-      i++;
-      digits();
-    }
-    if (s[i] === 'e' || s[i] === 'E') {
-      isFloat = true;
-      i++;
-      if (s[i] === '+' || s[i] === '-') i++;
-      digits();
-    }
-    const tok = s.slice(start, i);
-    if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(tok)) bad('malformed number: ' + tok);
-    const v = Number(tok);
-    if (isFloat) {
-      if (!Number.isFinite(v)) bad('number outside the finite double range; it cannot round-trip on the wire: ' + tok);
-      floatTok = Number.isInteger(v) && v >= -2147483648 && v <= 2147483647;
-      return v;
-    }
-    if (v >= -2147483648 && v <= 2147483647) return v;
-    const mag = tok[0] === '-' ? tok.slice(1) : tok;
-    if (mag.length < 16 || (mag.length === 16 && mag <= '9007199254740992')) return v;
-    if (mag.length <= 17 && String(v) === tok) return v;
-    return bad('integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: ' + tok);
-  };
-  const lit = (word, v) => {
-    if (s.startsWith(word, i)) {
-      i += word.length;
-      return v;
-    }
-    return bad("expected '" + word + "'");
-  };
-  const deep = (depth) => {
-    if (depth >= dMaxDepth) {
-      const f = new DecodeFault('LimitExceeded', 'within the depth bound of ' + dMaxDepth, 'limit depth of ' + dMaxDepth + ' exceeded');
-      f.path = at.slice();
-      throw f;
-    }
-  };
-  const obj = (depth) => {
-    deep(depth);
-    expect('{');
-    ws();
-    const o = {};
-    const members = [];
-    let reordered = false;
-    if (s[i] === '}') {
-      i++;
-      return o;
-    }
-    for (;;) {
-      ws();
-      const k = str();
-      ws();
-      expect(':');
-      ws();
-      at.push(k);
-      const v = val(depth + 1);
-      at.pop();
-      const f = floatTok;
-      // Phase 462: a repeated member name is refused, as the F# reader refuses it, once its value
-      // is read — a refusal inside the value wins, and a repeated null is the null's refusal.
-      if (hasOwn(o, k)) bad('repeated member name in one object');
-      members.push([k, v, f]);
-      if (k === '__proto__') Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
-      else o[k] = v;
-      if (f) markFloat(o, k);
-      if (/^(0|[1-9][0-9]*)$/.test(k)) reordered = true;
-      ws();
-      if (s[i] === ',') i++;
-      else if (s[i] === '}') {
-        i++;
-        break;
-      } else bad("expected ',' or '}'");
-    }
-    if (reordered) dMembersOf.set(o, members);
-    return o;
-  };
-  const arr = (depth) => {
-    deep(depth);
-    expect('[');
-    ws();
-    const a = [];
-    if (s[i] === ']') {
-      i++;
-      return a;
-    }
-    for (;;) {
-      at.push(a.length);
-      const v = val(depth + 1);
-      at.pop();
-      if (floatTok) markFloat(a, a.length);
-      a.push(v);
-      ws();
-      if (s[i] === ',') i++;
-      else if (s[i] === ']') {
-        i++;
-        break;
-      } else bad("expected ',' or ']'");
-    }
-    return a;
-  };
-  const val = (depth) => {
-    ws();
-    floatTok = false;
-    if (i >= n) return bad('unexpected end of input');
-    const c = s[i];
-    let v;
-    if (c === '"') v = str();
-    else if (c === '{') v = obj(depth);
-    else if (c === '[') v = arr(depth);
-    else if (c === 't') v = lit('true', true);
-    else if (c === 'f') v = lit('false', false);
-    else if (c === 'n') return bad('null is not representable in the Fuaran wire JVal model');
-    else if (c === '-' || (c >= '0' && c <= '9')) return num();
-    else return bad("unexpected character '" + c + "'");
-    floatTok = false;
-    return v;
-  };
-  const root = val(0);
-  ws();
-  if (i !== n) bad('trailing characters');
-  return root;
-};"""
-            .Replace("__CAP__", string Json.defaultMaxDepth)
+        (Template.text "ts-parse-leg.js").Replace("__CAP__", string Json.defaultMaxDepth)
 
     /// Phase 252 — the TypeScript check of a hosted slot's declared FORMAT, emitted only when
     /// the vocabulary declares one ([[declaresHostedFormat]]); the JS face of
     /// [[HostedFormat.admits]], held to the same answers by a test. Returns the value, so a
     /// decoder composes it in place.
-    let tsFormatHelper =
-        """// Phase 252 — a hosted slot's declared string format, checked as the F# host checks it.
-const dFormatDay = (y, m, d) => {
-  if (y < 1 || m < 1 || m > 12 || d < 1) return false;
-  const last = new Date(0);
-  last.setUTCFullYear(y, m, 0);
-  return d <= last.getUTCDate();
-};
-const dFormat = (format, v) => {
-  let ok = false;
-  if (typeof v === 'string') {
-    if (format === 'date') {
-      const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(v);
-      ok = m !== null && dFormatDay(+m[1], +m[2], +m[3]);
-    } else if (format === 'date-time') {
-      const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$/.exec(v);
-      ok = m !== null && dFormatDay(+m[1], +m[2], +m[3]) && +m[4] <= 23 && +m[5] <= 59 && +m[6] <= 59
-        && (m[9] === undefined || (+m[9] <= 23 && +m[10] <= 59));
-    } else if (format === 'uuid') {
-      ok = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
-    }
-  }
-  return ok ? v : dFail('OutOfRange', "a '" + format + "' string", "expected a '" + format + "' string");
-};"""
+    let tsFormatHelper = (Template.text "ts-format-helper.js")
 
     /// Emit a self-contained TypeScript (ESM) structural encoder for the named
     /// kinds — `encodeNode(n)` returns canonical wire byte-identical to the F#

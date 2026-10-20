@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.IdlAnnotationTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 113 — declared annotations on union cases and fields.
@@ -104,7 +105,7 @@ let private emitFs (idl: Idl) =
     | Error e -> failtestf "codegen rejected the vocabulary: %A" e
 
 let private snapshotOf (idl: Idl) =
-    match Diff.parse (Artifact.render idl) with
+    match Diff.parse (Artifact.render idl) None with
     | Ok s -> s
     | Error e -> failtestf "snapshot: %s" e
 
@@ -114,7 +115,7 @@ let private classifyAll (before: Idl) (after: Idl) =
 /// The one classification whose change matches `pick`, or a failure naming what
 /// was actually produced — an assertion that silently found nothing would pass
 /// for the wrong reason.
-let private theOne (pick: Diff.Change -> bool) (cs: Diff.Classification list) =
+let private theOne (pick: Change -> bool) (cs: Classification list) =
     match cs |> List.filter (fun c -> pick c.Change) with
     | [ one ] -> one
     | other ->
@@ -311,12 +312,12 @@ let tests =
               let c =
                   classifyAll plainIdl (withAnnotations (deprecated (Some "Ref") None) Annotations.Empty)
                   |> theOne (function
-                      | Diff.UnionCaseAnnotationsChanged("Src", "Lit", _, _) -> true
+                      | UnionCaseAnnotationsChanged("Src", "Lit", _, _) -> true
                       | _ -> false)
 
               Expect.equal
                   c.Severity
-                  Diff.Additive
+                  Additive
                   "marking a member breaks nothing — that is what makes a
                                                      two-release retirement possible"
 
@@ -326,10 +327,10 @@ let tests =
               let c =
                   classifyAll plainIdl (withAnnotations Annotations.Empty inProcessOnly)
                   |> theOne (function
-                      | Diff.FieldAnnotationsChanged(_, "label", _, _) -> true
+                      | FieldAnnotationsChanged(_, "label", _, _) -> true
                       | _ -> false)
 
-              Expect.equal c.Severity Diff.Additive "marking a field breaks nothing either")
+              Expect.equal c.Severity Additive "marking a field breaks nothing either")
 
           testCase "diff: WITHDRAWING a deprecation is a plain host-surface change" (fun _ ->
               let marked = withAnnotations (deprecated (Some "Ref") None) Annotations.Empty
@@ -337,10 +338,10 @@ let tests =
               let c =
                   classifyAll marked plainIdl
                   |> theOne (function
-                      | Diff.UnionCaseAnnotationsChanged _ -> true
+                      | UnionCaseAnnotationsChanged _ -> true
                       | _ -> false)
 
-              Expect.equal c.Severity Diff.HostSurfaceOnly "un-retiring a case is not a breaking event"
+              Expect.equal c.Severity HostSurfaceOnly "un-retiring a case is not a breaking event"
               Expect.stringContains c.Rationale "WITHDRAWN" "and the rationale says which direction it moved")
 
           testCase "diff: MOVING a marking is a host-surface change, never a wire one" (fun _ ->
@@ -352,10 +353,10 @@ let tests =
               let c =
                   classifyAll before after
                   |> theOne (function
-                      | Diff.UnionCaseAnnotationsChanged _ -> true
+                      | UnionCaseAnnotationsChanged _ -> true
                       | _ -> false)
 
-              Expect.equal c.Severity Diff.HostSurfaceOnly "the generated declaration moved; the wire did not")
+              Expect.equal c.Severity HostSurfaceOnly "the generated declaration moved; the wire did not")
 
           testCase "diff: an annotation change reports NOTHING about the shape" (fun _ ->
               // The failure this guards is the classifier reporting a marking as a
@@ -365,15 +366,15 @@ let tests =
 
               Expect.isFalse
                   (cs
-                   |> List.exists (fun c -> c.Severity = Diff.BreakingWire || c.Severity = Diff.BreakingForEmitters))
+                   |> List.exists (fun c -> c.Severity = BreakingWire || c.Severity = BreakingForEmitters))
                   "no annotation change may ever grade as breaking"
 
               Expect.isFalse
                   (cs
                    |> List.exists (fun c ->
                        match c.Change with
-                       | Diff.FieldTypeChanged _
-                       | Diff.FieldOptionalityChanged _
-                       | Diff.FieldHostSurfaceChanged _ -> true
+                       | FieldTypeChanged _
+                       | FieldOptionalityChanged _
+                       | FieldHostSurfaceChanged _ -> true
                        | _ -> false))
                   "and none of it may be reported as a shape or signature move") ]

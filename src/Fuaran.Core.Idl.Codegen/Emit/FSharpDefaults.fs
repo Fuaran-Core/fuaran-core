@@ -45,35 +45,52 @@ module internal FSharpDefaults =
         else
             s + ".0"
 
-    /// **The one admissibility rule BOTH default backends apply, written once.** A default whose
-    /// case is the union's DECLARED TRANSPARENT case (`Harden.TransparentUnions` — the case that
-    /// encodes BARE, without the `$type` discriminator) is refused by every backend.
-    ///
-    /// It is here, above both deciders, because it was written once and needed twice. Phase 124
-    /// added the TypeScript refusal — a `$type`-tagged omit predicate would be about a value the
-    /// JS encoder never writes — and added no F# counterpart, because the F# omit test is a
-    /// pattern match on the HOST value, where the case is not transparent at all and renders
-    /// perfectly. Each backend was locally right and the pair was wrong: a vocabulary declaring
-    /// such a default generated in F# and refused in TypeScript, which is a generator that ships
-    /// two hosts that do not agree about what the vocabulary means. Phase 125's generative
-    /// agreement property found it; the 2026-09-13 ruling is that the backends must AGREE, and
-    /// the narrower side wins because the wire is the thing both hosts have to share.
-    ///
-    /// One predicate rather than two matching checks is the point: `fsDefaultLit` and
-    /// `tsIsDefault` already decide the REST of their admissibility separately (they must — F#
-    /// has literals and patterns where JS has only `===`), and this is the one rule that is about
-    /// the WIRE rather than about either host language. A rule about the wire that is spelled
-    /// twice is a rule that drifts, and this one already had.
-    ///
-    /// Phase 525 — the F# side of the rule is now [[Decl.literal]]'s, the admissibility the F#
-    /// and F* backends share; both read the one primitive, [[TransparentUnion.tag]].
-    let isDeclaredTransparentCase (idl: Idl) (u: IdlUnion) (tag: string) : bool =
-        TransparentUnion.tag idl.Harden u = Some tag
+    /// Phase 524 (511.t4) — the F# PRINTER of a [[MemberValue]] (the one presence rule,
+    /// [[Decl.memberValue]]): `value` prints a carried value (a declared literal, or a scaffolded
+    /// authored value), `identity` an omit-default member's identity default, `refuse` spells the
+    /// site's refusal. `None` is a constructor parameter.
+    let fsMember
+        (value: IdlValue -> Result<string, CodegenError>)
+        (identity: IdlValue -> Result<string, CodegenError>)
+        (refuse: IdlValue -> CodegenError)
+        (f: IdlField)
+        (mv: MemberValue)
+        : Result<string, CodegenError> option =
+        match mv with
+        | MemberValue.Carries v -> Some(value v)
+        | MemberValue.Optional v -> Some(value v |> Result.map (fun e -> "Some(" + e + ")"))
+        | MemberValue.IdentityDefault d -> Some(identity d)
+        | MemberValue.Absent -> Some(Ok "None")
+        | MemberValue.Placeholder -> Some(hostOnlyLit f)
+        | MemberValue.Parameter -> None
+        | MemberValue.Refused v -> Some(Error(refuse v))
 
-    /// The F# source form of a declared default VALUE — enums (`ToneVariant.Default`), scalars,
-    /// the EMPTY LIST (Phase 1080), a nullary union case (`CellFormat.None`) and, since Phase 124,
-    /// a VALUE-CARRYING union case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record,
-    /// nested to any depth.
+    /// Phase 524 — the F# printer of a declared literal ([[LiteralTraversal]]): the F# source form
+    /// of a declared default VALUE — enums (`ToneVariant.Default`), scalars, the EMPTY LIST (Phase
+    /// 1080), a nullary union case (`CellFormat.None`) and, since Phase 124, a VALUE-CARRYING union
+    /// case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record, nested to any depth.
+    let fsLiteralPrinter: LiteralPrinter =
+        { Str = fun _ s -> SourceLit.fsString s
+          Int = fun _ i -> string i
+          Float = fun _ f -> fsFloatLit f
+          Bool = fun _ b -> if b then "true" else "false"
+          Enum = fun _ n case _ -> n + "." + case
+          EmptyList = fun _ -> "[]"
+          Record =
+            fun _ r members ->
+                members
+                |> List.map (fun (f, e) -> pascal f.Name + " = " + e)
+                |> recordLit r.Name
+          Union =
+            fun _ u c members ->
+                match members with
+                | [] -> u.Name + "." + c.Tag
+                | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (ps |> List.map snd |> String.concat ", ")
+          Some = fun e -> "Some(" + e + ")"
+          Absent = fun _ -> "None"
+          Path = fun _ _ -> "" }
+
+    /// The F# source form of a declared default value, printed by [[fsLiteralPrinter]].
     ///
     /// **The admissible set is decided by a constraint that is easy to miss: the string is used in
     /// both an EXPRESSION and a PATTERN position.** The generated encoder tests a union default by
@@ -86,75 +103,14 @@ module internal FSharpDefaults =
     /// is `List.isEmpty` (which has no non-empty analogue) precisely because equality may not
     /// compile at the element type.
     ///
-    /// `Error` ⇒ the generator cannot render it, and the module REFUSES rather than emitting an
-    /// artefact that contradicts its own declaration — see [[CodegenError.UnsupportedDefault]].
-    let rec fsDefaultLit (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        // Phase 525 — what is ADMITTED is [[Decl.literal]]'s, the one admissibility the F* target
-        // reads too: an unpaired surrogate (F# cannot spell it, and the encoder refuses it), a
-        // non-finite double (`nan` / `infinity` are identifiers, so they have no pattern spelling),
-        // an enum spelling [[IdlEnum.CaseOf]] does not resolve (Phase 292), and the union's declared
-        // transparent case (the 2026-09-13 ruling: the TypeScript backend cannot test for it on the
-        // wire, and a default only one host honours is not a default) are refused there. What
-        // follows only PRINTS an admitted literal.
-        Decl.literal idl t v
-        |> Result.bind (fun l ->
-            match l with
-            | Literal.Str s -> Ok(SourceLit.fsString s)
-            | Literal.Int i -> Ok(string i)
-            | Literal.Bool b -> Ok(if b then "true" else "false")
-            // A whole-valued float authored as an integer reads as a float here — the canonical
-            // artifact writes one that way (the same asymmetry `dFloat` carries on decode).
-            | Literal.Float f -> Ok(fsFloatLit f)
-            | Literal.Enum(n, case) -> Ok(n + "." + case)
-            | Literal.EmptyList -> Ok "[]"
-            | Literal.Record(r, authored) ->
-                r.Fields
-                |> List.map (fun rf ->
-                    fsDefaultField idl Map.empty rf authored
-                    |> Result.map (fun e -> pascal rf.Name + " = " + e))
-                |> sequenceR
-                |> Result.map (recordLit r.Name)
-            | Literal.Union(u, args, c, authored) ->
-                let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
-
-                // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed`
-                // is a one-argument constructor whatever an `IdlValue` happens to carry, and
-                // emitting the bare tag for a case that takes arguments would emit a FUNCTION
-                // where a value belongs (Phase 124).
-                c.Fields
-                |> List.map (fun cf -> fsDefaultField idl subst cf authored)
-                |> sequenceR
-                |> Result.map (fun parts ->
-                    match parts with
-                    | [] -> u.Name + "." + c.Tag
-                    | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (String.concat ", " ps)))
-
-    /// One declared field of a union case or a record, rendered from the authored value set —
-    /// honouring the same presence rules the encoder writes it under. A HostOnly slot is refused
-    /// rather than filled with its placeholder: the placeholder is an arbitrary host EXPRESSION
-    /// (`ignore`), which is not legal in the pattern position the encoder's omit test needs.
-    and fsDefaultField
-        (idl: Idl)
-        (subst: Map<string, IdlType>)
-        (f: IdlField)
-        (authored: (string * IdlValue) list)
-        : Result<string, CodegenError> =
-        let ft = TypeParams.substitute subst f.Type
-
-        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-        | Some(_, av) when av <> VAbsent ->
-            match f.Opt with
-            | Optional -> fsDefaultLit idl ft av |> Result.map (fun e -> "Some(" + e + ")")
-            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
-            | Required
-            | OmitDefault _ -> fsDefaultLit idl ft av
-        | _ ->
-            match f.Opt with
-            | Optional -> Ok "None"
-            | OmitDefault d -> fsDefaultLit idl ft d
-            | HostOnly
-            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
-
+    /// Phase 525 — what is ADMITTED is [[Decl.literal]]'s, the one admissibility the TypeScript
+    /// and F* targets read too: an unpaired surrogate, a non-finite double (`nan` / `infinity` are
+    /// identifiers, so they have no pattern spelling), an enum spelling [[IdlEnum.CaseOf]] does not
+    /// resolve (Phase 292), and the union's declared transparent case (the 2026-09-13 ruling) are
+    /// refused there. `Error` ⇒ the module REFUSES rather than emitting an artefact that
+    /// contradicts its own declaration — see [[CodegenError.UnsupportedDefault]].
+    let fsDefaultLit (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        LiteralTraversal.print fsLiteralPrinter idl "" t v
 
     // -----------------------------------------------------------------------
     // Phase 317 increment 7 — the IDL-declared-defaults leg. Emit a smart
@@ -177,16 +133,12 @@ module internal FSharpDefaults =
     /// such value and must be passed (a `Required` field with no declared default). This is the
     /// one rule both the `mk<Kind>` smart constructors and the derived default records apply, so a
     /// default record and a constructor called with the same arguments cannot disagree.
+    /// Phase 524 (511.t4) — the CONSTRUCTOR site of the one presence rule ([[Decl.memberValue]]).
     let fieldValue (idl: Idl) (declared: IdlValue option) (f: IdlField) : Result<string, CodegenError> option =
-        match declared, f.Opt with
-        | Some v, Required -> Some(fsDefaultLit idl f.Type v)
-        | Some v, Optional -> Some(fsDefaultLit idl f.Type v |> Result.map (fun e -> "Some(" + e + ")"))
-        | None, Required -> None
-        | None, Optional -> Some(Ok "None")
-        // HostOnly: not a ctor param either — the field takes its placeholder.
-        | _, HostOnly -> Some(hostOnlyLit f)
-        // OmitDefault: not a ctor param — the field takes its identity default.
-        | _, OmitDefault d -> Some(fsDefaultLit idl f.Type d)
+        let lit = fsDefaultLit idl f.Type
+
+        Decl.memberValue ValueSite.Constructor f.Opt declared
+        |> fsMember lit lit (fun v -> CodegenError.UnsupportedDefault(f.Type, v)) f
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`fsDefaultLit` — GP4/GP5).
@@ -230,23 +182,19 @@ module internal FSharpDefaults =
         let envelopeAssigns: Result<string, CodegenError> =
             idl.NodeFields
             |> List.map (fun f ->
-                let assign e = sprintf "; %s = %s" (pascal f.Name) e
-
-                match f.Opt with
-                | Optional -> Ok(sprintf "; %s = None" (pascal f.Name))
-                | OmitDefault d -> fsDefaultLit idl f.Type d |> Result.map assign
-                | HostOnly -> hostOnlyLit f |> Result.map assign
-                | Required ->
-                    match envelopeDefaultFor f.Name with
-                    | Some d -> fsDefaultLit idl f.Type d |> Result.map assign
-                    | None ->
-                        Error(
-                            CodegenError.RequiredEnvelopeField(
-                                f.Name,
-                                f.Type,
-                                "declare it Optional or OmitDefault, or carry a declared default for it (an IdlDefault whose Kind is the empty envelope address)"
-                            )
-                        ))
+                // Phase 524 (511.t4) — the envelope member takes the CONSTRUCTOR site's value, as a
+                // kind's field does ([[fieldValue]]); the one difference is the parameter, which
+                // the envelope has no place for and refuses by name.
+                match fieldValue idl (envelopeDefaultFor f.Name) f with
+                | Some r -> r |> Result.map (sprintf "; %s = %s" (pascal f.Name))
+                | None ->
+                    Error(
+                        CodegenError.RequiredEnvelopeField(
+                            f.Name,
+                            f.Type,
+                            "declare it Optional or OmitDefault, or carry a declared default for it (an IdlDefault whose Kind is the empty envelope address)"
+                        )
+                    ))
             |> concatR ""
 
         let ctor (k: IdlKind) : Result<string, CodegenError> =

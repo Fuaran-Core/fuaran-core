@@ -28,16 +28,29 @@
     <!-- Phase 402 - the one boundary this package reads Fuaran.Core.Idl's internals through, each
          lookup NoInlining (DECISIONS.md D129); first, so every emitter can call it. -->
     <Compile Include="Lookup.fs" />
+    <!-- Phase 524 - the published types (DECISIONS.md D125, amended), in the namespace
+         `Fuaran.Core.Idl.Codegen.Types`, ahead of every emitter: the emitters read them directly,
+         and the modules that use them split one concern per file. -->
+    <Compile Include="Types/Support.fs" />
+    <Compile Include="Types/Derivation.fs" />
+    <Compile Include="Types/FStar.fs" />
+    <Compile Include="Types/Snapshot.fs" />
+    <Compile Include="Types/Change.fs" />
+    <Compile Include="Types/Roster.fs" />
     <Compile Include="Emit/Core.fs" />
     <Compile Include="Emit/Annotations.fs" />
     <!-- Phase 511 - the ONE resolution every emitter reads (`Decl.resolve`): reach, the msg,
          equality and node-holder analyses, the generic instantiations, the envelope layout.
          After Annotations (it reads `emitsObsolete` once), ahead of every emitter. -->
     <Compile Include="Emit/Decl.fs" />
+    <!-- Phase 524 - one traversal per codec question, a printer per backend (B S10); the
+         runtime preludes are template files (Templates/), read by name. -->
+    <Compile Include="Emit/Printer.fs" />
+    <Compile Include="Emit/Template.fs" />
+    <Compile Include="Emit/DeriveTraversal.fs" />
     <Compile Include="Emit/FSharpTypes.fs" />
     <Compile Include="Emit/FSharpDefaults.fs" />
     <Compile Include="Emit/FSharpDerive.fs" />
-    <Compile Include="Emit/FSharpCollecting.fs" />
     <Compile Include="Emit/FSharpCodec.fs" />
     <Compile Include="Emit/JsonSchema.fs" />
     <Compile Include="Emit/TypeScriptCodec.fs" />
@@ -52,6 +65,13 @@
          after Codegen.fs, and AHEAD of Diff.fs since Phase 293, which reads a support
          document into the stability classifier's snapshot. -->
     <Compile Include="SupportArtifact.fs" />
+    <!-- Phase 524 - the stability classifier, one concern per file behind the `Diff` facade. -->
+    <Compile Include="Diff/Snapshot.fs" />
+    <Compile Include="Diff/Rules.fs" />
+    <Compile Include="Diff/Changes.fs" />
+    <Compile Include="Diff/Verdict.fs" />
+    <Compile Include="Diff/Obligations.fs" />
+    <Compile Include="Diff/Report.fs" />
     <Compile Include="Diff.fs" />
     <Compile Include="Trust.fs" />
     <!-- Phase 150 - the F* PROOF-MODEL target: the vocabulary's types, encoder and
@@ -59,7 +79,16 @@
          checks, together with the round-trip theorems over exactly those definitions.
          Reads the shared CodegenError channel declared in Codegen.fs, so after it;
          appended last (append-only registration). It emits nothing any host builds. -->
+    <Compile Include="FStar/Model.fs" />
+    <Compile Include="FStar/Vocabulary.fs" />
+    <Compile Include="FStar/Proofs.fs" />
+    <Compile Include="FStar/Vectors.fs" />
     <Compile Include="FStar.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 524 - the generated modules' runtime preludes, copied unchanged into what the
+         generator emits; embedded under their file names (Template.text). -->
+    <EmbeddedResource Include="Templates/*" LogicalName="Templates/%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <!-- Phase 511 - the suite states the laws of the internal `Decl` resolution directly. -->

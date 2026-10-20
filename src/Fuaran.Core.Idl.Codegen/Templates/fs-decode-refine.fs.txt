@@ -1,0 +1,10 @@
+// A declared case refine answers a SENTENCE over the members it reads: `dRefine` binds the
+// case's last member and lifts the refine's refusal to `OutOfRange` at the case's object —
+// every member decoded, and together they are a value the case does not admit.
+let private dRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError>) : Result<'U, DecodeError> =
+    match r with
+    | Error e -> Error e
+    | Ok v ->
+        match f v with
+        | Ok u -> Ok u
+        | Error m -> dFail DecodeCode.OutOfRange "a case its refinement admits" m

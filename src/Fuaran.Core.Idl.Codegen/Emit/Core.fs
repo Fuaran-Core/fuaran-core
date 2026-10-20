@@ -71,10 +71,8 @@ type CodegenError =
     /// of their own decisions made the member necessary, which the vocabulary's name
     /// would not.
     ///
-    /// Reached only from `Trust.hardenOrRefuse` / `Trust.checkHardenPolicy` — the
-    /// opt-in entry points. `Trust.harden` cannot raise it: its signature returns a
-    /// value, and changing that would break every caller of a published function to
-    /// deliver a refusal only an undeclared policy can trigger.
+    /// Raised by `Trust.checkHardenPolicy` and by `Trust.harden`, which checks the policy
+    /// before it hardens anything (Phase 180 made the checked path the only one).
     | UndeclaredHardenToken of member_: string * needed: string
     /// Phase 195 — a node-envelope field declared [[Optionality.Required]] with no default
     /// to fill it from. A smart constructor fills the envelope with an identity value so the
@@ -128,6 +126,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 /// Phase 293 — the emitter CORE every backend compiles after: the error channel's helpers, the
 /// one `Result` sequencer, the naming and mangling rules (`pascal`, `ident`, the keyword set),
@@ -506,28 +505,3 @@ module internal Core =
         | THosted h -> Ok h.FSharp
         | TRecord n -> Ok(applied n [])
         | TMap vt -> fsType vt |> Result.map (fun s -> "Map<string, " + s + ">")
-
-    // -----------------------------------------------------------------------
-    // Phase 293 — the declared-support records as the EMITTERS see them. `Gen.GenSupport` and
-    // `Gen.KindProjection` are the published shapes and stay declared in the facade, which
-    // compiles after every emitter; the facade converts, field for field.
-    // -----------------------------------------------------------------------
-
-    /// The emitters' view of `Gen.KindProjection`.
-    type Projection =
-        { SpecDecl: string
-          Encoder: string
-          Decoder: string
-          Mk: string option
-          MapMsg: string option
-          RecordFields: IdlField list option }
-
-    /// The emitters' view of `Gen.GenSupport`.
-    type Support =
-        { Docs: Map<string, string list>
-          TypeSplice: string option
-          EncodeSplice: string option
-          DecodeSplice: string option
-          AccessorSplice: string option
-          CaseRefines: Map<string, string>
-          KindProjections: Map<string, Projection> }

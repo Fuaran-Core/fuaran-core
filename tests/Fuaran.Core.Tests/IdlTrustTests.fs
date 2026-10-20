@@ -23,7 +23,7 @@ open Fuaran.Core.Tests.ReferenceIdl
 // **Phase 180 took the flip, on the schedule the measurement asked for.** Phase 179 made
 // the writer emit the block for every policy; `fuaran#1755` re-rendered both published
 // artifacts so neither depends on the absent-block answer; and only then did `Default`
-// go. `Trust.harden` is the checked path now — `hardenOrRefuse` survives as its alias —
+// go. `Trust.harden` is the checked path now — the `hardenOrRefuse` alias went at Phase 524 —
 // and an absent `harden` block reads back as `Undeclared`. The compat family below is
 // therefore INVERTED rather than deleted, and the inversion is asserted with its reason
 // beside it: the law was never "an absent block means the UI's tokens", it was "an
@@ -155,28 +155,6 @@ let tests =
                 testCase "an empty TransparentUnions is a declaration, not an omission" (fun _ ->
                     Expect.isEmpty refIdl.Harden.TransparentUnions "the fixture declares no transparent union"
                     Expect.isOk (Trust.checkHardenPolicy refIdl noTrust) "and that is not a refusal")
-
-                // Phase 180 — `harden` IS the checked path, and `hardenOrRefuse` is the
-                // name Phase 178 shipped it under, kept so code written between the two
-                // phases still compiles. The alias is asserted rather than assumed: a
-                // later session that gave the two different behaviours would be
-                // reintroducing exactly the unchecked entry point 180 removed.
-                testCase "hardenOrRefuse is an alias of harden, on both outcomes" (fun _ ->
-                    let v = VNode("n-1", "Note", [ "body", VUnion("Inline", [ "text", VStr "hello" ]) ])
-
-                    Expect.equal
-                        (Trust.hardenOrRefuse refIdl noTrust v)
-                        (Trust.harden refIdl noTrust v)
-                        "the two names agree on a declared vocabulary"
-
-                    let undeclared =
-                        { refIdl with
-                            Harden = HardenPolicy.Undeclared }
-
-                    Expect.equal
-                        (Trust.hardenOrRefuse undeclared noTrust v)
-                        (Trust.harden undeclared noTrust v)
-                        "and on an undeclared one")
 
                 testCase "harden refuses an undeclared vocabulary before hardening" (fun _ ->
                     let v = VNode("n-1", "Note", [ "body", VUnion("Inline", [ "text", VStr "hello" ]) ])

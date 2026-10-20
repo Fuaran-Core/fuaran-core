@@ -1,0 +1,37 @@
+// Phase 252 — a hosted slot's declared string format, checked before its host codec runs,
+// exactly as the interpreter and the TypeScript host check it.
+let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
+    let day (y: int) (m: int) (d: int) =
+        y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
+
+    let num (m: System.Text.RegularExpressions.Match) (i: int) = int m.Groups[i].Value
+
+    let ok =
+        match format, j with
+        | "date", JStr s ->
+            let m = System.Text.RegularExpressions.Regex.Match(s, "^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
+            m.Success && day (num m 1) (num m 2) (num m 3)
+        | "date-time", JStr s ->
+            let m =
+                System.Text.RegularExpressions.Regex.Match(
+                    s,
+                    "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$"
+                )
+
+            m.Success
+            && day (num m 1) (num m 2) (num m 3)
+            && num m 4 <= 23
+            && num m 5 <= 59
+            && num m 6 <= 59
+            && (not m.Groups[9].Success || (num m 9 <= 23 && num m 10 <= 59))
+        | "uuid", JStr s ->
+            System.Text.RegularExpressions.Regex.IsMatch(
+                s,
+                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            )
+        | _ -> false
+
+    if ok then
+        Ok()
+    else
+        dFail DecodeCode.OutOfRange ("a '" + format + "' string") (Canonical.write Rendering.CrossHost j)

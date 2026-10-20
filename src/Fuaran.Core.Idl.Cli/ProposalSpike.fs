@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Cli
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 230 — this harness used to be compiled into Fuaran.Core.Idl.Codegen and was
@@ -156,7 +157,7 @@ module internal ProposalSpike =
                          |> String.concat "; "))
 
     let private generateLeg (post: Idl) (tags: string list) : SpikeLeg * string option =
-        match Gen.fsharpModuleWith Gen.GenSupport.Empty "Spike.Generated" post tags with
+        match Gen.fsharpModuleWith GenSupport.Empty "Spike.Generated" post tags with
         | Error e -> leg "generate" false (sprintf "the F# structural layer does not generate: %A" e), None
         | Ok fsharp ->
             // Phase 124 — the TypeScript backend refuses an unrenderable declared default the way
@@ -379,8 +380,8 @@ module internal ProposalSpike =
                   candidateLeg input.Base post p.Fixtures ]
 
             let cost =
-                match Diff.run None (Artifact.render input.Base) (Artifact.render post) with
-                | Ok text -> text
+                match Diff.ofArtifacts (Artifact.render input.Base, None) (Artifact.render post, None) with
+                | Ok verdict -> Diff.report "none declared (no manifest given)" [] verdict
                 | Error e -> "(cost report unavailable: " + e + ")"
 
             Ok
