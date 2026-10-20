@@ -4798,9 +4798,12 @@ let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invoc
    18. THE SEAM CODEC, WHOLE (Phase 455) — `CapabilityCodec`'s three remaining pairs, clause for
        clause at the `JVal` as section 16 models the first: the typed INVOCATION
        (`encodeInvocationJson` / `invocationOf`, the repeated-address refusal raised through `at`),
-       the async ENVELOPE (`deferredJson` / `deferredOf`, the payload codec a parameter) and the
-       typed REFUSAL (`invokeErrorJson` / `invokeErrorOf`, all twelve `InvokeError` cases as
-       `gated_error`, with `faultJson` / `faultOf` inside). Then the two properties for every pair:
+       the async ENVELOPE (`CapabilitySeamCodec.encodeDeferred` / `decodeDeferred`, the payload codec
+       a parameter) and the typed REFUSAL (`CapabilitySeamCodec.encodeInvokeError` /
+       `decodeInvokeError`, all twelve `InvokeError` cases as `gated_error`, with
+       `encodeDeclarationFault` / `decodeDeclarationFault` inside). The last two pairs are derived from
+       their IDL declaration since Phase 551 (D200), where they were hand codecs in `CapabilityCodec`;
+       the documents and refusals are the same. Then the two properties for every pair:
        decode after encode, EXACTLY (`invocation_roundtrip`, `deferred_roundtrip`,
        `invoke_error_roundtrip`), and every refusal a reader answers RESOLVES in the document it read
        (`invocation_refusals_resolve`, `deferred_refusals_resolve`,
@@ -4810,7 +4813,7 @@ let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invoc
        PREMISE CHECKED FIRST. The codec is NOT built from the `Codec` blocks Phase 436 proved
        (`record`, `field`, `union`, …): every reader is written over `JVal` with the typed decode
        layer's combinators (`Decoder.field`, `optField`, `list`, `bind`, `map`, `at`, `fail`,
-       `tagDispatchWith`). So 436's composed round trip does not apply as a corollary, and both
+       `tagDispatchWith`; the derived pairs, their generated equivalents). So 436's composed round trip does not apply as a corollary, and both
        properties are proved here directly. The refusal law is `DecodeError.resolvesIn`, restated
        over this module's `jval` as `resolves_in` — the module is self-contained (header) — with the
        transport lemma `ok_at_under` and one soundness lemma per combinator, `DecodeLayer.fst`'s
@@ -5330,27 +5333,27 @@ let invocation_refusals_resolve () : Lemma (sound invocation_of_j) =
     | Error _ -> ()
     | Ok (cid, args) -> distinct_go_sound cid args [] 0 args; sound_elim (distinct_go cid args [] 0 args) x)
 
-(* ---- the async envelope: `deferredJson` / `deferredOf` ---- *)
+(* ---- the async envelope: `CapabilitySeamCodec.encodeDeferred` / `decodeDeferred` ---- *)
 
-(* F#: `CapabilityCodec.deferredJson`, the payload writer a parameter. *)
+(* F#: `CapabilitySeamCodec.encodeDeferred`, the payload writer a parameter. *)
 let deferred_json (#a:Type) (enc:a -> jval) (d:deferred a) : Tot jval =
   match d with
   | Pending -> JObj [("$type", JStr "pending")]
   | Ready v -> JObj [("$type", JStr "ready"); ("value", enc v)]
   | Failed m -> JObj [("$type", JStr "failed"); ("message", JStr m)]
 
-(* F#: the typed envelope reader under `deferredOf`, the payload reader a parameter. *)
+(* F#: `CapabilitySeamCodec.decodeDeferred`, the payload reader a parameter. *)
 let deferred_dec (#a:Type) (p:decoder a) : decoder (deferred a) =
   tag_dispatch [("pending", d_succeed Pending);
             ("ready", d_map Ready (field "value" p));
             ("failed", d_map Failed (field "message" d_str))]
 
-(* F#: `deferredOf`'s `payload` — the caller's sentence-answering reader, its refusal raised
+(* F#: `CapabilityCodec.payloadOf` — the caller's sentence-answering reader, its refusal raised
    `OutOfRange` at the payload. *)
 let payload_of (#a:Type) (dec:jval -> outcome a string) : decoder a =
   fun v -> match dec v with Ok x -> Ok x | Error _ -> Error (refuse OutOfRange)
 
-(* F#: `CapabilityCodec.deferredOf` (its sentence dropped). *)
+(* F#: `CapabilityCodec.decodeDeferred`'s reader, `decodeDeferred (payloadOf …)` (its sentence dropped). *)
 let deferred_of_j (#a:Type) (dec:jval -> outcome a string) : decoder (deferred a) = deferred_dec (payload_of dec)
 
 (* THE ENVELOPE ROUND TRIP (Phase 455), `deferred_roundtrip`: for any payload codec that reads back
@@ -5380,9 +5383,9 @@ let deferred_refusals_resolve (#a:Type) (dec:jval -> outcome a string) : Lemma (
   sound_intro (payload_of dec) (fun x -> ());
   deferred_dec_sound (payload_of dec)
 
-(* ---- the typed refusal: `invokeErrorJson` / `invokeErrorOf` ---- *)
+(* ---- the typed refusal: `CapabilitySeamCodec.encodeInvokeError` / `decodeInvokeError` ---- *)
 
-(* F#: `CapabilityCodec.faultJson`. *)
+(* F#: `CapabilitySeamCodec.encodeDeclarationFault`. *)
 let fault_json (f:decl_fault) : Tot jval =
   match f with
   | EmptySpace addr sp -> JObj [("$type", JStr "emptySpace"); ("addr", JStr addr); ("space", space_json sp)]
@@ -5390,10 +5393,10 @@ let fault_json (f:decl_fault) : Tot jval =
   | DuplicateHoleAddr addr -> JObj [("$type", JStr "duplicateHoleAddr"); ("addr", JStr addr)]
   | HoleUnderSlot node -> JObj [("$type", JStr "holeUnderSlot"); ("node", JStr node)]
 
-(* F#: the codec's `str name` — `Decoder.field name Decoder.str`. *)
+(* F#: a required string member — the derived reader's `dReq name fs dStr`. *)
 let str_f (name:string) : decoder string = field name d_str
 
-(* F#: the codec's `strList name` — `Decoder.field name (Decoder.list Decoder.str)`. *)
+(* F#: a required string-list member — the derived reader's `dReq name fs (dList dStr)`. *)
 let str_list_f (name:string) : decoder (list string) = field name (d_list d_str)
 
 let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
@@ -5402,7 +5405,7 @@ let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
    ("duplicateHoleAddr", d_map DuplicateHoleAddr (str_f "addr"));
    ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"))]
 
-(* F#: `CapabilityCodec.faultOf`. *)
+(* F#: `CapabilitySeamCodec.decodeDeclarationFault`. *)
 let fault_of_j (cr:codec_readers) : decoder decl_fault = tag_dispatch (fault_cases cr)
 
 (* F#: `InvokeError`, all twelve cases: the ten this model's `invoke_error` carries, under
@@ -5450,8 +5453,8 @@ let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) 
          (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra)));
    ("approvalRequired", d_map GApprovalRequired (str_f "policy"))]
 
-(* F#: `CapabilityCodec.invokeErrorOf` (its sentence dropped). `str "addr" |> Decoder.bind (fun
-   addr -> both …)` reads its three members in the order the nested `both` does. *)
+(* F#: `CapabilitySeamCodec.decodeInvokeError` (the sentence `CapabilityCodec.decodeInvokeError` adds
+   dropped). Each case reads its members in declaration order, the order the nested `both` does. *)
 let invoke_error_of_j (cr:codec_readers) : decoder gated_error = tag_dispatch (invoke_error_cases cr)
 
 let fault_roundtrip (cr:codec_readers) (f:decl_fault) : Lemma (fault_of_j cr (fault_json f) == Ok f) =

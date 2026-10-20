@@ -349,8 +349,8 @@ noeq type renderers = {
   hash:         string -> string;
   name_le:      string -> string -> bool;
   field:        string -> string;
-  (* Phase 398 — F#: `Canonical.write Rendering.CrossHost (JArr (where |> List.map QueryShape.predicateJson))` and the
-     same over `QueryShape.sortKeyJson`: the canonical text of a filter and of an order. *)
+  (* Phase 398 — F#: `Canonical.write Rendering.CrossHost (JArr (where |> List.map QuerySeamCodec.encodeColumnPredicate))` and the
+     same over `QuerySeamCodec.encodeSortKey`: the canonical text of a filter and of an order. *)
   render_where: list predicate -> string;
   render_order: list sort_key -> string
 }
@@ -1938,7 +1938,7 @@ let column_tag (t:column_type) : Tot string =
   | TimestampType Nanoseconds -> "timestamp_ns"
   | DecimalType -> "decimal"
 
-(* F#: `ColumnType.all |> List.map (fun t -> ColumnType.tag t, t)` looked up — `QueryShape.colTypeOf`'s
+(* F#: `ColumnType.all |> List.map (fun t -> ColumnType.tag t, t)` looked up — `QueryWire.columnTypeOf`'s
    table. *)
 let column_of_tag (s:string) : Tot (option column_type) =
   if s = "int" then Some IntType
@@ -1955,8 +1955,8 @@ let column_of_tag (s:string) : Tot (option column_type) =
 
 let column_tag_roundtrip (t:column_type) : Lemma (column_of_tag (column_tag t) == Some t) = ()
 
-(* F#: `QueryShape.tagged` — a string from a closed set; a miss is `UnknownTag`, raised at the value
-   by `andThen` (Phase 453). *)
+(* F#: `Decoder.oneOf` — a string from a closed set; a miss is `UnknownTag`, raised at the value
+   (Phase 453). *)
 let tagged_of (#a:Type) (look:string -> option a) : C.decoder a =
   fun el ->
     match C.d_str el with
@@ -1966,7 +1966,7 @@ let tagged_of (#a:Type) (look:string -> option a) : C.decoder a =
 let tagged_sound (#a:Type) (look:string -> option a) : Lemma (C.sound (tagged_of look)) =
   C.sound_intro (tagged_of look) (fun x -> ())
 
-(* F#: `QueryShape.colTypeOf`. *)
+(* F#: `QueryWire.columnTypeOf`. *)
 let col_type_of_j : C.decoder column_type = tagged_of column_of_tag
 
 (* F#: `EffectCodec.hostTag` / `hostDecoder`, over this model's effect class. *)
@@ -2059,8 +2059,8 @@ let param_of_j : C.decoder query_param =
          (C.both (C.field "type" col_type_of_j) (C.field "required" C.d_bool) (fun t r -> (t, r)))
          (fun n (tr:(column_type & bool)) -> { p_name = n; p_type = fst tr; p_required = snd tr })
 
-(* ---- a predicate and an order key: `QueryShape.predicateJson` / `predicateDecoder`,
-        `sortKeyJson` / `sortKeyDecoder` ---- *)
+(* ---- a predicate and an order key: `QuerySeamCodec.encodeColumnPredicate` /
+        `decodeColumnPredicate`, `encodeSortKey` / `decodeSortKey` (derived since Phase 551) ---- *)
 
 let predicate_tag (p:predicate) : Tot string =
   match p with
@@ -2073,7 +2073,7 @@ let predicate_tag (p:predicate) : Tot string =
   | IsNull _ -> "isNull"
   | IsNotNull _ -> "isNotNull"
 
-(* F#: `QueryShape.predicateJson` — a comparison's literal written at its own type
+(* F#: `QuerySeamCodec.encodeColumnPredicate` — a comparison's literal written at its own type
    (`Cell.typeOf v |> Option.defaultValue StringType`) by the column codec. *)
 let predicate_json (#r:Type) (cc:column_codec r) (p:predicate) : Tot C.jval =
   let col = predicate_column p in
@@ -2111,7 +2111,7 @@ let predicate_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder pre
    ("isNull", C.d_map IsNull (C.field "column" C.d_str));
    ("isNotNull", C.d_map IsNotNull (C.field "column" C.d_str))]
 
-(* F#: `QueryShape.predicateDecoder`. *)
+(* F#: `QuerySeamCodec.decodeColumnPredicate`. *)
 let predicate_of_j (#r:Type) (cc:column_codec r) : C.decoder predicate = C.tag_dispatch (predicate_cases cc)
 
 let direction_tag (d:sort_direction) : Tot string =
@@ -2625,7 +2625,7 @@ let s_f (name:string) : C.decoder string = C.field name C.d_str
 let sl_f (name:string) : C.decoder (list string) = C.field name (C.d_list C.d_str)
 let ty_f (name:string) : C.decoder column_type = C.field name col_type_of_j
 
-(* F#: `QueryShape.tags` looked up — `predicateNotApplicable`'s `predicate` member. *)
+(* F#: `QueryWire.predicateTags` looked up — `predicateNotApplicable`'s `predicate` member. *)
 let predicate_tag_of (s:string) : Tot (option string) =
   if s = "equalTo" || s = "greaterThan" || s = "atLeast" || s = "lessThan" || s = "atMost" ||
      s = "contains" || s = "isNull" || s = "isNotNull" then Some s else None
