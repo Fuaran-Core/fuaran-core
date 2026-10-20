@@ -422,7 +422,7 @@ module CapabilityPipeline =
     /// Decode a pipeline from a wire string, answering a typed refusal (Phase 310): its code, the
     /// path to the value at fault, and [[decode]]'s sentence. A parse failure is refused at the root.
     let decodeDetailed (s: string) : Result<CapabilityPipeline, DecodeError> =
-        Decoder.parse s
+        Decoder.parse ReadOptions.strict s
         |> Result.bind (Decoder.field "nodes" (Decoder.list nodeFromJ))
         |> Result.map (fun nodes -> { Nodes = nodes })
 

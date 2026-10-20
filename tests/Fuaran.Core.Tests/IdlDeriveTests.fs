@@ -2010,7 +2010,7 @@ module private Overrides =
                 Annotation = None } ]
 
     let json () : JVal =
-        match Decoder.parse (encodeNode tree) with
+        match Decoder.parse ReadOptions.strict (encodeNode tree) with
         | Ok j -> j
         | Error e -> failwithf "the fixture parses: %A" e
 
@@ -2140,7 +2140,7 @@ let collectingOverrideTests =
                       (Overrides.render (decodeNodeAll text))
                       "decodeNodeAll"
 
-              match Decoder.parse broken with
+              match Decoder.parse ReadOptions.strict broken with
               | Ok j ->
                   Expect.equal
                       (Overrides.render (decodeNodeJsonAllWith collectingDecoders j))

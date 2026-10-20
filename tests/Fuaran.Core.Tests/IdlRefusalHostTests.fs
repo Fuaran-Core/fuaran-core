@@ -642,7 +642,11 @@ let private corners: (string * string * Answer) list =
       "a lone surrogate written as an escape", corner "meta" (Some "\"\\ud800\""), refused "InvalidJson" []
       "a lone surrogate written raw", corner "meta" (Some("\"" + string (char 0xDC00) + "\"")), refused "InvalidJson" []
       "null in a json slot", corner "meta" (Some "null"), refused "InvalidJson" []
-      "nesting past the reader's cap", corner "meta" (Some deep), refused "LimitExceeded" []
+      // Phase 519: the cap's breach at the container opened at it — the root object is the first
+      // of the 512, so it is the 512th array, item 0 of each of the 510 under `meta`.
+      "nesting past the reader's cap",
+      corner "meta" (Some deep),
+      refused "LimitExceeded" (PathSegment.Key "meta" :: List.replicate 511 (PathSegment.Index 0))
       "a malformed number met before nesting past the cap",
       (corner "meta" (Some deep)).Replace("\"count\":1", "\"count\":01"),
       refused "InvalidJson" []

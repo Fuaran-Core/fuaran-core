@@ -61,7 +61,7 @@ open Fuaran.Core.Idl
 //     `Required | Optional | OmitDefault | HostOnly`; none of them says "always
 //     present, `null` when absent", which is what this vocabulary's encoder does
 //     for an absent optional. The READ half already exists in Core
-//     (`Json.parseTolerantOfNull`, which erases a null member to absence) but the
+//     (`Json.read ReadOptions.tolerantOfNull`, which erases a null member to absence) but the
 //     IDL's own `Decode.decode` entry point calls strict `Json.parse`, so the
 //     interpreter cannot reach it. The WRITE half is deliberately absent — the
 //     the canonical wire form is null-free by decision — so the honest
@@ -629,7 +629,7 @@ let tests =
               // Core's null-tolerant read (the erase-to-absence policy) handles the
               // read half — but the IDL's own decode entry point does not offer it.
               Expect.isTrue
-                  (Result.isOk (Json.parseTolerantOfNull withNull))
+                  (Result.isOk (Json.read ReadOptions.tolerantOfNull withNull))
                   "the tolerant read exists in Core, unreached by Decode.decode"
           }
 

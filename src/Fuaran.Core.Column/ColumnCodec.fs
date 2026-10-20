@@ -106,23 +106,43 @@ module ColumnCodec =
         | Ref _ -> Ok(encode src)
         | Embedded t -> Table.validate t |> Result.map (fun () -> encode src)
 
-    // ---- decode (`Json.parseDetailed` → the codec envelope `ColumnError`) ----
+    // ---- decode (`Json.read` → the codec envelope `ColumnError`) ----
 
-    // The `Wire.Decode` combinators, over this codec's envelope (Phase 299; the codec kept a private
-    // copy of each until then). A missing member is `MissingField`; a wrong JSON kind is
-    // `MalformedShape`, prefixed with where it was met when there is a where. The messages are the
-    // ones the private copies wrote.
-    let private fault (ctx: string) (f: Decode.Fault) : ColumnError =
-        match f with
-        | Decode.MissingProperty name -> MissingField name
-        | Decode.WrongKind(expected, got) ->
-            MalformedShape((if ctx = "" then "" else ctx + ": ") + "expected " + expected + ", got " + got)
+    /// THE CODEC'S PROJECTION OF A DECODE REFUSAL (Phase 519; `SchemaDeltaCodec` reads through it
+    /// too): the codec reads with the `Decoder` combinators and spells their refusal in its own
+    /// envelope. An absent member is `MissingField`, naming it (the last step of the refusal's
+    /// path); any other refusal is `MalformedShape`, its sentence prefixed with where it was met when
+    /// there is a where. A wrong JSON kind reads `expected <kind>, got <kind>`, as it did when the
+    /// codec read through the string-error twin's `Fault` (deleted with it): no refusal moved.
+    let internal ofDecodeError (ctx: string) (e: DecodeError) : ColumnError =
+        match e.Code, List.tryLast e.Path with
+        | DecodeCode.MissingField, Some(PathSegment.Key name) -> MissingField name
+        | _ -> MalformedShape((if ctx = "" then "" else ctx + ": ") + e.Message)
 
-    let private getField (name: string) (el: JVal) : Result<JVal, ColumnError> = Decode.propWith (fault "") name el
+    /// The codec's projection of a read's refusal (Phase 519): malformed text is `NotJson`, carrying
+    /// the parser's classified error. The depth cap — the one breach `ReadOptions.strict` admits —
+    /// keeps the spelling it had before every reader reported it as a breach: `NotJson` with kind
+    /// `MaxDepthExceeded` at the container's position, in the scanner's sentence, so no column
+    /// refusal moved. Another bound's breach, which a strict read never meets, is `MalformedShape`
+    /// naming the limit.
+    let internal ofJsonRefusal (r: JsonRefusal) : ColumnError =
+        match r with
+        | JsonRefusal.Malformed e -> NotJson e
+        | JsonRefusal.LimitExceeded b when b.Limit = JsonLimit.Depth ->
+            NotJson
+                { Kind = MaxDepthExceeded
+                  Position = b.Position
+                  Message = "max nesting depth " + string b.Declared + " exceeded" }
+        | JsonRefusal.LimitExceeded _ -> MalformedShape((DecodeError.ofJsonRefusal r).Message)
 
-    let private asArr (ctx: string) (el: JVal) : Result<JVal list, ColumnError> = Decode.arrayWith (fault ctx) el
+    let private getField (name: string) (el: JVal) : Result<JVal, ColumnError> =
+        Decoder.field name Decoder.json el |> Result.mapError (ofDecodeError "")
 
-    let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
+    let private asArr (ctx: string) (el: JVal) : Result<JVal list, ColumnError> =
+        Decoder.items el |> Result.mapError (ofDecodeError ctx)
+
+    let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> =
+        Decoder.str el |> Result.mapError (ofDecodeError ctx)
 
     /// The sentence a unit refusal is reported in, naming the token (or the shape fault) and its
     /// zero-based position in the text, as `Unit.parse` classifies it.
@@ -150,7 +170,7 @@ module ColumnCodec =
     /// An optional string member of a schema entry: absent is `None`; present and not a string is
     /// refused naming the column and the member.
     let private optionalText (column: string) (name: string) (el: JVal) : Result<string option, ColumnError> =
-        match Decode.tryProp name el with
+        match Decoder.tryMember name el with
         | None -> Ok None
         | Some(JStr s) -> Ok(Some s)
         | Some other ->
@@ -211,7 +231,7 @@ module ColumnCodec =
                     | Some d -> Field.withDescription d f
                     | None -> f))
             |> Result.bind (fun f ->
-                match Decode.tryProp "ext" el with
+                match Decoder.tryMember "ext" el with
                 | None -> Ok f
                 | Some(JObj members) ->
                     let rec go (f: Field) =
@@ -271,7 +291,7 @@ module ColumnCodec =
                 // omission cannot mean absent cells): models reproduce the canonical
                 // object shape minus the mask. Synthesize all-present; absent cells
                 // still require the full wrapped form, which stays canonical.
-                match Decode.tryProp "validity" colEl with
+                match Decoder.tryMember "validity" colEl with
                 | None -> Ok(values, values |> List.map (fun _ -> JBool true))
                 | Some validityEl ->
                     asArr (name + ".validity") validityEl
@@ -286,7 +306,7 @@ module ColumnCodec =
     /// first (`LengthMismatch`), then row by row a validity entry that is not a bool
     /// (`MalformedShape`) before the value beside it.
     let private decodeColumn (columnsObj: JVal) (name: string) (ty: ColumnType) : Result<Column, ColumnError> =
-        match Decode.tryProp name columnsObj with
+        match Decoder.tryMember name columnsObj with
         | None -> Error(MissingField("columns." + name))
         | Some colEl ->
             columnParts name colEl
@@ -399,13 +419,13 @@ module ColumnCodec =
     /// accepts, and is `t` itself for every table this function returned (`proofs/WireColumn.fst`).
     let decodeJson (el: JVal) : Result<DataSource, ColumnError> =
         let schemaR =
-            match Decode.tryProp "schema" el with
+            match Decoder.tryMember "schema" el with
             | Some schemaEl -> decodeSchema schemaEl |> Result.map Some
             | None -> Ok None
 
         schemaR
         |> Result.bind (fun schemaOpt ->
-            match Decode.tryProp "ref" el with
+            match Decoder.tryMember "ref" el with
             | Some refEl -> asStr "ref" refEl |> Result.map Ref
             | None ->
                 getField "columns" el
@@ -425,7 +445,7 @@ module ColumnCodec =
                                     (fun acc name ->
                                         acc
                                         |> Result.bind (fun entries ->
-                                            match Decode.tryProp name columnsObj with
+                                            match Decoder.tryMember name columnsObj with
                                             | None -> Error(MissingField("columns." + name))
                                             | Some colEl ->
                                                 columnParts name colEl
@@ -452,9 +472,9 @@ module ColumnCodec =
     /// Decode a wire string into a `DataSource`, surfacing the codec envelope `ColumnError` (a
     /// JSON-syntax failure becomes `NotJson`, carrying the parser's structured error).
     let decode (s: string) : Result<DataSource, ColumnError> =
-        match Json.parseDetailed s with
-        | Error e -> Error(NotJson e)
-        | Ok el -> decodeJson el
+        Json.read ReadOptions.strict s
+        |> Result.mapError ofJsonRefusal
+        |> Result.bind decodeJson
 
     // ---- one cell (Phase 514) ----
     // A value a document carries OUTSIDE a table — a predicate's literal, a model's argument to a

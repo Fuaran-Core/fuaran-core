@@ -256,14 +256,18 @@ let document (index: int) (v: DecodeVector) : string =
     + v.Input
     + "}"
 
-/// Where the vector's refusal is expected in that document: a parse refusal at the root, every
-/// other one under the member `v`.
+/// Where the vector's refusal is expected in that document: malformed text at the root, and every
+/// other refusal under the member `v`. The parser's depth cap counts the node object as one more
+/// container, so a vector the parser itself refuses at the cap (Phase 519: at the path of the
+/// container opened at it) is refused one container shallower inside `v` — its path's first item
+/// step is the node's own level.
 let expectedRefusal (v: DecodeVector) : (string * PathSegment list) option =
     v.Refusal
     |> Option.map (fun (code, path) ->
         match code with
-        | "InvalidJson"
-        | "LimitExceeded" -> code, path
+        | "InvalidJson" -> code, path
+        | "LimitExceeded" when Result.isError (Json.read ReadOptions.strict v.Input) ->
+            code, PathSegment.Key "v" :: List.tail path
         | _ -> code, PathSegment.Key "v" :: path)
 
 /// The generated module's name and file.

@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.StringParseRunTests
 
-// Phase 366 — a string is parsed by runs, not characters. `Json.parseDetailedWithPolicy`'s
+// Phase 366 — a string is parsed by runs, not characters. `Json.read`'s
 // `parseString` now walks each escape-free stretch, checks the surrogate pairing of every unit as it
 // passes (Phase 299), and copies the stretch whole. Its refusals are load-bearing: the KIND, the
 // MESSAGE and the POSITION of every one must be what the one-character-at-a-time reader produced.
@@ -122,10 +122,11 @@ let private production (oracle: Read) (input: string) : Read =
         | Ok(_, past) -> input.Substring(0, past)
         | Error _ -> input
 
-    match Json.parseDetailedWithPolicy RejectNull Json.defaultMaxDepth text with
+    match Json.read ReadOptions.strict text with
     | Ok(JStr s) -> Ok(s, text.Length)
     | Ok other -> Error(UnexpectedChar, sprintf "not a string: %A" other, -1)
-    | Error e -> Error(e.Kind, e.Message, e.Position)
+    | Error(JsonRefusal.Malformed e) -> Error(e.Kind, e.Message, e.Position)
+    | Error(JsonRefusal.LimitExceeded b) -> Error(MaxDepthExceeded, sprintf "a breach: %A" b, b.Position)
 
 /// The run-boundary alphabet. Each token is a raw stretch, a raw surrogate half, an escape (good or
 /// malformed), or a bare quote; sequences of them place every refusal at the start, the middle and
@@ -258,10 +259,10 @@ let tests =
           testCase "the common string, with no escape, decodes to its own text"
           <| fun _ ->
               for s in [ ""; "plain"; "\u00E9 \U0001F600 /" ] do
-                  Expect.equal (Json.parseDetailed ("\"" + s + "\"")) (Ok(JStr s)) (sprintf "%A" s)
+                  Expect.equal (Json.read ReadOptions.strict ("\"" + s + "\"")) (Ok(JStr s)) (sprintf "%A" s)
 
               Expect.equal
-                  (Json.parseDetailed "{\"k\":\"ab\\ncd\",\"e\":\"\\u00e9x\"}")
+                  (Json.read ReadOptions.strict "{\"k\":\"ab\\ncd\",\"e\":\"\\u00e9x\"}")
                   (Ok(JObj [ "k", JStr "ab\ncd"; "e", JStr "\u00E9x" ]))
                   "runs on both sides of an escape are copied whole"
 

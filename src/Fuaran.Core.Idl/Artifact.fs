@@ -1325,7 +1325,7 @@ module Artifact =
 
     /// [[ofJsonDetailed]] over `idl.json` bytes; a parse failure is refused at the root.
     let parseDetailed (text: string) : Result<Idl, DecodeError> =
-        Decoder.parse text |> Result.bind ofJsonDetailed
+        Decoder.parse ReadOptions.strict text |> Result.bind ofJsonDetailed
 
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the
     /// ordering [[canonicalise]] states.

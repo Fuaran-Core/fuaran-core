@@ -549,7 +549,7 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                   (let encInt (n: int) = Json.render (JInt n)
 
                    let decInt (s: string) =
-                       Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
+                       Json.parse s |> Result.bind (Decoder.describing Decoder.int)
 
                    Conformance.captureReplayLaws encInt decInt ConfRng.next OpStream.defaultHash 31337 200)
               run
@@ -1128,7 +1128,7 @@ let vacuityTests =
                     "Conformance.captureReplayLaws",
                     Conformance.captureReplayLaws
                         (fun (n: int) -> Json.render (JInt n))
-                        (fun s -> Decode.parse s |> Result.bind (Decoder.describing Decoder.int))
+                        (fun s -> Json.parse s |> Result.bind (Decoder.describing Decoder.int))
                         (fun r -> 7, r)
                         OpStream.defaultHash
                         31337

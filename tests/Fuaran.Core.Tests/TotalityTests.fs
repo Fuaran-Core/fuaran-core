@@ -1080,11 +1080,12 @@ let tests =
           <| fun _ ->
               let kind =
                   onOneMegabyteStack (fun () ->
-                      match Json.parseDetailed (Json.render (nestedArrays 10000 (JInt 1))) with
-                      | Error e -> Some e.Kind
+                      match Json.read ReadOptions.strict (Json.render (nestedArrays 10000 (JInt 1))) with
+                      | Error(JsonRefusal.LimitExceeded b) -> Some b.Limit
+                      | Error(JsonRefusal.Malformed _)
                       | Ok _ -> None)
 
-              Expect.equal kind (Some MaxDepthExceeded) "the read side's cap answers"
+              Expect.equal kind (Some JsonLimit.Depth) "the read side's cap answers, as the depth bound"
 
           // ---- ill-formed UTF-16, wherever a digest depends on it ----
 

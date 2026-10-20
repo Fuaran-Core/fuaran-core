@@ -250,7 +250,10 @@ module DecodeRejectCorpus =
               "nesting-past-the-cap"
               (sprintf """{"$type":"list","of":%s}""" int)
               (String.replicate 600 "[" + String.replicate 600 "]")
-              (Refuse(DecodeCode.LimitExceeded, []))
+              // Phase 519: the cap's breach at the path of the container opened at it — the 513th
+              // array, item 0 of each of the 512 above it — as every other bound's (it was the root
+              // while the default cap had a spelling of its own).
+              (Refuse(DecodeCode.LimitExceeded, List.replicate 512 (PathSegment.Index 0)))
           v
               "too-many-items"
               (sprintf """{"$type":"list","of":%s,"maxItems":2}""" int)
@@ -420,8 +423,12 @@ module DecodeRejectCorpus =
             | _ -> []
 
         (match vec.Limits with
-         | Some limits -> Decoder.parseWithLimits limits vec.Input
-         | None -> Decoder.parse vec.Input)
+         | Some limits ->
+             Decoder.parse
+                 { ReadOptions.strict with
+                     Limits = limits }
+                 vec.Input
+         | None -> Decoder.parse ReadOptions.strict vec.Input)
         |> Result.bind (shapeDecoder defs (parse vec.Shape))
         |> Result.mapError (fun e -> e.Code, e.Path)
 
@@ -707,12 +714,20 @@ let tests =
                         (DecodeCode.UnknownTag, [])
                         "oneOf miss"
 
-                    Expect.equal (refusal (Decoder.parse "{")) (DecodeCode.InvalidJson, []) "not JSON"
+                    Expect.equal
+                        (refusal (Decoder.parse ReadOptions.strict "{"))
+                        (DecodeCode.InvalidJson, [])
+                        "not JSON"
 
                     Expect.equal
-                        (refusal (Decoder.parseWith 3 "[[[[1]]]]"))
-                        (DecodeCode.LimitExceeded, [])
-                        "the nesting cap is a limit"
+                        (refusal (
+                            Decoder.parse
+                                { ReadOptions.strict with
+                                    Limits = JsonLimits.depthOnly 3 }
+                                "[[[[1]]]]"
+                        ))
+                        (DecodeCode.LimitExceeded, [ PathSegment.Index 0; PathSegment.Index 0; PathSegment.Index 0 ])
+                        "the nesting cap is a limit, at the path of the container opened at it"
 
                 testCase "every code has one wire name, and the names read back"
                 <| fun _ ->
@@ -884,7 +899,7 @@ let tests =
                         (Error "missing property: kind")
                         "kindOf"
 
-                    Expect.equal (Fuaran.Core.Decode.tryProp "s" doc) (Some(JStr "x")) "tryProp"
+                    Expect.equal (Decoder.tryMember "s" doc) (Some(JStr "x")) "tryMember"
 
                 testCase "the IDL interpreter's string forms carry the typed refusal's sentence"
                 <| fun _ ->
@@ -1097,7 +1112,8 @@ let tests =
 
                 testCase "reject vectors pin code and path"
                 <| fun _ ->
-                    let decode = Decoder.ofString (Decoder.field "a" Decoder.int)
+                    let decode =
+                        Decoder.parse ReadOptions.strict >> Result.bind (Decoder.field "a" Decoder.int)
 
                     let outcomes =
                         Corpus.runRejects
@@ -1192,7 +1208,7 @@ let tests =
 
                 // Phase 465 — the limits vectors pin every limit from both sides: for each of the
                 // five, a vector at the bound is accepted and one past it is the breach of THAT
-                // limit (read through `Json.parseWithLimits`, which names it) at the path the
+                // limit (read through `Json.read` under the vector's limits, which names it) at the path the
                 // vector pins — so a host whose unit is wrong (UTF-16 units, bytes) fails the
                 // astral and CJK vectors by name rather than by accident.
                 testCase "every limit is pinned at its bound and one past it, and a breach names its limit"
@@ -1203,7 +1219,7 @@ let tests =
 
                     let breached =
                         [ for v, l in limitVectors do
-                              match v.Intent, Json.parseWithLimits RejectNull l v.Input with
+                              match v.Intent, Json.read { ReadOptions.strict with Limits = l } v.Input with
                               | DecodeRejectCorpus.Refuse(DecodeCode.LimitExceeded, path),
                                 Error(JsonRefusal.LimitExceeded b) ->
                                   Expect.equal b.Path path (sprintf "%s: the breach's path" v.Name)

@@ -1786,7 +1786,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
                  if allWf then
                      diffs.Add(sprintf "seed %d: a well-formed pipeline was refused (%s)" i (prodDecodeErrRender e)))
 
-            match Decoder.parse s with
+            match Decoder.parse ReadOptions.strict s with
             | Error _ -> diffs.Add(sprintf "seed %d: the pipeline's own encoding did not parse" i)
             | Ok parsed ->
                 let mutable pdocs = [ parsed ]
@@ -1800,7 +1800,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
                     nodeDocuments <- nodeDocuments + 1
                     let text = Canon.render j
 
-                    match Decoder.parse text with
+                    match Decoder.parse ReadOptions.strict text with
                     | Error _ -> diffs.Add(sprintf "seed %d: a mutated pipeline document did not parse" i)
                     | Ok reparsed ->
                         match

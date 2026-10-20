@@ -871,7 +871,8 @@ const dSentinel = (sentinel) => (j) => {
 
     /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
     /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
-    /// a container opened past its nesting cap is `LimitExceeded` there.
+    /// a container opened past its nesting cap is `LimitExceeded` at that container's path (Phase
+    /// 519: the reader keeps the path of the value it is reading, as the F# scanner's frames do).
     ///
     /// Phase 347 — the leg IS a reader now, the F# reader's twin (`Json.parse`), not `JSON.parse`
     /// behind a scan. `JSON.parse` answers five questions differently from it, and each answer
@@ -890,6 +891,9 @@ const dSentinel = (sentinel) => (j) => {
 const dParse = (s) => {
   const n = s.length;
   let i = 0;
+  // The path to the value being read, root first: a member's key or an item's index per open
+  // container (Phase 519) — where a container opened past the cap is refused.
+  const at = [];
   // Whether the value just read was a WHOLE number written as a float token.
   let floatTok = false;
   const bad = (m) => { throw new DecodeFault('InvalidJson', 'JSON text', 'not valid JSON: ' + m); };
@@ -1002,7 +1006,11 @@ const dParse = (s) => {
     return bad("expected '" + word + "'");
   };
   const deep = (depth) => {
-    if (depth >= dMaxDepth) throw new DecodeFault('LimitExceeded', "nesting within the parser's cap", 'not valid JSON: max nesting depth ' + dMaxDepth + ' exceeded');
+    if (depth >= dMaxDepth) {
+      const f = new DecodeFault('LimitExceeded', 'within the depth bound of ' + dMaxDepth, 'limit depth of ' + dMaxDepth + ' exceeded');
+      f.path = at.slice();
+      throw f;
+    }
   };
   const obj = (depth) => {
     deep(depth);
@@ -1021,7 +1029,9 @@ const dParse = (s) => {
       ws();
       expect(':');
       ws();
+      at.push(k);
       const v = val(depth + 1);
+      at.pop();
       const f = floatTok;
       // Phase 462: a repeated member name is refused, as the F# reader refuses it, once its value
       // is read — a refusal inside the value wins, and a repeated null is the null's refusal.
@@ -1051,7 +1061,9 @@ const dParse = (s) => {
       return a;
     }
     for (;;) {
+      at.push(a.length);
       const v = val(depth + 1);
+      at.pop();
       if (floatTok) markFloat(a, a.length);
       a.push(v);
       ws();

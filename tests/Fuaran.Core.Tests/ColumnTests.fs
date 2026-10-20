@@ -185,6 +185,46 @@ let tests =
 
           // ---- the codec envelope ----
 
+          // Phase 519: the codecs read through `Decoder` with a `DecodeError -> ColumnError` projection
+          // of their own, where they read through the string-error twin's `Fault` adapters before.
+          // Every spelling the adapters wrote is the projection's, byte for byte, and the parser's
+          // nesting cap, a `Depth` breach on every reader now, keeps its `NotJson` spelling here.
+          testCase "the decode projection spells every refusal the deleted fault adapters spelled"
+          <| fun _ ->
+
+              let refusal (input: string) =
+                  match ColumnCodec.decode input with
+                  | Error e -> e
+                  | Ok v -> failtestf "%s decoded to %A" input v
+
+              Expect.equal (refusal "[]") (MalformedShape "expected object, got array") "a non-object, no context"
+              Expect.equal (refusal "{}") (MissingField "columns") "an absent member, by name"
+
+              Expect.equal
+                  (refusal """{"columns":{},"schema":1}""")
+                  (MalformedShape "schema: expected array, got int")
+                  "a wrong kind, with its context"
+
+
+              let deep = String.replicate 600 "[" + String.replicate 600 "]"
+
+              match refusal deep with
+              | NotJson e ->
+                  Expect.equal e.Kind MaxDepthExceeded "the cap keeps its kind"
+                  Expect.equal e.Position 512 "at the bracket opened past it"
+                  Expect.equal e.Message "max nesting depth 512 exceeded" "in the scanner's sentence"
+              | other -> failtestf "expected NotJson, got %A" other
+
+              Expect.equal
+                  (SchemaDeltaCodec.decode "{}")
+                  (Error(MissingField "added"))
+                  "the delta codec's absent member"
+
+              Expect.equal
+                  (SchemaDeltaCodec.decode "[]")
+                  (Error(MalformedShape "added: expected object, got array"))
+                  "and its wrong kind, under the member it was reading"
+
           testCase "NotJson — a syntax error surfaces as NotJson, carrying the parser's structured error"
           <| fun _ ->
               match ColumnCodec.decode "{not json" with

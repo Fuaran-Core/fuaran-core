@@ -275,7 +275,7 @@ module QueryCodec =
     /// `queryErrorOf` over text. A parse failure or an unknown `$type` is the `Error` sentence,
     /// never a `QueryError`.
     let decodeQueryError (s: string) : Result<QueryError, string> =
-        Decode.parse s |> Result.bind queryErrorOf
+        Json.parse s |> Result.bind queryErrorOf
 
     // ---- a model's arguments (Phase 251) ----
     // `Query.toJsonSchema` tells a model to emit one object keyed by parameter name; this reads that
@@ -375,7 +375,7 @@ module QueryCodec =
     /// `decodeArgsJson` over text. Text that is not JSON is `UnreadableArgs` carrying the parser's
     /// refusal at the root (Phase 385).
     let decodeArgs (q: Query) (s: string) : Result<(string * Cell) list, QueryError list> =
-        match Decoder.parse s with
+        match Decoder.parse ReadOptions.strict s with
         | Error e -> Error [ UnreadableArgs e ]
         | Ok el -> decodeArgsJson q el
 
@@ -433,7 +433,7 @@ module QueryCodec =
         (read: JVal -> Result<'T, DecodeError>)
         (s: string)
         : Result<'T, DecodeError> =
-        Decoder.parse s
+        Decoder.parse ReadOptions.strict s
         |> Result.bind (fun el ->
             match policy with
             | ReadPolicy.Lenient -> read el

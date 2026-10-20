@@ -907,8 +907,7 @@ module CapabilityCodec =
         Decoder.describing decodeJsonDetailed el
 
     /// Parse, then `decodeJson`; a malformed document is refused with the parser's sentence.
-    let decode (s: string) : Result<Capability, string> =
-        Decode.parse s |> Result.bind decodeJson
+    let decode (s: string) : Result<Capability, string> = Json.parse s |> Result.bind decodeJson
 
     // ---- typed invocation record ----
 
@@ -958,7 +957,7 @@ module CapabilityCodec =
     /// read as strings and checked against nothing until `validateArgs`, but an address given twice
     /// is refused (Phase 307).
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
-        Decode.parse s |> Result.bind (Decoder.describing invocationOf)
+        Json.parse s |> Result.bind (Decoder.describing invocationOf)
 
     // ---- Deferred<'T> async-result envelope (Phase 32) ----
 
@@ -997,7 +996,7 @@ module CapabilityCodec =
 
     /// Parse, then `deferredOf`; a refusal from `decodeT` is passed through as its own sentence.
     let decodeDeferred (decodeT: JVal -> Result<'T, string>) (s: string) : Result<Deferred<'T>, string> =
-        Decode.parse s |> Result.bind (deferredOf decodeT)
+        Json.parse s |> Result.bind (deferredOf decodeT)
 
     // ---- typed refusal (Phase 251) ----
     // The refusal crosses the wire like every other seam type, under the same `$type` envelope
@@ -1085,7 +1084,7 @@ module CapabilityCodec =
 
     /// Parse, then `invokeErrorOf`; an unknown `$type` is refused as `unknown invoke error: <tag>`.
     let decodeInvokeError (s: string) : Result<InvokeError, string> =
-        Decode.parse s |> Result.bind invokeErrorOf
+        Json.parse s |> Result.bind invokeErrorOf
 
     // ---- strict read policy (Phase 251) ----
     // `Strict` is a members check over the document BEFORE the ordinary decoder runs: every object
@@ -1164,7 +1163,8 @@ module CapabilityCodec =
 
     /// `decodeWith` answering a typed refusal (Phase 310); a parse failure is refused at the root.
     let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<Capability, DecodeError> =
-        Decoder.parse s |> Result.bind (decodeJsonDetailedWith policy)
+        Decoder.parse ReadOptions.strict s
+        |> Result.bind (decodeJsonDetailedWith policy)
 
     /// `decodeJson` under a read policy: `Strict` refuses an unknown member anywhere in the
     /// declaration (its signature, holes, value spaces, effects and placement included).
@@ -1173,7 +1173,7 @@ module CapabilityCodec =
 
     /// `decode` under a read policy.
     let decodeWith (policy: ReadPolicy) (s: string) : Result<Capability, string> =
-        Decode.parse s |> Result.bind (decodeJsonWith policy)
+        Json.parse s |> Result.bind (decodeJsonWith policy)
 
     /// `decodeInvocationWith` answering a typed refusal (Phase 310); a parse failure is refused at
     /// the root.
@@ -1181,13 +1181,14 @@ module CapabilityCodec =
         (policy: ReadPolicy)
         (s: string)
         : Result<string * (string * string) list, DecodeError> =
-        Decoder.parse s |> Result.bind (under policy strictInvocation invocationOf)
+        Decoder.parse ReadOptions.strict s
+        |> Result.bind (under policy strictInvocation invocationOf)
 
     /// `decodeInvocation` under a read policy: `Strict` refuses an unknown member of the
     /// invocation or of any of its arguments — an `"actor"` beside the `capabilityId`, say, which
     /// `Lenient` reads past.
     let decodeInvocationWith (policy: ReadPolicy) (s: string) : Result<string * (string * string) list, string> =
-        Decode.parse s
+        Json.parse s
         |> Result.bind (fun el ->
             under policy strictInvocation invocationOf el
             |> Result.mapError DecodeError.describe)
@@ -1210,4 +1211,4 @@ module CapabilityCodec =
         (decodeT: JVal -> Result<'T, string>)
         (s: string)
         : Result<Deferred<'T>, string> =
-        Decode.parse s |> Result.bind (deferredOfWith policy decodeT)
+        Json.parse s |> Result.bind (deferredOfWith policy decodeT)

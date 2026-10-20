@@ -1051,11 +1051,11 @@ let private encFloat (f: float) : JVal =
                       nodeTy
               yield
                   sprintf
-                      "/// `decodeNode`'s collecting twin: a parser refusal is the one defect, else every defect.\nlet decodeNodeAll (s: string) : Result<Node%s, DecodeError list> =\n    Decoder.parse s |> cOne |> Result.bind (colNode collectingDecoders)"
+                      "/// `decodeNode`'s collecting twin: a parser refusal is the one defect, else every defect.\nlet decodeNodeAll (s: string) : Result<Node%s, DecodeError list> =\n    Decoder.parse ReadOptions.strict s |> cOne |> Result.bind (colNode collectingDecoders)"
                       nodeTy
               yield
                   sprintf
-                      "let decodeNodeAllWith (decoders: CollectingDecoders) (s: string) : Result<Node%s, DecodeError list> =\n    Decoder.parse s |> cOne |> Result.bind (decoders.Node decoders)"
+                      "let decodeNodeAllWith (decoders: CollectingDecoders) (s: string) : Result<Node%s, DecodeError list> =\n    Decoder.parse ReadOptions.strict s |> cOne |> Result.bind (decoders.Node decoders)"
                       nodeTy ]
             |> String.concat "\n"
 
@@ -1778,10 +1778,11 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
-              // Phase 337 — the parser's refusal through `Decoder.parse`: `InvalidJson` at the root,
-              // or `LimitExceeded` past the nesting cap, with `Json.parse`'s sentence.
+              // Phase 337 — the parser's refusal through `Decoder.parse` (under `ReadOptions.strict`
+              // since Phase 519): `InvalidJson` at the root, or `LimitExceeded` at the path of the
+              // container opened past the nesting cap.
               [ sprintf
-                    "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\n/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter\n/// reports for the same document, and this layer's sentence (`DecodeError.describe`).\nlet decodeNode (s: string) : Result<Node%s, DecodeError> =\n    Decoder.parse s |> Result.bind decNode"
+                    "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\n/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter\n/// reports for the same document, and this layer's sentence (`DecodeError.describe`).\nlet decodeNode (s: string) : Result<Node%s, DecodeError> =\n    Decoder.parse ReadOptions.strict s |> Result.bind decNode"
                     (objParams msg "Node" []) ]
               [ witness ]
               [ validatorDecl msg ]

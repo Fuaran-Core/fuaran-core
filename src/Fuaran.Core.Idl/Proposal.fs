@@ -568,7 +568,7 @@ module Proposal =
 
     /// [[ofJsonDetailed]] over text; a parse failure is refused at the root.
     let parseDetailed (text: string) : Result<Proposal, DecodeError> =
-        Decoder.parse text |> Result.bind ofJsonDetailed
+        Decoder.parse ReadOptions.strict text |> Result.bind ofJsonDetailed
 
     /// Read a proposal document from JSON text — the sentence of [[parseDetailed]]'s refusal.
     /// Structural only: a document that parses can still fail [[validate]].

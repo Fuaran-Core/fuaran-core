@@ -52,20 +52,21 @@ let tests =
               | Ok() -> ()
               | Error m -> failtestf "null-tolerance family failed: %s" m
 
-          testCase "the strict parser is byte-identical on null-free input"
+          testCase "the two policies read null-free input identically"
           <| fun _ ->
               for input in strictInvariants do
-                  let viaDefault = Json.parseDetailed input
-                  let viaPolicy = Json.parseDetailedWithPolicy RejectNull Json.defaultMaxDepth input
+                  let strict = Json.read ReadOptions.strict input
+                  let tolerant = Json.read ReadOptions.tolerantOfNull input
 
-                  Expect.equal viaPolicy viaDefault ("strict policy diverged from the default on: " + input)
+                  Expect.equal tolerant strict ("the tolerant policy diverged from the strict on: " + input)
 
           testCase "the strict entry points still refuse every null position"
           <| fun _ ->
               for input in [ "null"; """{"a":null}"""; "[null]"; """{"a":[{"b":null}]}""" ] do
-                  match Json.parseDetailed input with
+                  match Json.read ReadOptions.strict input with
                   | Ok _ -> failtestf "strict parse accepted %s" input
-                  | Error e ->
+                  | Error(JsonRefusal.LimitExceeded b) -> failtestf "strict parse breached %A on %s" b input
+                  | Error(JsonRefusal.Malformed e) ->
                       Expect.equal e.Kind NullNotRepresentable ("classified kind for: " + input)
 
                       Expect.equal
@@ -75,9 +76,10 @@ let tests =
 
           testCase "the tolerant rejection names the missing absence"
           <| fun _ ->
-              match Json.parseDetailedTolerantOfNull "[1,null]" with
+              match Json.read ReadOptions.tolerantOfNull "[1,null]" with
               | Ok _ -> failtest "tolerant parse erased an array-element null"
-              | Error e ->
+              | Error(JsonRefusal.LimitExceeded b) -> failtestf "tolerant parse breached %A" b
+              | Error(JsonRefusal.Malformed e) ->
                   Expect.equal e.Kind NullNotRepresentable "still classified NullNotRepresentable"
                   Expect.stringContains e.Message "no absence to erase it to" "names why this position differs"
 
@@ -85,16 +87,20 @@ let tests =
           <| fun _ ->
               let deep = String.replicate 6 "{\"a\":" + "null" + String.replicate 6 "}"
 
-              match Json.parseTolerantOfNullWith 3 deep with
-              | Ok _ -> failtest "the tolerant policy escaped the nesting cap"
-              | Error m -> Expect.stringContains m "max nesting depth" "capped by name"
+              let capped =
+                  { ReadOptions.tolerantOfNull with
+                      Limits = JsonLimits.depthOnly 3 }
 
-          testCase "Decode.parseTolerantOfNull reads an erased member as missing"
+              match Json.read capped deep with
+              | Error(JsonRefusal.LimitExceeded b) -> Expect.equal b.Limit JsonLimit.Depth "capped by the depth bound"
+              | other -> failtestf "the tolerant policy escaped the nesting cap: %A" other
+
+          testCase "Decoder.parse tolerantOfNull reads an erased member as missing"
           <| fun _ ->
               let doc = """{"a":"x","b":null}"""
 
-              match Decode.parseTolerantOfNull doc with
-              | Error m -> failtestf "tolerant decode failed: %s" m
+              match Decoder.parse ReadOptions.tolerantOfNull doc with
+              | Error e -> failtestf "tolerant decode failed: %s" (DecodeError.render e)
               | Ok el ->
                   Expect.equal
                       (Decoder.describing (Decoder.field "a" Decoder.str) el)
@@ -110,8 +116,10 @@ let tests =
           <| fun _ ->
               // Canon.render sorts keys, so this also pins that erasure leaves nothing
               // behind for the canonical encoder to trip on.
-              let tolerant = Json.parseTolerantOfNull WireNullTolerance.foreignDocument
-              let strict = Json.parse WireNullTolerance.foreignDocumentNullFree
+              let tolerant =
+                  Json.read ReadOptions.tolerantOfNull WireNullTolerance.foreignDocument
+
+              let strict = Json.read ReadOptions.strict WireNullTolerance.foreignDocumentNullFree
 
               match tolerant, strict with
               | Ok a, Ok b ->

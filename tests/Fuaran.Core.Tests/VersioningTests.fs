@@ -57,7 +57,7 @@ let private tolerantCodec: Corpus.Codec<Versioning.Decoded<RNode>> =
     { Encode = fun d -> Canon.render (Versioning.reencode encodeNode d)
       Decode =
         fun s ->
-            Decode.parse s
+            Json.parse s
             |> Result.bind (
                 Versioning.decodeTolerant (Decoder.describing (Decoder.field "kind" Decoder.str)) isKnown decodeNode
             ) }
@@ -184,7 +184,7 @@ let tests =
               let childWire = "{\"glyph\":\"%\",\"id\":\"w1\",\"kind\":\"widget\"}"
 
               match
-                  Decode.parse childWire
+                  Json.parse childWire
                   |> Result.bind (
                       Versioning.decodeTolerant
                           (Decoder.describing (Decoder.field "kind" Decoder.str))

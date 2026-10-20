@@ -3,7 +3,7 @@
    the error classification as machine-checked theorems (fuaran-core Phase 146 — the boundary
    Phase 135's theorem 1 named and left open).
 
-   WHAT IS MODELLED. `Fuaran.Core.Json.parseDetailedWithPolicy` (src/Fuaran.Core.Wire/Json.fs),
+   WHAT IS MODELLED. `Fuaran.Core.Json.read` at no bound but the cap (src/Fuaran.Core.Wire/Json.fs),
    clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes, the
    `\uXXXX` path and — since Phase 306 — its refusal of a lone or ill-ordered surrogate,
    `parseNumber` with the JSON number grammar (`Json.isJsonNumber`, also since Phase 306) and the
@@ -12,7 +12,7 @@
    fork, which lives in the member loop and nowhere else. The entry point's trailing-input check is
    modelled too, because `TrailingCharacters` is the one classified failure the parser does NOT
    raise through its internal exception. Since Phase 465 the descent also takes a LIMITS record
-   (F#: `JsonLimits`, through `Json.parseWithLimits`): a string-length bound counted in code points
+   (F#: `JsonLimits`, through `Json.read`'s `ReadOptions`): a string-length bound counted in code points
    as the string is read, an items-per-array and a members-per-object bound checked before the
    item or member is read, and the document-byte bound checked before anything is — each spent as
    the depth cap is, and each refused as `LimitExceeded`, a kind the descent carries internally
@@ -161,7 +161,7 @@ let rec rev_app (#a: Type) (l acc: list a) : Tot (list a) (decreases l) =
 let rev (#a: Type) (l: list a) : Tot (list a) = rev_app l []
 
 (* ======================================================================================
-   1. The alphabet (F#: `char`, one constructor per character `parseDetailedWithPolicy`
+   1. The alphabet (F#: `char`, one constructor per character `Json.read`'s scanner
       distinguishes).
 
       `COther` carries the character itself, so a character the parser treats as ordinary is
@@ -984,7 +984,7 @@ and parse_items
      | CRBrack :: t2 -> POk (rev (v :: acc)) t2
      | _ -> PErr ExpectedToken "expected ',' or ']'" t1)
 
-(* F#: `parseDetailedWithPolicy`'s `try … with` — the value, then `skipWs`, then the leftover test.
+(* F#: the scanner's `document` (`Json.read`) — the value, then `skipWs`, then the leftover test.
    `TrailingCharacters` is the one classified failure NOT raised through `JsonParseError`: it is
    constructed here, from the leftover, which is why theorem 4 is stated about this entry point
    rather than about the raise sites. Runs the descent at NO bound (`unbounded`) — every
@@ -1000,7 +1000,7 @@ let parse
     let r1 = skip_ws r in
     if Nil? r1 then ROk v else RErr TrailingCharacters "trailing characters" r1
 
-(* F#: `Json.parseWithLimits` (Phase 465). The byte verdict first — before a character is read,
+(* F#: `Json.read` (Phase 465; one read since Phase 519). The byte verdict first — before a character is read,
    §21.7 — then the same descent under the record's bounds, and every breach LIFTED to `RLimit`:
    the depth cap's `MaxDepthExceeded` becomes `RLimit LDepth` at the same suffix (production
    converts the scanner's one depth refusal to the breach at the catch, with the path the scanner

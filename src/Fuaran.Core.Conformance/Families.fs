@@ -689,7 +689,7 @@ module Families =
           Unconditional
               "a fixed vector corpus: every run evaluates every vector under both read policies, so there is no sample that could miss one",
           built "every malformed and no-absence vector is a fixed member of the corpus",
-          "Json.parseTolerantOfNull Json.parseDetailedTolerantOfNull"
+          "Json.read"
           ("WireNullTolerance.lawsWith", [], seam, []),
           Unconditional
               "the handed vector set, walked whole: every vector is evaluated under both read policies, and the corpus law reds a set with none",

@@ -290,9 +290,9 @@ suffix says which question it answers:
   answered through a seam (`ResolveFault`, the query resolver's account of a fetch that could not
   complete). A fault is typically translated into the calling seam's `…Error` at the boundary.
 - **`…Error`** — the call itself is refused: its input does not parse or decode (`JsonError`,
-  `DecodeError`, `ReadError`), or it names what the seam does not hold or binds it wrongly — the seam
-  unions a caller receives (`InvokeError`, `QueryError`, `PipelineError`, `ColumnError`,
-  `SchemaError`, `RegistrationError`, …).
+  `DecodeError`), or it names what the seam does not hold or binds it wrongly — the seam unions a caller receives (`InvokeError`, `QueryError`, `PipelineError`, `ColumnError`, `SchemaError`, `RegistrationError`, …).
+  **Since `0.39.0` there is ONE read surface (Phase 519, breaking):** `ReadOptions` (`Null`, `Limits`; `ReadOptions.strict` / `tolerantOfNull`) and four readers — `Json.read` (the parser's `JsonRefusal`), `Json.parse` (its one string form), `Reader.read` (out of `Json`, its refusal a `DecodeError`: a shape mismatch is `WrongKind` at the value's path) and `Decoder.parse`; `Decode` (the string-error twin), `Json.ReadError`, `DecodeError.ofJsonError`, `Decoder.parseWith` / `parseWithLimits` / `ofString` and the other `Json.parse*` entry points are removed (the 0.39.0 notes map each).
+  A passed bound is `LimitExceeded` at the breach's path on every reader — the depth cap included, which the strict readers reported at the root before — and `Json.parse`'s sentences and every `ColumnError` are unmoved; moving a reader's refusal code or path is breaking (`conformance/decode/`, the generated hosts' differential).
 - **`…Failure`** — the outcome of a composite flow, whose cases wrap the other families
   (`GatedApplyFailure` is a denial or a rejection; `ProposeFailure`, `ApprovalFailure`).
 - **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would otherwise have run.
@@ -323,7 +323,7 @@ exactly three shapes, each in a fixed place:
    exception's message, and the families after it still run. The conformance kit does the same where a
    throw is what a law watches for: a dispatch that throws is a red law naming the throw.
 3. **Core's own misuse checks raise.** A programming error that no input data can cause raises at
-   the call that commits it — `Json.Reader` read twice or left unread (`invalidOp`), the kit's
+   the call that commits it — a `Reader` reading that reads twice or leaves a value unread (`invalidOp`), the kit's
    `ConfRng.choose` over an empty alphabet (`invalidArg`). Where data can reach the same check, the
    surface is the `try…` form, which answers a typed failure instead.
 
@@ -1127,7 +1127,7 @@ into a `Fuaran.Core.*` package (FGP 6).
 
 Public surfaces are FSharp.Core-only and Fable-clean on **both** the encode and the decode
 path. Decode is portable as of Phase 241: `Fuaran.Core.Wire.Json.parse` is a hand-rolled
-recursive-descent JSON parser (no System.Text.Json), `Fuaran.Core.Wire.Decode`'s combinators
+recursive-descent JSON parser (no System.Text.Json), `Fuaran.Core.Wire.Decoder`'s combinators
 operate over the resulting `JVal`, and `Fuaran.Core.OpStream.fromJsonl` ships its own
 self-contained line scanner — so a Fable-compiled host can decode, `verifyChain`, and replay
 in-browser without a host-side boundary. `Json.render` and `Json.parse` are inverses over

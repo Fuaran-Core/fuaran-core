@@ -813,7 +813,7 @@ let try_encode_json (#num #flt: eqtype) (h: host num flt) (src: data_source num 
        | Good _ -> Good (encode_json h src))
 
 (* ======================================================================================
-   5. DECODE (F#: `Decode.tryProp` and the codec's `getField` / `asArr` / `asStr`,
+   5. DECODE (F#: `Decoder.tryMember` and the codec's `getField` / `asArr` / `asStr`,
       `decodeCell`, `decodeSchemaEntry`, `decodeSchema`, `columnParts`, `decodeColumn`,
       `uniqueColumnKeys`, `decodeJson`).
    ====================================================================================== *)
@@ -826,14 +826,14 @@ let rec find_kv (#num #flt: eqtype) (n: list ch) (fs: list (list ch & jval num f
   | [] -> None
   | (k, v) :: t -> if k = n then Some v else find_kv n t
 
-(* F#: `Decode.tryProp` — `None` where `el` has no such member OR is not an object. *)
+(* F#: `Decoder.tryMember` — `None` where `el` has no such member OR is not an object. *)
 let try_prop (#num #flt: eqtype) (n: list ch) (el: jval num flt) : Tot (option (jval num flt)) =
   match el with
   | JObj fs -> find_kv n fs
   | _ -> None
 
-(* F#: `getField` = `Decode.propWith (fault "")`. A missing member is `MissingField`; a
-   non-object is `MalformedShape`. *)
+(* F#: `getField` = `Decoder.field name Decoder.json` through `ofDecodeError ""`. A missing
+   member is `MissingField`; a non-object is `MalformedShape`. *)
 let get_field (#num #flt: eqtype) (n: list ch) (el: jval num flt) : Tot (res (jval num flt)) =
   match el with
   | JObj fs ->
@@ -842,13 +842,13 @@ let get_field (#num #flt: eqtype) (n: list ch) (el: jval num flt) : Tot (res (jv
        | None -> Bad (MissingField n))
   | _ -> Bad MalformedShape
 
-(* F#: `asArr` = `Decode.arrayWith`. *)
+(* F#: `asArr` = `Decoder.items`, its refusal through `ofDecodeError`. *)
 let as_arr (#num #flt: eqtype) (el: jval num flt) : Tot (res (list (jval num flt))) =
   match el with
   | JArr xs -> Good xs
   | _ -> Bad MalformedShape
 
-(* F#: `asStr` = `Decode.stringWith`. *)
+(* F#: `asStr` = `Decoder.str`, its refusal through `ofDecodeError`. *)
 let as_str (#num #flt: eqtype) (el: jval num flt) : Tot (res (list ch)) =
   match el with
   | JStr s -> Good s

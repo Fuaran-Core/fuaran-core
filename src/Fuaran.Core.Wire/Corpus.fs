@@ -203,20 +203,26 @@ module Corpus =
             // whichever the parser meets first in document order, so either kind is the law's answer.
             let repeated = (Json.firstRepeatedMember v).IsSome
 
-            match Json.parseDetailed s, allStringsWellFormed v && not repeated with
+            // The refusal's grammar kind, where the read refused malformed text.
+            let kindOf (r: JsonRefusal) : JsonErrorKind option =
+                match r with
+                | JsonRefusal.Malformed e -> Some e.Kind
+                | JsonRefusal.LimitExceeded _ -> None
+
+            match Json.read ReadOptions.strict s, allStringsWellFormed v && not repeated with
             | Ok v2, true when render v2 = s -> Ok()
             | Ok v2, true -> Error(sprintf "fuzz seed=%d: %s not idempotent (%s vs %s)" at name s (render v2))
-            | Error e, true -> Error(sprintf "fuzz seed=%d: parse rejected %s output %s — %s" at name s e.Message)
-            | Error e, false when e.Kind = BadEscape && not (allStringsWellFormed v) -> Ok()
-            | Error e, false when e.Kind = DuplicateMember && repeated -> Ok()
-            | Error e, false ->
+            | Error r, true -> Error(sprintf "fuzz seed=%d: parse rejected %s output %s — %A" at name s r)
+            | Error r, false when kindOf r = Some BadEscape && not (allStringsWellFormed v) -> Ok()
+            | Error r, false when kindOf r = Some DuplicateMember && repeated -> Ok()
+            | Error r, false ->
                 Error(
                     sprintf
                         "fuzz seed=%d: %s output %s carries an ill-formed string or a repeated member and was refused as %A, not as that"
                         at
                         name
                         s
-                        e.Kind
+                        r
                 )
             | Ok _, false ->
                 Error(

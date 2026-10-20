@@ -28,11 +28,11 @@
      - `Json.parse`, the string-to-`JVal` parser, is OUT OF SCOPE. Its totality is a property of a
        recursive-descent parser over bytes — the depth bound, escape handling, the int53 token
        guard, `MaxDepthExceeded` and `TrailingCharacters` — and is a separate phase. Everything
-       here begins at a `JVal` that already exists. `Decode.parse` / `Decode.parseTolerantOfNull`
-       are one-line delegates to it and are not modelled either.
+       here begins at a `JVal` that already exists. `Json.parse` and `Decoder.parse` are one-line
+       delegates to it and are not modelled either.
 
      - THE PHASE 102 POLICY IS NOT A COMBINATOR PARAMETER, because in the shipped tree it is not
-       one. `NullPolicy` is a parameter of `Json.parseDetailedWithPolicy` and of nothing else, and
+       one. `NullPolicy` is a parameter of a read (`ReadOptions.Null`) and of nothing else, and
        `JVal` has no null constructor, so no combinator can see a null. What the policy IS, at the
        layer this theorem is about, is a DOCUMENT-LEVEL READ NORMALISATION upstream of every
        combinator: erase object-member nulls, refuse a null that has no absence to erase it to.
@@ -546,7 +546,7 @@ and decode_encode_items (#num #flt: eqtype) (acc: list rnode) (ns: list rnode)
 (* ======================================================================================
    7. The Phase 102 read policy — modelled where it lives, one layer above the combinators.
 
-      See the header: `NullPolicy` is a parameter of `Json.parseDetailedWithPolicy` and of
+      See the header: `NullPolicy` is a parameter of a read (`ReadOptions.Null`) and of
       nothing else, and `JVal` has no null constructor, so a combinator cannot see a null.
       What the policy does to the value the combinators are handed is a normalisation on the
       DOCUMENT, and that is what is modelled: `jvaln` — the foreign document, which has a
@@ -610,7 +610,7 @@ let reject_msg: string = "null is not representable in the Fuaran wire JVal mode
 let no_absence_msg: string =
   "null is not representable in the Fuaran wire JVal model, and this position has no absence to erase it to (only an object-member null is erased)"
 
-(* F#: `Json.parseDetailedWithPolicy`, at the tree. The erase fork is the ONE behavioural
+(* F#: `Json.read` under `ReadOptions.Null`, at the tree. The erase fork is the ONE behavioural
    difference between the policies, and it is in member position only. *)
 let rec read (#num #flt: eqtype) (p: null_policy) (d: jvaln num flt)
   : Tot (outcome (jval num flt)) (decreases %[(nsize d <: nat); 0]) =

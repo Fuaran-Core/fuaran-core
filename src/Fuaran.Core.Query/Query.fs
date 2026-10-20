@@ -814,7 +814,7 @@ module internal QueryErrorWire =
     /// The refusal a journalled reason records, or `None` for a reason that is not a query-error
     /// document (a journal written before Phase 385 recorded `QueryError.describe`'s sentence).
     let ofReason (reason: string) : QueryError option =
-        match Decoder.parse reason |> Result.bind decoder with
+        match Decoder.parse ReadOptions.strict reason |> Result.bind decoder with
         | Ok e -> Some e
         | Error _ -> None
 

@@ -423,9 +423,9 @@ type AggregateError =
 /// stated nowhere but in this type: a new case is a breaking-source change for every exhaustive
 /// match (FS0025), and is classed as one in STABILITY.md.
 type ColumnError =
-    /// The input was not valid JSON at all — the parser's structured failure (`Json.parseDetailed`):
-    /// its classified kind, its message and its position (Phase 299; it carried the string form,
-    /// already prefixed, before).
+    /// The input was not valid JSON at all — the parser's structured failure (`Json.read`'s
+    /// `Malformed`, and its nesting cap as kind `MaxDepthExceeded`): its classified kind, its message
+    /// and its position (Phase 299; it carried the string form, already prefixed, before).
     | NotJson of error: JsonError
     /// A required field was absent from an object (`schema` / `values` / `validity` / `name` / `type`).
     | MissingField of field: string

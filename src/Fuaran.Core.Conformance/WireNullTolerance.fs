@@ -3,7 +3,7 @@ namespace Fuaran.Core
 // ============================================================================
 //  The null-tolerant read conformance family (Phase 102).
 //
-//  `Json.parseTolerantOfNull` erases an object-member `null` to member absence so a
+//  A read under `ReadOptions.tolerantOfNull` erases an object-member `null` to member absence so a
 //  Fuaran.Core consumer can read a foreign document that spells absent members with the
 //  JSON `null` token. This family is what makes that a CONTRACT rather than an
 //  implementation detail: the vectors pin the erasure equivalence, the positions where
@@ -132,8 +132,26 @@ module WireNullTolerance =
             Json = """{"a":}"""
             Claim = Claim.UnaffectedByPolicy } ]
 
+    // A read's answer with the grammar refusal it carries (Phase 519: `Json.read` under the two
+    // named options). Under either, the only breach is the parser's nesting cap, which reads here as
+    // the kind that names it, `MaxDepthExceeded`; none of these vectors nests near it.
+    let private readUnder (options: ReadOptions) (text: string) : Result<JVal, JsonError> =
+        match Json.read options text with
+        | Ok v -> Ok v
+        | Error(JsonRefusal.Malformed e) -> Error e
+        | Error(JsonRefusal.LimitExceeded b) ->
+            Error
+                { Kind = MaxDepthExceeded
+                  Position = b.Position
+                  Message = "limit " + JsonLimit.name b.Limit + " of " + string b.Declared + " exceeded" }
+
+    let private strict (text: string) = readUnder ReadOptions.strict text
+
+    let private tolerant (text: string) =
+        readUnder ReadOptions.tolerantOfNull text
+
     let private checkErasesTo (v: Vector) (nullFree: string) : Corpus.Outcome =
-        match Json.parseDetailedTolerantOfNull v.Json, Json.parseDetailed nullFree with
+        match tolerant v.Json, strict nullFree with
         | Error e, _ -> fail v.Name ("tolerant read rejected the vector: " + e.Message)
         | _, Error e -> fail v.Name ("the null-free spelling is not valid JSON: " + e.Message)
         | Ok tolerant, Ok strictOfNullFree ->
@@ -141,7 +159,7 @@ module WireNullTolerance =
                 fail v.Name "erasure did not reproduce the null-free spelling's parse"
             else
                 // The strict path is untouched: the vector's own JSON is still refused by name.
-                match Json.parseDetailed v.Json with
+                match strict v.Json with
                 | Ok _ -> fail v.Name "the strict policy accepted a document carrying null"
                 | Error e when e.Kind <> NullNotRepresentable ->
                     fail v.Name ("the strict policy rejected for the wrong reason: " + e.Message)
@@ -159,7 +177,7 @@ module WireNullTolerance =
                         | Error m -> fail v.Name ("the rendered form is not strictly readable: " + m)
 
     let private checkNoAbsenceHere (v: Vector) : Corpus.Outcome =
-        match Json.parseDetailed v.Json, Json.parseDetailedTolerantOfNull v.Json with
+        match strict v.Json, tolerant v.Json with
         | Ok _, _ -> fail v.Name "the strict policy accepted a bare or array-element null"
         | _, Ok _ -> fail v.Name "the tolerant policy erased a null at a position with no absence"
         | Error s, Error t ->
@@ -173,7 +191,7 @@ module WireNullTolerance =
                 pass v.Name
 
     let private checkRejected (v: Vector) (strictKind: JsonErrorKind) (tolerantKind: JsonErrorKind) : Corpus.Outcome =
-        match Json.parseDetailed v.Json, Json.parseDetailedTolerantOfNull v.Json with
+        match strict v.Json, tolerant v.Json with
         | Ok _, _ -> fail v.Name "the strict policy accepted malformed input"
         | _, Ok _ -> fail v.Name "the tolerant policy accepted malformed input"
         | Error s, Error t ->
@@ -185,7 +203,7 @@ module WireNullTolerance =
                 pass v.Name
 
     let private checkUnaffected (v: Vector) : Corpus.Outcome =
-        match Json.parseDetailed v.Json, Json.parseDetailedTolerantOfNull v.Json with
+        match strict v.Json, tolerant v.Json with
         | Ok a, Ok b when a = b -> pass v.Name
         | Error a, Error b when a = b -> pass v.Name
         | _ -> fail v.Name "the two policies disagreed on a document carrying no null"
