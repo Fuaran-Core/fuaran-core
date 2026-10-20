@@ -544,10 +544,10 @@ module Families =
           "Query.invocationKey Query.determinismTag Query.validateParams QueryCodec.encode QueryCodec.decode QueryCodec.encodeResult QueryCodec.decodeResult QueryCodec.encodeDeferredResult QueryCodec.decodeDeferredResult QueryRegistry.register QueryRegistry.dispatch QueryRegistry.dispatchWithArgs QueryRegistry.enumerate Query.invokePage Query.invocationKeyPage QueryRegistry.dispatchPage QueryRegistry.dispatchPageWith QueryRegistry.dispatchCapturedWith QueryRegistry.dispatchPageCapturedWith QueryRegistry.dispatchReplayedWith"
           ("Conformance.registryLaws", [], seam, []),
           Unconditional
-              "each iteration queries matching and non-matching signatures on a built registry, and runs the four lifecycle verbs on all four registries",
+              "each iteration queries matching and non-matching signatures on a built registry, and runs the four lifecycle verbs on all five registries",
           built
               "an unregistered id and an out-of-space arg are built, and so are an unheld id, an ill-formed replacement and a repeated parameter",
-          "FunctionRegistry.register FunctionRegistry.dispatch FunctionRegistry.entry FunctionRegistry.findBySignature FunctionRegistry.narrow FunctionRegistry.ids FunctionRegistry.unregister FunctionRegistry.replace FunctionRegistry.restrict FunctionRegistry.union CapabilityRegistry.unregister CapabilityRegistry.replace CapabilityRegistry.restrict CapabilityRegistry.union QueryRegistry.unregister QueryRegistry.replace QueryRegistry.restrict QueryRegistry.union Validator.unregister Validator.replace Validator.restrict Validator.union"
+          "FunctionRegistry.register FunctionRegistry.dispatch FunctionRegistry.entry FunctionRegistry.findBySignature FunctionRegistry.narrow FunctionRegistry.ids FunctionRegistry.unregister FunctionRegistry.replace FunctionRegistry.restrict FunctionRegistry.union CapabilityRegistry.unregister CapabilityRegistry.replace CapabilityRegistry.restrict CapabilityRegistry.union QueryRegistry.unregister QueryRegistry.replace QueryRegistry.restrict QueryRegistry.union Validator.unregister Validator.replace Validator.restrict Validator.union ColumnValidator.unregister ColumnValidator.replace ColumnValidator.restrict ColumnValidator.union"
           ("Conformance.policyLaws", [], seam, []),
           Unconditional
               "each iteration runs every decision — allow, park and two denials — through a gate on all three registries, and a drawn triple through the lattice",

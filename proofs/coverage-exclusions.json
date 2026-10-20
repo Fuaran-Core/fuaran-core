@@ -1851,17 +1851,6 @@
     },
     {
       "members": [
-        "ColumnValidator.replace",
-        "ColumnValidator.restrict",
-        "ColumnValidator.union",
-        "ColumnValidator.unregister"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The column registry's lifecycle (Phase 521): each verb is the `Validator.Rules` verb at the column table, named case by case beside the other four registries' in the lifecycle tests.",
-      "standIn": "tests/Fuaran.Core.Tests/RegistryLifecycleTests.fs"
-    },
-    {
-      "members": [
         "Validator.Rules.empty",
         "Validator.Rules.enumerate",
         "Validator.Rules.ofChecks",

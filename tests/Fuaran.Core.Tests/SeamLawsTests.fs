@@ -70,8 +70,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  11
-                  "findable + non-match + narrowing + default-deny + space-relation + the six lifecycle laws (Phase 316) reported"
+                  16
+                  "findable + non-match + narrowing + default-deny + space-relation + the six lifecycle laws (Phase 316) + the column registry's five (Phase 521) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

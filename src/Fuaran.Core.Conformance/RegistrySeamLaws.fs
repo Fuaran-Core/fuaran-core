@@ -81,6 +81,11 @@ module internal RegistrySeamLaws =
     ///  - **the function registry's index stays consistent**: after a random sequence of lifecycle
     ///    edits, `findBySignature` by result type returns exactly the enumerated entries of that type
     ///    the query matches — no phantom, no miss.
+    ///
+    /// Since Phase 521 it certifies the FIFTH registry too — `ColumnValidator.Registry`, which is
+    /// `Validator.Rules<Table, string>` — in cells of its own over the same five-id pool (its own
+    /// stream, so the cells above draw exactly what they drew): the same five lifecycle laws, each
+    /// read in registration order, which is the order the registry's one walk runs its rules in.
     let registryLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let findable =
             LawKit.LawCell "a function is findable by its declared result type + required holes (subsumption + exact)"
@@ -600,6 +605,135 @@ module internal RegistrySeamLaws =
                 | _ -> unions.Check(false, fun () -> at "a drawn registry did not build")
             | _ -> inverse.Check(false, fun () -> at (sprintf "the drawn registries over %A did not build" held)))
 
+        // ---- Phase 521: the fifth registry — the column registry, `Validator.Rules<Table, string>` ----
+        let colInverse =
+            LawKit.LawCell "the column registry (Rules over a table): unregister undoes register on a fresh id"
+
+        let colUnknown =
+            LawKit.LawCell
+                "the column registry: unregister and replace of an id not held are refused UnknownRule, naming the held ids in registration order"
+
+        let colReplaces =
+            LawKit.LawCell
+                "the column registry: replace swaps exactly the rule under its id, in its position, and the walk runs the replacement"
+
+        let colRestricts =
+            LawKit.LawCell
+                "the column registry: restrict s r enumerates exactly the rules of r whose id is in s, in registration order"
+
+        let colUnions =
+            LawKit.LawCell
+                "the column registry: union is associative, joins exactly the registries whose ids are disjoint in each side's order, and refuses a shared id by DuplicateRule"
+
+        // A rule that reports its own id and a tag, so a walk shows which rule ran under which id.
+        let colRule (tag: string) (id: string) : ColumnRule =
+            ColumnValidator.rule id (fun _ -> [ Defect.create (tag + ":" + id) Severity.Info id None ])
+
+        let walked (r: ColumnValidator.Registry) : (string * string) list =
+            ColumnValidator.validateTagged r Table.empty
+            |> List.map (fun (id, d) -> id, d.Code)
+
+        LawKit.run (runner.Fork 521) iterations (fun rng _ at ->
+            let subset () =
+                pool |> List.filter (fun _ -> rng.IntBelow 2 = 0)
+
+            // a drawn registration order, so "in order" is never the pool's order by accident
+            let shuffled (ids: string list) =
+                ids
+                |> List.map (fun id -> rng.IntBelow 1000, id)
+                |> List.sortBy fst
+                |> List.map snd
+
+            let cols (ids: string list) =
+                build ColumnValidator.register ColumnValidator.empty (ids |> List.map (colRule "r"))
+
+            let held = shuffled (subset ())
+
+            let fresh =
+                pool
+                |> List.tryFind (fun id -> not (List.contains id held))
+                |> Option.defaultValue "z"
+
+            match cols held with
+            | Error e ->
+                colInverse.Check(false, fun () -> at (sprintf "the column registry over %A did not build: %A" held e))
+            | Ok cr ->
+                let back =
+                    ColumnValidator.register (colRule "r" fresh) cr
+                    |> Result.bind (ColumnValidator.unregister fresh)
+
+                colInverse.Check(
+                    (back |> Result.map ColumnValidator.enumerate) = Ok held
+                    && (back |> Result.map walked) = Ok(walked cr),
+                    fun () ->
+                        at (
+                            sprintf
+                                "unregister did not undo register of %s over %A: %A"
+                                fresh
+                                held
+                                (back |> Result.map ColumnValidator.enumerate)
+                        )
+                )
+
+                let refused =
+                    match ColumnValidator.unregister fresh cr, ColumnValidator.replace (colRule "x" fresh) cr with
+                    | Error(RegistrationError.UnknownRule(a, ka)), Error(RegistrationError.UnknownRule(b, kb)) ->
+                        a = fresh && b = fresh && ka = held && kb = held
+                    | _ -> false
+
+                colUnknown.Check(
+                    refused,
+                    fun () -> at (sprintf "an unheld id %s was not refused by name over %A" fresh held)
+                )
+
+                (match held with
+                 | [] -> ()
+                 | _ ->
+                     let k = rng.Choose held
+
+                     let ok =
+                         match ColumnValidator.replace (colRule "swapped" k) cr with
+                         | Ok r2 ->
+                             ColumnValidator.enumerate r2 = held
+                             && walked r2 = (held
+                                             |> List.map (fun id -> id, (if id = k then "swapped:" else "r:") + id))
+                         | Error _ -> false
+
+                     colReplaces.Check(ok, fun () -> at (sprintf "replace of %s over %A misbehaved" k held)))
+
+                let keep = Set.ofList (subset () @ [ "zz" ])
+
+                colRestricts.Check(
+                    ColumnValidator.enumerate (ColumnValidator.restrict keep cr) = (held |> List.filter keep.Contains),
+                    fun () -> at (sprintf "restrict %A over %A did not narrow exactly, in order" keep held)
+                )
+
+                let a, b, c = shuffled (subset ()), shuffled (subset ()), shuffled (subset ())
+
+                match cols a, cols b, cols c with
+                | Ok ca, Ok cb, Ok cc ->
+                    let assoc =
+                        associates
+                            (fun l r -> ColumnValidator.enumerate l = ColumnValidator.enumerate r)
+                            (ColumnValidator.union ca cb
+                             |> Result.bind (fun ab -> ColumnValidator.union ab cc))
+                            (ColumnValidator.union cb cc |> Result.bind (ColumnValidator.union ca))
+
+                    let joins =
+                        match ColumnValidator.union ca cb with
+                        | Ok ab ->
+                            List.isEmpty (b |> List.filter (fun id -> List.contains id a))
+                            && ColumnValidator.enumerate ab = a @ b
+                        | Error(RegistrationError.DuplicateRule(id, ka)) ->
+                            Some id = (b |> List.tryFind (fun x -> List.contains x a)) && ka = a
+                        | Error _ -> false
+
+                    colUnions.Check(
+                        assoc && joins,
+                        fun () -> at (sprintf "union over %A / %A / %A (assoc=%b joins=%b)" a b c assoc joins)
+                    )
+                | _ -> colUnions.Check(false, fun () -> at "a drawn column registry did not build"))
+
         LawKit.results
             [ findable
               nonMatch
@@ -611,7 +745,12 @@ module internal RegistrySeamLaws =
               replaces
               restricts
               unions
-              index ]
+              index
+              colInverse
+              colUnknown
+              colReplaces
+              colRestricts
+              colUnions ]
 
     // ---- content-pack loading contract (Phase 57) ----
     // The teeth on `PackManifest` / `ContentPack.load` + the signature-version compatibility check: a
