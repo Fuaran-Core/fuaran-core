@@ -12,6 +12,10 @@ never here. A tag without a file, or a file that does not open with its own head
 slot is headed `released <date> as v<version>` and the untagged standing `<Version>` is headed
 `DRAFT`. This index is what `Directory.Build.props` points a downstream version check at (`<FuaranStabilityRecord>`).
 
+## 0.40.0 — DRAFT
+
+[`0.40.0.md`](0.40.0.md)
+
 ## 0.39.0 — released 2026-10-20 as `v0.39.0`
 
 [`0.39.0.md`](0.39.0.md)
