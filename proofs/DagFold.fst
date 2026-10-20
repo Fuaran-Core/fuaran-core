@@ -990,7 +990,7 @@ let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
    WHAT IS NOT MODELLED, and the one boundary worth reading twice. Hashing itself (above).
    `Dag.mergeBase`, which is not on this path at all — `foldOnce` hands `reconcileMany` the base
    node's id directly (it is modelled since Phase 158, in section 14, for the shape where a
-   divergence point does have to be located). And **how the topological order is CHOSEN**: production's `topoOrder` is
+   divergence point does have to be located). And **how the topological order is CHOSEN**: production's head drain (`drainClosure`) is
    Kahn's algorithm draining a ready frontier smallest-id-first, and `topo_of` below is the
    reverse of the parent walk. On the base-plus-N-chains shape the head's closure is a spine,
    every pair of its members is comparable under the ancestor relation, and a spine therefore
@@ -1202,7 +1202,7 @@ let rec covers_drop (#a #b:Type) (fuel:list a) (l:list b)
     | [] -> ()
     | _ :: t -> (match fuel with | [] -> () | _ :: f -> covers_drop f t)
 
-(* F#: `topoOrder dag head`. On this shape the head's closure is a spine, so its topological
+(* F#: `drainClosure dag [ head ]`'s placed nodes. On this shape the head's closure is a spine, so its topological
    order is the parent walk reversed. `topo_forced` below is why that is not a shortcut. *)
 let topo_of (#op:eqtype) (d:dag op) (fuel:list (node op)) (head:string) : Tot (list string) =
   rev (ancestors_of d fuel head)
@@ -1216,7 +1216,7 @@ let rec nodes_for (#op:eqtype) (d:dag op) (l:list string) : Tot (list (node op))
      | Missing -> nodes_for d t
      | Found n -> n :: nodes_for d t)
 
-(* F#: `Dag.between` — `topoOrder head |> List.filter (fun id -> not (Set.contains id
+(* F#: `Dag.between` — `drainClosure dag [ head ] |> fst |> List.filter (fun id -> not (Set.contains id
    baseClosure)) |> List.map (fun id -> dag.Nodes.[id])`. *)
 let between (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string) (head:string)
   : Tot (list (node op)) =
@@ -1471,7 +1471,7 @@ let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
    12. The topological order on a spine is FORCED (Phase 142).
 
    Section 11 computes the whole DAG layer beneath the fold and leaves exactly one step ARGUED
-   rather than proved. Production's `topoOrder` drains a ready frontier smallest-id-first; the
+   rather than proved. Production's `drainClosure` drains a ready frontier smallest-id-first; the
    model's `topo_of` reverses the parent walk; and "on a spine there is only one topological order
    anyway, so the two coincide" was a sentence in a comment. This section is that sentence,
    mechanised — over the same base-plus-N-chains model, with no premise beyond the id distinctness
@@ -1481,7 +1481,7 @@ let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
      - `spine_order_forced` — a DISTINCT enumeration of a spine's closure in which every node
        follows its own parent is that spine in append order. A list argument: it mentions no DAG,
        no hash and no production function. This is the "exactly one topological order exists" half.
-     - `kahn_drain_is_such_an_enumeration` — the frontier drain (F#: the `while` loop of `topoCore`
+     - `kahn_drain_is_such_an_enumeration` — the frontier drain (F#: the `while` loop of `drainNodes` under `drainClosure`
        over `indeg` / `ready`) run over a spine's closure produces exactly that enumeration. This
        is the "and production's algorithm produces it" half.
 
@@ -1514,7 +1514,7 @@ let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
 (* ---- 12.1 what a topological order IS, as a property of a list ---- *)
 
 (* `x` occurs in `l`, and `y` occurs strictly after it. F#: what "parents before children" means of
-   the list `topoCore` emits — a comparison of positions, spelled without positions so the module
+   the list `drainClosure` places — a comparison of positions, spelled without positions so the module
    stays free of the integer arithmetic the rest of it avoids. *)
 let rec before (x y:string) (l:list string) : Tot bool =
   match l with
@@ -1533,7 +1533,7 @@ let rec parents_chain (#op:eqtype) (ns:list (node op)) (q:string) : Tot bool =
 
 (* Every parent of a node precedes it. Stated over the node's whole parent LIST rather than over a
    single parent, so the property is the general one and single-parenthood comes from
-   `parents_chain` where it is needed. F#: the property `topoCore`'s emitted order has by
+   `parents_chain` where it is needed. F#: the property `drainClosure`'s placed order has by
    construction — a node is emitted only once its in-degree over the closure has reached zero, and
    the in-degree counts precisely the parents inside the closure that are still unemitted. *)
 let rec all_before (ps:list string) (child:string) (ord:list string) : Tot bool =
@@ -1666,7 +1666,7 @@ let rec spine_ids_forced (q:string) (ids:list string) (ord:list string)
 (* THEOREM (task 1). The same statement over the nodes: a distinct enumeration of a spine's closure
    respecting each node's single parent is that spine, in append order, with the base first.
 
-   F#: `Dag.between` filters `topoOrder dag head` against the base's closure and looks the ids up,
+   F#: `Dag.between` filters `drainClosure dag [ head ]`'s placed nodes against the base's closure and looks the ids up,
    so the ONLY freedom the recovery has is which topological order that first step produced. This
    says there is none to have. *)
 let spine_order_forced (#op:eqtype) (ns:list (node op)) (q:string) (ord:list string)
@@ -1695,7 +1695,7 @@ let follows_parents_append_order (#op:eqtype) (ns:list (node op)) (q:string)
   = follows_spine_append_order q (ids_of ns);
     follows_spine_parents ns q (q :: ids_of ns)
 
-(* ---- 12.4 Kahn's frontier drain (F#: `topoCore`) ---- *)
+(* ---- 12.4 Kahn's frontier drain (F#: `drainClosure`) ---- *)
 
 (* F#: `parentsIn id` — a node's parents that lie INSIDE the closure. Everything outside is
    invisible to the drain, exactly as `List.filter (fun p -> Set.contains p anc)` makes it. *)
@@ -1781,7 +1781,7 @@ let rec frontier_none (#op:eqtype) (ns:list (node op)) (r:string) (closure emitt
 (* THE TIE-BREAK IS UNEXERCISED. At every step of a spine's drain the ready frontier holds exactly
    one id — so `pick` is applied only to one-element lists, and `picks_from_frontier` pins its
    answer without anything being said about how ids compare. F#: `ready` is a one-element list on
-   every iteration of `topoCore`'s loop over this closure, so `List.sort` is the identity and
+   every iteration of `drainClosure`'s loop over this closure, so `List.sort` is the identity and
    `List.head` is forced. *)
 let kahn_frontier_singleton (#op:eqtype) (n:node op) (t:list (node op)) (q:string)
   (closure emitted:list string)
@@ -1933,7 +1933,7 @@ let lane_ids_distinct (#op:eqtype) (mint:string -> string -> op -> string)
   distinct (bn.nid :: ids_of (lane_nodes mint ln.lactor bn.nid ln.lops))
 
 (* F#: `Dag.between` from the point where the topological order has been chosen —
-   `topoOrder dag head |> List.filter … |> List.map …` with the first step's RESULT taken as a
+   `drainClosure dag [ head ] |> fst |> List.filter … |> List.map …` with the first step's RESULT taken as a
    parameter. `between d fuel base_id head` is this at `ord = topo_of d fuel head`, definitionally. *)
 let between_ordered (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
   (ord:list string) : Tot (list (node op)) =
@@ -2113,11 +2113,11 @@ let fold_once_dag_ordered_eq (#op:eqtype) (#state #rej:Type)
 
    THE DANGLING-PARENT POLICY IS A PARAMETER, because the two production call sites differ on it
    and a theorem about "the drain" that did not say which would be a theorem about neither:
-     - `IgnoreDangling` — F#: `Dag.topoCore`'s closure walk (`match Map.tryFind id dag.Nodes with
+     - `IgnoreDangling` — F#: `Dag.drainClosure`'s closure walk (`match Map.tryFind id dag.Nodes with
        | Some n -> … | None -> collect acc rest`) with `Dag.ancestorsOf`'s `ContainsKey` guard
        beside it, and the `parentsIn` filter that follows. A parent the node set does not hold
        never enters the closure and is filtered out of the in-degree, so it constrains nothing and
-       the drain proceeds. This is the policy on the FOLD path — `topoOrder` -> `between` ->
+       the drain proceeds. This is the policy on the FOLD path — `drainClosure` -> `between` ->
        `betweenOps` -> `reconcileMany` -> `foldOnce` — and on `replayTo`.
      - `RefuseDangling` — F#: `Dag.firstBreak` (`n.Parents |> List.tryFind (fun p -> not
        (dag.Nodes.ContainsKey p))` -> `MissingParent`), hence `verifyDag` and `fromJsonlVerified`,
@@ -2142,7 +2142,7 @@ let fold_once_dag_ordered_eq (#op:eqtype) (#state #rej:Type)
        smallest-id-first is load-bearing rather than decoration.
 
    HOW A CYCLE IS SURFACED, which is a claim about production and worth stating exactly.
-   `topoCore` does not raise: a node inside a cycle never reaches in-degree zero, so the emitted
+   `drainClosure` does not raise: a node inside a cycle never reaches in-degree zero, so the emitted
    list is strictly SHORTER than the closure, and `isAcyclic` / `tryTopoOrder` read that length
    comparison and surface it while `replayTo` and `between` fold the truncated prefix. The model
    says the same thing without lengths: `drain_total_on_acyclic` gives completeness from
@@ -2420,7 +2420,7 @@ type drain_result =
   | Drained : list string -> drain_result
   | Refused : string -> drain_result
 
-(* F#: `topoCore`'s emitted order at the smallest-id tie-break, over the set as its own closure. *)
+(* F#: `drainClosure`'s placed order at the smallest-id tie-break, over the set as its own closure. *)
 let drain_order (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
   (ns:list (node op)) : Tot (list string) =
   kahn (pick_min lt) fuel ns (ids_of ns) []
@@ -2865,7 +2865,7 @@ let rec placed_follow_all (#op:eqtype) (ns:list (node op)) (closure ord:list str
 (* ---- 13.10 THE THEOREMS ---- *)
 
 (* THEOREM (task 1a). Every node the drain places stands after every one of its in-set parents.
-   F#: what `topoCore`'s emitted list has by construction — a node is emitted only once its
+   F#: what `drainClosure`'s placed list has by construction — a node is emitted only once its
    in-degree over the closure has reached zero, and that in-degree counts exactly the in-closure
    parents still unemitted. Quantified over the nodes it PLACED, which is the whole of them
    whenever the set is acyclic and a prefix of them when it is not. *)
@@ -2968,7 +2968,7 @@ let drain_deterministic (#op:eqtype) (policy:dangling_policy) (lt:string -> stri
 
 (* THEOREM. The policy is invisible on a set that holds every parent it names: the two production
    call sites compute the same order, and the fold path pays nothing for the refusing one's
-   existence. (`Dag.topoCore`'s `parentsIn` filter and `Dag.firstBreak`'s `tryFind` are asking the
+   existence. (`Dag.drainClosure`'s held-parent filter and `Dag.firstBreak`'s `tryFind` are asking the
    same question of the same data; they differ only in what they do with the answer.) *)
 let drain_policies_agree (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
   (ns:list (node op))
@@ -2977,7 +2977,7 @@ let drain_policies_agree (#op:eqtype) (lt:string -> string -> bool) (fuel:list (
   = ()
 
 (* THEOREM. … and where they differ, they differ exactly on the presence of a parent outside the
-   set. F#: `MissingParent`, which `verifyDag` raises before any drain runs and which `topoOrder`
+   set. F#: `MissingParent`, which `verifyDag` raises before any drain runs and which `drainClosure`
    silently drops. *)
 let drain_refusal_characterised (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
   (ns:list (node op)) (n:node op)
@@ -3180,7 +3180,7 @@ let total_order_by_deterministic (#op:eqtype) (#k:eqtype) (tbl:list (node op)) (
 
    THE ORDER IS SECTION 13'S DRAIN, by name. `topo_drain` is `drain_order` — the id-ordered Kahn
    drain — over the head's closure taken as a node set (`closure_nodes`), which is F#'s
-   `topoCore`: the ancestor closure first, then the frontier loop over exactly those nodes.
+   `drainClosure`: the ancestor closure first, then the frontier loop over exactly those nodes.
    `between_drained` is section 12's `between_ordered` at that order. Nothing is re-modelled, so
    the three drain theorems apply as they stand, and `lt` and the drain's fuel stay the
    parameters they were.
@@ -3328,14 +3328,14 @@ and anc_all_stable (#op:eqtype) (d:dag op) (f big:list (node op)) (ids:list stri
 
 (* ---- 14.2 the closure as a node set, and the delta under the drain ---- *)
 
-(* F#: the `anc` set of `topoCore`, as the nodes it names — the set the frontier loop runs over. *)
+(* F#: the `anc` set of `drainClosure`, as the nodes it names — the set the frontier loop runs over. *)
 let rec closure_nodes (#op:eqtype) (ns:list (node op)) (closure:list string)
   : Tot (list (node op)) =
   match ns with
   | [] -> []
   | n :: t -> if mem n.nid closure then n :: closure_nodes t closure else closure_nodes t closure
 
-(* F#: `topoOrder dag head` — the closure, then section 13's drain over exactly that node set. *)
+(* F#: `drainClosure dag [ head ]` — the closure, then section 13's drain over exactly that node set. *)
 let topo_drain (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
   (d:dag op) (fuel:list (node op)) (head:string) : Tot (list string) =
   drain_order lt kfuel (closure_nodes d.nodes (ancestors_of d fuel head))
@@ -4043,7 +4043,7 @@ let merge_base_is_divergence_acyclic (#op:eqtype) (lt:string -> string -> bool) 
 
    The closures (`cs`, one per deduplicated head) and the base closure (`base_c`) are the lists
    `ancestors_of` computes (section 11); `order` is the Kahn drain over the union of the heads'
-   closures (F#: `topoCoreMany`), whose distinctness and completeness on an acyclic set are
+   closures (F#: `drainClosure`), whose distinctness and completeness on an acyclic set are
    section 13's `drain_linear_extension` / `drain_total_on_acyclic`. Nothing here is a parameter
    standing in for the reconcile: the partition is the function production computes.
 
@@ -4282,9 +4282,10 @@ let reconcile_fold_order_free #op #state #rej apply fp opof s order base_c cs1 c
         `replayTo` returned the initial state as `Ok`;
      2. otherwise the head's closure is drained (section 14's `topo_drain`: the closure as a node
         set, section 13's id-ordered drain over it), and a drain that did not place every node
-        of the closure is `CyclicHistory` — production compares the emitted list's LENGTH with
-        the closure's size, which on a duplicate-free drain is the membership test below
-        (`drain_complete_is_acyclic` is why the two are the same test);
+        of the closure is cyclic — production's `Cyclic` (Phase 529; `CyclicHistory` before),
+        refused when the drain leaves any node of the closure unplaced, which on a
+        duplicate-free drain is the membership test below (`drain_complete_is_acyclic` is why
+        the two are the same test);
      3. otherwise each drained id's node op is applied in drain order, and the first rejection
         is `Rejected` naming its node.
 
@@ -4313,8 +4314,10 @@ let reconcile_fold_order_free #op #state #rej apply fp opof s order base_c cs1 c
        it; what is left of the hash premise is that the hash is injective on the nodes a store
        actually holds, which `verifyDag` re-checks key by key on load.
 
-   WHAT IS NOT CLAIMED. The diagnostic payload of `CyclicHistory` beyond the head (production
-   names the first cyclic ROOT, which at one root is the head). `replayClosure` over several roots
+   WHAT IS NOT CLAIMED. The diagnostic payload beyond the head: the model's `RCyclicHistory`
+   names the head, production's `Cyclic` (Phase 529) names every node the drain left unplaced,
+   which holds the head — a cyclic closure leaves its own head unplaced — and the differential
+   reads exactly that. `replayClosure` over several roots
    (`checkpointFrom`, `Dag.mergeParentsState`): the union drain is the same drain over a larger
    node set, and no theorem here identifies it. That `same` is production's `sameNode`: it is a
    parameter, and the differential is what ties the two.
@@ -4324,7 +4327,7 @@ let reconcile_fold_order_free #op #state #rej apply fp opof s order base_c cs1 c
 
 (* ---- 16.1 the replay ---- *)
 
-(* F#: `ReplayFault<'Rej>` — `UnknownHead`, `CyclicHistory`, `Rejected (nodeId, reject)`. *)
+(* F#: `ReplayFault<'Rej>` — `UnknownHead`, `Cyclic` (the head here; every unplaced node there), `Rejected (nodeId, reject)`. *)
 type replay_fault (rej:Type) =
   | RUnknownHead : string -> replay_fault rej
   | RCyclicHistory : string -> replay_fault rej
@@ -5024,7 +5027,7 @@ let conflicts_of_heads_is_the_sweep (#op:eqtype) (fp:op -> footprint) (d:dag op)
    20. The reachability index (Phase 289), lifted to proved (Phase 437).
 
    WHAT IS MODELLED. `Reach` as its slots: an id and its ancestor bitset, the bitset read as the
-   ids whose bits it sets. `reach_step` is one iteration of `Reach.ofDag`'s drain loop and
+   ids whose bits it sets. `reach_step` is one step of `Reach.ofDag`'s pass over the drain (`drainNodes`, Phase 529) and
    `Reach.extend`'s leaf step at once: a node the DAG holds and no slot carries, whose held
    parents all carry one, gets a slot whose set is its own id over the union of its parents'
    (`closureBits`); `reach_of_dag` runs it over the whole DAG's drain. `reach_ancestors` and
@@ -5073,7 +5076,7 @@ let rec held_slotted (#op:eqtype) (d:dag op) (r:list rslot) (ps:list string) : T
   | [] -> true
   | p :: t -> (Missing? (lookup d.nodes p) || Found? (slot_of r p)) && held_slotted d r t
 
-(* F#: one iteration of `ofDag`'s drain loop, and `Reach.extend`: a node the DAG holds, not yet
+(* F#: one step of `ofDag`'s pass over `drainNodes`' order, and `Reach.extend`: a node the DAG holds, not yet
    slotted, whose held parents are all slotted, gets the next slot with its own bit set over its
    parents' bitsets. *)
 let reach_step (#op:eqtype) (d:dag op) (r:list rslot) (id:string) : Tot (list rslot) =

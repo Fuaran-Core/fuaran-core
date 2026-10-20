@@ -495,14 +495,16 @@ let reach_common_base (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (no
           | [] -> Missing
           | c :: t -> Found (max_by (reach_deeper lt r) c t)))
 
-(* F#: `Dag.tryTopoOrder`'s answer. *)
+(* F#: `Dag.tryTopoOrder`'s answer: `TopoCyclic` names the head where production's one `Cyclic`
+   answer (Phase 529; a sentence naming the head before) names every unplaced node of the closure,
+   the head among them; the differential compares the case. *)
 type topo_result =
   | TopoOk : list string -> topo_result
   | TopoCyclic : string -> topo_result
 
 (* F#: `Dag.tryTopoOrder` — the closure's drain, `Ok` when it placed every id of the closure
-   (production compares the drain's length with the closure's size; the drain is distinct and
-   inside the closure, so that is the same test). *)
+   (production refuses when the drain leaves a node of the closure unplaced; the drain is distinct
+   and inside the closure, so that is the same test). *)
 let try_topo_order (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op)) (d:dag op)
   (fuel:list (node op)) (head:string) : Tot topo_result =
   let ord = topo_drain lt kfuel d fuel head in

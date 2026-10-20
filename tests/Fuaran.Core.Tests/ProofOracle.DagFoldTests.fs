@@ -2028,7 +2028,7 @@ let tests =
               Expect.isGreaterThan (count "ok") 0 "some heads replayed to a state"
               Expect.isGreaterThan (count "unknown-head") 0 "the missing-head arm ran"
 
-          testCase "a CYCLIC closure is refused as CyclicHistory by both — and the acyclic control replays"
+          testCase "a CYCLIC closure is refused as cyclic by both — and the acyclic control replays"
           <| fun _ ->
               let node id parents : DagNode<PlanOp> =
                   { Id = id

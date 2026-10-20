@@ -29,7 +29,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; and, since Phase 158, `Dag.mergeBase` and `Dag.between` over a MERGED HEAD under that drain — the shape a clone folds after a pull — with `between_merged`, `reconcile_many_merged_eq` and `merge_base_is_divergence` proved; and, since Phase 300, the lanes-apply test inside `fold_once` and the reconcile's PARTITION of the region above the base, with `fold_confluence_total`, `reconcile_sound` and `reconcile_fold_order_free` proved. Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, the head drain's (`drainClosure`) own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; and, since Phase 158, `Dag.mergeBase` and `Dag.between` over a MERGED HEAD under that drain — the shape a clone folds after a pull — with `between_merged`, `reconcile_many_merged_eq` and `merge_base_is_divergence` proved; and, since Phase 300, the lanes-apply test inside `fold_once` and the reconcile's PARTITION of the region above the base, with `fold_confluence_total`, `reconcile_sound` and `reconcile_fold_order_free` proved. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -133,7 +133,7 @@ that sentence, mechanised, in two lemmas over the same model:
 - **`spine_order_forced`** — a DISTINCT enumeration of a spine's closure in which every node
   follows its own parent is that spine in append order, base first. A list argument: it names no
   DAG, no hash and no production function.
-- **`kahn_drain_is_such_an_enumeration`** — the frontier drain, modelled as `topoCore`'s loop over
+- **`kahn_drain_is_such_an_enumeration`** — the frontier drain, modelled as `drainClosure`'s loop over
   `parentsIn` / `indeg` / `ready`, produces exactly such an enumeration over a spine's closure.
 
 From the two, **`between_chain_any_order`** is `between_chain` restated with the order UNIVERSALLY
@@ -217,11 +217,11 @@ the model's, and the host instantiates `lt` there.
 **The DANGLING-PARENT POLICY is a parameter, because the two production call sites differ on it**
 and a theorem about "the drain" that did not say which would be a theorem about neither:
 
-- `IgnoreDangling` — `Dag.topoCore`'s closure walk (`match Map.tryFind id dag.Nodes with | Some n
+- `IgnoreDangling` — `Dag.drainClosure`'s closure walk (`match Map.tryFind id dag.Nodes with | Some n
   -> … | None -> collect acc rest`) with `Dag.ancestorsOf`'s `ContainsKey` guard beside it and the
   `parentsIn` filter that follows. A parent the set does not hold never enters the closure and is
   filtered out of the in-degree, so it constrains nothing and the drain proceeds. This is the
-  policy on the FOLD path — `topoOrder` -> `between` -> `betweenOps` -> `reconcileMany` ->
+  policy on the FOLD path — `drainClosure` -> `between` -> `betweenOps` -> `reconcileMany` ->
   `foldOnce` — and on `replayTo`.
 - `RefuseDangling` — `Dag.firstBreak` (`n.Parents |> List.tryFind (fun p -> not
   (dag.Nodes.ContainsKey p))` -> `MissingParent`), hence `verifyDag` and `fromJsonlVerified`,
@@ -237,10 +237,10 @@ node — and which node production names among several is not modelled. What the
 — `firstBreak` reports the missing parent beside the node, and the node determines the parent, so
 the model names the node and stops there.
 
-**How a cycle is surfaced, stated exactly, because it is a claim about production.** `topoCore`
-does not raise: a node inside a cycle never reaches in-degree zero, so the emitted list is strictly
-SHORTER than the closure — `isAcyclic` and `tryTopoOrder` read that length comparison and surface
-it, while `replayTo` and `between` fold the truncated prefix. The model says the same thing without
+**How a cycle is surfaced, stated exactly, because it is a claim about production.** `drainClosure`
+does not raise: a node inside a cycle never reaches in-degree zero, so it is left unplaced and the
+placed list is strictly SHORTER than the closure — `isAcyclic` and `tryTopoOrder` surface the
+unplaced nodes as the one `Cyclic` answer (Phase 529), while `replayTo` and `between` fold the truncated prefix. The model says the same thing without
 lengths. `drain_total_on_acyclic` gives completeness from acyclicity; `drain_complete_is_acyclic`
 reads the converse off the linear-extension theorem, because a complete drain IS a topological
 enumeration and so witnesses acyclicity. The two are an iff, and that iff is exactly what
@@ -274,7 +274,7 @@ instance whose closure is itself.
 
 **The order is Phase 156's drain, by name, and that is the point of having proved it first.**
 `topo_drain` is `drain_order` over the head's closure taken as a node set (`closure_nodes`) —
-F#'s `topoCore`, the ancestor closure first and the frontier loop over exactly those nodes — and
+F#'s `drainClosure`, the ancestor closure first and the frontier loop over exactly those nodes — and
 `between_drained` is Phase 142's `between_ordered` at that order. Nothing is re-modelled, so the
 three drain theorems apply as they stand.
 
@@ -460,7 +460,7 @@ a blind footprint and requires the comparison to fail and shrink to two lanes of
 report is known to be a comparison that can lose.
 
 **Since Phase 134 the DELTA RECOVERY is measured too, over the same three pools.** Production's own
-`Dag.ancestorsOf` / `topoOrder` / `Dag.between` / `Dag.betweenOps`, on the DAG `foldOnce` actually
+`Dag.ancestorsOf` / `drainClosure` / `Dag.between` / `Dag.betweenOps`, on the DAG `foldOnce` actually
 builds, against the model's recovery over the **same nodes** — the ids the model walks are the
 content hashes production minted, so a disagreement can only be about the recovery and never about
 the hash. A sixth case runs `fold_once_dag`, the model's DAG-shaped entry point, end to end against
@@ -6453,7 +6453,7 @@ instead of a premise a consumer inherits.
 plane holds is replayed through it, and it had no row. `replay_to` is `replayClosure` at one root,
 clause for clause — refuse an unknown head, drain the head's closure with section 13's id-ordered
 drain over section 14's closure, refuse a drain that did not place the whole closure as
-`CyclicHistory`, apply each drained node's op in order. `replay_to_is_fold_over_drain`: over an
+`Cyclic`, apply each drained node's op in order. `replay_to_is_fold_over_drain`: over an
 id-distinct DAG and an acyclic closure it never reports a cycle, its order is a topological
 enumeration of the closure, and its outcome is section 3's `replay` over the drained ops.
 `replay_to_unknown_head_is_refused`: `UnknownHead` exactly for a head the DAG does not hold.
