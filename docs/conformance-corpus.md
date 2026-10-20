@@ -158,9 +158,9 @@ One table, one writer, one manifest schema, one freshness reading:
   shared `apply/manifest.json` beside other producers' rows.
 - **The writer** is `CorpusFile.render` (internal to `Fuaran.Core.Conformance` until its first outside adopter publishes it, D171): a header member per line, then one
   array member with an item per line, LF endings and a trailing newline. Every key, string and number,
-  and every compact item, goes through `Canon.render`, so a file escapes by the spine's one string rule.
+  and every compact item, goes through `Canonical.write Rendering.CrossHost`, so a file escapes by the spine's one string rule.
   An item is either a spaced object or array in author order (`CorpusCell.Row`, `CorpusCell.List`: the
-  vectors of `laws/` and `apply/`, every manifest row) or a value in `Canon.render`'s compact form
+  vectors of `laws/` and `apply/`, every manifest row) or a value in `Canonical.write Rendering.CrossHost`'s compact form
   (`CorpusCell.Value`: the vectors of `refusals/` and `decode/`, the lines of `escape/` and
   `encoding/`). No exporter writes JSON of its own. The hand writer the `laws/` and `apply/` files were
   written with until then spelled `\n`, `\t`, `\b`, `\f` and `\r` short where the spine writes `\u00xx`;
