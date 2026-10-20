@@ -512,13 +512,13 @@ module internal AlgebraTreeLaws =
     /// (`Ops.applyAll` under `OpScope.contained`), **applyability**
     /// (`Ops.canApplyAll` under `OpScope.contained` accepts every emitted step — `Diff.fst`'s
     /// `diff_applicable_contained` asked of the shipped engine), and **refusal exactness**
-    /// (`Diff.toOps` under `OpScope.contained` refuses with `TargetNotAContainer` exactly when `after` nests children
+    /// (`Diff.toOps` under `OpScope.contained` refuses with `NotAContainer` exactly when `after` nests children
     /// under a node the predicate rejects, and the plain `toOps` accepts the same pair — so the
     /// refusal is the container check's contribution and nothing else's).
     ///
     /// A fourth law, **refusal correspondence** (Phase 228), holds the diff-side refusal to its
     /// apply-side sibling: wherever `Diff.toOps` under `OpScope.contained` refuses an `after` with
-    /// `TargetNotAContainer(t, k)`, the offending nesting is BUILT as a graft — the subtree `after`
+    /// `NotAContainer(t, k)`, the offending nesting is BUILT as a graft — the subtree `after`
     /// carries at `t`, cut out of `after` and re-inserted under its own parent through
     /// `Ops.apply` under `OpScope.contained` — and that insert must refuse with `NotAContainer(t, k)`: the same
     /// offender, the same kind tag. Both refusals are defined by `Ops.firstUncontained`, and this is
@@ -556,7 +556,7 @@ module internal AlgebraTreeLaws =
 
         let correspondence =
             LawKit.LawCell(
-                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through the contained apply refuses NotAContainer(t, k))",
+                "contained diff refusal corresponds (the diff's NotAContainer(t, k) ⇒ the same graft through the contained apply refuses NotAContainer(t, k))",
                 Some "refused pair"
             )
         // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
@@ -600,7 +600,7 @@ module internal AlgebraTreeLaws =
                         fun () ->
                             at (
                                 sprintf
-                                    "the contained toOps refused with TargetNotAContainer(%s, %s), but grafting the same subtree through the contained apply answered %A"
+                                    "the contained toOps refused with NotAContainer(%s, %s), but grafting the same subtree through the contained apply answered %A"
                                     (idw.ToString t)
                                     k
                                     answer
@@ -618,7 +618,7 @@ module internal AlgebraTreeLaws =
                 accepted <- accepted + 1
 
             match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
-            | Error(Diff.TargetNotAContainer(p, k)) when expected ->
+            | Error(NotAContainer(p, k)) when expected ->
                 checkCorrespondence at after p k
 
                 // the node it names must be one `after` really carries, really has children, and
@@ -632,17 +632,17 @@ module internal AlgebraTreeLaws =
                     fun () ->
                         at (
                             sprintf
-                                "TargetNotAContainer named %s, which is not a childful non-container of `after`"
+                                "the diff's NotAContainer named %s, which is not a childful non-container of `after`"
                                 (idw.ToString p)
                         )
                 )
-            | Error(Diff.TargetNotAContainer(p, _)) ->
+            | Error(NotAContainer(p, _)) ->
                 refusal.Check(
                     false,
                     fun () ->
                         at (
                             sprintf
-                                "TargetNotAContainer(%s) on an `after` every parent of which can hold children"
+                                "the diff's NotAContainer(%s) on an `after` every parent of which can hold children"
                                 (idw.ToString p)
                         )
                 )
@@ -1261,3 +1261,190 @@ module internal AlgebraTreeLaws =
                     [ "clean full walk", cleanWalks
                       "keyed id in the witness surface", surfaceBuilds
                       "one id in two keyed positions", keyedBuilds ] ]
+
+    /// The keyed diff laws (Phase 518) — certify `Diff.toOpsWith` under `OpScope.keyed` against a
+    /// domain's keyed positions and content encoder. Four laws:
+    ///
+    /// - **Reconstruction.** Over a pair the keyed engine derives (`before` drawn, `after` reached
+    ///   from it by up to four drawn ops applied under the keyed scope), the keyed diff accepts and
+    ///   `Ops.applyAll` under the same scope lands its script on `after`.
+    /// - **A change below a keyed position is seen.** BUILT, never drawn: a node the keyed walk
+    ///   reaches and the structural walk does not is given a fresh keyed child through
+    ///   `KeyedWitness.PlaceKeyedChild`, so `after` differs from `before` ONLY below a keyed
+    ///   position; the script is non-empty and lands on `after`, whatever the encoder reads (the
+    ///   structural diff emitted `[]` there under an own-content encoder, `KeyedGateDiffTests` (b)).
+    /// - **The keyed arity is kept.** No shell the diff builds, and no rebuild of the script it
+    ///   applies, hands `ReplaceKeyedChildren` a list of another length than the node's keyed
+    ///   positions (the diff over `Tree.traversal` handed it `[]`, `KeyedGateDiffTests` (c)).
+    /// - **A relocation across a keyed boundary is refused.** BUILT: a structural node is removed
+    ///   and its id placed in a keyed position of another holder, and the diff refuses with
+    ///   `KeyedPosition` naming the node, that holder and the slot.
+    ///
+    /// A domain that declares no keyed position passes VACUOUSLY BY DECLARATION and the report says
+    /// so, as `keyedChildrenLawsAt`'s does. Opt-in, beside `keyedApplyLawsAt`. `'Node` needs equality.
+    let keyedDiffLawsAt
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (runner: LawKit.Runner)
+        (iterations: int)
+        : LawResult list =
+        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
+        // the keyed positions as declared, with every short or long rebuild RECORDED
+        let mutable arityBreaks: string list = []
+
+        let strict =
+            { keyw with
+                ReplaceKeyedChildren =
+                    fun n ks ->
+                        if List.length ks <> List.length (keyw.KeyedChildren n) then
+                            arityBreaks <- idw.ToString(nodew.Id n) :: arityBreaks
+
+                        keyw.ReplaceKeyedChildren n ks }
+
+        let scope = OpScope.keyed strict canHold nodew idw
+        let t = Tree.traversal nodew strict
+
+        let reconstruction =
+            LawKit.LawCell "keyed diff reconstruction (the keyed applyAll lands the keyed toOpsWith on after)"
+
+        let seen =
+            LawKit.LawCell(
+                "keyed diff sees a change below a keyed position (a non-empty script that lands on after)",
+                Some "built arm"
+            )
+
+        let arity =
+            LawKit.LawCell
+                "keyed diff keeps the keyed arity (no rebuild hands ReplaceKeyedChildren a list of another length)"
+
+        let crossing =
+            LawKit.LawCell(
+                "keyed diff refuses a relocation across a keyed boundary with KeyedPosition(node, holder, slot)",
+                Some "built arm"
+            )
+
+        let mutable declaredKeyed = 0
+        let mutable seenBuilds = 0
+        let mutable crossingBuilds = 0
+
+        let lands (at: string -> string) (cell: LawKit.LawCell) (before: 'Node) (after: 'Node) (nonEmpty: bool) =
+            match Diff.toOpsWith encode Policy.none scope before after with
+            | Ok ops ->
+                let landed = Ops.applyAll Policy.none scope ops before
+
+                cell.Check(
+                    (not nonEmpty || not (List.isEmpty ops)) && landed = Ok after,
+                    fun () -> at (sprintf "the keyed script %A does not land on after (got %A)" ops landed)
+                )
+            | Error e -> cell.Check(false, fun () -> at (sprintf "the keyed diff refused a pair it can reach: %A" e))
+
+        LawKit.run runner iterations (fun rng _ at ->
+            arityBreaks <- []
+            let before = rng.Draw gen.Tree
+            let structural = Tree.preorder nodew before
+
+            let surface =
+                structural |> List.map (fun n -> idw.ToString(nodew.Id n)) |> Set.ofList
+
+            let keyedOnly =
+                Tree.preorder t before
+                |> List.filter (fun n -> not (surface.Contains(idw.ToString(nodew.Id n))))
+
+            declaredKeyed <- declaredKeyed + List.length keyedOnly
+
+            // ---- reconstruction, over a pair the keyed engine derives ----
+            let mutable after = before
+
+            for _ in 1..4 do
+                let op = rng.Draw(LawKit.genOp nodew idw gen after)
+
+                match Ops.apply Policy.none scope op after with
+                | Ok t' -> after <- t'
+                | Error _ -> ()
+
+            lands at reconstruction before after false
+
+            // ---- a change below a keyed position (built) ----
+            let taken = Tree.ids t before |> List.map idw.ToString |> Set.ofList
+
+            match keyedOnly with
+            | [] -> ()
+            | _ ->
+                let target = rng.Choose keyedOnly
+                let fresh = rng.Draw(gen.FreshNode taken)
+
+                match keyw.PlaceKeyedChild target (nodew.Id fresh) with
+                | Some placed when idw.Equals (nodew.Id placed) (nodew.Id target) ->
+                    match Tree.updateNode t idw (nodew.Id target) (fun _ -> placed) before with
+                    | Some changed when changed <> before ->
+                        seenBuilds <- seenBuilds + 1
+                        lands at seen before changed true
+                    | _ -> ()
+                | _ -> ()
+
+            // ---- a relocation across a keyed boundary (built) ----
+            match structural with
+            | _ :: (_ :: _ as rest) ->
+                let victim = rng.Choose rest
+                let victimIds = Tree.ids t victim |> List.map idw.ToString |> Set.ofList
+
+                match Ops.apply Policy.none scope (RemoveNode(nodew.Id victim)) before with
+                | Ok cut ->
+                    let holder =
+                        Tree.preorder nodew cut
+                        |> List.filter (fun h -> not (victimIds.Contains(idw.ToString(nodew.Id h))))
+                        |> rng.Choose
+
+                    let slot = List.length (keyw.KeyedChildren holder)
+
+                    match keyw.PlaceKeyedChild holder (nodew.Id victim) with
+                    | Some placed when
+                        idw.Equals (nodew.Id placed) (nodew.Id holder)
+                        && List.length (keyw.KeyedChildren placed) = slot + 1
+                        ->
+                        match Tree.updateNode nodew idw (nodew.Id holder) (fun _ -> placed) cut with
+                        | Some relocated ->
+                            crossingBuilds <- crossingBuilds + 1
+                            let answer = Diff.toOpsWith encode Policy.none scope before relocated
+
+                            crossing.Check(
+                                (match answer with
+                                 | Error(KeyedPosition(v, h, s)) ->
+                                     idw.Equals v (nodew.Id victim) && idw.Equals h (nodew.Id holder) && s = slot
+                                 | _ -> false),
+                                fun () ->
+                                    at (
+                                        sprintf
+                                            "relocating %s into keyed position %d of %s answered %A"
+                                            (idw.ToString(nodew.Id victim))
+                                            slot
+                                            (idw.ToString(nodew.Id holder))
+                                            answer
+                                    )
+                            )
+                        | None -> ()
+                    | _ -> ()
+                | Error _ -> ()
+            | _ -> ()
+
+            arity.Check(
+                List.isEmpty arityBreaks,
+                fun () -> at (sprintf "ReplaceKeyedChildren was handed a list of another length at %A" arityBreaks)
+            ))
+
+        if declaredKeyed = 0 && seenBuilds = 0 && crossingBuilds = 0 then
+            LawKit.results [ reconstruction; seen; arity; crossing ]
+            @ [ LawKit.declared
+                    runner
+                    "keyed position"
+                    "the witness declares NO keyed position, so the keyed diff laws are vacuous BY DECLARATION" ]
+        else
+            LawKit.results [ reconstruction; seen; arity; crossing ]
+            @ [ LawKit.guard
+                    runner
+                    "built arm"
+                    [ "change below a keyed position", seenBuilds
+                      "relocation across a keyed boundary", crossingBuilds ] ]

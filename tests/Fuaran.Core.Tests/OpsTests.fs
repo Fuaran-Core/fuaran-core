@@ -582,7 +582,7 @@ let insertIdUniquenessTests =
               | Tree.Structural -> failtest "a tree carrying `a` and `b` twice read as well-formed"
 
               match Diff.toOps Policy.none (OpScope.plain nodew idw) t (sample ()) with
-              | Error(Diff.DuplicateIdInTree d) ->
+              | Error(DuplicateId d) ->
                   Expect.equal d "b" "Diff names the same offender the accept path would — one definition, one answer"
               | other -> failtestf "the diff should refuse a malformed `before` tree: %A" other
 
@@ -652,7 +652,7 @@ let insertIdUniquenessTests =
 // ---------------------------------------------------------------------------
 //  Phase 228 — one payload for the graft-containment refusal
 //
-//  `Diff.DiffError.TargetNotAContainer` and `Rejection.NotAContainer` detect one shape through one
+//  the diff's and the apply path's `Rejection.NotAContainer` (the diff's was `DiffError.TargetNotAContainer` until Phase 518) detect one shape through one
 //  definition (`Ops.firstUncontained`) and, since this phase, name the offender under one field,
 //  `target`. The cases below match on the NAMED fields, so a field that drifted back apart would
 //  stop compiling here rather than read as a pass.
@@ -684,13 +684,13 @@ let private correspondenceLaw = "contained diff refusal corresponds"
 [<Tests>]
 let graftRefusalCorrespondenceTests =
     testList
-        "Diff.TargetNotAContainer ≡ Ops.NotAContainer (Phase 228)"
+        "the diff's NotAContainer ≡ Ops.NotAContainer (Phase 228)"
         [ testCase "the diff and the apply path name the same offender under the same field"
           <| fun _ ->
               let after = nestedUnderPara ()
 
               match Diff.toOps Policy.none (OpScope.contained canHold137 nodew idw) (sample ()) after with
-              | Error(Diff.TargetNotAContainer(target = "a1"; kindTag = "para")) -> ()
+              | Error(NotAContainer(target = "a1"; kindTag = "para")) -> ()
               | other -> failtestf "expected TargetNotAContainer(target = a1, kindTag = para), got %A" other
 
               // the same graft, cut out of `after` and re-inserted under its own parent

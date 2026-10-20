@@ -5,12 +5,12 @@ module Fuaran.Core.Tests.KeyedGateDiffTests
 // `Children`). Each test pinned the answer measured then, a stated limit (`WriteGate.fs`'s and
 // `Diff.fs`'s headers), as a GO-RED fixture for the keyed entry the gate and the diff did not have:
 // when one lands, its answers flip and the tests become its laws. (a) flipped with Phase 517's keyed
-// gate; (b) and (c) are the keyed diff's, fuaran-core#518.
+// gate; (b) and (c) flipped with Phase 518's keyed diff (`Conformance.keyedDiffLawsAt` is the law).
 //
 //   (a) A lock on a holder and a write inside its keyed subtree: does `WriteGate.decide` refuse?
-//   (b) `Diff.toOpsWith` over the PLAIN witness, with a change below a keyed child: is it seen?
-//   (c) `Diff.toOpsWith` over `Tree.traversal`: does step 1's `ReplaceChildren n []` keep the
-//       arity `KeyedWitness.ReplaceKeyedChildren` promises?
+//   (b) `Diff.toOpsWith` with a change below a keyed child: is it seen?
+//   (c) `Diff.toOpsWith` over the keyed walk: is the arity `KeyedWitness.ReplaceKeyedChildren`
+//       promises kept at step 0's content shells and step 1's inserted shells?
 
 open Expecto
 open Fuaran.Core
@@ -100,9 +100,11 @@ let tests =
                         "locked by itself" ]
 
           testList
-              "(b) the plain diff does not see below a keyed child"
-              [ testCase "a change inside a keyed subtree emits no op, and the script does not reach after"
+              "(b) the keyed diff sees below a keyed child (Phase 518)"
+              [ testCase "a change inside a keyed subtree is the holder's update, whatever the encoder reads"
                 <| fun _ ->
+                    // Phase 496 pinned the OTHER answer here as the limit: over the plain witness an
+                    // own-content encoder saw nothing, `[]`, and the script landed on `before`.
                     let before = sample ()
 
                     let after =
@@ -113,29 +115,9 @@ let tests =
                               k "sw" "switch" [] [ "one", k "c1" "section" [ k "c1a" "heading" [] [] ] [] ] ]
                             []
 
-                    match Diff.toOpsWith ownContent Policy.none (OpScope.plain knodew idw) before after with
-                    | Ok ops ->
-                        Expect.isEmpty ops "no node the plain walk reaches changed its own content"
+                    let keyed = OpScope.keyed keyw canHoldAll knodew idw
 
-                        Expect.notEqual
-                            (Ops.applyAll Policy.none (OpScope.plain knodew idw) ops before)
-                            (Ok after)
-                            "so the script lands on before, not after"
-                    | Error e -> failtestf "the diff refused: %A" e
-
-                testCase "an encoder that reads the keyed positions sees the change only as the holder's update"
-                <| fun _ ->
-                    let before = sample ()
-
-                    let after =
-                        k
-                            "root"
-                            "section"
-                            [ leaf "a"
-                              k "sw" "switch" [] [ "one", k "c1" "section" [ k "c1a" "heading" [] [] ] [] ] ]
-                            []
-                    // `sprintf "%A"` over the shell reads the case table, so the holder's shell differs.
-                    match Diff.toOpsWith (sprintf "%A") Policy.none (OpScope.plain knodew idw) before after with
+                    match Diff.toOpsWith ownContent Policy.none keyed before after with
                     | Ok ops ->
                         Expect.equal
                             (ops
@@ -143,17 +125,56 @@ let tests =
                                  | UpdateNode n -> "UpdateNode " + n.Id
                                  | other -> sprintf "%A" other))
                             [ "UpdateNode sw" ]
-                            "the whole keyed subtree rides one UpdateNode of its holder"
+                            "the keyed subtree is the holder's content, so it rides one UpdateNode of sw"
 
-                        Expect.equal
-                            (Ops.applyAll Policy.none (OpScope.plain knodew idw) ops before)
-                            (Ok after)
-                            "which does reach after"
-                    | Error e -> failtestf "the diff refused: %A" e ]
+                        Expect.equal (Ops.applyAll Policy.none keyed ops before) (Ok after) "which reaches after"
+                    | Error e -> failtestf "the keyed diff refused: %A" e
+
+                    Expect.equal
+                        (Diff.changes ownContent Policy.none keyed before after)
+                        (Ok
+                            [ { Id = "sw"
+                                Kind = Diff.ChangeKind.Changed } ])
+                        "and changes reads it off the same pass: the holder Changed"
+
+                testCase "the plain scope still sees no keyed position: its own-content diff is empty"
+                <| fun _ ->
+                    // the plain scope declares no keyed position, so the case table is invisible to it
+                    // by contract; the keyed scope is the form that sees it
+                    let before = sample ()
+
+                    let after =
+                        k
+                            "root"
+                            "section"
+                            [ leaf "a"
+                              k "sw" "switch" [] [ "one", k "c1" "section" [ k "c1a" "heading" [] [] ] [] ] ]
+                            []
+
+                    Expect.equal
+                        (Diff.toOpsWith ownContent Policy.none (OpScope.plain knodew idw) before after)
+                        (Ok [])
+                        "nothing the plain walk reaches changed its own content"
+
+                testCase "a node relocated across a keyed boundary is refused as KeyedPosition"
+                <| fun _ ->
+                    let before = sample ()
+                    // `a` leaves the structural surface for a new case of `sw`
+                    let after =
+                        k
+                            "root"
+                            "section"
+                            [ k "sw" "switch" [] [ "one", k "c1" "section" [ leaf "c1a" ] []; "two", leaf "a" ] ]
+                            []
+
+                    Expect.equal
+                        (Diff.toOpsWith ownContent Policy.none (OpScope.keyed keyw canHoldAll knodew idw) before after)
+                        (Error(KeyedPosition("a", "sw", 1)))
+                        "the node, the holder that carries it, the slot" ]
 
           testList
-              "(c) the diff over Tree.traversal breaks the keyed arity"
-              [ testCase "step 1's empty ReplaceChildren hands ReplaceKeyedChildren a list shorter than its arity"
+              "(c) the keyed diff keeps the keyed arity (Phase 518)"
+              [ testCase "no shell or rebuild hands ReplaceKeyedChildren a list shorter than its arity"
                 <| fun _ ->
                     let mutable violations = []
 
@@ -167,8 +188,9 @@ let tests =
                                     keyw.ReplaceKeyedChildren n ks }
 
                     let before = sample ()
-                    // `fresh` is ADDED and holds a case, so step 1 inserts its shell through the
-                    // traversal's `ReplaceChildren fresh []`.
+                    // `fresh` is ADDED and holds a case, so step 1 inserts its shell; `sw` survives,
+                    // so step 0 reads its content shell. Phase 496 measured both under-filled
+                    // (`[ "fresh", 1, 0; "sw", 1, 0 ]`) when the diff ran over `Tree.traversal`.
                     let after =
                         k
                             "root"
@@ -178,32 +200,20 @@ let tests =
                               k "fresh" "switch" [] [ "x", leaf "fx" ] ]
                             []
 
-                    let tw = Tree.traversal knodew strict
+                    let keyed = OpScope.keyed strict canHoldAll knodew idw
 
-                    match Diff.toOpsWith ownContent Policy.none (OpScope.plain tw idw) before after with
+                    match Diff.toOpsWith ownContent Policy.none keyed before after with
                     | Ok ops ->
-                        // Step 1's shell of the added holder, AND step 0's content shells of the
-                        // survivor holder `sw` (`shellOf` is the same `ReplaceChildren n []`).
-                        Expect.equal
-                            (List.distinct violations |> List.sort)
-                            [ "fresh", 1, 0; "sw", 1, 0 ]
-                            "every holder was rebuilt with 0 keyed children against an arity of 1"
-
-                        // This domain answers the short list by leaving the cases in place, so the
-                        // "shell" still carries `fx` and the script inserts `fx` a second time.
                         match ops with
-                        | InsertChild(_, shell) :: _ ->
-                            Expect.equal (shell.Cases |> List.map (snd >> _.Id)) [ "fx" ] "the shell is not a shell"
-                        | other -> failtestf "expected the added holder's shell first, got %A" other
+                        | [ InsertChild("root", shell) ] ->
+                            Expect.equal
+                                (shell.Cases |> List.map (snd >> _.Id))
+                                [ "fx" ]
+                                "the shell keeps its keyed case"
 
-                        let landed =
-                            (Ok before, ops)
-                            ||> List.fold (fun acc op ->
-                                acc
-                                |> Result.bind (Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op))
+                            Expect.isEmpty shell.Children "and no structural child"
+                        | other -> failtestf "expected the added holder's shell alone, got %A" other
 
-                        Expect.notEqual
-                            landed
-                            (Ok after)
-                            "and the script does not land on after through the keyed engine"
+                        Expect.equal (Ops.applyAll Policy.none keyed ops before) (Ok after) "the script lands on after"
+                        Expect.isEmpty violations "no rebuild under-filled a keyed position"
                     | Error e -> failtestf "the diff refused: %A" e ] ]

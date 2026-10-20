@@ -13,6 +13,13 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ConformanceTests
 
+/// An index of a tree the test knows is well-formed (`Tree.Index.build` refuses a repeated id since
+/// Phase 518).
+let private ok (r: Result<'a, string>) : 'a =
+    match r with
+    | Ok x -> x
+    | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
+
 let private k (id: string) (children: KNode list) (cases: (string * KNode) list) : KNode =
     { Id = id
       Kind = (if List.isEmpty children then "para" else "section")
@@ -170,7 +177,7 @@ let tests =
 
                     Expect.equal (Tree.ancestors tw idw "c1a" t |> List.map _.Id) [ "root"; "sw"; "c1" ] "ancestors"
 
-                    let ix = Tree.Index.build tw idw t
+                    let ix = ok (Tree.Index.build tw idw t)
                     Expect.equal (Tree.Index.path idw "c1k" ix) (Some [ "root"; "sw"; "c1"; "c1k" ]) "Index"
 
                 testCase "updateNode and remapIds rebuild through a keyed position and keep the case table"

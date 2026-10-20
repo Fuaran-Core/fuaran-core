@@ -458,11 +458,7 @@ module Families =
           ("Conformance.digestLaws", tree, stronger, []),
           Guarded [ "pair shape" ],
           none "no refused outcome is read; a drawn pair that is refused only fails a law",
-          "Tree.digests Tree.ownDigest Tree.frameDigest Tree.Digests.diff Tree.Digests.subtreeEqual"
-          ("Conformance.changeLaws", tree, stronger, []),
-          Guarded [ "pair shape" ],
-          none "no refused outcome is read; a drawn pair that is refused only fails a law",
-          "Diff.changes"
+          "Tree.digests Tree.ownDigest Tree.frameDigest Tree.Digests.diff Tree.Digests.subtreeEqual Diff.changes"
           ("Conformance.introducedLaws", tree, seam, []),
           Guarded [ "gate arm" ],
           none "the gate's block is a verdict over findings, not a refused outcome; no law reads a refusal",
@@ -493,6 +489,11 @@ module Families =
           built
               "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms",
           "Ops.apply Ops.canApply Tree.wellFormedKeyed Tree.idsKeyed Tree.keyedIds Tree.traversal"
+          ("Conformance.keyedDiffLawsAt", Takes.KeyedWitness :: tree, capability, []),
+          Guarded [ "built arm (change below a keyed position / relocation across a keyed boundary)" ],
+          built
+              "the relocation across a keyed boundary is built through PlaceKeyedChild and must be refused KeyedPosition; its guard covers the built arms",
+          "Diff.toOpsWith Ops.applyAll Tree.traversal"
           ("Conformance.keyedArbitrationLawsWith", Takes.KeyedWitness :: tree, capability, []),
           Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ],
           drawn

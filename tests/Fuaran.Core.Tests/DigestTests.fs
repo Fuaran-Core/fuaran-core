@@ -34,7 +34,7 @@ let private isSha256Hex (s: string) =
     s.Length = 64
     && s |> Seq.forall (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
 
-let private keysOf (m: Map<string, string>) = m |> Map.toList |> List.map fst
+let private keysOf (m: Map<string, Digest>) = m |> Map.toList |> List.map fst
 
 let private kinds (cs: Diff.Change<string> list) = cs |> List.map (fun c -> c.Id, c.Kind)
 
@@ -74,7 +74,8 @@ let digestTests =
 
               for m in [ d.Own; d.Frame; d.Subtree ] do
                   for KeyValue(_, v) in m do
-                      Expect.isTrue (isSha256Hex v) (sprintf "a SHA-256 digest, not %s" v)
+                      Expect.isTrue (isSha256Hex v.Hex) (sprintf "a SHA-256 digest, not %O" v)
+                      Expect.equal v.Algorithm DigestAlgorithm.Sha256 "a typed SHA-256 digest (Phase 518)"
           }
 
           test "the maps are the per-node forms, and the Merkle digest is built as documented" {
@@ -86,8 +87,8 @@ let digestTests =
 
               // a leaf's subtree digest is SHA-256 over its own digest alone; a parent's is over its
               // own digest then its children's subtree digests, in order
-              let own id = Map.find id d.Own
-              let sub id = Map.find id d.Subtree
+              let own id = (Map.find id d.Own).Hex
+              let sub id = (Map.find id d.Subtree).Hex
               Expect.equal (sub "p1") (Hash.sha256Hex (Hash.canonicalFields [ own "p1" ])) "leaf"
               Expect.equal (sub "s1") (Hash.sha256Hex (Hash.canonicalFields [ own "s1"; sub "p1"; sub "p2" ])) "section"
 
@@ -168,7 +169,7 @@ let digestTests =
               // answers Unchanged — subtree agreement is the stronger fact, so the own digest is not read
               let tampered =
                   { d with
-                      Own = d.Own |> Map.add "p1" "tampered" }
+                      Own = d.Own |> Map.add "p1" (Map.find "p2" d.Own) }
 
               Expect.equal (Tree.Digests.diff d tampered).Changed [] "subtree-equal keys are never Changed"
 
@@ -177,7 +178,7 @@ let digestTests =
                   "absent on one side"
           }
 
-          test "an id carried twice keeps its LAST preorder occurrence, as Tree.Index.build does" {
+          test "an id carried twice keeps its LAST preorder occurrence (Tree.Index.build refuses such a tree)" {
               let twice = RNode.node "root" "doc" [ leaf "p" "first"; leaf "p" "second" ]
               let d = Tree.digests nodew idw encode twice
               Expect.equal (Map.find "p" d.Own) (Tree.ownDigest nodew idw encode (leaf "p" "second")) "the last wins"
@@ -198,7 +199,7 @@ let changeTests =
                         section "s2" [ leaf "p4" "d" ] ]
 
               let cs =
-                  Diff.changes encode nodew idw fixture after
+                  Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture after
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               Expect.equal
@@ -216,7 +217,7 @@ let changeTests =
                   RNode.node "root" "doc" [ section "s2" [ leaf "p3" "c"; leaf "p1" "A" ] ]
 
               let cs =
-                  Diff.changes encode nodew idw fixture after
+                  Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture after
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               Expect.equal
@@ -234,7 +235,8 @@ let changeTests =
                   RNode.node "root" "doc" [ section "s1" [ leaf "p2" "b" ]; section "s2" [ leaf "p3" "c" ] ]
 
               Expect.equal
-                  (Diff.changes encode nodew idw fixture shifted |> Result.map kinds)
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture shifted
+                   |> Result.map kinds)
                   (Ok [ "p1", Diff.ChangeKind.Removed ])
                   "p2 moved from index 1 to 0 under one parent, and that is p1's removal, not a reorder"
 
@@ -246,7 +248,8 @@ let changeTests =
                         section "s2" [ leaf "p3" "c" ] ]
 
               Expect.equal
-                  (Diff.changes encode nodew idw fixture swapped |> Result.map kinds)
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture swapped
+                   |> Result.map kinds)
                   (Ok [ "s1", Diff.ChangeKind.Reordered ])
                   "the kept children stand in a new order: the parent is Reordered, the children are not Moved"
           }
@@ -260,7 +263,7 @@ let changeTests =
                         section "s2" [ leaf "p5" "e" ] ]
 
               let cs =
-                  Diff.changes encode nodew idw fixture after
+                  Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture after
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let ops =
@@ -304,23 +307,26 @@ let changeTests =
           }
 
           test "the identity pair classifies to []; the refusals are toOps's, in its order" {
-              Expect.equal (Diff.changes encode nodew idw fixture fixture) (Ok []) "identity"
+              Expect.equal
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture fixture)
+                  (Ok [])
+                  "identity"
 
               Expect.equal
-                  (Diff.changes encode nodew idw fixture (RNode.node "other" "doc" []))
-                  (Error(Diff.RootIdMismatch("root", "other")))
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture (RNode.node "other" "doc" []))
+                  (Error(RootIdMismatch("root", "other")))
                   "root mismatch first"
 
               let dup = RNode.node "root" "doc" [ leaf "p" ""; leaf "p" "" ]
 
               Expect.equal
-                  (Diff.changes encode nodew idw dup fixture)
-                  (Error(Diff.DuplicateIdInTree "p"))
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) dup fixture)
+                  (Error(DuplicateId "p"))
                   "before's repeat"
 
               Expect.equal
-                  (Diff.changes encode nodew idw fixture dup)
-                  (Error(Diff.DuplicateIdInTree "p"))
+                  (Diff.changes encode Policy.none (OpScope.plain nodew idw) fixture dup)
+                  (Error(DuplicateId "p"))
                   "after's repeat"
           } ]
 
@@ -484,13 +490,14 @@ let projectionTests =
 
                   Expect.equal
                       (Projection.snapshotDigestOf pw n)
-                      (Tree.frameDigest nodew idw pw.Encode n)
+                      (Tree.frameDigest nodew idw pw.Encode n).Hex
                       "one definition"
 
               let snap = Projection.snapshot pw fixture
               let d = Tree.digests nodew idw pw.Encode fixture
-              Expect.equal snap.Digests d.Frame "the Frame map (plain ids escape to themselves)"
-              Expect.equal snap.Subtrees d.Subtree "the Merkle map"
+              let hex (m: Map<string, Digest>) = m |> Map.map (fun _ v -> v.Hex)
+              Expect.equal snap.Digests (hex d.Frame) "the Frame map (plain ids escape to themselves)"
+              Expect.equal snap.Subtrees (hex d.Subtree) "the Merkle map"
           }
 
           test "ChangedSince reports a reorder and a move — the parents whose child order or membership moved" {
@@ -568,7 +575,7 @@ let projectionTests =
               let d = Tree.digests nodew idw pw.Encode fixture
 
               let byDigest =
-                  Projection.project pw (Scope.BySubtreeDigest(Map.find "s1" d.Subtree)) fixture
+                  Projection.project pw (Scope.BySubtreeDigest (Map.find "s1" d.Subtree).Hex) fixture
 
               Expect.equal
                   byDigest

@@ -257,19 +257,6 @@ module Ops =
         | Tree.RepeatedId d -> Some d
         | Tree.Structural -> None
 
-    /// `firstUncontained`'s walk, over a witness of the caller's choosing: the first node `t`
-    /// reaches that holds STRUCTURAL children while `canHold` refuses it. The keyed engine walks
-    /// the graft's keyed subtrees too (Phase 286), since a node the keyed walk reaches is a node of
-    /// the tree; "holds children" stays `w.Children`, the list `canHold` is about.
-    let private firstUncontainedOver
-        (t: NodeWitness<'Node, 'Id>)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (node: 'Node)
-        : 'Node option =
-        Tree.preorder t node
-        |> List.tryFind (fun n -> not (List.isEmpty (w.Children n)) && not (canHold n))
-
     /// The first node of a graft (preorder) that HOLDS children while `canHold` refuses it — the
     /// interior offender an inserted subtree carries in. `None` when the graft's own interior
     /// already satisfies the invariant a contained scope exists to keep ("every node with children
@@ -284,16 +271,28 @@ module Ops =
     ///
     /// The predicate is the contained `Diff.toOps`'s, deliberately: the diff path has walked an `after`
     /// tree for exactly this shape since Phase 09, and the accept path was the one place the check
-    /// was missing — word for word Phase 137's situation with `DuplicateIdInTree`.
+    /// was missing — word for word Phase 137's situation with the diff's repeated-id refusal.
     ///
     /// **The single definition of the graft-containment shape (Phase 228).** Both refusals of that
-    /// shape are raised from THIS function — `Rejection.NotAContainer` on the apply path (through
-    /// `validateGraftContainment`) and `Diff.DiffError.TargetNotAContainer` on the diff path (through
-    /// `Diff.toOps` under a contained scope, which calls it over the whole `after` tree) — and both name the node it
-    /// returns under one payload, `target * kindTag`. It is `internal` rather than `private` only so
-    /// the `Diff` module can call it instead of re-stating it; it is not public surface.
-    let internal firstUncontained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (node: 'Node) : 'Node option =
-        firstUncontainedOver w canHold w node
+    /// shape are raised from THIS function, `Rejection.NotAContainer` on the apply path (through
+    /// `validateGraftContainment`) and on the diff path (through `Diff.toOps` under a scope with a
+    /// `CanHold`, which calls it over the whole `after` tree; `DiffError.TargetNotAContainer` until
+    /// Phase 518), and both name the node it returns under one payload, `target * kindTag`.
+    ///
+    /// **The walk is the caller's (Phase 286).** It reports the first node `t` reaches that holds
+    /// STRUCTURAL children (`w.Children`, the list `canHold` is about) while `canHold` refuses it:
+    /// the keyed engine and the keyed diff pass `Tree.traversal`, since a node the keyed walk reaches
+    /// is a node of the tree, and every other caller passes `w` itself. It is `internal` rather than
+    /// `private` only so the `Diff` module can call it instead of re-stating it; it is not public
+    /// surface.
+    let internal firstUncontained
+        (t: NodeWitness<'Node, 'Id>)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (node: 'Node)
+        : 'Node option =
+        Tree.preorder t node
+        |> List.tryFind (fun n -> not (List.isEmpty (w.Children n)) && not (canHold n))
 
     /// The graft-containment clause of `validateInsert` (Phase 161), factored out so the check has
     /// one name and one home. `NotAContainer` names the offending node in the GRAFT — not the
@@ -313,7 +312,7 @@ module Ops =
         (t: NodeWitness<'Node, 'Id>)
         (node: 'Node)
         : Result<unit, Rejection<'Id>> =
-        match firstUncontainedOver t canHold w node with
+        match firstUncontained t canHold w node with
         | Some offender -> Error(NotAContainer(w.Id offender, w.KindTag offender))
         | None -> Ok()
 
@@ -501,7 +500,7 @@ module Ops =
                         with
                         | Some d -> Error(DuplicateId d)
                         | None ->
-                            match incoming |> List.tryPick (firstUncontainedOver t canHold w) with
+                            match incoming |> List.tryPick (firstUncontained t canHold w) with
                             | Some offender -> Error(NotAContainer(w.Id offender, w.KindTag offender))
                             | None -> Ok()
 
@@ -737,8 +736,8 @@ module Ops =
         /// ancestors (whose node values every edit rebuilds) and the grafted and removed subtrees
         /// are re-indexed, through `Tree.Index.rebind`.
         ///
-        /// **The law:** `afterOp w idw op post (Tree.Index.build w idw pre) ≡ Tree.Index.build w
-        /// idw post` — the same `Root` and `ParentOf`, the same `ById` keys, and at each key a node
+        /// **The law:** for `Ok ix = Tree.Index.build w idw pre`, `afterOp w idw op post ix ≡
+        /// Tree.Index.build w idw post` — the same `Root` and `ParentOf`, the same `ById` keys, and at each key a node
         /// equal to `post`'s (a node outside the edit keeps the value the index held, which `apply`
         /// rebuilt from the same content). So `isFreshFor w idw encode post` holds of it under any
         /// `encode`, a content-only `UpdateNode` included (the updated node is re-indexed).
@@ -750,14 +749,16 @@ module Ops =
         /// found where the tracking puts it, with the children the tracking says it has); a `post`
         /// that disagrees — an op `apply` refused, a tree from elsewhere, an index built under
         /// another witness — falls back to `Tree.Index.build w idw post`, so the law holds whatever
-        /// the caller hands it, and only the cost depends on the contract.
+        /// the caller hands it, and only the cost depends on the contract. A `Result` since Phase
+        /// 518, because that fallback is `build`'s, which refuses a `post` carrying an id twice
+        /// (`Error d`, the id) rather than index it.
         let afterOp
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
             (op: SkeletonOp<'Node, 'Id>)
             (post: 'Node)
             (ix: Tree.NodeIndex<'Node, 'Id>)
-            : Tree.NodeIndex<'Node, 'Id> =
+            : Result<Tree.NodeIndex<'Node, 'Id>, 'Id> =
             let key (i: 'Id) = idw.ToString i
             let keyOf (n: 'Node) = key (w.Id n)
 
@@ -945,7 +946,7 @@ module Ops =
                         Some(Tree.Index.rebind w idw leaving arriving ix)
 
             match step start op |> Option.bind incremental with
-            | Some ix' -> ix'
+            | Some ix' -> Ok ix'
             | None -> Tree.Index.build w idw post
 
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)

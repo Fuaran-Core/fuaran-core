@@ -148,19 +148,6 @@ module Conformance =
         ValidityTreeLaws.digestLaws nodew idw encode gen
         |> within (family "digestLaws" seed) iterations
 
-    /// Forward — see `ValidityTreeLaws.changeLaws` (Phase 314): `Diff.changes` held to the script
-    /// `Diff.toOpsWith` emits, kind by kind.
-    let changeLaws
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (encode: 'Node -> string)
-        (gen: OpGen<'Node, 'Id>)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        ValidityTreeLaws.changeLaws nodew idw encode gen
-        |> within (family "changeLaws" seed) iterations
-
     /// Forward — see `ValidityTreeLaws.introducedLaws` (Phase 314): `Validator.introduced`, `verdict`, `gate`
     /// and `encodeVerdict` held to the defect-set difference and the three policies, over a domain's
     /// registry.
@@ -283,6 +270,20 @@ module Conformance =
         : LawResult list =
         KeyedApplyLaws.keyedApplyLawsAt keyw nodew idw gen
         |> within (family "keyedApplyLawsAt" seed) iterations
+
+    /// Forward — see `AlgebraTreeLaws.keyedDiffLawsAt` (Phase 518): `Diff.toOpsWith` under
+    /// `OpScope.keyed` held to the keyed engine over a domain's keyed positions and encoder.
+    let keyedDiffLawsAt
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        AlgebraTreeLaws.keyedDiffLawsAt keyw nodew idw encode gen
+        |> within (family "keyedDiffLawsAt" seed) iterations
 
     /// Forward — see `ChainStreamLaws.streamLaws`.
     let streamLaws

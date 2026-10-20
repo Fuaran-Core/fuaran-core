@@ -544,19 +544,29 @@ let private aiSurfaceTests =
 let private treeTests =
     testList
         "Tree and Ops (Phase 298)"
-        [ testCase "Index.tryBuild refuses a repeated id; Index.path terminates on the cyclic index build makes"
+        [ testCase "Index.build refuses a repeated id; Index.path terminates on a cyclic index a caller builds by hand"
           <| fun _ ->
-              // `a` holds `b`, which holds a second `a`: ParentOf ends a → b and b → a
+              // `a` holds `b`, which holds a second `a`: an index keeping the last `a` would link
+              // a → b and b → a. `build` refuses that tree (Phase 518), so the cycle is BUILT here as
+              // the record a caller may write by hand, which is what `path`'s guard still stands for.
               let bad =
                   RNode.node "r" "doc" [ RNode.node "a" "s" [ RNode.node "b" "s" [ RNode.leaf "a" "s" "" ] ] ]
 
-              match Tree.Index.tryBuild nodew idw bad with
-              | Error(Tree.RepeatedId "a") -> ()
-              | other -> failtestf "expected RepeatedId a, got %A" other
+              match Tree.Index.build nodew idw bad with
+              | Error "a" -> ()
+              | other -> failtestf "expected the repeated a, got %A" other
 
-              let ix = Tree.Index.build nodew idw bad
-              Expect.isNone (Tree.Index.path idw "b" ix) "a parent cycle has no root path — and the walk ends"
-              Expect.isOk (Tree.Index.tryBuild nodew idw (sample ())) "a well-formed tree indexes"
+              let cyclic: Tree.NodeIndex<RNode, string> =
+                  { ById =
+                      Map.ofList
+                          [ "r", bad
+                            "a", RNode.leaf "a" "s" ""
+                            "b", RNode.node "b" "s" [ RNode.leaf "a" "s" "" ] ]
+                    ParentOf = Map.ofList [ "a", "b"; "b", "a" ]
+                    Root = "r" }
+
+              Expect.isNone (Tree.Index.path idw "b" cyclic) "a parent cycle has no root path — and the walk ends"
+              Expect.isOk (Tree.Index.build nodew idw (sample ())) "a well-formed tree indexes"
 
           testCase "updateNode copies only the root-to-target path and shares every other subtree"
           <| fun _ ->

@@ -407,6 +407,8 @@ let prodRejClass (r: Rejection<string>) =
     // Phase 313: raised only by the grammar and reference engines, which the oracle does not run.
     | IllegalChild _ -> "IllegalChild"
     | StillReferenced _ -> "StillReferenced"
+    // Phase 518: raised only by `Diff`, never by an apply the oracle runs.
+    | RootIdMismatch _ -> "RootIdMismatch"
 
 let modelRejClass (r: TreeOps.rejection) =
     match r with

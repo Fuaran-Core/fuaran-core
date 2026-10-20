@@ -7,6 +7,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// An index of a tree the test knows is well-formed (`Tree.Index.build` refuses a repeated id since
+/// Phase 518).
+let private ok (r: Result<'a, string>) : 'a =
+    match r with
+    | Ok x -> x
+    | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
+
 let private ids (ns: RNode list) = ns |> List.map _.Id
 
 [<Tests>]
@@ -148,7 +155,7 @@ let indexTests =
         [ testCase "index navigators agree with the plain combinators for every id"
           <| fun _ ->
               let t = sample ()
-              let ix = Tree.Index.build nodew idw t
+              let ix = ok (Tree.Index.build nodew idw t)
 
               for id in Tree.ids nodew t do
                   Expect.equal
@@ -172,7 +179,7 @@ let indexTests =
 
           testCase "absent ids match the combinators (None / empty)"
           <| fun _ ->
-              let ix = Tree.Index.build nodew idw (sample ())
+              let ix = ok (Tree.Index.build nodew idw (sample ()))
               Expect.isNone (Tree.Index.tryFind idw "ghost" ix) "absent tryFind"
               Expect.isNone (Tree.Index.parentOf idw "ghost" ix) "absent parentOf"
               Expect.isNone (Tree.Index.path idw "ghost" ix) "absent path"
@@ -186,12 +193,12 @@ let indexTests =
           testCase "isFreshFor is true for the tree the index was built from"
           <| fun _ ->
               let t = sample ()
-              let ix = Tree.Index.build nodew idw t
+              let ix = ok (Tree.Index.build nodew idw t)
               Expect.isTrue (Tree.Index.isFreshFor nodew idw encNode t ix) "fresh for its own tree"
 
           testCase "isFreshFor detects a removed node"
           <| fun _ ->
-              let ix = Tree.Index.build nodew idw (sample ())
+              let ix = ok (Tree.Index.build nodew idw (sample ()))
               // a2 removed from section a
               let edited =
                   RNode.node
@@ -204,7 +211,7 @@ let indexTests =
 
           testCase "isFreshFor detects a child reorder"
           <| fun _ ->
-              let ix = Tree.Index.build nodew idw (sample ())
+              let ix = ok (Tree.Index.build nodew idw (sample ()))
               // a's children swapped: [a2; a1]
               let reordered =
                   RNode.node
@@ -218,7 +225,7 @@ let indexTests =
           // Phase 447 — a go-red per case the retired 32-bit stamp could miss or was documented to.
           testCase "isFreshFor detects a reparent that keeps every id, kind and child count"
           <| fun _ ->
-              let ix = Tree.Index.build nodew idw (sample ())
+              let ix = ok (Tree.Index.build nodew idw (sample ()))
               // a1 and b1 trade parents: every node keeps its id, its kind and its child count
               let swapped =
                   RNode.node
@@ -237,7 +244,7 @@ let indexTests =
           testCase "isFreshFor detects a content-only edit, through the encoder"
           <| fun _ ->
               let t = sample ()
-              let ix = Tree.Index.build nodew idw t
+              let ix = ok (Tree.Index.build nodew idw t)
 
               let edited =
                   RNode.node
@@ -258,11 +265,10 @@ let indexTests =
                   (Tree.tryFind nodew idw "a1" edited |> Option.map _.Value)
                   "which is why it is not the default: tryFind's node went stale"
 
-          // Phase 496 — the one answer `build`'s doc states: over a repeated id `tryBuild` refuses,
-          // naming what `wellFormed` names; `build` is the lenient form, keeping the LAST occurrence
-          // as `Tree.digests` does; and `isFreshFor` reads no index of such a tree as fresh, build's
-          // own included (the index keeps the last `a`, the walk finds the first).
-          testCase "a repeated id: tryBuild refuses as wellFormed does, build keeps the last, none is fresh"
+          // Phase 518 — ONE answer to a repeated id (Phase 496 pinned three: `tryBuild` refused,
+          // `build` kept the last, `isFreshFor` certified none). `build` refuses, naming what
+          // `wellFormed` names; and an index of the well-formed tree beside it is not fresh for it.
+          testCase "a repeated id: build refuses as wellFormed does, and no index is fresh for the tree"
           <| fun _ ->
               let twice =
                   RNode.node
@@ -271,26 +277,24 @@ let indexTests =
                       [ RNode.node "a" "section" [ RNode.leaf "b" "para" "x" ]
                         RNode.node "a" "section" [] ]
 
-              Expect.equal
-                  (Tree.Index.tryBuild nodew idw twice |> Result.map ignore)
-                  (Error(Tree.wellFormed nodew idw twice))
-                  "tryBuild's refusal is wellFormed's verdict"
-
-              Expect.equal (Tree.wellFormed nodew idw twice) (Tree.RepeatedId "a") "which names the repeat"
-
-              let ix = Tree.Index.build nodew idw twice
+              Expect.equal (Tree.wellFormed nodew idw twice) (Tree.RepeatedId "a") "wellFormed names the repeat"
 
               Expect.equal
-                  (Tree.Index.tryFind idw "a" ix |> Option.map (nodew.Children >> List.length))
-                  (Some 0)
-                  "build keeps the last a"
+                  (Tree.Index.build nodew idw twice |> Result.map ignore)
+                  (Error "a")
+                  "build refuses with the id wellFormed names"
 
-              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode twice ix) "and no index of it is fresh"
+              let once =
+                  RNode.node "root" "doc" [ RNode.node "a" "section" [ RNode.leaf "b" "para" "x" ] ]
+
+              let ix = ok (Tree.Index.build nodew idw once)
+              Expect.isTrue (Tree.Index.isFreshFor nodew idw encNode once ix) "fresh for its own tree"
+              Expect.isFalse (Tree.Index.isFreshFor nodew idw encNode twice ix) "and not for the malformed one"
 
           testCase "isFreshFor refuses an index holding a key the tree does not"
           <| fun _ ->
               let t = sample ()
-              let ix = Tree.Index.build nodew idw t
+              let ix = ok (Tree.Index.build nodew idw t)
 
               let extra =
                   { ix with

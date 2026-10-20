@@ -144,8 +144,8 @@ module Tree =
     /// second parent to find, so single-rootedness is a TYPE-LEVEL guarantee rather than a
     /// checkable clause. What remains checkable — and what every downstream function actually
     /// depends on — is id uniqueness: `Tree.updateNode` rewrites EVERY node matching a repeated id,
-    /// and `Tree.Index.build`'s `Map.ofList` silently keeps the last. So the predicate has one
-    /// clause and says why.
+    /// and an index of such a tree could not say which node an id names (`Tree.Index.build` refuses
+    /// it, Phase 518). So the predicate has one clause and says why.
     type WellFormed<'Id> =
         /// Every id the walk reaches is distinct — the `Children` preorder for the unkeyed forms,
         /// the `Tree.traversal` preorder for the keyed ones.
@@ -246,29 +246,39 @@ module Tree =
 
         loop [ (root, []) ]
 
-    /// Bottom-up structural rebuild: map every node through `f` *after* its children are
-    /// rebuilt, reassembling via `ReplaceChildren`. Iterative with an explicit frame stack
-    /// (Phase 19) so a deep tree cannot overflow — the engine behind `map` (`updateNode` copies
-    /// only the root-to-target path since Phase 298). A frame is `(node, children-not-yet-rebuilt, rebuilt-children-reversed)`;
-    /// `carry` hands a just-finished child up to its parent frame.
-    let private rebuildPostorder (w: NodeWitness<'Node, 'Id>) (f: 'Node -> 'Node) (root: 'Node) : 'Node =
-        let rec loop (stack: ('Node * 'Node list * 'Node list) list) (carry: 'Node option) : 'Node =
+    /// THE rebuild engine (Phase 518: one, where `map` and `FreshIds.repairDuplicates` each had
+    /// their own): every node through `f` *after* its children are rebuilt, bottom-up, reassembled
+    /// via `ReplaceChildren`. `f` is handed the node's PREORDER position (the root is 0) — a frame is
+    /// created when its node is first reached, which is preorder — so a caller that decided
+    /// something per preorder position in an earlier pass (`repairDuplicates`' renames) reads it
+    /// here. A LEAF is not rebuilt: `f` sees it as it is, never `ReplaceChildren n []`, which a
+    /// conformant witness answers with `n` anyway and a witness partial on nodes that cannot hold
+    /// children cannot answer at all. Iterative with an explicit frame stack (Phase 19) so a deep
+    /// tree cannot overflow (`updateNode` copies only the root-to-target path since Phase 298). A
+    /// frame is `(position, node, children-not-yet-rebuilt, rebuilt-children-reversed)`; `carry`
+    /// hands a just-finished child up to its parent frame.
+    let internal rebuildPostorder (w: NodeWitness<'Node, 'Id>) (f: int -> 'Node -> 'Node) (root: 'Node) : 'Node =
+        let rec loop (next: int) (stack: (int * 'Node * 'Node list * 'Node list) list) (carry: 'Node option) =
             match stack with
             | [] -> root // unreachable: the root frame returns directly when `rest` is empty
-            | (node, remaining, doneRev) :: rest ->
+            | (ix, node, remaining, doneRev) :: rest ->
                 match carry with
-                | Some child -> loop ((node, remaining, child :: doneRev) :: rest) None
+                | Some child -> loop next ((ix, node, remaining, child :: doneRev) :: rest) None
                 | None ->
                     match remaining with
                     | [] ->
-                        let rebuilt = f (w.ReplaceChildren node (List.rev doneRev))
+                        let rebuilt =
+                            if List.isEmpty doneRev then
+                                f ix node
+                            else
+                                f ix (w.ReplaceChildren node (List.rev doneRev))
 
                         match rest with
                         | [] -> rebuilt
-                        | _ -> loop rest (Some rebuilt)
-                    | c :: cs -> loop ((c, w.Children c, []) :: (node, cs, doneRev) :: rest) None
+                        | _ -> loop next rest (Some rebuilt)
+                    | c :: cs -> loop (next + 1) ((next, c, w.Children c, []) :: (ix, node, cs, doneRev) :: rest) None
 
-        loop [ (root, w.Children root, []) ] None
+        loop 1 [ (0, root, w.Children root, []) ] None
 
     /// Rebuild the tree, replacing the node identified by `target` with `f` applied to it.
     /// Returns None if `target` is absent. This backs every `Ops.apply`.
@@ -362,18 +372,24 @@ module Tree =
     ///     a change, and the fast path: a subtree whose digest agrees holds no change and needs no
     ///     walk (`Digests.diff`, `Projection.project` under `ChangedSince`).
     ///
+    /// Every entry is a typed `Digest` (Phase 518; the maps held its bare hex until 0.39.0), so a
+    /// digest read from here says which algorithm it was taken under and prints as the tagged text
+    /// the vectors store; `Digest.Hex` is the hex the maps used to hold, byte for byte.
+    ///
     /// A well-formed tree is the contract (`Tree.wellFormed`); for an id carried twice the LAST
-    /// preorder occurrence holds the entry, as `Tree.Index.build` keeps it.
+    /// preorder occurrence holds the entry. `digests` stays total over such a tree, where
+    /// `Tree.Index.build` refuses it, because `Projection` renders one by design (a `ById` read of a
+    /// repeated id is more than one line).
     type Digests =
         {
             /// Id key → own-content digest (`Tree.ownDigest`): id, kind and the encoded shell.
-            Own: Map<string, string>
+            Own: Map<string, Digest>
             /// Id key → frame digest (`Tree.frameDigest`): the own fields, then the child count and
             /// the ordered child id keys — what `Projection`'s changed-since baseline compares.
-            Frame: Map<string, string>
+            Frame: Map<string, Digest>
             /// Id key → Merkle digest over the own digest and the children's subtree digests, in
             /// order; equal digests head equal subtrees up to a SHA-256 collision.
-            Subtree: Map<string, string>
+            Subtree: Map<string, Digest>
         }
 
     /// The four-way partition `Digests.diff` reports over two digest maps, every list in ascending
@@ -398,11 +414,19 @@ module Tree =
     let private ownFields (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) =
         [ idw.ToString(w.Id n); w.KindTag n; encode (w.ReplaceChildren n []) ]
 
+    /// The SHA-256 digest of a canonical pre-image (`Hash.canonicalFields`, called at each key's own
+    /// definition so the `Hash.Roster` reads it there), TOTAL: an unpaired surrogate is encoded as
+    /// U+FFFD, as `Hash.sha256Hex` always has, so its `Hex` is exactly the `Hash.sha256Hex` the
+    /// Phase 314 maps held (`Digest.tryOfFields` is the guarded form, for a caller minting a digest
+    /// it will publish).
+    let private digestOfPreimage (preimage: string) : Digest =
+        preimage |> Hash.utf8Bytes |> Digest.ofSha256Bytes
+
     /// A node's own-content digest (Phase 314): SHA-256 over its id key, its kind tag and `encode`
     /// of its shell, through `Hash.canonicalFields`. `Digests.Own` holds one per node; this is the
-    /// per-node form for a caller that has one node in hand.
-    let ownDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : string =
-        ownFields w idw encode n |> Hash.canonicalFields |> Hash.sha256Hex
+    /// per-node form for a caller that has one node in hand. A typed `Digest` since Phase 518.
+    let ownDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : Digest =
+        ownFields w idw encode n |> Hash.canonicalFields |> digestOfPreimage
 
     /// The fields a frame digest adds after the own fields: the child count, then each child's id key.
     let private frameTail (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (n: 'Node) : string list =
@@ -412,10 +436,10 @@ module Tree =
     /// A node's frame digest (Phase 314): SHA-256 over the own fields, then the child count and each
     /// child's id key, through `Hash.canonicalFields` — the node as a parent. Byte-for-byte Phase
     /// 298's `Projection.snapshotDigestOf` for a child-blind encoder, which now reads it from here.
-    let frameDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : string =
+    let frameDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : Digest =
         ownFields w idw encode n @ frameTail w idw n
         |> Hash.canonicalFields
-        |> Hash.sha256Hex
+        |> digestOfPreimage
 
     /// Every node's three digests (Phase 314), built in ONE pass over the reversed preorder: a child
     /// follows its parent in preorder, so walking the list backwards meets every child before its
@@ -426,24 +450,25 @@ module Tree =
     let digests (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (root: 'Node) : Digests =
         let key (n: 'Node) = idw.ToString(w.Id n)
 
-        let step (own: Map<string, string>, frame: Map<string, string>, sub: Map<string, string>) (n: 'Node) =
+        let step (own: Map<string, Digest>, frame: Map<string, Digest>, sub: Map<string, Digest>) (n: 'Node) =
             let k = key n
-            // the LAST preorder occurrence of a repeated id holds the entry, as `Tree.Index.build`:
-            // walking backwards meets it first, so a later (earlier-in-preorder) twin is skipped.
+            // the LAST preorder occurrence of a repeated id holds the entry: walking backwards meets
+            // it first, so a later (earlier-in-preorder) twin is skipped.
             if Map.containsKey k own then
                 own, frame, sub
             else
                 // the encoder runs ONCE per node: the own fields feed both the own and the frame digest
                 let fields = ownFields w idw encode n
-                let o = fields |> Hash.canonicalFields |> Hash.sha256Hex
-                let f = fields @ frameTail w idw n |> Hash.canonicalFields |> Hash.sha256Hex
+                let o = fields |> Hash.canonicalFields |> digestOfPreimage
+                let f = fields @ frameTail w idw n |> Hash.canonicalFields |> digestOfPreimage
 
+                // the Merkle pre-image is the HEX of each digest, as it was when the maps held hex
                 let s =
-                    o
+                    o.Hex
                     :: (w.Children n
-                        |> List.map (fun c -> Map.tryFind (key c) sub |> Option.defaultValue ""))
+                        |> List.map (fun c -> Map.tryFind (key c) sub |> Option.map _.Hex |> Option.defaultValue ""))
                     |> Hash.canonicalFields
-                    |> Hash.sha256Hex
+                    |> digestOfPreimage
 
                 Map.add k o own, Map.add k f frame, Map.add k s sub
 
@@ -542,9 +567,10 @@ module Tree =
     /// Rebuild the tree applying `f` to every node, bottom-up: a node's children are mapped
     /// first, the node is rebuilt around them via `ReplaceChildren`, then `f` is applied to
     /// the node-with-mapped-children. `f` may return a structurally-different node (e.g. a new
-    /// id); a leaf (empty child list) passes through `ReplaceChildren n []` cleanly. Iterative
-    /// (Phase 19) — a deep tree cannot overflow.
-    let map (w: NodeWitness<'Node, 'Id>) (f: 'Node -> 'Node) (node: 'Node) : 'Node = rebuildPostorder w f node
+    /// id); a leaf (empty child list) is handed to `f` as it is, not rebuilt (Phase 518, the one
+    /// rebuild engine's posture). Iterative (Phase 19) — a deep tree cannot overflow.
+    let map (w: NodeWitness<'Node, 'Id>) (f: 'Node -> 'Node) (node: 'Node) : 'Node =
+        rebuildPostorder w (fun _ n -> f n) node
 
     /// Every node satisfying `pred`, in preorder.
     let filter (w: NodeWitness<'Node, 'Id>) (pred: 'Node -> bool) (root: 'Node) : 'Node list =
@@ -672,8 +698,8 @@ module Tree =
     /// whether it still describes a tree.
     type NodeIndex<'Node, 'Id> =
         {
-            /// Every node the preorder reaches, keyed by `IdWitness.ToString` of its id. For an id
-            /// carried twice the LAST occurrence wins.
+            /// Every node the preorder reaches, keyed by `IdWitness.ToString` of its id (`build`
+            /// refuses a tree that carries an id twice, so there is one node per key).
             ById: Map<string, 'Node>
             /// Each non-root node's key to its parent's id. The root has no entry, which is how
             /// `Index.path` knows it has reached the top.
@@ -688,37 +714,30 @@ module Tree =
     /// new semantics.
     module Index =
 
-        /// Build both maps in a single preorder pass. **The lenient builder** (Phase 496 states the one
-        /// answer the three functions give to a repeated id): over a tree that is not well-formed (an id
-        /// carried twice) `ById` and `ParentOf` keep the LAST occurrence — as `Tree.digests` does — and
-        /// the parent links can form a cycle; every read below terminates on such an index regardless
-        /// (Phase 298), `isFreshFor` certifies no such index as fresh (Phase 447), and `tryBuild` refuses
-        /// the tree instead. So the index of a malformed tree is never one a caller can certify: a
-        /// caller that may meet one builds with `tryBuild`. `build` keeps its total `NodeIndex`
-        /// signature because `Ops.Index.afterOp`'s fallback and its `afterOp ≡ build` law read it;
-        /// making `build` refuse is a signature change, recorded as pending for a breaking cut in
-        /// `docs/releases/0.39.0.md`.
-        let build (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : NodeIndex<'Node, 'Id> =
-            let nodes = preorder w root
-
-            { ById = nodes |> List.map (fun n -> idw.ToString(w.Id n), n) |> Map.ofList
-              ParentOf =
-                [ for p in nodes do
-                      for c in w.Children p -> idw.ToString(w.Id c), w.Id p ]
-                |> Map.ofList
-              Root = w.Id root }
-
-        /// `build`, refusing a tree that is not well-formed (Phase 298): `Error (RepeatedId d)`
-        /// naming the first id the preorder carries twice (`Tree.wellFormed`'s verdict), where
-        /// `build` would index it with the earlier occurrences silently overwritten.
-        let tryBuild
+        /// Build both maps in a single preorder pass, refusing a tree that is not well-formed: `Error d`
+        /// names `d`, the first id the preorder carries twice (`Tree.wellFormed`'s verdict). **One
+        /// answer to a repeated id (Phase 518).** Until 0.39.0 `build` indexed such a tree with the
+        /// earlier occurrences silently overwritten (and parent links that could form a cycle) while
+        /// `tryBuild` refused it; `build` now IS that refusal and `tryBuild` is gone, so no index of
+        /// a tree another entry refuses can be held at all. `Ops.Index.afterOp`'s fallback reads it,
+        /// and refuses the same tree with the same id.
+        let build
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
             (root: 'Node)
-            : Result<NodeIndex<'Node, 'Id>, WellFormed<'Id>> =
+            : Result<NodeIndex<'Node, 'Id>, 'Id> =
             match wellFormed w idw root with
-            | Structural -> Ok(build w idw root)
-            | repeated -> Error repeated
+            | RepeatedId d -> Error d
+            | Structural ->
+                let nodes = preorder w root
+
+                Ok
+                    { ById = nodes |> List.map (fun n -> idw.ToString(w.Id n), n) |> Map.ofList
+                      ParentOf =
+                        [ for p in nodes do
+                              for c in w.Children p -> idw.ToString(w.Id c), w.Id p ]
+                        |> Map.ofList
+                      Root = w.Id root }
 
         /// The node carrying `target`, if present (O(log n)).
         let tryFind (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Node option =
@@ -731,10 +750,12 @@ module Tree =
 
         /// The absolute id-path root..target (inclusive), walking parent links (O(depth)).
         ///
-        /// **Terminates on any index (Phase 298).** The walk carries the ids it has visited: over
-        /// an index `build` made from a tree carrying an id twice, the parent links can form a
-        /// cycle, and the walk that followed them looped forever. A cycle has no root to reach, so
-        /// such a target's path is `None` — the same answer as an absent id.
+        /// **Terminates on any index (Phase 298).** The walk carries the ids it has visited, so a
+        /// parent cycle has no root to reach and such a target's path is `None` — the same answer as
+        /// an absent id. `build` no longer makes such an index (Phase 518: it refuses the repeated id
+        /// that made one), but the guard stays: `NodeIndex` is a public record a caller can build by
+        /// hand, and `rebind` outside its contract can link a node under its own descendant, and a
+        /// `path` that looped on either would break the totality every `Index` read promises.
         let path (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Id list option =
             if not (Map.containsKey (idw.ToString target) ix.ById) then
                 None
@@ -783,7 +804,7 @@ module Tree =
         /// `tryFind` can hand back a node whose content has since changed: the weaker check is
         /// one the call site spells out.
         ///
-        /// Over an index `build`, `tryBuild`, `rebind` (inside its contract) or `Ops.Index.afterOp`
+        /// Over an index `build`, `rebind` (inside its contract) or `Ops.Index.afterOp`
         /// made, `true` means every lookup answers what the walk over `root` answers; the claim is
         /// `index-freshness-tracks-change` in `proofs.json`. O(n log n) — the walk with a map
         /// lookup a node, the order of cost the stamp recomputation it replaces paid; an opt-in
@@ -812,23 +833,16 @@ module Tree =
                     && List.forall (linked k) (w.Children n)
                 | None -> false
 
-            // The walk, depth-first over an explicit stack; `seen` refuses an id carried twice.
-            let rec walk (seen: Set<string>) (count: int) (stack: 'Node list) : int option =
-                match stack with
-                | [] -> Some count
-                | n :: rest ->
-                    let k = key n
-
-                    if seen.Contains k || not (agrees k n) then
-                        None
-                    else
-                        walk (Set.add k seen) (count + 1) (w.Children n @ rest)
+            // An id carried twice is `wellFormed`'s verdict — the one uniqueness scan (Phase 518; the
+            // walk below carried a `seen` set of its own) — and no index describes such a tree.
+            let nodes = preorder w root
 
             idw.ToString ix.Root = key root
-            && (match walk Set.empty 0 [ root ] with
-                // Every key the walk met is in both maps, so equal counts leave room for no other.
-                | Some count -> Map.count ix.ById = count && Map.count ix.ParentOf = count - 1
-                | None -> false)
+            && Option.isNone (firstRepeat idw Set.empty (nodes |> List.map w.Id))
+            && List.forall (fun n -> agrees (key n) n) nodes
+            // Every key the walk met is in both maps, so equal counts leave room for no other.
+            && Map.count ix.ById = List.length nodes
+            && Map.count ix.ParentOf = List.length nodes - 1
 
         /// Re-index through an edit confined to known nodes (Phase 317) — the primitive an index is
         /// MAINTAINED through rather than rebuilt (`Ops.Index.afterOp` is its caller for the
@@ -1011,36 +1025,10 @@ module FreshIds =
         if Map.isEmpty renames then
             root, []
         else
-            // Bottom-up rebuild whose frames carry their node's PREORDER position: a frame is
-            // created when its node is first reached, which is preorder, so `next` numbers the
-            // nodes exactly as `decide` did. `(position, node, children-to-rebuild,
-            // rebuilt-children-reversed)`; `carry` hands a finished child to its parent frame.
-            let rec loop (next: int) (stack: (int * 'Node * 'Node list * 'Node list) list) (carry: 'Node option) =
-                match stack with
-                | [] -> root // unreachable: the root frame returns directly
-                | (ix, node, remaining, doneRev) :: rest ->
-                    match carry with
-                    | Some child -> loop next ((ix, node, remaining, child :: doneRev) :: rest) None
-                    | None ->
-                        match remaining with
-                        | [] ->
-                            // a leaf is not rebuilt: a witness may leave `ReplaceChildren` partial
-                            // on nodes that cannot hold children
-                            let rebuilt =
-                                if List.isEmpty doneRev then
-                                    node
-                                else
-                                    w.ReplaceChildren node (List.rev doneRev)
+            // The one rebuild engine, which numbers the nodes in preorder exactly as `decide` did.
+            let rename (ix: int) (n: 'Node) =
+                match Map.tryFind ix renames with
+                | Some fresh -> setId fresh n
+                | None -> n
 
-                            let rebuilt =
-                                match Map.tryFind ix renames with
-                                | Some fresh -> setId fresh rebuilt
-                                | None -> rebuilt
-
-                            match rest with
-                            | [] -> rebuilt
-                            | _ -> loop next rest (Some rebuilt)
-                        | c :: cs ->
-                            loop (next + 1) ((next, c, w.Children c, []) :: (ix, node, cs, doneRev) :: rest) None
-
-            loop 1 [ (0, root, w.Children root, []) ] None, mapping
+            Tree.rebuildPostorder w rename root, mapping

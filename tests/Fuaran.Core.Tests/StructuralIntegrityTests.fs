@@ -312,7 +312,7 @@ let tests =
 
                     Expect.equal
                         (Diff.toOps (Policy.grammar grammar) (OpScope.contained canHold nodew idw) (doc ()) after)
-                        (Error(Diff.IllegalChildInTree("p1", "para", "root", "doc", [ "section"; "note" ])))
+                        (Error(IllegalChild("p1", "para", "root", "doc", [ "section"; "note" ])))
                         "the first illegal pair"
 
                     let legalAfter =

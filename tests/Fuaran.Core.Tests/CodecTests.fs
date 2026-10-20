@@ -726,18 +726,18 @@ let digestOnTheSpine =
                             let frame = own @ (string (List.length n.Children) :: (n.Children |> List.map _.Id))
 
                             let subtree =
-                                Map.find key d.Own
-                                :: (n.Children |> List.map (fun c -> Map.find c.Id d.Subtree))
+                                (Map.find key d.Own).Hex
+                                :: (n.Children |> List.map (fun c -> (Map.find c.Id d.Subtree).Hex))
 
                             for name, fields, map in
                                 [ "own", own, d.Own; "frame", frame, d.Frame; "subtree", subtree, d.Subtree ] do
                                 let stored = Map.find key map
                                 let typed = digestOk (Digest.tryOfFields fields)
                                 let msg = sprintf "%s %s %s" (EncodingProfile.name p) name key
-                                Expect.equal typed.Hex stored msg
-                                Expect.equal (digestOk (Digest.tryOfHex DigestAlgorithm.Sha256 stored)) typed msg
+                                Expect.equal typed stored msg
+                                Expect.equal (digestOk (Digest.tryOfHex DigestAlgorithm.Sha256 stored.Hex)) typed msg
 
-                        yield EncodingProfile.name p, Map.find "root" d.Subtree ]
+                        yield EncodingProfile.name p, (Map.find "root" d.Subtree).Hex ]
 
               Expect.equal
                   roots

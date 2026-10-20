@@ -13,6 +13,13 @@ open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
 
+/// An index of a tree the test knows is well-formed (`Tree.Index.build` refuses a repeated id since
+/// Phase 518).
+let private ok (r: Result<'a, string>) : 'a =
+    match r with
+    | Ok x -> x
+    | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
+
 /// Membership is the meaning on both sides: production carries `Set<string>`, the model carries
 /// lists read as sets (proofs/README.md, "sets are lists").
 let private asSet (xs: string list) = xs |> List.distinct |> List.sort
@@ -305,93 +312,101 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
 
     for t in states do
         let m = toModelTree t
-        let pix = Tree.Index.build nodew idw t
+        let built = Tree.Index.build nodew idw t
         let mix = TreeOps.ix_build m
         let wf = Tree.isWellFormed nodew idw t
 
         if not wf then
             repeated <- repeated + 1
 
-        match Tree.Index.tryBuild nodew idw t, TreeOps.ix_try_build m with
+        // Phase 518: production's `build` IS the refusing builder, so it stands beside the model's
+        // `ix_try_build`; the model's lenient `ix_build` has no production counterpart over a
+        // malformed tree any more, and the lookups are compared where production holds an index.
+        match built, TreeOps.ix_try_build m with
         | Ok _, DagFold.Ok _ -> ()
-        | Error(Tree.RepeatedId d), DagFold.Error d' when d = d' -> ()
-        | p, q -> differs "tryBuild" t "-" (Result.isOk p) q
+        | Error d, DagFold.Error d' when d = d' -> ()
+        | p, q -> differs "build" t "-" (Result.isOk p) q
 
-        for x in Tree.ids nodew t @ [ "absent-438" ] do
-            let prod =
-                (Tree.Index.tryFind idw x pix |> Option.map toModelTree,
-                 Tree.Index.parentOf idw x pix |> Option.map toModelTree,
-                 Tree.Index.path idw x pix,
-                 Tree.Index.depth idw x pix |> Option.map bigint,
-                 Tree.Index.ancestors idw x pix |> List.map toModelTree)
+        match built with
+        | Error _ -> ()
+        | Ok pix ->
+            for x in Tree.ids nodew t @ [ "absent-438" ] do
+                let prod =
+                    (Tree.Index.tryFind idw x pix |> Option.map toModelTree,
+                     Tree.Index.parentOf idw x pix |> Option.map toModelTree,
+                     Tree.Index.path idw x pix,
+                     Tree.Index.depth idw x pix |> Option.map bigint,
+                     Tree.Index.ancestors idw x pix |> List.map toModelTree)
 
-            let model =
-                (ofMOpt (TreeOps.ix_try_find x mix),
-                 ofMOpt (TreeOps.ix_parent_of x mix),
-                 ofMOpt (TreeOps.ix_path x mix),
-                 ofMOpt (TreeOps.ix_depth x mix),
-                 TreeOps.ix_ancestors x mix)
+                let model =
+                    (ofMOpt (TreeOps.ix_try_find x mix),
+                     ofMOpt (TreeOps.ix_parent_of x mix),
+                     ofMOpt (TreeOps.ix_path x mix),
+                     ofMOpt (TreeOps.ix_depth x mix),
+                     TreeOps.ix_ancestors x mix)
 
-            if prod <> model then
-                differs "an index lookup" t x prod model
+                if prod <> model then
+                    differs "an index lookup" t x prod model
 
-            match Tree.Index.path idw x pix with
-            | Some p when List.length p >= 3 -> deep <- deep + 1
-            | _ -> ()
+                match Tree.Index.path idw x pix with
+                | Some p when List.length p >= 3 -> deep <- deep + 1
+                | _ -> ()
 
-            if wf then
-                // Theorem 1 at production and at the model: the index is the walk it caches.
-                let walk =
-                    (Tree.tryFind nodew idw x t |> Option.map toModelTree,
-                     Tree.parentOf nodew idw x t |> Option.map toModelTree,
-                     Tree.path nodew idw x t,
-                     Tree.depth nodew idw x t |> Option.map bigint,
-                     Tree.ancestors nodew idw x t |> List.map toModelTree)
+                if wf then
+                    // Theorem 1 at production and at the model: the index is the walk it caches.
+                    let walk =
+                        (Tree.tryFind nodew idw x t |> Option.map toModelTree,
+                         Tree.parentOf nodew idw x t |> Option.map toModelTree,
+                         Tree.path nodew idw x t,
+                         Tree.depth nodew idw x t |> Option.map bigint,
+                         Tree.ancestors nodew idw x t |> List.map toModelTree)
 
-                let modelWalk =
-                    (ofMOpt (TreeOps.find_in x m),
-                     ofMOpt (TreeOps.ix_parent_walk x m),
-                     ofMOpt (TreeOps.ix_path_walk x m),
-                     ofMOpt (TreeOps.ix_depth_walk x m),
-                     TreeOps.ix_ancestors_walk x m)
+                    let modelWalk =
+                        (ofMOpt (TreeOps.find_in x m),
+                         ofMOpt (TreeOps.ix_parent_walk x m),
+                         ofMOpt (TreeOps.ix_path_walk x m),
+                         ofMOpt (TreeOps.ix_depth_walk x m),
+                         TreeOps.ix_ancestors_walk x m)
 
-                if walk <> prod then
-                    differs "production's index against production's walk" t x prod walk
+                    if walk <> prod then
+                        differs "production's index against production's walk" t x prod walk
 
-                if modelWalk <> walk then
-                    differs "the model's walk against production's walk" t x walk modelWalk
+                    if modelWalk <> walk then
+                        differs "the model's walk against production's walk" t x walk modelWalk
 
     // Theorems 2 and 3: every ordered pair, the tree an index was built from included.
     for t0 in states do
-        let pix = Tree.Index.build nodew idw t0
-        let mix = TreeOps.ix_build (toModelTree t0)
+        match Tree.Index.build nodew idw t0 with
+        | Error _ -> ()
+        | Ok pix ->
+            let mix = TreeOps.ix_build (toModelTree t0)
 
-        for t in states do
-            let p = Tree.Index.isFreshFor nodew idw noContent t pix
-            let q = fresh (toModelTree t) mix
+            for t in states do
+                let p = Tree.Index.isFreshFor nodew idw noContent t pix
+                let q = fresh (toModelTree t) mix
 
-            if p <> q then
-                differs "isFreshFor" t (sprintf "an index of %A" (toModelTree t0)) p q
+                if p <> q then
+                    differs "isFreshFor" t (sprintf "an index of %A" (toModelTree t0)) p q
 
-            if p then
-                freshN <- freshN + 1
+                if p then
+                    freshN <- freshN + 1
 
-                if
-                    toModelTree t <> toModelTree t0
-                    && Tree.isWellFormed nodew idw t
-                    && Tree.isWellFormed nodew idw t0
-                then
-                    diffs.Add(sprintf "production read a changed tree as fresh: %A against %A" t t0)
-            else
-                stale <- stale + 1
+                    if
+                        toModelTree t <> toModelTree t0
+                        && Tree.isWellFormed nodew idw t
+                        && Tree.isWellFormed nodew idw t0
+                    then
+                        diffs.Add(sprintf "production read a changed tree as fresh: %A against %A" t t0)
+                else
+                    stale <- stale + 1
 
-                let blind (u: RNode) =
-                    Tree.preorder nodew u
-                    |> List.map (fun n -> n.Id, n.Kind, List.length n.Children)
-                    |> List.sort
+                    let blind (u: RNode) =
+                        Tree.preorder nodew u
+                        |> List.map (fun n -> n.Id, n.Kind, List.length n.Children)
+                        |> List.sort
 
-                if blind t = blind t0 then
-                    reparents <- reparents + 1
+                    if blind t = blind t0 then
+                        reparents <- reparents + 1
 
     { Diffs = List.ofSeq diffs
       Repeated = repeated
@@ -922,7 +937,12 @@ let tests =
               // and the parent links, so the comparison above must lose on the freshness arm — it
               // is a comparison that can fail.
               Expect.isFalse
-                  (Tree.Index.isFreshFor nodew idw noContent reparentAfter (Tree.Index.build nodew idw reparentBefore))
+                  (Tree.Index.isFreshFor
+                      nodew
+                      idw
+                      noContent
+                      reparentAfter
+                      (ok (Tree.Index.build nodew idw reparentBefore)))
                   "production's check sees the reparent"
 
               let t = indexDifferential blindFresh (indexStates 4380 2)
@@ -950,7 +970,7 @@ let tests =
 
               let before = RNode.node "root" "doc" [ RNode.node "x" "k79499" [] ]
               let after = RNode.node "root" "doc" [ RNode.node "x" "k414100" [] ]
-              let ix = Tree.Index.build nodew idw before
+              let ix = ok (Tree.Index.build nodew idw before)
 
               Expect.isFalse
                   (Tree.Index.isFreshFor nodew idw noContent after ix)

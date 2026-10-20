@@ -170,17 +170,26 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                   "Conformance.loweringLaws"
                   200
                   (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
-              // Phase 314 — the digest maps, the change classification and the defect-set gate, at
+              // Phase 314 — the digest maps and the defect-set gate, at
               // the reference encoder and registry; the kit's own second draw supplies the independent
               // pairs that reach a changed kind, a removed region and a moved survivor.
               run
                   "Conformance.digestLaws"
                   200
                   (Conformance.digestLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+              // Phase 518 — the keyed diff at the keyed reference domain, under an own-content encoder
+              // that reads no keyed position (the change below one is seen regardless).
               run
-                  "Conformance.changeLaws"
+                  "Conformance.keyedDiffLawsAt"
                   200
-                  (Conformance.changeLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+                  (Conformance.keyedDiffLawsAt
+                      ConformanceTests.keyw
+                      ConformanceTests.knodew
+                      idw
+                      (fun (n: ConformanceTests.KNode) -> n.Id + ":" + n.Kind)
+                      ConformanceTests.kGen
+                      518
+                      200)
               run
                   "Conformance.introducedLaws"
                   200

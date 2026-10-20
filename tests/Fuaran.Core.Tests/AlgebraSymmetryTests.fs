@@ -8,6 +8,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// An index of a tree the test knows is well-formed (`Tree.Index.build` refuses a repeated id since
+/// Phase 518).
+let private ok (r: Result<'a, string>) : 'a =
+    match r with
+    | Ok x -> x
+    | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
+
 // ---- shared ---------------------------------------------------------------------------------
 
 /// A cursor over `ConfRng`, so a body reads `draw 6` rather than threading the state.
@@ -668,8 +675,10 @@ let indexAfterOpTests =
                           kinds
                           |> Map.add (kindOf op) ((Map.tryFind (kindOf op) kinds |> Option.defaultValue 0) + 1)
 
-                      let carried = Ops.Index.afterOp nodew idw op post (Tree.Index.build nodew idw pre)
-                      let rebuilt = Tree.Index.build nodew idw post
+                      let carried =
+                          ok (Ops.Index.afterOp nodew idw op post (ok (Tree.Index.build nodew idw pre)))
+
+                      let rebuilt = ok (Tree.Index.build nodew idw post)
 
                       Expect.isTrue
                           (sameIndex carried rebuilt)
@@ -690,32 +699,32 @@ let indexAfterOpTests =
 
               for s in 0..99 do
                   let mutable tree = genTree rng 20
-                  let mutable ix = Tree.Index.build nodew idw tree
+                  let mutable ix = ok (Tree.Index.build nodew idw tree)
 
                   for k in 0..29 do
                       let op = genAnyOp rng tree
 
                       match Ops.apply Policy.none (OpScope.plain nodew idw) op tree with
                       | Ok post ->
-                          ix <- Ops.Index.afterOp nodew idw op post ix
+                          ix <- ok (Ops.Index.afterOp nodew idw op post ix)
                           tree <- post
 
                           Expect.isTrue
-                              (sameIndex ix (Tree.Index.build nodew idw tree))
+                              (sameIndex ix (ok (Tree.Index.build nodew idw tree)))
                               (sprintf "session %d step %d: op=%A" s k op)
                       | Error _ -> ()
 
           testCase "a post the op does not describe falls back to the rebuild, so the law holds whatever is handed"
           <| fun () ->
               let pre = sample ()
-              let ix = Tree.Index.build nodew idw pre
+              let ix = ok (Tree.Index.build nodew idw pre)
               let ids = Tree.preorder nodew pre |> List.map nodew.Id
               let target = ids |> List.last
               // an op `apply` would accept, handed the UNEDITED tree
-              let carried = Ops.Index.afterOp nodew idw (RemoveNode target) pre ix
+              let carried = ok (Ops.Index.afterOp nodew idw (RemoveNode target) pre ix)
               Expect.isTrue (sameIndex carried ix) "the unedited tree's index"
               // an op naming an id the tree does not hold
-              let carried2 = Ops.Index.afterOp nodew idw (RemoveNode "no-such-id") pre ix
+              let carried2 = ok (Ops.Index.afterOp nodew idw (RemoveNode "no-such-id") pre ix)
               Expect.isTrue (sameIndex carried2 ix) "an unknown id"
 
           testCase "isFreshFor sees a reorder, a kind change, a removal and a value edit"
@@ -723,7 +732,7 @@ let indexAfterOpTests =
               let t =
                   RNode.node "r" "box" [ RNode.leaf "a" "leaf" "1"; RNode.leaf "b" "leaf" "2" ]
 
-              let ix = Tree.Index.build nodew idw t
+              let ix = ok (Tree.Index.build nodew idw t)
 
               let swapped =
                   RNode.node "r" "box" [ RNode.leaf "b" "leaf" "2"; RNode.leaf "a" "leaf" "1" ]
@@ -770,16 +779,16 @@ let indexAfterOpTests =
               let carriedCost (ballastSize: int) (rounds: int) =
                   let w, calls = counting ()
                   let mutable t = tree ballastSize
-                  let mutable ix = Tree.Index.build nodew idw t
+                  let mutable ix = ok (Tree.Index.build nodew idw t)
 
                   for op in session rounds do
                       match Ops.apply Policy.none (OpScope.plain nodew idw) op t with
                       | Ok post ->
-                          ix <- Ops.Index.afterOp w idw op post ix
+                          ix <- ok (Ops.Index.afterOp w idw op post ix)
                           t <- post
                       | Error e -> failtestf "the session is valid: %A refused %A" op e
 
-                  Expect.isTrue (sameIndex ix (Tree.Index.build nodew idw t)) "the carried index is the rebuild"
+                  Expect.isTrue (sameIndex ix (ok (Tree.Index.build nodew idw t))) "the carried index is the rebuild"
                   calls.Value
 
               let rebuildCost (ballastSize: int) (rounds: int) =

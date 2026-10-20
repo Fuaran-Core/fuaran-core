@@ -2156,8 +2156,10 @@ let tests =
                   "the report a reviewer reads names the case and both names"
           }
 
-          test
-              "Phase 228's rename of DiffError.TargetNotAContainer's field is caught as a breaking `retype` (named vector)" {
+          test "Phase 228's rename of the diff's not-a-container field is caught as a breaking `retype` (named vector)" {
+              // Phase 228 renamed `DiffError.TargetNotAContainer`'s field `parent` -> `target`; Phase 518
+              // folded that case into `Rejection.NotAContainer`, which carries the same payload under
+              // the same names, so the vector is asked of the case the diff refuses through today.
               let root = repoRoot ()
 
               let project = roster () |> List.find (fun p -> p.PackageId = "Fuaran.Core.Ops")
@@ -2171,12 +2173,12 @@ let tests =
                       current
                       |> List.filter (fun t ->
                           t.StartsWith("union-case ", StringComparison.Ordinal)
-                          && t.Contains "+DiffError`1.NewTargetNotAContainer ")
+                          && t.Contains "Rejection`1.NewNotAContainer ")
 
                   Expect.equal
                       token
-                      [ "union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(target: !0, kindTag: System.String)" ]
-                      "the case as 228 left it renders with its field names"
+                      [ "union-case Fuaran.Core.Rejection`1.NewNotAContainer #4(target: !0, kindTag: System.String)" ]
+                      "the case as 228 left the payload renders with its field names"
 
                   // The surface as it stood before 228: the same case, its first field `parent`.
                   let before228 =
@@ -2194,7 +2196,7 @@ let tests =
 
                   Expect.equal
                       (moves |> List.collect fieldRenames)
-                      [ "Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer", "parent", "target" ]
+                      [ "Fuaran.Core.Rejection`1.NewNotAContainer", "parent", "target" ]
                       "naming the case and both names — the class 228's worker had to write by hand"
 
                   // The blindness this phase removes, stated as its own control: rendered the

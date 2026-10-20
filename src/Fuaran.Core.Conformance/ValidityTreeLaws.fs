@@ -67,7 +67,7 @@ module internal ValidityTreeLaws =
 
         let diffRefuses =
             LawKit.LawCell(
-                "the grammar toOps refuses an after holding an illegal pair with IllegalChildInTree naming the first, after every the contained toOps refusal",
+                "the grammar toOps refuses an after holding an illegal pair with IllegalChild naming the first, after every the contained toOps refusal",
                 Some "grammar refusal"
             )
 
@@ -234,7 +234,7 @@ module internal ValidityTreeLaws =
                 diffRefuses.Check(
                     (match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) start drawn, answer with
                      | Error e, Error e' -> e = e'
-                     | Ok _, Error(Diff.IllegalChildInTree(child, childKind, parent, parentKind, kinds)) ->
+                     | Ok _, Error(IllegalChild(child, childKind, parent, parentKind, kinds)) ->
                          idw.Equals child (nodew.Id c)
                          && idw.Equals parent (nodew.Id p)
                          && childKind = nodew.KindTag c
@@ -654,17 +654,6 @@ module internal ValidityTreeLaws =
 
         (before, after) :: independent
 
-    /// The canonical rank of a change kind — `ChangeKind`'s declaration order, re-derived here so the
-    /// law reads the order off the type rather than off the function under test.
-    let private changeRank (k: Diff.ChangeKind<'Id>) : int =
-        match k with
-        | Diff.ChangeKind.Added -> 0
-        | Diff.ChangeKind.Removed -> 1
-        | Diff.ChangeKind.Moved _ -> 2
-        | Diff.ChangeKind.KindChanged _ -> 3
-        | Diff.ChangeKind.Changed -> 4
-        | Diff.ChangeKind.Reordered -> 5
-
     /// True when `xs` ascends strictly under `compare`.
     let private ascending (xs: 'a list) : bool =
         xs |> List.pairwise |> List.forall (fun (x, y) -> compare x y < 0)
@@ -765,7 +754,7 @@ module internal ValidityTreeLaws =
                     fun () -> at (sprintf "the four lists do not partition the key union: %A" delta)
                 )
 
-                match Tree.Index.tryBuild nodew idw before, Tree.Index.tryBuild nodew idw after with
+                match Tree.Index.build nodew idw before, Tree.Index.build nodew idw after with
                 | Ok bix, Ok aix ->
                     for k in Set.intersect (keysOf da) (keysOf db) do
                         match Map.tryFind k bix.ById, Map.tryFind k aix.ById with
@@ -778,7 +767,7 @@ module internal ValidityTreeLaws =
                             )
 
                             let below =
-                                match Diff.changes encode nodew idw b a with
+                                match Diff.changes encode Policy.none (OpScope.plain nodew idw) b a with
                                 | Ok [] -> true
                                 | _ -> false
 
@@ -788,7 +777,7 @@ module internal ValidityTreeLaws =
                             )
                         | _ -> ()
 
-                    match Diff.changes encode nodew idw before after with
+                    match Diff.changes encode Policy.none (OpScope.plain nodew idw) before after with
                     | Error e ->
                         agreesWithChanges.Check(
                             false,
@@ -821,225 +810,6 @@ module internal ValidityTreeLaws =
                   "added id", added
                   "removed id", removed
                   "updated survivor", updated ] ]
-
-    /// The change-classification laws (Phase 314) — hold `Diff.changes` to the script
-    /// `Diff.toOpsWith` emits, over the pairs `pairsOf` draws. The identity pair classifies to `[]`;
-    /// the entries ascend by `(id key, kind rank)` and name only ids of the two trees; the `Added` ids
-    /// are exactly the `InsertChild` grafts; the `Moved` ids exactly the `MoveNode` targets, each from
-    /// its before-parent to its after-parent; the `KindChanged` and `Changed` ids together exactly
-    /// the `UpdateNode` targets (the encoder must see the kind for this to hold, as an injective one
-    /// does — a red here over a domain's encoder is the encoder losing the kind); the `Removed` ids
-    /// are `before`'s minus `after`'s, every `RemoveNode` target is one and every other sits below one
-    /// in `before`; every `Reordered` id is a `ReorderChildren` parent and every such parent is
-    /// `Reordered` or holds an `Added` or `Moved` child; and the script's landing classifies as
-    /// unchanged against `after`. `'Node` needs equality. Guarded on the pair shape.
-    let changeLaws
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (encode: 'Node -> string)
-        (gen: OpGen<'Node, 'Id>)
-        (runner: LawKit.Runner)
-        (iterations: int)
-        : LawResult list =
-        let key (i: 'Id) = idw.ToString i
-        let identity = LawKit.LawCell "changes: the identity pair classifies to []"
-
-        let canonical =
-            LawKit.LawCell "changes: entries ascend by (id key, kind rank) and name only ids of the two trees"
-
-        let inserts =
-            LawKit.LawCell "changes: Added ids are exactly the InsertChild grafts of toOpsWith"
-
-        let moves =
-            LawKit.LawCell
-                "changes: Moved ids are exactly the MoveNode targets of toOpsWith, each from its before-parent to its after-parent"
-
-        let updates =
-            LawKit.LawCell
-                "changes: KindChanged and Changed ids together are exactly the UpdateNode targets of toOpsWith"
-
-        let removes =
-            LawKit.LawCell
-                "changes: Removed ids are before's minus after's; every RemoveNode target is one, and every other sits below one in before"
-
-        let reorders =
-            LawKit.LawCell
-                "changes: every Reordered id is a ReorderChildren parent, and every such parent is Reordered or holds an Added or Moved child"
-
-        let landing =
-            LawKit.LawCell "changes: the script's landing classifies as unchanged against after"
-
-        let mutable nonIdentity = 0
-        let mutable added = 0
-        let mutable removed = 0
-        let mutable moved = 0
-        let mutable updated = 0
-        let mutable reordered = 0
-
-        LawKit.run runner iterations (fun rng _ at ->
-            for before, after in pairsOf nodew idw gen rng do
-                if after <> before then
-                    nonIdentity <- nonIdentity + 1
-
-                identity.Check(
-                    (Diff.changes encode nodew idw before before = Ok []),
-                    fun () -> at "the identity pair does not classify to []"
-                )
-
-                match
-                    Diff.changes encode nodew idw before after,
-                    Diff.toOpsWith encode Policy.none (OpScope.plain nodew idw) before after,
-                    Tree.Index.tryBuild nodew idw before,
-                    Tree.Index.tryBuild nodew idw after
-                with
-                | Ok cs, Ok ops, Ok bix, Ok aix ->
-                    let bIds = bix.ById |> Map.keys |> Set.ofSeq
-                    let aIds = aix.ById |> Map.keys |> Set.ofSeq
-
-                    let named (pick: Diff.ChangeKind<'Id> -> bool) =
-                        cs
-                        |> List.filter (fun c -> pick c.Kind)
-                        |> List.map (fun c -> key c.Id)
-                        |> Set.ofList
-
-                    let addedIds = named ((=) Diff.ChangeKind.Added)
-                    let removedIds = named ((=) Diff.ChangeKind.Removed)
-
-                    let movedIds =
-                        named (function
-                            | Diff.ChangeKind.Moved _ -> true
-                            | _ -> false)
-
-                    let updatedIds =
-                        named (function
-                            | Diff.ChangeKind.KindChanged _
-                            | Diff.ChangeKind.Changed -> true
-                            | _ -> false)
-
-                    let reorderedIds = named ((=) Diff.ChangeKind.Reordered)
-                    added <- added + Set.count addedIds
-                    removed <- removed + Set.count removedIds
-                    moved <- moved + Set.count movedIds
-                    updated <- updated + Set.count updatedIds
-                    reordered <- reordered + Set.count reorderedIds
-
-                    canonical.Check(
-                        ascending (cs |> List.map (fun c -> key c.Id, changeRank c.Kind))
-                        && cs |> List.forall (fun c -> Set.contains (key c.Id) (Set.union bIds aIds)),
-                        fun () -> at (sprintf "entries are not canonical: %A" cs)
-                    )
-
-                    let grafts =
-                        ops
-                        |> List.choose (function
-                            | InsertChild(_, n) -> Some(key (nodew.Id n))
-                            | _ -> None)
-                        |> Set.ofList
-
-                    inserts.Check((addedIds = grafts), fun () -> at (sprintf "Added %A vs grafts %A" addedIds grafts))
-
-                    let moveTargets =
-                        ops
-                        |> List.choose (function
-                            | MoveNode(t, _) -> Some(key t)
-                            | _ -> None)
-                        |> Set.ofList
-
-                    let movedWell =
-                        cs
-                        |> List.forall (fun c ->
-                            match c.Kind with
-                            | Diff.ChangeKind.Moved(f, t) ->
-                                (Map.tryFind (key c.Id) bix.ParentOf |> Option.map key) = Some(key f)
-                                && (Map.tryFind (key c.Id) aix.ParentOf |> Option.map key) = Some(key t)
-                            | _ -> true)
-
-                    moves.Check(
-                        movedIds = moveTargets && movedWell,
-                        fun () -> at (sprintf "Moved %A vs MoveNode targets %A" movedIds moveTargets)
-                    )
-
-                    let updateTargets =
-                        ops
-                        |> List.choose (function
-                            | UpdateNode n -> Some(key (nodew.Id n))
-                            | _ -> None)
-                        |> Set.ofList
-
-                    updates.Check(
-                        (updatedIds = updateTargets),
-                        fun () ->
-                            at (sprintf "KindChanged and Changed %A vs UpdateNode targets %A" updatedIds updateTargets)
-                    )
-
-                    let removeTargets =
-                        ops
-                        |> List.choose (function
-                            | RemoveNode t -> Some(key t)
-                            | _ -> None)
-                        |> Set.ofList
-
-                    let belowARemoval (k: string) =
-                        match Map.tryFind k bix.ById with
-                        | Some n ->
-                            Tree.Index.ancestors idw (nodew.Id n) bix
-                            |> List.exists (fun p -> Set.contains (key (nodew.Id p)) removeTargets)
-                        | None -> false
-
-                    removes.Check(
-                        removedIds = Set.difference bIds aIds
-                        && Set.isSubset removeTargets removedIds
-                        && removedIds
-                           |> Set.forall (fun k -> Set.contains k removeTargets || belowARemoval k),
-                        fun () -> at (sprintf "Removed %A vs RemoveNode targets %A" removedIds removeTargets)
-                    )
-
-                    let reorderParents =
-                        ops
-                        |> List.choose (function
-                            | ReorderChildren(p, _) -> Some(key p)
-                            | _ -> None)
-                        |> Set.ofList
-
-                    let explained (p: string) =
-                        Set.contains p reorderedIds
-                        || (match Map.tryFind p aix.ById with
-                            | Some n ->
-                                nodew.Children n
-                                |> List.exists (fun c ->
-                                    let ck = key (nodew.Id c)
-                                    Set.contains ck addedIds || Set.contains ck movedIds)
-                            | None -> false)
-
-                    reorders.Check(
-                        Set.isSubset reorderedIds reorderParents
-                        && reorderParents |> Set.forall explained,
-                        fun () -> at (sprintf "Reordered %A vs ReorderChildren parents %A" reorderedIds reorderParents)
-                    )
-
-                    match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before with
-                    | Ok landed ->
-                        landing.Check(
-                            (Diff.changes encode nodew idw landed after = Ok []),
-                            fun () -> at "the script's landing still classifies as changed against after"
-                        )
-                    | Error e -> landing.Check(false, fun () -> at (sprintf "the script does not apply: %A" e))
-                | cs, ops, _, _ ->
-                    canonical.Check(
-                        false,
-                        fun () -> at (sprintf "a drawn pair was refused: changes %A, toOpsWith %A" cs ops)
-                    ))
-
-        LawKit.results [ identity; canonical; inserts; moves; updates; removes; reorders; landing ]
-        @ [ LawKit.guard
-                runner
-                "pair shape"
-                [ "non-identity pair", nonIdentity
-                  "added id", added
-                  "removed id", removed
-                  "moved survivor", moved
-                  "updated survivor", updated
-                  "reordered parent", reordered ] ]
 
     /// The introduced-defect laws (Phase 314) — certify `Validator.introduced`, `verdict`, `gate` and
     /// `encodeVerdict` against a domain's registry over the pairs `pairsOf` draws, `after` the

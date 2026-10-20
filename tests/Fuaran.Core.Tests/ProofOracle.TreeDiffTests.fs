@@ -161,14 +161,15 @@ let rec private reKind (kindOf: string -> string) (n: RNode) : RNode =
 let rec private idsOfTree (n: RNode) : string list =
     n.Id :: (n.Children |> List.collect idsOfTree)
 
-let private prodDiffRender (r: Result<SkeletonOp<RNode, string> list, Diff.DiffError<string>>) =
+let private prodDiffRender (r: Result<SkeletonOp<RNode, string> list, Rejection<string>>) =
     match r with
     | Ok ops -> "ok:" + (ops |> List.map renderProdOp |> String.concat ";")
-    | Error(Diff.RootIdMismatch(b, a)) -> sprintf "err:RootIdMismatch(%s,%s)" b a
-    | Error(Diff.DuplicateIdInTree d) -> sprintf "err:DuplicateIdInTree(%s)" d
-    | Error(Diff.TargetNotAContainer(p, k)) -> sprintf "err:TargetNotAContainer(%s,%s)" p k
+    | Error(RootIdMismatch(b, a)) -> sprintf "err:RootIdMismatch(%s,%s)" b a
+    | Error(DuplicateId d) -> sprintf "err:DuplicateIdInTree(%s)" d
+    | Error(NotAContainer(p, k)) -> sprintf "err:TargetNotAContainer(%s,%s)" p k
     // Phase 313: raised only by `Diff.toOps` under `Policy.grammar`, which the oracle does not run.
-    | Error(Diff.IllegalChildInTree(c, _, p, _, _)) -> sprintf "err:IllegalChildInTree(%s,%s)" c p
+    | Error(IllegalChild(c, _, p, _, _)) -> sprintf "err:IllegalChildInTree(%s,%s)" c p
+    | Error other -> sprintf "err:%A" other
 
 let private modelDiffRender (r: DagFold.outcome<TreeOps.op list, TreeDiff.diff_error>) =
     match r with
@@ -354,7 +355,7 @@ let private diffProbe
                           where ]
 
             agreement @ recon @ dry, 1, 0
-        | Error(Diff.TargetNotAContainer(p, k)) ->
+        | Error(NotAContainer(p, k)) ->
             let located =
                 match Tree.tryFind nodew idw p after with
                 | Some n when not (List.isEmpty (nodew.Children n)) && not (canHold n) && nodew.KindTag n = k -> []

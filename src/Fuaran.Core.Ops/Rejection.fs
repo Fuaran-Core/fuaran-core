@@ -28,7 +28,10 @@ type Rejection<'Id> =
     /// reports a stale op-script to others — a scheduler telling N proposers why arbitration refused
     /// them — reports `Arbitration.stale`'s bounded envelope instead.
     | UnknownNode of target: 'Id * addressable: 'Id list
-    /// Inserting / moving a node whose id already exists in the tree.
+    /// Inserting / moving a node whose id already exists in the tree — or, from `Diff` (Phase 518,
+    /// its `DuplicateIdInTree` until then), a `before` or `after` that carries this id twice (the
+    /// first id `Tree.wellFormed` finds at its second preorder occurrence, over the walk the scope
+    /// locates through).
     | DuplicateId of 'Id
     /// The root cannot be removed or moved.
     | CannotRemoveRoot
@@ -44,9 +47,9 @@ type Rejection<'Id> =
     /// plain scope treats every node as able to hold children.
     ///
     /// The graft-interior site is defined by `Ops.firstUncontained`, the single definition of the
-    /// shape; its diff-side sibling is `Diff.DiffError.TargetNotAContainer`, which names the same
-    /// offender under the same payload (Phase 228), and `Conformance.diffContainedLaws` holds the two
-    /// refusals to the same trees.
+    /// shape. `Diff` raises it too (Phase 518; `DiffError.TargetNotAContainer` until then, the same
+    /// payload since Phase 228), naming the first node of `after` that holds children `canHold`
+    /// refuses, and `Conformance.diffContainedLaws` holds the two sites to the same trees.
     | NotAContainer of target: 'Id * kindTag: string
     /// A reorder whose proposed order is not a permutation of the parent's children.
     | ReorderMismatch of parent: 'Id * expected: 'Id list * got: 'Id list
@@ -64,6 +67,13 @@ type Rejection<'Id> =
     /// ("that slot is not structural") without locating it again. An index and not a label because
     /// the witness declares an ordered list and carries no labels; were labels ever declared, the
     /// index would still be what locates the slot (DECISIONS.md D181).
+    ///
+    /// **The keyed diff's site (Phase 518).** Under a keyed scope `Diff` treats a holder's keyed
+    /// subtrees as the holder's content (one `UpdateNode` of the holder carries them), so a node the
+    /// two trees carry on different sides of a keyed boundary — in or below a keyed position of
+    /// `holder` in one tree, outside that holder's keyed positions in the other — is relocated
+    /// across it, which is the same domain edit. `Diff` refuses the pair with this case, naming the
+    /// first such node, the holder that carries it and the slot whose subtree holds it.
     | KeyedPosition of target: 'Id * holder: 'Id * slot: int
     /// An insert, move or in-place rewrite that would leave `child` (of kind `childKind`) under
     /// `parent` (of kind `parentKind`) where the domain's containment grammar does not let that kind
@@ -78,8 +88,12 @@ type Rejection<'Id> =
     /// reference (Phase 313): after it, the tree no longer declares an id it declared before, and
     /// `referrers` — in preorder — are the nodes that still refer to one. `target` is the removed
     /// node or the rewritten one. Only a policy with `Refs` raises this,
-    /// after every other check. Declared last.
+    /// after every other check.
     | StillReferenced of target: 'Id * referrers: 'Id list
+    /// (`Diff` only, Phase 518 — `DiffError.RootIdMismatch` until then.) Skeleton ops cannot change
+    /// the root, so two trees whose roots carry different ids are not a shared id space and no script
+    /// reaches one from the other. No apply raises it. Declared last, so every case keeps its tag.
+    | RootIdMismatch of before: 'Id * after: 'Id
 
 // ---- Phase 315: the envelope's operations and the footprint builders ----
 
@@ -107,7 +121,7 @@ module Rejection =
     /// The stable code of a rejection — one per class, camel-case, and for the skeleton classes the
     /// `$type` the canonical encoder writes: `unknownNode`, `duplicateId`, `cannotRemoveRoot`,
     /// `wouldNestUnderSelf`, `notAContainer`, `reorderMismatch`, `keyedPosition` — and since Phase 313
-    /// `illegalChild` and `stillReferenced`. Two answers differ
+    /// `illegalChild` and `stillReferenced`, and since Phase 518 `rootIdMismatch`. Two answers differ
     /// from the case tag. `reorderOnLeaf` is a `ReorderMismatch` whose parent holds no children
     /// (`expected = []`): nothing to reorder, rather than a wrong permutation, so a caller need not
     /// pre-check the leaf to tell them apart. And a domain's `Rejected` answers its OWN code verbatim
@@ -126,6 +140,7 @@ module Rejection =
         | KeyedPosition _ -> "keyedPosition"
         | IllegalChild _ -> "illegalChild"
         | StillReferenced _ -> "stillReferenced"
+        | RootIdMismatch _ -> "rootIdMismatch"
 
     /// The rejection as guidance an agent can act on: a message naming the failure in the domain's
     /// `nouns`, and the alternatives the envelope enumerates — the addressable ids of an
@@ -187,3 +202,16 @@ module Rejection =
                 + nouns.Node
                 + "s still reference; remove or retarget the references first"
               Alternatives = referrers |> List.map idText }
+        | RootIdMismatch(before, after) ->
+            { Message =
+                "the "
+                + nouns.Root
+                + " "
+                + q after
+                + " is not the "
+                + nouns.Root
+                + " "
+                + q before
+                + "; no script changes the "
+                + nouns.Root
+              Alternatives = [] }

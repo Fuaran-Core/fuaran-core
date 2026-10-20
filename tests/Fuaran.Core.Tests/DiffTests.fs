@@ -76,7 +76,7 @@ let tests =
           testCase "differing root ids yield a typed error, not an unapplyable script"
           <| fun _ ->
               match Diff.toOps Policy.none (OpScope.plain nodew idw) (sample ()) (RNode.node "different" "doc" []) with
-              | Error(Diff.RootIdMismatch("root", "different")) -> ()
+              | Error(RootIdMismatch("root", "different")) -> ()
               | other -> failtestf "expected RootIdMismatch, got %A" other
 
           // ---- container-aware diff (Phase 09); paras are leaves ----
@@ -100,7 +100,7 @@ let tests =
               let after = applyAllOk [ InsertChild("a1", RNode.leaf "x" "para" "v") ] before
 
               match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
-              | Error(Diff.TargetNotAContainer("a1", "para")) -> ()
+              | Error(NotAContainer("a1", "para")) -> ()
               | other -> failtestf "expected TargetNotAContainer at a1, got %A" other
 
           // ---- the settled-order drop (Phase 305, 305.t1): steps 1-3 leave a parent holding its

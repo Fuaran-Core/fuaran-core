@@ -17,6 +17,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// An index of a tree the test knows is well-formed (`Tree.Index.build` refuses a repeated id since
+/// Phase 518).
+let private ok (r: Result<'a, string>) : 'a =
+    match r with
+    | Ok x -> x
+    | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
+
 // ---- a seeded generator over the reference node ------------------------------------------------
 
 let private kinds = [ "section"; "para"; "aside"; "list" ]
@@ -223,7 +230,7 @@ let tests =
                         let canHold = drawCanHold rng
 
                         match Diff.toOpsWith encode Policy.none (OpScope.contained canHold nodew idw) before after with
-                        | Error(Diff.TargetNotAContainer _) -> () // `after` nests under a non-container: no legal script
+                        | Error(NotAContainer _) -> () // `after` nests under a non-container: no legal script
                         | Error e -> failtestf "refused a well-formed pair with %A" e
                         | Ok ops ->
                             asked <- asked + 1
@@ -567,7 +574,7 @@ let tests =
                     // Phase 305 found the check blind to content and added a content-aware pair beside
                     // it; Phase 447 (D150) made the one check exact and folded the encoder into it.
                     let tree = sample ()
-                    let ix = Tree.Index.build nodew idw tree
+                    let ix = ok (Tree.Index.build nodew idw tree)
                     Expect.isTrue (Tree.Index.isFreshFor nodew idw encode tree ix) "fresh on the unedited tree"
 
                     let a1 = Tree.tryFind nodew idw "a1" tree |> Option.get
@@ -586,7 +593,7 @@ let tests =
                             idw
                             encode
                             edited
-                            (Ops.Index.afterOp nodew idw (UpdateNode(a1 |> withValue "rewritten")) edited ix))
+                            (ok (Ops.Index.afterOp nodew idw (UpdateNode(a1 |> withValue "rewritten")) edited ix)))
                         "and the index carried through the edit is fresh"
 
                     let moved =
@@ -594,3 +601,175 @@ let tests =
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
                     Expect.isFalse (Tree.Index.isFreshFor nodew idw encode moved ix) "a structural edit is stale too" ] ]
+
+// ---- Phase 518: `Diff.changes` read off the script's own passes ---------------------------------
+//
+// `Conformance.changeLaws` (Phase 314) held `changes` — then a second walk of both trees — to the
+// script `toOpsWith` emits. Since Phase 518 the two are one run of the emitter, so the family left
+// the kit and its eight checks are this unit test of one function, over independent drawn pairs
+// (the pairs that reach an added, a removed, a moved, a changed and a reordered id).
+
+let private rankOf (k: Diff.ChangeKind<string>) =
+    match k with
+    | Diff.ChangeKind.Added -> 0
+    | Diff.ChangeKind.Removed -> 1
+    | Diff.ChangeKind.Moved _ -> 2
+    | Diff.ChangeKind.KindChanged _ -> 3
+    | Diff.ChangeKind.Changed -> 4
+    | Diff.ChangeKind.Reordered -> 5
+
+[<Tests>]
+let changeTests =
+    testList
+        "Diff.changes is the script's classification (Phase 518, was Conformance.changeLaws)"
+        [ testCase "over drawn pairs every kind names exactly the ids the script's ops name"
+          <| fun _ ->
+              let rng = Random 518
+              let scope = OpScope.plain nodew idw
+              let mutable reached = Map.empty<int, int>
+
+              for i in 1..300 do
+                  let before = drawTree rng pool
+                  // the drawn trees place children in pool order, so half the pairs reverse every
+                  // child list of `after`: the kept children then stand in another relative order
+                  let after =
+                      match drawTree rng pool with
+                      | t when i % 2 = 0 ->
+                          Tree.map
+                              nodew
+                              (fun n ->
+                                  { n with
+                                      Children = List.rev n.Children })
+                              t
+                      | t -> t
+
+                  let at (what: string) =
+                      sprintf "pair %d: %s\nbefore %A\nafter %A" i what before after
+
+                  Expect.equal (Diff.changes encode Policy.none scope before before) (Ok []) (at "identity")
+
+                  match
+                      Diff.changes encode Policy.none scope before after,
+                      Diff.toOpsWith encode Policy.none scope before after
+                  with
+                  | Ok cs, Ok ops ->
+                      let bix = ok (Tree.Index.build nodew idw before)
+                      let aix = ok (Tree.Index.build nodew idw after)
+                      let bIds = bix.ById |> Map.keys |> Set.ofSeq
+                      let aIds = aix.ById |> Map.keys |> Set.ofSeq
+
+                      for c in cs do
+                          reached <- reached |> Map.change (rankOf c.Kind) (fun n -> Some(defaultArg n 0 + 1))
+
+                      let named (pick: Diff.ChangeKind<string> -> bool) =
+                          cs |> List.filter (fun c -> pick c.Kind) |> List.map _.Id |> Set.ofList
+
+                      let ofOps (pick: SkeletonOp<RNode, string> -> string option) =
+                          ops |> List.choose pick |> Set.ofList
+
+                      let addedIds = named ((=) Diff.ChangeKind.Added)
+                      let removedIds = named ((=) Diff.ChangeKind.Removed)
+
+                      let movedIds =
+                          named (function
+                              | Diff.ChangeKind.Moved _ -> true
+                              | _ -> false)
+
+                      let updateTargets =
+                          ofOps (function
+                              | UpdateNode n -> Some n.Id
+                              | _ -> None)
+
+                      Expect.isTrue
+                          ((cs
+                            |> List.map (fun c -> c.Id, rankOf c.Kind)
+                            |> List.pairwise
+                            |> List.forall (fun (x, y) -> x < y))
+                           && cs |> List.forall (fun c -> Set.contains c.Id (Set.union bIds aIds)))
+                          (at "entries ascend by (id key, kind rank) and name only ids of the two trees")
+
+                      Expect.equal
+                          addedIds
+                          (ofOps (function
+                              | InsertChild(_, n) -> Some n.Id
+                              | _ -> None))
+                          (at "Added is the grafts")
+
+                      Expect.equal
+                          movedIds
+                          (ofOps (function
+                              | MoveNode(t, _) -> Some t
+                              | _ -> None))
+                          (at "Moved is the MoveNode targets")
+
+                      for c in cs do
+                          match c.Kind with
+                          | Diff.ChangeKind.Moved(f, t) ->
+                              Expect.equal
+                                  (Map.tryFind c.Id bix.ParentOf, Map.tryFind c.Id aix.ParentOf)
+                                  (Some f, Some t)
+                                  (at "a move names both parents")
+                          | _ -> ()
+
+                      // the encoder reads the kind, so a kind change is an update too
+                      Expect.equal
+                          (named (function
+                              | Diff.ChangeKind.KindChanged _
+                              | Diff.ChangeKind.Changed -> true
+                              | _ -> false))
+                          updateTargets
+                          (at "KindChanged and Changed are the UpdateNode targets")
+
+                      let removeTargets =
+                          ofOps (function
+                              | RemoveNode t -> Some t
+                              | _ -> None)
+
+                      let belowARemoval (k: string) =
+                          Tree.Index.ancestors idw k bix
+                          |> List.exists (fun p -> removeTargets.Contains p.Id)
+
+                      Expect.isTrue
+                          (removedIds = Set.difference bIds aIds
+                           && Set.isSubset removeTargets removedIds
+                           && removedIds |> Set.forall (fun k -> removeTargets.Contains k || belowARemoval k))
+                          (at "Removed is before's minus after's, each a RemoveNode target or below one")
+
+                      let reorderParents =
+                          ofOps (function
+                              | ReorderChildren(p, _) -> Some p
+                              | _ -> None)
+
+                      let reordered = named ((=) Diff.ChangeKind.Reordered)
+
+                      let explained (p: string) =
+                          reordered.Contains p
+                          || (Map.tryFind p aix.ById
+                              |> Option.exists (fun n ->
+                                  n.Children
+                                  |> List.exists (fun c -> addedIds.Contains c.Id || movedIds.Contains c.Id)))
+
+                      Expect.isTrue
+                          (Set.isSubset reordered reorderParents && reorderParents |> Set.forall explained)
+                          (at "every Reordered id is a reorder's parent, and every reorder is explained")
+
+                      match Ops.applyAll Policy.none scope ops before with
+                      | Ok landed ->
+                          Expect.equal
+                              (Diff.changes encode Policy.none scope landed after)
+                              (Ok [])
+                              (at "the landing classifies as unchanged")
+                      | Error e -> failtest (at (sprintf "the script does not apply: %A" e))
+                  | answer -> failtest (at (sprintf "a drawn pair was refused: %A" answer))
+
+              for rank, name in
+                  [ 0, "added"
+                    1, "removed"
+                    2, "moved"
+                    3, "kind"
+                    4, "changed"
+                    5, "reordered" ] do
+                  Expect.isGreaterThan
+                      (Map.tryFind rank reached |> Option.defaultValue 0)
+                      10
+                      (sprintf "the pairs reached %s ids" name) ]

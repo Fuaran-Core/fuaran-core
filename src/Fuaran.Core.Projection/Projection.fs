@@ -224,21 +224,21 @@ module Projection =
     /// map from — and the encoder is read over the node's SHELL, which for the
     /// child-blind `Encode` the witness contract demands is the same string.
     let snapshotDigestOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (node: 'Node) : string =
-        Tree.frameDigest pw.Tree pw.IdW pw.Encode node
+        (Tree.frameDigest pw.Tree pw.IdW pw.Encode node).Hex
 
-    /// `Tree.digests` under the witness's encoder, both maps re-keyed from the raw
-    /// `IdW.ToString` key to the projection's `idKey` (the escaped form every scope
-    /// compares, Phase 298). `escapeCell` is injective, so the re-keying loses no
-    /// entry.
-    let private digestsOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (root: 'Node) : Tree.Digests =
-        let rekey (m: Map<string, string>) =
-            m |> Map.toList |> List.map (fun (k, v) -> escapeCell k, v) |> Map.ofList
+    /// The `Frame` and `Subtree` maps of `Tree.digests` under the witness's encoder,
+    /// re-keyed from the raw `IdW.ToString` key to the projection's `idKey` (the escaped
+    /// form every scope compares, Phase 298) and read as the hex the snapshot stores
+    /// (`Digest.Hex`; the maps are `Digest`-typed since Phase 518). `escapeCell` is
+    /// injective, so the re-keying loses no entry.
+    let private digestsOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (root: 'Node) =
+        let rekey (m: Map<string, Digest>) =
+            m |> Map.toList |> List.map (fun (k, v) -> escapeCell k, v.Hex) |> Map.ofList
 
         let d = Tree.digests pw.Tree pw.IdW pw.Encode root
 
-        { Own = rekey d.Own
-          Frame = rekey d.Frame
-          Subtree = rekey d.Subtree }
+        {| Frame = rekey d.Frame
+           Subtree = rekey d.Subtree |}
 
     /// Project one node at `depth` into its terse line.
     let lineOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (depth: int) (node: 'Node) : ProjectionLine =

@@ -227,6 +227,8 @@ module ApplyVectorExport =
         | IllegalChild(child, _, parent, parentKind, _) ->
             Canon.typed "illegalChild" [ "child", JStr child; "parent", JStr parent; "parentKind", JStr parentKind ]
         | StillReferenced(target, _) -> Canon.typed "stillReferenced" [ "target", JStr target ]
+        // Phase 518 — raised only by `Diff`, which no apply vector runs.
+        | RootIdMismatch(before, after) -> Canon.typed "rootIdMismatch" [ "before", JStr before; "after", JStr after ]
 
     // -----------------------------------------------------------------------
     //  the authored cases

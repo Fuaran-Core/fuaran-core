@@ -5956,25 +5956,25 @@
     {
       "id": "index-fresh-on-build",
       "level": "proved",
-      "statement": "BUILD IS FRESH FOR A WELL-FORMED TREE, AND TRYBUILD BUILDS EXACTLY THE WELL-FORMED TREES. The index `Tree.Index.build` makes is fresh for the well-formed tree it was built from (`fresh_on_build`). `Tree.Index.tryBuild` answers `Ok` exactly on a well-formed tree, with `build`'s index, fresh, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`).",
-      "boundary": "Freshness on build is for a well-formed tree only: over a tree carrying an id twice NO index is fresh, `build`'s own included (`ix_fresh_wf`, `repeated_ids_never_fresh`), because there the index keeps the last node carrying the id and the walk finds the first.",
-      "claim": "BUILD IS FRESH FOR A WELL-FORMED TREE, AND TRYBUILD BUILDS EXACTLY THE WELL-FORMED TREES. The index `Tree.Index.build` makes is fresh for the well-formed tree it was built from (`fresh_on_build`). `Tree.Index.tryBuild` answers `Ok` exactly on a well-formed tree, with `build`'s index, fresh, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`). Freshness on build is for a well-formed tree only: over a tree carrying an id twice NO index is fresh, `build`'s own included (`ix_fresh_wf`, `repeated_ids_never_fresh`), because there the index keeps the last node carrying the id and the walk finds the first.",
+      "statement": "BUILD BUILDS EXACTLY THE WELL-FORMED TREES, AND ITS INDEX IS FRESH. `Tree.Index.build` answers `Ok` exactly on a well-formed tree, with an index fresh for the tree it was built from, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`; `fresh_on_build` for the index). Production's `build` is the model's `ix_try_build`; the model's lenient `ix_build` has no production counterpart.",
+      "boundary": "Freshness is for a well-formed tree only: over a tree carrying an id twice NO index is fresh (`ix_fresh_wf`, `repeated_ids_never_fresh`), and production's `build` makes none there, refusing the tree instead.",
+      "claim": "BUILD BUILDS EXACTLY THE WELL-FORMED TREES, AND ITS INDEX IS FRESH. `Tree.Index.build` answers `Ok` exactly on a well-formed tree, with an index fresh for the tree it was built from, and otherwise refuses with `Tree.wellFormed`'s first repeated id (`try_build_exact`, through `scan_dup_none_iff` and `wf_iff_no_dups`; `fresh_on_build` for the index). Production's `build` is the model's `ix_try_build`; the model's lenient `ix_build` has no production counterpart. Freshness is for a well-formed tree only: over a tree carrying an id twice NO index is fresh (`ix_fresh_wf`, `repeated_ids_never_fresh`), and production's `build` makes none there, refusing the tree instead.",
       "phase": "fuaran-core#447",
       "evidence": {
         "theorem": "try_build_exact",
         "model": "proofs/TreeOps.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Tree.Index.tryBuild"
+          "Tree.Index.build"
         ]
       }
     },
     {
       "id": "index-differential",
       "level": "tested",
-      "statement": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): all five lookups at every id and an absent one, `tryBuild`'s verdict and named id, and `isFreshFor` over every ordered pair of trees; over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ fails the case — no premise allows one (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). The pair pinned as a collision of the retired 32-bit stamp is asserted still to collide under that term and to read as stale in production and in the model. GO-RED: the model's freshness narrowed to (id, kind, child count), parent links unread, disagrees with production, on the freshness arm alone.",
+      "statement": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): `build`'s verdict and named id beside the model's `ix_try_build`, all five lookups at every id and an absent one wherever production's `build` makes an index (a well-formed tree), and `isFreshFor` over every ordered pair whose first tree production indexes; over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ fails the case — no premise allows one (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). The pair pinned as a collision of the retired 32-bit stamp is asserted still to collide under that term and to read as stale in production and in the model. GO-RED: the model's freshness narrowed to (id, kind, child count), parent links unread, disagrees with production, on the freshness arm alone.",
       "boundary": "Agreement over the sampled cases only, never over all inputs; production is compared through the model's view of a node, an encoder that reads nothing (`index-node-is-its-record`).",
-      "claim": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): all five lookups at every id and an absent one, `tryBuild`'s verdict and named id, and `isFreshFor` over every ordered pair of trees; over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ fails the case — no premise allows one (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). The pair pinned as a collision of the retired 32-bit stamp is asserted still to collide under that term and to read as stale in production and in the model. GO-RED: the model's freshness narrowed to (id, kind, child count), parent links unread, disagrees with production, on the freshness arm alone. Agreement over the sampled cases only, never over all inputs; production is compared through the model's view of a node, an encoder that reads nothing (`index-node-is-its-record`).",
+      "claim": "The extracted section 23 runs beside production's `Tree.Index` over every state a generated lane pool reaches, the reparent pair, and each of those with a node copied under the root (a tree carrying an id twice): `build`'s verdict and named id beside the model's `ix_try_build`, all five lookups at every id and an absent one wherever production's `build` makes an index (a well-formed tree), and `isFreshFor` over every ordered pair whose first tree production indexes; over a well-formed tree, production's index, production's walk and the model's walk all agree. A fresh pair whose trees differ fails the case — no premise allows one (guards: a repeated id, a path three ids long, stale and fresh pairs, and a stale pair only a child id tells apart). The pair pinned as a collision of the retired 32-bit stamp is asserted still to collide under that term and to read as stale in production and in the model. GO-RED: the model's freshness narrowed to (id, kind, child count), parent links unread, disagrees with production, on the freshness arm alone. Agreement over the sampled cases only, never over all inputs; production is compared through the model's view of a node, an encoder that reads nothing (`index-node-is-its-record`).",
       "phase": "fuaran-core#447",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -5986,8 +5986,7 @@
         ],
         "operations": [
           "Tree.Index.build",
-          "Tree.Index.isFreshFor",
-          "Tree.Index.tryBuild"
+          "Tree.Index.isFreshFor"
         ]
       }
     },

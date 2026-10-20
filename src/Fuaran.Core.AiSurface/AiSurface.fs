@@ -159,6 +159,7 @@ module RejectionCodec =
                   "legal", JArr(legal |> List.map JStr) ]
         | StillReferenced(target, referrers) ->
             Canon.typed "stillReferenced" [ "target", one target; "referrers", many referrers ]
+        | RootIdMismatch(before, after) -> Canon.typed "rootIdMismatch" [ "before", one before; "after", one after ]
 
     /// `encode` rendered canonically (`Canon.render`: sorted keys, the pinned escaping). A caller that
     /// must refuse an ill-formed id rather than write it through renders with `Canon.tryRender`.
