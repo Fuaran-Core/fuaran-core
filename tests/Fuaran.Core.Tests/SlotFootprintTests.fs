@@ -258,7 +258,7 @@ let tests =
                           Batch [ RemoveNode "a2"; InsertChild("b", RNode.leaf "q" "para" "v") ] ]
 
                     for op in ops do
-                        let f = Ops.footprint nodew idw [ op ]
+                        let f = Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
                         Expect.isEmpty f.SlotReads (sprintf "%A reads no slot" op)
                         Expect.isEmpty f.SlotWrites (sprintf "%A writes no slot" op)
 
@@ -269,7 +269,10 @@ let tests =
                     for a in ops do
                         for b in ops do
                             Expect.isEmpty
-                                (Dag.conflicts (fun op -> Ops.footprint nodew idw [ op ]) [ a ] [ b ]
+                                (Dag.conflicts
+                                    (fun op -> Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ])
+                                    [ a ]
+                                    [ b ]
                                  |> List.filter (fun c ->
                                      match c.Shape with
                                      | MergeConflictShape.SlotClash _ -> true

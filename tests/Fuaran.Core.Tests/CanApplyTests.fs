@@ -30,8 +30,8 @@ let tests =
         [ testCase "canApply agrees with apply on accept/reject and the exact envelope"
           <| fun _ ->
               for op in cases do
-                  let applied = Ops.apply nodew idw op (sample ())
-                  let checked' = Ops.canApply nodew idw op (sample ())
+                  let applied = Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ())
+                  let checked' = Ops.canApply Policy.none (OpScope.plain nodew idw) op (sample ())
 
                   match applied, checked' with
                   | Ok _, Ok() -> ()
@@ -40,7 +40,13 @@ let tests =
 
           testCase "canApply on a valid op returns Ok"
           <| fun _ ->
-              match Ops.canApply nodew idw (InsertChild("a", RNode.leaf "a3" "para" "w")) (sample ()) with
+              match
+                  Ops.canApply
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      (InsertChild("a", RNode.leaf "a3" "para" "w"))
+                      (sample ())
+              with
               | Ok() -> ()
               | Error e -> failtestf "expected Ok, got %A" e
 
@@ -48,7 +54,7 @@ let tests =
           <| fun _ ->
               let ops = [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "ghost" ]
 
-              match Ops.canApplyAll nodew idw ops (sample ()) with
+              match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops (sample ()) with
               | Error(1, UnknownNode("ghost", _)) -> ()
               | other -> failtestf "expected Error at index 1, got %A" other
 
@@ -58,4 +64,6 @@ let tests =
                   [ InsertChild("a", RNode.leaf "a3" "para" "w")
                     ReorderChildren("a", [ "a3"; "a2"; "a1" ]) ]
 
-              Expect.isOk (Ops.canApplyAll nodew idw ops (sample ())) "valid sequence accepted" ]
+              Expect.isOk
+                  (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops (sample ()))
+                  "valid sequence accepted" ]

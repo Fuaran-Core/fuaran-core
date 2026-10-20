@@ -147,7 +147,8 @@ module RejectionCodec =
         | ReorderMismatch(parent, expected, got) ->
             Canon.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
         | Rejected(code, message) -> Canon.typed "rejected" [ "code", JStr code; "message", JStr message ]
-        | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", one target; "holder", one holder ]
+        | KeyedPosition(target, holder, slot) ->
+            Canon.typed "keyedPosition" [ "target", one target; "holder", one holder; "slot", JInt slot ]
         | IllegalChild(child, childKind, parent, parentKind, legal) ->
             Canon.typed
                 "illegalChild"

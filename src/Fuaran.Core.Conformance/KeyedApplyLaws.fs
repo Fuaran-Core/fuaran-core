@@ -10,7 +10,7 @@ module internal KeyedApplyLaws =
     ///
     /// Phase 189 let a domain DECLARE its keyed positions and certified the domain's own id check
     /// against that declaration (`keyedChildrenLaws`). Phase 286 hands the same declaration to the
-    /// engine: `Ops.applyContainedKeyed` locates through `Tree.traversal` and refuses a
+    /// engine: the engine under `OpScope.keyed` locates through `Tree.traversal` and refuses a
     /// `DuplicateId` over the keyed walk. This family certifies the three things that makes true of
     /// a domain, and none of them is a law the domain could pass by declaring nothing it holds:
     ///
@@ -20,7 +20,7 @@ module internal KeyedApplyLaws =
     ///   alone. A witness that breaks one of these makes every walk below a keyed position rebuild
     ///   a different tree from the one it read.
     /// - **The engine's refusal and the domain's own full walk AGREE.** An insert is refused as
-    ///   `DuplicateId` by `applyContainedKeyed` exactly when `KeyedWitness.IdsUnique` refuses the
+    ///   `DuplicateId` by the keyed engine exactly when `KeyedWitness.IdsUnique` refuses the
     ///   tree the unkeyed engine builds from it. The collisions are BUILT through
     ///   `PlaceKeyedChild`, never drawn (a generator's contract is a fresh id, so a drawn sample
     ///   cannot carry one): an id held keyed in the tree against a structural graft, an id held
@@ -28,11 +28,15 @@ module internal KeyedApplyLaws =
     ///   the three shapes the unkeyed engine is blind to. A clean insert is the arm that keeps the
     ///   law from passing for an engine that refuses everything.
     /// - **Declaring nothing changes nothing.** With `KeyedChildren = fun _ -> []`,
-    ///   `applyContainedKeyed` / `canApplyContainedKeyed` answer exactly what `applyContained` /
-    ///   `canApplyContained` answer, over every op kind the kit draws.
+    ///   `Ops.apply` / `Ops.canApply` under the keyed scope answer exactly what they answer under the
+    ///   contained one, over every op kind the kit draws.
+    /// - **A lock on a holder covers its keyed subtree** (Phase 517). Under the keyed scope the write
+    ///   gate reads a target's ancestors along the keyed walk, so locking a node that holds keyed
+    ///   positions refuses every non-batch op drawn across the keyed walk with a target at or below
+    ///   it — a write the keyed engine would otherwise apply inside the locked holder.
     /// - **The keyed engine is one engine, and it keeps the keyed walk well formed.** Over ops
     ///   drawn across the keyed walk — parents, targets and updates that sit in or below a keyed
-    ///   position — `canApplyContainedKeyed` agrees with `applyContainedKeyed` (accept/reject and
+    ///   position — the keyed dry run agrees with the keyed apply (accept/reject and
     ///   the envelope), and an op it accepts into a tree whose keyed walk repeats no id leaves one
     ///   that repeats none. The second is the sampled form of `keyed_apply_preserves_wf` over every
     ///   op kind, the `UpdateNode` payload check included, which the model does not reach.
@@ -69,13 +73,13 @@ module internal KeyedApplyLaws =
 
         let agreement =
             LawKit.LawCell(
-                "applyContainedKeyed refuses an insert as DuplicateId exactly when the domain's id check refuses the tree the unkeyed engine builds",
+                "the keyed apply refuses an insert as DuplicateId exactly when the domain's id check refuses the tree the unkeyed engine builds",
                 Some "built arm and op kind"
             )
 
         let identity =
             LawKit.LawCell
-                "with no keyed position declared, applyContainedKeyed and canApplyContainedKeyed answer exactly what applyContained and canApplyContained answer"
+                "with no keyed position declared, the keyed apply and the keyed canApply answer exactly what the contained apply and the contained canApply answer"
 
         let mutable keyedHolders = 0
         let mutable keyedContainers = 0
@@ -87,13 +91,21 @@ module internal KeyedApplyLaws =
 
         let dryRun =
             LawKit.LawCell
-                "canApplyContainedKeyed ≡ applyContainedKeyed (accept/reject + envelope) over ops drawn across the keyed walk"
+                "the keyed canApply ≡ the keyed apply (accept/reject + envelope) over ops drawn across the keyed walk"
 
         let keyedPreservation =
             LawKit.LawCell(
-                "an op applyContainedKeyed accepts keeps a tree well formed over its keyed walk",
+                "an op the keyed apply accepts keeps a tree well formed over its keyed walk",
                 Some "built arm and op kind"
             )
+
+        let keyedLock =
+            LawKit.LawCell(
+                "under the keyed scope, a lock on a node refuses every non-batch op with a target in its subtree along the keyed walk",
+                Some "built arm and op kind"
+            )
+
+        let mutable lockedWrites = 0
 
         let mutable declaredKeyed = 0
         let mutable placementsTaken = 0
@@ -205,7 +217,7 @@ module internal KeyedApplyLaws =
                     let parent = rng.Choose parents
                     let op = InsertChild(nodew.Id parent, graft)
 
-                    match Ops.applyContained canHold nodew idw op pre with
+                    match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op pre with
                     | Error _ -> ()
                     | Ok built ->
                         let domainRefuses = not (keyw.IdsUnique built)
@@ -213,7 +225,7 @@ module internal KeyedApplyLaws =
                         if domainRefuses = collision then
                             count ()
 
-                        let keyed = Ops.applyContainedKeyed keyw canHold nodew idw op pre
+                        let keyed = Ops.apply Policy.none (OpScope.keyed keyw canHold nodew idw) op pre
 
                         let engineRefuses =
                             match keyed with
@@ -225,7 +237,7 @@ module internal KeyedApplyLaws =
                             fun () ->
                                 at (
                                     sprintf
-                                        "%s: inserting %s under %s — %s %s the tree the unkeyed engine builds, and applyContainedKeyed answered %A; the engine's refusal and the domain's own walk disagree, so either the declaration misses a position %s walks or the engine walks one it does not"
+                                        "%s: inserting %s under %s — %s %s the tree the unkeyed engine builds, and the keyed apply answered %A; the engine's refusal and the domain's own walk disagree, so either the declaration misses a position %s walks or the engine walks one it does not"
                                         arm
                                         (keyOf graft)
                                         (keyOf parent)
@@ -275,17 +287,23 @@ module internal KeyedApplyLaws =
             // ---- declaring nothing changes nothing (drawn, every op kind) ----
             let op = rng.Draw(LawKit.genOp nodew idw gen tree)
             kinds.Note op
-            let plain = Ops.applyContained canHold nodew idw op tree
-            let viaKeyed = Ops.applyContainedKeyed unkeyed canHold nodew idw op tree
-            let plainDry = Ops.canApplyContained canHold nodew idw op tree
-            let keyedDry = Ops.canApplyContainedKeyed unkeyed canHold nodew idw op tree
+            let plain = Ops.apply Policy.none (OpScope.contained canHold nodew idw) op tree
+
+            let viaKeyed =
+                Ops.apply Policy.none (OpScope.keyed unkeyed canHold nodew idw) op tree
+
+            let plainDry =
+                Ops.canApply Policy.none (OpScope.contained canHold nodew idw) op tree
+
+            let keyedDry =
+                Ops.canApply Policy.none (OpScope.keyed unkeyed canHold nodew idw) op tree
 
             identity.Check(
                 (plain = viaKeyed && plainDry = keyedDry),
                 fun () ->
                     at (
                         sprintf
-                            "%A: applyContained gave %A and applyContainedKeyed %A; canApplyContained gave %A and canApplyContainedKeyed %A"
+                            "%A: the contained apply gave %A and the keyed apply %A; the contained canApply gave %A and the keyed canApply %A"
                             op
                             plain
                             viaKeyed
@@ -296,13 +314,43 @@ module internal KeyedApplyLaws =
 
             // ---- the keyed engine over ops that address the keyed walk (drawn) ----
             let kop = rng.Draw(LawKit.genOp t idw gen tree)
-            let applied = Ops.applyContainedKeyed keyw canHold nodew idw kop tree
-            let dry = Ops.canApplyContainedKeyed keyw canHold nodew idw kop tree
+            let applied = Ops.apply Policy.none (OpScope.keyed keyw canHold nodew idw) kop tree
+            let dry = Ops.canApply Policy.none (OpScope.keyed keyw canHold nodew idw) kop tree
 
             dryRun.Check(
                 (Result.map ignore applied = dry),
-                fun () -> at (sprintf "%A: applyContainedKeyed gave %A, canApplyContainedKeyed %A" kop applied dry)
+                fun () -> at (sprintf "%A: the keyed apply gave %A, the keyed dry run %A" kop applied dry)
             )
+
+            // ---- the keyed write gate (Phase 517): a lock on a holder covers its keyed subtree ----
+            let scope = OpScope.keyed keyw canHold nodew idw
+
+            match kop, keyedNodes |> List.filter (fun n -> not (List.isEmpty (keyw.KeyedChildren n))) with
+            | Batch _, _
+            | _, [] -> ()
+            | _, holders ->
+                let locked = keyOf (rng.Choose holders)
+                let targets = WriteGate.targetsOf scope kop tree
+
+                let underLock (target: string) =
+                    match Tree.path t idw (idw.OfString target) tree with
+                    | Some path -> path |> List.exists (fun i -> idw.ToString i = locked)
+                    | None -> false
+
+                if targets |> Set.exists underLock then
+                    lockedWrites <- lockedWrites + 1
+
+                    keyedLock.Check(
+                        Result.isError (WriteGate.decide (WriteGate.lockOnly [ locked ]) scope kop tree),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "locking %s did not refuse %A, whose targets %A lie below it"
+                                    locked
+                                    kop
+                                    targets
+                            )
+                    )
 
             match applied with
             | Ok after when Tree.wellFormedKeyed nodew keyw idw tree = Tree.Structural ->
@@ -332,7 +380,8 @@ module internal KeyedApplyLaws =
               agreement
               identity
               dryRun
-              keyedPreservation ]
+              keyedPreservation
+              keyedLock ]
 
         if declaredKeyed = 0 && placementsTaken = 0 then
             // Vacuous BY DECLARATION for the keyed arms — the `keyedChildrenLaws` verdict, in its
@@ -356,5 +405,6 @@ module internal KeyedApplyLaws =
                        "keyed in the tree, structural in the graft", keyedInTree
                        "structural in the tree, keyed in the graft", keyedInGraft
                        "keyed in the tree and in the graft", keyedBoth
-                       "accepted op over the keyed walk", acceptedKeyed ]
+                       "accepted op over the keyed walk", acceptedKeyed
+                       "op writing under a locked keyed holder", lockedWrites ]
                      @ kinds.Demands) ]

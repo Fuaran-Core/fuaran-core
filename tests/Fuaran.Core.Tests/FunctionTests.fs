@@ -916,7 +916,7 @@ let memoTests =
               let flat = template ()
 
               let nested =
-                  match Ops.apply nodew idw (MoveNode("s", "c")) flat with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("s", "c")) flat with
                   | Ok t -> t
                   | Error e -> failtestf "the move was refused: %A" e
 

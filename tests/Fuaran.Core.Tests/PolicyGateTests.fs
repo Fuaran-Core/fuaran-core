@@ -278,7 +278,8 @@ let tests =
                       [ RNode.leaf "boiler" "para" "v"
                         RNode.node "body" "section" [ RNode.leaf "p1" "para" "v" ] ]
 
-              let decide gate op = WriteGate.decide gate nodew idw op tree
+              let decide gate op =
+                  WriteGate.decide gate (OpScope.plain nodew idw) op tree
 
               let edit id = UpdateNode(RNode.leaf id "para" "w")
 
@@ -321,12 +322,17 @@ let tests =
                   "a lock protects a block from its ancestor's removal"
 
               Expect.equal
-                  (WriteGate.applyGated (WriteGate.lockOnly [ "boiler" ]) nodew idw (edit "boiler") tree)
+                  (WriteGate.applyGated
+                      (WriteGate.lockOnly [ "boiler" ])
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      (edit "boiler")
+                      tree)
                   (Error(GatedApplyFailure.Denied(WriteDenial.Locked("boiler", "boiler"))))
                   "applyGated refuses before the reducer"
 
               Expect.equal
-                  (WriteGate.targetsOf nodew idw (RemoveNode "body") tree)
+                  (WriteGate.targetsOf (OpScope.plain nodew idw) (RemoveNode "body") tree)
                   (Set.ofList [ "body"; "p1" ])
                   "a removal's targets are its destroyed subtree"
 

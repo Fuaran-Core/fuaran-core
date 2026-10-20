@@ -3535,6 +3535,21 @@ let contained_step (ch:tree -> bool) (b1 a:tree) (o:op) (t:tree)
             mem_cons x (kid_ids acs);
             assert (ch (TNode np ak acs) == ch (TNode np ak pcs)))
        | _, _ -> ())
+    (* Phase 517: the engine asks `ch` of a reorder's parent too; the parent is an after-node
+       holding more than one child, so it carries `after`'s kind, which `ch` accepts. *)
+    | ReorderChildren p _ ->
+      find_in_some_iff p t;
+      find_in_some_iff p a;
+      (match find_in p t, find_in p a with
+       | Some pn, Some am ->
+         find_in_id p t pn;
+         find_in_id p a am;
+         find_in_mem_pre p a am;
+         first_non_container_none_mem ch (pre a) am;
+         (match pn, am with
+          | TNode _ pk pcs, TNode _ ak acs ->
+            assert (ch (TNode p ak acs) == ch (TNode p ak pcs)))
+       | _, _ -> ())
     | _ -> ()
 #pop-options
 

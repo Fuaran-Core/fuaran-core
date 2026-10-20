@@ -10,7 +10,7 @@ module internal KeyedArbitrationLaws =
     /// **Arbitration over a domain's containers and keyed positions, certified** (Phase 247).
     ///
     /// `arbitrationLaws` certifies `Arbitration.arbitrate`, and its generator draws every script
-    /// through `Ops.applyContained`, so it never proposes one the container capability refuses and
+    /// through `Ops.apply` under `OpScope.contained`, so it never proposes one the container capability refuses and
     /// never builds two that carry one id off the `Children` walk. Those are exactly the two things
     /// `arbitrate` admits and a domain's own engine then refuses or loses: an insert under a node that
     /// cannot hold children (plain apply drops it when the witness ignores a leaf's new children), and
@@ -22,7 +22,7 @@ module internal KeyedArbitrationLaws =
     ///   input-permutation invariance, a total partition, a pairwise-independent accepted set under
     ///   `footprintOf`, and actionable rejections (`Inapplicable` is `canApplyOf`'s envelope verbatim;
     ///   `Conflicts` cites accepted ids, each with its non-empty `Ops.interference` clauses);
-    /// - **the accepted scripts LAND** under the domain's keyed engine, `Ops.applyContainedKeyed` at
+    /// - **the accepted scripts LAND** under the domain's keyed engine, `Ops.apply` under `OpScope.keyed` at
     ///   `OpGen.CanHold` — in the pinned order, its reverse, a shuffle, and as `MergedScript`, all to
     ///   one tree (content hash over the keyed walk) whose keyed walk repeats no id and which the
     ///   domain's own `IdsUnique` accepts when it accepted the base;
@@ -33,11 +33,11 @@ module internal KeyedArbitrationLaws =
     ///   apply together), never both are admitted, and when the first is, the second is `Conflicts`
     ///   citing it with `Interference.SameTarget` on that id.
     ///
-    /// `keyedArbitrationLaws` pins the pair to `Ops.footprintKeyed keyw nodew idw` and
-    /// `Ops.canApplyAllKeyed keyw canHold nodew idw`. The `With` form takes them as parameters, so a
+    /// `keyedArbitrationLaws` pins the pair to `Ops.footprint` under `OpScope.keyed` and
+    /// `Ops.canApplyAll` under `OpScope.keyed`. The `With` form takes them as parameters, so a
     /// test can hand it `arbitrate`'s pair and watch both built arms go red, and a domain that records
     /// further identity in its footprint (a label, say) can certify its own composition — its
-    /// footprint must still record a keyed id a graft carries in `ContentWrites`, as `footprintKeyed`
+    /// footprint must still record a keyed id a graft carries in `ContentWrites`, as `Ops.footprint` under `OpScope.keyed`
     /// does, for the clash arm to name it.
     ///
     /// **Vacuity is declared, not hidden.** A generator whose `CanHold` is `None` has no
@@ -77,7 +77,7 @@ module internal KeyedArbitrationLaws =
 
         let lands =
             LawKit.LawCell(
-                "the accepted scripts land under applyContainedKeyed in any order, to one tree whose keyed walk repeats no id",
+                "the accepted scripts land under the keyed apply in any order, to one tree whose keyed walk repeats no id",
                 Some "arbitration bucket, built arm and op kind"
             )
 
@@ -111,7 +111,9 @@ module internal KeyedArbitrationLaws =
         let landFrom (start: 'Node) (ops: SkeletonOp<'Node, 'Id> list) =
             ops
             |> List.fold
-                (fun acc op -> acc |> Result.bind (Ops.applyContainedKeyed keyw canHold nodew idw op))
+                (fun acc op ->
+                    acc
+                    |> Result.bind (Ops.apply Policy.none (OpScope.keyed keyw canHold nodew idw) op))
                 (Ok start)
 
         LawKit.run runner iterations (fun rng _ at ->
@@ -168,7 +170,7 @@ module internal KeyedArbitrationLaws =
                     let p2 = nodew.Id(rng.Choose parents)
                     let a = [ InsertChild(p1, g1) ]
                     let b = [ InsertChild(p2, g2) ]
-                    let engine = Ops.canApplyAllKeyed keyw canHold nodew idw
+                    let engine = Ops.canApplyAll Policy.none (OpScope.keyed keyw canHold nodew idw)
                     // counted only where the clash is real: each applies alone, the two do not.
                     if
                         carries g1

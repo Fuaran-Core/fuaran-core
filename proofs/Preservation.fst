@@ -1532,14 +1532,16 @@ let rec apply_contained (ch:tree -> bool) (o:op) (t:tree)
           | None -> Error (UnknownNode x (ids t))
           | Some pid -> Ok (rem_at pid x t))
 
-  (* F#: `validateReorder` — `canHold` is not consulted, and a reorder cannot give a childless
-     node children. *)
+  (* F#: the reorder arm of `check` — `canHold` is asked of the parent LAST, after the permutation
+     check (Phase 517, D38's order): no reorder refused before changes class, and a reorder of a
+     node that cannot hold children (the empty reorder of a leaf included) is refused. *)
   | ReorderChildren p order ->
     (match find_in p t with
      | None -> Error (UnknownNode p (ids t))
      | Some n ->
        let current = kid_ids (kids_of n) in
        if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else if not (ch n) then Error (NotAContainer p (kind_of n))
        else Ok (reorder_at p order t))
 
   (* F#: the `MoveNode` arm, with the capability test on the NEW PARENT between the endpoint
@@ -1611,6 +1613,7 @@ let can_apply_contained (ch:tree -> bool) (o:op) (t:tree) : Tot (outcome unit re
      | Some n ->
        let current = kid_ids (kids_of n) in
        if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else if not (ch n) then Error (NotAContainer p (kind_of n))
        else Ok ())
   | UpdateNode n ->
     (match find_in (tid_of n) t with
@@ -1785,6 +1788,7 @@ let not_a_container_locates (ch:tree -> bool) (o:op) (t:tree)
       (match first_uncontained ch n with
        | Some off -> first_uncontained_some ch n off
        | None -> ())
+    | ReorderChildren p _ -> find_in_some_iff p t
     | _ -> ()
 
 (* THE SIXTH LEMMA, as one statement: `apply` never raises the class (section 1), the

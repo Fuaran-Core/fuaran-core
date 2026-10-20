@@ -256,7 +256,7 @@ module Families =
           Guarded [ "accepted"; "refused" ],
           drawn
               "canApply ≡ apply and totality read both outcomes; genOp DRAWS refusals, and the collision arm BUILDS them only where the witness can carry a multi-node subtree",
-          "Ops.applyContained Ops.canApplyContained Ops.invert"
+          "Ops.apply Ops.canApply Ops.invert"
           ("Conformance.diffLaws", tree, BaseRun, []),
           Guarded [ "non-identity pair" ],
           none "a refused op is skipped while building `after`; no law reads it",
@@ -275,7 +275,7 @@ module Families =
           Guarded [ "accepted"; "refused" ],
           drawn
               "the refusal IFF reads the drawn pair under the witness's canHold, and a canHold that refuses nothing holds it trivially; the graft probe beside it is built",
-          "Diff.toOpsContained Ops.applyAllWith Ops.canApplyAllWith"
+          "Diff.toOps Ops.applyAll Ops.canApplyAll"
           ("Conformance.normalizeLaws", tree, stronger, []),
           Guarded [ "non-identity script" ],
           none "a refused op is skipped; no law reads it",
@@ -284,7 +284,7 @@ module Families =
           Guarded [ "built arm (child perturbation / invariant probe / interior graft)" ],
           built
               "the interior-offender graft is built and must be refused NotAContainer; its guard covers the built arms",
-          "Ops.applyContained Ops.canApplyContained"
+          "Ops.apply Ops.canApply"
           ("Conformance.mergeConflictLaws", tree, stronger, []),
           Guarded [ "op-pair interference" ],
           none "conflicts is a report list, never a refused outcome",
@@ -449,12 +449,12 @@ module Families =
           Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ],
           built
               "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms",
-          "Ops.applyContainedKeyed Tree.keyedIds"
+          "Ops.apply Tree.keyedIds"
           ("Conformance.placementLaws", tree, stronger, []),
           Guarded [ "placement arm (place / move across parents / move within a parent / non-final position)" ],
           built
               "the unknown anchor, the out-of-range index and the three engine refusals (absent parent, duplicate id, move of the root) are built every iteration a holder is drawn",
-          "TreePlacement.placeContained TreePlacement.moveContained TreePlacement.place TreePlacement.move"
+          "TreePlacement.place TreePlacement.move"
           ("Conformance.digestLaws", tree, stronger, []),
           Guarded [ "pair shape" ],
           none "no refused outcome is read; a drawn pair that is refused only fails a law",
@@ -471,12 +471,12 @@ module Families =
           Guarded [ "grammar refusal" ],
           drawn
               "IllegalChild is reached by drawn ops and by a graft built from the drawn tree's first illegal pair; a grammar the generator never violates reaches neither, which the grammar-refusal guard reports",
-          "Ops.applyGrammar Ops.canApplyGrammar Ops.applyAllGrammar Ops.canApplyAllGrammar Ops.illegalChildren Diff.toOpsGrammar Arbitration.arbitrateGrammar Validator.containment"
+          "Ops.apply Ops.canApply Ops.applyAll Ops.canApplyAll Ops.illegalChildren Diff.toOps Arbitration.arbitrate Validator.containment"
           ("Conformance.referenceLawsAt", Takes.RefWitness :: tree, capability, []),
           Guarded [ "reference arm" ],
           drawn
               "StillReferenced is reached only when a drawn remove destroys a declaration a survivor references, and the race only when the tree holds a resolved reference; the reference-arm guard counts both",
-          "Ops.applyReferenced Ops.footprintReferenced Validator.referenceIntegrity Validator.referenceOrder Validator.referenceDefects Validator.forwardReferences"
+          "Ops.apply Ops.footprint Validator.referenceIntegrity Validator.referenceOrder Validator.referenceDefects Validator.forwardReferences"
           ("Conformance.loweringLaws", tree, stronger, []),
           Guarded [ "lowered tree (well-formed / in the containment invariant / filled shell / built repeated id)" ],
           built
@@ -486,18 +486,18 @@ module Families =
           Guarded [ "built arm (repeated id built / clone placed)" ],
           none
               "no law reads a refused outcome: a minted id, a repaired tree and an accepted clone are the subjects, and a refused clone fails the clone law outright",
-          "FreshIds.repairDuplicates TreePlacement.cloneContained"
+          "FreshIds.repairDuplicates TreePlacement.clone"
           ("Conformance.keyedApplyLawsAt", Takes.KeyedWitness :: tree, capability, [ "witness-surface-scope" ]),
           Guarded
               [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ],
           built
               "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms",
-          "Ops.applyContainedKeyed Ops.canApplyContainedKeyed Tree.wellFormedKeyed Tree.idsKeyed Tree.keyedIds Tree.traversal"
+          "Ops.apply Ops.canApply Tree.wellFormedKeyed Tree.idsKeyed Tree.keyedIds Tree.traversal"
           ("Conformance.keyedArbitrationLawsWith", Takes.KeyedWitness :: tree, capability, []),
           Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ],
           drawn
               "the container-illegal proposal and the keyed-id clash are built and must be refused; Inapplicable also comes from the kit's corruption roll and Conflicts from drawn scripts, so the guard covers the arbitration bucket",
-          "Ops.footprintKeyed Ops.canApplyAllKeyed"
+          "Ops.footprint Ops.canApplyAll"
           ("Conformance.propagationEvaluatorLawsAt",
            [ Takes.EvaluatorWitness ],
            capability,

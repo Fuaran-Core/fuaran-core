@@ -262,7 +262,7 @@ module internal AlgebraTreeLaws =
 
             let applied =
                 try
-                    Some(Ops.applyContained canHold nodew idw op tree)
+                    Some(Ops.apply Policy.none (OpScope.contained canHold nodew idw) op tree)
                 with _ ->
                     None
 
@@ -271,7 +271,7 @@ module internal AlgebraTreeLaws =
             match applied with
             | None -> ()
             | Some res ->
-                let chk = Ops.canApplyContained canHold nodew idw op tree
+                let chk = Ops.canApply Policy.none (OpScope.contained canHold nodew idw) op tree
 
                 let equiv =
                     match res, chk with
@@ -304,7 +304,7 @@ module internal AlgebraTreeLaws =
                     | Error e ->
                         inversion.Check(false, fun () -> at (sprintf "invert failed (%A) on an applyable %A" e op))
                     | Ok inv ->
-                        let restored = Ops.applyContained canHold nodew idw inv post
+                        let restored = Ops.apply Policy.none (OpScope.contained canHold nodew idw) inv post
 
                         inversion.Check(
                             (match restored with
@@ -356,7 +356,7 @@ module internal AlgebraTreeLaws =
 
                         let applied =
                             try
-                                Some(Ops.applyContained canHold nodew idw colliding tree)
+                                Some(Ops.apply Policy.none (OpScope.contained canHold nodew idw) colliding tree)
                             with _ ->
                                 None
 
@@ -369,7 +369,8 @@ module internal AlgebraTreeLaws =
                         | None -> ()
                         | Some res ->
                             // the `canApply ≡ apply` family, re-run over the widened op population
-                            let chk = Ops.canApplyContained canHold nodew idw colliding tree
+                            let chk =
+                                Ops.canApply Policy.none (OpScope.contained canHold nodew idw) colliding tree
 
                             let equiv =
                                 match res, chk with
@@ -452,18 +453,18 @@ module internal AlgebraTreeLaws =
             for _ in 1..4 do
                 let op = rng.Draw(LawKit.genOp nodew idw gen after)
 
-                match Ops.applyContained canHold nodew idw op after with
+                match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op after with
                 | Ok t' -> after <- t'
                 | Error _ -> ()
 
             if after <> before then
                 nonIdentity <- nonIdentity + 1
 
-            match Diff.toOps nodew idw before after with
+            match Diff.toOps Policy.none (OpScope.plain nodew idw) before after with
             | Error e ->
                 reconstruction.Check(false, fun () -> at (sprintf "toOps errored on a valid before/after: %A" e))
             | Ok ops ->
-                let rebuilt = Ops.applyAll nodew idw ops before
+                let rebuilt = Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before
 
                 reconstruction.Check(
                     (match rebuilt with
@@ -472,7 +473,7 @@ module internal AlgebraTreeLaws =
                     fun () -> at (sprintf "applyAll(toOps) ≠ after (got %A)" rebuilt)
                 )
 
-                match Ops.canApplyAll nodew idw ops before with
+                match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before with
                 | Ok() -> applyability.Saw()
                 | Error(j, e) -> applyability.Check(false, fun () -> at (sprintf "emitted op %d rejects: %A" j e))
 
@@ -495,7 +496,7 @@ module internal AlgebraTreeLaws =
         LawKit.results [ reconstruction; applyability; survivor ]
         @ [ LawKit.guard runner "non-identity pair" [ "non-identity pair", nonIdentity ] ]
 
-    /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOpsContained` certified
+    /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOps` under `OpScope.contained` certified
     /// through the container-aware sequence surface, with the witness's own `canHold`.
     ///
     /// **Why a twin rather than a widening of `diffLaws`.** `diffLaws` above certifies
@@ -504,22 +505,22 @@ module internal AlgebraTreeLaws =
     /// construction (Phase 160's `all_with_at_total_is_plain`). So a script emitted for a
     /// container-aware witness was never shown applyable under the engine that witness actually
     /// runs: the check and the executor disagreed about what a refusal is. This family asks the
-    /// same questions of the pair that belong together — `toOpsContained` emitted it, so
-    /// `applyAllWith` / `canApplyAllWith` under the same predicate are what must accept it.
+    /// same questions of the pair that belong together — `Diff.toOps` under `OpScope.contained` emitted it, so
+    /// `Ops.applyAll` under `OpScope.contained` / `Ops.canApplyAll` under `OpScope.contained` under the same predicate are what must accept it.
     ///
     /// Three laws, mirroring `diffLaws`' three: **reconstruction**
-    /// (`applyAllWith canHold (toOpsContained before after) before = after`), **applyability**
-    /// (`canApplyAllWith canHold` accepts every emitted step — `Diff.fst`'s
+    /// (`Ops.applyAll` under `OpScope.contained`), **applyability**
+    /// (`Ops.canApplyAll` under `OpScope.contained` accepts every emitted step — `Diff.fst`'s
     /// `diff_applicable_contained` asked of the shipped engine), and **refusal exactness**
-    /// (`toOpsContained` refuses with `TargetNotAContainer` exactly when `after` nests children
+    /// (`Diff.toOps` under `OpScope.contained` refuses with `TargetNotAContainer` exactly when `after` nests children
     /// under a node the predicate rejects, and the plain `toOps` accepts the same pair — so the
     /// refusal is the container check's contribution and nothing else's).
     ///
     /// A fourth law, **refusal correspondence** (Phase 228), holds the diff-side refusal to its
-    /// apply-side sibling: wherever `toOpsContained` refuses an `after` with
+    /// apply-side sibling: wherever `Diff.toOps` under `OpScope.contained` refuses an `after` with
     /// `TargetNotAContainer(t, k)`, the offending nesting is BUILT as a graft — the subtree `after`
     /// carries at `t`, cut out of `after` and re-inserted under its own parent through
-    /// `Ops.applyContained` — and that insert must refuse with `NotAContainer(t, k)`: the same
+    /// `Ops.apply` under `OpScope.contained` — and that insert must refuse with `NotAContainer(t, k)`: the same
     /// offender, the same kind tag. Both refusals are defined by `Ops.firstUncontained`, and this is
     /// the law that says a host may read them as one class. Two cases are not askable and are
     /// skipped rather than counted: an offender that is `after`'s ROOT (there is no parent to graft
@@ -544,17 +545,18 @@ module internal AlgebraTreeLaws =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
 
         let reconstruction =
-            LawKit.LawCell "contained diff reconstruction (applyAllWith (toOpsContained before after) before = after)"
+            LawKit.LawCell
+                "contained diff reconstruction (the contained applyAll (the contained toOps before after) before = after)"
 
         let applyability =
-            LawKit.LawCell "contained diff applyability (canApplyAllWith accepts the emitted script)"
+            LawKit.LawCell "contained diff applyability (the contained canApplyAll accepts the emitted script)"
 
         let refusal =
             LawKit.LawCell "contained diff refuses exactly a non-container after-parent"
 
         let correspondence =
             LawKit.LawCell(
-                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))",
+                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through the contained apply refuses NotAContainer(t, k))",
                 Some "refused pair"
             )
         // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
@@ -564,7 +566,7 @@ module internal AlgebraTreeLaws =
         let mutable refused = 0
         let mutable grafted = 0
 
-        /// the first node of `t` the predicate refuses, if any — the offender `toOpsContained`
+        /// the first node of `t` the predicate refuses, if any — the offender `Diff.toOps` under `OpScope.contained`
         /// names once it also carries children
         let firstRefused (t: 'Node) =
             Tree.preorder nodew t |> List.tryFind (fun n -> not (canHold n))
@@ -576,14 +578,18 @@ module internal AlgebraTreeLaws =
             |> List.exists (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
 
         /// Phase 228 — the offending nesting `after` carries at `t`, built as a graft and applied
-        /// through `Ops.applyContained`: it must refuse with `NotAContainer(t, k)`
+        /// through `Ops.apply` under `OpScope.contained`: it must refuse with `NotAContainer(t, k)`
         let checkCorrespondence (at: string -> string) (after: 'Node) (t: 'Id) (k: string) =
             match Tree.tryFind nodew idw t after, Tree.parentOf nodew idw t after with
             | Some graft, Some host ->
-                match Ops.apply nodew idw (RemoveNode t) after with
+                match Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode t) after with
                 | Ok cut when Tree.tryFind nodew idw (nodew.Id host) cut |> Option.exists canHold ->
                     let answer =
-                        Ops.applyContained canHold nodew idw (InsertChild(nodew.Id host, graft)) cut
+                        Ops.apply
+                            Policy.none
+                            (OpScope.contained canHold nodew idw)
+                            (InsertChild(nodew.Id host, graft))
+                            cut
 
                     grafted <- grafted + 1
 
@@ -594,7 +600,7 @@ module internal AlgebraTreeLaws =
                         fun () ->
                             at (
                                 sprintf
-                                    "toOpsContained refused with TargetNotAContainer(%s, %s), but grafting the same subtree through applyContained answered %A"
+                                    "the contained toOps refused with TargetNotAContainer(%s, %s), but grafting the same subtree through the contained apply answered %A"
                                     (idw.ToString t)
                                     k
                                     answer
@@ -611,7 +617,7 @@ module internal AlgebraTreeLaws =
             else
                 accepted <- accepted + 1
 
-            match Diff.toOpsContained canHold nodew idw before after with
+            match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
             | Error(Diff.TargetNotAContainer(p, k)) when expected ->
                 checkCorrespondence at after p k
 
@@ -654,30 +660,31 @@ module internal AlgebraTreeLaws =
             for _ in 1..4 do
                 let op = rng.Draw(LawKit.genOp nodew idw gen after)
 
-                match Ops.applyContained canHold nodew idw op after with
+                match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op after with
                 | Ok t' -> after <- t'
                 | Error _ -> ()
 
             checkRefusal at before after
 
-            match Diff.toOpsContained canHold nodew idw before after with
+            match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
             | Error e ->
                 if not (violates after) then
                     reconstruction.Check(
                         false,
-                        fun () -> at (sprintf "toOpsContained errored on a container-valid pair: %A" e)
+                        fun () -> at (sprintf "the contained toOps errored on a container-valid pair: %A" e)
                     )
             | Ok ops ->
-                let rebuilt = Ops.applyAllWith canHold nodew idw ops before
+                let rebuilt =
+                    Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) ops before
 
                 reconstruction.Check(
                     (match rebuilt with
                      | Ok r when r = after -> true
                      | _ -> false),
-                    fun () -> at (sprintf "applyAllWith(toOpsContained) ≠ after (got %A)" rebuilt)
+                    fun () -> at (sprintf "the contained applyAll(the contained toOps) ≠ after (got %A)" rebuilt)
                 )
 
-                match Ops.canApplyAllWith canHold nodew idw ops before with
+                match Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
                 | Ok() -> applyability.Saw()
                 | Error(j, e) ->
                     applyability.Check(false, fun () -> at (sprintf "emitted op %d rejects under canHold: %A" j e))
@@ -697,7 +704,7 @@ module internal AlgebraTreeLaws =
 
                     // and the plain diff must ACCEPT the same pair: the refusal is the container
                     // check's contribution and nothing else's
-                    match Diff.toOps nodew idw before violating with
+                    match Diff.toOps Policy.none (OpScope.plain nodew idw) before violating with
                     | Ok _ -> refusal.Saw()
                     | Error e ->
                         refusal.Check(
@@ -755,14 +762,15 @@ module internal AlgebraTreeLaws =
             // collect an applyable script: thread random ops, keep the accepted ones
             let accepted = rng.Draw(LawKit.collectScript None nodew idw gen 6 tree)
 
-            match Ops.applyAll nodew idw accepted tree with
+            match Ops.applyAll Policy.none (OpScope.plain nodew idw) accepted tree with
             | Ok moved when moved <> tree -> nonIdentity <- nonIdentity + 1
             | _ -> ()
 
             let normd = Ops.normalize nodew idw accepted
 
             preservation.Check(
-                Ops.applyAll nodew idw normd tree = Ops.applyAll nodew idw accepted tree,
+                Ops.applyAll Policy.none (OpScope.plain nodew idw) normd tree =
+                    Ops.applyAll Policy.none (OpScope.plain nodew idw) accepted tree,
                 fun () -> at "applyAll(normalize ops) ≠ applyAll ops"
             )
 
@@ -790,7 +798,7 @@ module internal AlgebraTreeLaws =
             )
 
         let preservation =
-            LawKit.LawCell("applyContained preserves the container invariant over this witness", Some "built arm")
+            LawKit.LawCell("the contained apply preserves the container invariant over this witness", Some "built arm")
 
         let graftRefusal =
             LawKit.LawCell("a graft with an interior non-container is refused, naming that node", Some "built arm")
@@ -838,7 +846,7 @@ module internal AlgebraTreeLaws =
                     fun () ->
                         at (
                             sprintf
-                                "canHold READS THE CHILD LIST — node %s (kind %s) answers %b holding %d child(ren) and %b %s. A predicate that changes under an edit can be satisfied at the instant applyContained checks it and violated by the very insert that check licensed, so applyContained does not preserve the container invariant for this domain (proofs/Preservation.fst, contained_needs_child_blind). Write canHold over the node's own kind, or its own fields, and never over its children."
+                                "canHold READS THE CHILD LIST — node %s (kind %s) answers %b holding %d child(ren) and %b %s. A predicate that changes under an edit can be satisfied at the instant the contained apply checks it and violated by the very insert that check licensed, so the contained apply does not preserve the container invariant for this domain (proofs/Preservation.fst, contained_needs_child_blind). Write canHold over the node's own kind, or its own fields, and never over its children."
                                 (idw.ToString(nodew.Id subject))
                                 (nodew.KindTag subject)
                                 (canHold subject)
@@ -868,7 +876,7 @@ module internal AlgebraTreeLaws =
             let op = rng.Draw(LawKit.genOp nodew idw gen tree)
 
             if (firstUncontained tree).IsNone then
-                match Ops.applyContained canHold nodew idw op tree with
+                match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op tree with
                 | Ok post ->
                     probes <- probes + 1
 
@@ -922,7 +930,13 @@ module internal AlgebraTreeLaws =
                 let parent = rng.Choose holders
                 grafts <- grafts + 1
 
-                match Ops.applyContained canHold nodew idw (InsertChild(nodew.Id parent, graft)) tree with
+                match
+                    Ops.apply
+                        Policy.none
+                        (OpScope.contained canHold nodew idw)
+                        (InsertChild(nodew.Id parent, graft))
+                        tree
+                with
                 | Error(NotAContainer(named, kindTag)) ->
                     graftRefusal.Check(
                         idw.Equals named (nodew.Id shell) && kindTag = nodew.KindTag shell,
@@ -959,7 +973,7 @@ module internal AlgebraTreeLaws =
 
     /// **The container capability's two obligations, certified rather than assumed** (Phase 161).
     ///
-    /// Phase 140 proved `Ops.applyContained` preserves the invariant it exists to keep — *every node
+    /// Phase 140 proved `Ops.apply` under `OpScope.contained` preserves the invariant it exists to keep — *every node
     /// with children satisfies `canHold`* — and named the two hypotheses the theorem must carry to
     /// be true of the function that ships. Phase 161 discharged one of them in code (DECISIONS D38:
     /// `validateInsert` walks the graft). The other cannot be discharged by any engine check, and
@@ -1037,7 +1051,7 @@ module internal AlgebraTreeLaws =
     /// **What it does NOT do is widen the witness surface.** `Children` is still what the engine
     /// rebuilds through, and the reasons `README.md` gives for that stand. What is certified here
     /// is the DOMAIN'S check, at the domain's own witness, over the domain's own generator. Since
-    /// Phase 286 the same declaration also reaches the engine — `Ops.applyContainedKeyed` refuses a
+    /// Phase 286 the same declaration also reaches the engine — `Ops.apply` under `OpScope.keyed` refuses a
     /// keyed collision itself — and `keyedApplyLaws` certifies that the engine's refusal and this
     /// check agree; the keyed ids read here are `Tree.keyedIds`, derived from `KeyedChildren`.
     ///

@@ -30,7 +30,7 @@ namespace Fuaran.Core
 ///     it is compared AT THE SLOT: two writes to different slots of one node commute, and only a write
 ///     and an access of the SAME slot collide (`Interference.SlotClash`). No skeleton op writes a slot —
 ///     every skeleton op rewrites a node whole, and a pure script cannot say which part of a payload
-///     changed — so `Ops.footprint` and `Ops.footprintKeyed` leave both sets empty, and a domain op that
+///     changed — so `Ops.footprint` under every scope leaves both sets empty, and a domain op that
 ///     writes a field by name declares it with `Footprint.slotEdit` / `Footprint.readingSlot`. A domain
 ///     that declares no slot access gets the four-set verdict it always got.
 ///
@@ -173,7 +173,7 @@ module Footprint =
     /// (`Interference.RightWritesLeftReads`). A domain op that edits a node's references is
     /// `union (contentEdit id) (reading referenced)`: `contentEdit` alone carries no unknown-parent
     /// write, so without the read such an op is independent of the removal of the node it now
-    /// references, and the two merge into a dangling reference. `Ops.footprintReferenced` adds the
+    /// references, and the two merge into a dangling reference. `Ops.footprint` under a policy with `Refs` adds the
     /// same reads to the skeleton ops' footprint.
     let reading (ids: string list) : Footprint = { empty with Reads = Set.ofList ids }
 

@@ -163,22 +163,18 @@ let tests =
                 testCase "an illegal insert is IllegalChild naming the child, the parent and the legal children"
                 <| fun _ ->
                     Expect.equal
-                        (Ops.applyGrammar
-                            grammar
-                            canHold
-                            nodew
-                            idw
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
                             (InsertChild("root", RNode.leaf "x" "para" ""))
                             (doc ()))
                         (Error(IllegalChild("x", "para", "root", "doc", [ "section"; "note" ])))
                         "a paragraph under the document"
 
                     Expect.isOk
-                        (Ops.applyGrammar
-                            grammar
-                            canHold
-                            nodew
-                            idw
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
                             (InsertChild("s1", RNode.leaf "x" "para" ""))
                             (doc ()))
                         "a paragraph under a section"
@@ -188,45 +184,57 @@ let tests =
                     let graft = RNode.node "s2" "section" [ RNode.leaf "x" "note" "" ]
 
                     Expect.equal
-                        (Ops.applyGrammar grammar canHold nodew idw (InsertChild("root", graft)) (doc ()))
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
+                            (InsertChild("root", graft))
+                            (doc ()))
                         (Error(IllegalChild("x", "note", "s2", "section", [ "section"; "para" ])))
                         "a note inside the grafted section"
 
                 testCase "every engine refusal keeps its class: the container check fires first"
                 <| fun _ ->
                     Expect.equal
-                        (Ops.applyGrammar
-                            grammar
-                            canHold
-                            nodew
-                            idw
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
                             (InsertChild("p1", RNode.leaf "x" "note" ""))
                             (doc ()))
                         (Error(NotAContainer("p1", "para")))
                         "a paragraph cannot hold children at all"
 
                     Expect.equal
-                        (Ops.applyGrammar
-                            grammar
-                            canHold
-                            nodew
-                            idw
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
                             (InsertChild("nope", RNode.leaf "x" "note" ""))
                             (doc ()))
-                        (Ops.applyContained canHold nodew idw (InsertChild("nope", RNode.leaf "x" "note" "")) (doc ()))
+                        (Ops.apply
+                            Policy.none
+                            (OpScope.contained canHold nodew idw)
+                            (InsertChild("nope", RNode.leaf "x" "note" ""))
+                            (doc ()))
                         "an unknown parent is the engine's envelope"
 
                 testCase "a move creates one pair: the moved node under its new parent"
                 <| fun _ ->
                     Expect.equal
-                        (Ops.applyGrammar grammar canHold nodew idw (MoveNode("p1", "root")) (doc ()))
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
+                            (MoveNode("p1", "root"))
+                            (doc ()))
                         (Error(IllegalChild("p1", "para", "root", "doc", [ "section"; "note" ])))
                         "a paragraph moved under the document"
 
                 testCase "an in-place rewrite that changes a kind is checked under its parent and over its children"
                 <| fun _ ->
                     Expect.equal
-                        (Ops.applyGrammar grammar canHold nodew idw (UpdateNode(RNode.node "s1" "chapter" [])) (doc ()))
+                        (Ops.apply
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
+                            (UpdateNode(RNode.node "s1" "chapter" []))
+                            (doc ()))
                         (Error(IllegalChild("s1", "chapter", "root", "doc", [ "section"; "note" ])))
                         "a chapter the document may not hold"
 
@@ -236,7 +244,11 @@ let tests =
                         | other -> grammar other
 
                     Expect.equal
-                        (Ops.applyGrammar g2 canHold nodew idw (UpdateNode(RNode.node "s1" "box" [])) (doc ()))
+                        (Ops.apply
+                            (Policy.grammar g2)
+                            (OpScope.contained canHold nodew idw)
+                            (UpdateNode(RNode.node "s1" "box" []))
+                            (doc ()))
                         (Ok(
                             RNode.node
                                 "root"
@@ -252,7 +264,7 @@ let tests =
                         Batch [ InsertChild("s1", RNode.leaf "x" "para" ""); MoveNode("x", "root") ]
 
                     Expect.equal
-                        (Ops.applyGrammar grammar canHold nodew idw script (doc ()))
+                        (Ops.apply (Policy.grammar grammar) (OpScope.contained canHold nodew idw) script (doc ()))
                         (Error(IllegalChild("x", "para", "root", "doc", [ "section"; "note" ])))
                         "the move half"
 
@@ -262,7 +274,7 @@ let tests =
                         [ InsertChild("s1", RNode.leaf "x" "para" "")
                           InsertChild("root", RNode.leaf "y" "para" "") ]
 
-                    match Ops.applyAllGrammar grammar canHold nodew idw ops (doc ()) with
+                    match Ops.applyAll (Policy.grammar grammar) (OpScope.contained canHold nodew idw) ops (doc ()) with
                     | Error { Applied = 1
                               Rejection = IllegalChild("y", _, "root", _, _)
                               Tree = partial } ->
@@ -270,12 +282,12 @@ let tests =
                     | other -> failtestf "expected the second op refused, got %A" other
 
                     Expect.equal
-                        (Ops.canApplyAllGrammar grammar canHold nodew idw ops (doc ()))
+                        (Ops.canApplyAll (Policy.grammar grammar) (OpScope.contained canHold nodew idw) ops (doc ()))
                         (Error(1, IllegalChild("y", "para", "root", "doc", [ "section"; "note" ])))
                         "the dry run"
 
                     Expect.equal
-                        (Ops.canApplyGrammar grammar canHold nodew idw ops.Head (doc ()))
+                        (Ops.canApply (Policy.grammar grammar) (OpScope.contained canHold nodew idw) ops.Head (doc ()))
                         (Ok())
                         "the single-op dry run"
 
@@ -284,8 +296,8 @@ let tests =
                     let op = MoveNode("p1", "root")
 
                     Expect.equal
-                        (Ops.applyGrammar (fun _ -> None) canHold nodew idw op (doc ()))
-                        (Ops.applyContained canHold nodew idw op (doc ()))
+                        (Ops.apply (Policy.grammar (fun _ -> None)) (OpScope.contained canHold nodew idw) op (doc ()))
+                        (Ops.apply Policy.none (OpScope.contained canHold nodew idw) op (doc ()))
                         "identical"
 
                 testCase "the diff refuses an after holding an illegal pair, after every contained refusal"
@@ -299,7 +311,7 @@ let tests =
                               RNode.leaf "n1" "note" "v" ]
 
                     Expect.equal
-                        (Diff.toOpsGrammar grammar canHold nodew idw (doc ()) after)
+                        (Diff.toOps (Policy.grammar grammar) (OpScope.contained canHold nodew idw) (doc ()) after)
                         (Error(Diff.IllegalChildInTree("p1", "para", "root", "doc", [ "section"; "note" ])))
                         "the first illegal pair"
 
@@ -310,10 +322,12 @@ let tests =
                             [ RNode.node "s1" "section" [ RNode.leaf "p1" "para" "v"; RNode.leaf "p2" "para" "w" ]
                               RNode.leaf "n1" "note" "v" ]
 
-                    match Diff.toOpsGrammar grammar canHold nodew idw (doc ()) legalAfter with
+                    match
+                        Diff.toOps (Policy.grammar grammar) (OpScope.contained canHold nodew idw) (doc ()) legalAfter
+                    with
                     | Ok ops ->
                         Expect.equal
-                            (Ops.applyAllGrammar grammar canHold nodew idw ops (doc ()))
+                            (Ops.applyAll (Policy.grammar grammar) (OpScope.contained canHold nodew idw) ops (doc ()))
                             (Ok legalAfter)
                             "the script rebuilds the after tree under the grammar"
                     | Error e -> failtestf "refused a legal pair: %A" e
@@ -329,7 +343,11 @@ let tests =
                             Ops = [ InsertChild("s1", RNode.leaf "y" "para" "") ] } ]
 
                     let verdict =
-                        Arbitration.arbitrateGrammar grammar canHold nodew idw (doc ()) proposals
+                        Arbitration.arbitrate
+                            (Policy.grammar grammar)
+                            (OpScope.contained canHold nodew idw)
+                            (doc ())
+                            proposals
 
                     Expect.equal (verdict.Accepted |> List.map _.Id) [ 2 ] "the legal one lands"
 
@@ -453,34 +471,53 @@ let tests =
                 testCase "a remove that orphans a reference is StillReferenced, naming every referrer"
                 <| fun _ ->
                     Expect.equal
-                        (Ops.applyReferenced refw (fun _ -> None) (fun _ -> true) nodew idw (RemoveNode "b") (linked ()))
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
+                            (RemoveNode "b")
+                            (linked ()))
                         (Error(StillReferenced("b", [ "a1" ])))
                         "a1 refers to b"
 
                     Expect.equal
-                        (Ops.applyReferenced refw (fun _ -> None) (fun _ -> true) nodew idw (RemoveNode "a") (linked ()))
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
+                            (RemoveNode "a")
+                            (linked ()))
                         (Error(StillReferenced("a", [ "b1" ])))
                         "b1 refers to a1, below a — the subtree's declarations count"
 
                     let unlinked =
-                        match Ops.apply nodew idw (UpdateNode(RNode.leaf "b1" "para" "")) (linked ()) with
+                        match
+                            Ops.apply
+                                Policy.none
+                                (OpScope.plain nodew idw)
+                                (UpdateNode(RNode.leaf "b1" "para" ""))
+                                (linked ())
+                        with
                         | Ok t -> t
                         | Error e -> failwithf "the unlinking update was refused: %A" e
 
                     Expect.isOk
-                        (Ops.applyReferenced refw (fun _ -> None) (fun _ -> true) nodew idw (RemoveNode "a") unlinked)
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
+                            (RemoveNode "a")
+                            unlinked)
                         "nothing outside a refers into it any more (a1's own reference leaves with it)"
 
                     Expect.equal
-                        (Ops.applyReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             (RemoveNode "zz")
                             (linked ()))
-                        (Ops.apply nodew idw (RemoveNode "zz") (linked ()))
+                        (Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode "zz") (linked ()))
                         "an engine refusal keeps its class"
 
                 testCase "a rewrite that stops declaring a referenced name is StillReferenced too"
@@ -498,30 +535,31 @@ let tests =
                     let tree = RNode.node "root" "section" [ def; user ]
 
                     Expect.equal
-                        (Ops.applyReferenced
-                            named
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some named }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             (UpdateNode(RNode.leaf "d" "para" ""))
                             tree)
                         (Error(StillReferenced("d", [ "u" ])))
                         "d stops declaring `total`, which u refers to"
 
                     Expect.isOk
-                        (Ops.applyReferenced
-                            named
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some named }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             (UpdateNode { def with Value = "new" })
                             tree)
                         "a rewrite that keeps the declaration lands"
 
                     Expect.equal
-                        (Ops.applyReferenced named (fun _ -> None) (fun _ -> true) nodew idw (RemoveNode "d") tree)
+                        (Ops.apply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some named }
+                            (OpScope.contained (fun _ -> true) nodew idw)
+                            (RemoveNode "d")
+                            tree)
                         (Error(StillReferenced("d", [ "u" ])))
                         "and the remove of the declarer"
 
@@ -530,24 +568,20 @@ let tests =
                     let unlinkB1 = UpdateNode(RNode.leaf "b1" "para" "")
 
                     Expect.equal
-                        (Ops.canApplyAllReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.canApplyAll
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             [ unlinkB1; RemoveNode "b" ]
                             (linked ()))
                         (Error(1, StillReferenced("b", [ "a1" ])))
                         "the second step: a1 still refers to b"
 
                     match
-                        Ops.applyAllReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        Ops.applyAll
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             [ unlinkB1; RemoveNode "a" ]
                             (linked ())
                     with
@@ -555,24 +589,20 @@ let tests =
                     | Error e -> failtestf "refused: %A" e
 
                     Expect.equal
-                        (Ops.canApplyAllReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.canApplyAll
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             [ RemoveNode "a1"; RemoveNode "b" ]
                             (linked ()))
                         (Error(0, StillReferenced("a1", [ "b1" ])))
                         "a1 is itself referenced by b1"
 
                     Expect.equal
-                        (Ops.canApplyReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        (Ops.canApply
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             (RemoveNode "b")
                             (linked ()))
                         (Error(StillReferenced("b", [ "a1" ])))
@@ -581,8 +611,12 @@ let tests =
                 testCase "footprintReferenced reads the references a script writes, so the race is refused by name"
                 <| fun _ ->
                     let a1 = Tree.tryFind nodew idw "a1" (linked ()) |> Option.get
-                    let writer = Ops.footprintReferenced refw nodew idw [ UpdateNode a1 ]
-                    let remover = Ops.footprintReferenced refw nodew idw [ RemoveNode "b" ]
+
+                    let writer =
+                        Ops.footprint (Policy.referenced refw) (OpScope.plain nodew idw) [ UpdateNode a1 ]
+
+                    let remover =
+                        Ops.footprint (Policy.referenced refw) (OpScope.plain nodew idw) [ RemoveNode "b" ]
 
                     Expect.isTrue (writer.Reads.Contains "b") "the referenced id is read"
                     Expect.isFalse (Ops.independent writer remover) "dependent"
@@ -594,7 +628,7 @@ let tests =
 
                 testCase "a domain op that writes a reference reads it through Footprint.reading"
                 <| fun _ ->
-                    let remove = Ops.footprint nodew idw [ RemoveNode "b" ]
+                    let remove = Ops.footprint Policy.none (OpScope.plain nodew idw) [ RemoveNode "b" ]
 
                     Expect.isTrue
                         (Ops.independent (Footprint.contentEdit "a1") remove)
@@ -609,12 +643,10 @@ let tests =
                 testCase "arbitrateReferenced refuses a remove that would orphan the base's references"
                 <| fun _ ->
                     let verdict =
-                        Arbitration.arbitrateReferenced
-                            refw
-                            (fun _ -> None)
-                            (fun _ -> true)
-                            nodew
-                            idw
+                        Arbitration.arbitrate
+                            { Policy.grammar (fun _ -> None) with
+                                Refs = Some refw }
+                            (OpScope.contained (fun _ -> true) nodew idw)
                             (linked ())
                             [ { Id = 1
                                 Holder = "a"

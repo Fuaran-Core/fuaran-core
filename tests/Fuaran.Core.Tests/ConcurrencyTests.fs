@@ -77,7 +77,8 @@ let concurrencyLawTests =
               // EVERY pair independent, so genuinely-dependent pairs (same-parent positional
               // inserts, remove-vs-insert races) are asserted and must fail totality and/or
               // confluence. If this run comes back green, the law certifies nothing.
-              let underApprox (_: SkeletonOp<RNode, string> list) = Ops.footprint nodew idw []
+              let underApprox (_: SkeletonOp<RNode, string> list) =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) []
 
               let results =
                   Conformance.concurrencyLawsWith nodew idw opGen encNode underApprox 8080 300
@@ -103,7 +104,7 @@ let concurrencyLawTests =
               // relocations or the algebra changed under the theorem: read section 18 before
               // treating a green here as permission to tighten the clause.
               let noUnknownParent (ops: SkeletonOp<RNode, string> list) =
-                  let fp = Ops.footprint nodew idw ops
+                  let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) ops
 
                   { fp with
                       UnknownParentWrites = Set.empty }
@@ -137,7 +138,7 @@ let concurrencyLawTests =
               // vacuously green — sufficiency-not-necessity: no claim about dependent pairs) while
               // the coverage vacuity guard reports that nothing was certified.
               let allConflict (ops: SkeletonOp<RNode, string> list) =
-                  Ops.footprint nodew idw (RemoveNode "phantom-clash" :: ops)
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) (RemoveNode "phantom-clash" :: ops)
 
               let results =
                   Conformance.concurrencyLawsWith nodew idw opGen encNode allConflict 8080 60

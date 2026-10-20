@@ -67,7 +67,7 @@ let rec private encTreeOp (op: SkeletonOp<RNode, string>) : string =
     | UpdateNode node -> "U|" + encNode node
 
 let treeW: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
-    { Apply = fun op st -> Ops.apply nodew idw op st
+    { Apply = fun op st -> Ops.apply Policy.none (OpScope.plain nodew idw) op st
       Encode = encTreeOp
       Decode = fun _ -> Error "FoldConfluenceTests: the tree witness's decode is unused by the pack" }
 
@@ -83,7 +83,7 @@ let private treeScript (n: int) (r0: ConfRng.T) =
         let op, r' = genOp cur r
         r <- r'
 
-        match Ops.apply nodew idw op cur with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
         | Ok t' ->
             cur <- t'
             accepted <- accepted @ [ op ]
@@ -119,7 +119,8 @@ let treeLaneGen: LaneGen<SkeletonOp<RNode, string>, RNode> =
 
 let treeHash = Tree.encodeHash nodew encNode
 
-let treeFootprint (op: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ op ]
+let treeFootprint (op: SkeletonOp<RNode, string>) =
+    Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
 // ---------------------------------------------------------------------------
 //  Domain 2 — a NON-tree domain with the shape of a real op-stream consumer: a work plan of

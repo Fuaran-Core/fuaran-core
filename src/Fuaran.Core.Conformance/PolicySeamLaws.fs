@@ -507,9 +507,9 @@ module internal PolicySeamLaws =
         LawKit.run (runner.Fork 3181) iterations (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let op = rng.Draw(LawKit.genOp nodew idw gen tree)
-            let targets = WriteGate.targetsOf nodew idw op tree
+            let targets = WriteGate.targetsOf (OpScope.plain nodew idw) op tree
 
-            match Ops.apply nodew idw op tree with
+            match Ops.apply Policy.none (OpScope.plain nodew idw) op tree with
             | Ok post ->
                 applied <- applied + 1
                 let before = childLists tree
@@ -537,17 +537,22 @@ module internal PolicySeamLaws =
             let ids = Tree.preorder nodew tree |> List.map (nodew.Id >> key)
             let lockedNode = rng.Choose ids
             let gate = WriteGate.lockOnly [ lockedNode ]
-            let verdict = WriteGate.decide gate nodew idw op tree
+            let verdict = WriteGate.decide gate (OpScope.plain nodew idw) op tree
 
             if Result.isError verdict then
                 denied <- denied + 1
 
             first.Check(
-                (match verdict, WriteGate.applyGated gate nodew idw op tree with
+                (match verdict, WriteGate.applyGated gate Policy.none (OpScope.plain nodew idw) op tree with
                  | Error d, Error(GatedApplyFailure.Denied d') -> d = d'
-                 | Ok(), Ok t -> Unchecked.equals (Ops.apply nodew idw op tree) (Ok t: Result<'Node, Rejection<'Id>>)
+                 | Ok(), Ok t ->
+                     Unchecked.equals
+                         (Ops.apply Policy.none (OpScope.plain nodew idw) op tree)
+                         (Ok t: Result<'Node, Rejection<'Id>>)
                  | Ok(), Error(GatedApplyFailure.Rejected r) ->
-                     Unchecked.equals (Ops.apply nodew idw op tree) (Error r: Result<'Node, Rejection<'Id>>)
+                     Unchecked.equals
+                         (Ops.apply Policy.none (OpScope.plain nodew idw) op tree)
+                         (Error r: Result<'Node, Rejection<'Id>>)
                  | _ -> false),
                 fun () -> at (sprintf "applyGated disagrees with decide on %A" op)
             )
@@ -565,7 +570,7 @@ module internal PolicySeamLaws =
 
             subtree.Check(
                 (not directHit || Result.isError verdict)
-                && WriteGate.decide WriteGate.allowAll nodew idw op tree = Ok(),
+                && WriteGate.decide WriteGate.allowAll (OpScope.plain nodew idw) op tree = Ok(),
                 fun () -> at (sprintf "locking %s did not refuse %A" lockedNode op)
             )
 
@@ -573,7 +578,7 @@ module internal PolicySeamLaws =
 
             monotone.Check(
                 not (Result.isError verdict)
-                || Result.isError (WriteGate.decide wider nodew idw op tree),
+                || Result.isError (WriteGate.decide wider (OpScope.plain nodew idw) op tree),
                 fun () -> at (sprintf "a wider lock admitted %A" op)
             ))
 

@@ -503,7 +503,7 @@ module Validator =
     /// A child the containment grammar does not let its parent hold (Phase 313): one
     /// `Severity.Error` defect per pair `Ops.illegalChildren` reports over the whole tree, in its
     /// order, located at the CHILD, coded `TREE-ILLEGALCHILD`, its message naming both kinds and the
-    /// children the parent's kind may hold. The family the grammar engine (`Ops.applyGrammar`)
+    /// children the parent's kind may hold. The family the grammar engine (`Ops.apply` under `Policy.grammar`)
     /// refuses to create — it reports the same pairs over a tree that arrived whole, decoded, merged
     /// or authored outside the engine. `allowedChildren` maps a parent's kind tag to the kind tags it
     /// may hold, `None` meaning any.

@@ -85,9 +85,9 @@ let private presProbe
     let mst = toModelTree st
     let where = sprintf "op %s at tree %s" (renderProdOp op) (prodTreeHash st)
 
-    let prod = Ops.apply nodew idw op st
+    let prod = Ops.apply Policy.none (OpScope.plain nodew idw) op st
     let model = modelApply mop mst
-    let prodCan = Ops.canApply nodew idw op st
+    let prodCan = Ops.canApply Policy.none (OpScope.plain nodew idw) op st
     let modelCan = Preservation.can_apply mop mst
 
     // 1. apply
@@ -207,7 +207,7 @@ let private presProbe
             let roundTrip =
                 match pInv with
                 | Ok pi ->
-                    (match Ops.apply nodew idw pi pt with
+                    (match Ops.apply Policy.none (OpScope.plain nodew idw) pi pt with
                      | Ok back ->
                          if prodTreeHash back <> prodTreeHash st then
                              [ sprintf
@@ -284,7 +284,7 @@ let private presDifferential
             generated
             |> List.fold
                 (fun (acc, cur) op ->
-                    match Ops.apply nodew idw op cur with
+                    match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                     | Ok t -> (acc @ [ t ]), t
                     | Error _ -> acc, cur)
                 ([ treeBase ], treeBase)
@@ -373,11 +373,11 @@ let private contProbe
     let where =
         sprintf "op %s at tree %s under canHold={%s}" (renderProdOp op) (prodTreeHash st) (showKinds kinds)
 
-    let prod = Ops.applyContained canHold nodew idw op st
+    let prod = Ops.apply Policy.none (OpScope.contained canHold nodew idw) op st
     let model = modelApply mCanHold mop mst
-    let prodCan = Ops.canApplyContained canHold nodew idw op st
+    let prodCan = Ops.canApply Policy.none (OpScope.contained canHold nodew idw) op st
     let modelCan = Preservation.can_apply_contained mCanHold mop mst
-    let plain = Ops.apply nodew idw op st
+    let plain = Ops.apply Policy.none (OpScope.plain nodew idw) op st
 
     // 1. applyContained
     let applyDiff, accepted, refused, cls =
@@ -451,7 +451,7 @@ let private contProbe
 
     // 3. the DIFFERENCE, on production: the two engines agree EXCEPT where the container-aware one
     //    raises `NotAContainer` — `apply_contained_diff` asked of the shipped code rather than of
-    //    the model. This is the half that says `applyContained` is `apply` plus a guard rather
+    //    the model. This is the half that says `Ops.apply` under `OpScope.contained` is `apply` plus a guard rather
     //    than a second engine.
     //
     //    Note the shape of the exception, which the first run of this differential is what taught:
@@ -619,7 +619,7 @@ let private contDifferential
             generated
             |> List.fold
                 (fun (acc, cur) op ->
-                    match Ops.apply nodew idw op cur with
+                    match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                     | Ok t -> (acc @ [ t ]), t
                     | Error _ -> acc, cur)
                 ([ treeBase ], treeBase)
@@ -680,7 +680,7 @@ let private contDifferential
 // ---------------------------------------------------------------------------
 //  Phase 160 — the SEQUENCE surface as a third oracle family.
 //
-//  `Ops.applyAllWith` / `Ops.canApplyAllWith` are the container-aware script pair that closes the
+//  `Ops.applyAll` under `OpScope.contained` / `Ops.canApplyAll` under `OpScope.contained` are the container-aware script pair that closes the
 //  gap Phase 140 recorded, and `proofs/Preservation.fst` section 9 models them clause for clause:
 //  `apply_all_with` / `can_apply_all_with`, with the failure payload MODELLED rather than dropped
 //  (section 8's `can_apply_all` drops the index because nothing there turned on it; here
@@ -763,9 +763,12 @@ let private scriptProbe
             (prodTreeHash st)
             (showKinds kinds)
 
-    let prod = Ops.applyAllWith canHold nodew idw script st
+    let prod = Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script st
     let model = Preservation.apply_all_with mCanHold zero mscript mst
-    let prodCan = Ops.canApplyAllWith canHold nodew idw script st
+
+    let prodCan =
+        Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) script st
+
     let modelCan = modelCanApply mCanHold zero mscript mst
 
     // 1-4. applyAllWith: verdict, tree, class, index, partial tree
@@ -888,8 +891,10 @@ let private scriptProbe
     //    instances, which is the claim that no existing caller moved. Asserted here as well as in
     //    `OpsTests` because this pool is the generated one.
     let instanceDiff =
-        let plainApply = Ops.applyAll nodew idw script st
-        let totalApply = Ops.applyAllWith (fun _ -> true) nodew idw script st
+        let plainApply = Ops.applyAll Policy.none (OpScope.plain nodew idw) script st
+
+        let totalApply =
+            Ops.applyAll Policy.none (OpScope.contained (fun _ -> true) nodew idw) script st
 
         let render r =
             match r with
@@ -913,8 +918,8 @@ let private scriptProbe
 
         let canSide =
             if
-                renderCan (Ops.canApplyAll nodew idw script st)
-                <> renderCan (Ops.canApplyAllWith (fun _ -> true) nodew idw script st)
+                renderCan (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) script st)
+                <> renderCan (Ops.canApplyAll Policy.none (OpScope.contained (fun _ -> true) nodew idw) script st)
             then
                 [ sprintf "canApplyAll is NOT canApplyAllWith (fun _ -> true) — %s" where ]
             else
@@ -1152,7 +1157,7 @@ let tests =
               let cxInsert =
                   InsertChild("a", RNode.node "fresh" "section" [ RNode.leaf "root" "para" "v" ])
 
-              match Ops.apply nodew idw cxInsert cxTree with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) cxInsert cxTree with
               | Ok _ -> failtest "the shipped engine ADMITS the Phase 133 counterexample — Phase 137 has regressed"
               | Error(DuplicateId d) ->
                   Expect.equal d "root" "the offender named is the DESCENDANT id, which the pre-137 check could not see"
@@ -1334,13 +1339,14 @@ let tests =
               // (2) and the shipped engine refuses it, naming the offender IN THE GRAFT — "a",
               //     which holds "b" while the predicate refuses it — and not "root", which is the
               //     parent and can hold children perfectly well.
-              match Ops.applyContained canHold nodew idw graft tree with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft tree with
               | Error(NotAContainer("a", "para")) -> ()
               | other -> failtestf "expected NotAContainer naming the interior offender 'a', got %A" other
 
               Expect.equal
-                  (Ops.canApplyContained canHold nodew idw graft tree)
-                  (Ops.applyContained canHold nodew idw graft tree |> Result.map ignore)
+                  (Ops.canApply Policy.none (OpScope.contained canHold nodew idw) graft tree)
+                  (Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft tree
+                   |> Result.map ignore)
                   "the dry run sees the interior refusal too"
 
           testCase "the sequence surface sees containment and the plain pair still does not — both halves"
@@ -1349,13 +1355,13 @@ let tests =
               // production, at the same tree and the same script. This case was Phase 140's, where
               // it recorded a FINDING — `Ops.canApplyAll` and `Ops.applyAll` both threaded the
               // plain `apply`, so there was no container-aware sequence surface at all and a
-              // caller pre-flighting with `canApplyAll` and executing with `applyContained` had a
+              // caller pre-flighting with `canApplyAll` and executing with `Ops.apply` under `OpScope.contained` had a
               // check that could not see the refusal its executor would make.
               //
-              // Phase 160 closed that by ADDING `applyAllWith` / `canApplyAllWith` beside the pair,
+              // Phase 160 closed that by ADDING `Ops.applyAll` under `OpScope.contained` / `Ops.canApplyAll` under `OpScope.contained` beside the pair,
               // and 140's own note — "this case goes RED if that gap is ever closed" — turned out
               // to be a go-red by intention rather than by construction: every assertion it made
-              // was about `canApplyAll` and `applyContained`, and 160 deliberately moved neither.
+              // was about `canApplyAll` and `Ops.apply` under `OpScope.contained`, and 160 deliberately moved neither.
               // The plain pair is the `fun _ -> true` instance BY CONSTRUCTION, so it is blind to
               // containment now and always will be; a phase that changed that would have moved
               // every existing caller.
@@ -1374,22 +1380,22 @@ let tests =
 
               // ---- half one: the plain pair has not moved, and is still blind ----
               Expect.isOk
-                  (Ops.canApplyAll nodew idw script tree
+                  (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) script tree
                    |> Result.mapError (fun (i, e) -> sprintf "%d:%A" i e))
                   "canApplyAll certifies the script — it consults no capability, and must not start"
 
-              match Ops.applyContained canHold nodew idw (Batch script) tree with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) (Batch script) tree with
               | Error(NotAContainer("leaf", "para")) -> ()
               | other ->
                   failtestf "applyContained was expected to refuse the very script canApplyAll certified, got %A" other
 
               // ---- half two: the sequence surface that DOES see it (Phase 160) ----
-              match Ops.canApplyAllWith canHold nodew idw script tree with
+              match Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) script tree with
               | Error(0, NotAContainer("leaf", "para")) -> ()
               | other ->
                   failtestf "canApplyAllWith must refuse at step 0 with the envelope applyAllWith raises, got %A" other
 
-              match Ops.applyAllWith canHold nodew idw script tree with
+              match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script tree with
               | Error { Applied = 0
                         Rejection = NotAContainer("leaf", "para")
                         Tree = partial } ->

@@ -60,7 +60,7 @@ type NodeWitness<'Node, 'Id> =
 /// **What the engine does with it (Phase 286).** It READS it. `Tree.traversal` derives the
 /// `NodeWitness` whose walk covers both surfaces, so every navigator reaches a node held in a keyed
 /// position; `Tree.wellFormedKeyed` / `Tree.graftWellFormedKeyed` hold id uniqueness over that
-/// walk; and `Ops.applyContainedKeyed` refuses a `DuplicateId` there and addresses nodes below a
+/// walk; and `Ops.apply` under `OpScope.keyed` refuses a `DuplicateId` there and addresses nodes below a
 /// keyed position. A domain declares its keyed positions ONCE, here, and stops re-deriving the walk.
 ///
 /// **A domain with no keyed position declares none** — `KeyedChildren = fun _ -> []`,
@@ -174,7 +174,7 @@ module Tree =
     /// The same scan, over ids a caller has already collected (Phase 286): the first of `incoming`
     /// that `held` carries, or that `incoming` repeats within itself; `None` when admitting
     /// `incoming` beside `held` keeps every id unique. `graftWellFormed` is this with `held` the
-    /// tree's ids and `incoming` the graft's, and `Ops.applyContainedKeyed` asks it about an
+    /// tree's ids and `incoming` the graft's, and `Ops.apply` under `OpScope.keyed` asks it about an
     /// `UpdateNode` payload's keyed subtrees, whose ids arrive beside a tree the payload's target
     /// keeps.
     let firstRepeatedId (idw: IdWitness<'Id>) (held: 'Id list) (incoming: 'Id list) : 'Id option =
@@ -601,7 +601,7 @@ module Tree =
     /// `map`, `remapIds`) — and requires the domain's `ReplaceChildren` not to move the keyed
     /// positions (the `keyedApplyLaws` witness laws). Handing it to the structural ops would let
     /// them append to, filter and permute keyed positions, which is exactly what Phase 189 kept them
-    /// from; `Ops.applyContainedKeyed` locates through it and edits through `nodew`.
+    /// from; `Ops.apply` under `OpScope.keyed` locates through it and edits through `nodew`.
     let traversal (w: NodeWitness<'Node, 'Id>) (keyw: KeyedWitness<'Node, 'Id>) : NodeWitness<'Node, 'Id> =
         { Id = w.Id
           KindTag = w.KindTag
@@ -644,7 +644,7 @@ module Tree =
 
     /// `graftWellFormed` over the keyed walk, on BOTH sides: an id the tree holds in a keyed
     /// position, and an id the graft carries into one, are each seen. This is the scan
-    /// `Ops.applyContainedKeyed`'s `DuplicateId` refusal projects from.
+    /// `Ops.apply` under `OpScope.keyed`'s `DuplicateId` refusal projects from.
     let graftWellFormedKeyed
         (w: NodeWitness<'Node, 'Id>)
         (keyw: KeyedWitness<'Node, 'Id>)

@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.ContainedOpsTests
 
-// Phase 251 — container-aware skeleton ops. `applyContained`/`canApplyContained` reject an
+// Phase 251 — container-aware skeleton ops. `Ops.apply` under `OpScope.contained`/`Ops.canApply` under `OpScope.contained` reject an
 // insert/move under a leaf with `NotAContainer` instead of silently no-op'ing (the F1
 // adoption finding); the plain `apply`/`canApply` are unchanged (every node can hold
 // children). A leaf-bearing witness then certifies green through the container-aware path.
@@ -24,7 +24,7 @@ let tests =
           <| fun _ ->
               let op = InsertChild("p", RNode.leaf "c" "para" "")
 
-              match Ops.applyContained canHold nodew idw op (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op (mixed ()) with
               | Error(NotAContainer("p", "para")) -> ()
               | other -> failtestf "expected NotAContainer, got %A" other
 
@@ -32,7 +32,7 @@ let tests =
           <| fun _ ->
               let op = InsertChild("s", RNode.leaf "c" "para" "hi")
 
-              match Ops.applyContained canHold nodew idw op (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op (mixed ()) with
               | Ok r -> Expect.isSome (Tree.tryFind nodew idw "c" r) "inserted under the container"
               | Error e -> failtestf "unexpected %A" e
 
@@ -41,11 +41,14 @@ let tests =
               // default `apply` treats every node as a container (back-compat); the insert
               // succeeds structurally (ReplaceChildren on the reference RNode is total).
               let op = InsertChild("p", RNode.leaf "c" "para" "")
-              Expect.isOk (Ops.apply nodew idw op (mixed ())) "default apply still accepts it"
+
+              Expect.isOk
+                  (Ops.apply Policy.none (OpScope.plain nodew idw) op (mixed ()))
+                  "default apply still accepts it"
 
           testCase "MoveNode under a leaf is NotAContainer"
           <| fun _ ->
-              match Ops.applyContained canHold nodew idw (MoveNode("s", "p")) (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) (MoveNode("s", "p")) (mixed ()) with
               | Error(NotAContainer("p", "para")) -> ()
               | other -> failtestf "expected NotAContainer, got %A" other
 
@@ -54,8 +57,9 @@ let tests =
               let op = InsertChild("p", RNode.leaf "c" "para" "")
 
               Expect.equal
-                  (Ops.canApplyContained canHold nodew idw op (mixed ()))
-                  (Ops.applyContained canHold nodew idw op (mixed ()) |> Result.map ignore)
+                  (Ops.canApply Policy.none (OpScope.contained canHold nodew idw) op (mixed ()))
+                  (Ops.apply Policy.none (OpScope.contained canHold nodew idw) op (mixed ())
+                   |> Result.map ignore)
                   "check ≡ apply (contained)"
 
           // ---- Phase 161 (DECISIONS D38, option A): the graft's INTERIOR is inspected ----
@@ -70,7 +74,7 @@ let tests =
               // not in the tree, which is what makes this case different from the two above.
               let graft = InsertChild("s", RNode.node "a" "para" [ RNode.leaf "b" "para" "" ])
 
-              match Ops.applyContained canHold nodew idw graft (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ()) with
               | Error(NotAContainer("a", "para")) -> ()
               | other -> failtestf "expected NotAContainer naming the interior offender 'a', got %A" other
 
@@ -81,7 +85,7 @@ let tests =
               let graft =
                   InsertChild("s", RNode.node "a" "para" [ RNode.node "a2" "para" [ RNode.leaf "a3" "para" "" ] ])
 
-              match Ops.applyContained canHold nodew idw graft (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ()) with
               | Error(NotAContainer("a", "para")) -> ()
               | other -> failtestf "expected the first offender 'a', got %A" other
 
@@ -92,7 +96,7 @@ let tests =
               let graft =
                   InsertChild("s", RNode.node "a" "section" [ RNode.leaf "b" "para" ""; RNode.leaf "c" "para" "" ])
 
-              match Ops.applyContained canHold nodew idw graft (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ()) with
               | Ok r -> Expect.isSome (Tree.tryFind nodew idw "b" r) "the whole graft went in"
               | Error e -> failtestf "a contained graft must still be accepted, got %A" e
 
@@ -101,8 +105,9 @@ let tests =
               let graft = InsertChild("s", RNode.node "a" "para" [ RNode.leaf "b" "para" "" ])
 
               Expect.equal
-                  (Ops.canApplyContained canHold nodew idw graft (mixed ()))
-                  (Ops.applyContained canHold nodew idw graft (mixed ()) |> Result.map ignore)
+                  (Ops.canApply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ()))
+                  (Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ())
+                   |> Result.map ignore)
                   "check ≡ apply over the interior walk"
 
           testCase "the plain apply is byte-for-byte unaffected by the interior walk"
@@ -114,11 +119,11 @@ let tests =
               let graft = InsertChild("s", RNode.node "a" "para" [ RNode.leaf "b" "para" "" ])
 
               Expect.equal
-                  (Ops.apply nodew idw graft (mixed ()))
-                  (Ops.applyContained (fun _ -> true) nodew idw graft (mixed ()))
+                  (Ops.apply Policy.none (OpScope.plain nodew idw) graft (mixed ()))
+                  (Ops.apply Policy.none (OpScope.contained (fun _ -> true) nodew idw) graft (mixed ()))
                   "apply ≡ applyContained (fun _ -> true) on a graft the real predicate refuses"
 
-              match Ops.apply nodew idw graft (mixed ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) graft (mixed ()) with
               | Ok r -> Expect.isSome (Tree.tryFind nodew idw "b" r) "the plain engine still accepts it whole"
               | Error e -> failtestf "the plain apply must be unchanged, got %A" e
 
@@ -128,7 +133,7 @@ let tests =
               // was refused before Phase 161 changes its class. This graft breaks BOTH invariants.
               let graft = InsertChild("s", RNode.node "p" "para" [ RNode.leaf "b" "para" "" ])
 
-              match Ops.applyContained canHold nodew idw graft (mixed ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft (mixed ()) with
               | Error(DuplicateId "p") -> ()
               | other -> failtestf "expected DuplicateId to keep its precedence, got %A" other
 
@@ -145,7 +150,7 @@ let tests =
                       [ RNode.node "s" "section" [ RNode.node "a" "para" [ RNode.leaf "b" "para" "" ] ]
                         RNode.node "s2" "section" [] ]
 
-              match Ops.applyContained canHold nodew idw (MoveNode("a", "s2")) tree with
+              match Ops.apply Policy.none (OpScope.contained canHold nodew idw) (MoveNode("a", "s2")) tree with
               | Ok r -> Expect.isSome (Tree.tryFind nodew idw "b" r) "the subtree moved intact, interior and all"
               | Error e -> failtestf "a move must not be refused for a pre-existing interior violation, got %A" e
 
@@ -299,7 +304,7 @@ let containerLawTests =
           testCase "a canHold that READS THE CHILD LIST fails the child-blindness law"
           <| fun _ ->
               // The go-red for law 1, and the predicate is Phase 140's `cx_childless`: lawful by
-              // the engine's type, and unstable under the very edit `applyContained` licenses.
+              // the engine's type, and unstable under the very edit `Ops.apply` under `OpScope.contained` licenses.
               let childReading (n: RNode) = List.isEmpty (nodew.Children n)
 
               let results =

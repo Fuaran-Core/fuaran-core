@@ -18,11 +18,10 @@ namespace Fuaran.Core
 //  node allows its subtree: a target is locked when it or any ancestor is in
 //  `Locked`, and (under an allow-list) writable when it or any ancestor is in
 //  `Writable`. A node an op CREATES has the ancestors it is created under.
-//  The ancestors are read along the STRUCTURAL walk (`Tree.path` over the plain
-//  witness), so a node held in a keyed position has no ancestor chain and a lock
-//  on its holder does not reach it: there is no keyed gate yet, and a caller
-//  that applies through `Ops.applyContainedKeyed` gates keyed writes itself
-//  (Phase 496; `KeyedGateDiffTests` (a) pins it).
+//  The ancestors are read along the walk the scope locates through (Phase 517):
+//  under a keyed scope a node held in a keyed position has its holder, and the
+//  holder's ancestors, as its chain, so a lock on a holder covers its keyed
+//  subtree as it covers its structural one.
 //
 //  FSharp.Core + Fuaran.Core.Tree only, as `Ops` is; Fable-clean.
 // ============================================================================
@@ -96,28 +95,34 @@ module WriteGate =
     /// (the nodes it authors, destroys, relocates or rewrites) and unknown-parent writes, the nodes of
     /// its slot writes, and — what the pure footprint cannot name, recorded as its pinned
     /// over-approximation (2) — the subtree a `RemoveNode` destroys, the subtree the view located.
-    let private targetsOfOne (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (v: OpView<'Node, 'Id>) : Set<string> =
-        let fp = Ops.footprint w idw [ v.Op ]
+    /// Under a keyed scope the footprint and the destroyed subtree are the keyed walks (Phase 517).
+    let private targetsOfOne (scope: OpScope<'Node, 'Id>) (v: OpView<'Node, 'Id>) : Set<string> =
+        let fp = Ops.footprint Policy.none scope [ v.Op ]
 
         Set.unionMany
             [ fp.StructureWrites
               fp.ContentWrites
               fp.UnknownParentWrites
               Footprint.slotNodes fp.SlotWrites
-              Ops.destroyedBy (Tree.ids w) v |> List.map idw.ToString |> Set.ofList ]
+              Ops.destroyedBy (OpScope.ids scope) v
+              |> List.map scope.Ids.ToString
+              |> Set.ofList ]
 
     /// The chain a target's policy is read along, nearest first: the target, then its ancestors in
-    /// `root`. For a node `op` creates — absent from `root`, inside an `InsertChild`'s graft — the
-    /// chain runs through the graft up to the insert's parent and on through the parent's ancestors.
+    /// `root` along the walk the scope locates through. For a node `op` creates — absent from
+    /// `root`, inside an `InsertChild`'s graft — the chain runs through the graft up to the insert's
+    /// parent and on through the parent's ancestors.
     let private chainOf
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         (target: string)
         : string list =
+        let idw = scope.Ids
+        let walk = OpScope.locate scope
+
         let inTree (id: 'Id) (node: 'Node) =
-            Tree.path w idw id node |> Option.map (List.rev >> List.map idw.ToString)
+            Tree.path walk idw id node |> Option.map (List.rev >> List.map idw.ToString)
 
         match inTree (idw.OfString target) root with
         | Some chain -> chain
@@ -134,13 +139,12 @@ module WriteGate =
     /// (through itself or an ancestor), else — under an allow-list — the first that is not covered.
     let private decideOne
         (gate: WriteGate)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, WriteDenial> =
-        let targets = targetsOfOne w idw v |> Set.toList
-        let chains = targets |> List.map (fun t -> t, chainOf w idw v.Op root t)
+        let targets = targetsOfOne scope v |> Set.toList
+        let chains = targets |> List.map (fun t -> t, chainOf scope v.Op root t)
 
         let locked =
             chains
@@ -162,18 +166,18 @@ module WriteGate =
 
     /// The gate's walk over an op (Phase 512): a `Batch` taken op by op, each step's view located
     /// on the tree the steps before it produced, `judge` reading the view, and the engine stepping
-    /// through the SAME view, so the gate and the reducer see one location of each op. The runner
-    /// stops at the first denial (`Choice1Of2`) or at the first op the reducer refuses
+    /// through the SAME view under the scope, so the gate and the reducer see one location of each
+    /// op. The runner stops at the first denial (`Choice1Of2`) or at the first op the reducer refuses
     /// (`Choice2Of2`, carrying what `judge` said of it) — the reducer refuses there, whatever the
     /// gate would say of the ops after it.
     let private walk
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (judge: OpView<'Node, 'Id> -> 'Node -> Result<'Out, WriteDenial>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         =
-        let s = Ops.plainScope w idw
+        let s = Ops.walksOf scope
+        let canHold = Ops.canHoldOf scope
 
         let rec steps (o: SkeletonOp<'Node, 'Id>) =
             match o with
@@ -187,27 +191,23 @@ module WriteGate =
                 match judge v node with
                 | Error denial -> Error(Choice1Of2 denial)
                 | Ok out ->
-                    match Ops.applyView (fun _ -> true) s v node with
+                    match Ops.applyView canHold s v node with
                     | Ok next -> Ok(next, out)
                     | Error _ -> Error(Choice2Of2 out))
             (steps op)
             root
 
-    /// The ids `op` writes when it lands on `root` (Phase 318) — the targets the gate decides on:
-    /// `Ops.footprint`'s structure, content and unknown-parent writes and its slot writes' nodes,
-    /// with the subtree a `RemoveNode` destroys added from the tree. A `Batch` is taken op by op,
-    /// each over the tree the ops before it produced, and stops at the first op that does not apply
-    /// (the reducer refuses there, whatever its targets). Every id an op creates, destroys, rewrites
-    /// or whose child list it changes is a target, except the SOURCE parent of a removed or moved node
-    /// — a tree fact the footprint records only as the target's unknown-parent write — whose lock
-    /// reaches the target anyway, because the target is in that parent's subtree.
-    let targetsOf
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Set<string> =
-        let r = walk w idw (fun v _ -> Ok(targetsOfOne w idw v)) op root
+    /// The ids `op` writes when it lands on `root` under `scope` (Phase 318; the scope, Phase 517) —
+    /// the targets the gate decides on: `Ops.footprint`'s structure, content and unknown-parent
+    /// writes and its slot writes' nodes, with the subtree a `RemoveNode` destroys added from the
+    /// tree. A `Batch` is taken op by op, each over the tree the ops before it produced, and stops at
+    /// the first op the scope's engine does not apply (the reducer refuses there, whatever its
+    /// targets). Every id an op creates, destroys, rewrites or whose child list it changes is a
+    /// target, except the SOURCE parent of a removed or moved node — a tree fact the footprint
+    /// records only as the target's unknown-parent write — whose lock reaches the target anyway,
+    /// because the target is in that parent's subtree.
+    let targetsOf (scope: OpScope<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) (root: 'Node) : Set<string> =
+        let r = walk scope (fun v _ -> Ok(targetsOfOne scope v)) op root
 
         let last =
             match r.Refused with
@@ -216,36 +216,38 @@ module WriteGate =
 
         Set.unionMany (last :: r.Outs)
 
-    /// Decide whether `op` may write what it writes on `root` (Phase 318): `Error` with the first
-    /// denial, `Ok ()` otherwise. A target is refused `Locked` when it or an ancestor is locked, and
-    /// — under an allow-list — `NotWritable` when neither it nor any ancestor is on the list; the lock
-    /// wins where both hold. A `Batch` is decided op by op over the trees the earlier ops produce, so
-    /// an op inside it is judged where it actually lands; the first op that does not apply ends the
-    /// decision (`Ok`), and the reducer refuses it.
+    /// Decide whether `op` may write what it writes on `root` under `scope` (Phase 318): `Error` with
+    /// the first denial, `Ok ()` otherwise. A target is refused `Locked` when it or an ancestor is
+    /// locked, and — under an allow-list — `NotWritable` when neither it nor any ancestor is on the
+    /// list; the lock wins where both hold. The ancestors are read along the walk the scope locates
+    /// through, so under a keyed scope a lock on a holder covers its keyed subtree (Phase 517). A
+    /// `Batch` is decided op by op over the trees the earlier ops produce, so an op inside it is
+    /// judged where it actually lands; the first op that does not apply ends the decision (`Ok`),
+    /// and the reducer refuses it.
     let decide
         (gate: WriteGate)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, WriteDenial> =
-        match (walk w idw (decideOne gate w idw) op root).Refused with
+        match (walk scope (decideOne gate scope) op root).Refused with
         | Some(Choice1Of2 denial) -> Error denial
         | _ -> Ok()
 
-    /// Apply `op` only if the gate allows it (Phase 318): the gate is consulted FIRST and a denial
-    /// returns before `Ops.apply` runs; an allowed op's reducer rejection is `Rejected`. Default-deny
-    /// by shape: there is no path from a denied op to an applied tree.
+    /// Apply `op` under `policy` and `scope` only if the gate allows it (Phase 318): the gate is
+    /// consulted FIRST and a denial returns before `Ops.apply` runs; an allowed op's reducer
+    /// rejection is `Rejected`. Default-deny by shape: there is no path from a denied op to an
+    /// applied tree.
     let applyGated
         (gate: WriteGate)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, GatedApplyFailure<'Id>> =
-        match decide gate w idw op root with
+        match decide gate scope op root with
         | Error denial -> Error(GatedApplyFailure.Denied denial)
-        | Ok() -> Ops.apply w idw op root |> Result.mapError GatedApplyFailure.Rejected
+        | Ok() -> Ops.apply policy scope op root |> Result.mapError GatedApplyFailure.Rejected
 
     /// A denial as the guidance an agent repairs from: one sentence naming the target and why, and as
     /// alternatives the allow-list (for `NotWritable`) or nothing (for `Locked`).

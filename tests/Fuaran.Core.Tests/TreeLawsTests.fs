@@ -44,8 +44,8 @@ let treeLawTests =
           <| fun _ ->
               // `diffLaws` above certifies `Diff.toOps`' scripts with the PLAIN sequence pair,
               // which is blind to containment by construction. This family asks the questions of
-              // the pair that belong together: `toOpsContained` emitted the script, so
-              // `canApplyAllWith` / `applyAllWith` under the SAME predicate are what must accept
+              // the pair that belong together: `Diff.toOps` under `OpScope.contained` emitted the script, so
+              // `Ops.canApplyAll` under `OpScope.contained` / `Ops.applyAll` under `OpScope.contained` under the SAME predicate are what must accept
               // it. Run against a witness with a real capability — the generator builds "section"
               // internally and "para" at the leaves, so a para is a genuine non-container and the
               // family's minted probe has somewhere to graft.
@@ -84,7 +84,7 @@ let treeLawTests =
           <| fun _ ->
               // The go-red the green run above cannot be: with a predicate that admits nothing, any
               // `after` carrying a child is a container violation, so the refusal law's DEMANDING
-              // direction is the only one exercised. If `toOpsContained` ever stopped consulting
+              // direction is the only one exercised. If `Diff.toOps` under `OpScope.contained` ever stopped consulting
               // the predicate, this run would report a script where a refusal is required and the
               // family would go red — which is what makes the green run above evidence rather than
               // an assertion about a branch nothing takes.

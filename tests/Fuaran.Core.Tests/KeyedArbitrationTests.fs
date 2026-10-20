@@ -1,9 +1,9 @@
 module Fuaran.Core.Tests.KeyedArbitrationTests
 
-// Phase 247 — off-walk identity in the footprint and arbitration. `Ops.footprintKeyed` reads an
+// Phase 247 — off-walk identity in the footprint and arbitration. `Ops.footprint` under `OpScope.keyed` reads an
 // inserted subtree's ids over the keyed walk, so two scripts that each bring in one keyed id are
 // dependent; `Arbitration.arbitrateWith` takes the domain's footprint and applicability, and
-// `arbitrateContained` is its container-aware common case; `Conformance.keyedArbitrationLawsAt`
+// `Arbitration.arbitrate` under `OpScope.contained` is its container-aware common case; `Conformance.keyedArbitrationLawsAt`
 // builds the container-illegal proposal and the keyed-id clash the plain family never draws.
 //
 // The domain is `ConformanceTests`' keyed reference: `KNode` holds a case table (`Cases`) beside
@@ -34,8 +34,11 @@ let private switchHolding (id: string) (keyed: string) = k id [] [ "on", leaf ke
 let private doc () =
     k "root" [ k "s1" [ leaf "x1" ] []; k "s2" [ leaf "x2" ] []; leaf "note" ] []
 
-let private fp ops = Ops.footprint knodew idw ops
-let private fpK ops = Ops.footprintKeyed keyw knodew idw ops
+let private fp ops =
+    Ops.footprint Policy.none (OpScope.plain knodew idw) ops
+
+let private fpK ops =
+    Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) ops
 
 let private noKeyedK: KeyedWitness<KNode, string> =
     { keyw with
@@ -63,7 +66,11 @@ let private failed (results: LawResult list) =
 
 let private landKeyed (ops: SkeletonOp<KNode, string> list) (root: KNode) =
     ops
-    |> List.fold (fun acc op -> acc |> Result.bind (Ops.applyContainedKeyed keyw canHoldAll knodew idw op)) (Ok root)
+    |> List.fold
+        (fun acc op ->
+            acc
+            |> Result.bind (Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op))
+        (Ok root)
 
 [<Tests>]
 let tests =
@@ -139,7 +146,10 @@ let tests =
                           Batch [ InsertChild("s2", leaf "n"); RemoveNode "x1" ] ]
 
                     for op in ops do
-                        Expect.equal (Ops.footprintKeyed noKeyedK knodew idw [ op ]) (fp [ op ]) (sprintf "%A" op) ]
+                        Expect.equal
+                            (Ops.footprint Policy.none (OpScope.keyed noKeyedK (fun _ -> true) knodew idw) [ op ])
+                            (fp [ op ])
+                            (sprintf "%A" op) ]
 
           testList
               "Ops.canApplyAllKeyed"
@@ -149,17 +159,21 @@ let tests =
                     let script = [ InsertChild("root", leaf "n"); InsertChild("root", leaf "held") ]
 
                     Expect.equal
-                        (Ops.canApplyAllKeyed keyw canHoldAll knodew idw script t)
+                        (Ops.canApplyAll Policy.none (OpScope.keyed keyw canHoldAll knodew idw) script t)
                         (Error(1, DuplicateId "held"))
                         "the second step collides with an id held in a case"
 
                     Expect.equal
-                        (Ops.canApplyAllWith canHoldAll knodew idw script t)
+                        (Ops.canApplyAll Policy.none (OpScope.contained canHoldAll knodew idw) script t)
                         (Ok())
                         "the unkeyed check is blind to it"
 
                     Expect.equal
-                        (Ops.canApplyAllKeyed keyw canHold knodew idw [ InsertChild("a", leaf "n") ] t)
+                        (Ops.canApplyAll
+                            Policy.none
+                            (OpScope.keyed keyw canHold knodew idw)
+                            [ InsertChild("a", leaf "n") ]
+                            t)
                         (Error(0, NotAContainer("a", "para")))
                         "and it carries the container capability"
 
@@ -173,8 +187,8 @@ let tests =
                           [ RemoveNode "ghost" ]
                           [ ReorderChildren("s1", [ "x1" ]); RemoveNode "x1"; RemoveNode "x1" ] ] do
                         Expect.equal
-                            (Ops.canApplyAllKeyed noKeyedK canHold knodew idw script t)
-                            (Ops.canApplyAllWith canHold knodew idw script t)
+                            (Ops.canApplyAll Policy.none (OpScope.keyed noKeyedK canHold knodew idw) script t)
+                            (Ops.canApplyAll Policy.none (OpScope.contained canHold knodew idw) script t)
                             (sprintf "%A" script) ]
 
           testList
@@ -191,13 +205,17 @@ let tests =
                           prop 5 [ ReorderChildren("s2", [ "x2" ]) ] ]
 
                     Expect.equal
-                        (Arbitration.arbitrateWith (Ops.footprint knodew idw) (Ops.canApplyAll knodew idw) t proposals)
-                        (Arbitration.arbitrate knodew idw t proposals)
+                        (Arbitration.arbitrateWith
+                            (Ops.footprint Policy.none (OpScope.plain knodew idw))
+                            (Ops.canApplyAll Policy.none (OpScope.plain knodew idw))
+                            t
+                            proposals)
+                        (Arbitration.arbitrate Policy.none (OpScope.plain knodew idw) t proposals)
                         "one partition"
 
                     Expect.equal
-                        (Arbitration.arbitrateContained canHoldAll knodew idw t proposals)
-                        (Arbitration.arbitrate knodew idw t proposals)
+                        (Arbitration.arbitrate Policy.none (OpScope.contained canHoldAll knodew idw) t proposals)
+                        (Arbitration.arbitrate Policy.none (OpScope.plain knodew idw) t proposals)
                         "and arbitrateContained with a capability that refuses nothing is arbitrate"
 
                 testCase "an insert under a leaf: arbitrate admits it, arbitrateContained refuses it"
@@ -206,15 +224,21 @@ let tests =
                     let underLeaf = prop 1 [ InsertChild("note", leaf "n") ]
                     let elsewhere = prop 2 [ InsertChild("s1", leaf "m") ]
 
-                    let plain = Arbitration.arbitrate knodew idw t [ underLeaf; elsewhere ]
+                    let plain =
+                        Arbitration.arbitrate Policy.none (OpScope.plain knodew idw) t [ underLeaf; elsewhere ]
+
                     Expect.equal (plain.Accepted |> List.map _.Id) [ 1; 2 ] "admitted by the plain check"
 
                     Expect.isError
-                        (Ops.applyAllWith canHold knodew idw plain.MergedScript t)
+                        (Ops.applyAll Policy.none (OpScope.contained canHold knodew idw) plain.MergedScript t)
                         "and the domain's engine then refuses the merged script"
 
                     let contained =
-                        Arbitration.arbitrateContained canHold knodew idw t [ underLeaf; elsewhere ]
+                        Arbitration.arbitrate
+                            Policy.none
+                            (OpScope.contained canHold knodew idw)
+                            t
+                            [ underLeaf; elsewhere ]
 
                     Expect.equal (contained.Accepted |> List.map _.Id) [ 2 ] "only the legal proposal lands"
 
@@ -225,8 +249,8 @@ let tests =
 
                     let viaDomain =
                         Arbitration.arbitrateWith
-                            (Ops.footprintKeyed keyw knodew idw)
-                            (Ops.canApplyAllKeyed keyw canHold knodew idw)
+                            (Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw))
+                            (Ops.canApplyAll Policy.none (OpScope.keyed keyw canHold knodew idw))
                             t
                             [ underLeaf; elsewhere ]
 
@@ -250,7 +274,7 @@ let tests =
                                         switchHolding (sprintf "fig%d" i) (sprintf "L%d" (i % 16))
                                     ) ] ]
 
-                    let plain = Arbitration.arbitrate knodew idw t proposals
+                    let plain = Arbitration.arbitrate Policy.none (OpScope.plain knodew idw) t proposals
                     Expect.equal (List.length plain.Accepted) n "the plain footprint admits every clash"
 
                     match landKeyed plain.MergedScript t with
@@ -260,8 +284,8 @@ let tests =
 
                     let keyed =
                         Arbitration.arbitrateWith
-                            (Ops.footprintKeyed keyw knodew idw)
-                            (Ops.canApplyAllKeyed keyw canHoldAll knodew idw)
+                            (Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw))
+                            (Ops.canApplyAll Policy.none (OpScope.keyed keyw canHoldAll knodew idw))
                             t
                             proposals
 
@@ -306,8 +330,8 @@ let tests =
                             idw
                             containedKGen
                             encK
-                            (Ops.footprint knodew idw)
-                            (Ops.canApplyAllKeyed keyw canHold knodew idw)
+                            (Ops.footprint Policy.none (OpScope.plain knodew idw))
+                            (Ops.canApplyAll Policy.none (OpScope.keyed keyw canHold knodew idw))
                             2471
                             200
 
@@ -326,8 +350,8 @@ let tests =
                             idw
                             containedKGen
                             encK
-                            (Ops.footprintKeyed keyw knodew idw)
-                            (Ops.canApplyAll knodew idw)
+                            (Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw))
+                            (Ops.canApplyAll Policy.none (OpScope.plain knodew idw))
                             2472
                             200
 

@@ -26,9 +26,10 @@ let footprintTests =
               // where in it. A future reader comparing the before/after shapes should not
               // conclude the analysis was left behind — this asserts it was already
               // id-only, so there was nothing to update.
-              let ins = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "n" "para" "x") ]
+              let ins =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "n" "para" "x") ]
 
-              let mov = Ops.footprint nodew idw [ MoveNode("a", "b") ]
+              let mov = Ops.footprint Policy.none (OpScope.plain nodew idw) [ MoveNode("a", "b") ]
 
               Expect.equal ins.StructureWrites (setOf [ "a" ]) "insert writes the named parent's child-list"
               Expect.equal mov.StructureWrites (setOf [ "b" ]) "move writes the destination child-list"
@@ -41,7 +42,10 @@ let footprintTests =
           testCase "InsertChild footprints the parent (structure + read) and the inserted subtree (content)"
           <| fun _ ->
               let fp =
-                  Ops.footprint nodew idw [ InsertChild("a", RNode.node "n" "para" [ RNode.leaf "n1" "para" "x" ]) ]
+                  Ops.footprint
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      [ InsertChild("a", RNode.node "n" "para" [ RNode.leaf "n1" "para" "x" ]) ]
 
               Expect.equal fp.StructureWrites (setOf [ "a" ]) "the parent's child-list is a structure-write"
               Expect.equal fp.ContentWrites (setOf [ "n"; "n1" ]) "the whole inserted subtree is content-written"
@@ -50,14 +54,14 @@ let footprintTests =
 
           testCase "RemoveNode footprints the target as content + an UNKNOWN-parent structure-write"
           <| fun _ ->
-              let fp = Ops.footprint nodew idw [ RemoveNode "a" ]
+              let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) [ RemoveNode "a" ]
               Expect.equal fp.ContentWrites (setOf [ "a" ]) "the removed node is content-written"
               Expect.equal fp.UnknownParentWrites (setOf [ "a" ]) "its source parent is unknown from the script"
               Expect.isEmpty fp.StructureWrites "no NAMED structural anchor — the parent isn't in the op"
 
           testCase "MoveNode footprints the known destination + the unknown source"
           <| fun _ ->
-              let fp = Ops.footprint nodew idw [ MoveNode("a", "b") ]
+              let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) [ MoveNode("a", "b") ]
               Expect.equal fp.StructureWrites (setOf [ "b" ]) "the destination child-list is a known structure-write"
               Expect.equal fp.ContentWrites (setOf [ "a" ]) "the relocated node is content-written"
               Expect.equal fp.UnknownParentWrites (setOf [ "a" ]) "the source parent is the unknown over-approx"
@@ -65,7 +69,9 @@ let footprintTests =
 
           testCase "ReorderChildren footprints the parent (structure) and names its children (read)"
           <| fun _ ->
-              let fp = Ops.footprint nodew idw [ ReorderChildren("p", [ "b"; "a" ]) ]
+              let fp =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ ReorderChildren("p", [ "b"; "a" ]) ]
+
               Expect.equal fp.StructureWrites (setOf [ "p" ]) "the parent's child-list order is rewritten"
               Expect.equal fp.Reads (setOf [ "p"; "a"; "b" ]) "the parent + its named children are read"
               Expect.isEmpty fp.ContentWrites "a reorder touches no node's content"
@@ -74,7 +80,10 @@ let footprintTests =
           testCase "Batch unions its inner ops' footprints"
           <| fun _ ->
               let fp =
-                  Ops.footprint nodew idw [ Batch [ InsertChild("a", RNode.leaf "x" "para" "v"); RemoveNode "b" ] ]
+                  Ops.footprint
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      [ Batch [ InsertChild("a", RNode.leaf "x" "para" "v"); RemoveNode "b" ] ]
 
               Expect.equal fp.ContentWrites (setOf [ "x"; "b" ]) "insert + remove content-writes unioned"
               Expect.equal fp.StructureWrites (setOf [ "a" ]) "the insert's parent"
@@ -82,12 +91,15 @@ let footprintTests =
 
           testCase "the empty script has the empty footprint (independent of everything)"
           <| fun _ ->
-              let fp = Ops.footprint nodew idw []
+              let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) []
               Expect.isEmpty fp.Reads "empty"
               Expect.isEmpty fp.StructureWrites "empty"
               Expect.isEmpty fp.ContentWrites "empty"
               Expect.isEmpty fp.UnknownParentWrites "empty"
-              Expect.isTrue (Ops.independent fp (Ops.footprint nodew idw [ RemoveNode "a" ])) "empty ⊥ anything" ]
+
+              Expect.isTrue
+                  (Ops.independent fp (Ops.footprint Policy.none (OpScope.plain nodew idw) [ RemoveNode "a" ]))
+                  "empty ⊥ anything" ]
 
 [<Tests>]
 let independenceTests =
@@ -95,39 +107,60 @@ let independenceTests =
         "Ops.independent"
         [ testCase "inserts under DIFFERENT named parents are independent"
           <| fun _ ->
-              let a = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "x" "para" "v") ]
-              let b = Ops.footprint nodew idw [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+              let a =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+
+              let b =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+
               Expect.isTrue (Ops.independent a b) "disjoint parents + disjoint new ids commute"
 
           testCase "two inserts under the SAME parent are NOT independent (the pinned same-parent rule)"
           <| fun _ ->
-              let a = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "x" "para" "v") ]
-              let b = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "y" "para" "w") ]
+              let a =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+
+              let b =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "y" "para" "w") ]
+
               Expect.isFalse (Ops.independent a b) "both shift a's siblings"
 
           testCase "a reorder and an insert under different parents are independent"
           <| fun _ ->
-              let a = Ops.footprint nodew idw [ ReorderChildren("a", [ "a2"; "a1" ]) ]
-              let b = Ops.footprint nodew idw [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+              let a =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ ReorderChildren("a", [ "a2"; "a1" ]) ]
+
+              let b =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+
               Expect.isTrue (Ops.independent a b) "reorder a's kids vs insert under b commute"
 
           testCase "a remove conflicts with any concurrent structural write (unknown-parent over-approx)"
           <| fun _ ->
               // disjoint by NAMED ids, but the removed node's parent is unknown — conservatively dependent.
-              let a = Ops.footprint nodew idw [ RemoveNode "a1" ]
-              let b = Ops.footprint nodew idw [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+              let a = Ops.footprint Policy.none (OpScope.plain nodew idw) [ RemoveNode "a1" ]
+
+              let b =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("b", RNode.leaf "y" "para" "w") ]
+
               Expect.isFalse (Ops.independent a b) "a remove is only independent of a structure-free script"
 
           testCase "creating a node the other script uses as a structural anchor conflicts (content-vs-read)"
           <| fun _ ->
-              let a = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "q" "para" "v") ]
-              let b = Ops.footprint nodew idw [ InsertChild("q", RNode.leaf "y" "para" "w") ]
+              let a =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "q" "para" "v") ]
+
+              let b =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("q", RNode.leaf "y" "para" "w") ]
+
               Expect.isFalse (Ops.independent a b) "A authors q; B reads q as its parent"
 
           testCase "inserting and removing the SAME id conflict (content-vs-content)"
           <| fun _ ->
-              let a = Ops.footprint nodew idw [ InsertChild("a", RNode.leaf "z" "para" "v") ]
-              let b = Ops.footprint nodew idw [ RemoveNode "z" ]
+              let a =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ InsertChild("a", RNode.leaf "z" "para" "v") ]
+
+              let b = Ops.footprint Policy.none (OpScope.plain nodew idw) [ RemoveNode "z" ]
               Expect.isFalse (Ops.independent a b) "both touch z's lifecycle" ]
 
 [<Tests>]
@@ -139,18 +172,23 @@ let commutationTests =
               let tree = sample () // root[a[a1,a2], b[b1]]
               let a = [ InsertChild("a", RNode.leaf "x" "para" "v") ]
               let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
-              Expect.isTrue (Ops.independent (Ops.footprint nodew idw a) (Ops.footprint nodew idw b)) "independent"
+
+              Expect.isTrue
+                  (Ops.independent
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) a)
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) b))
+                  "independent"
 
               let hashOf = Tree.encodeHash nodew encNode
 
               let ab =
-                  Ops.applyAll nodew idw a tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw b t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) a tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) b t)
                   |> Result.map hashOf
 
               let ba =
-                  Ops.applyAll nodew idw b tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw a t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) b tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) a t)
                   |> Result.map hashOf
 
               Expect.equal ab ba "both orders yield the same tree (content hash)"
@@ -164,18 +202,23 @@ let commutationTests =
               let tree = flat ()
               let a = [ InsertChild("p", RNode.leaf "c" "para" "3") ]
               let b = [ InsertChild("p", RNode.leaf "d" "para" "4") ]
-              Expect.isFalse (Ops.independent (Ops.footprint nodew idw a) (Ops.footprint nodew idw b)) "dependent"
+
+              Expect.isFalse
+                  (Ops.independent
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) a)
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) b))
+                  "dependent"
 
               let hashOf = Tree.encodeHash nodew encNode
 
               let ab =
-                  Ops.applyAll nodew idw a tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw b t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) a tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) b t)
                   |> Result.map hashOf
 
               let ba =
-                  Ops.applyAll nodew idw b tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw a t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) b tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) a t)
                   |> Result.map hashOf
 
               Expect.notEqual ab ba "the two orders diverge — so footprint MUST call them dependent"
@@ -199,19 +242,21 @@ let commutationTests =
               let b = [ InsertChild("p", RNode.leaf "c" "para" "3") ]
 
               Expect.isFalse
-                  (Ops.independent (Ops.footprint nodew idw a) (Ops.footprint nodew idw b))
+                  (Ops.independent
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) a)
+                      (Ops.footprint Policy.none (OpScope.plain nodew idw) b))
                   "still declared dependent — conservative, and safe"
 
               let hashOf = Tree.encodeHash nodew encNode
 
               let ab =
-                  Ops.applyAll nodew idw a tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw b t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) a tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) b t)
                   |> Result.map hashOf
 
               let ba =
-                  Ops.applyAll nodew idw b tree
-                  |> Result.bind (fun t -> Ops.applyAll nodew idw a t)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) b tree
+                  |> Result.bind (fun t -> Ops.applyAll Policy.none (OpScope.plain nodew idw) a t)
                   |> Result.map hashOf
 
               Expect.equal ab ba "append semantics make the two orders agree" ]
@@ -427,7 +472,8 @@ let interferenceTests =
 
           testCase "concrete scripts name the clause and the addresses"
           <| fun _ ->
-              let fp ops = Ops.footprint nodew idw ops
+              let fp ops =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) ops
 
               let ins parent id =
                   InsertChild(parent, RNode.leaf id "para" "v")
@@ -468,7 +514,7 @@ let gateFootprintAgreementTests =
 
               let applicable =
                   OpsTests.everyOp t
-                  |> List.filter (fun op -> Result.isOk (Ops.apply nodew idw op t))
+                  |> List.filter (fun op -> Result.isOk (Ops.apply Policy.none (OpScope.plain nodew idw) op t))
 
               // the probe reaches every op kind, so the agreement is not vacuous on any arm
               for kind in [ "InsertChild"; "RemoveNode"; "MoveNode"; "ReorderChildren"; "UpdateNode" ] do
@@ -477,8 +523,8 @@ let gateFootprintAgreementTests =
                       (sprintf "an applicable %s is probed" kind)
 
               for op in applicable do
-                  let fp = Ops.footprintIn nodew idw t [ op ]
-                  let targets = WriteGate.targetsOf nodew idw op t
+                  let fp = Ops.footprintIn Policy.none (OpScope.plain nodew idw) t [ op ]
+                  let targets = WriteGate.targetsOf (OpScope.plain nodew idw) op t
 
                   // the source parent the op does not itself name (a move within one parent names it
                   // as the destination, and the gate decides on it there)
@@ -488,7 +534,11 @@ let gateFootprintAgreementTests =
                       | MoveNode(x, _) ->
                           Tree.parentOf nodew idw x t
                           |> Option.map _.Id
-                          |> Option.filter (fun p -> not ((Ops.footprint nodew idw [ op ]).StructureWrites.Contains p))
+                          |> Option.filter (fun p ->
+                              not (
+                                  (Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]).StructureWrites.Contains
+                                      p
+                              ))
                           |> Option.toList
                       | _ -> []
 
@@ -502,23 +552,35 @@ let gateFootprintAgreementTests =
               let t = sample ()
               // the move brings b1 under a; the removal then destroys a with b1 inside it
               let ops = [ MoveNode("b1", "a"); RemoveNode "a" ]
-              let afterMove = Ops.apply nodew idw ops.Head t |> Result.defaultValue t
+
+              let afterMove =
+                  Ops.apply Policy.none (OpScope.plain nodew idw) ops.Head t
+                  |> Result.defaultValue t
 
               let expected =
-                  Set.union (WriteGate.targetsOf nodew idw ops[0] t) (WriteGate.targetsOf nodew idw ops[1] afterMove)
+                  Set.union
+                      (WriteGate.targetsOf (OpScope.plain nodew idw) ops[0] t)
+                      (WriteGate.targetsOf (OpScope.plain nodew idw) ops[1] afterMove)
 
-              Expect.equal (WriteGate.targetsOf nodew idw (Batch ops) t) expected "threaded, not read at the base"
-              Expect.contains (WriteGate.targetsOf nodew idw (Batch ops) t) "b1" "b1 is destroyed by the second step"
+              Expect.equal
+                  (WriteGate.targetsOf (OpScope.plain nodew idw) (Batch ops) t)
+                  expected
+                  "threaded, not read at the base"
+
+              Expect.contains
+                  (WriteGate.targetsOf (OpScope.plain nodew idw) (Batch ops) t)
+                  "b1"
+                  "b1 is destroyed by the second step"
 
           testCase "a batch stops at the first op that does not apply, keeping that op's targets"
           <| fun _ ->
               let t = sample ()
               let ops = Batch [ RemoveNode "a1"; RemoveNode "a1"; RemoveNode "b" ]
-              let targets = WriteGate.targetsOf nodew idw ops t
+              let targets = WriteGate.targetsOf (OpScope.plain nodew idw) ops t
               Expect.contains targets "a1" "the refused step's own target is named"
               Expect.isFalse (targets.Contains "b") "no step after the refusal is judged"
 
               Expect.equal
-                  (WriteGate.decide (WriteGate.lockOnly [ "b" ]) nodew idw ops t)
+                  (WriteGate.decide (WriteGate.lockOnly [ "b" ]) (OpScope.plain nodew idw) ops t)
                   (Ok())
                   "the gate leaves the refusal to the reducer" ]

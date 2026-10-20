@@ -47,7 +47,7 @@ let tests =
           <| fun _ ->
               let op = InsertChild("a", RNode.leaf "a3" "para" "w")
 
-              match Ops.apply nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Ok r -> Expect.equal (childIds nodew "a" r) [ "a1"; "a2"; "a3" ] "appended"
               | Error e -> failtestf "unexpected %A" e
 
@@ -55,25 +55,31 @@ let tests =
           <| fun _ ->
               let op = InsertChild("a", RNode.leaf "b1" "para" "dup")
 
-              match Ops.apply nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Error(DuplicateId "b1") -> ()
               | other -> failtestf "expected DuplicateId, got %A" other
 
           testCase "InsertChild under an unknown parent enumerates the addressable ids"
           <| fun _ ->
-              match Ops.apply nodew idw (InsertChild("ghost", RNode.leaf "z" "para" "")) (sample ()) with
+              match
+                  Ops.apply
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      (InsertChild("ghost", RNode.leaf "z" "para" ""))
+                      (sample ())
+              with
               | Error(UnknownNode("ghost", addressable)) -> Expect.contains addressable "root" "addressable lists ids"
               | other -> failtestf "expected UnknownNode, got %A" other
 
           testCase "RemoveNode drops the subtree"
           <| fun _ ->
-              match Ops.apply nodew idw (RemoveNode "a") (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode "a") (sample ()) with
               | Ok r -> Expect.isNone (Tree.tryFind nodew idw "a" r) "a gone"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "RemoveNode refuses the root"
           <| fun _ ->
-              match Ops.apply nodew idw (RemoveNode "root") (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode "root") (sample ()) with
               | Error CannotRemoveRoot -> ()
               | other -> failtestf "expected CannotRemoveRoot, got %A" other
 
@@ -81,7 +87,7 @@ let tests =
           <| fun _ ->
               // Membership only: the move APPENDS. Landing it anywhere else is
               // `Batch [MoveNode …; ReorderChildren …]` — see the next case.
-              match Ops.apply nodew idw (MoveNode("a1", "b")) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("a1", "b")) (sample ()) with
               | Ok r ->
                   Expect.equal (childIds nodew "b" r) [ "b1"; "a1" ] "a1 appended under b"
                   Expect.equal (childIds nodew "a" r) [ "a2" ] "a1 left a"
@@ -91,32 +97,36 @@ let tests =
           <| fun _ ->
               let op = Batch [ MoveNode("a1", "b"); ReorderChildren("b", [ "a1"; "b1" ]) ]
 
-              match Ops.apply nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Ok r -> Expect.equal (childIds nodew "b" r) [ "a1"; "b1" ] "placed first by naming the order"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "MoveNode refuses to nest a node under itself"
           <| fun _ ->
-              match Ops.apply nodew idw (MoveNode("a", "a1")) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("a", "a1")) (sample ()) with
               | Error(WouldNestUnderSelf("a", NestRelation.Descendant)) -> ()
               | other -> failtestf "expected WouldNestUnderSelf, got %A" other
 
           // Phase 315 — the relation says which of the two mistakes it was.
           testCase "MoveNode under itself is the Self relation, into its subtree the Descendant one"
           <| fun _ ->
-              match Ops.apply nodew idw (MoveNode("a", "a")) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("a", "a")) (sample ()) with
               | Error(WouldNestUnderSelf("a", NestRelation.Self)) -> ()
               | other -> failtestf "expected WouldNestUnderSelf(a, Self), got %A" other
 
           testCase "ReorderChildren permutes"
           <| fun _ ->
-              match Ops.apply nodew idw (ReorderChildren("a", [ "a2"; "a1" ])) (sample ()) with
+              match
+                  Ops.apply Policy.none (OpScope.plain nodew idw) (ReorderChildren("a", [ "a2"; "a1" ])) (sample ())
+              with
               | Ok r -> Expect.equal (childIds nodew "a" r) [ "a2"; "a1" ] "reordered"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "ReorderChildren rejects a non-permutation"
           <| fun _ ->
-              match Ops.apply nodew idw (ReorderChildren("a", [ "a1"; "a1" ])) (sample ()) with
+              match
+                  Ops.apply Policy.none (OpScope.plain nodew idw) (ReorderChildren("a", [ "a1"; "a1" ])) (sample ())
+              with
               | Error(ReorderMismatch("a", _, _)) -> ()
               | other -> failtestf "expected ReorderMismatch, got %A" other
 
@@ -125,7 +135,7 @@ let tests =
               let batch =
                   Batch [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "root" ]
 
-              match Ops.apply nodew idw batch (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) batch (sample ()) with
               | Error CannotRemoveRoot -> ()
               | other -> failtestf "expected CannotRemoveRoot (atomic abort), got %A" other
 
@@ -133,7 +143,7 @@ let tests =
           <| fun _ ->
               let ops = [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "ghost" ]
 
-              match Ops.applyAll nodew idw ops (sample ()) with
+              match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops (sample ()) with
               | Error { Applied = 1
                         Rejection = UnknownNode("ghost", _)
                         Tree = partial } ->
@@ -152,8 +162,8 @@ let tests =
               Expect.equal (List.length normd) 1 "the insert/remove pair collapses"
 
               Expect.equal
-                  (Ops.applyAll nodew idw normd (sample ()))
-                  (Ops.applyAll nodew idw ops (sample ()))
+                  (Ops.applyAll Policy.none (OpScope.plain nodew idw) normd (sample ()))
+                  (Ops.applyAll Policy.none (OpScope.plain nodew idw) ops (sample ()))
                   "applyAll is unchanged"
 
           testCase "normalize keeps only the last of adjacent reorders on a parent"
@@ -245,7 +255,9 @@ let insertIdUniquenessTests =
         "Ops.InsertChild id uniqueness (Phase 137)"
         [ testCase "a subtree whose descendant id is already in the tree is refused by apply"
           <| fun _ ->
-              match Ops.apply nodew idw (InsertChild("b", descendantCollision ())) (sample ()) with
+              match
+                  Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", descendantCollision ())) (sample ())
+              with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected DuplicateId \"a1\", got %A" other
 
@@ -254,11 +266,12 @@ let insertIdUniquenessTests =
               let op = InsertChild("b", descendantCollision ())
 
               Expect.equal
-                  (Ops.canApply nodew idw op (sample ()))
-                  (Ops.apply nodew idw op (sample ()) |> Result.map ignore)
+                  (Ops.canApply Policy.none (OpScope.plain nodew idw) op (sample ()))
+                  (Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ())
+                   |> Result.map ignore)
                   "canApply ≡ apply on the descendant collision"
 
-              match Ops.canApply nodew idw op (sample ()) with
+              match Ops.canApply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected DuplicateId \"a1\", got %A" other
 
@@ -268,13 +281,14 @@ let insertIdUniquenessTests =
               // the id check is reached whatever kind the incoming subtree carries.
               let op = InsertChild("b", descendantCollision ())
 
-              match Ops.applyContained canHold137 nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold137 nodew idw) op (sample ()) with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected DuplicateId \"a1\", got %A" other
 
               Expect.equal
-                  (Ops.canApplyContained canHold137 nodew idw op (sample ()))
-                  (Ops.applyContained canHold137 nodew idw op (sample ()) |> Result.map ignore)
+                  (Ops.canApply Policy.none (OpScope.contained canHold137 nodew idw) op (sample ()))
+                  (Ops.apply Policy.none (OpScope.contained canHold137 nodew idw) op (sample ())
+                   |> Result.map ignore)
                   "canApplyContained ≡ applyContained"
 
           testCase "a subtree duplicated WITHIN ITSELF is refused even though no id is in the tree"
@@ -284,15 +298,15 @@ let insertIdUniquenessTests =
               // is about the tree that RESULTS, and this one carries "dup" twice.
               let op = InsertChild("b", internallyDuplicated ())
 
-              match Ops.apply nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Error(DuplicateId "dup") -> ()
               | other -> failtestf "expected DuplicateId \"dup\", got %A" other
 
-              match Ops.canApply nodew idw op (sample ()) with
+              match Ops.canApply Policy.none (OpScope.plain nodew idw) op (sample ()) with
               | Error(DuplicateId "dup") -> ()
               | other -> failtestf "expected DuplicateId \"dup\" from canApply, got %A" other
 
-              match Ops.applyContained canHold137 nodew idw op (sample ()) with
+              match Ops.apply Policy.none (OpScope.contained canHold137 nodew idw) op (sample ()) with
               | Error(DuplicateId "dup") -> ()
               | other -> failtestf "expected DuplicateId \"dup\" from applyContained, got %A" other
 
@@ -302,7 +316,7 @@ let insertIdUniquenessTests =
               let sub =
                   RNode.node "z" "section" [ RNode.leaf "b1" "para" "x"; RNode.leaf "a1" "para" "y" ]
 
-              match Ops.apply nodew idw (InsertChild("b", sub)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", sub)) (sample ()) with
               | Error(DuplicateId "b1") -> ()
               | other -> failtestf "expected the first offender \"b1\", got %A" other
 
@@ -311,13 +325,25 @@ let insertIdUniquenessTests =
               // The pre-137 validator checked the inserted node's own id BEFORE parent existence.
               // `Tree.ids` is preorder, so the widened scan checks that same id first and the
               // precedence is preserved rather than quietly reordered.
-              match Ops.apply nodew idw (InsertChild("ghost", RNode.leaf "b1" "para" "")) (sample ()) with
+              match
+                  Ops.apply
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      (InsertChild("ghost", RNode.leaf "b1" "para" ""))
+                      (sample ())
+              with
               | Error(DuplicateId "b1") -> ()
               | other -> failtestf "expected DuplicateId \"b1\" ahead of UnknownNode, got %A" other
 
           testCase "a descendant collision also outranks an unknown parent"
           <| fun _ ->
-              match Ops.apply nodew idw (InsertChild("ghost", descendantCollision ())) (sample ()) with
+              match
+                  Ops.apply
+                      Policy.none
+                      (OpScope.plain nodew idw)
+                      (InsertChild("ghost", descendantCollision ()))
+                      (sample ())
+              with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected DuplicateId \"a1\" ahead of UnknownNode, got %A" other
 
@@ -327,7 +353,7 @@ let insertIdUniquenessTests =
               let fresh =
                   RNode.node "z" "section" [ RNode.leaf "z1" "para" "x"; RNode.leaf "z2" "para" "y" ]
 
-              match Ops.apply nodew idw (InsertChild("b", fresh)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", fresh)) (sample ()) with
               | Ok r ->
                   Expect.equal (childIds nodew "b" r) [ "b1"; "z" ] "appended under b"
 
@@ -346,7 +372,7 @@ let insertIdUniquenessTests =
                       [ InsertChild("a", RNode.leaf "a3" "para" "ok")
                         InsertChild("b", descendantCollision ()) ]
 
-              match Ops.apply nodew idw ops (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) ops (sample ()) with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected the batch to abort with DuplicateId \"a1\", got %A" other
 
@@ -355,7 +381,7 @@ let insertIdUniquenessTests =
               // A move takes an EXISTING subtree to a new parent, so its ids are already in the
               // tree by construction; the insert-side check must not make a legal move look like a
               // collision.
-              match Ops.apply nodew idw (MoveNode("a1", "b")) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("a1", "b")) (sample ()) with
               | Ok r -> Expect.equal (childIds nodew "b" r) [ "b1"; "a1" ] "the move still lands"
               | Error e -> failtestf "a legal move must not be refused, got %A" e
 
@@ -393,7 +419,7 @@ let insertIdUniquenessTests =
           <| fun _ ->
               // First refusal wins, and a script is NOT a `Batch`. A `Batch` is all-or-nothing
               // inside one op — it aborts and the caller's original tree survives. A script keeps
-              // the accepted prefix: `applyAllWith` stops at the first refusal and hands back the
+              // the accepted prefix: `Ops.applyAll` under `OpScope.contained` stops at the first refusal and hands back the
               // tree that prefix reached, with the 0-based index of the step that failed.
               //
               // The predicate here admits `doc` and `section` and refuses `para`, so step 2 —
@@ -406,7 +432,7 @@ let insertIdUniquenessTests =
                     MoveNode("a2", "a1")
                     InsertChild("a", RNode.leaf "a4" "para" "never") ]
 
-              match Ops.applyAllWith canHold nodew idw script (sample ()) with
+              match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script (sample ()) with
               | Error { Applied = i
                         Rejection = NotAContainer("a1", "para")
                         Tree = partial } ->
@@ -432,9 +458,10 @@ let insertIdUniquenessTests =
               let script =
                   [ InsertChild("a", RNode.leaf "a3" "para" "first"); MoveNode("a2", "a1") ]
 
-              let dry = Ops.canApplyAllWith canHold nodew idw script (sample ())
+              let dry =
+                  Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) script (sample ())
 
-              match dry, Ops.applyAllWith canHold nodew idw script (sample ()) with
+              match dry, Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script (sample ()) with
               | Error(di, de), Error { Applied = ai; Rejection = ae } ->
                   Expect.equal di ai "the dry run and the mutating call name the same step"
                   Expect.equal (sprintf "%A" de) (sprintf "%A" ae) "…and the same envelope"
@@ -481,8 +508,10 @@ let insertIdUniquenessTests =
                   rng <- r
                   checkedScripts <- checkedScripts + 1
 
-                  let plain = Ops.applyAll nodew idw script (sample ())
-                  let total = Ops.applyAllWith (fun _ -> true) nodew idw script (sample ())
+                  let plain = Ops.applyAll Policy.none (OpScope.plain nodew idw) script (sample ())
+
+                  let total =
+                      Ops.applyAll Policy.none (OpScope.contained (fun _ -> true) nodew idw) script (sample ())
 
                   if Result.isError plain then
                       refusals <- refusals + 1
@@ -493,8 +522,10 @@ let insertIdUniquenessTests =
                       (sprintf "applyAll must be applyAllWith (fun _ -> true) on %A" script)
 
                   Expect.equal
-                      (renderCan (Ops.canApplyAll nodew idw script (sample ())))
-                      (renderCan (Ops.canApplyAllWith (fun _ -> true) nodew idw script (sample ())))
+                      (renderCan (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) script (sample ())))
+                      (renderCan (
+                          Ops.canApplyAll Policy.none (OpScope.contained (fun _ -> true) nodew idw) script (sample ())
+                      ))
                       (sprintf "canApplyAll must be canApplyAllWith (fun _ -> true) on %A" script)
 
               // the pool was not vacuous in either direction — an all-accepting or all-refusing run
@@ -550,7 +581,7 @@ let insertIdUniquenessTests =
               | Tree.RepeatedId d -> Expect.equal d "b" "the first id reached twice in preorder is named"
               | Tree.Structural -> failtest "a tree carrying `a` and `b` twice read as well-formed"
 
-              match Diff.toOps nodew idw t (sample ()) with
+              match Diff.toOps Policy.none (OpScope.plain nodew idw) t (sample ()) with
               | Error(Diff.DuplicateIdInTree d) ->
                   Expect.equal d "b" "Diff names the same offender the accept path would — one definition, one answer"
               | other -> failtestf "the diff should refuse a malformed `before` tree: %A" other
@@ -579,7 +610,7 @@ let insertIdUniquenessTests =
               // and the validator is a projection of it rather than a second copy: the same three
               // grafts, through the shipped accept path.
               let verdict graft =
-                  match Ops.apply nodew idw (InsertChild("b", graft)) t with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", graft)) t with
                   | Ok _ -> "accept"
                   | Error(DuplicateId d) -> "duplicate:" + d
                   | Error e -> sprintf "%A" e
@@ -658,7 +689,7 @@ let graftRefusalCorrespondenceTests =
           <| fun _ ->
               let after = nestedUnderPara ()
 
-              match Diff.toOpsContained canHold137 nodew idw (sample ()) after with
+              match Diff.toOps Policy.none (OpScope.contained canHold137 nodew idw) (sample ()) after with
               | Error(Diff.TargetNotAContainer(target = "a1"; kindTag = "para")) -> ()
               | other -> failtestf "expected TargetNotAContainer(target = a1, kindTag = para), got %A" other
 
@@ -666,10 +697,10 @@ let graftRefusalCorrespondenceTests =
               let graft = Tree.tryFind nodew idw "a1" after |> Option.get
 
               let cut =
-                  Ops.apply nodew idw (RemoveNode "a1") after
+                  Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode "a1") after
                   |> Result.defaultWith (failwithf "cut: %A")
 
-              match Ops.applyContained canHold137 nodew idw (InsertChild("a", graft)) cut with
+              match Ops.apply Policy.none (OpScope.contained canHold137 nodew idw) (InsertChild("a", graft)) cut with
               | Error(NotAContainer(target = "a1"; kindTag = "para")) -> ()
               | other -> failtestf "expected NotAContainer(target = a1, kindTag = para), got %A" other
 
@@ -723,12 +754,12 @@ let moveContainedLengthTests =
 
               for anchor in [ Anchor.Last; Anchor.First; Anchor.Index 0 ] do
                   Expect.equal
-                      (TreePlacement.move nodew idw "a" "p" anchor t)
+                      (TreePlacement.move Policy.none (OpScope.plain nodew idw) "a" "p" anchor t)
                       (Error(PlaceError.Refused(DuplicateId "a")))
                       (sprintf "the repeated target is named, at %A" anchor)
 
               Expect.equal
-                  (TreePlacement.moveContained canHold137 nodew idw "a" "p" Anchor.Last t)
+                  (TreePlacement.move Policy.none (OpScope.contained canHold137 nodew idw) "a" "p" Anchor.Last t)
                   (Error(PlaceError.Refused(DuplicateId "a")))
                   "the contained form refuses it the same way"
 
@@ -740,10 +771,13 @@ let moveContainedLengthTests =
                       "doc"
                       [ RNode.node "p" "section" [ RNode.leaf "a" "para" "1"; RNode.leaf "b" "para" "2" ] ]
 
-              Expect.equal (TreePlacement.move nodew idw "a" "p" Anchor.First t) (Ok []) "already there"
+              Expect.equal
+                  (TreePlacement.move Policy.none (OpScope.plain nodew idw) "a" "p" Anchor.First t)
+                  (Ok [])
+                  "already there"
 
               Expect.equal
-                  (TreePlacement.move nodew idw "a" "p" Anchor.Last t)
+                  (TreePlacement.move Policy.none (OpScope.plain nodew idw) "a" "p" Anchor.Last t)
                   (Ok [ ReorderChildren("p", [ "b"; "a" ]) ])
                   "a reorder among its own siblings" ]
 
@@ -784,28 +818,41 @@ let scriptRunnerTests =
               for a in ops do
                   for b in ops do
                       let script = [ a; b ]
-                      let run = Ops.applyAll nodew idw script t
+                      let run = Ops.applyAll Policy.none (OpScope.plain nodew idw) script t
 
                       let dry =
                           match run with
                           | Ok _ -> Ok()
                           | Error r -> Error(r.Applied, r.Rejection)
 
-                      Expect.equal (Ops.canApplyAll nodew idw script t) dry "canApplyAll"
-                      Expect.equal (Ops.canApplyAllWith (fun _ -> true) nodew idw script t) dry "canApplyAllWith"
+                      Expect.equal (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) script t) dry "canApplyAll"
 
                       Expect.equal
-                          (Ops.canApplyAllGrammar (fun _ -> None) (fun _ -> true) nodew idw script t)
+                          (Ops.canApplyAll Policy.none (OpScope.contained (fun _ -> true) nodew idw) script t)
+                          dry
+                          "canApplyAllWith"
+
+                      Expect.equal
+                          (Ops.canApplyAll
+                              (Policy.grammar (fun _ -> None))
+                              (OpScope.contained (fun _ -> true) nodew idw)
+                              script
+                              t)
                           dry
                           "canApplyAllGrammar with no grammar"
 
                       Expect.equal
-                          (Ops.apply nodew idw (Batch script) t)
+                          (Ops.apply Policy.none (OpScope.plain nodew idw) (Batch script) t)
                           (run |> Result.mapError _.Rejection)
                           "Batch is the script, all-or-nothing"
 
                       Expect.equal
-                          (WriteGate.applyGated WriteGate.allowAll nodew idw (Batch script) t)
+                          (WriteGate.applyGated
+                              WriteGate.allowAll
+                              Policy.none
+                              (OpScope.plain nodew idw)
+                              (Batch script)
+                              t)
                           (run |> Result.mapError (fun r -> GatedApplyFailure.Rejected r.Rejection))
                           "the permissive gate"
 
@@ -815,7 +862,11 @@ let scriptRunnerTests =
                           Expect.equal (i, e) (r.Applied, r.Rejection) "invertAll refuses where the script does"
                       | Ok after, Ok inverse ->
                           applied <- applied + 1
-                          Expect.equal (Ops.applyAll nodew idw inverse after) (Ok t) "the inverse script undoes it"
+
+                          Expect.equal
+                              (Ops.applyAll Policy.none (OpScope.plain nodew idw) inverse after)
+                              (Ok t)
+                              "the inverse script undoes it"
                       | r, i -> failtestf "applyAll and invertAll disagree on %A: %A / %A" script r i
 
               // both outcomes are reached, so neither half of the agreement is vacuous

@@ -40,13 +40,13 @@ let arbitrateTests =
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "v") ]
               let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "w") ]
 
-              let r = Arbitration.arbitrate nodew idw tree [ p2; p1 ] // input order ≠ pinned order
+              let r = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p2; p1 ] // input order ≠ pinned order
 
               Expect.equal (acceptedIds r) [ 1; 2 ] "both accepted, ascending id"
               Expect.isEmpty r.Rejected "nothing rejected"
               Expect.equal r.MergedScript (p1.Ops @ p2.Ops) "merged script composes in pinned order"
 
-              match Ops.applyAll nodew idw r.MergedScript tree with
+              match Ops.applyAll Policy.none (OpScope.plain nodew idw) r.MergedScript tree with
               | Ok _ -> ()
               | Error e -> failtestf "the merged script must apply green: %A" e
 
@@ -59,7 +59,8 @@ let arbitrateTests =
               let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
               let p3 = prop 3 [ InsertChild("a", RNode.leaf "z" "para" "3") ]
 
-              let r = Arbitration.arbitrate nodew idw tree [ p3; p1; p2 ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p3; p1; p2 ]
 
               Expect.equal (acceptedIds r) [ 1 ] "only the lowest-id proposal is accepted"
 
@@ -74,12 +75,16 @@ let arbitrateTests =
               let bad = [ InsertChild("zz", RNode.leaf "x" "para" "v") ] // unknown parent
               let p1 = prop 1 bad
 
-              let r = Arbitration.arbitrate nodew idw tree [ p1 ]
+              let r = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1 ]
 
               match r.Rejected with
               | [ (p, Inapplicable(ix, rej)) ] ->
                   Expect.equal p.Id 1 "the proposal is the rejected one"
-                  Expect.equal (Ops.canApplyAll nodew idw bad tree) (Error(ix, rej)) "exactly the canApplyAll envelope"
+
+                  Expect.equal
+                      (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) bad tree)
+                      (Error(ix, rej))
+                      "exactly the canApplyAll envelope"
 
                   match rej with
                   | UnknownNode("zz", _) -> ()
@@ -94,7 +99,8 @@ let arbitrateTests =
               let p3 = prop 3 [ RemoveNode "b1" ] // remove ⇒ unknown-parent ⇒ conflicts with any structural write
               let p4 = prop 4 [ InsertChild("b", RNode.leaf "w" "para" "4") ] // independent of p1 — accepted
 
-              let r = Arbitration.arbitrate nodew idw tree [ p4; p3; p2; p1 ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p4; p3; p2; p1 ]
 
               Expect.equal (acceptedIds r) [ 1; 4 ] "the two independent applicable proposals are accepted"
 
@@ -112,7 +118,8 @@ let arbitrateTests =
               let p2 = prop 2 [ RemoveNode "b1" ]
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "y" "para" "3") ]
 
-              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2; p3 ]
 
               Expect.equal (acceptedIds r) [ 1; 3 ] "p1 + p3 accepted"
               Expect.equal (citedBy r) [ 2, Some [ 1; 3 ] ] "p2 cites BOTH accepted interferers"
@@ -124,24 +131,28 @@ let arbitrateTests =
               let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "z" "para" "3") ]
 
-              let reference = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
+              let reference =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2; p3 ]
 
               for input in [ [ p3; p2; p1 ]; [ p2; p3; p1 ]; [ p3; p1; p2 ] ] do
-                  Expect.equal (Arbitration.arbitrate nodew idw tree input) reference "same partition, any input order"
+                  Expect.equal
+                      (Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree input)
+                      reference
+                      "same partition, any input order"
 
           testCase "the accepted scripts apply confluently in either order (same content hash)"
           <| fun _ ->
               let tree = sample ()
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
               let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "2") ]
-              let r = Arbitration.arbitrate nodew idw tree [ p1; p2 ]
+              let r = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2 ]
               Expect.equal (acceptedIds r) [ 1; 2 ] "both accepted"
 
               let hashOf = Tree.encodeHash nodew encNode
 
               let apply2 first second =
-                  Ops.applyAll nodew idw first tree
-                  |> Result.bind (Ops.applyAll nodew idw second)
+                  Ops.applyAll Policy.none (OpScope.plain nodew idw) first tree
+                  |> Result.bind (Ops.applyAll Policy.none (OpScope.plain nodew idw) second)
                   |> Result.map hashOf
 
               Expect.equal (apply2 p1.Ops p2.Ops) (apply2 p2.Ops p1.Ops) "any order, one tree"
@@ -149,13 +160,15 @@ let arbitrateTests =
           testCase "arbitrate is total on degenerate input (empty list, empty scripts)"
           <| fun _ ->
               let tree = sample ()
-              let empty = Arbitration.arbitrate nodew idw tree []
+              let empty = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree []
               Expect.isEmpty empty.Accepted "no proposals, nothing accepted"
               Expect.isEmpty empty.Rejected "no proposals, nothing rejected"
               Expect.isEmpty empty.MergedScript "no proposals, empty merged script"
 
               // an empty script applies vacuously and is independent of everything.
-              let r = Arbitration.arbitrate nodew idw tree [ prop 1 [] ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ prop 1 [] ]
+
               Expect.equal (acceptedIds r) [ 1 ] "the empty script is accepted"
               Expect.isEmpty r.MergedScript "and contributes no ops" ]
 
@@ -240,14 +253,17 @@ let explainedRejectionTests =
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "y" "para" "3") ]
               let p4 = prop 4 [ InsertChild("a", RNode.leaf "z" "para" "4") ]
 
-              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3; p4 ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2; p3; p4 ]
 
               Expect.equal (acceptedIds r) [ 1; 3 ] "p1 + p3 accepted"
 
               for p, reason in r.Rejected do
                   match reason with
                   | Conflicts(ids, carried) ->
-                      let explained = Arbitration.interference nodew idw r.Accepted p
+                      let explained =
+                          Arbitration.interference Policy.none (OpScope.plain nodew idw) r.Accepted p
+
                       Expect.equal (List.map fst explained) ids "the explanation cites exactly the Conflicts ids"
                       Expect.equal carried explained "the case carries exactly Arbitration.interference"
 
@@ -258,13 +274,13 @@ let explainedRejectionTests =
               // and the clauses say HOW: the remove serialises against both inserts, the second
               // insert under `a` shares p1's parent.
               Expect.equal
-                  (Arbitration.interference nodew idw r.Accepted p2)
+                  (Arbitration.interference Policy.none (OpScope.plain nodew idw) r.Accepted p2)
                   [ 1, [ Interference.LeftUnknownParent(Set.ofList [ "b1" ], Set.ofList [ "a" ]) ]
                     3, [ Interference.LeftUnknownParent(Set.ofList [ "b1" ], Set.ofList [ "b" ]) ] ]
                   "p2 relocates b1 against each accepted structural write"
 
               Expect.equal
-                  (Arbitration.interference nodew idw r.Accepted p4)
+                  (Arbitration.interference Policy.none (OpScope.plain nodew idw) r.Accepted p4)
                   [ 1, [ Interference.SameParent(Set.ofList [ "a" ]) ] ]
                   "p4 shares parent a with p1, and nothing with p3"
 
@@ -273,11 +289,14 @@ let explainedRejectionTests =
               let tree = sample ()
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
               let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "2") ]
-              let r = Arbitration.arbitrate nodew idw tree [ p1; p2 ]
+              let r = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2 ]
 
               for p in r.Accepted do
                   let others = r.Accepted |> List.filter (fun a -> a.Id <> p.Id)
-                  Expect.isEmpty (Arbitration.interference nodew idw others p) "accepted proposals are independent"
+
+                  Expect.isEmpty
+                      (Arbitration.interference Policy.none (OpScope.plain nodew idw) others p)
+                      "accepted proposals are independent"
 
           testCase "a stale proposal's bounded report: the missing id, the count, and a capped sample"
           <| fun _ ->
@@ -286,7 +305,7 @@ let explainedRejectionTests =
                   RNode.node "root" "doc" [ for i in 1..200 -> RNode.leaf (sprintf "n%d" i) "para" "v" ]
 
               let p1 = prop 1 [ InsertChild("n1", RNode.leaf "x" "para" "1"); RemoveNode "gone" ]
-              let r = Arbitration.arbitrate nodew idw big [ p1 ]
+              let r = Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) big [ p1 ]
 
               match r.Rejected with
               | [ (_, reason) ] ->
@@ -312,7 +331,12 @@ let explainedRejectionTests =
                   RNode.node "root" "doc" [ for i in 1..n -> RNode.leaf (sprintf "n%d" i) "para" "v" ]
 
               for n in [ 0; 3; 7; 50; 465; 2000 ] do
-                  let r = Arbitration.arbitrate nodew idw (docOf n) [ prop 1 [ RemoveNode "gone" ] ]
+                  let r =
+                      Arbitration.arbitrate
+                          Policy.none
+                          (OpScope.plain nodew idw)
+                          (docOf n)
+                          [ prop 1 [ RemoveNode "gone" ] ]
 
                   match r.Rejected |> List.map (snd >> Arbitration.stale) with
                   | [ Some s ] ->
@@ -326,7 +350,9 @@ let explainedRejectionTests =
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
               let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ] // Conflicts
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "a1" "para" "3") ] // DuplicateId
-              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
+
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree [ p1; p2; p3 ]
 
               Expect.equal (List.length r.Rejected) 2 "one conflict, one duplicate"
 

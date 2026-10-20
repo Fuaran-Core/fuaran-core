@@ -8,12 +8,12 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
 let private applyAllOk ops tree =
-    match Ops.applyAll nodew idw ops tree with
+    match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops tree with
     | Ok r -> r
     | Error { Applied = i; Rejection = e } -> failtestf "applyAll failed at %d: %A" i e
 
 let private diffOk before after =
-    match Diff.toOps nodew idw before after with
+    match Diff.toOps Policy.none (OpScope.plain nodew idw) before after with
     | Ok ops -> ops
     | Error e -> failtestf "diff failed: %A" e
 
@@ -75,7 +75,7 @@ let tests =
 
           testCase "differing root ids yield a typed error, not an unapplyable script"
           <| fun _ ->
-              match Diff.toOps nodew idw (sample ()) (RNode.node "different" "doc" []) with
+              match Diff.toOps Policy.none (OpScope.plain nodew idw) (sample ()) (RNode.node "different" "doc" []) with
               | Error(Diff.RootIdMismatch("root", "different")) -> ()
               | other -> failtestf "expected RootIdMismatch, got %A" other
 
@@ -88,8 +88,8 @@ let tests =
               let after = applyAllOk [ InsertChild("b", RNode.leaf "b2" "para" "w") ] before
 
               Expect.equal
-                  (Diff.toOpsContained canHold nodew idw before after)
-                  (Diff.toOps nodew idw before after)
+                  (Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after)
+                  (Diff.toOps Policy.none (OpScope.plain nodew idw) before after)
                   "identical to toOps on container trees"
 
           testCase "toOpsContained refuses an after-tree nesting a child under a leaf"
@@ -99,7 +99,7 @@ let tests =
               // plain apply (every node a container) lets us build the illegal-for-leaves after
               let after = applyAllOk [ InsertChild("a1", RNode.leaf "x" "para" "v") ] before
 
-              match Diff.toOpsContained canHold nodew idw before after with
+              match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
               | Error(Diff.TargetNotAContainer("a1", "para")) -> ()
               | other -> failtestf "expected TargetNotAContainer at a1, got %A" other
 

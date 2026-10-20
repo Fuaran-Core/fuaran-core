@@ -4,11 +4,12 @@ namespace Fuaran.Core
 /// Given two trees over a shared id space, derive a `SkeletonOp` list that transforms one
 /// into the other — so a desired tree lowers to the apply/op-stream path every domain has.
 ///
-/// **Structural positions only (Phase 496).** There is no keyed diff: over the plain witness a change
-/// below a keyed child is seen only where the caller's encoder reads the holder's keyed positions
-/// (as that holder's `UpdateNode`), and `Tree.traversal` is not a witness to diff over, because the
-/// shells the diff builds (`ReplaceChildren n []`) are shorter than the keyed arity it must preserve
-/// (`KeyedGateDiffTests` (b) and (c) pin both).
+/// **Structural positions only (Phase 496).** There is no keyed diff yet: the diff walks a scope's
+/// structural witness (`OpScope.Nodes`) whatever its `Keyed`, so a change below a keyed child is seen
+/// only where the caller's encoder reads the holder's keyed positions (as that holder's
+/// `UpdateNode`), and `Tree.traversal` is not a witness to diff over, because the shells the diff
+/// builds (`ReplaceChildren n []`) are shorter than the keyed arity it must preserve
+/// (`KeyedGateDiffTests` (b) and (c) pin both; the keyed diff is fuaran-core#518's).
 module Diff =
 
     /// Why a diff could not be produced — a typed result, never an unapplyable script.
@@ -25,7 +26,7 @@ module Diff =
         /// `target` is the first such node of `after` in preorder, as `Ops.firstUncontained` — the
         /// single definition of the shape — finds it, and `kindTag` is that node's own. The payload
         /// is its apply-side sibling's, `Rejection.NotAContainer`: grafting the same subtree through
-        /// `Ops.applyContained` refuses with `NotAContainer` naming the same `target` and `kindTag`,
+        /// `Ops.apply` under the same contained scope refuses with `NotAContainer` naming the same `target` and `kindTag`,
         /// which `Conformance.diffContainedLaws` asserts. (Phase 228 renamed the field from `parent`,
         /// the operator's ruling (B) of 2026-09-20; positional construction and matching are
         /// unaffected.)
@@ -147,7 +148,8 @@ module Diff =
     // moves and the removals. An `UpdateNode` keeps the children the tree holds, so it is inert to
     // the four structural blocks wherever it sits; the two sites are where the containment check
     // is satisfied. Measured over 5,444 independent pairs with drawn kinds and a drawn `canHold`:
-    // 0 refused under `applyAllWith`, 0 round-trip mismatches, where the structural script had 41%
+    // 0 refused under `Ops.applyAll` with that `canHold` as the scope's, 0 round-trip mismatches,
+    // where the structural script had 41%
     // refused and appending every update last still had 41% (`ProofOracleTests`, the content-aware
     // bridge).
     let private emitWith
@@ -317,136 +319,102 @@ module Diff =
                     // 5. The updates `canHold` refuses, last of all: by now each such node holds
                     //    exactly its `after` children, which `firstUncontained` has already shown
                     //    to be none (a childful node the predicate refuses is refused up front by
-                    //    `toOpsContained`, and the plain forms pass a predicate that refuses
+                    //    `diffUnder` under a scope with a `CanHold`, and a plain scope's predicate refuses
                     //    nothing, so this block is empty there).
                     ops.AddRange trailingUpdates
 
                     Ok(List.ofSeq ops)
 
-    /// Derive a script such that `Ops.applyAll (toOps w idw before after) before`
-    /// reproduces `after` structurally. Relocated subtrees diff to `MoveNode` (never
-    /// remove+insert), so an unchanged subtree is preserved, not destroyed and rebuilt.
-    /// The emitted order is always applyable: added nodes go in as leaf shells (top-down),
-    /// every survivor is then reattached/reordered to its `after` position, and removed
-    /// regions are deleted **last** (so a surviving child is pulled out before its old
-    /// container is removed). Structural only — a survivor keeps `before`'s content, kind
-    /// included; `toOpsWith` is the form that diffs content too. The two roots must share an id.
-    let toOps
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+    /// The one entry behind `toOps` and `toOpsWith` (Phase 517): the scope's container refusal, the
+    /// emitter, then the policy's grammar refusal, in that order.
+    let private diffUnder
+        (changed: ('Node -> 'Node -> bool) option)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        emitWith None (fun _ -> true) w idw before after
+        let w = scope.Nodes
 
-    /// Container-aware diff (Phase 09) — the `canHold`-aware mirror of `toOps`, the diff-path
-    /// analogue of `Ops.applyContained`. Every parent the emitted script addresses comes from
-    /// the `after` tree, so an `after` that nests children under a node `canHold` rejects makes
-    /// a container-legal script impossible: that is surfaced as a typed `TargetNotAContainer`
-    /// rather than an `InsertChild`/`MoveNode` under a leaf. When every `after`-parent is a
-    /// container the result is exactly `toOps` (so `toOps` is the `(fun _ -> true)` wrapper —
-    /// the same relationship `apply`/`applyContained` have). Containment *legality* (which kind
-    /// may parent which) stays domain-side; `canHold` answers only "can this node hold children
-    /// at all".
+        // Every (new) parent the script targets is an `after` node that has children. If any such
+        // node cannot hold children, no container-legal script exists.
+        let uncontained =
+            scope.CanHold
+            |> Option.bind (fun canHold -> Ops.firstUncontained canHold w after)
+
+        let script =
+            match uncontained with
+            | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
+            | None -> emitWith changed (Ops.canHoldOf scope) w scope.Ids before after
+
+        match policy.Grammar with
+        | Some allowedChildren -> grammarChecked allowedChildren w after script
+        | None -> script
+
+    /// Derive a script such that `Ops.applyAll policy scope (toOps policy scope before after) before`
+    /// reproduces `after` structurally (Phase 245; the policy and scope, Phase 517). Relocated
+    /// subtrees diff to `MoveNode` (never remove+insert), so an unchanged subtree is preserved, not
+    /// destroyed and rebuilt. The emitted order is always applyable: added nodes go in as leaf shells
+    /// (top-down), every survivor is then reattached/reordered to its `after` position, and removed
+    /// regions are deleted **last** (so a surviving child is pulled out before its old container is
+    /// removed). Structural only — a survivor keeps `before`'s content, kind included; `toOpsWith` is
+    /// the form that diffs content too. The two roots must share an id.
     ///
-    /// **What the check buys, exactly (Phase 305).** The script's addresses resolve, in `after`,
-    /// to nodes `canHold` accepts (`proofs/TreeDiff.fst`, `diff_applicable_contained`). That is NOT
-    /// yet "`applyAllWith canHold` accepts every step": the script runs against `before`'s kinds,
-    /// and a structural diff carries no content, so a survivor that is a leaf in `before` and a
-    /// container in `after` refuses the inserts under it with `NotAContainer` — over independent
-    /// pairs with kinds drawn freely, 41% of the scripts this form returns are refused. The
-    /// content-aware `toOpsContainedWith` is the form that applies under the predicate it checked.
-    let toOpsContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+    /// **Under a scope with a `CanHold` (Phase 09).** Every parent the emitted script addresses comes
+    /// from the `after` tree, so an `after` that nests children under a node `canHold` rejects makes
+    /// a container-legal script impossible: that is the typed `TargetNotAContainer`, not an
+    /// `InsertChild`/`MoveNode` under a leaf. When every `after`-parent is a container the script is
+    /// the plain scope's. What the check buys, exactly (Phase 305): the script's addresses resolve,
+    /// in `after`, to nodes `canHold` accepts (`proofs/TreeDiff.fst`, `diff_applicable_contained`).
+    /// That is NOT yet "`Ops.applyAll` under the scope accepts every step": the script runs against
+    /// `before`'s kinds, and a structural diff carries no content, so a survivor that is a leaf in
+    /// `before` and a container in `after` refuses the inserts under it — `toOpsWith` is the form
+    /// that applies under the predicate it checked.
+    ///
+    /// **Under a policy with a `Grammar` (Phase 313).** Every refusal above is made first and
+    /// unchanged; then an `after` that holds a child its parent's kind may not hold is refused with
+    /// `IllegalChildInTree`, naming the first such pair (`Ops.illegalChildren`). Every parent→child
+    /// pair the script creates is one the final tree holds, so for a `before` that keeps the grammar,
+    /// `Ops.applyAll` under the same policy accepts the script wherever the tree it builds keeps it
+    /// (`Conformance.containmentLaws`). A policy's `Refs` constrains no diff: the script lands on
+    /// `after`, and whether `after` keeps its references is `Validator.referenceIntegrity`'s report
+    /// and the engine's `StillReferenced` refusal when the script is applied under that policy.
+    ///
+    /// **A keyed scope is diffed over its structural positions (see the module note).**
+    let toOps
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        // Every (new) parent the script targets is an `after` node that has children. If any
-        // such node cannot hold children, no container-legal script exists.
-        match Ops.firstUncontained canHold w after with
-        | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
-        | None -> emitWith None canHold w idw before after
+        diffUnder None policy scope before after
 
-    /// Content-aware, container-aware diff (Phase 305) — `toOpsContained` that also emits an
-    /// `UpdateNode` for every survivor whose own content differs, as the caller's `encode` sees it
-    /// over the two nodes' SHELLS (`ReplaceChildren n []`, so a change in the children alone is
-    /// never an update). The witness has no content accessor, so the encoder is the one way the
-    /// diff can see content — the same per-call parameter `Tree.encodeHash` and `Tree.Index.isFreshFor`
-    /// take, and like theirs it should be injective over a node's own content: a lossy encoder
-    /// makes two different nodes read as unchanged and the script lands on a tree that is not
-    /// `after`.
+    /// Content-aware diff (Phase 305) — `toOps` that also emits an `UpdateNode` for every survivor
+    /// whose own content differs, as the caller's `encode` sees it over the two nodes' SHELLS
+    /// (`ReplaceChildren n []`, so a change in the children alone is never an update). The witness has
+    /// no content accessor, so the encoder is the one way the diff can see content — the same
+    /// per-call parameter `Tree.encodeHash` and `Tree.Index.isFreshFor` take, and like theirs it should
+    /// be injective over a node's own content: a lossy encoder makes two different nodes read as
+    /// unchanged and the script lands on a tree that is not `after`.
     ///
     /// **The guarantee this form adds.** For well-formed `before` and `after` and a child-blind
-    /// `canHold`, a script it returns is accepted at every step by `Ops.applyAllWith canHold` and
-    /// lands on `after`, content included — the placement rule in `emitWith`'s header (D103) is what
-    /// makes it so, and `ProofOracleTests`' content-aware bridge measures it over drawn kinds and a
-    /// drawn predicate. The refusals are `toOpsContained`'s, unchanged. With
-    /// `canHold = fun _ -> true` it is exactly `toOpsWith`.
-    let toOpsContainedWith
-        (canHold: 'Node -> bool)
+    /// `canHold`, a script it returns is accepted at every step by `Ops.applyAll` under the same scope
+    /// and lands on `after`, content included — the placement rule in `emitWith`'s header (D103) is
+    /// what makes it so, and `ProofOracleTests`' content-aware bridge measures it over drawn kinds and
+    /// a drawn predicate. The refusals are `toOps`'s, unchanged, under the same policy and scope.
+    let toOpsWith
         (encode: 'Node -> string)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        let w = scope.Nodes
+
         let differs (b: 'Node) (a: 'Node) =
             shellOf encode w b <> shellOf encode w a
 
-        match Ops.firstUncontained canHold w after with
-        | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
-        | None -> emitWith (Some differs) canHold w idw before after
-
-    /// Content-aware diff (Phase 305) — `toOps` that also emits an `UpdateNode` for every survivor
-    /// whose own content differs under the caller's `encode`; `toOpsContainedWith (fun _ -> true)`,
-    /// so every update sits before the structural blocks. `Ops.applyAll (toOpsWith encode w idw
-    /// before after) before` reproduces `after` structurally AND in every node's content the
-    /// encoder distinguishes.
-    let toOpsWith
-        (encode: 'Node -> string)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (before: 'Node)
-        (after: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        toOpsContainedWith (fun _ -> true) encode w idw before after
-
-    /// Grammar-aware diff (Phase 313) — `toOpsContained` with the domain's containment grammar
-    /// beside `canHold`. Every refusal `toOpsContained` makes is made first and unchanged; then an
-    /// `after` that holds a child its parent's kind may not hold is refused with
-    /// `IllegalChildInTree`, naming the first such pair (`Ops.illegalChildren`). Otherwise the
-    /// script is `toOpsContained`'s, and every parent→child pair it creates is one the final tree
-    /// holds — a shell is inserted under its `after` parent and never moved, a survivor is moved
-    /// once, to its `after` parent — so for a `before` that keeps the grammar, `Ops.applyAllGrammar`
-    /// accepts the script wherever the tree it builds keeps it (`Conformance.containmentLaws`).
-    /// Structural only, as `toOps` is: a survivor keeps `before`'s content, kind included;
-    /// `toOpsGrammarWith` is the content-aware form.
-    let toOpsGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (before: 'Node)
-        (after: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        toOpsContained canHold w idw before after
-        |> grammarChecked allowedChildren w after
-
-    /// `toOpsGrammar` over the content-aware `toOpsContainedWith` (Phase 305): the same two
-    /// refusals in the same order, and a script that carries the survivors' content changes.
-    let toOpsGrammarWith
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (encode: 'Node -> string)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (before: 'Node)
-        (after: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        toOpsContainedWith canHold encode w idw before after
-        |> grammarChecked allowedChildren w after
+        diffUnder (Some differs) policy scope before after
 
     /// The rank of a change kind in the canonical order: declaration order, so an id's entries read
     /// added, removed, moved, kind, content, reordered.
@@ -463,7 +431,7 @@ module Diff =
     /// changed, in canonical order — ascending id key, then `ChangeKind` declaration order — each
     /// entry one of `Added | Removed | Moved | KindChanged | Changed | Reordered` as the cases
     /// document. Read off the two trees' indexes directly, not off a script, and held to the script
-    /// by `Conformance.changeLaws`: over `Ok ops = toOpsWith encode w idw before after`, the `Added`
+    /// by `Conformance.changeLaws`: over `Ok ops = toOpsWith encode Policy.none (OpScope.plain w idw) before after`, the `Added`
     /// ids are exactly the `InsertChild` grafts' ids, the `Moved` ids exactly the `MoveNode` targets,
     /// the `KindChanged` and `Changed` ids together exactly the `UpdateNode` targets (when `encode`
     /// sees the kind, as an injective encoder does), the `RemoveNode` targets are `Removed` and every

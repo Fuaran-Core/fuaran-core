@@ -10,7 +10,8 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
 /// The caller-injected address projection: a single op's footprint over the reference witnesses.
-let private fp (op: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ op ]
+let private fp (op: SkeletonOp<RNode, string>) =
+    Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
 // ---- Phase 64: Dag.conflicts by shape ----
 
@@ -133,7 +134,7 @@ let private sw: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string
         | Batch inner -> "B|" + (inner |> List.map encOp |> String.concat ";")
         | UpdateNode node -> "U|" + encNode node
 
-    { Apply = fun op st -> Ops.apply nodew idw op st
+    { Apply = fun op st -> Ops.apply Policy.none (OpScope.plain nodew idw) op st
       Encode = encOp
       Decode = fun _ -> Error "unused" }
 
@@ -184,7 +185,10 @@ let reconcileTests =
               match Dag.reconcile fp dag baseId headA headB with
               | Ok script ->
                   let hashOf = Tree.encodeHash nodew encNode
-                  let applyAll ops t = Ops.applyAll nodew idw ops t
+
+                  let applyAll ops t =
+                      Ops.applyAll Policy.none (OpScope.plain nodew idw) ops t
+
                   let viaScript = applyAll script baseTree |> Result.map hashOf
                   let ab = applyAll a baseTree |> Result.bind (applyAll b) |> Result.map hashOf
                   let ba = applyAll b baseTree |> Result.bind (applyAll a) |> Result.map hashOf

@@ -586,13 +586,13 @@ named above).
 
 | Core class | Raised by | Payload | Host class |
 |---|---|---|---|
-| `NotAContainer` | `Ops.applyContained` / `canApplyContained`, at the insert's parent or the graft's interior | `target`, `kindTag` | the host's one container refusal |
-| `TargetNotAContainer` | `Diff.toOpsContained`, at the first offending node of `after` | `target`, `kindTag` | the same class |
+| `NotAContainer` | `Ops.apply` / `canApply` under a contained scope, at the insert's parent or the graft's interior | `target`, `kindTag` | the host's one container refusal |
+| `TargetNotAContainer` | `Diff.toOps` under a contained scope, at the first offending node of `after` | `target`, `kindTag` | the same class |
 
 Both are defined by `Ops.firstUncontained` and carry one payload, the offender's id and its own kind
 tag (Phase 228 renamed the diff case's field from `parent`). So a host that maps one of them has
 mapped both. `Conformance.diffContainedLaws` holds the two to the same trees: wherever the diff
-refuses with `TargetNotAContainer(t, k)`, it builds the same graft, and `applyContained` must refuse
+refuses with `TargetNotAContainer(t, k)`, it builds the same graft, and the contained `Ops.apply` must refuse
 it with `NotAContainer(t, k)`.
 
 ### Adoption

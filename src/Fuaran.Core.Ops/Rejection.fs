@@ -40,8 +40,8 @@ type Rejection<'Id> =
     /// `target` names a node in a different place at each: the (new) PARENT of an insert/move, which
     /// is a node of the tree; or — since Phase 161 (DECISIONS D38) — an interior node of the SUBTREE
     /// an `InsertChild` carries, which is a node of the caller's own graft. `kindTag` is always that
-    /// node's own. Only the container-aware `applyContained` / `canApplyContained` raise this; the
-    /// plain `apply` / `canApply` treat every node as able to hold children.
+    /// node's own. Only a scope with a `CanHold` (`OpScope.contained` / `keyed`) raises this; the
+    /// plain scope treats every node as able to hold children.
     ///
     /// The graft-interior site is defined by `Ops.firstUncontained`, the single definition of the
     /// shape; its diff-side sibling is `Diff.DiffError.TargetNotAContainer`, which names the same
@@ -53,27 +53,32 @@ type Rejection<'Id> =
     /// Domain-side extension point: a per-kind property-edit rejection.
     | Rejected of code: string * message: string
     /// A `RemoveNode` / `MoveNode` whose target is held directly in a KEYED position of `holder`
-    /// (Phase 286). The keyed engine (`Ops.applyContainedKeyed`) reaches such a node — it can be
+    /// (Phase 286). The engine under a keyed scope (`OpScope.keyed`) reaches such a node — it can be
     /// updated in place, grow structural children, be a move's destination — but the skeleton ops
     /// restructure only the structural surface, and a keyed position is arity-fixed: vacating or
-    /// relocating it is a domain edit. Only the keyed engine raises this; the unkeyed forms cannot
-    /// see the node and answer `UnknownNode`, as they always have. Declared LAST so every existing
-    /// case keeps its tag.
-    | KeyedPosition of target: 'Id * holder: 'Id
+    /// relocating it is a domain edit. Only a keyed scope raises this; the unkeyed scopes cannot
+    /// see the node and answer `UnknownNode`, as they always have.
+    ///
+    /// `slot` (Phase 517, absorbing fuaran-core#492) is the position's 0-based index in the holder's
+    /// `KeyedWitness.KeyedChildren`: WHICH keyed position, so a domain can name it to its author
+    /// ("that slot is not structural") without locating it again. An index and not a label because
+    /// the witness declares an ordered list and carries no labels; were labels ever declared, the
+    /// index would still be what locates the slot (DECISIONS.md D181).
+    | KeyedPosition of target: 'Id * holder: 'Id * slot: int
     /// An insert, move or in-place rewrite that would leave `child` (of kind `childKind`) under
     /// `parent` (of kind `parentKind`) where the domain's containment grammar does not let that kind
     /// hold it (Phase 313). `legal` is what the grammar lets `parentKind` hold — the repair the
     /// envelope enumerates, as `UnknownNode` enumerates the addressable ids; `[]` when the grammar
-    /// lets it hold nothing. Only the grammar forms (`Ops.applyGrammar`, `Ops.applyReferenced` and
-    /// their dry runs) raise this, and always after every check the container-aware engine makes,
+    /// lets it hold nothing. Only a policy with a `Grammar` raises this,
+    /// and always after every check the engine makes,
     /// so no operation it refuses changes class. Declared after `KeyedPosition` so every existing
     /// case keeps its tag.
     | IllegalChild of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
     /// A `RemoveNode` or an `UpdateNode` that would take away a declaration other nodes still
     /// reference (Phase 313): after it, the tree no longer declares an id it declared before, and
     /// `referrers` — in preorder — are the nodes that still refer to one. `target` is the removed
-    /// node or the rewritten one. Only the reference-aware forms (`Ops.applyReferenced` and its dry
-    /// runs) raise this, after every other check. Declared last.
+    /// node or the rewritten one. Only a policy with `Refs` raises this,
+    /// after every other check. Declared last.
     | StillReferenced of target: 'Id * referrers: 'Id list
 
 // ---- Phase 315: the envelope's operations and the footprint builders ----
@@ -155,10 +160,12 @@ module Rejection =
             { Message = "a reorder of " + q parent + " must be a permutation of its current children"
               Alternatives = expected |> List.map idText }
         | Rejected(_, message) -> { Message = message; Alternatives = [] }
-        | KeyedPosition(target, holder) ->
+        | KeyedPosition(target, holder, slot) ->
             { Message =
                 q target
-                + " sits in a keyed position of "
+                + " sits in keyed position "
+                + string slot
+                + " of "
                 + q holder
                 + "; vacating or relocating it is a domain edit"
               Alternatives = [] }

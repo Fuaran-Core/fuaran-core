@@ -58,10 +58,10 @@ let private encKOp (op: KOp) : string =
     | RemoveNode t -> "R|" + t
     | other -> sprintf "%A" other
 
-/// The keyed engine as a stream witness: `Ops.applyContainedKeyed`, which refuses an id the keyed
+/// The keyed engine as a stream witness: `Ops.apply` under `OpScope.keyed`, which refuses an id the keyed
 /// walk already holds.
 let keyedW: StreamWitness<KOp, KNode, Rejection<string>> =
-    { Apply = fun op t -> Ops.applyContainedKeyed keyw canHoldAll knodew idw op t
+    { Apply = fun op t -> Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op t
       Encode = encKOp
       Decode = fun _ -> Error "FootprintLawsAtTests: decode is unused by the family" }
 
@@ -93,13 +93,14 @@ let private genKeyedOp (rng: ConfRng.T) : KOp * ConfRng.T =
 
 let keyedGen: StreamGen<KOp, KNode> = { State0 = keyedBase; Op = genKeyedOp }
 
-/// The footprint that reads the keyed walk (`Ops.footprintKeyed`) — the one that is kept.
+/// The footprint that reads the keyed walk (`Ops.footprint` under `OpScope.keyed`) — the one that is kept.
 let keyedFootprint (op: KOp) : Footprint =
-    Ops.footprintKeyed keyw knodew idw [ op ]
+    Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) [ op ]
 
 /// The first, unsound footprint: the surface walk only, so an inserted subtree's keyed ids are
 /// missed.
-let private surfaceFootprint (op: KOp) : Footprint = Ops.footprint knodew idw [ op ]
+let private surfaceFootprint (op: KOp) : Footprint =
+    Ops.footprint Policy.none (OpScope.plain knodew idw) [ op ]
 
 // ---------------------------------------------------------------------------
 //  The plan domain (`FoldFixtures`) — a non-tree state, its own footprint

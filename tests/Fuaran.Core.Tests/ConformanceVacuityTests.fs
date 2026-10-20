@@ -70,7 +70,7 @@ let private sink = ConformanceTests.keyedSink "test-key-0"
 /// The honest footprint `concurrencyLaws` itself supplies — the `With` entry point takes it as a
 /// parameter so a test can under-approximate it and prove the law has teeth. The census wants the
 /// honest one.
-let private honestFootprint = Ops.footprint nodew idw
+let private honestFootprint = Ops.footprint Policy.none (OpScope.plain nodew idw)
 
 /// A chain format that is NOT the canonical one (Phase 349): its own genesis and a payload that
 /// frames the canonical pre-image, so every `…With` operation's reference run is at a config a
@@ -291,12 +291,12 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                       idw
                       KeyedArbitrationTests.containedKGen
                       KeyedArbitrationTests.encK
-                      (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
-                      (Ops.canApplyAllKeyed
-                          ConformanceTests.keyw
-                          (fun n -> n.Kind <> "para")
-                          ConformanceTests.knodew
-                          idw)
+                      (Ops.footprint
+                          Policy.none
+                          (OpScope.keyed ConformanceTests.keyw (fun _ -> true) ConformanceTests.knodew idw))
+                      (Ops.canApplyAll
+                          Policy.none
+                          (OpScope.keyed ConformanceTests.keyw (fun n -> n.Kind <> "para") ConformanceTests.knodew idw))
                       2470
                       200)
 
@@ -1968,12 +1968,16 @@ let private spellingPairs: (string * string * Lazy<LawResult list * LawResult li
                idw
                KeyedArbitrationTests.containedKGen
                KeyedArbitrationTests.encK
-               (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
-               (Ops.canApplyAllKeyed
-                   ConformanceTests.keyw
-                   (LawKit.canHoldOf KeyedArbitrationTests.containedKGen)
-                   ConformanceTests.knodew
-                   idw)
+               (Ops.footprint
+                   Policy.none
+                   (OpScope.keyed ConformanceTests.keyw (fun _ -> true) ConformanceTests.knodew idw))
+               (Ops.canApplyAll
+                   Policy.none
+                   (OpScope.keyed
+                       ConformanceTests.keyw
+                       (LawKit.canHoldOf KeyedArbitrationTests.containedKGen)
+                       ConformanceTests.knodew
+                       idw))
                2470
                60)
       "Conformance.snapshotLaws",

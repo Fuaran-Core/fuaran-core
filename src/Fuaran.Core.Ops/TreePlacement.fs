@@ -56,9 +56,10 @@ type PlaceError<'Id> =
 /// case stays one bare op. **The law** (`Conformance.placementLaws`): `applyAll` of the script puts
 /// the node exactly at the anchor's position and moves nothing else.
 ///
-/// The `…Contained` forms validate through `canApplyContained canHold`, for a domain that executes
-/// through `applyContained` / `applyAllWith canHold`; the plain forms are those with every node able
-/// to hold children.
+/// Every entry takes a `Policy` and an `OpScope` (Phase 517) and validates through `Ops.canApply`
+/// under them, for a domain that executes through `Ops.applyAll` under the same pair: a contained
+/// scope refuses a placement under a node `canHold` refuses, a grammar policy one its grammar
+/// forbids, and a keyed scope places under a node held in or below a keyed position.
 [<RequireQualifiedAccess>]
 module TreePlacement =
 
@@ -92,65 +93,62 @@ module TreePlacement =
             else
                 Ok i
 
-    /// The ids of `parent`'s children, once the engine's dry run has said `parent` exists.
-    let private childIds (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (parent: 'Id) (root: 'Node) : 'Id list =
-        match Tree.tryFind w idw parent root with
+    /// The ids of `parent`'s structural children, once the engine's dry run has said `parent` exists
+    /// — located through the walk the scope locates through, as the engine located it.
+    let private childIds (scope: OpScope<'Node, 'Id>) (parent: 'Id) (root: 'Node) : 'Id list =
+        let w = scope.Nodes
+
+        match Tree.tryFind (OpScope.locate scope) scope.Ids parent root with
         | Some p -> w.Children p |> List.map w.Id
         | None -> []
 
-    /// `place` under a container capability: the dry run is `canApplyContained canHold`.
-    let placeContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+    /// Insert `node` under `parent` at `anchor` under `policy` and `scope` (the records, Phase 517), as
+    /// a script `Ops.applyAll` accepts under the same policy and scope (see the module note for its
+    /// shape). Refused, by name, when the engine would refuse the insert (`Ops.canApply`'s envelope),
+    /// when the anchor names no other child of `parent`, or when the index is out of range.
+    let place
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (parent: 'Id)
         (anchor: Anchor<'Id>)
         (node: 'Node)
         (root: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
+        let idw = scope.Ids
         let insert = InsertChild(parent, node)
 
-        match Ops.canApplyContained canHold w idw insert root with
+        match Ops.canApply policy scope insert root with
         | Error r -> Error(PlaceError.Refused r)
         | Ok() ->
-            let others = childIds w idw parent root
+            let others = childIds scope parent root
 
             positionOf idw parent anchor others
             |> Result.map (fun k ->
                 if k = List.length others then
                     [ insert ]
                 else
-                    [ Batch [ insert; ReorderChildren(parent, List.insertAt k (w.Id node) others) ] ])
+                    [ Batch
+                          [ insert
+                            ReorderChildren(parent, List.insertAt k (scope.Nodes.Id node) others) ] ])
 
-    /// Insert `node` under `parent` at `anchor`, as a script `Ops.applyAll` accepts (see the module
-    /// note for its shape). Refused, by name, when the engine would refuse the insert, when the
-    /// anchor names no other child of `parent`, or when the index is out of range.
-    let place
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (parent: 'Id)
-        (anchor: Anchor<'Id>)
-        (node: 'Node)
-        (root: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
-        placeContained (fun _ -> true) w idw parent anchor node root
-
-    /// `move` under a container capability: the dry run is `canApplyContained canHold`.
-    let moveContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+    /// Move `target` under `newParent` at `anchor` under `policy` and `scope` — to another parent, or
+    /// to another position among its own siblings — as a script `Ops.applyAll` accepts under the same
+    /// policy and scope (see the module note for its shape).
+    let move
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (target: 'Id)
         (newParent: 'Id)
         (anchor: Anchor<'Id>)
         (root: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
+        let idw = scope.Ids
         let move = MoveNode(target, newParent)
 
-        match Ops.canApplyContained canHold w idw move root with
+        match Ops.canApply policy scope move root with
         | Error r -> Error(PlaceError.Refused r)
         | Ok() ->
-            let siblings = childIds w idw newParent root
+            let siblings = childIds scope newParent root
             let isTarget c = idw.Equals c target
             let held = siblings |> List.filter isTarget |> List.length
             let others = siblings |> List.filter (isTarget >> not)
@@ -182,46 +180,17 @@ module TreePlacement =
                     else
                         [ Batch [ move; ReorderChildren(newParent, wanted) ] ])
 
-    /// Move `target` under `newParent` at `anchor` — to another parent, or to another position among
-    /// its own siblings — as a script `Ops.applyAll` accepts (see the module note for its shape).
-    let move
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (target: 'Id)
-        (newParent: 'Id)
-        (anchor: Anchor<'Id>)
-        (root: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
-        moveContained (fun _ -> true) w idw target newParent anchor root
-
-    /// `clone` under a container capability.
-    let cloneContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (setId: 'Id -> 'Node -> 'Node)
-        (mint: 'Id -> Set<string> -> 'Id)
-        (source: 'Id)
-        (parent: 'Id)
-        (anchor: Anchor<'Id>)
-        (root: 'Node)
-        : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
-        match Tree.subtree w idw source root with
-        | None -> Error(PlaceError.Refused(UnknownNode(source, Tree.ids w root)))
-        | Some sub ->
-            let taken = Tree.ids w root |> List.map idw.ToString |> Set.ofList
-            let copy, _ = FreshIds.repairDuplicates w idw setId mint taken sub
-            placeContained canHold w idw parent anchor copy root
-
-    /// Copy the subtree at `source` and place the copy under `parent` at `anchor`. Every id of the
-    /// copy is renamed through `mint` (`FreshIds.derived idw`, `FreshIds.sequential idw prefix`, or a
-    /// domain's own strategy) against the tree's ids, by `FreshIds.repairDuplicates`; the script is
-    /// `place`'s, so the copy's ids are the ones its `InsertChild` carries. A paste from ANOTHER tree
-    /// is the same two steps a caller composes: `repairDuplicates` against this tree's keys, then
-    /// `place`.
+    /// Copy the subtree at `source` and place the copy under `parent` at `anchor`, under `policy` and
+    /// `scope`. Every id of the copy is renamed through `mint` (`FreshIds.derived idw`,
+    /// `FreshIds.sequential idw prefix`, or a domain's own strategy) against the tree's ids, by
+    /// `FreshIds.repairDuplicates`; the script is `place`'s, so the copy's ids are the ones its
+    /// `InsertChild` carries. Under a keyed scope the source is located, the taken ids read and the
+    /// copy renamed over the keyed walk, so an id the copy holds in a keyed position is renamed too.
+    /// A paste from ANOTHER tree is the same two steps a caller composes: `repairDuplicates` against
+    /// this tree's keys, then `place`.
     let clone
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (setId: 'Id -> 'Node -> 'Node)
         (mint: 'Id -> Set<string> -> 'Id)
         (source: 'Id)
@@ -229,4 +198,12 @@ module TreePlacement =
         (anchor: Anchor<'Id>)
         (root: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, PlaceError<'Id>> =
-        cloneContained (fun _ -> true) w idw setId mint source parent anchor root
+        let walk = OpScope.locate scope
+        let idw = scope.Ids
+
+        match Tree.subtree walk idw source root with
+        | None -> Error(PlaceError.Refused(UnknownNode(source, Tree.ids walk root)))
+        | Some sub ->
+            let taken = Tree.ids walk root |> List.map idw.ToString |> Set.ofList
+            let copy, _ = FreshIds.repairDuplicates walk idw setId mint taken sub
+            place policy scope parent anchor copy root

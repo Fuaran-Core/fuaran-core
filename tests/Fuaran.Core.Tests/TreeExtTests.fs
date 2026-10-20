@@ -101,11 +101,11 @@ let transformTests =
               Expect.equal (ids (Tree.preorder nodew copy)) [ "copy-a"; "copy-a1"; "copy-a2" ] "ids carry the rename"
 
               // the remapped copy inserts cleanly; the un-remapped original would collide
-              match Ops.apply nodew idw (InsertChild("b", copy)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", copy)) (sample ()) with
               | Ok _ -> ()
               | Error e -> failtestf "insert of remapped copy rejected: %A" e
 
-              match Ops.apply nodew idw (InsertChild("b", sub)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", sub)) (sample ()) with
               | Error(DuplicateId "a") -> ()
               | other -> failtestf "expected DuplicateId for the un-remapped copy, got %A" other
 
@@ -122,7 +122,7 @@ let transformTests =
 
               Expect.equal (ids (Tree.preorder nodew partial)) [ "copy-a"; "a1"; "a2" ] "only the root was renamed"
 
-              match Ops.apply nodew idw (InsertChild("b", partial)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", partial)) (sample ()) with
               | Error(DuplicateId "a1") -> ()
               | other -> failtestf "expected DuplicateId \"a1\" for the partially remapped copy, got %A" other
 
@@ -136,7 +136,7 @@ let transformTests =
 
               Expect.equal (ids (Tree.preorder nodew collapsed)) [ "flat"; "flat"; "flat" ] "all three collapsed"
 
-              match Ops.apply nodew idw (InsertChild("b", collapsed)) (sample ()) with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (InsertChild("b", collapsed)) (sample ()) with
               | Error(DuplicateId "flat") -> ()
               | other -> failtestf "expected DuplicateId \"flat\" for the non-injective remap, got %A" other ]
 

@@ -1515,41 +1515,8 @@
         "Arbitration.stale"
       ],
       "class": "measured-elsewhere",
-      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
+      "reason": "The interference report and the stale reading beside the modelled `arbitrate`; the arbitration tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/ArbitrationTests.fs"
-    },
-    {
-      "members": [
-        "Arbitration.arbitrateContained"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
-    },
-    {
-      "members": [
-        "Arbitration.arbitrateReferenced"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/StructuralIntegrityTests.fs"
-    },
-    {
-      "members": [
-        "Diff.toOpsWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Diff variants with a content projection; the content-aware diff tests stand in (the contained form is on the ladder).",
-      "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
-    },
-    {
-      "members": [
-        "Diff.toOpsGrammarWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The content-aware grammar diff; `toOpsGrammar` (rostered under `containmentLaws`) is it with no content projection.",
-      "through": "Diff.toOpsGrammar",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.TreeDiffTests.fs"
     },
     {
       "members": [
@@ -1575,13 +1542,10 @@
     },
     {
       "members": [
-        "Ops.applyAllReferenced",
-        "Ops.canApplyAllReferenced",
-        "Ops.canApplyReferenced",
         "Ops.isLegalChild"
       ],
       "class": "measured-elsewhere",
-      "reason": "The reference-witness sequence forms and the containment predicate beside the rostered reference and containment families; example-tested.",
+      "reason": "The containment predicate beside the rostered containment family; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/StructuralIntegrityTests.fs"
     },
     {
@@ -1600,14 +1564,6 @@
       "class": "measured-elsewhere",
       "reason": "Rejection codes and explanations for a reader; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
-    },
-    {
-      "members": [
-        "TreePlacement.clone"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Uncontained clone beside the rostered `cloneContained`; example-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/PlacementTests.fs"
     },
     {
       "members": [
@@ -2356,6 +2312,20 @@
       "class": "measured-elsewhere",
       "reason": "Builds a DAG from a node map — the one way in since the constructor went private at 1.0.0 — refusing a key that is not its node's id; example-tested, the refusal by a go-red vector.",
       "standIn": "tests/Fuaran.Core.Tests/DagTests.fs"
+    },
+    {
+      "members": [
+        "OpScope.plain",
+        "OpScope.contained",
+        "OpScope.keyed",
+        "OpScope.locate",
+        "OpScope.ids",
+        "Policy.none",
+        "Policy.grammar",
+        "Policy.referenced"
+      ],
+      "class": "trivial",
+      "reason": "The engine's two records' builders and readers (Phase 517): each constructs a scope or a policy from what the caller hands it, picks the walk the scope declares, or reads ids along it. What the records MEAN is the engine's, and is on the ladder under `Ops.apply`."
     }
   ]
 }

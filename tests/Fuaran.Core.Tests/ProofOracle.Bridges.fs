@@ -1041,7 +1041,7 @@ let rec renderModelOp (op: TreeOps.op) : string =
     | TreeOps.UpdateNode node -> "U|" + encWitnessNode (mTid node) (mKind node)
 
 // ---------------------------------------------------------------------------
-//  Phase 140 — the CONTAINER CAPABILITY: `Ops.applyContained` / `Ops.canApplyContained` beside
+//  Phase 140 — the CONTAINER CAPABILITY: `Ops.apply` under `OpScope.contained` / `Ops.canApply` under `OpScope.contained` beside
 //  the model, over a GENERATED `canHold`.
 //
 //  WHY A GENERATED PREDICATE RATHER THAN A FIXED ONE. `canHold` is a parameter of the engine, and
@@ -1057,11 +1057,11 @@ let rec renderModelOp (op: TreeOps.op) : string =
 //  counterexample `contained_needs_child_blind` is what says the type permits worse.
 //
 //  FIVE COMPARISONS, per (op, state, predicate):
-//    1. `Ops.applyContained` vs the model's `apply_contained` — verdict, accepted result through
+//    1. `Ops.apply` under `OpScope.contained` vs the model's `apply_contained` — verdict, accepted result through
 //       `Tree.encodeHash`, rejection by CLASS.
-//    2. `Ops.canApplyContained` vs the model's `can_apply_contained`, and that the dry run and the
+//    2. `Ops.canApply` under `OpScope.contained` vs the model's `can_apply_contained`, and that the dry run and the
 //       mutating call agree on EACH side separately (`can_apply_contained_agrees` instantiated).
-//    3. `Ops.applyContained` against `Ops.apply` ON PRODUCTION: the two must agree exactly unless
+//    3. `Ops.apply` under `OpScope.contained` against `Ops.apply` ON PRODUCTION: the two must agree exactly unless
 //       the container-aware one raises `NotAContainer`, which is `not_a_container_exact` asked of
 //       the shipped engine rather than of the model.
 //    4. where a `NotAContainer` is raised, that the node it names really holds children, that its

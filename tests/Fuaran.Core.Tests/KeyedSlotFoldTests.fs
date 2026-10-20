@@ -8,7 +8,7 @@ module Fuaran.Core.Tests.KeyedSlotFoldTests
 //   - In the skeleton vocabulary a keyed slot is written only by rewriting its holder
 //     (`UpdateNode` of the holder, whose payload carries the keyed positions) or by authoring the
 //     holder (`InsertChild` of a subtree containing it). Both content-write the holder, under
-//     `Ops.footprint` and `Ops.footprintKeyed` alike, so two lanes writing one slot always fail
+//     `Ops.footprint` and `Ops.footprint` under `OpScope.keyed` alike, so two lanes writing one slot always fail
 //     `Ops.independent` with `SameTarget` on the holder and `Dag.reconcile` halts with
 //     `ConcurrentUpdate` there. The engine cannot even address a slot otherwise: `KeyedWitness`
 //     names no key, and the keyed engine refuses to vacate or relocate a keyed node
@@ -26,7 +26,7 @@ module Fuaran.Core.Tests.KeyedSlotFoldTests
 // places a keyed child BY KEY, lowered with `slotEdit holder key`, folds clean against a placement
 // into another key and halts with `SlotClash` at the key; the skeleton `UpdateNode` of the holder
 // keeps halting at the holder, because a pure script cannot say which keyed position a payload
-// changed, so `Ops.footprintKeyed` records the holder whole (the premise Phase 340 reported rather
+// changed, so `Ops.footprint` under `OpScope.keyed` records the holder whole (the premise Phase 340 reported rather
 // than widening `KeyedWitness` for a key no skeleton op could use).
 
 open Expecto
@@ -54,7 +54,11 @@ let private placeInSlot (id: string) : SkeletonOp<KNode, string> = UpdateNode(k 
 
 let private applyAll (ops: SkeletonOp<KNode, string> list) (root: KNode) =
     ops
-    |> List.fold (fun acc op -> acc |> Result.bind (Ops.applyContainedKeyed keyw canHoldAll knodew idw op)) (Ok root)
+    |> List.fold
+        (fun acc op ->
+            acc
+            |> Result.bind (Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op))
+        (Ok root)
 
 let rec private findNode (id: string) (n: KNode) : KNode option =
     if n.Id = id then
@@ -67,7 +71,7 @@ let private slotOf (root: KNode) =
     |> Option.map (fun sw -> sw.Cases |> List.map (fun (key, c) -> key, c.Id))
 
 let private sw: StreamWitness<SkeletonOp<KNode, string>, KNode, Rejection<string>> =
-    { Apply = fun op st -> Ops.applyContainedKeyed keyw canHoldAll knodew idw op st
+    { Apply = fun op st -> Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op st
       Encode = sprintf "%A"
       Decode = fun _ -> Error "unused" }
 
@@ -122,7 +126,7 @@ let tests =
               let baseId, headA, headB, dag = forkDag [ placeInSlot "a" ] [ placeInSlot "b" ]
 
               let fpK op =
-                  Ops.footprintKeyed keyw knodew idw [ op ]
+                  Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) [ op ]
 
               match Dag.reconcile fpK dag baseId headA headB with
               | Ok script -> failtestf "two writes to one keyed slot folded clean: %A" script
@@ -135,7 +139,9 @@ let tests =
           testCase "and under the unkeyed footprint too: the holder is content-written either way"
           <| fun _ ->
               let baseId, headA, headB, dag = forkDag [ placeInSlot "a" ] [ placeInSlot "b" ]
-              let fp op = Ops.footprint knodew idw [ op ]
+
+              let fp op =
+                  Ops.footprint Policy.none (OpScope.plain knodew idw) [ op ]
 
               match Dag.reconcile fp dag baseId headA headB with
               | Ok script -> failtestf "two writes to one keyed slot folded clean: %A" script
@@ -172,7 +178,8 @@ let tests =
               let baseId, headA, headB, dag = forkDag [ placeInSlot "a" ] [ placeInSlot "b" ]
 
               let blind op =
-                  let f = Ops.footprintKeyed keyw knodew idw [ op ]
+                  let f =
+                      Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) [ op ]
 
                   { f with
                       Reads = Set.remove "sw" f.Reads
@@ -215,13 +222,22 @@ let tests =
           testCase
               "Phase 340: the skeleton UpdateNode of the holder still halts at the holder — the footprint is whole-node by construction"
           <| fun _ ->
-              let f = Ops.footprintKeyed keyw knodew idw [ placeInSlot "a" ]
+              let f =
+                  Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) [ placeInSlot "a" ]
+
               Expect.isEmpty f.SlotWrites "no skeleton op narrows to a keyed slot"
               Expect.contains f.ContentWrites "sw" "the holder is written whole"
 
               let baseId, headA, headB, dag = forkDag [ placeInSlot "a" ] [ placeInSlot "b" ]
 
-              match Dag.reconcile (fun op -> Ops.footprintKeyed keyw knodew idw [ op ]) dag baseId headA headB with
+              match
+                  Dag.reconcile
+                      (fun op -> Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) knodew idw) [ op ])
+                      dag
+                      baseId
+                      headA
+                      headB
+              with
               | Ok script -> failtestf "two UpdateNodes of one holder folded clean: %A" script
               | Error cs ->
                   Expect.isEmpty

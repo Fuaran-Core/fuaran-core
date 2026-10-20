@@ -654,7 +654,7 @@ module Conformance =
     /// Forward — the keyed-arbitration laws at a DOMAIN'S `KeyedWitness`, with the keyed composition as
     /// the footprint and admission pair (Phase 247; Phase 390's spelling — `keyedArbitrationLawsWith` is
     /// this family with the pair as a further parameter, last before the seed):
-    /// `Ops.footprintKeyed keyw nodew idw` and `Ops.canApplyAllKeyed keyw canHold nodew idw`, with
+    /// `Ops.footprint` under `OpScope.keyed` and `Ops.canApplyAll` under `OpScope.keyed`, with
     /// `canHold` the generator's `CanHold` (every node, when it is `None`). The shape a domain that
     /// arbitrates over containers or keyed positions runs. A pinned-default SPELLING of
     /// `keyedArbitrationLawsWith` since Phase 507: one family, one census cell, its guards labelled
@@ -674,8 +674,8 @@ module Conformance =
             idw
             gen
             encode
-            (Ops.footprintKeyed keyw nodew idw)
-            (Ops.canApplyAllKeyed keyw (LawKit.canHoldOf gen) nodew idw)
+            (Ops.footprint Policy.none (OpScope.keyed keyw (fun _ -> true) nodew idw))
+            (Ops.canApplyAll Policy.none (OpScope.keyed keyw (LawKit.canHoldOf gen) nodew idw))
         |> within (family "keyedArbitrationLawsWith" seed) iterations
 
     /// Forward — see `CapabilitySeamLaws.capabilityLaws`.

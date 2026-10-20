@@ -2,7 +2,7 @@ module Fuaran.Core.Tests.KeyedApplyTests
 
 // Phase 286 — the keyed witness reaches the apply path. `KeyedWitness.KeyedChildren` hands the
 // engine the nodes a domain holds in keyed positions; `Tree.traversal` walks them, the keyed
-// `wellFormed` / `graftWellFormed` see them, and `Ops.applyContainedKeyed` refuses a `DuplicateId`
+// `wellFormed` / `graftWellFormed` see them, and `Ops.apply` under `OpScope.keyed` refuses a `DuplicateId`
 // over them and addresses nodes below them — while the structural ops still edit `Children` alone.
 //
 // The domain is `ConformanceTests`' keyed reference: `KNode` holds a case table (`Cases`) beside
@@ -35,10 +35,10 @@ let private ids (xs: string list) = xs
 let private canHoldAll (_: KNode) = true
 
 let private applyK op root =
-    Ops.applyContainedKeyed keyw canHoldAll knodew idw op root
+    Ops.apply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op root
 
 let private applyU op root =
-    Ops.applyContained canHoldAll knodew idw op root
+    Ops.apply Policy.none (OpScope.contained canHoldAll knodew idw) op root
 
 /// The keyed reference with no keyed position declared — the `fun _ -> []` domain.
 let private noKeyedK: KeyedWitness<KNode, string> =
@@ -231,7 +231,7 @@ let tests =
                     Expect.equal (applyK op t) (Error(DuplicateId "c1a")) "refused by Core"
 
                     Expect.equal
-                        (Ops.canApplyContainedKeyed keyw canHoldAll knodew idw op t)
+                        (Ops.canApply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) op t)
                         (Error(DuplicateId "c1a"))
                         "and by the dry run"
 
@@ -288,18 +288,34 @@ let tests =
                 testCase "a node held DIRECTLY in a keyed position cannot be removed or moved by a skeleton op"
                 <| fun _ ->
                     let t = sample ()
-                    Expect.equal (applyK (RemoveNode "c1") t) (Error(KeyedPosition("c1", "sw"))) "remove"
-                    Expect.equal (applyK (MoveNode("c1", "a")) t) (Error(KeyedPosition("c1", "sw"))) "move"
+                    Expect.equal (applyK (RemoveNode "c1") t) (Error(KeyedPosition("c1", "sw", 0))) "remove"
+                    Expect.equal (applyK (MoveNode("c1", "a")) t) (Error(KeyedPosition("c1", "sw", 0))) "move"
 
                     Expect.equal
-                        (Ops.canApplyContainedKeyed keyw canHoldAll knodew idw (RemoveNode "c1") t)
-                        (Error(KeyedPosition("c1", "sw")))
+                        (Ops.canApply Policy.none (OpScope.keyed keyw canHoldAll knodew idw) (RemoveNode "c1") t)
+                        (Error(KeyedPosition("c1", "sw", 0)))
                         "the dry run agrees"
 
                     Expect.equal
                         (applyU (RemoveNode "c1") t)
                         (Error(UnknownNode("c1", [ "root"; "a"; "sw" ])))
                         "unkeyed: unknown, as always"
+
+                testCase "the refusal names WHICH keyed position: the slot is the index in KeyedChildren"
+                <| fun _ ->
+                    // Phase 517 (absorbing fuaran-core#492): a holder with two cases; the node in the
+                    // second is refused naming slot 1, its index in the witness's ordered list (the
+                    // witness carries no labels, D181), and a node held in the first names slot 0.
+                    let t =
+                        k "root" [ k "sw" [] [ "one", leaf "c1"; "two", k "c2" [ leaf "c2a" ] [] ] ] []
+
+                    Expect.equal (applyK (RemoveNode "c2") t) (Error(KeyedPosition("c2", "sw", 1))) "second slot"
+                    Expect.equal (applyK (MoveNode("c1", "c2")) t) (Error(KeyedPosition("c1", "sw", 0))) "first slot"
+
+                    Expect.equal
+                        (Rejection.explain id RejectionNouns.generic (KeyedPosition("c2", "sw", 1))).Message
+                        "'c2' sits in keyed position 1 of 'sw'; vacating or relocating it is a domain edit"
+                        "the guidance names the slot"
 
                 testCase "a node with a structural parent below a keyed position can be removed"
                 <| fun _ ->
@@ -329,10 +345,13 @@ let tests =
                             Children = [ leaf "under" ] }
 
                     let op = InsertChild("root", k "g" [] [ "one", bad ])
-                    Expect.isOk (Ops.applyContained canHold knodew idw op t) "the structural walk cannot see it"
+
+                    Expect.isOk
+                        (Ops.apply Policy.none (OpScope.contained canHold knodew idw) op t)
+                        "the structural walk cannot see it"
 
                     Expect.equal
-                        (Ops.applyContainedKeyed keyw canHold knodew idw op t)
+                        (Ops.apply Policy.none (OpScope.keyed keyw canHold knodew idw) op t)
                         (Error(NotAContainer("bad", "leafy")))
                         "the keyed walk can" ]
 
@@ -370,7 +389,7 @@ let tests =
 
                     Expect.isTrue
                         (results
-                         |> List.exists (fun r -> not r.Passed && r.Law.StartsWith "applyContainedKeyed refuses"))
+                         |> List.exists (fun r -> not r.Passed && r.Law.StartsWith "the keyed apply refuses"))
                         "the agreement law names the gap"
 
                 testCase "a witness that hides its keyed positions and still places into them FAILS the agreement law"
@@ -379,7 +398,7 @@ let tests =
 
                     Expect.isTrue
                         (results
-                         |> List.exists (fun r -> not r.Passed && r.Law.StartsWith "applyContainedKeyed refuses"))
+                         |> List.exists (fun r -> not r.Passed && r.Law.StartsWith "the keyed apply refuses"))
                         "named"
 
                 testCase "a ReplaceKeyedChildren that ignores its list FAILS the placement law"

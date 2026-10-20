@@ -752,8 +752,7 @@
           "the extracted model keeps the diamond its theorem proves, moves included, and the pure independence refuses the same pairs"
         ],
         "operations": [
-          "Ops.footprintIn",
-          "Ops.footprintInKeyed"
+          "Ops.footprintIn"
         ]
       }
     },
@@ -1642,8 +1641,7 @@
         "model": "proofs/Preservation.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Ops.apply",
-          "Ops.applyContainedKeyed"
+          "Ops.apply"
         ]
       }
     },
@@ -1933,8 +1931,8 @@
           "the sequence surface sees containment and the plain pair still does not — both halves"
         ],
         "operations": [
-          "Ops.applyContained",
-          "Ops.canApplyContained"
+          "Ops.apply",
+          "Ops.canApply"
         ]
       }
     },
@@ -1950,7 +1948,7 @@
         "model": "proofs/Preservation.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Ops.applyAllWith"
+          "Ops.applyAll"
         ]
       }
     },
@@ -2013,8 +2011,8 @@
           "the sequence surface sees containment and the plain pair still does not — both halves"
         ],
         "operations": [
-          "Ops.applyAllWith",
-          "Ops.canApplyAllWith"
+          "Ops.applyAll",
+          "Ops.canApplyAll"
         ]
       }
     },
@@ -2072,8 +2070,7 @@
         "model": "proofs/TreeDiff.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Diff.toOps",
-          "Diff.toOpsContained"
+          "Diff.toOps"
         ]
       }
     },
@@ -2089,7 +2086,7 @@
         "model": "proofs/TreeDiff.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Diff.toOpsContainedWith"
+          "Diff.toOpsWith"
         ]
       }
     },
@@ -2105,7 +2102,7 @@
         "model": "proofs/TreeDiff.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Diff.toOpsContainedWith"
+          "Diff.toOpsWith"
         ]
       }
     },
@@ -2124,7 +2121,7 @@
           "a bridge that erases every kind loses against Diff.toOpsContainedWith — the measurement can fail"
         ],
         "operations": [
-          "Diff.toOpsContainedWith"
+          "Diff.toOpsWith"
         ]
       }
     },
@@ -2238,8 +2235,7 @@
           "the reconstruction hypothesis is NECESSARY — a pair whose shared id changes KIND loses"
         ],
         "operations": [
-          "Diff.toOps",
-          "Diff.toOpsContained"
+          "Diff.toOps"
         ]
       }
     },

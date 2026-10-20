@@ -284,7 +284,7 @@ module Propagation =
         | Batch ops ->
             let step (acc: Set<string>, tree: 'Node) (o: SkeletonOp<'Node, 'Id>) =
                 let next =
-                    match Ops.apply w idw o tree with
+                    match Ops.apply Policy.none (OpScope.plain w idw) o tree with
                     | Ok tree' -> tree'
                     | Error _ -> tree
 
@@ -337,7 +337,7 @@ module Propagation =
             w.Children n |> List.map (fun c -> s (w.Id c))
 
         let reads (n: 'Node) = readsOf n |> Seq.map s |> Set.ofSeq
-        let written = (Ops.footprint w idw [ op ]).ContentWrites
+        let written = (Ops.footprint Policy.none (OpScope.plain w idw) [ op ]).ContentWrites
 
         let local =
             after
@@ -384,7 +384,7 @@ module Propagation =
         (op: SkeletonOp<'Node, 'Id>)
         : Set<string> =
         let seeds =
-            match Ops.apply w idw op root with
+            match Ops.apply Policy.none (OpScope.plain w idw) op root with
             | Ok post -> seedsForOp w idw readsOf root post op
             | Error _ -> touchedBy w idw root op
 

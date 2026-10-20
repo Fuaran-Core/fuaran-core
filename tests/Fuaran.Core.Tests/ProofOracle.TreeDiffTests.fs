@@ -39,8 +39,8 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 //       conjunction of the four block characterisations `diff_script_shape` proves — is asked of
 //       every operation production emitted. That is the theorem held to the engine rather than to
 //       the model of it.
-//    5. `Diff.toOpsContained` vs `TreeDiff.to_ops_contained` under a DRAWN predicate, and where it
-//       produces a script, that script certified through `canApplyAllWith` / `applyAllWith` — the
+//    5. `Diff.toOps` under `OpScope.contained` vs `TreeDiff.to_ops_contained` under a DRAWN predicate, and where it
+//       produces a script, that script certified through `Ops.canApplyAll` under `OpScope.contained` / `Ops.applyAll` under `OpScope.contained` — the
 //       container-aware pair Phase 160 added, which is the executor a contained script belongs to.
 //       This is `diff_applicable_contained` asked of the shipped engine.
 //    6. where a `TargetNotAContainer` is raised, that the node it names is one `after` really
@@ -54,7 +54,7 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 //      source comment argues for would not be load-bearing and the theorem would be about nothing.
 //    * THE CONTAINER CHECK. Substituting the model's PLAIN `to_ops` into the contained slot is an
 //      engine that "emits an insert under a non-container" because it never looked, and it must
-//      disagree with the shipped `toOpsContained` on exactly the pairs whose `after` nests under a
+//      disagree with the shipped `Diff.toOps` under `OpScope.contained` on exactly the pairs whose `after` nests under a
 //      leaf.
 // ---------------------------------------------------------------------------
 
@@ -167,7 +167,7 @@ let private prodDiffRender (r: Result<SkeletonOp<RNode, string> list, Diff.DiffE
     | Error(Diff.RootIdMismatch(b, a)) -> sprintf "err:RootIdMismatch(%s,%s)" b a
     | Error(Diff.DuplicateIdInTree d) -> sprintf "err:DuplicateIdInTree(%s)" d
     | Error(Diff.TargetNotAContainer(p, k)) -> sprintf "err:TargetNotAContainer(%s,%s)" p k
-    // Phase 313: raised only by `Diff.toOpsGrammar`, which the oracle does not run.
+    // Phase 313: raised only by `Diff.toOps` under `Policy.grammar`, which the oracle does not run.
     | Error(Diff.IllegalChildInTree(c, _, p, _, _)) -> sprintf "err:IllegalChildInTree(%s,%s)" c p
 
 let private modelDiffRender (r: DagFold.outcome<TreeOps.op list, TreeDiff.diff_error>) =
@@ -225,7 +225,7 @@ let private diffProbe
     let where =
         sprintf "pair %s -> %s under canHold={%s}" (prodTreeHash before) (prodTreeHash after) (showKinds kinds)
 
-    let prod = Diff.toOps nodew idw before after
+    let prod = Diff.toOps Policy.none (OpScope.plain nodew idw) before after
     let model = TreeDiff.to_ops mb ma
 
     // 1. the verdict and the script, operation for operation
@@ -245,7 +245,7 @@ let private diffProbe
         | Error e ->
             [ sprintf "toOps REFUSED an independently generated well-formed pair (%A) — %s" e where ], 0, 0, 0, 0, 0, 0
         | Ok ops ->
-            let rebuilt = Ops.applyAll nodew idw ops before
+            let rebuilt = Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before
 
             let reconstruction =
                 match rebuilt with
@@ -255,7 +255,7 @@ let private diffProbe
                     [ sprintf "applyAll(toOps) was REFUSED at step %d (%s) — %s" i (prodRejClass e) where ]
 
             let applyability =
-                match Ops.canApplyAll nodew idw ops before with
+                match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before with
                 | Ok() -> []
                 | Error(i, e) ->
                     [ sprintf "canApplyAll REFUSED the emitted script at step %d (%s) — %s" i (prodRejClass e) where ]
@@ -276,7 +276,7 @@ let private diffProbe
             let has f = ops |> List.exists f
 
             let broken =
-                match Ops.applyAll nodew idw (removesFirst ops) before with
+                match Ops.applyAll Policy.none (OpScope.plain nodew idw) (removesFirst ops) before with
                 | Ok t when prodTreeHash t = prodTreeHash after -> 0
                 | _ -> 1
 
@@ -317,7 +317,9 @@ let private diffProbe
             broken
 
     // 5-6. the container-aware mirror, and the executor a contained script belongs to
-    let prodC = Diff.toOpsContained canHold nodew idw before after
+    let prodC =
+        Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after
+
     let modelC = containedDiff mCanHold mb ma
 
     let containedDiffs, contained, refused =
@@ -334,7 +336,7 @@ let private diffProbe
         match prodC with
         | Ok ops ->
             let recon =
-                match Ops.applyAllWith canHold nodew idw ops before with
+                match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
                 | Ok t when prodTreeHash t = prodTreeHash after -> []
                 | Ok t ->
                     [ sprintf "applyAllWith(toOpsContained) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash t) ]
@@ -342,7 +344,7 @@ let private diffProbe
                     [ sprintf "applyAllWith REFUSED a contained script at step %d (%s) — %s" i (prodRejClass e) where ]
 
             let dry =
-                match Ops.canApplyAllWith canHold nodew idw ops before with
+                match Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
                 | Ok() -> []
                 | Error(i, e) ->
                     [ sprintf
@@ -403,7 +405,7 @@ let tests =
     testList
         "Proofs.Oracle"
         [
-          // ---- Phase 305: the content-aware diff oracle — `Diff.toOpsContainedWith` beside the model ----
+          // ---- Phase 305: the content-aware diff oracle — `Diff.toOpsWith` under `OpScope.contained` beside the model ----
           //
           // `TreeDiff.diff_applicable_contained_run` is about the extracted `to_ops_contained_with`; this
           // holds that function to the shipped one. Pairs are the Phase 141 generator's independent
@@ -412,7 +414,7 @@ let tests =
           // Compared per pair: the verdict and the script, operation for operation, through the same
           // renderers as the structural differential; then the theorem instantiated on both sides —
           // the extracted `apply_contained_all` lands the extracted script on the model of `after`,
-          // and `Ops.applyAllWith canHold` lands production's on `after`'s shape. Agreement is over the
+          // and `Ops.applyAll` under `OpScope.contained` lands production's on `after`'s shape. Agreement is over the
           // pool drawn, never over all inputs.
 
           testCase
@@ -460,7 +462,10 @@ let tests =
                   let encode (n: RNode) = nodew.KindTag n
                   let mb = toModelTree before
                   let ma = toModelTree after
-                  let prod = Diff.toOpsContainedWith canHold encode nodew idw before after
+
+                  let prod =
+                      Diff.toOpsWith encode Policy.none (OpScope.contained canHold nodew idw) before after
+
                   let model = TreeDiff.to_ops_contained_with mCanHold mb ma
 
                   if prodDiffRender prod <> modelDiffRender model then
@@ -493,7 +498,7 @@ let tests =
                               "#%d: the extracted script applies under the predicate on the model and lands on after"
                               i)
 
-                      match Ops.applyAllWith canHold nodew idw pops before with
+                      match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) pops before with
                       | Ok t ->
                           Expect.equal
                               (prodShape t)
@@ -563,7 +568,9 @@ let tests =
                   let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
                   let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
                   let encode (n: RNode) = nodew.KindTag n
-                  let prod = Diff.toOpsContainedWith canHold encode nodew idw before after
+
+                  let prod =
+                      Diff.toOpsWith encode Policy.none (OpScope.contained canHold nodew idw) before after
 
                   let model =
                       TreeDiff.to_ops_contained_with mCanHold (toModelTreeBlind before) (toModelTreeBlind after)
@@ -714,18 +721,18 @@ let tests =
                   if not (Set.isEmpty sharedIds) then
                       shared <- shared + 1
 
-                      match Diff.toOps nodew idw before after with
+                      match Diff.toOps Policy.none (OpScope.plain nodew idw) before after with
                       | Error e ->
                           // `diff_refusals_exact` says the only refusals are a root-id mismatch and
                           // a repeated id, and this pair has neither — a kind disagreement is not a
                           // refusal, which is half of why it is dangerous.
                           failtestf "toOps REFUSED a well-formed pair over a kind disagreement (%A)" e
                       | Ok ops ->
-                          match Ops.canApplyAll nodew idw ops before with
+                          match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before with
                           | Error _ -> refused <- refused + 1
                           | Ok() -> ()
 
-                          match Ops.applyAll nodew idw ops before with
+                          match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before with
                           | Ok t when prodTreeHash t = prodTreeHash after -> ()
                           | _ -> lost <- lost + 1
 

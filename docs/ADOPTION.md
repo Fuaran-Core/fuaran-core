@@ -214,7 +214,7 @@ reaches one of settled, pending or refused. Then dispatch through the very path 
 
 - **F1 — `ReplaceChildren` is partial on leaves.** Your leaf kinds (`Paragraph`, `Cell`, …) can't
   hold children, so `withChildren` is a no-op on them. Supply `CanHold = Some isContainer` and
-  dispatch real edits through `Ops.applyContained` / `canApplyContained` — they reject an insert/move
+  dispatch real edits through `Ops.apply` / `canApply` under `OpScope.contained canHold` — they reject an insert/move
   under a leaf with `NotAContainer` instead of silently no-op'ing. Containment *legality* (which kind
   may parent which) stays yours; `canHold` answers only "can this node hold children at all".
 - **F2 — conformance is witness-level *and* reducer-level.** `opAlgebra` certifies the tree witness

@@ -333,9 +333,9 @@ everywhere: (1) the companion witness that selects the variant (`KeyedWitness`, 
 the domain capabilities, grammar before containment — `allowedChildren` (which kinds a parent kind
 admits) before `canHold` (whether a node holds children at all); (3) the `NodeWitness`, then the
 `IdWitness`; (4) the request (the op, the proposals); (5) the subject last (the root, the base tree),
-so the call pipes. `applyReferenced refw allowedChildren canHold w idw op root`,
-`arbitrateGrammar allowedChildren canHold nodew idw baseTree proposals` and
-`applyContainedKeyed keyw canHold nodew idw op root` are the same rule with steps left out. The
+so the call pipes. `OpScope.keyed keyw canHold w idw` is the rule with steps left out, and since `0.39.0` the engine
+entries take the two records first, `Policy` then `OpScope` (Phase 517, DECISIONS.md D181): `Ops.apply policy scope
+op root`, `Arbitration.arbitrate policy scope baseTree proposals`, `Diff.toOpsWith encode policy scope before after`. The
 attributed verbs follow it too: the AI surface's `Proposals` verbs take the witness, then the actor,
 then the instant, then their own arguments — `approve w approver at id q state`,
 `reject approver at id reason q`, `proposeWithId author at id intent ops q` (Phase 391).
@@ -1011,14 +1011,14 @@ commute) and `false` is **always a safe answer, never a defect report** — "ser
 **The pinned over-approximations below are properties of the PURE form** — each a *tree fact the pure
 script cannot name* — and stay pinned for it: Phase 143 proved the unknown-parent clause necessary over
 the record for any footprint computed from the script alone. **Precision lives where the base is known
-(Phase 500).** `Ops.footprintIn` / `footprintInKeyed` compute the same record at the tree the script
+(Phase 500).** `Ops.footprintIn` (under any scope) computes the same record at the tree the script
 applies to, threaded op by op: a removal or a move names its source parent as a known structure-write, a
 removal content-writes the subtree it destroys (the set Phase 163 asked for), a move reads its destination's
 ancestors, an in-place `UpdateNode` reads and content-writes its target alone, and an absent target — or
 any op after one that does not apply — takes the pure arm. `Arbitration.arbitrateIn`, `Dag.conflictsIn` /
 `reconcileIn` / `reconcileManyIn` compose it; `Conformance.footprintInLawsAt` certifies it at a domain's
 own ops; the pure entries and their verdicts are unchanged. It refines the pure verdict (`FootprintIn.footprint_in_refines`: no pair the pure form frees is refused)
-and is sound over every operation, moves included (`footprint_in_sound`, the five move pairs proved in-phase). **The write gate reads the same location of each op (Phase 512, `0.39.0`, internal):** `WriteGate.targetsOf` is exactly `footprintIn`'s structure and content writes less a source parent the op does not itself name (an allowance on the target covers it, D138), each op located ONCE (an internal per-op view) for the engine's checks and edit, the gate, the grammar's created pairs and the inverse; `FootprintTests` holds the agreement over every op of the reference tree, and a change to either side alone is breaking for it.
+and is sound over every operation, moves included (`footprint_in_sound`, the five move pairs proved in-phase). **The write gate reads the same location of each op (Phase 512, `0.39.0`, internal):** `WriteGate.targetsOf` is exactly `footprintIn`'s structure and content writes less a source parent the op does not itself name (an allowance on the target covers it, D138), each op located ONCE (an internal per-op view) for the engine's checks and edit, the gate, the grammar's created pairs and the inverse; `FootprintTests` holds the agreement over every op of the reference tree, and a change to either side alone is breaking for it. **Since `0.39.0` the gate, like every engine entry, takes an `OpScope` (Phase 517, D181):** it reads a target's ancestors along the walk the scope locates through, so under a keyed scope a lock on a holder covers its keyed subtree (`Conformance.keyedApplyLawsAt`, the keyed-lock law); the engine asks `CanHold` of a reorder's parent, last, so the one verdict that moved is an accepted reorder of a node `canHold` refuses (now `NotAContainer`); and `Rejection.KeyedPosition` carries the slot, the position's index in the holder's `KeyedChildren`. Each is breaking for a consumer that pinned the old answer or matches the case positionally.
 
 - **A `RemoveNode` / `MoveNode` has an unknown source parent.** Removing or moving a node also rewrites
   its *source* parent's child-list, a tree fact the op does not carry, so the target lands in

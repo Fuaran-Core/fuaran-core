@@ -219,9 +219,10 @@ module ApplyVectorExport =
             Canon.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
         | ReorderMismatch(parent, _, _) -> Canon.typed "reorderMismatch" [ "parent", JStr parent ]
         | Rejected(code, _) -> Canon.typed "rejected" [ "code", JStr code ]
-        // Phase 286 — raised only by `Ops.applyContainedKeyed`, which no apply vector runs, so no
-        // pinned vector carries it; the projection names it so the match stays total.
-        | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
+        // Phase 286 — raised only under a keyed scope, which no apply vector runs, so no pinned
+        // vector carries it; the projection names it so the match stays total.
+        | KeyedPosition(target, holder, _) ->
+            Canon.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
         // Phase 313 — raised only by the grammar and reference engines, which no apply vector runs.
         | IllegalChild(child, _, parent, parentKind, _) ->
             Canon.typed "illegalChild" [ "child", JStr child; "parent", JStr parent; "parentKind", JStr parentKind ]
@@ -422,7 +423,7 @@ module ApplyVectorExport =
     /// What the reference answered, in the terms a host compares against. Computed by CALLING
     /// `Ops.apply`; nothing here restates what it ought to say.
     let private expectedOf (c: Case) : CorpusCell =
-        match Ops.apply nodew idw c.Op c.Tree with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) c.Op c.Tree with
         | Ok result ->
             let bytes = encodeTree result
 
@@ -658,7 +659,7 @@ module ApplyVectorExport =
     /// Run one parsed vector the way a host would — apply, then compare — and report what
     /// disagreed with the recorded answer.
     let checkVector (v: ParsedVector) : string option =
-        match Ops.apply nodew idw v.Op v.Tree, v.Verdict with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) v.Op v.Tree, v.Verdict with
         | Ok result, "accept" ->
             let bytes = encodeTree result
 

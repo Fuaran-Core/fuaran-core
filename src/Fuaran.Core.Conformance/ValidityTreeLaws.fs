@@ -7,21 +7,21 @@ module internal ValidityTreeLaws =
     // ---- Phase 313: the structural-integrity families ----
 
     /// The containment-grammar laws (Phase 313) — the teeth on the grammar engine
-    /// (`Ops.applyGrammar` and its dry runs), `Diff.toOpsGrammar`, `Arbitration.arbitrateGrammar` and
+    /// (`Ops.apply` under `Policy.grammar` and its dry runs), `Diff.toOps` under `Policy.grammar`, `Arbitration.arbitrate` under `Policy.grammar` and
     /// `Validator.containment`, at the domain's own grammar. Each iteration draws a tree, PRUNES it to
     /// the grammar (its lowering, each insert kept only where the grammar engine accepts it — so the
     /// start state keeps the grammar), and threads drawn ops through the engine:
     ///
-    ///   - **agreement** — the engine is `applyContained` then the grammar: it refuses with the same
-    ///     envelope wherever `applyContained` refuses, and with `IllegalChild` exactly where the tree
-    ///     `applyContained` would build breaks the grammar;
+    ///   - **agreement** — the engine is `Ops.apply` under `OpScope.contained` then the grammar: it refuses with the same
+    ///     envelope wherever `Ops.apply` under `OpScope.contained` refuses, and with `IllegalChild` exactly where the tree
+    ///     `Ops.apply` under `OpScope.contained` would build breaks the grammar;
     ///   - **preservation** — an accepted op keeps every parent's children legal (`grammar_preserves`
     ///     in `proofs/Preservation.fst`, asked of the shipped engine);
     ///   - **naming** — `IllegalChild` names a pair the step would create, with the parent's kind and
     ///     what the grammar lets that kind hold; the refusal is also BUILT each iteration the drawn
     ///     tree carries an illegal pair, by cutting the child out and grafting it back;
     ///   - the **dry runs** answer the engine's envelope; the **diff** reconstructs a grammar-legal
-    ///     pair through `applyAllGrammar` and refuses an `after` holding an illegal pair, naming the
+    ///     pair through `Ops.applyAll` under `Policy.grammar` and refuses an `after` holding an illegal pair, naming the
     ///     first; **arbitration** admits only scripts the engine accepts, and its accepted scripts
     ///     land in either order to one grammar-legal tree; and **`Validator.containment`** reports
     ///     exactly the pairs `Ops.illegalChildren` does.
@@ -40,14 +40,14 @@ module internal ValidityTreeLaws =
         let canHold = LawKit.canHoldOf gen
 
         let engine op t =
-            Ops.applyGrammar allowedChildren canHold nodew idw op t
+            Ops.apply (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) op t
 
         let legal (t: 'Node) =
             List.isEmpty (Ops.illegalChildren allowedChildren nodew t)
 
         let agreement =
             LawKit.LawCell
-                "the grammar engine is applyContained then the grammar (the same envelope where it refuses, IllegalChild exactly where its result breaks the grammar)"
+                "the grammar engine is the contained apply then the grammar (the same envelope where it refuses, IllegalChild exactly where its result breaks the grammar)"
 
         let preservation =
             LawKit.LawCell "an accepted op keeps every parent's children legal"
@@ -59,20 +59,21 @@ module internal ValidityTreeLaws =
             )
 
         let dryRun =
-            LawKit.LawCell "the dry runs answer the engine's envelope (canApplyGrammar, canApplyAllGrammar)"
+            LawKit.LawCell "the dry runs answer the engine's envelope (the grammar canApply, the grammar canApplyAll)"
 
         let diffBack =
-            LawKit.LawCell "grammar diff reconstruction (applyAllGrammar (toOpsGrammar before after) before = after)"
+            LawKit.LawCell
+                "grammar diff reconstruction (the grammar applyAll (the grammar toOps before after) before = after)"
 
         let diffRefuses =
             LawKit.LawCell(
-                "toOpsGrammar refuses an after holding an illegal pair with IllegalChildInTree naming the first, after every toOpsContained refusal",
+                "the grammar toOps refuses an after holding an illegal pair with IllegalChildInTree naming the first, after every the contained toOps refusal",
                 Some "grammar refusal"
             )
 
         let arbitration =
             LawKit.LawCell
-                "arbitrateGrammar admits only what the grammar engine accepts, and its accepted scripts land in either order to one grammar-legal tree"
+                "the grammar arbitrate admits only what the grammar engine accepts, and its accepted scripts land in either order to one grammar-legal tree"
 
         let validator =
             LawKit.LawCell "Validator.containment reports exactly Ops.illegalChildren, child by child"
@@ -107,7 +108,7 @@ module internal ValidityTreeLaws =
             match op with
             | Batch ops -> ops |> List.fold (fun acc o -> acc |> Result.bind (expectedOf o)) (Ok t)
             | _ ->
-                match Ops.applyContained canHold nodew idw op t with
+                match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op t with
                 | Error e -> Error(Choice1Of2 e)
                 | Ok t1 when legal t1 -> Ok t1
                 | Ok t1 -> Error(Choice2Of2 t1)
@@ -154,15 +155,24 @@ module internal ValidityTreeLaws =
                      | Ok t1, Ok t2 -> t1 = t2
                      | Error(Choice2Of2 _), Error(IllegalChild _) -> true
                      | _ -> false),
-                    fun () -> at (sprintf "op %A: expected %A, applyGrammar answered %A" op expected g)
+                    fun () -> at (sprintf "op %A: expected %A, the grammar apply answered %A" op expected g)
                 )
 
+                let scriptVerdict =
+                    match g with
+                    | Ok _ -> Ok()
+                    | Error e -> Error(0, e)
+
                 dryRun.Check(
-                    Ops.canApplyGrammar allowedChildren canHold nodew idw op cur = Result.map ignore g
-                    && Ops.canApplyAllGrammar allowedChildren canHold nodew idw [ op ] cur = (match g with
-                                                                                              | Ok _ -> Ok()
-                                                                                              | Error e -> Error(0, e)),
-                    fun () -> at (sprintf "a dry run disagrees with applyGrammar on %A" op)
+                    Ops.canApply (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) op cur = Result.map
+                        ignore
+                        g
+                    && Ops.canApplyAll
+                        (Policy.grammar allowedChildren)
+                        (OpScope.contained canHold nodew idw)
+                        [ op ]
+                        cur = scriptVerdict,
+                    fun () -> at (sprintf "a dry run disagrees with the grammar apply on %A" op)
                 )
 
                 match g, expected with
@@ -178,18 +188,18 @@ module internal ValidityTreeLaws =
             // the built refusal: the drawn tree's first illegal pair, cut out and grafted back
             match Ops.illegalChildren allowedChildren nodew drawn with
             | (p, c) :: _ ->
-                match Ops.apply nodew idw (RemoveNode(nodew.Id c)) drawn with
+                match Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode(nodew.Id c)) drawn with
                 | Ok cut ->
                     let graft = InsertChild(nodew.Id p, c)
 
-                    match Ops.applyContained canHold nodew idw graft cut with
+                    match Ops.apply Policy.none (OpScope.contained canHold nodew idw) graft cut with
                     | Ok result ->
                         refused <- refused + 1
 
                         expectNamed
                             at
                             result
-                            (Ops.applyGrammar allowedChildren canHold nodew idw graft cut
+                            (Ops.apply (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) graft cut
                              |> function
                                  | Error e -> e
                                  | Ok _ -> Rejected("accepted", "the illegal graft was accepted"))
@@ -198,28 +208,31 @@ module internal ValidityTreeLaws =
             | [] -> ()
 
             // the diff: a grammar-legal pair reconstructs; the drawn tree, where illegal, is refused
-            match Diff.toOpsGrammar allowedChildren canHold nodew idw start cur with
+            match Diff.toOps (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) start cur with
             | Ok ops ->
-                let back = Ops.applyAllGrammar allowedChildren canHold nodew idw ops start
+                let back =
+                    Ops.applyAll (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) ops start
 
                 diffBack.Check(
                     (match back with
                      | Ok t -> t = cur
                      | Error _ -> false),
-                    fun () -> at (sprintf "applyAllGrammar (toOpsGrammar) answered %A" back)
+                    fun () -> at (sprintf "the grammar applyAll (the grammar toOps) answered %A" back)
                 )
             | Error e ->
-                diffBack.Check(false, fun () -> at (sprintf "toOpsGrammar refused a grammar-legal pair: %A" e))
+                diffBack.Check(false, fun () -> at (sprintf "the grammar toOps refused a grammar-legal pair: %A" e))
 
             match Ops.illegalChildren allowedChildren nodew drawn with
             | (p, c) :: _ ->
                 // Phase 302 — counted: the engine-loop refusals above meet "IllegalChild" without
                 // this arm ever being reached.
                 illegalDrawn <- illegalDrawn + 1
-                let answer = Diff.toOpsGrammar allowedChildren canHold nodew idw start drawn
+
+                let answer =
+                    Diff.toOps (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) start drawn
 
                 diffRefuses.Check(
-                    (match Diff.toOpsContained canHold nodew idw start drawn, answer with
+                    (match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) start drawn, answer with
                      | Error e, Error e' -> e = e'
                      | Ok _, Error(Diff.IllegalChildInTree(child, childKind, parent, parentKind, kinds)) ->
                          idw.Equals child (nodew.Id c)
@@ -228,7 +241,7 @@ module internal ValidityTreeLaws =
                          && parentKind = nodew.KindTag p
                          && kinds = (allowedChildren parentKind |> Option.defaultValue [])
                      | _ -> false),
-                    fun () -> at (sprintf "toOpsGrammar over an illegal after answered %A" answer)
+                    fun () -> at (sprintf "the grammar toOps over an illegal after answered %A" answer)
                 )
             | [] -> ()
 
@@ -240,7 +253,11 @@ module internal ValidityTreeLaws =
                         Ops = [ rng.Draw(LawKit.genOp nodew idw gen cur) ] } ]
 
             let verdict =
-                Arbitration.arbitrateGrammar allowedChildren canHold nodew idw cur proposals
+                Arbitration.arbitrate
+                    (Policy.grammar allowedChildren)
+                    (OpScope.contained canHold nodew idw)
+                    cur
+                    proposals
 
             let landAll (scripts: SkeletonOp<'Node, 'Id> list list) =
                 scripts
@@ -248,7 +265,7 @@ module internal ValidityTreeLaws =
                     (fun acc ops ->
                         acc
                         |> Result.bind (fun t ->
-                            Ops.applyAllGrammar allowedChildren canHold nodew idw ops t
+                            Ops.applyAll (Policy.grammar allowedChildren) (OpScope.contained canHold nodew idw) ops t
                             |> Result.mapError (fun r -> r.Applied, r.Rejection)))
                     (Ok cur)
 
@@ -264,9 +281,13 @@ module internal ValidityTreeLaws =
                    |> List.forall (fun (p, why) ->
                        match why with
                        | Inapplicable(i, r) ->
-                           Ops.canApplyAllGrammar allowedChildren canHold nodew idw p.Ops cur = Error(i, r)
+                           Ops.canApplyAll
+                               (Policy.grammar allowedChildren)
+                               (OpScope.contained canHold nodew idw)
+                               p.Ops
+                               cur = Error(i, r)
                        | Conflicts _ -> true),
-                fun () -> at (sprintf "arbitrateGrammar: forward %A, backward %A" forward backward)
+                fun () -> at (sprintf "the grammar arbitrate: forward %A, backward %A" forward backward)
             ))
 
         LawKit.results
@@ -286,19 +307,19 @@ module internal ValidityTreeLaws =
                   "illegal drawn tree", illegalDrawn ] ]
 
     /// The reference-integrity laws (Phase 313) — the teeth on `Validator.referenceDefects` /
-    /// `forwardReferences` and their families, the reference-aware engine (`Ops.applyReferenced`) and
-    /// `Ops.footprintReferenced`, at the domain's own `RefWitness`. The defects are checked against
+    /// `forwardReferences` and their families, the reference-aware engine (`Ops.apply` under a policy with `Refs`) and
+    /// `Ops.footprint` under `Policy.referenced`, at the domain's own `RefWitness`. The defects are checked against
     /// a naive specification held here (a reference with no declarer; a declaration with no
     /// referrer; the nodes that reach themselves through "refers to a declaration of"; a declaration
     /// later in preorder that is not the referrer's descendant), never against the validator's own
     /// walk. Drawn ops are threaded through the engine:
     ///
-    ///   - **agreement** — the engine refuses with `applyContained`'s envelope wherever it refuses,
+    ///   - **agreement** — the engine refuses with `Ops.apply` under `OpScope.contained`'s envelope wherever it refuses,
     ///     and refuses an accepted step with `StillReferenced` exactly when, in the tree it would build,
     ///     a node refers to an id the tree declared before the step and no longer does (a remove's
     ///     subtree, a rewrite that declares less), naming every such node;
     ///   - **preservation** — an accepted op leaves no reference dangling that resolved before it;
-    ///   - **footprint** — `footprintReferenced` contains `footprint` and reads every reference an
+    ///   - **footprint** — `Ops.footprint` under `Policy.referenced` contains `footprint` and reads every reference an
     ///     inserted subtree or an update payload carries; and, BUILT from the drawn tree wherever a
     ///     node refers to a declaration its declarer's id names, the update of the referrer and the
     ///     removal of the declarer interfere on the referenced id — the race `independent` refuses.
@@ -330,13 +351,13 @@ module internal ValidityTreeLaws =
 
         let agreement =
             LawKit.LawCell
-                "the reference engine is applyContained then StillReferenced, exactly where an accepted step leaves a resolved reference dangling"
+                "the reference engine is the contained apply then StillReferenced, exactly where an accepted step leaves a resolved reference dangling"
 
         let preservation =
             LawKit.LawCell "an accepted op leaves no reference dangling that resolved before it"
 
         let footprintReads =
-            LawKit.LawCell "footprintReferenced contains footprint and reads every reference a script writes"
+            LawKit.LawCell "the referenced footprint contains footprint and reads every reference a script writes"
 
         let race =
             LawKit.LawCell(
@@ -479,7 +500,7 @@ module internal ValidityTreeLaws =
             match op with
             | Batch ops -> ops |> List.fold (fun acc o -> acc |> Result.bind (expectedOf o)) (Ok t)
             | _ ->
-                match Ops.applyContained canHold nodew idw op t with
+                match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op t with
                 | Error e -> Error e
                 | Ok t1 ->
                     let lost = Set.difference (declaredKeys t) (declaredKeys t1)
@@ -508,10 +529,17 @@ module internal ValidityTreeLaws =
 
             for _ in 1..6 do
                 let op = rng.Draw(LawKit.genOp nodew idw gen cur)
-                let g = Ops.applyReferenced refw none canHold nodew idw op cur
 
-                let fp = Ops.footprint nodew idw [ op ]
-                let fr = Ops.footprintReferenced refw nodew idw [ op ]
+                let g =
+                    Ops.apply
+                        { Policy.grammar none with
+                            Refs = Some refw }
+                        (OpScope.contained canHold nodew idw)
+                        op
+                        cur
+
+                let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
+                let fr = Ops.footprint (Policy.referenced refw) (OpScope.plain nodew idw) [ op ]
 
                 footprintReads.Check(
                     Set.isSubset fp.Reads fr.Reads
@@ -521,14 +549,14 @@ module internal ValidityTreeLaws =
                     && fp.SlotReads = fr.SlotReads
                     && fp.SlotWrites = fr.SlotWrites
                     && (written op |> List.forall (fun r -> fr.Reads.Contains(key r))),
-                    fun () -> at (sprintf "footprintReferenced of %A is %A against footprint %A" op fr fp)
+                    fun () -> at (sprintf "the referenced footprint of %A is %A against footprint %A" op fr fp)
                 )
 
                 let expected = expectedOf op cur
 
                 agreement.Check(
                     (g = expected),
-                    fun () -> at (sprintf "op %A: expected %A, applyReferenced answered %A" op expected g)
+                    fun () -> at (sprintf "op %A: expected %A, the referenced apply answered %A" op expected g)
                 )
 
                 match g with
@@ -564,8 +592,11 @@ module internal ValidityTreeLaws =
             | (n, r, d) :: _ ->
                 races <- races + 1
 
-                let a = Ops.footprintReferenced refw nodew idw [ UpdateNode n ]
-                let b = Ops.footprintReferenced refw nodew idw [ RemoveNode(nodew.Id d) ]
+                let a =
+                    Ops.footprint (Policy.referenced refw) (OpScope.plain nodew idw) [ UpdateNode n ]
+
+                let b =
+                    Ops.footprint (Policy.referenced refw) (OpScope.plain nodew idw) [ RemoveNode(nodew.Id d) ]
 
                 race.Check(
                     not (Ops.independent a b)
@@ -608,7 +639,7 @@ module internal ValidityTreeLaws =
         for _ in 1..4 do
             let op = rng.Draw(LawKit.genOp nodew idw gen after)
 
-            match Ops.applyContained canHold nodew idw op after with
+            match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op after with
             | Ok t' -> after <- t'
             | Error _ -> ()
 
@@ -857,7 +888,7 @@ module internal ValidityTreeLaws =
 
                 match
                     Diff.changes encode nodew idw before after,
-                    Diff.toOpsWith encode nodew idw before after,
+                    Diff.toOpsWith encode Policy.none (OpScope.plain nodew idw) before after,
                     Tree.Index.tryBuild nodew idw before,
                     Tree.Index.tryBuild nodew idw after
                 with
@@ -986,7 +1017,7 @@ module internal ValidityTreeLaws =
                         fun () -> at (sprintf "Reordered %A vs ReorderChildren parents %A" reorderedIds reorderParents)
                     )
 
-                    match Ops.applyAll nodew idw ops before with
+                    match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before with
                     | Ok landed ->
                         landing.Check(
                             (Diff.changes encode nodew idw landed after = Ok []),

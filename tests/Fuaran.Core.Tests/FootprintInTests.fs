@@ -14,9 +14,10 @@ open Fuaran.Core.Tests.Reference
 type private Op = SkeletonOp<RNode, string>
 
 let private fpIn (ops: Op list) =
-    Ops.footprintIn nodew idw (sample ()) ops
+    Ops.footprintIn Policy.none (OpScope.plain nodew idw) (sample ()) ops
 
-let private fpPure (ops: Op list) = Ops.footprint nodew idw ops
+let private fpPure (ops: Op list) =
+    Ops.footprint Policy.none (OpScope.plain nodew idw) ops
 
 let private upd (id: string) (value: string) : Op = UpdateNode(RNode.leaf id "para" value)
 
@@ -27,7 +28,9 @@ let private independentPure (a: Op list) (b: Op list) = Ops.independent (fpPure 
 /// Both orders apply from the sample and reach the same content hash.
 let private commute (a: Op list) (b: Op list) =
     let hash (t: RNode) = Tree.encodeHash nodew encNode t
-    let run (ops: Op list) (t: RNode) = Ops.applyAll nodew idw ops t
+
+    let run (ops: Op list) (t: RNode) =
+        Ops.applyAll Policy.none (OpScope.plain nodew idw) ops t
 
     match run a (sample ()) |> Result.bind (run b), run b (sample ()) |> Result.bind (run a) with
     | Ok x, Ok y -> hash x = hash y
@@ -178,7 +181,7 @@ let footprintInTests =
               let all = [ upd "a1" "x'"; RemoveNode "b"; MoveNode("a2", "root") ]
 
               Expect.equal
-                  (Ops.footprintInKeyed keyw nodew idw (sample ()) all)
+                  (Ops.footprintIn Policy.none (OpScope.keyed keyw (fun _ -> true) nodew idw) (sample ()) all)
                   (fpIn all)
                   "the keyed form is the unkeyed one"
 
@@ -195,12 +198,17 @@ let footprintInTests =
                   let b, r3 = genTreeOp r2
                   rng <- r3
 
-                  match Ops.apply nodew idw a t, Ops.apply nodew idw b t with
+                  match
+                      Ops.apply Policy.none (OpScope.plain nodew idw) a t,
+                      Ops.apply Policy.none (OpScope.plain nodew idw) b t
+                  with
                   | Ok _, Ok _ ->
                       let pureInd = Ops.independent (fpPure [ a ]) (fpPure [ b ])
 
                       let inInd =
-                          Ops.independent (Ops.footprintIn nodew idw t [ a ]) (Ops.footprintIn nodew idw t [ b ])
+                          Ops.independent
+                              (Ops.footprintIn Policy.none (OpScope.plain nodew idw) t [ a ])
+                              (Ops.footprintIn Policy.none (OpScope.plain nodew idw) t [ b ])
 
                       if pureInd then
                           pureFree <- pureFree + 1
@@ -232,15 +240,23 @@ let arbitrateInTests =
         [ testCase "two in-place edits of different nodes coexist under arbitrateIn where arbitrate refuses the second"
           <| fun () ->
               let proposals = [ prop 1 [ upd "a1" "x'" ]; prop 2 [ upd "b1" "z'" ] ]
-              let plain = Arbitration.arbitrate nodew idw (sample ()) proposals
-              let inBase = Arbitration.arbitrateIn nodew idw (sample ()) proposals
+
+              let plain =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) (sample ()) proposals
+
+              let inBase =
+                  Arbitration.arbitrateIn Policy.none (OpScope.plain nodew idw) (sample ()) proposals
+
               Expect.equal (plain.Accepted |> List.map _.Id) [ 1 ] "the pure partition accepts one"
               Expect.equal (inBase.Accepted |> List.map _.Id) [ 1; 2 ] "the base-aware partition accepts both"
 
           testCase "an edit under a removed ancestor is still refused, citing the removal"
           <| fun () ->
               let proposals = [ prop 1 [ RemoveNode "a" ]; prop 2 [ upd "a1" "x'" ] ]
-              let r = Arbitration.arbitrateIn nodew idw (sample ()) proposals
+
+              let r =
+                  Arbitration.arbitrateIn Policy.none (OpScope.plain nodew idw) (sample ()) proposals
+
               Expect.equal (r.Accepted |> List.map _.Id) [ 1 ] "the removal wins the pinned order"
 
               match r.Rejected with
@@ -254,7 +270,9 @@ let arbitrateInTests =
               let dup =
                   RNode.node "root" "doc" [ RNode.leaf "a" "para" ""; RNode.leaf "a" "para" "" ]
 
-              let r = Arbitration.arbitrateIn nodew idw dup [ prop 1 [ upd "a" "v" ] ]
+              let r =
+                  Arbitration.arbitrateIn Policy.none (OpScope.plain nodew idw) dup [ prop 1 [ upd "a" "v" ] ]
+
               Expect.isEmpty r.Accepted "nothing is accepted"
 
               match r.Rejected with
@@ -284,8 +302,11 @@ let private lanes (lanes: Op list list) =
 
     baseId, heads, dag
 
-let private fpAt (t: RNode) (op: Op) = Ops.footprintIn nodew idw t [ op ]
-let private fpOf (op: Op) = Ops.footprint nodew idw [ op ]
+let private fpAt (t: RNode) (op: Op) =
+    Ops.footprintIn Policy.none (OpScope.plain nodew idw) t [ op ]
+
+let private fpOf (op: Op) =
+    Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
 [<Tests>]
 let dagInTests =
@@ -329,7 +350,7 @@ let dagInTests =
               match Dag.reconcileManyIn w fpAt dag baseId (sample ()) heads with
               | Ok script ->
                   Expect.equal script [ upd "a1" "x'"; upd "b1" "z'" ] "the merge script in head order"
-                  Expect.isOk (Ops.applyAll nodew idw script (sample ())) "and it applies"
+                  Expect.isOk (Ops.applyAll Policy.none (OpScope.plain nodew idw) script (sample ())) "and it applies"
               | Error f -> failtestf "the base-aware fold refused: %A" f
 
           testCase "reconcileIn is reconcileManyIn at two heads, and a lane that interferes is still refused"
@@ -389,9 +410,11 @@ let treeGen: StreamGen<Op, RNode> = { State0 = sample (); Op = genTreeOp }
 
 let treeHash: RNode -> string = Tree.encodeHash nodew encNode
 
-let footprintOf (op: Op) : Footprint = Ops.footprint nodew idw [ op ]
+let footprintOf (op: Op) : Footprint =
+    Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
-let footprintIn (t: RNode) (op: Op) : Footprint = Ops.footprintIn nodew idw t [ op ]
+let footprintIn (t: RNode) (op: Op) : Footprint =
+    Ops.footprintIn Policy.none (OpScope.plain nodew idw) t [ op ]
 
 /// A footprint that forgets the removed subtree: the in-place edit of a node inside it is freed, and
 /// the law goes red.

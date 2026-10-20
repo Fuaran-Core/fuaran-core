@@ -63,12 +63,12 @@ module internal ConcurrencyLaws =
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
-            let fa = Ops.footprint nodew idw a
-            let fb = Ops.footprint nodew idw b
+            let fa = Ops.footprint Policy.none (OpScope.plain nodew idw) a
+            let fb = Ops.footprint Policy.none (OpScope.plain nodew idw) b
 
             // determinism: footprint is a pure function of the script.
             determinism.Check(
-                Ops.footprint nodew idw a = fa,
+                Ops.footprint Policy.none (OpScope.plain nodew idw) a = fa,
                 fun () -> at "footprint is not a pure function of the script"
             )
 
@@ -77,7 +77,7 @@ module internal ConcurrencyLaws =
             let prefix = List.truncate k a
 
             monotonicity.Check(
-                subsetFp (Ops.footprint nodew idw prefix) fa,
+                subsetFp (Ops.footprint Policy.none (OpScope.plain nodew idw) prefix) fa,
                 fun () -> at (sprintf "a %d-op prefix footprint ⊄ the full footprint" k)
             )
 
@@ -91,13 +91,21 @@ module internal ConcurrencyLaws =
                 if not (List.isEmpty a) && not (List.isEmpty b) && Ops.independent fa fb then
                     Some(a, b)
                 else
-                    LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) tree rng
+                    LawKit.drawIndependentPair
+                        nodew
+                        idw
+                        gen
+                        (Ops.footprint Policy.none (OpScope.plain nodew idw))
+                        tree
+                        rng
 
             match pair with
             | None -> ()
             | Some(a, b) ->
                 independentPairs <- independentPairs + 1
-                let applyAll ops t = Ops.applyAll nodew idw ops t
+
+                let applyAll ops t =
+                    Ops.applyAll Policy.none (OpScope.plain nodew idw) ops t
 
                 let ab =
                     applyAll a tree |> Result.bind (fun ta -> applyAll b ta |> Result.map hashOf)
@@ -518,7 +526,8 @@ module internal ConcurrencyLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
+        let fp (op: SkeletonOp<'Node, 'Id>) =
+            Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
         let symmetry =
             LawKit.LawCell "conflicts is symmetric (conflicts a b ≡ conflicts b a up to Left/Right swap)"
@@ -634,7 +643,9 @@ module internal ConcurrencyLaws =
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let hashOf = Tree.encodeHash nodew encode
-        let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
+
+        let fp (op: SkeletonOp<'Node, 'Id>) =
+            Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ]
 
         // A minimal StreamWitness so the branch deltas live in a REAL DAG (append needs Encode for the
         // content id; the shared-history law replays through Apply). Encode is a structural
@@ -657,13 +668,17 @@ module internal ConcurrencyLaws =
             | UpdateNode node -> "U|" + encode node
 
         let sw: StreamWitness<SkeletonOp<'Node, 'Id>, 'Node, Rejection<'Id>> =
-            { Apply = fun op st -> Ops.applyContained canHold nodew idw op st
+            { Apply = fun op st -> Ops.apply Policy.none (OpScope.contained canHold nodew idw) op st
               Encode = encOp
               Decode = fun _ -> Error "reconcileLaws: decode unused" }
 
         let applyAll (ops: SkeletonOp<'Node, 'Id> list) (t: 'Node) =
             ops
-            |> List.fold (fun acc op -> acc |> Result.bind (fun s -> Ops.applyContained canHold nodew idw op s)) (Ok t)
+            |> List.fold
+                (fun acc op ->
+                    acc
+                    |> Result.bind (fun s -> Ops.apply Policy.none (OpScope.contained canHold nodew idw) op s))
+                (Ok t)
 
         let clean =
             LawKit.LawCell(
@@ -740,7 +755,15 @@ module internal ConcurrencyLaws =
             // cross-validation and the criss-cross shape were reached by luck or not at all.
             let a, b =
                 if i % 8 = 4 || i % 4 = 3 then
-                    match LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) tree rng with
+                    match
+                        LawKit.drawIndependentPair
+                            nodew
+                            idw
+                            gen
+                            (Ops.footprint Policy.none (OpScope.plain nodew idw))
+                            tree
+                            rng
+                    with
                     | Some p -> p
                     | None -> a0, b0
                 else
@@ -761,7 +784,9 @@ module internal ConcurrencyLaws =
             // that the trial falls back to the disjoint shape, on the same draw.
             let commutesWithA (s: SkeletonOp<'Node, 'Id> list) =
                 not (List.isEmpty s)
-                && Ops.independent (Ops.footprint nodew idw a) (Ops.footprint nodew idw s)
+                && Ops.independent
+                    (Ops.footprint Policy.none (OpScope.plain nodew idw) a)
+                    (Ops.footprint Policy.none (OpScope.plain nodew idw) s)
 
             let crissB =
                 if i % 4 = 3 && not (List.isEmpty a) then
@@ -804,7 +829,15 @@ module internal ConcurrencyLaws =
                     // can be drawn, so the criss-cross trial can fold clean and its shared-history
                     // law is asserted; drawn as before otherwise.
                     let c, d =
-                        match LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) merged rng with
+                        match
+                            LawKit.drawIndependentPair
+                                nodew
+                                idw
+                                gen
+                                (Ops.footprint Policy.none (OpScope.plain nodew idw))
+                                merged
+                                rng
+                        with
                         | Some p -> p
                         | None ->
                             let c = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
@@ -918,7 +951,9 @@ module internal ConcurrencyLaws =
             if
                 not (List.isEmpty exclA)
                 && not (List.isEmpty exclB)
-                && Ops.independent (Ops.footprint nodew idw exclA) (Ops.footprint nodew idw exclB)
+                && Ops.independent
+                    (Ops.footprint Policy.none (OpScope.plain nodew idw) exclA)
+                    (Ops.footprint Policy.none (OpScope.plain nodew idw) exclB)
             then
                 independentDeltas <- independentDeltas + 1
 
@@ -1078,7 +1113,10 @@ module internal ConcurrencyLaws =
                     rng.State <- r'
                     interleavings <- ops :: interleavings
 
-                match Ops.applyAll nodew idw (a @ b) tree |> Result.map hashOf with
+                match
+                    Ops.applyAll Policy.none (OpScope.plain nodew idw) (a @ b) tree
+                    |> Result.map hashOf
+                with
                 | Error rej ->
                     totality.Check(
                         false,
@@ -1093,7 +1131,7 @@ module internal ConcurrencyLaws =
                     )
                 | Ok refHash ->
                     for ops in interleavings do
-                        match Ops.applyAll nodew idw ops tree with
+                        match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops tree with
                         | Error rej ->
                             totality.Check(
                                 false,
@@ -1139,7 +1177,7 @@ module internal ConcurrencyLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        concurrencyLawsWith nodew idw gen encode (Ops.footprint nodew idw) runner iterations
+        concurrencyLawsWith nodew idw gen encode (Ops.footprint Policy.none (OpScope.plain nodew idw)) runner iterations
 
     // ---- proposal arbitration (Phase 85) ----
     // The teeth on `Arbitration.arbitrate`: a deterministic, total partition of N op-script
@@ -1245,14 +1283,15 @@ module internal ConcurrencyLaws =
 
                 proposals <- proposals @ [ mkProposal k ops ]
 
-            let result = Arbitration.arbitrate nodew idw tree proposals
+            let result =
+                Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree proposals
 
             // determinism + permutation invariance: shuffled input ⇒ identical Arbitration.
             let shuffled = rng.Shuffle proposals
 
             permutation.Check(
-                Arbitration.arbitrate nodew idw tree shuffled = result
-                && Arbitration.arbitrate nodew idw tree proposals = result,
+                Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree shuffled = result
+                && Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree proposals = result,
                 fun () -> at "arbitrate is not deterministic / permutation-invariant"
             )
 
@@ -1273,10 +1312,10 @@ module internal ConcurrencyLaws =
             )
 
             let selfInterfering (p: OpScriptProposal<'Node, 'Id>) =
-                match Ops.canApplyAll nodew idw p.Ops tree with
+                match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) p.Ops tree with
                 | Error _ -> false
                 | Ok() ->
-                    let fp = Ops.footprint nodew idw p.Ops
+                    let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) p.Ops
                     not (Ops.independent fp fp)
 
             match proposals |> List.tryFind selfInterfering with
@@ -1295,8 +1334,8 @@ module internal ConcurrencyLaws =
                 )
 
                 uniqueness.Check(
-                    Arbitration.arbitrate nodew idw tree twinLast
-                    <> Arbitration.arbitrate nodew idw tree twinFirst,
+                    Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree twinLast
+                    <> Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree twinFirst,
                     fun () ->
                         at (
                             sprintf
@@ -1319,7 +1358,8 @@ module internal ConcurrencyLaws =
 
             // pairwise independence of the accepted set.
             let acceptedFps =
-                result.Accepted |> List.map (fun p -> p.Id, Ops.footprint nodew idw p.Ops)
+                result.Accepted
+                |> List.map (fun p -> p.Id, Ops.footprint Policy.none (OpScope.plain nodew idw) p.Ops)
 
             let pairwise =
                 acceptedFps
@@ -1333,12 +1373,12 @@ module internal ConcurrencyLaws =
                 match reason with
                 | Inapplicable(ix, rej) ->
                     actionability.Check(
-                        Ops.canApplyAll nodew idw p.Ops tree = Error(ix, rej),
+                        Ops.canApplyAll Policy.none (OpScope.plain nodew idw) p.Ops tree = Error(ix, rej),
                         fun () -> at (sprintf "Inapplicable ≠ the canApplyAll envelope (proposal %d)" p.Id)
                     )
                 | Conflicts(ids, _) ->
                     conflictsSeen <- conflictsSeen + 1
-                    let fp = Ops.footprint nodew idw p.Ops
+                    let fp = Ops.footprint Policy.none (OpScope.plain nodew idw) p.Ops
 
                     let citesInterferingAccepted =
                         not (List.isEmpty ids)
@@ -1360,12 +1400,16 @@ module internal ConcurrencyLaws =
 
             let applyIn (order: SkeletonOp<'Node, 'Id> list list) =
                 order
-                |> List.fold (fun acc s -> acc |> Result.bind (Ops.applyAll nodew idw s)) (Ok tree)
+                |> List.fold
+                    (fun acc s -> acc |> Result.bind (Ops.applyAll Policy.none (OpScope.plain nodew idw) s))
+                    (Ok tree)
                 |> Result.map hashOf
 
             let shuffledScripts = rng.Shuffle scripts
 
-            let viaMerged = Ops.applyAll nodew idw result.MergedScript tree |> Result.map hashOf
+            let viaMerged =
+                Ops.applyAll Policy.none (OpScope.plain nodew idw) result.MergedScript tree
+                |> Result.map hashOf
 
             confluence.Check(
                 (match applyIn scripts, applyIn (List.rev scripts), applyIn shuffledScripts, viaMerged with

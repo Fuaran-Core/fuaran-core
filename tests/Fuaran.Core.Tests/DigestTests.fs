@@ -264,7 +264,7 @@ let changeTests =
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let ops =
-                  Diff.toOpsWith encode nodew idw fixture after
+                  Diff.toOpsWith encode Policy.none (OpScope.plain nodew idw) fixture after
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let named k =

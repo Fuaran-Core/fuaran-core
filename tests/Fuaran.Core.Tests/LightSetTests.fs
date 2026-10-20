@@ -68,7 +68,7 @@ let private hashCorpus: string list =
 // ---------------------------------------------------------------------------------------------
 
 let private skeletonStream: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
-    { Apply = fun op t -> Ops.apply nodew idw op t
+    { Apply = fun op t -> Ops.apply Policy.none (OpScope.plain nodew idw) op t
       Encode = sprintf "%A"
       Decode = fun _ -> Error "not decoded in this suite" }
 
@@ -109,7 +109,7 @@ let private genScript (len: int) (rng: ConfRng.T) : SkeletonOp<RNode, string> li
         r <- r'
         ops.Add op
 
-        match Ops.apply nodew idw op tree with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) op tree with
         | Ok t -> tree <- t
         | Error _ -> ()
 
@@ -264,7 +264,7 @@ let tests =
 
                         match
                             OpStream.appendMany OpStream.defaultHash skeletonStream (Human "h") ops (sample ()) [],
-                            Ops.applyAll nodew idw ops (sample ())
+                            Ops.applyAll Policy.none (OpScope.plain nodew idw) ops (sample ())
                         with
                         | Error(i, e), Error { Applied = j; Rejection = e' } ->
                             refused <- refused + 1
@@ -283,7 +283,8 @@ let tests =
               "Footprint builders"
               [ testCase "the builders are Ops.footprint's clauses"
                 <| fun _ ->
-                    let fp ops = Ops.footprint nodew idw ops
+                    let fp ops =
+                        Ops.footprint Policy.none (OpScope.plain nodew idw) ops
 
                     Expect.equal
                         (fp [ InsertChild("a", RNode.leaf "n" "para" "v") ])
@@ -338,7 +339,9 @@ let tests =
               "Rejection — code, explain, encoder"
               [ testCase "a reorder on a leaf has its own code; a wrong permutation keeps reorderMismatch"
                 <| fun _ ->
-                    match Ops.apply nodew idw (ReorderChildren("a1", [ "x" ])) (sample ()) with
+                    match
+                        Ops.apply Policy.none (OpScope.plain nodew idw) (ReorderChildren("a1", [ "x" ])) (sample ())
+                    with
                     | Error r ->
                         Expect.equal (Rejection.code r) "reorderOnLeaf" "nothing to reorder"
 
@@ -348,7 +351,9 @@ let tests =
                             "the leaf message"
                     | Ok _ -> failtest "a reorder naming a child a leaf does not hold is refused"
 
-                    match Ops.apply nodew idw (ReorderChildren("a", [ "a1" ])) (sample ()) with
+                    match
+                        Ops.apply Policy.none (OpScope.plain nodew idw) (ReorderChildren("a", [ "a1" ])) (sample ())
+                    with
                     | Error r ->
                         Expect.equal (Rejection.code r) "reorderMismatch" "a wrong permutation"
 
@@ -359,7 +364,7 @@ let tests =
                     | Ok _ -> failtest "a short permutation is refused"
 
                     Expect.isOk
-                        (Ops.apply nodew idw (ReorderChildren("a1", [])) (sample ()))
+                        (Ops.apply Policy.none (OpScope.plain nodew idw) (ReorderChildren("a1", [])) (sample ()))
                         "an empty reorder of a leaf is the identity"
 
                 testCase "every case's code, guidance and canonical encoding (the pinned fixture)"
@@ -414,11 +419,11 @@ let tests =
                           "a heading may not be empty",
                           [],
                           """{"$type":"rejected","code":"DOC-07","message":"a heading may not be empty"}"""
-                          KeyedPosition("k", "h"),
+                          KeyedPosition("k", "h", 2),
                           "keyedPosition",
-                          "'k' sits in a keyed position of 'h'; vacating or relocating it is a domain edit",
+                          "'k' sits in keyed position 2 of 'h'; vacating or relocating it is a domain edit",
                           [],
-                          """{"$type":"keyedPosition","holder":"h","target":"k"}""" ]
+                          """{"$type":"keyedPosition","holder":"h","slot":2,"target":"k"}""" ]
 
                     for r, code, message, alternatives, wire in cases do
                         Expect.equal (Rejection.code r) code (sprintf "code of %A" r)

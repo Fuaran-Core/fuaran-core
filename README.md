@@ -124,14 +124,14 @@ positions (`KeyedChildren` (since `0.33.0`)), an arity-preserving rebuild of the
 place one there (`PlaceKeyedChild` (since `0.30.0`)), and your own full-walk id check (`IdsUnique` (since `0.30.0`)). Then
 `Tree.traversal nodew keyw` (since `0.33.0`) is a witness every navigator (`tryFind`, `path`, `Index.build`,
 `updateNode`, …) reaches those nodes through; `Tree.idsKeyed` (since `0.33.0`) / `wellFormedKeyed` (since `0.33.0`) /
-`graftWellFormedKeyed` (since `0.33.0`) are the keyed walks; and `Ops.applyContainedKeyed` (since `0.33.0`) refuses a `DuplicateId`
-held in a keyed position on either side of an insert, and addresses nodes below one. The unkeyed
-`Ops.apply` / `applyContained` are unchanged: they see only `Children`, so a domain that uses them
+`graftWellFormedKeyed` (since `0.33.0`) are the keyed walks; and the engine under `OpScope.keyed keyw canHold nodew idw` (since `0.39.0`, unreleased)
+refuses a `DuplicateId` held in a keyed position on either side of an insert, and addresses nodes below one. Under
+`OpScope.plain` (since `0.39.0`, unreleased) or `OpScope.contained` (since `0.39.0`, unreleased) the engine is unchanged: it sees only `Children`, so a domain that uses them
 still owes its own check over its own walk.
 
 **And certify the declaration rather than assuming it.** `Conformance.keyedApplyLawsAt` (since `0.36.0`) BUILDS the
 collisions the unkeyed engine is blind to — an id held keyed in the tree against a structural graft,
-the reverse, and keyed against keyed — and requires `applyContainedKeyed` (since `0.33.0`) to refuse exactly the
+the reverse, and keyed against keyed — and requires the engine under the keyed scope to refuse exactly the
 inserts your own check refuses afterwards; a keyed position your `KeyedChildren` forgets is the
 disagreement it reports. `Conformance.keyedChildrenLawsAt` (since `0.36.0`) certifies your check itself. Building the
 collisions is the point: your generator mints fresh ids, so a law quantified over what it draws
@@ -141,7 +141,8 @@ and the report says it was vacuous **by declaration** rather than passing quietl
 What stays deliberate is what the engine EDITS through. `Children` is what it **rebuilds**
 through — structural ops append to, filter and permute that list and nothing else — so a keyed
 position is read and located but never added to, vacated or reordered by a skeleton op; a
-`RemoveNode` or `MoveNode` of a node held directly in one is refused as `KeyedPosition` (since `0.33.0`). Widening
+`RemoveNode` or `MoveNode` of a node held directly in one is refused as `KeyedPosition` (since `0.33.0`), naming the
+holder and the slot. Widening
 `Children` itself to reach keyed positions would oblige every domain to re-express them as an
 ordered list the engine may restructure, which is the change Phase 189 declined and Phase 286 keeps
 declining. `Conformance.opAlgebra` certifies the invariant at
@@ -186,15 +187,15 @@ sequence zero with `cfg.Genesis`, the value every chain walker starts from, so a
 verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). Under
 `canonicalConfig` it is the empty-genesis instantiation and emits the same bytes it always has.
 
-### The container capability — what `applyContained` enforces, and the one thing it asks of you
+### The container capability — what a contained scope enforces, and the one thing it asks of you
 
-`Ops.applyContained canHold` is the variant for a domain with leaves: `canHold` answers *can this
+`OpScope.contained canHold nodew idw` (since `0.39.0`, unreleased) is the scope for a domain with leaves: `canHold` answers *can this
 node hold children at all*, and a node that cannot earns a typed `NotAContainer` instead of an
 op that silently does nothing. Containment **legality** — which kinds may parent which — stays
 yours; this is the coarse question only.
 
-It is enforced at three places, and the third is worth stating because it is the one a caller
-authoring a subtree meets: the PARENT of an `InsertChild`, the NEW PARENT of a `MoveNode`, and
+It is enforced at every parent an op writes, and one of them is worth stating because it is the one a caller
+authoring a subtree meets: the PARENT of an `InsertChild` or a `ReorderChildren`, the NEW PARENT of a `MoveNode`, and
 **every node of the inserted subtree that holds children**. A graft whose own interior places
 children under a node your predicate refuses is rejected, with `NotAContainer` naming that node —
 which is a node of *your* graft, not of the tree, so look for it there. A `MoveNode` is deliberately

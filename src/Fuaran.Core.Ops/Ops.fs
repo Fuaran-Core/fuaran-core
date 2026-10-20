@@ -59,8 +59,8 @@ type SkeletonOp<'Node, 'Id> =
 ///
 /// A reference RESOLVES when some node of the tree declares its id. What Core does with the witness:
 /// `Validator.referenceIntegrity` reports the dangling, unused, forward and cyclic references;
-/// `Ops.footprintReferenced` reads every id a script writes a reference to; and the reference-aware
-/// engine (`Ops.applyReferenced`) refuses a `RemoveNode` that would leave a reference dangling.
+/// `Ops.footprint` under a `Policy` carrying it reads every id a script writes a reference to; and the
+/// engine under that policy refuses a `RemoveNode` that would leave a reference dangling.
 type RefWitness<'Node, 'Id> =
     {
         /// The ids this node refers to, in the domain's order; each resolves when some node's
@@ -73,8 +73,8 @@ type RefWitness<'Node, 'Id> =
 
 /// A script's refusal (Phase 391): the first op of an op-script the engine refused, with the tree
 /// the accepted prefix reached. A script is not a `Batch` — it stops at the first refusal and KEEPS
-/// the prefix — so the refusal names how far it got. `Ops.applyAllWith` and every sequence form
-/// beside it (`applyAll`, `applyAllGrammar`, `applyAllReferenced`) answer it on `Error`.
+/// the prefix — so the refusal names how far it got. `Ops.applyAll` answers it on `Error`,
+/// under every policy and scope.
 type ScriptRejection<'Node, 'Id> =
     {
         /// How many ops were applied before the refusal — so also the 0-based position of the
@@ -86,11 +86,109 @@ type ScriptRejection<'Node, 'Id> =
         Tree: 'Node
     }
 
-/// How the engine sees a tree for one op (Phase 512): the witness it EDITS through, the one it
-/// LOCATES through, the keyed positions when the domain declares them, and the id witness — the
-/// quadruple every validator threaded as four parameters. Internal; the redesign's public `Scope`.
+/// How the engine sees a domain's tree (Phase 517): the structural witness it walks and rebuilds
+/// through, the id witness, which nodes can hold children, and the keyed positions when the domain
+/// declares them. The engine's entries take one where they used to take a name per combination
+/// (`Ops.apply` under `OpScope.contained`, `Ops.apply` under `OpScope.keyed`, `Ops.canApplyAll` under `OpScope.keyed`, ...): a contained or a keyed write
+/// is the same entry under another scope, so no check the plain path makes can be bypassed by
+/// choosing a spelling. Build one with `OpScope.plain`, `OpScope.contained` or `OpScope.keyed`.
+///
+/// It is the domain's DECLARATION; the walks the engine derives from it (the keyed traversal) are
+/// computed by the engine, so a scope cannot name a locate walk that disagrees with its keyed
+/// positions. Named `OpScope` because `Fuaran.Core.Scope<'Id>` (a projection's scope) already
+/// shares the namespace, and two types of one name are ambiguous to a caller opening both.
 [<NoEquality; NoComparison>]
-type internal OpScope<'Node, 'Id> =
+type OpScope<'Node, 'Id> =
+    {
+        /// The structural witness: what the engine edits through (`Children` / `ReplaceChildren`),
+        /// and what it walks when no keyed position is declared.
+        Nodes: NodeWitness<'Node, 'Id>
+        /// The id witness every address is keyed by.
+        Ids: IdWitness<'Id>
+        /// Which nodes can hold children at all (Phase 251). `None` admits every node, which is
+        /// what the plain scope means. Asked of every parent an op writes: an insert's parent, a
+        /// move's destination, a reorder's parent (Phase 517), an update's rewritten node, and every
+        /// interior node of an inserted graft (Phase 161, D38).
+        CanHold: ('Node -> bool) option
+        /// The keyed positions (Phase 286). `Some` makes the engine locate through
+        /// `Tree.traversal Nodes keyw` and see the keyed ids in its duplicate check; it still edits
+        /// through `Nodes` alone, so a keyed position is never added to, vacated or reordered.
+        Keyed: KeyedWitness<'Node, 'Id> option
+    }
+
+/// Building an `OpScope` (Phase 517).
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module OpScope =
+
+    /// Every node can hold children; no keyed position.
+    let plain (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : OpScope<'Node, 'Id> =
+        { Nodes = w
+          Ids = idw
+          CanHold = None
+          Keyed = None }
+
+    /// Only the nodes `canHold` accepts can hold children (Phase 251); no keyed position.
+    let contained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : OpScope<'Node, 'Id> =
+        { plain w idw with
+            CanHold = Some canHold }
+
+    /// The keyed scope (Phase 286): `contained` with the domain's keyed positions declared.
+    let keyed
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        : OpScope<'Node, 'Id> =
+        { contained canHold w idw with
+            Keyed = Some keyw }
+
+    /// The walk the engine locates nodes through: `Tree.traversal` over the keyed positions when
+    /// they are declared, the structural witness otherwise.
+    let locate (s: OpScope<'Node, 'Id>) : NodeWitness<'Node, 'Id> =
+        match s.Keyed with
+        | Some keyw -> Tree.traversal s.Nodes keyw
+        | None -> s.Nodes
+
+    /// The ids of `node`'s subtree in the walk the scope locates through, preorder.
+    let ids (s: OpScope<'Node, 'Id>) (node: 'Node) : 'Id list = Tree.ids (locate s) node
+
+/// Which checks the engine runs beyond its own (Phase 517): the domain's containment grammar
+/// (Phase 313) and its references (Phase 313). The refusal order inside one step is the engine's,
+/// whichever fields are set: the engine's checks (D38's order), then the grammar (`IllegalChild`),
+/// then the references (`StillReferenced`). `Policy.none` is the engine alone.
+[<NoEquality; NoComparison>]
+type Policy<'Node, 'Id> =
+    {
+        /// What a parent of each kind may hold (`None` from the function = unconstrained). A step
+        /// that would leave a child under a parent whose kind may not hold it is `IllegalChild`.
+        Grammar: (string -> string list option) option
+        /// The domain's references. A step that would take away a declaration a remaining node still
+        /// refers to is `StillReferenced`; the footprint reads every id a script writes a reference to.
+        Refs: RefWitness<'Node, 'Id> option
+    }
+
+/// Building a `Policy` (Phase 517).
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Policy =
+
+    /// The engine's own checks and nothing more.
+    let none<'Node, 'Id> : Policy<'Node, 'Id> = { Grammar = None; Refs = None }
+
+    /// The engine's checks, then the containment grammar.
+    let grammar (allowedChildren: string -> string list option) : Policy<'Node, 'Id> =
+        { Grammar = Some allowedChildren
+          Refs = None }
+
+    /// The engine's checks, then the references (no grammar).
+    let referenced (refw: RefWitness<'Node, 'Id>) : Policy<'Node, 'Id> = { Grammar = None; Refs = Some refw }
+
+/// The walks the engine derives from an `OpScope` for one entry (Phase 512; named `OpScope` until
+/// Phase 517 made that the public declaration): the witness it EDITS through, the one it LOCATES
+/// through, the keyed positions, and the id witness. Internal.
+[<NoEquality; NoComparison>]
+type internal Walks<'Node, 'Id> =
     { Edit: NodeWitness<'Node, 'Id>
       Locate: NodeWitness<'Node, 'Id>
       Keyed: ('Node -> 'Node list) option
@@ -144,7 +242,7 @@ module Ops =
     /// definition of structural validity rather than a second, separately-maintained copy of it.
     /// The behaviour is unchanged — same seed, same preorder, same first offender — and the point of
     /// the move is that it can no longer drift from `Tree.wellFormed`, which is what a caller
-    /// checks the RESULT with. **Phase 286**: over `t`, so under `applyContainedKeyed` it is
+    /// checks the RESULT with. **Phase 286**: over `t`, so under a keyed scope it is
     /// `Tree.graftWellFormedKeyed` and sees keyed positions on both sides of the graft.
     ///
     /// Scope, damage and precedence are all stated where the predicate is defined
@@ -174,7 +272,7 @@ module Ops =
 
     /// The first node of a graft (preorder) that HOLDS children while `canHold` refuses it — the
     /// interior offender an inserted subtree carries in. `None` when the graft's own interior
-    /// already satisfies the invariant `applyContained` exists to keep ("every node with children
+    /// already satisfies the invariant a contained scope exists to keep ("every node with children
     /// satisfies `canHold`"). A childless node is unconstrained: the predicate answers "can this
     /// node hold children AT ALL", so a leaf that holds none says nothing.
     ///
@@ -184,14 +282,14 @@ module Ops =
     /// — machine-checked as `contained_needs_op_hypothesis` in `proofs/Preservation.fst` before it
     /// was a refusal. The operator's ruling was to inspect the graft.
     ///
-    /// The predicate is `Diff.toOpsContained`'s, deliberately: the diff path has walked an `after`
+    /// The predicate is the contained `Diff.toOps`'s, deliberately: the diff path has walked an `after`
     /// tree for exactly this shape since Phase 09, and the accept path was the one place the check
     /// was missing — word for word Phase 137's situation with `DuplicateIdInTree`.
     ///
     /// **The single definition of the graft-containment shape (Phase 228).** Both refusals of that
     /// shape are raised from THIS function — `Rejection.NotAContainer` on the apply path (through
     /// `validateGraftContainment`) and `Diff.DiffError.TargetNotAContainer` on the diff path (through
-    /// `Diff.toOpsContained`, which calls it over the whole `after` tree) — and both name the node it
+    /// `Diff.toOps` under a contained scope, which calls it over the whole `after` tree) — and both name the node it
     /// returns under one payload, `target * kindTag`. It is `internal` rather than `private` only so
     /// the `Diff` module can call it instead of re-stating it; it is not public surface.
     let internal firstUncontained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (node: 'Node) : 'Node option =
@@ -224,7 +322,7 @@ module Ops =
     // located the op in the tree for themselves; they now read one `OpView`.
 
     /// The plain scope: locate through the edit witness, no keyed position.
-    let internal plainScope (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : OpScope<'Node, 'Id> =
+    let internal plainScope (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : Walks<'Node, 'Id> =
         { Edit = w
           Locate = w
           Keyed = None
@@ -235,20 +333,30 @@ module Ops =
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
-        : OpScope<'Node, 'Id> =
+        : Walks<'Node, 'Id> =
         { Edit = nodew
           Locate = Tree.traversal nodew keyw
           Keyed = Some keyw.KeyedChildren
           Ids = idw }
 
+    /// The walks an `OpScope` declares (Phase 517): the keyed traversal when it declares keyed
+    /// positions, the structural witness otherwise.
+    let internal walksOf (s: OpScope<'Node, 'Id>) : Walks<'Node, 'Id> =
+        match s.Keyed with
+        | Some keyw -> keyedScope keyw s.Nodes s.Ids
+        | None -> plainScope s.Nodes s.Ids
+
+    /// The scope's container capability; `None` admits every node.
+    let internal canHoldOf (s: OpScope<'Node, 'Id>) : 'Node -> bool = defaultArg s.CanHold (fun _ -> true)
+
     /// The node whose STRUCTURAL child list holds `target`, over every node the locate walk reaches:
     /// `Tree.parentOf w` in the plain scope, and below keyed positions too in the keyed one.
-    let internal structuralParentOf (s: OpScope<'Node, 'Id>) (target: 'Id) (root: 'Node) : 'Node option =
+    let internal structuralParentOf (s: Walks<'Node, 'Id>) (target: 'Id) (root: 'Node) : 'Node option =
         Tree.preorder s.Locate root
         |> List.tryFind (fun n -> s.Edit.Children n |> List.exists (fun c -> s.Ids.Equals (s.Edit.Id c) target))
 
     /// What `op` finds in `root` (Phase 512) — one match on the op, one locate. It refuses nothing.
-    let internal view (s: OpScope<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) (root: 'Node) : OpView<'Node, 'Id> =
+    let internal view (s: Walks<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) (root: 'Node) : OpView<'Node, 'Id> =
         let find (i: 'Id) = Tree.tryFind s.Locate s.Ids i root
 
         let blank =
@@ -309,7 +417,7 @@ module Ops =
 
     let private validateInsert
         (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (parent: 'Id)
         (node: 'Node)
@@ -353,7 +461,7 @@ module Ops =
     /// holds no keyed node skips both, which is why a domain with no keyed position is unaffected.
     let private validateUpdate
         (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (node: 'Node)
         (root: 'Node)
@@ -403,7 +511,7 @@ module Ops =
     /// checks its steps one by one.
     let private check
         (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
@@ -421,7 +529,7 @@ module Ops =
         | RemoveNode target ->
             match v.Located, v.KeyedPosition with
             | None, _ -> unknown target
-            | Some _, Some(holder, _) -> Error(KeyedPosition(target, s.Edit.Id holder))
+            | Some _, Some(holder, slot) -> Error(KeyedPosition(target, s.Edit.Id holder, slot))
             | Some _, None -> Ok()
         | ReorderChildren(parent, order) ->
             match v.Located with
@@ -434,6 +542,14 @@ module Ops =
 
                 if key current <> key order then
                     Error(ReorderMismatch(parent, current, order))
+                // Phase 517 (and fuaran-core#492's rule): the engine asks `canHold` of EVERY parent the
+                // view says an op writes, and a reorder writes its parent's child list. Checked LAST,
+                // D38's order: no reorder refused before this clause changes class, so the only
+                // verdict that moves is an ACCEPTED reorder on a node that cannot hold children —
+                // the empty reorder of a leaf, which now refuses as a reorder under any other parent
+                // the predicate rejects would.
+                elif not (canHold p) then
+                    Error(NotAContainer(parent, s.Edit.KindTag p))
                 else
                     Ok()
         // A move's checks, no tree built (Phase 298), in the order the apply path has always refused
@@ -457,13 +573,13 @@ module Ops =
                 Error(WouldNestUnderSelf(target, relation))
             | Some _, Some _ ->
                 match v.KeyedPosition with
-                | Some(holder, _) -> Error(KeyedPosition(target, s.Edit.Id holder))
+                | Some(holder, slot) -> Error(KeyedPosition(target, s.Edit.Id holder, slot))
                 | None -> Ok()
         | Batch _ -> Ok()
 
     /// The edit of a step `check` accepted, through the nodes the view located. The `UnknownNode`
     /// fallback is unreachable for a view of `root` itself, and total rather than a throw (GP4).
-    let private edit (s: OpScope<'Node, 'Id>) (v: OpView<'Node, 'Id>) (root: 'Node) : Result<'Node, Rejection<'Id>> =
+    let private edit (s: Walks<'Node, 'Id>) (v: OpView<'Node, 'Id>) (root: 'Node) : Result<'Node, Rejection<'Id>> =
         let w = s.Edit
         let eq = s.Ids.Equals
 
@@ -508,7 +624,7 @@ module Ops =
     /// One step of the engine over a view already located: check, then edit.
     let internal applyView
         (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
@@ -553,7 +669,7 @@ module Ops =
 
     /// First refusal wins and the prefix is kept: the tree every step reached, or the
     /// `ScriptRejection` naming how many applied, why the next was refused and the tree it was
-    /// offered against (`applyAllWith`'s contract, Phase 391).
+    /// offered against (`applyAll`'s contract, Phase 391).
     let internal script
         (step: 'Node -> SkeletonOp<'Node, 'Id> -> Result<'Node, Rejection<'Id>>)
         (ops: SkeletonOp<'Node, 'Id> list)
@@ -569,12 +685,12 @@ module Ops =
                   Rejection = e
                   Tree = r.Tree }
 
-    /// The shared apply engine (Phase 251) over a scope (Phase 512) and a container capability:
-    /// `apply` passes the plain scope and `fun _ -> true`, `applyContained` the domain's `canHold`,
-    /// `applyContainedKeyed` the keyed scope. A `Batch` is the runner's all-or-nothing form.
+    /// The shared apply engine (Phase 251) over the walks (Phase 512) and a container capability:
+    /// every public entry derives both from its `OpScope` (Phase 517). A `Batch` is the runner's
+    /// all-or-nothing form.
     let rec private applyWith
         (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
@@ -593,199 +709,6 @@ module Ops =
         match script (fun node o -> engine o node) ops root with
         | Ok _ -> Ok()
         | Error r -> Error(r.Applied, r.Rejection)
-
-    /// Apply one skeleton op. Every node is treated as able to hold children.
-    let apply
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        applyWith (fun _ -> true) (plainScope w idw) op root
-
-    /// Container-aware apply (Phase 251): an `InsertChild`/`MoveNode` whose (new) parent
-    /// `canHold` rejects is a typed `NotAContainer`, not a silent no-op. Domains with closed
-    /// kind-sets that have leaves dispatch through this. Containment *legality* (which kinds
-    /// may parent which) stays domain-side — `canHold` answers only "can this node hold
-    /// children at all".
-    ///
-    /// **Phase 161 (DECISIONS D38): an `InsertChild` also has its GRAFT inspected.** The subtree is
-    /// walked and the first interior node that holds children while `canHold` refuses it earns the
-    /// same `NotAContainer`, naming that node. So `applyContained` now keeps the invariant
-    /// `contained_preserves` is about — every node with children satisfies `canHold` — against a
-    /// graft as well as against a parent. The one premise no engine check can discharge is
-    /// `child_blind`: a `canHold` that READS the child list can admit a node at the instant it is
-    /// checked and refuse it the instant it gains one. That is the domain's obligation, certified
-    /// by `Conformance.containerLaws` rather than assumed.
-    ///
-    /// **The unkeyed form (Phase 286).** It walks `Children` alone, so a node a domain holds in a
-    /// keyed position is invisible to it — to its `DuplicateId` refusal as much as to its
-    /// addressing. A domain with keyed positions calls `applyContainedKeyed` with its
-    /// `KeyedWitness`; for a domain with none the two answer identically.
-    let applyContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        applyWith canHold (plainScope w idw) op root
-
-    /// `applyContained` over the keyed walk (Phase 286): the domain declares its keyed positions
-    /// once, in `keyw`, and the engine's own refusals see them.
-    ///
-    /// - **`DuplicateId` sees every id-bearing position.** The insert scan is
-    ///   `Tree.graftWellFormedKeyed`, so the refusal names an id the tree holds in a keyed position
-    ///   OR one the graft carries into a keyed position, as well as the structural collisions it
-    ///   always named; an `UpdateNode` payload's keyed subtrees are checked the same way against the
-    ///   tree the target keeps.
-    /// - **The engine LOCATES through `Tree.traversal nodew keyw`.** A node held in, or below, a
-    ///   keyed position can be an insert's or a reorder's parent, a move's destination, an update's
-    ///   target, and a remove's or move's target when it has a structural parent. `UnknownNode`
-    ///   enumerates the ids the keyed walk reaches.
-    /// - **The engine EDITS through `nodew`.** Structural ops append to, filter and permute
-    ///   `Children` and rebuild through `ReplaceChildren`, exactly as `applyContained` does; the
-    ///   keyed positions are never added to, vacated or reordered. A `RemoveNode` / `MoveNode` of a
-    ///   node held directly in a keyed position is therefore refused as `KeyedPosition`.
-    /// - **Containment** (`NotAContainer` over a graft's interior) walks the keyed subtrees too.
-    ///
-    /// For a domain whose `KeyedChildren` is `fun _ -> []` this returns exactly what
-    /// `applyContained` returns, on every op and tree (`Conformance.keyedApplyLaws` runs both).
-    let applyContainedKeyed
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        applyWith canHold (keyedScope keyw nodew idw) op root
-
-    let private canApplyWith
-        (canHold: 'Node -> bool)
-        (s: OpScope<'Node, 'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        match op with
-        | Batch _ -> applyWith canHold s op root |> Result.map ignore
-        | _ -> check canHold s (view s op root) root
-
-    /// Dry-run validation (Phase 246): would `op` be accepted against `root`? Returns the
-    /// exact `Rejection` `apply` would, but builds **no** new tree for the index/structure
-    /// ops — `MoveNode` included since Phase 298 (`validateMove`). Only `Batch` is
-    /// order-dependent, so its check simulates through `apply` (and discards the result). The
-    /// AI pre-flight surface — "is this op legal?"
-    /// — without committing the (potentially large) rebuild.
-    let canApply
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        canApplyWith (fun _ -> true) (plainScope w idw) op root
-
-    /// Container-aware dry-run (Phase 251) — the `canApply` mirror of `applyContained`.
-    let canApplyContained
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        canApplyWith canHold (plainScope w idw) op root
-
-    /// Keyed dry-run (Phase 286) — the `canApply` mirror of `applyContainedKeyed`: the same
-    /// rejection it would return, without building the tree for the index/structure ops.
-    let canApplyContainedKeyed
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        canApplyWith canHold (keyedScope keyw nodew idw) op root
-
-    /// Apply a sequence non-atomically under a container capability (Phase 160) — the
-    /// sequence-level `applyContained`, threading `applyWith canHold` so every step sees the
-    /// capability the per-op surface has consulted since Phase 251.
-    ///
-    /// FIRST REFUSAL WINS, and a script is **not** a `Batch`. `Batch` is all-or-nothing inside
-    /// one op: it aborts and the original tree survives. A script stops at the first refusal and
-    /// returns the tree built so far, so the accepted prefix is kept. On failure the payload is a
-    /// `ScriptRejection` (Phase 391; a positional triple before `0.37.0`): `Applied`, the number of
-    /// ops applied before the refusal and so the 0-based position of the refused op in `ops`;
-    /// `Rejection`, the envelope; and `Tree`, the tree the accepted prefix reached — the state the
-    /// refused step was offered against.
-    let applyAllWith
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        let s = plainScope w idw
-        script (fun node o -> applyWith canHold s o node) ops root
-
-    /// Dry-run a sequence under a container capability (Phase 160) — the `canApplyAll` mirror of
-    /// `applyAllWith`, and the pre-flight a container-aware executor needs: it reports the same
-    /// first-refusal index and the same envelope `applyAllWith` would, `NotAContainer` included.
-    ///
-    /// The sequence is order-dependent, so this threads through `applyWith canHold` (each step's
-    /// check sees the prior step's tree) and discards the materialised tree — the same shape
-    /// `canApplyAll` has carried since Phase 246, with the capability now threaded.
-    let canApplyAllWith
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<unit, int * Rejection<'Id>> =
-        dryRun (applyWith canHold (plainScope w idw)) ops root
-
-    /// Apply a sequence non-atomically, threading the tree. Every node is treated as able to hold
-    /// children, so this is `applyAllWith (fun _ -> true)` and its behaviour is exactly what it
-    /// was before Phase 160 — the instance relation `apply`/`applyContained` have carried since
-    /// Phase 251, now at the sequence level. First refusal wins: on failure the `ScriptRejection` —
-    /// how many ops applied, the envelope, and the partial tree built so far.
-    let applyAll
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        applyAllWith (fun _ -> true) w idw ops root
-
-    /// Dry-run a sequence (Phase 246): report the first failing index + envelope without
-    /// returning a tree. `canApplyAllWith (fun _ -> true)` since Phase 160 — the check consults
-    /// no capability, so a script it certifies can still be refused by `applyContained` /
-    /// `applyAllWith` at a step whose parent cannot hold children. A container-aware caller
-    /// pre-flights with `canApplyAllWith` and executes with `applyAllWith`.
-    let canApplyAll
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<unit, int * Rejection<'Id>> =
-        canApplyAllWith (fun _ -> true) w idw ops root
-
-    /// Dry-run a sequence over the keyed engine (Phase 247) — the `canApplyAllWith` mirror of
-    /// `applyContainedKeyed`: each step is checked against the tree the earlier steps leave, under
-    /// `canHold` and over the keyed walk, so it reports the first-refusal index and the envelope a
-    /// keyed executor would meet — a `DuplicateId` on an id held in a keyed position, a
-    /// `KeyedPosition`, a `NotAContainer` — and discards the materialised tree. It is the `canApply` a
-    /// keyed domain hands `Arbitration.arbitrateWith`. For a domain whose `KeyedChildren` is
-    /// `fun _ -> []` it answers exactly what `canApplyAllWith canHold` answers.
-    let canApplyAllKeyed
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<unit, int * Rejection<'Id>> =
-        dryRun (applyWith canHold (keyedScope keyw nodew idw)) ops root
 
     // ---- the index, maintained through an edit (Phase 317) ----
     // `Tree.Index.build` is O(n) and `isFreshFor` reports staleness after every op, so a consumer
@@ -807,7 +730,7 @@ module Ops =
               Gone: Set<string>
               Touched: Set<string> }
 
-        /// The index of `post` — the tree `apply w idw op` returned for the tree `ix` indexes —
+        /// The index of `post` — the tree `apply` returned for the tree `ix` indexes —
         /// carried through `op` rather than rebuilt (Phase 317). Every op kind is handled, a
         /// `Batch` folded through its steps without the intermediate trees: the op names the
         /// containers it rewrote and the subtrees it grafted or removed, and only those, their
@@ -1110,11 +1033,13 @@ module Ops =
         (o: SkeletonOp<'Node, 'Id>)
         : Result<'Node * SkeletonOp<'Node, 'Id>, Rejection<'Id>> =
         invert w idw o state
-        |> Result.bind (fun inv -> apply w idw o state |> Result.map (fun next -> next, inv))
+        |> Result.bind (fun inv ->
+            applyWith (fun _ -> true) (plainScope w idw) o state
+            |> Result.map (fun next -> next, inv))
 
     /// The script-level inverse (Phase 305): the inverses of `ops`, each derived against the state
-    /// the forward op saw, in REVERSE order — so `applyAll (invertAll w idw ops pre) (applyAll w idw
-    /// ops pre) = pre`, the law `invert` states per op lifted to the sequence. It refuses as
+    /// the forward op saw, in REVERSE order — so, under the plain scope, `applyAll (invertAll w idw
+    /// ops pre) (applyAll ops pre) = pre`, the law `invert` states per op lifted to the sequence. It refuses as
     /// `applyAll` does, with the 0-based index of the first op that does not apply (or cannot be
     /// inverted, which is the same op: `invert` refuses exactly what `canApply` refuses) and its
     /// envelope.
@@ -1265,7 +1190,7 @@ module Ops =
     // alone. The tightening needs the tree — the destroyed subtree, the source parent, a move's
     // destination ancestors — and is `footprintIn` (Phase 500, D166), below, where the base is known.
 
-    // The one fold behind `footprint` and `footprintKeyed` (Phase 247). `carried` reads the ids an
+    // The one fold behind `footprint` over a plain and a keyed scope (Phase 247). `carried` reads the ids an
     // inserted subtree carries; `introduced` the ids an `UpdateNode` payload brings in beyond its own
     // target. The unkeyed form passes `Tree.ids w` and nothing, which is exactly the fold `footprint`
     // was before the keyed form existed.
@@ -1290,7 +1215,7 @@ module Ops =
                 //
                 // Phase 137: the dup-check named here is now the one `validateInsert` actually performs
                 // — `firstDuplicateId` reads exactly this `Tree.ids w node` set against the whole tree
-                // (the keyed walk of the graft under `footprintKeyed`, as the keyed engine reads it),
+                // (the keyed walk of the graft under a keyed scope, as the keyed engine reads it),
                 // so `Reads` describes a read that happens rather than one the footprint assumed. The
                 // set is unchanged: the validator's other half (is the subtree unique WITHIN ITSELF?) is
                 // internal to the op and reads no tree state, so it adds nothing to the footprint and
@@ -1339,44 +1264,74 @@ module Ops =
 
         List.fold (fun acc op -> Footprint.union acc (ofOp op)) Footprint.empty ops
 
-    /// The read/write footprint of an op-script (Phase 78) — a pure, total derivation over the skeleton
-    /// five through the node/id witnesses (the `NodeWitness` reads the ids out of an inserted `'Node`
-    /// subtree; the `IdWitness` keys every address by its string form). `Batch` folds its inner ops.
-    /// Total: no tree, no failure case — it never throws (GP4) and mints no ids. Over-approximating by
-    /// design — see `Footprint` and STABILITY.md for the pinned conservative cases.
-    ///
-    /// **The unkeyed form (Phase 247).** It reads an inserted subtree's ids over `Children` alone, so
-    /// an id a domain holds in a keyed position inside the graft is not in the footprint: two scripts
-    /// that each insert a subtree carrying the same keyed id are declared independent and collide only
-    /// at replay. A domain with keyed positions calls `footprintKeyed` with its `KeyedWitness`; for a
-    /// domain with none the two answer identically.
-    let footprint (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (ops: SkeletonOp<'Node, 'Id> list) : Footprint =
-        footprintOver w idw (Tree.ids w) (fun _ -> []) ops
+    /// The pure fold over a scope: the ids an insert authors are the graft's walk in the scope (the
+    /// keyed walk under a keyed scope, Phase 247), and an `UpdateNode` payload's keyed subtrees are
+    /// new content under a keyed scope.
+    let private footprintOfScope (scope: OpScope<'Node, 'Id>) (ops: SkeletonOp<'Node, 'Id> list) : Footprint =
+        let w = scope.Nodes
 
-    /// `footprint` over the keyed walk (Phase 247) — the footprint of the script
-    /// `Ops.applyContainedKeyed` runs. The id set an `InsertChild` authors is the graft's keyed walk,
-    /// `Tree.idsKeyed nodew keyw node`, so an id held in a keyed position anywhere inside the inserted
-    /// subtree is read and content-written as a structural one is; and an `UpdateNode` payload's keyed
-    /// subtrees, which the keyed engine checks as new content, are read and content-written too. Two
-    /// scripts that each bring in the same keyed id therefore fail `independent` with
-    /// `Interference.SameTarget` on it — the collision `footprint` cannot see.
+        match scope.Keyed with
+        | None -> footprintOver w scope.Ids (Tree.ids w) (fun _ -> []) ops
+        | Some keyw ->
+            footprintOver
+                w
+                scope.Ids
+                (Tree.idsKeyed w keyw)
+                (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed w keyw))
+                ops
+
+    /// The reads a policy's references add (Phase 313): every id the script writes a reference to —
+    /// the references every node of an inserted subtree carries (over the scope's walk), and those of
+    /// an `UpdateNode` payload. `None` without a `RefWitness`.
+    let private referenceReads
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint option =
+        policy.Refs
+        |> Option.map (fun refw ->
+            let rec written (op: SkeletonOp<'Node, 'Id>) : 'Id list =
+                match op with
+                | InsertChild(_, node) -> Tree.preorder (OpScope.locate scope) node |> List.collect refw.RefsOf
+                | UpdateNode node -> refw.RefsOf node
+                | Batch inner -> inner |> List.collect written
+                | RemoveNode _
+                | MoveNode _
+                | ReorderChildren _ -> []
+
+            Footprint.reading (ops |> List.collect written |> List.map scope.Ids.ToString))
+
+    let private withReferenceReads policy scope ops (fp: Footprint) : Footprint =
+        match referenceReads policy scope ops with
+        | Some reads -> Footprint.union fp reads
+        | None -> fp
+
+    /// The read/write footprint of an op-script (Phase 78) under a policy and a scope (Phase 517) — a
+    /// pure, total derivation over the skeleton ops through the scope's witnesses (the `IdWitness`
+    /// keys every address by its string form). `Batch` folds its inner ops. Total: no tree, no failure
+    /// case — it never throws (GP4) and mints no ids. Over-approximating by design — see `Footprint`
+    /// and STABILITY.md for the pinned conservative cases.
     ///
-    /// Every other address is `footprint`'s: the keyed engine edits through `Children` alone, so the
-    /// structural writes are unchanged, and an op that locates a node below a keyed position names it by
-    /// the same id key. For a domain whose `KeyedChildren` is `fun _ -> []` this returns exactly what
-    /// `footprint` returns. Total, no throws (GP4); it mints no ids.
-    let footprintKeyed
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+    /// **The scope (Phase 247).** Under a plain or contained scope an inserted subtree's ids are read
+    /// over `Children` alone. Under a keyed scope the id set an `InsertChild` authors is the graft's
+    /// keyed walk (`Tree.idsKeyed`), and an `UpdateNode` payload's keyed subtrees, which the keyed
+    /// engine checks as new content, are read and content-written too — so two scripts that each
+    /// bring in the same keyed id fail `independent` with `Interference.SameTarget` on it. Every other
+    /// address is the same in every scope: the engine edits through `Children` alone. `CanHold` does
+    /// not move a footprint.
+    ///
+    /// **The policy (Phase 313).** A `Refs` witness READS every id the script writes a reference to
+    /// — so a script that writes a reference to `x` fails `independent` against a script that destroys
+    /// `x`, by `Interference.RightWritesLeftReads` / `LeftWritesRightReads` naming `x`. It only ever
+    /// ADDS collisions: as sound as the footprint without it, and `independent` over it is never more
+    /// permissive. A `Grammar` does not move a footprint: every check it adds reads a parent the op
+    /// already reads or rewrites a node in place, which the unknown-parent clause serialises.
+    let footprint
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         : Footprint =
-        footprintOver
-            nodew
-            idw
-            (Tree.idsKeyed nodew keyw)
-            (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
-            ops
+        footprintOfScope scope ops |> withReferenceReads policy scope ops
 
     // ---- the base-aware footprint (Phase 500) ----
     // The pure footprint cannot name a relocated or rewritten node's parent, so it records an
@@ -1391,7 +1346,7 @@ module Ops =
     // THE SCRIPT IS THREADED. The second op of a script applies to the tree the first op leaves, not
     // to the base: a removal after a move destroys what the move brought under it. So each op is
     // footprinted at the state the ops before it reach (`apply`, the engine the script lands with;
-    // `applyContainedKeyed` with an admitting `canHold` for the keyed form, which reaches the same
+    // the keyed engine with an admitting `canHold` for a keyed scope, which reaches the same
     // tree as the domain's engine for every script that engine accepts), and the script's footprint
     // is the union. Where an op does not apply, the state is lost and every op from there on takes
     // the PURE arm: conservative, and honest — the promise `independent` makes is for scripts that
@@ -1425,7 +1380,7 @@ module Ops =
     /// The base-aware arm of one non-batch op, read from its view of the state (Phase 512): `None`
     /// where the pure arm stands (see above).
     let private resolvedFootprint
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (ids: 'Node -> 'Id list)
         (introduced: 'Node -> 'Id list)
         (v: OpView<'Node, 'Id>)
@@ -1509,36 +1464,34 @@ module Ops =
     /// the pure footprint is sound and strictly more precise (`FootprintIn.footprint_in_sound`,
     /// `footprint_in_refines`, `Conformance.footprintInLawsAt`). `Arbitration.arbitrateIn` and
     /// `Dag.conflictsIn` / `reconcileIn` are the entries that hold the base and compose it.
+    ///
+    /// Under a keyed scope (as the keyed `footprint`) the ids an insert authors and a removal destroys
+    /// are the graft's and the subtree's keyed walks, an `UpdateNode` payload's keyed subtrees are read
+    /// and content-written, and the script is threaded through the keyed engine with an admitting
+    /// container capability — the tree every script the keyed engine accepts reaches; the resolution
+    /// still locates structurally (D166). A policy's `Refs` adds `footprint`'s reference reads.
     let footprintIn
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (baseTree: 'Node)
         (ops: SkeletonOp<'Node, 'Id> list)
         : Footprint =
-        footprintInOver w idw (applyView (fun _ -> true) (plainScope w idw)) (Tree.ids w) (fun _ -> []) baseTree ops
+        let w = scope.Nodes
+        let idw = scope.Ids
 
-    /// `footprintIn` over the keyed walk (Phase 500), as `footprintKeyed` is to `footprint`: the ids
-    /// an insert authors and a removal destroys are the graft's and the subtree's keyed walks
-    /// (`Tree.idsKeyed`), an `UpdateNode` payload's keyed subtrees are read and content-written, and
-    /// the script is threaded through the keyed engine with an admitting container capability — the
-    /// tree every script `applyContainedKeyed` accepts reaches. Every other address is
-    /// `footprintIn`'s; for a domain whose `KeyedChildren` is `fun _ -> []` the two agree. Total, no
-    /// throws (GP4).
-    let footprintInKeyed
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        : Footprint =
-        footprintInOver
-            nodew
-            idw
-            (fun v t -> applyContainedKeyed keyw (fun _ -> true) nodew idw v.Op t)
-            (Tree.idsKeyed nodew keyw)
-            (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
-            baseTree
-            ops
+        match scope.Keyed with
+        | None ->
+            footprintInOver w idw (applyView (fun _ -> true) (plainScope w idw)) (Tree.ids w) (fun _ -> []) baseTree ops
+        | Some keyw ->
+            footprintInOver
+                w
+                idw
+                (fun v t -> applyWith (fun _ -> true) (keyedScope keyw w idw) v.Op t)
+                (Tree.idsKeyed w keyw)
+                (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed w keyw))
+                baseTree
+                ops
+        |> withReferenceReads policy scope ops
 
     /// Every clause of `independent` two footprints fail, with the addresses each fails on (Phase
     /// 248) — the explanation of a `false` verdict, so a refused party can see WHAT it collides on
@@ -1640,8 +1593,8 @@ module Ops =
     /// cannot overflow.
     ///
     /// **The law** (`Conformance.loweringLaws`): for every `Tree.wellFormed` tree,
-    /// `applyAll w idw (lower w t) (skeletonRoot w t) = Ok t`. **The contained form is the same
-    /// script under `applyAllWith canHold`**: every node that holds children is an insert's parent,
+    /// `applyAll Policy.none (OpScope.plain w idw) (lower w t) (skeletonRoot w t) = Ok t`. **The contained
+    /// form is the same script under `OpScope.contained canHold`**: every node that holds children is an insert's parent,
     /// so for a tree in the containment invariant (every node with children satisfies `canHold`)
     /// the script is accepted and rebuilds the tree; for a tree outside it, the refusal is
     /// `NotAContainer` naming the first offender in preorder — the shell is accepted childless and
@@ -1661,12 +1614,12 @@ module Ops =
     // `canHold` is unary and child-blind by design (Phase 161): it answers whether a node can hold
     // children AT ALL. A grammar answers which: for a parent's kind tag, the kind tags it may hold
     // (`None` = any). The grammar is DATA the domain declares, never a kind Core knows (DECISIONS,
-    // Phase 313), and every surface that reads it — the engine below, `Diff.toOpsGrammar`,
-    // `Arbitration.arbitrateGrammar`, `Validator.containment`, `Conformance.containmentLaws` — reads
+    // Phase 313), and every surface that reads it — the engine under a grammar `Policy`, `Diff.toOps`,
+    // `Arbitration.arbitrate`, `Validator.containment`, `Conformance.containmentLaws` — reads
     // it through `isLegalChild`, so they share ONE definition of a legal child.
     //
-    // The grammar and reference forms WRAP the container-aware engine rather than widening it: each
-    // non-batch step is first decided exactly as `applyContained` decides it, and the new clauses run
+    // A policy's grammar and reference clauses WRAP the engine rather than widening it: each
+    // non-batch step is first decided exactly as the engine decides it, and the new clauses run
     // only on a step it accepted, against the tree before and after it. So no operation the engine
     // refuses changes class (the D38 ordering, at the level of a whole engine), and a `Batch` stays
     // all-or-nothing because it is threaded step by step through the same wrapper.
@@ -1712,7 +1665,7 @@ module Ops =
     /// graft (preorder); a move's node under its new parent (the pairs inside the moved subtree
     /// already stood — D38's reasoning for `NotAContainer`); an in-place rewrite under its parent,
     /// then each kept child under it, since a rewrite can change the kind. Removes and reorders none.
-    let private createdPairs (s: OpScope<'Node, 'Id>) (v: OpView<'Node, 'Id>) (before: 'Node) : ('Node * 'Node) list =
+    let private createdPairs (s: Walks<'Node, 'Id>) (v: OpView<'Node, 'Id>) (before: 'Node) : ('Node * 'Node) list =
         let w = s.Edit
 
         let under (parent: 'Node option) (child: 'Node) =
@@ -1743,7 +1696,7 @@ module Ops =
     /// grammar does not let its parent hold.
     let private grammarRefusal
         (allowedChildren: string -> string list option)
-        (s: OpScope<'Node, 'Id>)
+        (s: Walks<'Node, 'Id>)
         (v: OpView<'Node, 'Id>)
         (before: 'Node)
         : Rejection<'Id> option =
@@ -1762,13 +1715,15 @@ module Ops =
     /// the step is not the step's doing and is not reported.
     let private referenceRefusal
         (refw: RefWitness<'Node, 'Id>)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (s: Walks<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (before: 'Node)
         (after: 'Node)
         : Rejection<'Id> option =
-        let key (i: 'Id) = idw.ToString i
+        // the walk the engine locates through: under a keyed scope a declaration or a reference held
+        // in a keyed position is one the tree carries (Phase 517)
+        let w = s.Locate
+        let key (i: 'Id) = s.Ids.ToString i
 
         let declared (t: 'Node) =
             Tree.preorder w t |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
@@ -1794,195 +1749,137 @@ module Ops =
         | ReorderChildren _
         | Batch _ -> None
 
-    /// The wrapped engine: `applyContained` decides each non-batch step, and `check` — handed the
-    /// step's view, the tree before it and the tree after it — runs only on a step it accepted. The
-    /// view is located once, for the engine and the clause alike. A `Batch` is the runner's
-    /// all-or-nothing form over this same function, exactly as the engine threads one.
-    let rec private applyChecked
-        (check: OpView<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+    // ---- the one engine entry: a policy and a scope (Phase 517) ----
+    // The entry matrix (plain x contained x keyed scopes, grammar and reference policies, single
+    // and script, do and dry run) was 39 named functions with eight cells nobody had drawn. It is
+    // four verbs over two records: `OpScope` says how the engine sees the tree, `Policy` which
+    // checks run beyond the engine's own, and every combination exists by construction.
+
+    /// One step under a policy: the engine's checks (D38's order) on the view located once, then the
+    /// grammar over the pairs the step creates (read from the tree BEFORE it), then the edit, then the
+    /// references over the trees before and after it. A `Batch` is the runner's all-or-nothing form.
+    let rec private stepWith
+        (policy: Policy<'Node, 'Id>)
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (s: Walks<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
         match op with
-        | Batch ops -> batch (fun node o -> applyChecked check canHold w idw o node) ops root
+        | Batch ops -> batch (fun node o -> stepWith policy canHold s o node) ops root
         | _ ->
-            let s = plainScope w idw
             let v = view s op root
 
-            applyView canHold s v root
-            |> Result.bind (fun after ->
-                match check v root after with
+            match check canHold s v root with
+            | Error e -> Error e
+            | Ok() ->
+                match policy.Grammar |> Option.bind (fun g -> grammarRefusal g s v root) with
                 | Some r -> Error r
-                | None -> Ok after)
+                | None ->
+                    edit s v root
+                    |> Result.bind (fun after ->
+                        match policy.Refs |> Option.bind (fun refw -> referenceRefusal refw s v.Op root after) with
+                        | Some r -> Error r
+                        | None -> Ok after)
 
-    /// The sequence form of `applyChecked`: the runner's script, `applyAllWith`'s `ScriptRejection`.
-    let private applyAllChecked
-        (check: OpView<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+    /// The dry run of one step: the engine's checks and the grammar read the view and the tree
+    /// before it, so no tree is built (Phase 246, Phase 298) unless the policy carries references,
+    /// whose clause reads the tree after the step, or the op is a `Batch`, which is order-dependent.
+    let private checkWith
+        (policy: Policy<'Node, 'Id>)
         (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        script (fun node o -> applyChecked check canHold w idw o node) ops root
-
-    let private grammarCheck allowedChildren (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) =
-        let s = plainScope w idw
-        fun v before (_: 'Node) -> grammarRefusal allowedChildren s v before
-
-    let private referenceCheck
-        (refw: RefWitness<'Node, 'Id>)
-        allowedChildren
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        =
-        let s = plainScope w idw
-
-        fun (v: OpView<'Node, 'Id>) before after ->
-            match grammarRefusal allowedChildren s v before with
-            | Some r -> Some r
-            | None -> referenceRefusal refw w idw v.Op before after
-
-    /// Grammar-aware apply (Phase 313) — `applyContained` with the domain's containment grammar
-    /// beside `canHold`. Every step the container-aware engine refuses is refused with the same
-    /// envelope; a step it accepts is then refused with `IllegalChild` when it would leave a child
-    /// under a parent whose kind `allowedChildren` does not let hold it (see the section head for
-    /// which pairs each op creates). For a tree that keeps the grammar, every tree this returns keeps
-    /// it — `Conformance.containmentLaws`, and `grammar_preserves` in `proofs/Preservation.fst`.
-    /// With `allowedChildren = fun _ -> None` it answers exactly what `applyContained` answers.
-    let applyGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        applyChecked (grammarCheck allowedChildren w idw) canHold w idw op root
-
-    /// The dry run of `applyGrammar`: its exact envelope, and no tree returned. The grammar clause
-    /// reads the step's result, so unlike `canApplyContained` this builds the edited tree.
-    let canApplyGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (s: Walks<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        applyGrammar allowedChildren canHold w idw op root |> Result.map ignore
+        match op, policy.Refs with
+        | Batch _, _
+        | _, Some _ -> stepWith policy canHold s op root |> Result.map ignore
+        | _, None ->
+            let v = view s op root
 
-    /// The sequence form of `applyGrammar` — `applyAllWith`'s contract (first refusal wins; the
-    /// `ScriptRejection` naming how many ops applied, the envelope and the tree the accepted prefix
-    /// reached) under the grammar.
-    let applyAllGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        applyAllChecked (grammarCheck allowedChildren w idw) canHold w idw ops root
+            check canHold s v root
+            |> Result.bind (fun () ->
+                match policy.Grammar |> Option.bind (fun g -> grammarRefusal g s v root) with
+                | Some r -> Error r
+                | None -> Ok())
 
-    /// The dry run of `applyAllGrammar`, in `canApplyAllWith`'s shape — the `canApply` a domain with
-    /// a grammar hands `Arbitration.arbitrateWith` (`Arbitration.arbitrateGrammar` is that
-    /// composition).
-    let canApplyAllGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<unit, int * Rejection<'Id>> =
-        dryRun (applyGrammar allowedChildren canHold w idw) ops root
-
-    /// Reference-aware apply (Phase 313) — `applyGrammar` under a `RefWitness` as well: a
-    /// `RemoveNode` or `UpdateNode` it accepts is then refused with `StillReferenced` when the tree
-    /// after it no longer declares an id it declared before and a node of that tree still refers to
-    /// it — a removed subtree's declarations, or what a rewrite stops declaring. So an accepted op
-    /// never leaves dangling a reference that resolved before it. A reference an INSERT or an
-    /// in-place rewrite brings in is not refused here: whether it resolves is
-    /// `Validator.referenceIntegrity`'s report, because a document under construction legitimately
-    /// refers ahead of what it has declared. Pass `fun _ -> None` for a domain with no grammar.
-    let applyReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<'Node, Rejection<'Id>> =
-        applyChecked (referenceCheck refw allowedChildren w idw) canHold w idw op root
-
-    /// The dry run of `applyReferenced`.
-    let canApplyReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (op: SkeletonOp<'Node, 'Id>)
-        (root: 'Node)
-        : Result<unit, Rejection<'Id>> =
-        applyReferenced refw allowedChildren canHold w idw op root |> Result.map ignore
-
-    /// The sequence form of `applyReferenced`, `applyAllWith`'s contract.
-    let applyAllReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<'Node, ScriptRejection<'Node, 'Id>> =
-        applyAllChecked (referenceCheck refw allowedChildren w idw) canHold w idw ops root
-
-    /// The dry run of `applyAllReferenced`, in `canApplyAllWith`'s shape.
-    let canApplyAllReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        (root: 'Node)
-        : Result<unit, int * Rejection<'Id>> =
-        dryRun (applyReferenced refw allowedChildren canHold w idw) ops root
-
-    /// `footprint` under a `RefWitness` (Phase 313): every id the script writes a reference to is
-    /// READ — the references every node of an inserted subtree carries, and those of an `UpdateNode`
-    /// payload — so a script that writes a reference to `x` fails `independent` against a script that
-    /// destroys `x`, by `Interference.RightWritesLeftReads` / `LeftWritesRightReads` naming `x`.
-    /// Every other address is `footprint`'s, so this only ever ADDS collisions: it is as sound as
-    /// `footprint` is, and `independent` over it is never more permissive.
+    /// Apply one skeleton op under `policy` and `scope` (Phase 517). Every failure is a typed
+    /// `Rejection`, never an exception (GP4).
     ///
-    /// Among the skeleton ops alone the remove-versus-reference race was already serialised, by the
-    /// pinned unknown-parent clause (a remove collides with every structural write, an update is one).
-    /// What this adds is the collision NAMED for the reference, and the same read for a domain op that
-    /// writes a reference and no structure (`Footprint.reading`), where no other clause catches it.
-    /// The read meets a removal's content-write when the declared id IS the declaring node's id; a
-    /// domain declaring names that are not node ids folds the names a removal destroys into its own
-    /// removal footprint.
-    let footprintReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (w: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (ops: SkeletonOp<'Node, 'Id> list)
-        : Footprint =
-        let rec written (op: SkeletonOp<'Node, 'Id>) : 'Id list =
-            match op with
-            | InsertChild(_, node) -> Tree.preorder w node |> List.collect refw.RefsOf
-            | UpdateNode node -> refw.RefsOf node
-            | Batch inner -> inner |> List.collect written
-            | RemoveNode _
-            | MoveNode _
-            | ReorderChildren _ -> []
+    /// **The scope.** `OpScope.plain` treats every node as able to hold children. Under
+    /// `OpScope.contained canHold` (Phase 251) a step that would leave children under a node
+    /// `canHold` refuses is `NotAContainer` — an insert's parent, a move's destination, a reorder's
+    /// parent (Phase 517), an update's rewritten node, and, since Phase 161 (D38), every interior
+    /// node of an inserted graft; containment LEGALITY (which kinds may parent which) is the policy's
+    /// grammar. The one premise no check can discharge is `child_blind`: a `canHold` that reads the
+    /// child list — the domain's obligation, certified by `Conformance.containerLaws`. Under
+    /// `OpScope.keyed` (Phase 286) the engine LOCATES through `Tree.traversal`, so a node held in or
+    /// below a keyed position can be an insert's or a reorder's parent, a move's destination, an
+    /// update's target, and a remove's or move's target when it has a structural parent; it EDITS
+    /// through `Nodes`, so a remove or move of a node held directly in a keyed position is
+    /// `KeyedPosition`, naming its holder and slot; `DuplicateId` sees every id the keyed walk
+    /// reaches, on both sides of a graft and in an update payload's keyed subtrees. For a domain whose
+    /// `KeyedChildren` is `fun _ -> []` the keyed scope answers exactly what the contained one does
+    /// (`Conformance.keyedApplyLaws`).
+    ///
+    /// **The policy.** After every check the engine makes (so no op it refuses changes class), a
+    /// `Grammar` refuses a step that would leave a child under a parent whose kind may not hold it
+    /// (`IllegalChild`, Phase 313; `grammar_preserves` in `proofs/Preservation.fst`), and `Refs`
+    /// refuses a `RemoveNode` or `UpdateNode` that would leave a reference of the tree dangling
+    /// (`StillReferenced`). A reference an insert or a rewrite brings in is not refused: whether it
+    /// resolves is `Validator.referenceIntegrity`'s report. With `fun _ -> None` as its grammar a
+    /// policy answers exactly what `Policy.none` answers.
+    let apply
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        stepWith policy (canHoldOf scope) (walksOf scope) op root
 
-        Footprint.union (footprint w idw ops) (Footprint.reading (ops |> List.collect written |> List.map idw.ToString))
+    /// Dry-run validation (Phase 246): would `op` be accepted against `root` under `policy` and
+    /// `scope`? The exact `Rejection` `apply` would return, and no new tree built for a non-batch op
+    /// unless the policy carries references (their clause reads the tree after the step). A `Batch`
+    /// is order-dependent, so its check simulates through `apply` and discards the result. The AI
+    /// pre-flight surface — "is this op legal?" — without committing the rebuild.
+    let canApply
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        checkWith policy (canHoldOf scope) (walksOf scope) op root
+
+    /// Apply a sequence non-atomically (Phase 160) under `policy` and `scope`, threading the tree.
+    ///
+    /// FIRST REFUSAL WINS, and a script is **not** a `Batch`. `Batch` is all-or-nothing inside one
+    /// op: it aborts and the original tree survives. A script stops at the first refusal and returns
+    /// the tree built so far, so the accepted prefix is kept. On failure the payload is a
+    /// `ScriptRejection` (Phase 391): `Applied`, the number of ops applied before the refusal and so
+    /// the 0-based position of the refused op in `ops`; `Rejection`, the envelope; and `Tree`, the
+    /// tree the accepted prefix reached — the state the refused step was offered against.
+    let applyAll
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
+        let canHold = canHoldOf scope
+        let s = walksOf scope
+        script (fun node o -> stepWith policy canHold s o node) ops root
+
+    /// Dry-run a sequence (Phase 246): the 0-based index of the first refused op and its envelope,
+    /// exactly as `applyAll` under the same policy and scope would report them, and no tree returned.
+    /// Each step is checked against the tree the earlier steps leave. It is the `canApply` a domain
+    /// hands `Arbitration.arbitrateWith`; `Arbitration.arbitrate` composes it with `footprint` under
+    /// one policy and scope.
+    let canApplyAll
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        let canHold = canHoldOf scope
+        let s = walksOf scope
+        dryRun (stepWith policy canHold s) ops root

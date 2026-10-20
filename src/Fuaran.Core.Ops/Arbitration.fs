@@ -153,34 +153,32 @@ module Arbitration =
     /// the `interfering` citation, in the same order), because `arbitrate` computes both with this
     /// function; every clause list is non-empty. It stays the query surface for a party that holds
     /// a proposal and an accepted set but no rejection. Empty exactly when the proposal is
-    /// independent of every accepted one. Total.
+    /// independent of every accepted one. The footprints are `Ops.footprint policy scope`'s, so it
+    /// explains `arbitrate policy scope` (Phase 517). Total.
     let interference
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (accepted: OpScriptProposal<'Node, 'Id> list)
         (proposal: OpScriptProposal<'Node, 'Id>)
         : (int * Interference list) list =
         accepted
-        |> List.map (fun a -> a, Ops.footprint nodew idw a.Ops)
-        |> interferingWith (Ops.footprint nodew idw proposal.Ops)
+        |> List.map (fun a -> a, Ops.footprint policy scope a.Ops)
+        |> interferingWith (Ops.footprint policy scope proposal.Ops)
 
     /// `arbitrate` with the domain's own footprint and applicability (Phase 247) — the same
     /// deterministic, total partition, in the same three steps, with the two judgements the
     /// partition rests on supplied by the domain rather than read off the skeleton defaults:
     ///
     ///   - `footprint` decides independence. It is what `Conflicts` is computed and explained with,
-    ///     so a domain that holds identity `Ops.footprint` cannot see — an id in a keyed position
-    ///     (`Ops.footprintKeyed`), a label, a slot — records it there and has a clash refused rather
-    ///     than admitted.
+    ///     so a domain that holds identity the scope's footprint cannot see — a label, a slot —
+    ///     records it there and has a clash refused rather than admitted.
     ///   - `canApply` decides applicability against the base, in `Ops.canApplyAll`'s shape: the
     ///     first refused op's index and its envelope, which `Inapplicable` carries verbatim. A domain
-    ///     whose engine refuses what the plain check admits — an insert under a node that cannot hold
-    ///     children (`Ops.canApplyAllWith canHold`), a duplicate over the keyed walk
-    ///     (`Ops.canApplyAllKeyed`) — has the proposal refused here instead of admitted and dropped
-    ///     (or refused) when the merged script lands.
+    ///     whose engine refuses what a weaker check admits has the proposal refused here instead of
+    ///     admitted and dropped (or refused) when the merged script lands.
     ///
-    /// `arbitrate nodew idw` IS `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew
-    /// idw)`. Every guarantee `arbitrate` states holds of this form for the functions handed to it:
+    /// `arbitrate policy scope` IS `arbitrateWith (Ops.footprint policy scope) (Ops.canApplyAll
+    /// policy scope)` over a well-formed base. Every guarantee `arbitrate` states holds of this form for the functions handed to it:
     /// the pinned order, totality, the partition, pairwise `Ops.independent` accepted footprints and
     /// the re-cited `Conflicts`. The one that is the DOMAIN'S to keep is the confluence claim — the
     /// accepted scripts apply in any order to one tree — which holds when `footprint` is sound for
@@ -240,19 +238,19 @@ module Arbitration =
     /// the accepted set promises — `TreeOps.tree_independence_diamond` — is stated at `wf`, and the
     /// promise is empty below it. So a malformed base is
     /// REFUSED rather than arbitrated: every proposal is rejected `Inapplicable(0, DuplicateId d)`,
-    /// `d` the first id the base's preorder carries twice (`Tree.wellFormed`'s verdict), and the
-    /// accepted set and merged script are empty. Index 0 because no op was offered: the refusal is
-    /// the base's, and a proposer that reads it repairs nothing in its script. The four witness-
-    /// taking entries make the check; `arbitrateWith` takes a `canApply` and no witness, so a
-    /// domain composing it directly checks its own base (`Tree.wellFormedKeyed` for a keyed one).
+    /// `d` the first id the base's preorder carries twice (`Tree.wellFormed`'s verdict over the walk
+    /// the scope locates through, so under a keyed scope `Tree.wellFormedKeyed`'s, Phase 517), and
+    /// the accepted set and merged script are empty. Index 0 because no op was offered: the refusal
+    /// is the base's, and a proposer that reads it repairs nothing in its script. The scope-taking
+    /// entries make the check; `arbitrateWith` takes a `canApply` and no scope, so a domain
+    /// composing it directly checks its own base.
     let private atWellFormedBase
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         (decide: unit -> Arbitration<'Node, 'Id>)
         : Arbitration<'Node, 'Id> =
-        match Tree.wellFormed nodew idw baseTree with
+        match Tree.wellFormed (OpScope.locate scope) scope.Ids baseTree with
         | Tree.Structural -> decide ()
         | Tree.RepeatedId d ->
             { Accepted = []
@@ -275,11 +273,11 @@ module Arbitration =
     ///      unique ids — `duplicateIds proposals = []` is that assumption as a
     ///      total check, and `proofs/Arbitrate.fst` proves both the guarantee
     ///      under it and that it cannot be dropped.
-    ///   2. **Batch `canApply`.** `Ops.canApplyAll` against the base filters
+    ///   2. **Batch `canApply`.** `Ops.canApplyAll policy scope` against the base filters
     ///      the inapplicable — each rejection carries the op-algebra's own
     ///      envelope + the failing op index (GP5).
     ///   3. **Greedy independence.** Each remaining proposal is accepted iff
-    ///      its footprint (Phase 78, `Ops.footprint`) is `Ops.independent` of
+    ///      its footprint (Phase 78, `Ops.footprint policy scope`) is `Ops.independent` of
     ///      everything already accepted; otherwise it is rejected with
     ///      `Conflicts`, citing the interfering accepted ids (recomputed
     ///      against the FULL accepted set, so the citation is the complete
@@ -300,106 +298,44 @@ module Arbitration =
     /// *better* is the host's business; Core only says which ones *can
     /// coexist*.
     ///
-    /// The partition under the skeleton defaults — `arbitrateWith (Ops.footprint nodew idw)
-    /// (Ops.canApplyAll nodew idw)` — once the base is well-formed; a base carrying an id twice
-    /// rejects every proposal `Inapplicable(0, DuplicateId d)` and accepts none. Greedy in ascending
-    /// `Id`, so the accepted set is maximal, not maximum.
+    /// The partition under `policy` and `scope` (Phase 517) — `arbitrateWith (Ops.footprint policy
+    /// scope) (Ops.canApplyAll policy scope)` — once the base is well-formed; a base carrying an id
+    /// twice rejects every proposal `Inapplicable(0, DuplicateId d)` and accepts none. Greedy in
+    /// ascending `Id`, so the accepted set is maximal, not maximum.
+    ///
+    /// Applicability is the engine's under the pair, so under a contained scope a proposal that
+    /// inserts or moves under a node `canHold` refuses is `Inapplicable` with `NotAContainer`, under
+    /// a grammar policy one that would leave an illegal child is `Inapplicable` with `IllegalChild`,
+    /// and under a policy with `Refs` one whose remove or rewrite would leave a reference of the
+    /// BASE dangling is `Inapplicable` with `StillReferenced`. Independence is the footprint's under
+    /// the pair: a keyed scope reads the keyed ids a graft brings in, and `Refs` reads every id a
+    /// script writes a reference to, so a proposal that writes a reference to a node another removes
+    /// conflicts with it. Every check a grammar adds reads a parent the op already reads, or rewrites
+    /// a node in place, which the pinned unknown-parent clause serialises, so the accepted scripts
+    /// stay confluent under the policy's engine (`Conformance.containmentLaws`,
+    /// `Conformance.keyedArbitrationLaws`).
     let arbitrate
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        atWellFormedBase nodew idw baseTree proposals (fun () ->
-            arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw) baseTree proposals)
+        atWellFormedBase scope baseTree proposals (fun () ->
+            arbitrateWith (Ops.footprint policy scope) (Ops.canApplyAll policy scope) baseTree proposals)
 
-    /// `arbitrate` with the base-aware footprint (Phase 500) — `arbitrateWith (Ops.footprintIn nodew
-    /// idw baseTree) (Ops.canApplyAll nodew idw) baseTree`, once the base is well-formed. The same
-    /// pinned order, totality and partition; independence is decided by `Ops.footprintIn` at the base
-    /// every proposal is checked against, so two proposals that rewrite different nodes in place, or
-    /// remove and insert under unrelated parents, coexist where `arbitrate` refuses them, and no pair
-    /// `arbitrate` accepts is refused (`FootprintIn.footprint_in_refines`). Every accepted script
-    /// applies at the base (`Ops.canApplyAll`), which is the premise under which the base-aware
-    /// footprint's promise holds (`FootprintIn.footprint_in_sound`). The keyed and contained
-    /// compositions are one call each: `arbitrateWith (Ops.footprintInKeyed keyw nodew idw baseTree)
-    /// (Ops.canApplyAllKeyed keyw canHold nodew idw) baseTree`, after `Tree.wellFormedKeyed`.
+    /// `arbitrate` with the base-aware footprint (Phase 500) — `arbitrateWith (Ops.footprintIn policy
+    /// scope baseTree) (Ops.canApplyAll policy scope) baseTree`, once the base is well-formed. The
+    /// same pinned order, totality and partition; independence is decided by `Ops.footprintIn` at
+    /// the base every proposal is checked against, so two proposals that rewrite different nodes in
+    /// place, or remove and insert under unrelated parents, coexist where `arbitrate` refuses them,
+    /// and no pair `arbitrate` accepts is refused (`FootprintIn.footprint_in_refines`). Every accepted
+    /// script applies at the base (`Ops.canApplyAll`), which is the premise under which the
+    /// base-aware footprint's promise holds (`FootprintIn.footprint_in_sound`).
     let arbitrateIn
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
+        (policy: Policy<'Node, 'Id>)
+        (scope: OpScope<'Node, 'Id>)
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        atWellFormedBase nodew idw baseTree proposals (fun () ->
-            arbitrateWith (Ops.footprintIn nodew idw baseTree) (Ops.canApplyAll nodew idw) baseTree proposals)
-
-    /// `arbitrate` under a container capability (Phase 247) — the `applyContained` /
-    /// `canApplyAllWith` precedent, at the partition: applicability is
-    /// `Ops.canApplyAllWith canHold`, so a proposal that inserts or moves under a node `canHold`
-    /// refuses, or grafts a subtree whose interior breaks it, is `Inapplicable` with the
-    /// `NotAContainer` envelope rather than admitted. `arbitrate` checks with `Ops.canApplyAll`,
-    /// under which every node can hold children, so it admits such a proposal; landing the merged
-    /// script through `Ops.applyAllWith canHold` then refuses it, and plain `Ops.applyAll` keeps
-    /// whatever the domain's `ReplaceChildren` does with a leaf's new children — for a witness that
-    /// ignores them, the insert is silently dropped. Independence is `Ops.footprint`'s, unchanged.
-    ///
-    /// It is `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw)`; a
-    /// domain with keyed positions composes the keyed pair the same way —
-    /// `arbitrateWith (Ops.footprintKeyed keyw nodew idw) (Ops.canApplyAllKeyed keyw canHold nodew idw)`.
-    /// With `canHold = fun _ -> true` it is exactly `arbitrate`.
-    let arbitrateContained
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (proposals: OpScriptProposal<'Node, 'Id> list)
-        : Arbitration<'Node, 'Id> =
-        atWellFormedBase nodew idw baseTree proposals (fun () ->
-            arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw) baseTree proposals)
-
-    /// `arbitrateContained` under the domain's containment grammar as well (Phase 313):
-    /// applicability is `Ops.canApplyAllGrammar allowedChildren canHold`, so a proposal that would
-    /// leave a child under a parent whose kind may not hold it is `Inapplicable` with the
-    /// `IllegalChild` envelope — naming the legal children — instead of admitted and refused when the
-    /// merged script lands. Independence is `Ops.footprint`'s: every check the grammar adds reads a
-    /// parent the op already reads (an insert's parent, a move's destination) or rewrites a node in
-    /// place, which the pinned unknown-parent clause already serialises, so the accepted scripts stay
-    /// confluent under the grammar engine (`Conformance.containmentLaws`).
-    ///
-    /// It is `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllGrammar allowedChildren canHold
-    /// nodew idw)`; with `allowedChildren = fun _ -> None` it is exactly `arbitrateContained`.
-    let arbitrateGrammar
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (proposals: OpScriptProposal<'Node, 'Id> list)
-        : Arbitration<'Node, 'Id> =
-        atWellFormedBase nodew idw baseTree proposals (fun () ->
-            arbitrateWith
-                (Ops.footprint nodew idw)
-                (Ops.canApplyAllGrammar allowedChildren canHold nodew idw)
-                baseTree
-                proposals)
-
-    /// `arbitrateGrammar` under a `RefWitness` as well (Phase 313): independence is
-    /// `Ops.footprintReferenced`, so a proposal that writes a reference to a node another proposal
-    /// removes conflicts with it and the citation names the referenced id; applicability is
-    /// `Ops.canApplyAllReferenced`, so a proposal whose remove or rewrite would leave a reference of the
-    /// BASE dangling is `Inapplicable` with `StillReferenced`. It is `arbitrateWith (Ops.footprintReferenced
-    /// refw nodew idw) (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)`.
-    let arbitrateReferenced
-        (refw: RefWitness<'Node, 'Id>)
-        (allowedChildren: string -> string list option)
-        (canHold: 'Node -> bool)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (proposals: OpScriptProposal<'Node, 'Id> list)
-        : Arbitration<'Node, 'Id> =
-        atWellFormedBase nodew idw baseTree proposals (fun () ->
-            arbitrateWith
-                (Ops.footprintReferenced refw nodew idw)
-                (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)
-                baseTree
-                proposals)
+        atWellFormedBase scope baseTree proposals (fun () ->
+            arbitrateWith (Ops.footprintIn policy scope baseTree) (Ops.canApplyAll policy scope) baseTree proposals)

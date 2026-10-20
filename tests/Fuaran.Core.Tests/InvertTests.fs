@@ -8,7 +8,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
 let private applyOk op tree =
-    match Ops.apply nodew idw op tree with
+    match Ops.apply Policy.none (OpScope.plain nodew idw) op tree with
     | Ok r -> r
     | Error e -> failtestf "apply failed: %A" e
 

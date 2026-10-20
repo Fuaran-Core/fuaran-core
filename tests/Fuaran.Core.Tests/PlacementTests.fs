@@ -35,7 +35,7 @@ let private kidsOf (id: string) (t: RNode) =
     |> Option.defaultValue []
 
 let private applied (script: SkeletonOp<RNode, string> list) (t: RNode) =
-    match Ops.applyAll nodew idw script t with
+    match Ops.applyAll Policy.none (OpScope.plain nodew idw) script t with
     | Ok t' -> t'
     | Error { Applied = i; Rejection = e } -> failtestf "the script %A was refused at step %d: %A" script i e
 
@@ -144,7 +144,7 @@ module private IndexBearing =
     let ofCore (t: RNode) (r: Result<SkeletonOp<RNode, string> list, PlaceError<string>>) : Outcome =
         match r with
         | Ok script ->
-            match Ops.applyAll nodew idw script t with
+            match Ops.applyAll Policy.none (OpScope.plain nodew idw) script t with
             | Ok t' -> Tree t'
             | Error _ -> Other
         | Error(PlaceError.IndexOutOfRange(p, i, n)) -> OutOfRange(p, i, n)
@@ -222,22 +222,26 @@ let tests =
               let n = leaf "n"
 
               Expect.equal
-                  (okScript (TreePlacement.place nodew idw "root" Anchor.Last n t))
+                  (okScript (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" Anchor.Last n t))
                   [ InsertChild("root", n) ]
                   "last"
 
               Expect.equal
-                  (okScript (TreePlacement.place nodew idw "root" (Anchor.Before "b") n t))
+                  (okScript (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" (Anchor.Before "b") n t))
                   [ Batch [ InsertChild("root", n); ReorderChildren("root", [ "a"; "n"; "b"; "c" ]) ] ]
                   "before b"
 
               Expect.equal
-                  (okScript (TreePlacement.place nodew idw "root" (Anchor.Index 3) n t))
+                  (okScript (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" (Anchor.Index 3) n t))
                   [ InsertChild("root", n) ]
                   "index = count is last"
 
               Expect.equal
-                  (kidsOf "root" (applied (okScript (TreePlacement.place nodew idw "root" Anchor.First n t)) t))
+                  (kidsOf
+                      "root"
+                      (applied
+                          (okScript (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" Anchor.First n t))
+                          t))
                   [ "n"; "a"; "b"; "c" ]
                   "first"
 
@@ -247,32 +251,32 @@ let tests =
               let n = leaf "n"
 
               Expect.equal
-                  (TreePlacement.place nodew idw "root" (Anchor.After "a1") n t)
+                  (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" (Anchor.After "a1") n t)
                   (Error(PlaceError.UnknownAnchor("root", "a1", [ "a"; "b"; "c" ])))
                   "a grandchild is not a sibling"
 
               Expect.equal
-                  (TreePlacement.place nodew idw "a" (Anchor.Index 3) n t)
+                  (TreePlacement.place Policy.none (OpScope.plain nodew idw) "a" (Anchor.Index 3) n t)
                   (Error(PlaceError.IndexOutOfRange("a", 3, 2)))
                   "past the end"
 
               Expect.equal
-                  (TreePlacement.place nodew idw "a" (Anchor.Index(-1)) n t)
+                  (TreePlacement.place Policy.none (OpScope.plain nodew idw) "a" (Anchor.Index(-1)) n t)
                   (Error(PlaceError.IndexOutOfRange("a", -1, 2)))
                   "before the start"
 
               Expect.equal
-                  (TreePlacement.place nodew idw "zz" Anchor.Last n t)
+                  (TreePlacement.place Policy.none (OpScope.plain nodew idw) "zz" Anchor.Last n t)
                   (Error(PlaceError.Refused(UnknownNode("zz", Tree.ids nodew t))))
                   "absent parent"
 
               Expect.equal
-                  (TreePlacement.place nodew idw "root" Anchor.Last (leaf "b") t)
+                  (TreePlacement.place Policy.none (OpScope.plain nodew idw) "root" Anchor.Last (leaf "b") t)
                   (Error(PlaceError.Refused(DuplicateId "b")))
                   "duplicate id"
 
               Expect.equal
-                  (TreePlacement.placeContained canHold nodew idw "b" Anchor.Last n t)
+                  (TreePlacement.place Policy.none (OpScope.contained canHold nodew idw) "b" Anchor.Last n t)
                   (Error(PlaceError.Refused(NotAContainer("b", "para"))))
                   "a leaf cannot hold the node"
 
@@ -281,29 +285,32 @@ let tests =
               let t = fixture ()
 
               Expect.equal
-                  (okScript (TreePlacement.move nodew idw "b" "a" Anchor.Last t))
+                  (okScript (TreePlacement.move Policy.none (OpScope.plain nodew idw) "b" "a" Anchor.Last t))
                   [ MoveNode("b", "a") ]
                   "across, last"
 
               Expect.equal
-                  (okScript (TreePlacement.move nodew idw "b" "a" (Anchor.After "a1") t))
+                  (okScript (TreePlacement.move Policy.none (OpScope.plain nodew idw) "b" "a" (Anchor.After "a1") t))
                   [ Batch [ MoveNode("b", "a"); ReorderChildren("a", [ "a1"; "b"; "a2" ]) ] ]
                   "across, between"
 
               Expect.equal
-                  (okScript (TreePlacement.move nodew idw "c" "root" Anchor.First t))
+                  (okScript (TreePlacement.move Policy.none (OpScope.plain nodew idw) "c" "root" Anchor.First t))
                   [ ReorderChildren("root", [ "c"; "a"; "b" ]) ]
                   "within"
 
-              Expect.equal (okScript (TreePlacement.move nodew idw "b" "root" (Anchor.Index 1) t)) [] "already there"
+              Expect.equal
+                  (okScript (TreePlacement.move Policy.none (OpScope.plain nodew idw) "b" "root" (Anchor.Index 1) t))
+                  []
+                  "already there"
 
               Expect.equal
-                  (TreePlacement.move nodew idw "a" "a1" Anchor.Last t)
+                  (TreePlacement.move Policy.none (OpScope.plain nodew idw) "a" "a1" Anchor.Last t)
                   (Error(PlaceError.Refused(WouldNestUnderSelf("a", NestRelation.Descendant))))
                   "into its own subtree"
 
               Expect.equal
-                  (TreePlacement.move nodew idw "b" "root" (Anchor.Before "b") t)
+                  (TreePlacement.move Policy.none (OpScope.plain nodew idw) "b" "root" (Anchor.Before "b") t)
                   (Error(PlaceError.UnknownAnchor("root", "b", [ "a"; "c" ])))
                   "a node is not its own anchor"
 
@@ -312,7 +319,17 @@ let tests =
               let t = fixture ()
 
               let script =
-                  okScript (TreePlacement.clone nodew idw setId (FreshIds.derived idw) "a" "c" Anchor.First t)
+                  okScript (
+                      TreePlacement.clone
+                          Policy.none
+                          (OpScope.plain nodew idw)
+                          setId
+                          (FreshIds.derived idw)
+                          "a"
+                          "c"
+                          Anchor.First
+                          t
+                  )
 
               let t' = applied script t
               Expect.equal (kidsOf "c" t') [ "a-copy"; "c1" ] "the copy leads c"
@@ -321,7 +338,17 @@ let tests =
               Expect.isTrue (Tree.isWellFormed nodew idw t') "well-formed"
 
               let twice =
-                  okScript (TreePlacement.clone nodew idw setId (FreshIds.derived idw) "a" "c" Anchor.Last t')
+                  okScript (
+                      TreePlacement.clone
+                          Policy.none
+                          (OpScope.plain nodew idw)
+                          setId
+                          (FreshIds.derived idw)
+                          "a"
+                          "c"
+                          Anchor.Last
+                          t'
+                  )
 
               Expect.equal (kidsOf "c" (applied twice t')) [ "a-copy"; "c1"; "a-copy-2" ] "the second copy probes"
 
@@ -335,7 +362,10 @@ let tests =
               for parent in [ "root"; "a"; "c" ] do
                   for anchor in anchorsOver (kidsOf parent t) do
                       let theirs = AnchorRelative.placeOp t n parent anchor |> Option.get
-                      let ours = okScript (TreePlacement.place nodew idw parent anchor n t)
+
+                      let ours =
+                          okScript (TreePlacement.place Policy.none (OpScope.plain nodew idw) parent anchor n t)
+
                       Expect.equal ours theirs (sprintf "place under %s at %A" parent anchor)
 
           testCase
@@ -352,7 +382,12 @@ let tests =
 
                           for anchor in anchorsOver others do
                               let theirs = AnchorRelative.moveOp t target parent anchor |> Option.get
-                              let ours = okScript (TreePlacement.move nodew idw target parent anchor t)
+
+                              let ours =
+                                  okScript (
+                                      TreePlacement.move Policy.none (OpScope.plain nodew idw) target parent anchor t
+                                  )
+
                               let within = List.contains target (kidsOf parent t)
 
                               if not within then
@@ -372,7 +407,9 @@ let tests =
               for parent in [ "root"; "a"; "c" ] do
                   for i in -1 .. List.length (kidsOf parent t) + 1 do
                       Expect.equal
-                          (IndexBearing.ofCore t (TreePlacement.place nodew idw parent (Anchor.Index i) n t))
+                          (IndexBearing.ofCore
+                              t
+                              (TreePlacement.place Policy.none (OpScope.plain nodew idw) parent (Anchor.Index i) n t))
                           (IndexBearing.insertAt parent i n t)
                           (sprintf "insert under %s at %d" parent i)
 
@@ -385,7 +422,15 @@ let tests =
 
                           for i in -1 .. List.length others + 1 do
                               Expect.equal
-                                  (IndexBearing.ofCore t (TreePlacement.move nodew idw target parent (Anchor.Index i) t))
+                                  (IndexBearing.ofCore
+                                      t
+                                      (TreePlacement.move
+                                          Policy.none
+                                          (OpScope.plain nodew idw)
+                                          target
+                                          parent
+                                          (Anchor.Index i)
+                                          t))
                                   (IndexBearing.moveAt target parent i t)
                                   (sprintf "move %s under %s at %d" target parent i)
 
@@ -407,15 +452,25 @@ let tests =
                   "the script"
 
               Expect.equal (Ops.skeletonRoot nodew t) (sec "root" []) "the skeleton"
-              Expect.equal (Ops.applyAll nodew idw script (Ops.skeletonRoot nodew t)) (Ok t) "round trip"
-              Expect.equal (Ops.applyAllWith canHold nodew idw script (Ops.skeletonRoot nodew t)) (Ok t) "contained"
+
+              Expect.equal
+                  (Ops.applyAll Policy.none (OpScope.plain nodew idw) script (Ops.skeletonRoot nodew t))
+                  (Ok t)
+                  "round trip"
+
+              Expect.equal
+                  (Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script (Ops.skeletonRoot nodew t))
+                  (Ok t)
+                  "contained"
 
           testCase "under canHold, a tree outside the containment invariant is refused at its first offender"
           <| fun () ->
               let t = sec "root" [ RNode.node "p" "para" [ leaf "x" ]; leaf "y" ]
               let script = Ops.lower nodew t
 
-              match Ops.applyAllWith canHold nodew idw script (Ops.skeletonRoot nodew t) with
+              match
+                  Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script (Ops.skeletonRoot nodew t)
+              with
               | Error { Applied = 1
                         Rejection = NotAContainer("p", "para") } -> ()
               | other -> failtestf "expected NotAContainer at step 1, got %A" other

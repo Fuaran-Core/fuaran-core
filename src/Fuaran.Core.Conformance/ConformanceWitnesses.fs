@@ -2,7 +2,7 @@ namespace Fuaran.Core
 
 /// The domain-supplied op-algebra generator: how to build a random tree, and how to mint
 /// a fresh node whose id avoids a given set (for `InsertChild`). `CanHold` (Phase 251) is
-/// the container capability — `Some p` exercises the laws through `Ops.applyContained` so a
+/// the container capability — `Some p` exercises the laws through `Ops.apply` under `OpScope.contained` so a
 /// witness whose `ReplaceChildren` is partial on leaves certifies green without restricting
 /// the generator to containers; `None` uses the plain `apply` (every node can hold children).
 type OpGen<'Node, 'Id> =
@@ -136,7 +136,7 @@ type ConstructWitness<'T> =
     }
 
 // `KeyedWitness` (Phase 189) was declared here until Phase 286, which moved it to
-// `Fuaran.Core.Tree` beside `NodeWitness`: the keyed walks and `Ops.applyContainedKeyed` read it,
+// `Fuaran.Core.Tree` beside `NodeWitness`: the keyed walks and `Ops.apply` under `OpScope.keyed` read it,
 // and neither can reference this assembly. The namespace is unchanged.
 
 /// The domain-supplied INCREMENTAL EVALUATOR (Phase 211): what a domain hands `Propagation.eval`

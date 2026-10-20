@@ -662,7 +662,7 @@ let indexAfterOpTests =
                   let pre = genTree rng 12
                   let op = genAnyOp rng pre
 
-                  match Ops.apply nodew idw op pre with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
                   | Ok post ->
                       kinds <-
                           kinds
@@ -695,7 +695,7 @@ let indexAfterOpTests =
                   for k in 0..29 do
                       let op = genAnyOp rng tree
 
-                      match Ops.apply nodew idw op tree with
+                      match Ops.apply Policy.none (OpScope.plain nodew idw) op tree with
                       | Ok post ->
                           ix <- Ops.Index.afterOp nodew idw op post ix
                           tree <- post
@@ -773,7 +773,7 @@ let indexAfterOpTests =
                   let mutable ix = Tree.Index.build nodew idw t
 
                   for op in session rounds do
-                      match Ops.apply nodew idw op t with
+                      match Ops.apply Policy.none (OpScope.plain nodew idw) op t with
                       | Ok post ->
                           ix <- Ops.Index.afterOp w idw op post ix
                           t <- post
@@ -787,7 +787,7 @@ let indexAfterOpTests =
                   let mutable t = tree ballastSize
 
                   for op in session rounds do
-                      match Ops.apply nodew idw op t with
+                      match Ops.apply Policy.none (OpScope.plain nodew idw) op t with
                       | Ok post ->
                           Tree.Index.build w idw post |> ignore
                           t <- post

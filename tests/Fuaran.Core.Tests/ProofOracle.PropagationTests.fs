@@ -992,7 +992,7 @@ let tests =
               let dirty = Propagation.dirtyFromOp nodew idw pre subtreeReads op
               Expect.isTrue (Set.contains "s" dirty) "dirtyFromOp names s, whose declared reads moved"
 
-              match Ops.apply nodew idw op pre with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
               | Error e -> failtestf "%A" e
               | Ok post ->
                   Expect.equal
@@ -1003,7 +1003,9 @@ let tests =
               // An op `Ops.apply` refuses has no post-edit tree to diff: the closure is over `touchedBy`.
               let refused = MoveNode("root", "c")
 
-              Expect.isError (Ops.apply nodew idw refused pre) "moving the root under its own descendant is refused"
+              Expect.isError
+                  (Ops.apply Policy.none (OpScope.plain nodew idw) refused pre)
+                  "moving the root under its own descendant is refused"
 
               Expect.equal
                   (Propagation.dirtyFromOp nodew idw pre subtreeReads refused)
@@ -1143,7 +1145,7 @@ let tests =
                   let pre = genTree ()
                   let op = genOp pre 0
 
-                  match Ops.apply nodew idw op pre with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
                   | Error _ -> ()
                   | Ok post ->
                       accepted <- accepted + 1

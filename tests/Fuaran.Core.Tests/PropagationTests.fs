@@ -348,7 +348,7 @@ let private countEval (t: RNode) (resolve: string -> int option) (id: string) : 
 /// against the full evaluation of the post-edit tree.
 let private replay (pre: RNode) (op: SkeletonOp<RNode, string>) =
     let post =
-        match Ops.apply nodew idw op pre with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
         | Ok t -> t
         | Error e -> failtestf "the probe's op was refused: %A" e
 
@@ -431,7 +431,7 @@ let changeSetTests =
 
               let op = InsertChild("c", RNode.leaf "z" "para" "")
 
-              match Ops.apply nodew idw op pre with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
               | Error e -> failtestf "%A" e
               | Ok post ->
                   Expect.isFalse
@@ -452,7 +452,7 @@ let changeSetTests =
                     ReorderChildren("root", [ "r"; "p2"; "p1" ])
                     UpdateNode(RNode.leaf "r" "para" "p2")
                     InsertChild("p2", RNode.leaf "z" "para" "y") ] do
-                  match Ops.apply nodew idw op pre with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) op pre with
                   | Error e -> failtestf "%A refused: %A" op e
                   | Ok post ->
                       let survivors = Tree.ids nodew post |> Set.ofList

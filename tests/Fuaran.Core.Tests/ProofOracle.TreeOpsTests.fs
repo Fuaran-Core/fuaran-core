@@ -67,7 +67,7 @@ let private treeProbeWith
     let where = sprintf "op %s at tree %s" (treeW.Encode op) (prodTreeHash st)
 
     let fpDiff =
-        let p = prodFpParts (Ops.footprint nodew idw [ op ])
+        let p = prodFpParts (Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ])
         let m = modelFpParts (TreeOps.op_fp mop)
 
         if p <> m then
@@ -75,7 +75,7 @@ let private treeProbeWith
         else
             []
 
-    let prod = Ops.apply nodew idw op st
+    let prod = Ops.apply Policy.none (OpScope.plain nodew idw) op st
     let model = TreeOps.apply mop mst
 
     let applyDiff, accepted, rejected, cls =
@@ -148,7 +148,7 @@ let private treeDifferentialWith
             generated
             |> List.fold
                 (fun (acc, cur) op ->
-                    match Ops.apply nodew idw op cur with
+                    match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                     | Ok t -> (acc @ [ t ]), t
                     | Error _ -> acc, cur)
                 ([ treeBase ], treeBase)
@@ -254,7 +254,7 @@ let private indexStates (seed: int) (trials: int) : RNode list =
                   List.concat lanes
                   |> List.fold
                       (fun (acc, cur) op ->
-                          match Ops.apply nodew idw op cur with
+                          match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                           | Ok t -> (acc @ [ t ]), t
                           | Error _ -> acc, cur)
                       ([ treeBase ], treeBase)
@@ -432,7 +432,7 @@ let tests =
 
                   // Every rejection class the plain `apply` can raise was reached — named rather
                   // than counted, because a count cannot say WHICH arm went unexercised.
-                  // `NotAContainer` is `applyContained`'s alone and `Rejected` is the domain-side
+                  // `NotAContainer` is `Ops.apply` under `OpScope.contained`'s alone and `Rejected` is the domain-side
                   // extension point Core never raises, so the reachable set is these five.
                   for cls in
                       [ "UnknownNode"
@@ -504,7 +504,7 @@ let tests =
               let flat = treeBase
 
               let nested =
-                  match Ops.apply nodew idw (MoveNode("b", "a")) treeBase with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("b", "a")) treeBase with
                   | Ok t -> t
                   | Error e -> failtestf "MoveNode(b, a) was refused: %A" e
 
@@ -540,7 +540,7 @@ let tests =
                       List.concat lanes
                       |> List.fold
                           (fun (acc, cur) op ->
-                              match Ops.apply nodew idw op cur with
+                              match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                               | Ok t -> (acc @ [ t ]), t
                               | Error _ -> acc, cur)
                           ([ treeBase ], treeBase)
@@ -559,7 +559,7 @@ let tests =
               // And the refutation the model evaluates, on production: the label preorder of the
               // shard's pair is one list, the pre-image is two.
               let nested =
-                  match Ops.apply nodew idw (MoveNode("b", "a")) treeBase with
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) (MoveNode("b", "a")) treeBase with
                   | Ok t -> t
                   | Error e -> failtestf "MoveNode(b, a) was refused: %A" e
 
@@ -595,7 +595,7 @@ let tests =
                       ops
                       |> List.fold
                           (fun (acc, cur) op ->
-                              match Ops.apply nodew idw op cur with
+                              match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                               | Ok t -> (acc @ [ t ]), t
                               | Error _ -> acc, cur)
                           ([ treeBase ], treeBase)
@@ -684,7 +684,7 @@ let tests =
                       ops
                       |> List.fold
                           (fun (acc, cur) op ->
-                              match Ops.apply nodew idw op cur with
+                              match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                               | Ok t -> (acc @ [ t ]), t
                               | Error _ -> acc, cur)
                           ([ treeBase ], treeBase)
@@ -803,7 +803,8 @@ let tests =
 
               let pInsert: SkeletonOp<RNode, string> = InsertChild("p", RNode.node "n" "para" [])
 
-              let fp (o: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ o ]
+              let fp (o: SkeletonOp<RNode, string>) =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ o ]
 
               Expect.equal (fp pMove) (fp pRemove) "production agrees: the two ops carry the same four address sets"
 
@@ -821,8 +822,8 @@ let tests =
               Expect.isFalse (Ops.independent fpM fpI) "production refuses the pair, by the pinned clause alone"
 
               let prodOrder first second =
-                  match Ops.apply nodew idw first pTree with
-                  | Ok t -> Ops.apply nodew idw second t
+                  match Ops.apply Policy.none (OpScope.plain nodew idw) first pTree with
+                  | Ok t -> Ops.apply Policy.none (OpScope.plain nodew idw) second t
                   | e -> e
 
               Expect.equal
@@ -837,7 +838,10 @@ let tests =
                   "STILL-REFUSED class, in production: remove-then-insert cannot find the insert's parent"
 
               Expect.isTrue
-                  (match Ops.apply nodew idw pRemove pTree, Ops.apply nodew idw pInsert pTree with
+                  (match
+                      Ops.apply Policy.none (OpScope.plain nodew idw) pRemove pTree,
+                      Ops.apply Policy.none (OpScope.plain nodew idw) pInsert pTree
+                   with
                    | Ok _, Ok _ -> true
                    | _ -> false)
                   "both halves apply at the tree on their own — so the divergence is the pair's, not one op's"
@@ -875,14 +879,16 @@ let tests =
 
               let a: SkeletonOp<RNode, string> = MoveNode("x", "np")
               let b: SkeletonOp<RNode, string> = MoveNode("y", "mp")
-              let fp (o: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ o ]
+
+              let fp (o: SkeletonOp<RNode, string>) =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ o ]
 
               Expect.isFalse (Ops.independent (fp a) (fp b)) "production refuses the move pair"
 
               Expect.isTrue
-                  (match Ops.apply nodew idw a cTree with
+                  (match Ops.apply Policy.none (OpScope.plain nodew idw) a cTree with
                    | Ok t ->
-                       match Ops.apply nodew idw b t with
+                       match Ops.apply Policy.none (OpScope.plain nodew idw) b t with
                        | Error _ -> true
                        | Ok _ -> false
                    | Error _ -> false)
@@ -981,7 +987,7 @@ let tests =
                       generated
                       |> List.fold
                           (fun (acc, cur) op ->
-                              match Ops.apply nodew idw op cur with
+                              match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                               | Ok t -> (acc @ [ t ]), t
                               | Error _ -> acc, cur)
                           ([ treeBase ], treeBase)
@@ -996,7 +1002,7 @@ let tests =
 
                   for script in scripts do
                       for st in states do
-                          let prod = Ops.footprintIn nodew idw st script
+                          let prod = Ops.footprintIn Policy.none (OpScope.plain nodew idw) st script
 
                           let model =
                               TreeOps.fp_in_all (toModelTree st) (script |> List.map (toModelOpWith toModelTree))
@@ -1049,7 +1055,7 @@ let tests =
               // base-aware one refines — the same comparison finds the removal whose subtree the
               // base resolved.
               let script = [ RemoveNode "a" ]
-              let prod = Ops.footprintIn nodew idw treeBase script
+              let prod = Ops.footprintIn Policy.none (OpScope.plain nodew idw) treeBase script
               let pureModel = TreeOps.fp_all (script |> List.map (toModelOpWith toModelTree))
 
               let model =
@@ -1092,7 +1098,7 @@ let tests =
                       generated
                       |> List.fold
                           (fun (acc, cur) op ->
-                              match Ops.apply nodew idw op cur with
+                              match Ops.apply Policy.none (OpScope.plain nodew idw) op cur with
                               | Ok t -> (acc @ [ t ]), t
                               | Error _ -> acc, cur)
                           ([ treeBase ], treeBase)

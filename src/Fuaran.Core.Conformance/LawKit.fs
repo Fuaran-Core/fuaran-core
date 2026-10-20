@@ -492,7 +492,7 @@ module internal LawKit =
             | Some t -> t.Note op
             | None -> ()
 
-            match Ops.applyContained canHold nodew idw op cur with
+            match Ops.apply Policy.none (OpScope.contained canHold nodew idw) op cur with
             | Ok t' ->
                 cur <- t'
                 accepted <- accepted @ [ op ]

@@ -157,7 +157,10 @@ let private arbitrationDifferential
         for t in 1..trials do
             let proposals, r' = genProposalSet uniqueIds r
             r <- r'
-            let prod = Arbitration.arbitrate nodew idw treeBase proposals
+
+            let prod =
+                Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) treeBase proposals
+
             let mps = proposals |> List.map toModelProposal
             let p = renderProdArbitration prod
             let m = renderModelArbitration (modelArbitrate mbase mps)
@@ -322,27 +325,29 @@ let tests =
                   "and the model's hypothesis is false of it"
 
               Expect.equal
-                  (holders (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  (holders (Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) baseTree [ a; b ]))
                   [ "a" ]
                   "a arrives first, a is accepted"
 
               Expect.equal
-                  (holders (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  (holders (Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) baseTree [ b; a ]))
                   [ "b" ]
                   "b arrives first, b is accepted"
 
               Expect.equal
-                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  (renderProdArbitration (Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) baseTree [ a; b ]))
                   (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_a; Arbitrate.dup_b ]))
                   "and the model agrees with production on the witness, in this order"
 
               Expect.equal
-                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  (renderProdArbitration (Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) baseTree [ b; a ]))
                   (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_b; Arbitrate.dup_a ]))
                   "and in the other"
 
               // what a repeated id does NOT cost: the partition is still total and still justified
-              let r = Arbitration.arbitrate nodew idw baseTree [ a; b ]
+              let r =
+                  Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) baseTree [ a; b ]
+
               Expect.equal (List.length r.Accepted + List.length r.Rejected) 2 "nothing dropped"
 
               match r.Rejected with
@@ -370,15 +375,15 @@ let tests =
 
               let first =
                   Arbitration.arbitrate
-                      nodew
-                      idw
+                      Policy.none
+                      (OpScope.plain nodew idw)
                       baseTree
                       ([ Arbitrate.mx_1; Arbitrate.mx_2; Arbitrate.mx_3 ] |> List.map ofModelProposal)
 
               let last =
                   Arbitration.arbitrate
-                      nodew
-                      idw
+                      Policy.none
+                      (OpScope.plain nodew idw)
                       baseTree
                       ([ Arbitrate.mx_1_last; Arbitrate.mx_2; Arbitrate.mx_3 ]
                        |> List.map ofModelProposal)

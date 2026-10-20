@@ -32,11 +32,11 @@ module internal PlacementTreeLaws =
             let i = rng.IntBelow(count + 1)
             Anchor.Index i, i
 
-    /// The placement laws (Phase 312) — certify `TreePlacement.placeContained` / `moveContained`
-    /// against a domain's own witness, executed the way that domain executes (`applyAllWith` under
+    /// The placement laws (Phase 312) — certify `TreePlacement.place` under `OpScope.contained` / `TreePlacement.move` under `OpScope.contained`
+    /// against a domain's own witness, executed the way that domain executes (`Ops.applyAll` under `OpScope.contained` under
     /// the generator's `CanHold`):
     ///
-    ///   - **landing**: an accepted placement's script is accepted by `applyAllWith`, puts the node
+    ///   - **landing**: an accepted placement's script is accepted by `Ops.applyAll` under `OpScope.contained`, puts the node
     ///     at exactly the position its anchor names, and changes no other node's child list — for a
     ///     placed insert, a move to another parent (whose source parent loses only the node), and a
     ///     move within its own parent;
@@ -45,7 +45,7 @@ module internal PlacementTreeLaws =
     ///   - **refusals by name** (BUILT every iteration): an anchor naming no other child is
     ///     `UnknownAnchor`, an index outside `0 .. count` is `IndexOutOfRange`, and a placement the
     ///     engine refuses — an absent parent, a duplicate id, a move of the root — carries exactly
-    ///     the envelope `canApplyContained` returns.
+    ///     the envelope `Ops.canApply` under `OpScope.contained` returns.
     ///
     /// The landing arms are drawn, so the family is guarded on each: a placed insert, a move across
     /// parents, a move within a parent, and a landing short of last (the arm that emits a reorder).
@@ -97,7 +97,7 @@ module internal PlacementTreeLaws =
                 (sourceParent: string option)
                 (added: Set<string>)
                 =
-                match Ops.applyAllWith canHold nodew idw script tree with
+                match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script tree with
                 | Error r ->
                     lands.Check(
                         false,
@@ -166,8 +166,10 @@ module internal PlacementTreeLaws =
                 let anchor, k = drawAnchor rng others
                 let insert = InsertChild(pid, node)
 
-                match TreePlacement.placeContained canHold nodew idw pid anchor node tree with
-                | Error(PlaceError.Refused r) when Ops.canApplyContained canHold nodew idw insert tree = Error r ->
+                match TreePlacement.place Policy.none (OpScope.contained canHold nodew idw) pid anchor node tree with
+                | Error(PlaceError.Refused r) when
+                    Ops.canApply Policy.none (OpScope.contained canHold nodew idw) insert tree = Error r
+                    ->
                     // the generator's fresh node is one this witness refuses to graft — the engine's
                     // verdict, carried unchanged, and nothing to land. The match guard IS the assertion,
                     // so the cell records evidence (`Saw`) rather than a check that cannot fail.
@@ -220,8 +222,9 @@ module internal PlacementTreeLaws =
                     // a node this witness will not graft is refused by the engine first, which is
                     // the documented precedence; the anchor refusal is asserted where the insert
                     // itself is acceptable
-                    if Ops.canApplyContained canHold nodew idw insert tree = Ok() then
-                        let got = TreePlacement.placeContained canHold nodew idw pid a node tree
+                    if Ops.canApply Policy.none (OpScope.contained canHold nodew idw) insert tree = Ok() then
+                        let got =
+                            TreePlacement.place Policy.none (OpScope.contained canHold nodew idw) pid a node tree
 
                         byName.Check(
                             (got = Error expected),
@@ -234,17 +237,29 @@ module internal PlacementTreeLaws =
 
                 let engineCases =
                     [ "an absent parent",
-                      TreePlacement.placeContained canHold nodew idw absent Anchor.Last node tree,
+                      TreePlacement.place
+                          Policy.none
+                          (OpScope.contained canHold nodew idw)
+                          absent
+                          Anchor.Last
+                          node
+                          tree,
                       InsertChild(absent, node)
                       "a duplicate id",
-                      TreePlacement.placeContained canHold nodew idw pid Anchor.First tree tree,
+                      TreePlacement.place Policy.none (OpScope.contained canHold nodew idw) pid Anchor.First tree tree,
                       InsertChild(pid, tree)
                       "a move of the root",
-                      TreePlacement.moveContained canHold nodew idw (nodew.Id tree) pid Anchor.Last tree,
+                      TreePlacement.move
+                          Policy.none
+                          (OpScope.contained canHold nodew idw)
+                          (nodew.Id tree)
+                          pid
+                          Anchor.Last
+                          tree,
                       MoveNode(nodew.Id tree, pid) ]
 
                 for what, got, op in engineCases do
-                    match Ops.canApplyContained canHold nodew idw op tree with
+                    match Ops.canApply Policy.none (OpScope.contained canHold nodew idw) op tree with
                     | Error r ->
                         asEngine.Check(
                             (got = Error(PlaceError.Refused r)),
@@ -278,7 +293,7 @@ module internal PlacementTreeLaws =
                     let anchor, k = drawAnchor rng others
                     let isWithin = keyOf q = sourceParent
 
-                    match TreePlacement.moveContained canHold nodew idw tid qid anchor tree with
+                    match TreePlacement.move Policy.none (OpScope.contained canHold nodew idw) tid qid anchor tree with
                     | Error e ->
                         lands.Check(
                             false,
@@ -337,7 +352,7 @@ module internal PlacementTreeLaws =
     /// own witness:
     ///
     ///   - **round trip**: `applyAll (lower t) (skeletonRoot t) = Ok t` for every well-formed tree
-    ///     drawn, and — **the contained form** — `applyAllWith canHold` of the same script gives the
+    ///     drawn, and — **the contained form** — `Ops.applyAll` under `OpScope.contained` of the same script gives the
     ///     same tree whenever the tree is in the containment invariant (every node holding children
     ///     satisfies `canHold`);
     ///   - **shape**: the script is one `InsertChild(parent, shellOf node)` per node below the root,
@@ -358,7 +373,7 @@ module internal PlacementTreeLaws =
 
         let contained =
             LawKit.LawCell(
-                "the contained form: applyAllWith canHold (lower t) (skeletonRoot t) = t on a tree in the containment invariant",
+                "the contained form: the contained applyAll (lower t) (skeletonRoot t) = t on a tree in the containment invariant",
                 Some "lowered tree"
             )
 
@@ -396,7 +411,7 @@ module internal PlacementTreeLaws =
                 then
                     filled <- filled + 1
 
-                let plain = Ops.applyAll nodew idw script skeleton
+                let plain = Ops.applyAll Policy.none (OpScope.plain nodew idw) script skeleton
 
                 roundTrip.Check(
                     (plain = Ok tree),
@@ -405,11 +420,13 @@ module internal PlacementTreeLaws =
 
                 if nodes |> List.forall (fun n -> List.isEmpty (nodew.Children n) || canHold n) then
                     inInvariant <- inInvariant + 1
-                    let held = Ops.applyAllWith canHold nodew idw script skeleton
+
+                    let held =
+                        Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script skeleton
 
                     contained.Check(
                         (held = Ok tree),
-                        fun () -> at (sprintf "applyAllWith canHold (lower t) (skeletonRoot t) answered %A" held)
+                        fun () -> at (sprintf "the contained applyAll (lower t) (skeletonRoot t) answered %A" held)
                     )
 
                 let expected =
@@ -449,7 +466,11 @@ module internal PlacementTreeLaws =
                     let badTree = Option.get bad
 
                     let got =
-                        Ops.applyAll nodew idw (Ops.lower nodew badTree) (Ops.skeletonRoot nodew badTree)
+                        Ops.applyAll
+                            Policy.none
+                            (OpScope.plain nodew idw)
+                            (Ops.lower nodew badTree)
+                            (Ops.skeletonRoot nodew badTree)
 
                     duplicate.Check(
                         (match got with
@@ -471,7 +492,7 @@ module internal PlacementTreeLaws =
 
     /// The fresh-id laws (Phase 312) — certify a domain's minting strategy `mint` (the shipped
     /// `FreshIds.derived idw` / `FreshIds.sequential idw prefix`, or the domain's own), its `setId`,
-    /// and `FreshIds.repairDuplicates` and `TreePlacement.cloneContained` over them:
+    /// and `FreshIds.repairDuplicates` and `TreePlacement.clone` under `OpScope.contained` over them:
     ///
     ///   - `setId` sets the id and keeps the kind and the children;
     ///   - a minted id's key is ABSENT from the taken set it was minted against — asserted down a
@@ -645,10 +666,9 @@ module internal PlacementTreeLaws =
                 let anchor, k = drawAnchor rng others
 
                 match
-                    TreePlacement.cloneContained
-                        canHold
-                        nodew
-                        idw
+                    TreePlacement.clone
+                        Policy.none
+                        (OpScope.contained canHold nodew idw)
                         setId
                         mint
                         (nodew.Id source)
@@ -676,7 +696,7 @@ module internal PlacementTreeLaws =
                         | [ Batch(InsertChild(_, c) :: _) ] -> Some c
                         | _ -> None
 
-                    match copy, Ops.applyAllWith canHold nodew idw script tree with
+                    match copy, Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) script tree with
                     | Some c, Ok post ->
                         cloned <- cloned + 1
                         let before = childKeys nodew idw tree

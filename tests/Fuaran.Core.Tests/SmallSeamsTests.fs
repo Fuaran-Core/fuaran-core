@@ -580,8 +580,8 @@ let private treeTests =
                       let op = MoveNode(t, p)
 
                       Expect.equal
-                          (Ops.canApply nodew idw op root)
-                          (Ops.apply nodew idw op root |> Result.map ignore)
+                          (Ops.canApply Policy.none (OpScope.plain nodew idw) op root)
+                          (Ops.apply Policy.none (OpScope.plain nodew idw) op root |> Result.map ignore)
                           (sprintf "MoveNode(%s, %s)" t p) ]
 
 // ---- Observer ----

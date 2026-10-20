@@ -361,7 +361,12 @@ in
 if (not ((TreeOps.same_multiset current order))) then begin
      DagFold.Error (TreeOps.ReorderMismatch (p, current, order))
      end else begin
+      
+if (not ((ch n))) then begin
+     DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of n)))
+     end else begin
      DagFold.Ok ((TreeOps.reorder_at p order t))
+     end
      end)
      end)
      end
@@ -515,7 +520,12 @@ in
 if (not ((TreeOps.same_multiset current order))) then begin
      DagFold.Error (TreeOps.ReorderMismatch (p, current, order))
      end else begin
+      
+if (not ((ch n))) then begin
+     DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of n)))
+     end else begin
      DagFold.Ok (())
+     end
      end)
      end)
      end

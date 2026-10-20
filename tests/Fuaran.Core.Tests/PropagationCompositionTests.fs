@@ -48,7 +48,7 @@ let private updateNodeTests =
           <| fun () ->
               let t = tree ()
 
-              match Ops.apply nodew idw (UpdateNode(RNode.node "a" "aside" [])) t with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (UpdateNode(RNode.node "a" "aside" [])) t with
               | Ok t' ->
                   Expect.equal (kindOf "a" t') (Some "aside") "the content is the payload's"
                   Expect.equal (childIds "a" t') (Some [ "a1"; "a2" ]) "the children are the ones it had"
@@ -61,7 +61,7 @@ let private updateNodeTests =
               let t = tree ()
               let payload = RNode.node "a" "aside" [ RNode.node "zz" "para" [] ]
 
-              match Ops.apply nodew idw (UpdateNode payload) t with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (UpdateNode payload) t with
               | Ok t' ->
                   Expect.equal (childIds "a" t') (Some [ "a1"; "a2" ]) "a payload child is not grafted"
                   Expect.isNone (Tree.tryFind nodew idw "zz" t') "nor does its id enter the tree"
@@ -71,11 +71,11 @@ let private updateNodeTests =
           <| fun () ->
               let t = tree ()
 
-              match Ops.apply nodew idw (UpdateNode(RNode.node "root" "article" [])) t with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (UpdateNode(RNode.node "root" "article" [])) t with
               | Ok t' -> Expect.equal (kindOf "root" t') (Some "article") "the root's content moved"
               | Error e -> failtestf "refused: %A" e
 
-              match Ops.apply nodew idw (UpdateNode(RNode.node "nope" "para" [])) t with
+              match Ops.apply Policy.none (OpScope.plain nodew idw) (UpdateNode(RNode.node "nope" "para" [])) t with
               | Error(UnknownNode("nope", addressable)) ->
                   Expect.equal addressable (Tree.ids nodew t) "the refusal enumerates the addressable ids"
               | other -> failtestf "expected UnknownNode, got %A" other
@@ -85,18 +85,26 @@ let private updateNodeTests =
               let t = tree ()
               let canHold (n: RNode) = n.Kind <> "para"
 
-              match Ops.applyContained canHold nodew idw (UpdateNode(RNode.node "a" "para" [])) t with
+              match
+                  Ops.apply Policy.none (OpScope.contained canHold nodew idw) (UpdateNode(RNode.node "a" "para" [])) t
+              with
               | Error(NotAContainer("a", "para")) -> ()
               | other -> failtestf "expected NotAContainer(a, para), got %A" other
 
               // A leaf may become a non-container: it holds no children to strand.
-              match Ops.applyContained canHold nodew idw (UpdateNode(RNode.node "a1" "para" [])) t with
+              match
+                  Ops.apply Policy.none (OpScope.contained canHold nodew idw) (UpdateNode(RNode.node "a1" "para" [])) t
+              with
               | Ok _ -> ()
               | Error e -> failtestf "a childless rewrite was refused: %A" e
 
               // canApply agrees with apply, clause for clause.
               Expect.equal
-                  (Ops.canApplyContained canHold nodew idw (UpdateNode(RNode.node "a" "para" [])) t)
+                  (Ops.canApply
+                      Policy.none
+                      (OpScope.contained canHold nodew idw)
+                      (UpdateNode(RNode.node "a" "para" []))
+                      t)
                   (Error(NotAContainer("a", "para")))
                   "the dry run returns the refusal apply would"
 
@@ -105,9 +113,12 @@ let private updateNodeTests =
               let t = tree ()
               let op = UpdateNode(RNode.node "a" "aside" [])
 
-              match Ops.invert nodew idw op t, Ops.apply nodew idw op t with
+              match Ops.invert nodew idw op t, Ops.apply Policy.none (OpScope.plain nodew idw) op t with
               | Ok inv, Ok t' ->
-                  Expect.equal (Ops.apply nodew idw inv t') (Ok t) "apply (invert op pre) (apply op pre) = pre"
+                  Expect.equal
+                      (Ops.apply Policy.none (OpScope.plain nodew idw) inv t')
+                      (Ok t)
+                      "apply (invert op pre) (apply op pre) = pre"
 
                   match inv with
                   | UpdateNode n -> Expect.equal n.Kind "section" "the inverse carries the pre-state content"
@@ -116,7 +127,9 @@ let private updateNodeTests =
 
           testCase "footprint: a read and a content-write of the target, and an unknown-parent write"
           <| fun () ->
-              let fp = Ops.footprint nodew idw [ UpdateNode(RNode.node "a1" "heading" []) ]
+              let fp =
+                  Ops.footprint Policy.none (OpScope.plain nodew idw) [ UpdateNode(RNode.node "a1" "heading" []) ]
+
               Expect.equal fp.Reads (Set.singleton "a1") "reads the target"
               Expect.equal fp.ContentWrites (Set.singleton "a1") "writes the target's content"
               Expect.equal fp.UnknownParentWrites (Set.singleton "a1") "rewrites an entry of a parent it cannot name"
@@ -128,12 +141,18 @@ let private updateNodeTests =
               let t = tree ()
               let upd = UpdateNode(RNode.node "a1" "heading" [])
               let rem = RemoveNode "a"
-              let fpU = Ops.footprint nodew idw [ upd ]
-              let fpR = Ops.footprint nodew idw [ rem ]
+              let fpU = Ops.footprint Policy.none (OpScope.plain nodew idw) [ upd ]
+              let fpR = Ops.footprint Policy.none (OpScope.plain nodew idw) [ rem ]
 
               // Both apply at t, and in one order the second is refused.
-              let updThenRem = Ops.apply nodew idw upd t |> Result.bind (Ops.apply nodew idw rem)
-              let remThenUpd = Ops.apply nodew idw rem t |> Result.bind (Ops.apply nodew idw upd)
+              let updThenRem =
+                  Ops.apply Policy.none (OpScope.plain nodew idw) upd t
+                  |> Result.bind (Ops.apply Policy.none (OpScope.plain nodew idw) rem)
+
+              let remThenUpd =
+                  Ops.apply Policy.none (OpScope.plain nodew idw) rem t
+                  |> Result.bind (Ops.apply Policy.none (OpScope.plain nodew idw) upd)
+
               Expect.isOk updThenRem "update then remove lands"
               Expect.isError remThenUpd "remove then update is refused — the pair does not commute"
               Expect.isFalse (Ops.independent fpU fpR) "so the footprints must not call them independent"
@@ -185,7 +204,8 @@ let private changedForOpTests =
               let op = RemoveNode "y"
 
               let post =
-                  Ops.apply nodew idw op pre |> Result.defaultWith (fun e -> failwithf "%A" e)
+                  Ops.apply Policy.none (OpScope.plain nodew idw) op pre
+                  |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let changed = Propagation.changedForOp nodew idw formulaReads pre post op
               Expect.isTrue (Set.contains "z" changed) "z read y, so it moved"
@@ -218,7 +238,8 @@ let private changedForOpTests =
               let op = RemoveNode "y"
 
               let post =
-                  Ops.apply nodew idw op pre |> Result.defaultWith (fun e -> failwithf "%A" e)
+                  Ops.apply Policy.none (OpScope.plain nodew idw) op pre
+                  |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let deps = Propagation.dependencyMap nodew idw formulaReads post
 
@@ -255,7 +276,8 @@ let private changedForOpTests =
               let op = UpdateNode(RNode.leaf "z" "formula" "x")
 
               let post =
-                  Ops.apply nodew idw op pre |> Result.defaultWith (fun e -> failwithf "%A" e)
+                  Ops.apply Policy.none (OpScope.plain nodew idw) op pre
+                  |> Result.defaultWith (fun e -> failwithf "%A" e)
 
               let changed = Propagation.changedForOp nodew idw formulaReads pre post op
               Expect.equal changed (Set.singleton "z") "one node" ]
@@ -687,7 +709,7 @@ let private dataEdit (edit: SourceEdit) (s: Sheet) : Sheet * Set<string> =
 
 /// A structural edit through `Ops`, its change set from `changedForOp`.
 let private sheetEdit (op: SkeletonOp<SheetNode, string>) (s: Sheet) : Sheet * Set<string> =
-    match Ops.apply sheetw idw op s.Tree with
+    match Ops.apply Policy.none (OpScope.plain sheetw idw) op s.Tree with
     | Error _ -> s, Set.empty
     | Ok tree' -> { s with Tree = tree' }, Propagation.changedForOp sheetw idw nodeReads s.Tree tree' op
 

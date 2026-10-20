@@ -2,10 +2,10 @@ module Fuaran.Core.Tests.ContentDiffTests
 
 // Phase 305 — the content-aware diff and the closed undo, measured on the shipped engine.
 //
-// The second-pass review found `Diff.toOpsContained` reading `after`'s kinds for its container check
+// The second-pass review found `Diff.toOps` under `OpScope.contained` reading `after`'s kinds for its container check
 // while the script it returns runs against `before`'s kinds: on `before = root(p:para)`, `after =
 // root(p:section(q:para))` under `canHold = kind <> "para"` it answered `Ok [InsertChild(p, q)]` and
-// `applyAllWith` refused that script with `NotAContainer(p, para)`. The content-aware form emits an
+// `Ops.applyAll` under `OpScope.contained` refused that script with `NotAContainer(p, para)`. The content-aware form emits an
 // `UpdateNode` for every survivor whose content changed, placed by DECISIONS D103: a survivor whose
 // new node `canHold` accepts is rewritten FIRST, every other one LAST. The bridges below measure the
 // rule over independent pairs with kinds and a predicate drawn freely, keep the shipped structural
@@ -71,7 +71,7 @@ let private isUpdate =
     | _ -> false
 
 let private applyAllWithOk canHold ops before =
-    match Ops.applyAllWith canHold nodew idw ops before with
+    match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
     | Ok t -> Ok t
     | Error { Applied = i; Rejection = e } -> Error(i, e)
 
@@ -100,7 +100,7 @@ let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, str
     let pick (xs: 'a list) = xs[rng.Next(xs.Length)]
 
     let tryAdd (op: SkeletonOp<RNode, string>) =
-        match Ops.apply nodew idw op cur.Value with
+        match Ops.apply Policy.none (OpScope.plain nodew idw) op cur.Value with
         | Ok t ->
             ops.Add op
             cur.Value <- t
@@ -149,7 +149,7 @@ let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, str
     List.ofSeq ops, cur.Value
 
 let private treeOf (ops: SkeletonOp<RNode, string> list) (tree: RNode) =
-    match Ops.applyAll nodew idw ops tree with
+    match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops tree with
     | Ok t -> t
     | Error { Applied = i; Rejection = e } -> failtestf "a drawn script did not apply at %d: %A" i e
 
@@ -171,7 +171,7 @@ let tests =
                     "the shard's pair: the structural contained diff is refused on the way back in, the content-aware one applies"
                 <| fun () ->
                     let structural =
-                        match Diff.toOpsContained notPara nodew idw shardBefore shardAfter with
+                        match Diff.toOps Policy.none (OpScope.contained notPara nodew idw) shardBefore shardAfter with
                         | Ok ops -> ops
                         | Error e -> failtestf "toOpsContained refused the pair: %A" e
 
@@ -185,7 +185,14 @@ let tests =
                     | other -> failtestf "the structural script's refusal moved: %A — re-read D103" other
 
                     let aware =
-                        match Diff.toOpsContainedWith notPara encode nodew idw shardBefore shardAfter with
+                        match
+                            Diff.toOpsWith
+                                encode
+                                Policy.none
+                                (OpScope.contained notPara nodew idw)
+                                shardBefore
+                                shardAfter
+                        with
                         | Ok ops -> ops
                         | Error e -> failtestf "toOpsContainedWith refused the pair: %A" e
 
@@ -215,7 +222,7 @@ let tests =
                         let after = drawTree rng pool
                         let canHold = drawCanHold rng
 
-                        match Diff.toOpsContainedWith canHold encode nodew idw before after with
+                        match Diff.toOpsWith encode Policy.none (OpScope.contained canHold nodew idw) before after with
                         | Error(Diff.TargetNotAContainer _) -> () // `after` nests under a non-container: no legal script
                         | Error e -> failtestf "refused a well-formed pair with %A" e
                         | Ok ops ->
@@ -234,7 +241,7 @@ let tests =
                             // script with every rewrite appended LAST — each is refused on a
                             // measurable share of the same pairs, which is what the placement
                             // rule is for
-                            match Diff.toOpsContained canHold nodew idw before after with
+                            match Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after with
                             | Ok structural ->
                                 match applyAllWithOk canHold structural before with
                                 | Error _ -> structuralRefused <- structuralRefused + 1
@@ -275,7 +282,7 @@ let tests =
 
                 testCase "the structural part of the content-aware script is exactly the structural diff"
                 <| fun () ->
-                    // the bridge to the proved model: `TreeDiff.fst` models `toOps` / `toOpsContained`,
+                    // the bridge to the proved model: `TreeDiff.fst` models `toOps` / `Diff.toOps` under `OpScope.contained`,
                     // and the content-aware form adds rewrites around the same four blocks
                     let rng = Random 1305
 
@@ -285,11 +292,11 @@ let tests =
                         let canHold = drawCanHold rng
 
                         let structural =
-                            Diff.toOpsContained canHold nodew idw before after
+                            Diff.toOps Policy.none (OpScope.contained canHold nodew idw) before after
                             |> Result.map (List.filter (isUpdate >> not))
 
                         let aware =
-                            Diff.toOpsContainedWith canHold encode nodew idw before after
+                            Diff.toOpsWith encode Policy.none (OpScope.contained canHold nodew idw) before after
                             |> Result.map (List.filter (isUpdate >> not))
 
                         Expect.equal aware structural "same refusals, same structural blocks in the same order"
@@ -303,7 +310,7 @@ let tests =
                         let before = drawTree rng pool
                         let after = drawTree rng pool
 
-                        match Diff.toOpsWith encode nodew idw before after with
+                        match Diff.toOpsWith encode Policy.none (OpScope.plain nodew idw) before after with
                         | Error e -> failtestf "toOpsWith refused %A" e
                         | Ok ops ->
                             Expect.equal (treeOf ops before) after "applyAll(toOpsWith) = after, content included"
@@ -321,7 +328,7 @@ let tests =
 
                     // and the identity pair is the empty script
                     let t = drawTree rng pool
-                    Expect.equal (Diff.toOpsWith encode nodew idw t t) (Ok []) "identity" ]
+                    Expect.equal (Diff.toOpsWith encode Policy.none (OpScope.plain nodew idw) t t) (Ok []) "identity" ]
 
           testList
               "normalize"
@@ -405,7 +412,7 @@ let tests =
                             collapsed <- collapsed + 1
 
                         Expect.equal
-                            (Ops.applyAll nodew idw normd tree)
+                            (Ops.applyAll Policy.none (OpScope.plain nodew idw) normd tree)
                             (Ok reached)
                             "applyAll(normalize s) = applyAll s"
 
@@ -433,13 +440,13 @@ let tests =
                     | other -> failtestf "unexpected inverse %A" other
 
                     let after =
-                        Ops.apply nodew idw rewrite tree
+                        Ops.apply Policy.none (OpScope.plain nodew idw) rewrite tree
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
                     Expect.equal
                         (Ops.apply
-                            nodew
-                            idw
+                            Policy.none
+                            (OpScope.plain nodew idw)
                             (Ops.invert nodew idw rewrite tree
                              |> Result.defaultWith (fun e -> failtestf "%A" e))
                             after)
@@ -458,13 +465,20 @@ let tests =
                         | Error(i, e) -> failtestf "invertAll refused an applyable script at %d: %A" i e
                         | Ok undo ->
                             Expect.equal (List.length undo) (List.length script) "one inverse per op"
-                            Expect.equal (Ops.applyAll nodew idw undo reached) (Ok tree) "the undo script restores pre"
+
+                            Expect.equal
+                                (Ops.applyAll Policy.none (OpScope.plain nodew idw) undo reached)
+                                (Ok tree)
+                                "the undo script restores pre"
 
                         // the same script with a refused op spliced in: the index and envelope are
                         // `applyAll`'s
                         let broken = script @ [ RemoveNode "not-here" ]
 
-                        match Ops.invertAll nodew idw broken tree, Ops.applyAll nodew idw broken tree with
+                        match
+                            Ops.invertAll nodew idw broken tree,
+                            Ops.applyAll Policy.none (OpScope.plain nodew idw) broken tree
+                        with
                         | Error(i, e), Error { Applied = j; Rejection = e' } ->
                             Expect.equal i j "same index"
                             Expect.equal (Rejection.code e) (Rejection.code e') "same envelope class"
@@ -488,7 +502,9 @@ let tests =
                             Holder = "one"
                             Ops = [ RemoveNode "a" ] } ]
 
-                    let result = Arbitration.arbitrate nodew idw malformed proposals
+                    let result =
+                        Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) malformed proposals
+
                     Expect.isEmpty result.Accepted "nothing is accepted"
                     Expect.isEmpty result.MergedScript "nothing is merged"
 
@@ -499,7 +515,11 @@ let tests =
 
                     // and the contained / grammar / referenced forms refuse the same base the same way
                     let contained =
-                        Arbitration.arbitrateContained (fun _ -> true) nodew idw malformed proposals
+                        Arbitration.arbitrate
+                            Policy.none
+                            (OpScope.contained (fun _ -> true) nodew idw)
+                            malformed
+                            proposals
 
                     Expect.equal contained.Rejected result.Rejected "arbitrateContained"
 
@@ -518,10 +538,11 @@ let tests =
                                     Holder = sprintf "h%d" i
                                     Ops = fst (drawScript rng tree 2) } ]
 
-                        let result = Arbitration.arbitrate nodew idw tree proposals
+                        let result =
+                            Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) tree proposals
 
                         let merged =
-                            match Ops.applyAll nodew idw result.MergedScript tree with
+                            match Ops.applyAll Policy.none (OpScope.plain nodew idw) result.MergedScript tree with
                             | Ok t -> t
                             | Error { Applied = i; Rejection = e } ->
                                 failtestf "the merged script was refused at %d: %A" i e
@@ -533,7 +554,7 @@ let tests =
                             let order = shuffled rng result.Accepted |> List.collect _.Ops
 
                             Expect.equal
-                                (Ops.applyAll nodew idw order tree)
+                                (Ops.applyAll Policy.none (OpScope.plain nodew idw) order tree)
                                 (Ok merged)
                                 "a shuffled order of the accepted scripts applies and lands on the merged tree"
 
@@ -552,7 +573,7 @@ let tests =
                     let a1 = Tree.tryFind nodew idw "a1" tree |> Option.get
 
                     let edited =
-                        Ops.apply nodew idw (UpdateNode(a1 |> withValue "rewritten")) tree
+                        Ops.apply Policy.none (OpScope.plain nodew idw) (UpdateNode(a1 |> withValue "rewritten")) tree
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
                     Expect.isFalse
@@ -569,7 +590,7 @@ let tests =
                         "and the index carried through the edit is fresh"
 
                     let moved =
-                        Ops.apply nodew idw (RemoveNode "a1") tree
+                        Ops.apply Policy.none (OpScope.plain nodew idw) (RemoveNode "a1") tree
                         |> Result.defaultWith (fun e -> failtestf "%A" e)
 
                     Expect.isFalse (Tree.Index.isFreshFor nodew idw encode moved ix) "a structural edit is stale too" ] ]
