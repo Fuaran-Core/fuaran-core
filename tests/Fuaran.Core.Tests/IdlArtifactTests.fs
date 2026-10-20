@@ -868,3 +868,125 @@ let combinatorTests =
                       schema
                       """{"a":{"$type":"leaf","n":1},"b":{"$type":"branch","of":[{"$type":"leaf","n":"x"}]}}""")
                   "a nested defect is refused") ]
+
+// ---------------------------------------------------------------------------
+// Phase 526 — `support.json` read on the typed decode layer.
+//
+// `SupportArtifact.ofJson` was a nine-deep `Result.bind` over hand-rolled member readers whose
+// refusals were sentences spelt in the file. It is a `Decoder` now, so every refusal carries a
+// `DecodeCode` and the path to the value at fault, exactly as `idl.json`'s do — and these cases
+// pin the CODE and the PATH, never the sentence, which is a projection and may be reworded.
+// The writer did not move: the reference document renders to the bytes it rendered before.
+// ---------------------------------------------------------------------------
+
+/// The reference support document's rendered value, with `edit` applied to its root members.
+let private supportWith (edit: (string * JVal) list -> (string * JVal) list) : JVal =
+    match SupportArtifact.json ReferenceIdl.support with
+    | JObj ms -> JObj(edit ms)
+    | other -> failtestf "support.json renders an object, not %A" other
+
+let private replaceMember (name: string) (value: JVal) (ms: (string * JVal) list) =
+    ms |> List.map (fun (k, v) -> if k = name then k, value else k, v)
+
+let private refusal (root: JVal) : DecodeCode * PathSegment list =
+    match SupportArtifact.decoder root with
+    | Ok _ -> failtestf "a defective support document was read: %A" root
+    | Error e -> e.Code, e.Path
+
+[<Tests>]
+let supportReaderTests =
+    testList
+        "support.json is read on the typed decode layer (Phase 526)"
+        [ testCase "the reference document round-trips through the decoder, byte for byte" (fun _ ->
+              let text = SupportArtifact.render ReferenceIdl.support
+
+              match SupportArtifact.parseDetailed text with
+              | Error e -> failtestf "the reference support document did not read: %s" (DecodeError.render e)
+              | Ok doc ->
+                  Expect.equal doc ReferenceIdl.support "the same document back"
+                  Expect.equal (SupportArtifact.render doc) text "and the same bytes"
+
+              Expect.isOk (SupportArtifact.parse (SupportArtifact.render SupportDocument.Empty)) "the empty document")
+
+          testCase "a refusal names its code and the path to the value at fault" (fun _ ->
+              let key = PathSegment.Key
+              let idx = PathSegment.Index
+
+              let firstEntry (name: string) (edit: (string * JVal) list -> (string * JVal) list) =
+                  supportWith (fun ms ->
+                      ms
+                      |> List.map (fun (k, v) ->
+                          match k, v with
+                          | k, JArr(JObj first :: rest) when k = name -> k, JArr(JObj(edit first) :: rest)
+                          | _ -> k, v))
+
+              let without (name: string) (ms: (string * JVal) list) =
+                  ms |> List.filter (fun (k, _) -> k <> name)
+
+              let cases =
+                  [ "no version", supportWith (without "version"), (DecodeCode.MissingField, [ key "version" ])
+                    "a version that is not an integer",
+                    supportWith (replaceMember "version" (JStr "1")),
+                    (DecodeCode.WrongKind, [ key "version" ])
+                    "another encoding version",
+                    supportWith (replaceMember "version" (JInt(SupportArtifact.version + 1))),
+                    (DecodeCode.OutOfRange, [ key "version" ])
+                    "a root that is not an object", JArr [], (DecodeCode.WrongKind, [])
+                    "docs that are not an array",
+                    supportWith (replaceMember "docs" (JStr "x")),
+                    (DecodeCode.WrongKind, [ key "docs" ])
+                    "a doc line that is not a string",
+                    firstEntry "docs" (replaceMember "lines" (JArr [ JInt 1 ])),
+                    (DecodeCode.WrongKind, [ key "docs"; idx 0; key "lines"; idx 0 ])
+                    "a refine without its expression",
+                    firstEntry "caseRefines" (without "expression"),
+                    (DecodeCode.MissingField, [ key "caseRefines"; idx 0; key "expression" ])
+                    "a projection without its decoder",
+                    firstEntry "kindProjections" (without "decoder"),
+                    (DecodeCode.MissingField, [ key "kindProjections"; idx 0; key "decoder" ])
+                    "a projection's record fields that are not an array",
+                    firstEntry "kindProjections" (fun ms -> ms @ [ "recordFields", JInt 3 ]),
+                    (DecodeCode.WrongKind, [ key "kindProjections"; idx 0; key "recordFields" ])
+                    "a splices block that is not an object — it used to read as no splices at all",
+                    supportWith (fun ms -> without "splices" ms @ [ "splices", JArr [] ]),
+                    (DecodeCode.WrongKind, [ key "splices" ])
+                    "a prelude without its path",
+                    supportWith (replaceMember "hostPrelude" (JObj [ "module", JStr "Prelude" ])),
+                    (DecodeCode.MissingField, [ key "hostPrelude"; key "path" ]) ]
+
+              for name, root, expected in cases do
+                  Expect.equal (refusal root) expected name)
+
+          testCase "the version is refused FIRST and alone, before any member it might explain" (fun _ ->
+              let root =
+                  supportWith (fun ms ->
+                      replaceMember "version" (JInt(SupportArtifact.version + 1)) ms
+                      @ [ "splices", JStr "a future shape" ])
+
+              Expect.equal
+                  (refusal root)
+                  (DecodeCode.OutOfRange, [ PathSegment.Key "version" ])
+                  "the version, not the splices")
+
+          testCase
+              "the string forms render the refusal with its code and path; text that is not JSON is InvalidJson"
+              (fun _ ->
+                  match SupportArtifact.parse "{\"version\": \"1\"}" with
+                  | Ok _ -> failtest "a string version was read"
+                  | Error e -> Expect.stringStarts e "WrongKind at $[\"version\"]: " "code, path, sentence"
+
+                  match SupportArtifact.ofJson (JObj [ "version", JStr "1" ]) with
+                  | Ok _ -> failtest "a string version was read from the root"
+                  | Error e ->
+                      Expect.stringStarts e "WrongKind at $[\"version\"]: " "the same line from the parsed root"
+
+                  match SupportArtifact.parseDetailed "{" with
+                  | Ok _ -> failtest "text that is not JSON was read"
+                  | Error e -> Expect.equal (e.Code, e.Path) (DecodeCode.InvalidJson, []) "refused at the root")
+
+          testCase "a member the document does not know is tolerated, as it always was" (fun _ ->
+              let root = supportWith (fun ms -> ms @ [ "x-future", JBool true ])
+
+              match SupportArtifact.decoder root with
+              | Ok doc -> Expect.equal doc ReferenceIdl.support "the known members read as before"
+              | Error e -> failtestf "an unknown member was refused: %s" (DecodeError.render e)) ]

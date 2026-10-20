@@ -101,17 +101,12 @@ let private parseOrFail (text: string) =
     | Error e -> failtestf "proposal did not parse: %s" e
 
 let private spike (p: Proposal) =
-    match
-        ProposalSpike.run
-            { Base = Mini.miniIdl
-              Proposal = p
-              Corpus = [ "plain-badge", plainBadgeWire ]
-              FuzzSeed = 20260821
-              FuzzVectors = 200
-              External = [] }
-    with
-    | Ok r -> r
-    | Error e -> failtestf "spike did not run: %s" e
+    ProposalSpike.run
+        { Base = Mini.miniIdl
+          Proposal = p
+          Corpus = [ "plain-badge", plainBadgeWire ]
+          FuzzSeed = 20260821
+          FuzzVectors = 200 }
 
 let private legOf (r: SpikeReport) (name: string) =
     match r.Legs |> List.tryFind (fun l -> l.Name = name) with
@@ -375,17 +370,12 @@ let tests =
                     let p = parseOrFail (completeJson tooltipDelta candidateWire)
 
                     let r =
-                        match
-                            ProposalSpike.run
-                                { Base = Mini.miniIdl
-                                  Proposal = p
-                                  Corpus = []
-                                  FuzzSeed = 20260821
-                                  FuzzVectors = 50
-                                  External = [] }
-                        with
-                        | Ok r -> r
-                        | Error e -> failtestf "spike did not run: %s" e
+                        ProposalSpike.run
+                            { Base = Mini.miniIdl
+                              Proposal = p
+                              Corpus = []
+                              FuzzSeed = 20260821
+                              FuzzVectors = 50 }
 
                     let l = legOf r "corpus"
                     Expect.isFalse l.Passed "a vacuous leg is not a pass"
@@ -428,17 +418,12 @@ let tests =
               [ testCase "it prints exactly the report the harness renders, and exits 0 on a green run" (fun _ ->
                     withCommandInputs (completeJson tooltipDelta candidateWire) (fun path ->
                         let expected =
-                            match
-                                ProposalSpike.run
-                                    { Base = Mini.miniIdl
-                                      Proposal = parseOrFail (completeJson tooltipDelta candidateWire)
-                                      Corpus = [ "plain-badge.json", plainBadgeWire ]
-                                      FuzzSeed = commandSeed
-                                      FuzzVectors = commandVectors
-                                      External = [] }
-                            with
-                            | Ok r -> r
-                            | Error e -> failtestf "spike did not run: %s" e
+                            ProposalSpike.run
+                                { Base = Mini.miniIdl
+                                  Proposal = parseOrFail (completeJson tooltipDelta candidateWire)
+                                  Corpus = [ "plain-badge.json", plainBadgeWire ]
+                                  FuzzSeed = commandSeed
+                                  FuzzVectors = commandVectors }
 
                         Expect.isTrue
                             expected.Green
@@ -475,13 +460,15 @@ let tests =
                         Expect.equal code 1 "a failed leg is exit 1"
                         Expect.stringContains out "already expressible" "and the report says which leg and why"))
 
-                testCase "no --idl is a refusal: exit 2, said on stderr" (fun _ ->
+                // Phase 526 — the tool's ONE refusal channel is stdout, `classify`'s; the verb's refusals
+                // used to go to stderr, and these assertions pin the move in both directions.
+                testCase "no --idl is a refusal: exit 2, said on the tool's one refusal channel (stdout)" (fun _ ->
                     withCommandInputs (completeJson tooltipDelta candidateWire) (fun path ->
                         let code, out, err = runCli (sprintf "spike-proposal \"%s\"" (path "proposal.json"))
 
                         Expect.equal code 2 "the document did not read is exit 2"
-                        Expect.stringContains err "no --idl" "the refusal names the missing argument"
-                        Expect.equal out "" "and nothing is printed to stdout"))
+                        Expect.stringContains out "fuaran-core-idl: no --idl" "the refusal names the missing argument"
+                        Expect.equal err "" "and nothing is printed to stderr"))
 
                 testCase
                     "Phase 384 — a bad flag, a bad integer, a missing file and an unwritable --out are typed refusals, exit 2"
@@ -518,13 +505,13 @@ let tests =
                                   full + sprintf " --out \"%s\"" (path "no-such-dir/report.md"), "--out unwritable" ] do
                                 let code, out, err = runCli args
                                 Expect.equal code 2 (sprintf "%s: refused, exit 2" named)
-                                Expect.stringContains err named (sprintf "%s: the refusal names it" named)
+                                Expect.stringContains out named (sprintf "%s: the refusal names it" named)
 
                                 Expect.isFalse
-                                    (err.Contains "   at " || err.Contains "Exception")
-                                    (sprintf "%s: a sentence, never a stack trace — got %s" named err)
+                                    (out.Contains "   at " || out.Contains "Exception")
+                                    (sprintf "%s: a sentence, never a stack trace — got %s" named out)
 
-                                Expect.equal out "" (sprintf "%s: nothing on stdout" named)
+                                Expect.equal err "" (sprintf "%s: nothing on stderr" named)
 
                             // The control: the same full invocation, with a writable --out, is green.
                             let code, out, _ = runCli (full + sprintf " --out \"%s\"" (path "report.md"))

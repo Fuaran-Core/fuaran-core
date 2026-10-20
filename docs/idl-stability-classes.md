@@ -246,11 +246,74 @@ not govern.
 
 ## Using the command
 
+<!-- BEGIN USAGE (Phase 526): `fuaran-core-idl --help`, rendered from the command's verb table. Do not edit by hand — `IdlStabilityClassTests` holds this block byte-equal to the command's output. -->
 ```
-fuaran-core-idl classify <before.json> <after.json> [--manifest <manifest.json>]
-                                                    [--expect <class>]
-fuaran-core-idl table
+fuaran-core-idl — the IDL stability classifier over two `idl.json` revisions.
+
+USAGE
+  fuaran-core-idl classify <before.json> <after.json> [--manifest <manifest.json>]
+                           [--expect <class>] [--support-before <support.json>]
+                           [--support-after <support.json>]
+  fuaran-core-idl table
+  fuaran-core-idl spike-proposal <proposal.json> --idl <idl.json> [--corpus <dir>]
+                                 [--out <report.md>] [--seed <int>] [--vectors <int>]
+  fuaran-core-idl --help
+
+CLASSIFY
+  Reads two committed artifact revisions and prints the advisory report — the
+  wire severity of every changed member with the reason it applies, the host
+  obligations it raises — then the verdict block: the class, the wire-profile
+  evolution, whether emitters break, and the F# consequence classes a consumer
+  compiled against the generated structural layer meets.
+
+  Advisory. Nothing is written, no version is bumped and no build is gated.
+
+  Exits 0 unchanged / host-surface / additive — a consumer absorbs it by
+  repinning; 3 breaking — the wire moved, or a conformant emitter stops
+  conforming; 4 undecided — a change crosses an erased slot the artifact does
+  not describe. With --expect: 0 match, 1 mismatch — an assertion has two
+  outcomes, and sharing the branching codes would make a passing assertion
+  indistinguishable from a break.
+
+  --manifest         the vocabulary's manifest, read ONLY for its host roster (`hosts`).
+                     Omitted, or without `hosts`, no host is obliged by name and the
+                     report says so.
+  --expect           assert the verdict class. Exits 0 on a match, 1 on a mismatch.
+                     One of: unchanged | host-surface | additive | breaking | undecided
+  --support-before   each side's declared support (support.json), both or neither: a doc
+                     block, splice, case refine, kind projection or prelude that moved is
+                     then a host-surface row instead of reading as `unchanged`.
+  --support-after    the other side's, with --support-before.
+
+TABLE
+  Prints the F# consequence table — the classes and the reason each applies.
+  External surface guards and corpus gates cite this table rather than each
+  re-deriving the mapping from the compiler's behaviour. Exits 0.
+
+SPIKE-PROPOSAL
+  Prices a vocabulary-change proposal against the vocabulary in --idl without
+  cutting a branch or writing a declaration: the delta is applied to an
+  in-memory copy and four legs run — generate (every backend), corpus, fuzz
+  and candidates — then the stability cost is reported.
+
+  Exits 0 every leg passed, 1 a leg failed. A green exit removes one
+  objection; it is never a recommendation.
+
+  --idl       the vocabulary the proposal is priced against.
+  --corpus    the directory holding the `nodes/` family; without it the corpus leg
+              reports not-checked and the run is not green.
+  --out       write the report there instead of printing it.
+  --seed      the fuzz leg's seed (default 20260826).
+  --vectors   the fuzz leg's vector count (default 200).
+
+REFUSALS
+  Every verb refuses the same way: one line on stdout, `fuaran-core-idl: <sentence>`,
+  and exit 2 — bad usage (an unknown verb or flag, a missing argument or value, a flag
+  given twice, a non-integer --seed or --vectors), an input that did not read or parse,
+  or an output that could not be written. 2 is none of the verdict codes: the tool
+  reached no verdict, and a gate must not read it as one.
 ```
+<!-- END USAGE -->
 
 Two calling shapes, because a gate is in one of two positions. Without `--expect` it classifies
 whatever the pull brought and the caller branches on the exit code above. With `--expect <class>`
@@ -266,8 +329,18 @@ its reference host `fuaran` when a roster declares it.
 
 Everything is written to stdout, refusals included, so a gate that captures the output gets the
 whole record in one stream. A refusal — bad usage, an unreadable file, an artifact that did not
-parse — exits **2**, which is deliberately not one of the verdict codes: the tool reached no
-verdict, and a gate must not read that as one.
+parse — is one line, `fuaran-core-idl: <sentence>`, and exits **2**, which is deliberately not one
+of the verdict codes: the tool reached no verdict, and a gate must not read that as one.
+
+**One refusal channel, whichever verb refused (Phase 526).** Until then `spike-proposal` was the
+exception: moved in from the repository's test runner at Phase 230 with its own parser, it kept
+refusing on stderr. The convention was decided rather than carried: a downstream generation step
+that drives the tool now reads one refusal shape on one stream, whichever verb failed, and nothing
+depends on how the calling shell treats a native command's stderr. The tool writes nothing to
+stderr. Every verb's arguments are read by ONE strict parser from the verb's own declaration, the
+same table the usage above is rendered from — an unknown flag, a flag without its value, a flag
+given twice and a non-integer `--seed` / `--vectors` are refused, never ignored — and every exit
+code is the one it was.
 
 The classification is **advisory**, as the classifier has been since Phase 700. Nothing here writes
 a file, bumps a version or gates a build on its own account; a gate that wants to stop is the one

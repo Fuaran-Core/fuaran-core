@@ -165,6 +165,7 @@ method Fuaran.Core.Idl.Gen.typescriptValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.
 method Fuaran.Core.Idl.SupportArtifact.json(Fuaran.Core.Idl.SupportDocument) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.SupportArtifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
 method Fuaran.Core.Idl.SupportArtifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
+method Fuaran.Core.Idl.SupportArtifact.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.SupportArtifact.render(Fuaran.Core.Idl.SupportDocument) : System.String
 method Fuaran.Core.Idl.Trust.checkHardenPolicy(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Trust.harden(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.Idl.CodegenError>
@@ -182,6 +183,7 @@ property Fuaran.Core.Idl.Diff.allConsequences : Microsoft.FSharp.Collections.FSh
 property Fuaran.Core.Idl.Diff.consequenceTable : System.String { get }
 property Fuaran.Core.Idl.Diff.mappingTable : System.String { get }
 property Fuaran.Core.Idl.FStarTarget.presenceSplitAt : System.Int32 { get }
+property Fuaran.Core.Idl.SupportArtifact.decoder : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, Fuaran.Core.DecodeError>> { get }
 property Fuaran.Core.Idl.SupportDocument.Empty : Fuaran.Core.Idl.SupportDocument { get } (static)
 record-field Fuaran.Core.Idl.Codegen.Types.CaseSnap.Annotations #1 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.CaseSnap.Fields #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>

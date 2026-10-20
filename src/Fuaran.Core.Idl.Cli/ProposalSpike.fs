@@ -26,9 +26,11 @@ open Fuaran.Core.Idl.Codegen.Types
 //
 // **What the legs prove, and what they cannot.**
 //
-//   * `generate` proves the change is EXPRESSIBLE by the generator — that the
-//     F#, TypeScript and JSON-schema legs all emit. A codegen failure here is a
-//     real finding: it means the shape proposed is not one the engine can carry.
+//   * `generate` proves the change is EXPRESSIBLE by the generator — that every
+//     backend emits: the F# structural layer, the TypeScript module and its
+//     declarations, the JSON schema, and the F* model over the touched kinds that
+//     target admits. A codegen failure here is a real finding: it means the shape
+//     proposed is not one the engine can carry.
 //   * `corpus` proves the change is ADDITIVE against real recorded wire — every
 //     document the base vocabulary accepted, the post vocabulary accepts, and
 //     encodes to the same bytes. This is the claim "additive by construction"
@@ -46,16 +48,6 @@ open Fuaran.Core.Idl.Codegen.Types
 // None of them says the change is a good idea. A green spike removes the
 // question "does this work"; every remaining question is a judgement.
 // ---------------------------------------------------------------------------
-
-/// One generated leg run outside this process — a TypeScript module under a JS
-/// runtime, say. Optional everywhere: the spike degrades to its in-process legs
-/// and SAYS SO, rather than reporting a pass it did not obtain.
-type internal ExternalLeg =
-    {
-        Name: string
-        /// `moduleSource` → `vectorsLiteral` → one wire string per vector, in order.
-        Run: string -> string -> Result<string list, string>
-    }
 
 /// The verdict of one leg.
 type internal SpikeLeg =
@@ -79,7 +71,6 @@ type internal SpikeInput =
         /// on every machine, or a divergence is unreproducible.
         FuzzSeed: int
         FuzzVectors: int
-        External: ExternalLeg list
     }
 
 type internal SpikeReport =
@@ -156,45 +147,76 @@ module internal ProposalSpike =
                          |> List.map (fun (n, m) -> n + " (" + m + ")")
                          |> String.concat "; "))
 
-    let private generateLeg (post: Idl) (tags: string list) : SpikeLeg * string option =
-        match Gen.fsharpModuleWith GenSupport.Empty "Spike.Generated" post tags with
-        | Error e -> leg "generate" false (sprintf "the F# structural layer does not generate: %A" e), None
-        | Ok fsharp ->
-            // Phase 124 — the TypeScript backend refuses an unrenderable declared default the way
-            // the F# one already did, so this leg reports it as a failed generation rather than
-            // shipping a module whose omit tests contradict the delta's own IDL.
-            //
-            // Phase 195 — the schema leg refuses too (a generic union with no finite `$defs`), so
-            // it is reported here beside the other two instead of crashing the spike.
-            match Gen.typescriptModule post tags with
-            | Error e -> leg "generate" false (sprintf "the TypeScript structural layer does not generate: %A" e), None
-            | Ok ts ->
-                match Gen.jsonSchema post with
-                | Error e -> leg "generate" false (sprintf "the JSON schema does not generate: %A" e), None
-                | Ok schema ->
-                    match Json.parse schema with
-                    | Error e -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e), None
-                    | Ok _ ->
-                        leg
-                            "generate"
-                            true
-                            (sprintf
-                                "F# %d chars, TypeScript %d chars, JSON schema %d chars — all three legs emit"
-                                (String.length fsharp)
-                                (String.length ts)
-                                (String.length schema)),
-                        Some ts
+    /// Every backend the generator has, over the delta's touched kinds (Phase 526: the TypeScript
+    /// declarations and the F* model were not run before). The F* model is generated over the
+    /// touched kinds that target ADMITS (`FStarTarget.partition`); a touched kind it refuses is
+    /// named in the detail and is not a failure, because that refusal is the target's declared
+    /// boundary rather than a defect in the delta. The first backend that does not emit fails the
+    /// leg, naming itself.
+    let private generateLeg (post: Idl) (tags: string list) : SpikeLeg =
+        let fstarAdmitted, fstarRefused =
+            FStarTarget.partition post
+            |> List.filter (fun v -> List.contains v.Tag tags)
+            |> List.partition (fun v -> Option.isNone v.Refusal)
 
-    let private fuzzLeg
-        (post: Idl)
-        (tags: string list)
-        (seed: int)
-        (count: int)
-        (tsModule: string option)
-        (externals: ExternalLeg list)
-        : SpikeLeg list =
+        let fstar =
+            match fstarAdmitted with
+            | [] -> Ok ""
+            | admitted -> FStarTarget.vocabularyModule "Spike.Model" post (admitted |> List.map _.Tag)
+
+        let backends =
+            [ "F# structural layer", (fun () -> Gen.fsharpModuleWith GenSupport.Empty "Spike.Generated" post tags)
+              // Phase 124 — the TypeScript backend refuses an unrenderable declared default the way the
+              // F# one already did, so it is reported as a failed generation rather than shipping a
+              // module whose omit tests contradict the delta's own IDL.
+              "TypeScript module", (fun () -> Gen.typescriptModule post tags)
+              "TypeScript declarations", (fun () -> Gen.typescriptDeclarations post tags)
+              // Phase 195 — the schema refuses too (a generic union with no finite `$defs`).
+              "JSON schema", (fun () -> Gen.jsonSchema post)
+              "F* model", (fun () -> fstar) ]
+
+        let rec run (acc: (string * string) list) remaining =
+            match remaining with
+            | [] -> Ok(List.rev acc)
+            | (name, emit) :: rest ->
+                match emit () with
+                | Error e -> Error(sprintf "the %s does not generate: %s" name (CodegenError.describe e))
+                | Ok text -> run ((name, text) :: acc) rest
+
+        match run [] backends with
+        | Error e -> leg "generate" false e
+        | Ok emitted ->
+            match
+                emitted
+                |> List.tryFind (fun (name, _) -> name = "JSON schema")
+                |> Option.map (snd >> Json.parse)
+            with
+            | Some(Error e) -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e)
+            | _ ->
+                let sizes =
+                    emitted
+                    |> List.choose (fun (name, text) ->
+                        if name = "F* model" && List.isEmpty fstarAdmitted then
+                            None
+                        else
+                            Some(sprintf "%s %d chars" name (String.length text)))
+                    |> String.concat ", "
+
+                let fstarNote =
+                    match fstarRefused with
+                    | [] -> ""
+                    | refused ->
+                        sprintf
+                            "; outside the F* model's boundary: %s"
+                            (refused
+                             |> List.map (fun v -> v.Tag + " (" + Option.defaultValue "" v.Refusal + ")")
+                             |> String.concat "; ")
+
+                leg "generate" true (sprintf "%s — every backend emits%s" sizes fstarNote)
+
+    let private fuzzLeg (post: Idl) (tags: string list) (seed: int) (count: int) : SpikeLeg =
         if count <= 0 || List.isEmpty tags then
-            [ leg "fuzz" false "no vectors requested, or the delta touches no kind — the generative leg is vacuous" ]
+            leg "fuzz" false "no vectors requested, or the delta touches no kind — the generative leg is vacuous"
         else
             // `Sample`, not `Gen`: the sampler travelled with the model at the 0.8.0
             // split (Phase 97) precisely because its output is a VALUE rather than a
@@ -224,7 +246,7 @@ module internal ProposalSpike =
                 | Error e :: _ -> Error e
 
             match sequenceEncoded [] interpreter with
-            | Error e -> [ leg "fuzz" false e ]
+            | Error e -> leg "fuzz" false e
             | Ok encoded ->
                 let selfDivergences =
                     [ for i, _, w in encoded do
@@ -233,81 +255,23 @@ module internal ProposalSpike =
                           | Ok again when again <> w -> yield sprintf "vector %d: re-encode differs" i
                           | Ok _ -> () ]
 
-                let selfLeg =
-                    if List.isEmpty selfDivergences then
-                        leg
-                            "fuzz"
-                            true
-                            (sprintf
-                                "%d generated vector(s) over %d kind(s) at seed %d round-trip byte-identically"
-                                (List.length encoded)
-                                (List.length tags)
-                                seed)
-                    else
-                        leg
-                            "fuzz"
-                            false
-                            (sprintf
-                                "%d divergence(s): %s"
-                                (List.length selfDivergences)
-                                (selfDivergences |> List.truncate 5 |> String.concat "; "))
-
-                let externalLegs =
-                    match tsModule with
-                    | None -> []
-                    | Some source ->
-                        // Phase 252 — the value literals are scaffolded against the POST
-                        // vocabulary, so every omit-at-default member is filled the way the
-                        // generated decoder fills it, under the vocabulary's declared shape.
-                        let literalR =
-                            (Ok [], encoded)
-                            ||> List.fold (fun acc (i, v, _) ->
-                                match acc, Gen.typescriptValue post TNode v with
-                                | Error m, _ -> Error m
-                                | _, Error e -> Error(sprintf "vector %d: %s" i (CodegenError.describe e))
-                                | Ok xs, Ok s -> Ok(sprintf "  [%d, %s]," i s :: xs))
-                            |> Result.map (List.rev >> String.concat "\n")
-
-                        [ for ext in externals do
-                              match literalR |> Result.bind (fun literal -> ext.Run source literal) with
-                              | Error m -> yield leg ("fuzz:" + ext.Name) false ("the external leg did not run: " + m)
-                              | Ok produced ->
-                                  let expected = encoded |> List.map (fun (_, _, w) -> w)
-
-                                  if List.length produced <> List.length expected then
-                                      yield
-                                          leg
-                                              ("fuzz:" + ext.Name)
-                                              false
-                                              (sprintf
-                                                  "the external leg returned %d wire(s) for %d vector(s)"
-                                                  (List.length produced)
-                                                  (List.length expected))
-                                  else
-                                      let diffs =
-                                          List.zip expected produced
-                                          |> List.mapi (fun i (e, p) -> i, e, p)
-                                          |> List.filter (fun (_, e, p) -> e <> p)
-
-                                      if List.isEmpty diffs then
-                                          yield
-                                              leg
-                                                  ("fuzz:" + ext.Name)
-                                                  true
-                                                  (sprintf
-                                                      "%d vector(s) agree with the interpreter"
-                                                      (List.length expected))
-                                      else
-                                          yield
-                                              leg
-                                                  ("fuzz:" + ext.Name)
-                                                  false
-                                                  (sprintf
-                                                      "%d vector(s) diverge, first at index %d"
-                                                      (List.length diffs)
-                                                      (diffs |> List.head |> (fun (i, _, _) -> i))) ]
-
-                selfLeg :: externalLegs
+                if List.isEmpty selfDivergences then
+                    leg
+                        "fuzz"
+                        true
+                        (sprintf
+                            "%d generated vector(s) over %d kind(s) at seed %d round-trip byte-identically"
+                            (List.length encoded)
+                            (List.length tags)
+                            seed)
+                else
+                    leg
+                        "fuzz"
+                        false
+                        (sprintf
+                            "%d divergence(s): %s"
+                            (List.length selfDivergences)
+                            (selfDivergences |> List.truncate 5 |> String.concat "; "))
 
     let private candidateLeg (baseIdl: Idl) (post: Idl) (fixtures: ProposalFixture list) : SpikeLeg =
         if List.isEmpty fixtures then
@@ -355,28 +319,26 @@ module internal ProposalSpike =
                 leg "candidates" false (findings |> List.map (fun (n, m) -> n + " — " + m) |> String.concat "; ")
 
     /// Run the spike. The vocabulary is never written; the report is the whole
-    /// output.
-    let run (input: SpikeInput) : Result<SpikeReport, string> =
+    /// output. Total: a delta that does not apply is a report with one failed leg.
+    let run (input: SpikeInput) : SpikeReport =
         let p = input.Proposal
         let defects = Proposal.validate p
 
         match Proposal.applyDelta input.Base p.Delta with
         | Error e ->
-            Ok
-                { ProposalId = p.Id
-                  Defects = defects
-                  Legs = [ leg "apply" false e ]
-                  CostReport = "(not computed — the delta did not apply)"
-                  Green = false }
+            { ProposalId = p.Id
+              Defects = defects
+              Legs = [ leg "apply" false e ]
+              CostReport = "(not computed — the delta did not apply)"
+              Green = false }
         | Ok post ->
             let tags = Proposal.touchedKinds post p.Delta
-            let generated, tsModule = generateLeg post tags
 
             let legs =
                 [ leg "apply" true (sprintf "%d delta op(s) applied to an in-memory copy" (List.length p.Delta))
-                  generated
+                  generateLeg post tags
                   corpusLeg input.Base post input.Corpus
-                  yield! fuzzLeg post tags input.FuzzSeed input.FuzzVectors tsModule input.External
+                  fuzzLeg post tags input.FuzzSeed input.FuzzVectors
                   candidateLeg input.Base post p.Fixtures ]
 
             let cost =
@@ -384,12 +346,11 @@ module internal ProposalSpike =
                 | Ok verdict -> Diff.report "none declared (no manifest given)" [] verdict
                 | Error e -> "(cost report unavailable: " + e + ")"
 
-            Ok
-                { ProposalId = p.Id
-                  Defects = defects
-                  Legs = legs
-                  CostReport = cost
-                  Green = legs |> List.forall _.Passed }
+            { ProposalId = p.Id
+              Defects = defects
+              Legs = legs
+              CostReport = cost
+              Green = legs |> List.forall _.Passed }
 
     /// Render a report for a human reader.
     ///
