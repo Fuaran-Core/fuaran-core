@@ -612,3 +612,27 @@ shape that does not break a host on arrival: at least one host's certification k
 manifest's fixture list as a whole and asserts that its per-kind leg tallies account for exactly the
 manifest's fixture count, so a new kind there is a red build in a repository that has adopted
 nothing.
+
+## The structural families the corpus carries and Core does not emit (Phase 479)
+
+The shared corpus's `chain/`, `dag/`, `merge-conformance/` and `diff/` families exercise mechanisms
+this package owns: the chain payload and hash, the DAG content address, the three-way merge and its
+conflict shapes, and the structural diff. **They are not Core's to emit**, and no exporter row
+renders them. Every vector in them carries bytes only a UI-tier codec writes. The chain records hash
+the UI's stream-entry envelope over a UI `TreeOp`. The DAG records nest a UI `TreeOp` and result
+envelope inside the address pre-image. The merge fixtures are UI trees with a `SemanticStyle` blend
+and a sample domain validator. The diff goldens use UI node kinds and ops `SkeletonOp` does not have.
+A Core render would restate those codecs in this repository's tests. The inventory and the reasoning
+are DECISIONS.md D191.
+
+What a port with no UI tier certifies against is the Core-owned share, which is already here:
+
+| Mechanism | Core-owned vectors |
+|---|---|
+| the linear chain pre-image, per actor | `escape/string-escape.json` |
+| an actor as folded into a chain payload and a DAG node id, per encoding profile | `encoding/encoding-profiles.json` |
+| skeleton ops over a witness with no domain payload | `apply/skeleton-apply.json` |
+
+A family that certifies a chain walk, a DAG fold, a merge or a skeleton diff end to end over the
+skeleton witness does not exist yet. It would be a new family with its own row in the exporter table,
+not a copy of the UI corpus's four.
