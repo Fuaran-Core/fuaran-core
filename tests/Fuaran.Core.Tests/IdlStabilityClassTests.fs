@@ -44,6 +44,8 @@ module private Fixtures =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = ann }
 
     let kindOf tag fields : IdlKind =
@@ -75,6 +77,7 @@ module private Fixtures =
                 Cases = [ "Plain"; "Loud" ]
                 Wires = []
                 CaseAnnotations = []
+                Aliases = []
                 Annotations = Annotations.Empty } ]
           Records = []
           Defaults = []

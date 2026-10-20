@@ -378,6 +378,39 @@ module FStarTarget =
                 unmodellable (sprintf "a declared default the opaque numeric model cannot spell: %A" v) where
             | Literal.Enum(n, case) -> Ok(ctorName ("e_" + snake n) case)
             | Literal.EmptyList -> Ok "[]"
+            // Phase 539 — the model's map is an association list, so the empty map is `[]`; a JSON
+            // default is a `jval` term, spellable unless it holds a number (the opaque numeric
+            // boundary the scalar arms above already state).
+            | Literal.EmptyMap -> Ok "[]"
+            | Literal.Json j ->
+                let rec term (j: JVal) : string option =
+                    let all (xs: string option list) =
+                        if List.forall Option.isSome xs then
+                            Some(List.choose id xs)
+                        else
+                            None
+
+                    match j with
+                    | JStr s -> Some("(JStr " + lit s + ")")
+                    | JBool b -> Some(if b then "(JBool true)" else "(JBool false)")
+                    | JInt _
+                    | JFloat _ -> None
+                    | JArr xs ->
+                        all (List.map term xs)
+                        |> Option.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
+                    | JObj ms ->
+                        all (
+                            ms
+                            |> List.map (fun (k, x) -> term x |> Option.map (fun t -> "(" + lit k + ", " + t + ")"))
+                        )
+                        |> Option.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
+
+                match term j with
+                | Some t -> Ok t
+                | None ->
+                    unmodellable
+                        (sprintf "a declared JSON default holding a number the opaque numeric model cannot spell: %A" v)
+                        where
             | Literal.Record(r, authored) ->
                 fieldMembers idl Map.empty (where + " (default)") r.Fields
                 |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName (SRecord r.Name)) "Mk") ms authored)
@@ -513,7 +546,7 @@ module FStarTarget =
     /// express: each reached declaration is translated in the order it was reached — the envelope,
     /// what it reaches, the selected kinds, what they reach — so the refusal a kind is named with
     /// is the first one met in that order.
-    let private model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
+    let private modelOf (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
         let reach = (Decl.resolve idl Map.empty kindTags).Wire
         let memberMap = System.Collections.Generic.Dictionary<string, Member list>()
 
@@ -715,6 +748,15 @@ module FStarTarget =
                       Shape = idl.Wire.NodeEnvelope
                       KeyOrder = idl.Wire.KeyOrder
                       DeclaredWire = everyMember |> Seq.exists (fun m -> declaredWire m.Type) }
+
+
+    /// [[modelOf]] behind the Phase 539 refusal: the model's decoder reads each member under its one
+    /// name and has no presence condition, so a vocabulary declaring either (or an enum alias) is
+    /// refused by name rather than modelled as if it declared neither.
+    let private model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
+        match Decl.canonicalFormDeclarations idl with
+        | what :: _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
+        | [] -> modelOf idl kindTags
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

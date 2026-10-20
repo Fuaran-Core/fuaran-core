@@ -6,6 +6,7 @@ open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpTypes
 open Fuaran.Core.Idl.Emit.FSharpDefaults
+open Fuaran.Core.Idl.Emit.FSharpCanonicalForm
 
 /// The F# structural-layer CODEC: the encoder and decoder groups, the witness, the validator
 /// scaffold, and the module that assembles them around the type group.
@@ -138,6 +139,23 @@ let private encFloat (f: float) : JVal =
                 // only the EMPTY list, so there is no non-empty case to answer for.)
                 | TList _ ->
                     sprintf "(if List.isEmpty %s then None else Some(%s, %s))" src (SourceLit.fsString f.Name) enc
+                // Phase 539 — the empty-map default, tested as the list one is (`Map.isEmpty` needs no
+                // equality at the value type; [[Decl.literal]] admits only the EMPTY map).
+                | TMap _ ->
+                    sprintf "(if Map.isEmpty %s then None else Some(%s, %s))" src (SourceLit.fsString f.Name) enc
+                // Phase 539 — a JSON default is compared as the interpreter compares it, by canonical
+                // bytes, so a value holding the default's members in another order is still at it.
+                | TJson ->
+                    match d with
+                    | VJson j ->
+                        sprintf
+                            "(if Canonical.write Rendering.CrossHost %s = %s then None else Some(%s, %s))"
+                            src
+                            (SourceLit.fsString (Canonical.write Rendering.CrossHost j))
+                            (SourceLit.fsString f.Name)
+                            enc
+                    | _ ->
+                        sprintf "(if %s = %s then None else Some(%s, %s))" src dexpr (SourceLit.fsString f.Name) enc
                 | _ -> sprintf "(if %s = %s then None else Some(%s, %s))" src dexpr (SourceLit.fsString f.Name) enc))
 
     /// Phase 511 — THE F# PRESENCE RULE: one field's encoder piece as a `(string * JVal) option`
@@ -158,10 +176,26 @@ let private encFloat (f: float) : JVal =
         | HostOnly -> Ok "None"
         | OmitDefault d -> omitPiece idl src f d
 
+    /// [[presencePiece]] under the field's presence condition (Phase 539): a member whose condition
+    /// fails is omitted whatever it holds, as the interpreter omits it.
+    let memberPiece
+        (idl: Idl)
+        (fields: IdlField list)
+        (srcOf: string -> string)
+        (f: IdlField)
+        : Result<string, CodegenError> =
+        presencePiece idl (srcOf f.Name) f
+        |> Result.bind (fun piece ->
+            match f.Presence with
+            | None -> Ok piece
+            | Some c ->
+                presenceTest idl fields srcOf c
+                |> Result.map (fun test -> sprintf "(if %s then %s else None)" test piece))
+
     /// A field read off a bound record variable `recv` (`s` for a spec/record encoder, `n` for
-    /// the node envelope), under [[presencePiece]].
-    let specPieceOf (idl: Idl) (recv: string) (f: IdlField) : Result<string, CodegenError> =
-        presencePiece idl (recv + "." + pascal f.Name) f
+    /// the node envelope), under [[memberPiece]].
+    let specPieceOf (idl: Idl) (recv: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
+        memberPiece idl fields (fun name -> recv + "." + pascal name) f
 
     /// One `"key", <enc>` pair of a *required* union-case field (positional binding; the wire
     /// key is the raw field name, the value reference is keyword-escaped).
@@ -239,7 +273,7 @@ let private encFloat (f: float) : JVal =
                             pairs)
                 else
                     c.Fields
-                    |> List.map (fun f -> presencePiece idl (ident f.Name) f)
+                    |> List.map (memberPiece idl c.Fields ident)
                     |> concatR "; "
                     |> Result.map (fun pieces ->
                         sprintf
@@ -277,7 +311,7 @@ let private encFloat (f: float) : JVal =
     let specEncoder (typedName: string) (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
         k.Fields
-        |> List.map (specPieceOf idl "s")
+        |> List.map (specPieceOf idl "s" k.Fields)
         |> concatR "; "
         |> Result.map (fun pieces ->
             sprintf
@@ -298,7 +332,7 @@ let private encFloat (f: float) : JVal =
         let ps = declParams msg r.Name []
 
         r.Fields
-        |> List.map (specPieceOf idl "s")
+        |> List.map (specPieceOf idl "s" r.Fields)
         |> concatR "; "
         |> Result.map (fun pieces ->
             sprintf
@@ -417,8 +451,11 @@ let private encFloat (f: float) : JVal =
         | TMap vt -> decFn vt |> Result.map (sprintf "(dMap %s)")
 
     /// Reading one field back out, honouring the presence rules [[presencePiece]]
-    /// wrote it under.
-    let decField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
+    /// wrote it under — over [[memberView]]'s reading of the object when the field declares an alias
+    /// or a presence condition (Phase 539).
+    let decField (idl: Idl) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
+        let fsx = memberView idl fields f |> Option.defaultValue "__fs"
+
         match f.Type with
         // The VALUE is a sentinel and carries nothing, so what decodes is `()` — or, for a
         // `TFn` slot (Phase 689), its declared placeholder. An OPTIONAL slot's PRESENCE is real
@@ -444,19 +481,19 @@ let private encFloat (f: float) : JVal =
             decFn f.Type
             |> Result.map (fun d ->
                 match f.Opt with
-                | Required -> sprintf "dReq %s __fs %s" name d
-                | Optional -> sprintf "dOpt %s __fs %s" name d
-                | OmitDefault _ -> sprintf "dDef %s __fs %s (%s)" name d placeholder
+                | Required -> sprintf "dReq %s %s %s" name fsx d
+                | Optional -> sprintf "dOpt %s %s %s" name fsx d
+                | OmitDefault _ -> sprintf "dDef %s %s %s (%s)" name fsx d placeholder
                 // Never on the wire — nothing to read, so take the placeholder.
                 | HostOnly -> sprintf "Ok (%s)" placeholder)
         | _ ->
             match f.Opt with
             | Required ->
                 decFn f.Type
-                |> Result.map (fun d -> sprintf "dReq %s __fs %s" (SourceLit.fsString f.Name) d)
+                |> Result.map (fun d -> sprintf "dReq %s %s %s" (SourceLit.fsString f.Name) fsx d)
             | Optional ->
                 decFn f.Type
-                |> Result.map (fun d -> sprintf "dOpt %s __fs %s" (SourceLit.fsString f.Name) d)
+                |> Result.map (fun d -> sprintf "dOpt %s %s %s" (SourceLit.fsString f.Name) fsx d)
             // Never on the wire — nothing to read, so take the declared placeholder.
             | HostOnly -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
             // Phase 124 — the decoder's optional arm and the encoder's omit test are now
@@ -467,7 +504,7 @@ let private encFloat (f: float) : JVal =
                 fsDefaultLit idl f.Type d
                 |> Result.bind (fun dexpr ->
                     decFn f.Type
-                    |> Result.map (fun dfn -> sprintf "dDef %s __fs %s (%s)" (SourceLit.fsString f.Name) dfn dexpr))
+                    |> Result.map (fun dfn -> sprintf "dDef %s %s %s (%s)" (SourceLit.fsString f.Name) fsx dfn dexpr))
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -498,16 +535,21 @@ let private encFloat (f: float) : JVal =
 
     let fieldBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
         fs
-        |> List.map (fun f -> decField idl f |> Result.map (fun e -> ident f.Name, e))
+        |> List.map (fun f -> decField idl fs f |> Result.map (fun e -> ident f.Name, e))
         |> sequenceR
 
     /// An enum decoder (Phase 337): a string naming no case is `UnknownTag`, anything else
     /// `WrongKind` — the interpreter's split, and since Phase 520 the interpreter's detail, so the
     /// projected sentence is the interpreter's too.
     let enumDecoder (e: IdlEnum) =
+        // Phase 539 — each declared alias decodes to its case, after the canonical arms.
         let arms =
-            e.Cases
-            |> List.map (fun c -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString (e.WireOf c)) e.Name c)
+            (e.Cases
+             |> List.map (fun c -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString (e.WireOf c)) e.Name c))
+            @ (e.Cases
+               |> List.collect (fun c ->
+                   e.AliasesOf c
+                   |> List.map (fun a -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString a) e.Name c)))
             |> String.concat "\n"
 
         sprintf
@@ -708,23 +750,24 @@ let private encFloat (f: float) : JVal =
     /// Reading one field back out under [[decField]]'s presence rules, collecting. A leaf field (and
     /// a host-only one, which reads nothing) is [[decField]]'s expression lifted, so its presence
     /// rules are the short-circuiting decoder's by construction.
-    let colField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
+    let colField (idl: Idl) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
         let name = SourceLit.fsString f.Name
+        let fsx = memberView idl fields f |> Option.defaultValue "__fs"
 
         match f.Opt with
-        | HostOnly -> decField idl f |> Result.map (sprintf "cOne (%s)")
-        | _ when not (collectsOver f.Type) -> decField idl f |> Result.map (sprintf "cOne (%s)")
-        | Required -> colFn f.Type |> Result.map (sprintf "cReq %s __fs %s" name)
-        | Optional -> colFn f.Type |> Result.map (sprintf "cOpt %s __fs %s" name)
+        | HostOnly -> decField idl fields f |> Result.map (sprintf "cOne (%s)")
+        | _ when not (collectsOver f.Type) -> decField idl fields f |> Result.map (sprintf "cOne (%s)")
+        | Required -> colFn f.Type |> Result.map (sprintf "cReq %s %s %s" name fsx)
+        | Optional -> colFn f.Type |> Result.map (sprintf "cOpt %s %s %s" name fsx)
         | OmitDefault d ->
             fsDefaultLit idl f.Type d
             |> Result.bind (fun dexpr ->
                 colFn f.Type
-                |> Result.map (fun c -> sprintf "cDef %s __fs %s (%s)" name c dexpr))
+                |> Result.map (fun c -> sprintf "cDef %s %s %s (%s)" name fsx c dexpr))
 
     let colBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
         fs
-        |> List.map (fun f -> colField idl f |> Result.map (fun e -> ident f.Name, e))
+        |> List.map (fun f -> colField idl fs f |> Result.map (fun e -> ident f.Name, e))
         |> sequenceR
 
     /// Read every member (in declaration order — the order the defects are reported in), then
@@ -1552,7 +1595,9 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             // kind's own object; `Canonical.write Rendering.CrossHost` sorts keys, so splice order is
             // irrelevant. Nested emission is byte-identical to the pre-declarable form.
             let envelopePieces () =
-                decl.Envelope.Members |> List.map (specPieceOf idl "n") |> concatR "; "
+                decl.Envelope.Members
+                |> List.map (specPieceOf idl "n" decl.Envelope.Members)
+                |> concatR "; "
 
             let body =
                 match decl.Envelope.Kind, decl.Envelope.Members with
@@ -1752,6 +1797,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               (sup.AccessorSplice |> Option.toList)
               decodeHelpers idl.Wire.Discriminator decl.Hosted (not sup.CaseRefines.IsEmpty)
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])
+              @ (if declaresCanonicalFormAnywhere idl then
+                     [ canonicalFormHelpers ]
+                 else
+                     [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               // Phase 337 — the parser's refusal through `Decoder.parse` (under `ReadOptions.strict`

@@ -17,6 +17,8 @@ let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 /// The vocabulary.

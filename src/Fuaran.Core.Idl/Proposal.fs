@@ -332,6 +332,8 @@ module Proposal =
                     { Name = name
                       Type = ty
                       Opt = opt
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty })))
 
     let private readFields (owner: JVal) : Result<IdlField list, DecodeError> =

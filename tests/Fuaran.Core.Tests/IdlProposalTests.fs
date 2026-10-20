@@ -69,6 +69,8 @@ let private postIdl =
                   { Name = "tooltip"
                     Type = TStr
                     Opt = Optional
+                    Aliases = []
+                    Presence = None
                     Annotations = Annotations.Empty }
               ) ]
     with
@@ -280,6 +282,8 @@ let tests =
                               { Name = "x"
                                 Type = TStr
                                 Opt = Optional
+                                Aliases = []
+                                Presence = None
                                 Annotations = Annotations.Empty }
                           ) ]
                     |> ignore
@@ -298,6 +302,8 @@ let tests =
                                   { Name = "label"
                                     Type = TStr
                                     Opt = Optional
+                                    Aliases = []
+                                    Presence = None
                                     Annotations = Annotations.Empty }
                               ) ]
                     with
@@ -313,6 +319,8 @@ let tests =
                                   { Name = "x"
                                     Type = TStr
                                     Opt = Optional
+                                    Aliases = []
+                                    Presence = None
                                     Annotations = Annotations.Empty }
                               ) ]
                     with

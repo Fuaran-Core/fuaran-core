@@ -77,6 +77,12 @@ type internal Literal =
     /// The enum's HOST case, resolved from the wire spelling the value carries.
     | Enum of enumName: string * case: string
     | EmptyList
+    /// The EMPTY map (Phase 539) — admitted where the field's own type is the map, never nested in a
+    /// record or union literal (see [[FSharpDefaults.fsDefaultLit]]).
+    | EmptyMap
+    /// A JSON value at a `TJson` slot (Phase 539) — every string well-formed and every number finite;
+    /// admitted where the field's own type is the JSON slot, never nested.
+    | Json of JVal
     | Record of IdlRecord * authored: (string * IdlValue) list
     | Union of IdlUnion * args: IdlType list * IdlUnionCase * authored: (string * IdlValue) list
 
@@ -535,6 +541,38 @@ module internal Decl =
           Enums = List.ofSeq enums }
 
     // -----------------------------------------------------------------------
+    // Phase 539 — the canonical-form declarations (DECISIONS.md D190), named for a backend that
+    // does not apply them and must refuse them by name rather than ignore them.
+    // -----------------------------------------------------------------------
+
+    /// Every field list of the vocabulary with the owner it belongs to, as a refusal names it.
+    let fieldOwners (idl: Idl) : (string * IdlField list) list =
+        [ for k in idl.Kinds do
+              yield "kind '" + k.Tag + "'", k.Fields
+          for o in idl.Ops do
+              yield "op '" + o.Tag + "'", o.Fields
+          for u in idl.Unions do
+              for c in u.Cases do
+                  yield "union case '" + u.Name + "." + c.Tag + "'", c.Fields
+          for r in idl.Records do
+              yield "record '" + r.Name + "'", r.Fields
+          yield "the node envelope", idl.NodeFields ]
+
+    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
+    /// vocabulary that declares none.
+    let canonicalFormDeclarations (idl: Idl) : string list =
+        [ for owner, fields in fieldOwners idl do
+              for f in fields do
+                  if not (List.isEmpty f.Aliases) then
+                      yield sprintf "the aliases of field '%s' of %s" f.Name owner
+
+                  if f.Presence.IsSome then
+                      yield sprintf "the presence condition of field '%s' of %s" f.Name owner
+          for e in idl.Enums do
+              if e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a)) then
+                  yield sprintf "the case aliases of enum '%s'" e.Name ]
+
+    // -----------------------------------------------------------------------
     // Phase 525 — the ONE admissibility of a declared default (see [[Literal]]).
     // -----------------------------------------------------------------------
 
@@ -542,13 +580,24 @@ module internal Decl =
     /// backend gives it. Admitted: a well-formed string; an int; a bool; a finite float (an int
     /// authored at a float slot reads as one); an enum's WIRE spelling, resolved to its host case
     /// through [[IdlEnum.CaseOf]] (a host case name the wire does not use is refused — Phase 292);
-    /// the empty list; a declared record; a declared union case at the declared arity that is not
-    /// the union's declared TRANSPARENT case (the 2026-09-13 ruling: the case encodes bare, so no
-    /// host can test for it on the wire). Everything else — a map, a JSON value, a closure or
-    /// hosted value, a non-empty list, an unpaired surrogate, a non-finite float — is refused.
+    /// the empty list; the empty map and a JSON value at a `TJson` slot whose strings are well-formed
+    /// and whose numbers are finite (Phase 539); a declared record; a declared union case at the
+    /// declared arity that is not the union's declared TRANSPARENT case (the 2026-09-13 ruling: the
+    /// case encodes bare, so no host can test for it on the wire). Everything else — a non-empty map,
+    /// a closure or hosted value, a non-empty list, an unpaired surrogate, a non-finite float — is
+    /// refused.
     let literal (idl: Idl) (t: IdlType) (v: IdlValue) : Result<Literal, CodegenError> =
         let refuse () =
             Error(CodegenError.UnsupportedDefault(t, v))
+
+        let rec spellable (j: JVal) =
+            match j with
+            | JStr s -> SourceLit.isWellFormed s
+            | JFloat f -> System.Double.IsFinite f
+            | JInt _
+            | JBool _ -> true
+            | JArr xs -> List.forall spellable xs
+            | JObj ms -> ms |> List.forall (fun (k, x) -> SourceLit.isWellFormed k && spellable x)
 
         match t, v with
         | TStr, VStr s when not (SourceLit.isWellFormed s) -> refuse ()
@@ -562,6 +611,8 @@ module internal Decl =
             | Some case -> Ok(Literal.Enum(n, case))
             | None -> refuse ()
         | TList _, VList [] -> Ok Literal.EmptyList
+        | TMap _, VMap [] -> Ok Literal.EmptyMap
+        | TJson, VJson j when spellable j -> Ok(Literal.Json j)
         | TRecord n, VRecord authored ->
             match CodegenLookup.tryRecord idl n with
             | Some r -> Ok(Literal.Record(r, authored))

@@ -206,6 +206,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                 { Name = Option.defaultValue "" (str "name" f)
                   Type = go (Decoder.tryMember "shape" f |> Option.defaultValue (JObj []))
                   Opt = (if flag "optional" f then Optional else Required)
+                  Aliases = []
+                  Presence = None
                   Annotations = Annotations.Empty })
 
         go v.Shape
@@ -227,6 +229,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                 [ { Name = "v"
                     Type = translate i v
                     Opt = Required
+                    Aliases = []
+                    Presence = None
                     Annotations = Annotations.Empty } ] })
 
     let idl =

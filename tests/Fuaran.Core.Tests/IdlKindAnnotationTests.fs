@@ -37,6 +37,8 @@ let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 let private deprecated (replacement: string option) (message: string option) =
@@ -275,6 +277,7 @@ let tests =
                               Cases = [ "Plain" ]
                               Wires = []
                               CaseAnnotations = [ "Screaming", since "0.18.0" ]
+                              Aliases = []
                               Annotations = Annotations.Empty } ] }
 
               let errs = Declare.enumWireErrors broken

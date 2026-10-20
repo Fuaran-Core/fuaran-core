@@ -22,8 +22,6 @@ module Decode =
     let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
         r |> Result.mapError (DecodeError.under step)
 
-    let private field (name: string) (fields: (string * JVal) list) : JVal option = Decoder.tryMember name (JObj fields)
-
     /// The arity refusal both union arms share (Phase 292 — the bare arm used to zip the
     /// two lists unchecked and throw where the object arm refused).
     let private arity (u: UnionForm) =
@@ -50,6 +48,8 @@ module Decode =
         // untouched (the encoder refuses a non-finite float inside a verbatim value, Phase 292).
         | WireForm.Float, JStr(FloatToken.NonFinite f) -> Ok(VFloat f)
         | WireForm.Enum e, JStr s when List.contains s e.WireCases -> Ok(VEnum s)
+        // Phase 539 — a declared alias decodes to its case's canonical spelling.
+        | WireForm.Enum e, JStr s when (e.CaseAccepting s).IsSome -> Ok(VEnum(e.WireOf(Option.get (e.CaseAccepting s))))
         | WireForm.Enum e, JStr s ->
             err
                 DecodeCode.UnknownTag
@@ -167,7 +167,11 @@ module Decode =
             function
             | [] -> Ok(List.rev acc)
             | (f: IdlField) :: rest ->
-                match field f.Name jfields, f.Opt with
+                // Phase 539 — the member is read under its spellings and dropped when its presence
+                // condition fails ([[WireForm.readMember]]), so it reaches the optionality rules below
+                // as the canonical form has it; a refusal inside it is at its CANONICAL spelling, the
+                // generated decoders' path too.
+                match WireForm.readMember idl fields f jfields, f.Opt with
                 | _, HostOnly -> go acc rest
                 | None, Optional -> go acc rest
                 // omit-at-default: an absent field restores its identity default

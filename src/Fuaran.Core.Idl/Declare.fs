@@ -35,6 +35,7 @@ module Declare =
           Cases = cases
           Wires = []
           CaseAnnotations = []
+          Aliases = []
           Annotations = Annotations.Empty }
 
     /// An enum whose wire strings differ from its host case names, declared as
@@ -47,6 +48,7 @@ module Declare =
           Cases = cases |> List.map fst
           Wires = cases |> List.map snd
           CaseAnnotations = []
+          Aliases = []
           Annotations = Annotations.Empty }
 
     /// Declare what is true ABOUT some of an enum's cases (Phase 119), by HOST case
@@ -390,6 +392,13 @@ module Declare =
                 | _ -> None
             | None -> None
 
+        // Phase 539 — the values a presence condition may compare a sibling with: a scalar at its type,
+        // and for an enum its CANONICAL wire string (an alias spelling would make one condition two).
+        let canonicalScalar (t: IdlType) (v: IdlValue) : bool =
+            match v, WireForm.ofType idl t with
+            | VEnum w, WireForm.Enum e -> List.contains w e.WireCases
+            | _ -> not (List.isEmpty (WireForm.scalarSpellings idl t v))
+
         let rec mentionsVar (t: IdlType) =
             match t with
             | TVar _ -> true
@@ -496,6 +505,109 @@ module Declare =
             [ yield!
                   nameErrors (owner + ": field") (fields |> List.mapi (fun j f -> fieldAt j @ [ key "name" ], f.Name))
 
+              // Phase 539 — every alias a member is read under is an identifier, and no two members of
+              // one owner share a spelling: a document carrying it could not say which member it is.
+              let spellingsOf =
+                  [ for j, f in List.indexed fields do
+                        yield j, [], f.Name
+
+                        for a, alias in List.indexed f.Aliases do
+                            yield j, [ key "aliases"; item a ], alias ]
+
+              for k, (j, tail, n) in List.indexed spellingsOf do
+                  if not (List.isEmpty tail) then
+                      let path = fieldAt j @ tail
+
+                      if not (isIdentifier n) then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: the alias '%s' of field '%s' is not an identifier (an ASCII letter or '_', then letters, digits, '_')"
+                                  owner
+                                  n
+                                  fields[j].Name)
+
+                      if
+                          spellingsOf
+                          |> List.indexed
+                          |> List.exists (fun (k', (_, t, m)) -> k' <> k && m = n && (k' < k || List.isEmpty t))
+                      then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: the alias '%s' of field '%s' is another spelling of a member of the same owner"
+                                  owner
+                                  n
+                                  fields[j].Name)
+
+                      if inheritedMemberNames.Contains n then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: the alias '%s' is reserved — every JavaScript object already carries a member of that name"
+                                  owner
+                                  n)
+
+              // Phase 539 — a presence condition is admitted on a member that CAN be absent, over a
+              // sibling that is declared, wire-visible, unconditional and not the member itself; a
+              // presence test needs a sibling that can be absent, an equality test a canonical scalar.
+              for j, f in List.indexed fields do
+                  match f.Presence with
+                  | None -> ()
+                  | Some c ->
+                      let path = fieldAt j @ [ key "presence" ]
+                      let at = sprintf "%s, field '%s'" owner f.Name
+
+                      let siblingName =
+                          match c with
+                          | WhenPresent s
+                          | WhenAbsent s
+                          | WhenEquals(s, _) -> s
+
+                      match f.Opt with
+                      | Optional
+                      | OmitDefault _ -> ()
+                      | _ ->
+                          fault
+                              path
+                              (sprintf
+                                  "%s: a presence condition needs an Optional or OmitDefault member — a member whose condition fails is absent, and only those two say what absence means"
+                                  at)
+
+                      match fields |> List.tryFind (fun g -> g.Name = siblingName) with
+                      | None ->
+                          fault
+                              path
+                              (sprintf "%s: the presence condition names '%s', which is not a sibling" at siblingName)
+                      | Some g when g.Name = f.Name ->
+                          fault path (sprintf "%s: a presence condition cannot name its own member" at)
+                      | Some g when g.Presence.IsSome ->
+                          fault
+                              path
+                              (sprintf "%s: the presence condition names '%s', which is itself conditional" at g.Name)
+                      | Some g when g.Opt = HostOnly ->
+                          fault
+                              path
+                              (sprintf "%s: the presence condition names '%s', which is never on the wire" at g.Name)
+                      | Some g ->
+                          match c with
+                          | WhenPresent _
+                          | WhenAbsent _ when g.Opt <> Optional ->
+                              fault
+                                  path
+                                  (sprintf
+                                      "%s: a presence test needs an Optional sibling, and '%s' is never absent"
+                                      at
+                                      g.Name)
+                          | WhenEquals(_, v) when not (canonicalScalar g.Type v) ->
+                              fault
+                                  path
+                                  (sprintf
+                                      "%s: the presence condition compares '%s' with a value that is not a canonical scalar of its type (a string, an int, a bool or an enum's wire string)"
+                                      at
+                                      g.Name)
+                          | _ -> ()
+
               for j, f in List.indexed fields do
                   if inheritedMemberNames.Contains f.Name then
                       fault
@@ -543,6 +655,36 @@ module Declare =
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl
           yield! hostedWireErrors idl
+
+          // Phase 539 — an enum alias names a declared case, is single-line well-formed text, and is
+          // no other spelling of the enum: a wire string or another alias would decode two ways.
+          for i, e in List.indexed idl.Enums do
+              let at = enumAt i @ [ key "aliases" ]
+              let keyed = e.Aliases |> List.map fst
+
+              for c in keyed do
+                  if not (List.contains c e.Cases) then
+                      fault
+                          at
+                          (sprintf "enum '%s': an alias entry names case '%s', which the enum does not declare" e.Name c)
+
+              if List.length (List.distinct keyed) <> List.length keyed then
+                  fault at (sprintf "enum '%s': two alias entries name the same case" e.Name)
+
+              let all = e.Aliases |> List.collect snd
+
+              for a in all do
+                  if a = "" || controlOrBreak a || illFormed a then
+                      fault
+                          at
+                          (sprintf
+                              "enum '%s': an alias is empty, carries a line break or a control character, or is ill-formed UTF-16"
+                              e.Name)
+                  elif List.contains a e.WireCases then
+                      fault at (sprintf "enum '%s': the alias '%s' is one of the enum's wire strings" e.Name a)
+
+              if List.length (List.distinct all) <> List.length all then
+                  fault at (sprintf "enum '%s': one alias is declared twice" e.Name)
 
           // Names, and the namespaces they share.
           yield! nameErrors "kind" (idl.Kinds |> List.mapi (fun i k -> [ key "kinds"; item i; key "tag" ], k.Tag))

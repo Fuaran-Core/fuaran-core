@@ -31,6 +31,8 @@ let private field name ty opt =
     { Name = name
       Type = ty
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 let private req name ty = field name ty Required

@@ -238,6 +238,8 @@ let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 /// The smallest vocabulary that generates at all: one kind, one required string field.
@@ -664,6 +666,8 @@ let artifactRoundTrip =
                                       [ { Name = "text"
                                           Type = TStr
                                           Opt = Required
+                                          Aliases = []
+                                          Presence = None
                                           Annotations = Annotations.Empty } ]
                                     Annotations = Annotations.Empty } ]
                               Annotations = Annotations.Empty } ]

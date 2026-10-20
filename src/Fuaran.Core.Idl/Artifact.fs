@@ -205,6 +205,25 @@ module Artifact =
         | HostOnly -> Canonical.typed "hostOnly" []
         | OmitDefault d -> Canonical.typed "omitDefault" [ "default", valueJson d ]
 
+    /// A field's presence condition (Phase 539, DECISIONS.md D190): `$type`-tagged by its test, the
+    /// sibling it reads, and for an equality test the value, written as every authored value is.
+    let private presenceJson (c: PresenceCondition) : JVal =
+        match c with
+        | WhenPresent s -> Canonical.typed "whenPresent" [ "sibling", JStr s ]
+        | WhenAbsent s -> Canonical.typed "whenAbsent" [ "sibling", JStr s ]
+        | WhenEquals(s, v) -> Canonical.typed "whenEquals" [ "sibling", JStr s; "value", valueJson v ]
+
+    /// A field's Phase 539 members — `aliases` (in priority order) and `presence` — each omitted when
+    /// it says nothing, so a vocabulary that declares neither renders byte-for-byte as it did.
+    let private canonicalFormJson (f: IdlField) : (string * JVal) list =
+        (if List.isEmpty f.Aliases then
+             []
+         else
+             [ "aliases", JArr(f.Aliases |> List.map JStr) ])
+        @ (match f.Presence with
+           | Some c -> [ "presence", presenceJson c ]
+           | None -> [])
+
     /// The declared annotation set (Phase 113), or `[]` when it says nothing.
     ///
     /// Returned as the key-value PAIRS to splice rather than as a `JVal`, so the
@@ -270,6 +289,7 @@ module Artifact =
                 [ "name", JStr f.Name
                   "type", typeJson f.Type
                   "optionality", optionalityJson f.Opt ]
+                @ canonicalFormJson f
                 @ annotationsJson f.Annotations
             ))
         |> JArr
@@ -371,8 +391,17 @@ module Artifact =
         | OmitDefault d -> OmitDefault(canonValue d)
         | other -> other
 
+    let private canonPresence (c: PresenceCondition) : PresenceCondition =
+        match c with
+        | WhenEquals(s, v) -> WhenEquals(s, canonValue v)
+        | other -> other
+
     let private canonFields (fs: IdlField list) : IdlField list =
-        fs |> List.map (fun f -> { f with Opt = canonOpt f.Opt })
+        fs
+        |> List.map (fun f ->
+            { f with
+                Opt = canonOpt f.Opt
+                Presence = f.Presence |> Option.map canonPresence })
 
     let private canonKind (k: IdlKind) : IdlKind =
         { k with Fields = canonFields k.Fields }
@@ -408,6 +437,12 @@ module Artifact =
                     CaseAnnotations =
                         e.CaseAnnotations
                         |> List.filter (fun (_, a) -> not a.IsEmpty)
+                        |> List.sortWith (fun (a, _) (b, _) -> ordinal (e.WireOf a) (e.WireOf b))
+                    // Phase 539 — addressed exactly as `CaseAnnotations` is; each alias list keeps
+                    // its order, which is its priority.
+                    Aliases =
+                        e.Aliases
+                        |> List.filter (fun (_, a) -> not (List.isEmpty a))
                         |> List.sortWith (fun (a, _) (b, _) -> ordinal (e.WireOf a) (e.WireOf b)) })
             |> sortedBy _.Name
           Records =
@@ -512,6 +547,14 @@ module Artifact =
                                    ) ]
                              else
                                  [])
+                          // Phase 539 — the lenient spellings of each case, keyed by the case's
+                          // WIRE string as `caseAnnotations` is and for the same reason; emitted
+                          // only when some case declares one.
+                          @ (match e.Aliases |> List.filter (fun (_, a) -> not (List.isEmpty a)) with
+                             | [] -> []
+                             | entries ->
+                                 [ "aliases",
+                                   JObj(entries |> List.map (fun (c, a) -> e.WireOf c, JArr(a |> List.map JStr))) ])
                           // Phase 542 — the enum's OWN annotations, omitted when empty.
                           @ annotationsJson e.Annotations
                       ))
@@ -877,6 +920,18 @@ module Artifact =
     /// One field object — internal since Phase 403, the support document's reader of a projected
     /// record's declared fields. Its `type` and `optionality` are both looked for BEFORE either is
     /// read, so a field missing one reports the missing one whatever the other holds.
+    /// A field's presence condition (Phase 539) — [[presenceJson]]'s inverse.
+    let private readPresence (v: JVal) : Result<PresenceCondition, DecodeError> =
+        Decoder.tagDispatch
+            "$type"
+            [ "whenPresent", (fun j -> str "sibling" j |> Result.map WhenPresent)
+              "whenAbsent", (fun j -> str "sibling" j |> Result.map WhenAbsent)
+              "whenEquals",
+              (fun j ->
+                  str "sibling" j
+                  |> Result.bind (fun s -> Decoder.field "value" readValue j |> Result.map (fun x -> WhenEquals(s, x)))) ]
+            v
+
     let internal readField (v: JVal) : Result<IdlField, DecodeError> =
         str "name" v
         |> Result.bind (fun name ->
@@ -885,12 +940,18 @@ module Artifact =
             |> Result.bind (fun ty ->
                 Decoder.field "optionality" readOptionality v
                 |> Result.bind (fun opt ->
-                    readAnnotations v
-                    |> Result.map (fun ann ->
-                        { Name = name
-                          Type = ty
-                          Opt = opt
-                          Annotations = ann }))))
+                    Decoder.fieldOr "aliases" [] (Decoder.list Decoder.str) v
+                    |> Result.bind (fun aliases ->
+                        Decoder.fieldOr "presence" None (readPresence >> Result.map Some) v
+                        |> Result.bind (fun presence ->
+                            readAnnotations v
+                            |> Result.map (fun ann ->
+                                { Name = name
+                                  Type = ty
+                                  Opt = opt
+                                  Aliases = aliases
+                                  Presence = presence
+                                  Annotations = ann }))))))
 
     let private readFields (owner: JVal) : Result<IdlField list, DecodeError> = listOf "fields" readField owner
 
@@ -974,6 +1035,33 @@ module Artifact =
             Error(Decoder.wrongKind "object" other)
             |> under (PathSegment.Key "caseAnnotations")
 
+    /// Per-case aliases (Phase 539), keyed on the WIRE string exactly as [[readCaseAnnotations]] reads
+    /// its entries, and refused on the same terms.
+    let private readEnumAliases (e: IdlEnum) (v: JVal) : Result<(string * string list) list, DecodeError> =
+        match Decoder.tryMember "aliases" v with
+        | None -> Ok []
+        | Some(JObj entries) ->
+            entries
+            |> List.map (fun (wire, aliases) ->
+                match e.CaseOf wire with
+                | None ->
+                    Error(DecodeError.make DecodeCode.UnknownTag "a case the enum declares" ("case '" + wire + "'"))
+                    |> under (PathSegment.Key wire)
+                | Some case ->
+                    Decoder.list Decoder.str aliases
+                    |> Result.map (fun a -> case, a)
+                    |> under (PathSegment.Key wire))
+            |> List.fold
+                (fun acc r ->
+                    match acc, r with
+                    | Error e, _ -> Error e
+                    | _, Error e -> Error e
+                    | Ok xs, Ok x -> Ok(x :: xs))
+                (Ok [])
+            |> Result.map List.rev
+            |> under (PathSegment.Key "aliases")
+        | Some other -> Error(Decoder.wrongKind "object" other) |> under (PathSegment.Key "aliases")
+
     let private readEnum (v: JVal) : Result<IdlEnum, DecodeError> =
         str "name" v
         |> Result.bind (fun name ->
@@ -1000,11 +1088,14 @@ module Artifact =
             |> Result.bind (fun e ->
                 readCaseAnnotations e v
                 |> Result.bind (fun anns ->
-                    readAnnotations v
-                    |> Result.map (fun ann ->
-                        { e with
-                            CaseAnnotations = anns
-                            Annotations = ann }))))
+                    readEnumAliases e v
+                    |> Result.bind (fun aliases ->
+                        readAnnotations v
+                        |> Result.map (fun ann ->
+                            { e with
+                                CaseAnnotations = anns
+                                Aliases = aliases
+                                Annotations = ann })))))
 
     let private readRecord (v: JVal) : Result<IdlRecord, DecodeError> =
         str "name" v

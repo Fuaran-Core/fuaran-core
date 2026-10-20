@@ -315,6 +315,18 @@ module Sample =
                         sampleType idl r depth f.Type
 
             f.Name, v)
+        // Phase 539 — a member whose presence condition fails over the draw is drawn ABSENT, as the
+        // decoder reads it (its optionality's absence), so a sample is a canonical value. No RNG is
+        // drawn here, which keeps every vocabulary without a condition's seeded stream byte-identical.
+        |> fun drawn ->
+            drawn
+            |> List.map (fun (name, v) ->
+                match fields |> List.tryFind (fun f -> f.Name = name) with
+                | Some({ Presence = Some c } as f) when not (WireForm.holdsAuthored fields c drawn) ->
+                    match f.Opt with
+                    | OmitDefault d -> name, d
+                    | _ -> name, VAbsent
+                | _ -> name, v)
 
     /// Phase 698 — the node ENVELOPE, sampled from [[Idl.NodeFields]] through the
     /// same [[sampleFields]] the kind fields use, so both presence polarities are

@@ -88,6 +88,46 @@ module internal FSharpDefaults =
     ///
     /// `Error` ⇒ the generator cannot render it, and the module REFUSES rather than emitting an
     /// artefact that contradicts its own declaration — see [[CodegenError.UnsupportedDefault]].
+    /// A JSON value as the F# `JVal` expression that builds it (Phase 539) — legal in an expression
+    /// position only. [[Decl.literal]] has already refused an ill-formed string and a non-finite number.
+    let rec fsJValLit (j: JVal) : string =
+        match j with
+        | JStr s -> "JStr " + SourceLit.fsString s
+        | JInt i -> sprintf "JInt(%d)" i
+        | JBool b -> if b then "JBool true" else "JBool false"
+        | JFloat f -> "JFloat(" + fsFloatLit f + ")"
+        | JArr xs -> "JArr [ " + (xs |> List.map fsJValLit |> String.concat "; ") + " ]"
+        | JObj ms ->
+            "JObj [ "
+            + (ms
+               |> List.map (fun (k, x) -> "(" + SourceLit.fsString k + ", " + fsJValLit x + ")")
+               |> String.concat "; ")
+            + " ]"
+
+    /// Phase 539 — a member of a record or union-case default whose own literal is an empty map or a
+    /// JSON value, which has no PATTERN spelling: the union encoder's omit test matches the default as
+    /// a pattern, and a record default sits inside one whenever a union case carries it. Refused by
+    /// name rather than emitted as source the compiler would reject.
+    let private nestedUnspellable
+        (idl: Idl)
+        (subst: Map<string, IdlType>)
+        (fields: IdlField list)
+        (authored: (string * IdlValue) list)
+        : CodegenError option =
+        fields
+        |> List.tryPick (fun f ->
+            let ft = TypeParams.substitute subst f.Type
+
+            let v =
+                match authored |> List.tryFind (fun (n, _) -> n = f.Name), f.Opt with
+                | Some(_, av), _ when av <> VAbsent -> Some av
+                | _, OmitDefault d -> Some d
+                | _ -> None
+
+            match v |> Option.map (fun x -> x, Decl.literal idl ft x) with
+            | Some(x, Ok(Literal.EmptyMap | Literal.Json _)) -> Some(CodegenError.UnsupportedDefault(ft, x))
+            | _ -> None)
+
     let rec fsDefaultLit (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         // Phase 525 — what is ADMITTED is [[Decl.literal]]'s, the one admissibility the F* target
         // reads too: an unpaired surrogate (F# cannot spell it, and the encoder refuses it), a
@@ -107,6 +147,23 @@ module internal FSharpDefaults =
             | Literal.Float f -> Ok(fsFloatLit f)
             | Literal.Enum(n, case) -> Ok(n + "." + case)
             | Literal.EmptyList -> Ok "[]"
+            | Literal.EmptyMap -> Ok "Map.empty"
+            | Literal.Json j -> Ok(fsJValLit j)
+            | Literal.Record(r, authored) when (nestedUnspellable idl Map.empty r.Fields authored).IsSome ->
+                Error(Option.get (nestedUnspellable idl Map.empty r.Fields authored))
+            | Literal.Union(u, args, c, authored) when
+                (nestedUnspellable idl (TypeParams.bind u args |> Option.defaultValue Map.empty) c.Fields authored)
+                    .IsSome
+                ->
+                Error(
+                    Option.get (
+                        nestedUnspellable
+                            idl
+                            (TypeParams.bind u args |> Option.defaultValue Map.empty)
+                            c.Fields
+                            authored
+                    )
+                )
             | Literal.Record(r, authored) ->
                 r.Fields
                 |> List.map (fun rf ->

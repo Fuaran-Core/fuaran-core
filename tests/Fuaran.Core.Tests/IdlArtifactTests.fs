@@ -314,6 +314,8 @@ let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl
                 Fields =
                   [ { Name = "departs"
                       Opt = Required
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty
                       Type =
                         THosted

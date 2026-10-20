@@ -249,6 +249,19 @@ module internal TypeScriptCodec =
         // Phase 1080 — an omitted-when-empty repeated slot. `.length === 0` rather
         // than an equality test, because JS arrays compare by reference.
         | TList _, VList [] -> Ok(src + ".length === 0")
+        // Phase 539 — the empty-map default, and a JSON default compared by canonical bytes, as the F#
+        // backend and the interpreter compare it ([[Decl.literal]] decides what is admitted).
+        | TMap _, VMap [] -> Ok("Object.keys(" + src + ").length === 0")
+        | TJson, VJson _ ->
+            match Decl.literal idl t d with
+            | Ok(Literal.Json j) ->
+                Ok(
+                    "encJson("
+                    + src
+                    + ") === "
+                    + SourceLit.tsString (Canonical.write Rendering.CrossHost j)
+                )
+            | _ -> refuse ()
         | TRecord n, VRecord authored ->
             match CodegenLookup.tryRecord idl n with
             | None -> refuse ()
@@ -295,7 +308,18 @@ module internal TypeScriptCodec =
         let ft = TypeParams.substitute subst f.Type
         let member' = src + "." + f.Name
 
+        // Phase 539 — a map or JSON member of a record or union-case default is refused, as the F#
+        // backend refuses it (it has no pattern spelling there): the backends agree (D33).
+        let unspellable =
+            match ft, authored |> List.tryFind (fun (n, _) -> n = f.Name), f.Opt with
+            | TMap _, Some(_, (VMap _ as v)), _
+            | TJson, Some(_, (VJson _ as v)), _
+            | TMap _, (None | Some(_, VAbsent)), OmitDefault(VMap _ as v)
+            | TJson, (None | Some(_, VAbsent)), OmitDefault(VJson _ as v) -> Some v
+            | _ -> None
+
         match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
+        | _ when unspellable.IsSome -> Error(CodegenError.UnsupportedDefault(ft, unspellable.Value))
         | Some(_, av) when av <> VAbsent ->
             match f.Opt with
             // A host-only slot never reaches the wire, so the JS object the encoder sees has no

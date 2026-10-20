@@ -907,6 +907,8 @@ let declarationTests =
                                           @ [ { Name = "extra"
                                                 Type = TRecord name
                                                 Opt = Optional
+                                                Aliases = []
+                                                Presence = None
                                                 Annotations = Annotations.Empty } ] }) }
 
                   match Gen.typescriptDeclarations idl [ "Corner" ] with
@@ -1018,10 +1020,14 @@ let private oneOptional (name: string) : Idl =
                   [ { Name = "a"
                       Type = TStr
                       Opt = Required
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty }
                     { Name = name
                       Type = TStr
                       Opt = Optional
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty } ] } ]
         Unions = []
         Enums = []

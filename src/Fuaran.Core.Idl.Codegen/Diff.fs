@@ -97,6 +97,11 @@ module Diff =
             /// adds a doc comment and an `Obsolete` attribute — so folding it into
             /// `TypeHost` would report a retirement marking as a signature move.
             Annotations: string
+            /// The member's retired spellings (Phase 539), in priority order; `[]` when the artifact
+            /// declares none, which is also how a revision predating the key reads.
+            Aliases: string list
+            /// The member's presence condition (Phase 539) as canonical JSON, `""` when it declares none.
+            Presence: string
         }
 
     /// What a field belongs to. `ONodeEnvelope` is the per-node field set beside
@@ -173,6 +178,9 @@ module Diff =
             /// keys them on and canonically rendered — a case that says nothing is absent
             /// from the map, which is also how a revision predating the key reads.
             CaseAnnotations: Map<string, string>
+            /// Per-case aliases (Phase 539), keyed by the WIRE string as [[CaseAnnotations]] is; a case
+            /// declaring none is absent from the map.
+            CaseAliases: Map<string, string list>
         }
 
     /// One `idl.json` revision, keyed for lookup. Collections the artifact sorts
@@ -364,7 +372,16 @@ module Diff =
                     |> String.concat "; "
                   OptClass = str "$type" opt |> Option.defaultValue "?"
                   Opt = optLabel opt
-                  Annotations = readAnnotations v }
+                  Annotations = readAnnotations v
+                  Aliases =
+                    arr "aliases" v
+                    |> List.choose (function
+                        | JStr s -> Some s
+                        | _ -> None)
+                  Presence =
+                    match field "presence" v with
+                    | Some c -> Canonical.write Rendering.CrossHost c
+                    | None -> "" }
         | _ -> None
 
     let private readFields (owner: JVal) : FieldSnap list =
@@ -496,6 +513,21 @@ module Diff =
                             | Some(JObj entries) ->
                                 entries
                                 |> List.map (fun (wire, block) -> wire, Canonical.write Rendering.CrossHost block)
+                                |> Map.ofList
+                            | _ -> Map.empty
+                          CaseAliases =
+                            match field "aliases" e with
+                            | Some(JObj entries) ->
+                                entries
+                                |> List.map (fun (wire, xs) ->
+                                    wire,
+                                    (match xs with
+                                     | JArr items ->
+                                         items
+                                         |> List.choose (function
+                                             | JStr s -> Some s
+                                             | _ -> None)
+                                     | _ -> []))
                                 |> Map.ofList
                             | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields
@@ -653,6 +685,13 @@ module Diff =
         /// side means "declared none". Never a wire event: an annotation changes no
         /// encoding in either direction.
         | FieldAnnotationsChanged of Owner * name: string * before: string * after: string
+        /// The member's retired spellings moved (Phase 539). Additive when every alias the old
+        /// revision accepted is still accepted; a wire break when one is withdrawn — a document
+        /// written in that spelling no longer reads.
+        | FieldAliasesChanged of Owner * name: string * before: string list * after: string list
+        /// The member's presence condition appeared, moved or vanished (Phase 539): the canonical
+        /// bytes of every document in the configurations it governs move — a wire break.
+        | FieldPresenceChanged of Owner * name: string * before: string * after: string
         /// The declared annotations on a union CASE moved (Phase 113).
         | UnionCaseAnnotationsChanged of union: string * case: string * before: string * after: string
         /// The declared annotations on a KIND or a tree-OP itself moved (Phase 119) —
@@ -667,6 +706,8 @@ module Diff =
         /// case's wire string, which is how the artifact keys them and what a
         /// third-party reader sees.
         | EnumCaseAnnotationsChanged of enumName: string * wire: string * before: string * after: string
+        /// The lenient spellings of an enum case moved (Phase 539), graded as [[FieldAliasesChanged]].
+        | EnumCaseAliasesChanged of enumName: string * wire: string * before: string list * after: string list
         /// A smart-constructor (authoring) default appeared — not the wire-visible
         /// omit-at-default. Additive; `value` is canonical JSON.
         | DefaultAdded of kind: string * field: string * value: string
@@ -709,6 +750,12 @@ module Diff =
 
                   if old.Annotations <> f.Annotations then
                       yield FieldAnnotationsChanged(owner, f.Name, old.Annotations, f.Annotations)
+
+                  if old.Aliases <> f.Aliases then
+                      yield FieldAliasesChanged(owner, f.Name, old.Aliases, f.Aliases)
+
+                  if old.Presence <> f.Presence then
+                      yield FieldPresenceChanged(owner, f.Name, old.Presence, f.Presence)
 
           for f in before do
               if not (Map.containsKey f.Name a) then
@@ -1233,6 +1280,31 @@ module Diff =
 
     let private always (cs: FSharpConsequence list) : Context -> Change -> FSharpConsequence list = fun _ _ -> cs
 
+    /// Phase 539 — an alias list's verdict: `Additive` when every spelling the old revision accepted
+    /// is still accepted (a decoder reads strictly more documents), a wire break when one is
+    /// withdrawn (a document in that spelling stops reading). Neither moves a generated declaration.
+    let private classifyAliases (subject: string) (before: string list) (after: string list) =
+        match before |> List.filter (fun a -> not (List.contains a after)) with
+        | [] ->
+            Additive,
+            sprintf
+                "%s accepts more spellings (%s → %s); every document that read still reads."
+                subject
+                (String.concat ", " before)
+                (String.concat ", " after),
+            "DECISIONS.md D190 (an alias is decode-only: accepted and normalised, never encoded)"
+        | withdrawn ->
+            BreakingWire,
+            sprintf
+                "%s withdrew the alias(es) %s — a document written in a withdrawn spelling no longer reads."
+                subject
+                (String.concat ", " withdrawn),
+            "DECISIONS.md D190 (an alias is decode-only: accepted and normalised, never encoded)"
+
+    /// The alias rows share one verdict and one documented shape.
+    let private aliasRow (subject: string) =
+        row subject "`additive` when no alias is withdrawn, `breaking-wire` otherwise" "none"
+
     /// The annotation rows share one verdict and one documented shape.
     let private annotationRow (subject: string) =
         row
@@ -1737,6 +1809,28 @@ module Diff =
               [ annotationRow "an enum case's annotation set" ]
 
           rule
+              "EnumCaseAliasesChanged"
+              "46"
+              NoFamily
+              (function
+              | EnumCaseAliasesChanged(e, w, _, _) -> e + "." + w
+              | c -> misapplied "EnumCaseAliasesChanged" c)
+              (function
+              | EnumCaseAliasesChanged(e, w, b, a) -> classifyAliases (sprintf "case `\"%s\"` of enum `%s`" w e) b a
+              | c -> misapplied "EnumCaseAliasesChanged" c)
+              (always noShape)
+              (function
+              | EnumCaseAliasesChanged(e, w, b, a) ->
+                  sprintf
+                      "enum case aliases changed: %s.\"%s\" : [%s] -> [%s]"
+                      e
+                      w
+                      (String.concat ", " b)
+                      (String.concat ", " a)
+              | c -> misapplied "EnumCaseAliasesChanged" c)
+              [ aliasRow "an enum case's alias list" ]
+
+          rule
               "RecordAdded"
               "50"
               NoFamily
@@ -2074,6 +2168,58 @@ module Diff =
               [ annotationRow "a field's annotation set" ]
 
           rule
+              "FieldAliasesChanged"
+              "68"
+              NoFamily
+              (function
+              | FieldAliasesChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldAliasesChanged" c)
+              (function
+              | FieldAliasesChanged(owner, n, b, a) -> classifyAliases (sprintf "field `%s` on %s" n owner.Describe) b a
+              | c -> misapplied "FieldAliasesChanged" c)
+              (always noShape)
+              (function
+              | FieldAliasesChanged(o, n, b, a) ->
+                  sprintf
+                      "field aliases changed: %s.%s : [%s] -> [%s]"
+                      o.Describe
+                      n
+                      (String.concat ", " b)
+                      (String.concat ", " a)
+              | c -> misapplied "FieldAliasesChanged" c)
+              [ aliasRow "a field's alias list" ]
+
+          rule
+              "FieldPresenceChanged"
+              "69"
+              NoFamily
+              (function
+              | FieldPresenceChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldPresenceChanged" c)
+              (function
+              | FieldPresenceChanged(owner, n, b, a) ->
+                  BreakingWire,
+                  sprintf
+                      "field `%s` on %s changed its presence condition (%s → %s) — the canonical bytes of every document in the configurations it governs move."
+                      n
+                      owner.Describe
+                      (if b = "" then "none" else b)
+                      (if a = "" then "none" else a),
+                  "DECISIONS.md D190 (a member whose condition fails is absent from the canonical form)"
+              | c -> misapplied "FieldPresenceChanged" c)
+              (always noShape)
+              (function
+              | FieldPresenceChanged(o, n, b, a) ->
+                  sprintf
+                      "field presence changed: %s.%s : %s -> %s"
+                      o.Describe
+                      n
+                      (if b = "" then "none" else b)
+                      (if a = "" then "none" else a)
+              | c -> misapplied "FieldPresenceChanged" c)
+              [ row "a field's presence condition" "`breaking-wire`" "none" ]
+
+          rule
               "UnionCaseAnnotationsChanged"
               "66"
               NoFamily
@@ -2361,7 +2507,16 @@ module Diff =
                                     let aw = a.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
 
                                     if bw <> aw then
-                                        EnumCaseAnnotationsChanged(name, w, bw, aw) ])
+                                        EnumCaseAnnotationsChanged(name, w, bw, aw)
+
+                            // Phase 539 — per-case aliases, over the cases both revisions carry.
+                            for w in a.WireCases do
+                                if List.contains w b.WireCases then
+                                    let bw = b.CaseAliases |> Map.tryFind w |> Option.defaultValue []
+                                    let aw = a.CaseAliases |> Map.tryFind w |> Option.defaultValue []
+
+                                    if bw <> aw then
+                                        EnumCaseAliasesChanged(name, w, bw, aw) ])
                       before.Enums
                       after.Enums
 
