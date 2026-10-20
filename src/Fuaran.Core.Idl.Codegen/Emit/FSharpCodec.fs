@@ -959,9 +959,10 @@ let private encFloat (f: float) : JVal =
 
         let helpers =
             if sup.CaseRefines.IsEmpty then
-                [ FSharpCollecting.helpers ]
+                [ Template.text "fs-collecting.fs.txt" ]
             else
-                [ FSharpCollecting.helpers; FSharpCollecting.refineHelper ]
+                [ Template.text "fs-collecting.fs.txt"
+                  Template.text "fs-collecting-refine.fs.txt" ]
 
         groupR
         |> Result.map (fun group ->
@@ -978,192 +979,19 @@ let private encFloat (f: float) : JVal =
     /// declares a hosted slot and `dRefine` when the support declares a case refine — the two
     /// places a verbatim expression answers a sentence rather than a typed refusal.
     let decodeHelpers (disc: string) (hosted: bool) (refines: bool) : string =
-        let discLit = SourceLit.fsString disc
-
-        [ yield
-              """// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
-// path from the value the outermost decoder was handed, what the position expected, and a
-// sentence. The code, the path, the expectation and the detail are the ones the IDL interpreter
-// reports for the same document, so the sentence — `DecodeError.sentence`'s projection of them
-// (Phase 520) — is the interpreter's too.
-let private dFail (code: DecodeCode) (expected: string) (detail: string) : Result<'T, DecodeError> =
-    Error(DecodeError.make code expected detail)"""
-          yield
-              """// One step further from the root — what a refusal gains as it leaves a member or an item.
-let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
-    match r with
-    | Ok v -> Ok v
-    | Error e -> Error(DecodeError.under step e)"""
-          yield
-              """let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
-    match j with
-    | JObj fs -> Ok fs
-    | other -> Error(Decoder.wrongKind "object" other)"""
-          yield
-              """// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
-let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = __DISC__) with
-    | Some(_, JStr t) -> Ok t
-    | Some(_, other) -> Error(Decoder.wrongKind "string" other) |> dUnder (PathSegment.Key __DISC__)
-    | None -> Error(Decoder.missing __DISC__)"""
-                  .Replace("__DISC__", discLit)
-          yield
-              """// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
-let private dUnknown (expected: string) (detail: string) : Result<'T, DecodeError> =
-    dFail DecodeCode.UnknownTag expected detail |> dUnder (PathSegment.Key __DISC__)"""
-                  .Replace("__DISC__", discLit)
-          yield
-              """let private dStr (j: JVal) : Result<string, DecodeError> =
-    match j with
-    | JStr s -> Ok s
-    | other -> Error(Decoder.wrongKind "string" other)"""
-          yield
-              """let private dInt (j: JVal) : Result<int, DecodeError> =
-    match j with
-    | JInt i -> Ok i
-    | other -> Error(Decoder.wrongKind "int" other)"""
-          yield
-              """let private dBool (j: JVal) : Result<bool, DecodeError> =
-    match j with
-    | JBool b -> Ok b
-    | other -> Error(Decoder.wrongKind "bool" other)"""
-          yield
-              """// A whole-valued float renders without a decimal point, so it parses back as JInt.
-// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
-// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never
-// to the string: a host that answered the string would hand a consumer a different tree on
-// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
-// the float slot.
-let private dFloat (j: JVal) : Result<float, DecodeError> =
-    match j with
-    | JFloat f -> Ok f
-    | JInt i -> Ok(float i)
-    | JStr "NaN" -> Ok System.Double.NaN
-    | JStr "Infinity" -> Ok System.Double.PositiveInfinity
-    | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
-    | other -> Error(Decoder.wrongKind "number" other)"""
-          yield
-              """// Phase 347 — a closure / opaque slot holds one fixed sentinel string, read BY VALUE as the
-// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
-// takes), any other kind `WrongKind`. The sentinel carries nothing, so it decodes to `()`.
-let private dSentinel (sentinel: string) (j: JVal) : Result<unit, DecodeError> =
-    match j with
-    | JStr s when s = sentinel -> Ok()
-    | JStr s -> dFail DecodeCode.OutOfRange "string" ("'" + s + "'")
-    | other -> Error(Decoder.wrongKind "string" other)"""
-          yield
-              """// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
-// contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j"""
-          yield
-              """let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
-    match j with
-    | JArr xs ->
-        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
-            match rest with
-            | [] -> Ok(List.rev acc)
-            | x :: tail ->
-                match dec x with
-                | Ok v -> go (i + 1) (v :: acc) tail
-                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
-
-        go 0 [] xs
-    | other -> Error(Decoder.wrongKind "array" other)"""
-          yield
-              """// Every entry is checked, in document order; a repeated key keeps its FIRST value, as every
-// member read does (Phase 347 — `Map.ofList` kept the last, as `JSON.parse` does).
-let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
-    match j with
-    | JObj fs ->
-        (Ok Map.empty, fs)
-        ||> List.fold (fun acc (k, v) ->
-            match acc with
-            | Error e -> Error e
-            | Ok items ->
-                dec v
-                |> dUnder (PathSegment.Key k)
-                |> Result.map (fun d -> if Map.containsKey k items then items else Map.add k d items))
-    | other -> Error(Decoder.wrongKind "object" other)"""
-          yield
-              """let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
-    | None -> Error(Decoder.missing name)"""
-          yield
-              """let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
-    | None -> Ok None"""
-          yield
-              """let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
-    | None -> Ok dflt"""
+        [ yield Template.text "fs-decode-helpers.fs.txt"
           if hosted then
-              yield
-                  """// A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is
-// `OutOfRange` at the slot — any declared wire form has already been checked, so the value is
-// of the kind the slot takes and the codec does not admit it.
-let private dHosted (r: Result<'T, string>) : Result<'T, DecodeError> =
-    match r with
-    | Ok v -> Ok v
-    | Error m -> dFail DecodeCode.OutOfRange "a value the slot's host codec admits" m"""
+              yield Template.text "fs-decode-hosted.fs.txt"
           if refines then
-              yield
-                  """// A declared case refine answers a SENTENCE over the members it reads: `dRefine` binds the
-// case's last member and lifts the refine's refusal to `OutOfRange` at the case's object —
-// every member decoded, and together they are a value the case does not admit.
-let private dRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError>) : Result<'U, DecodeError> =
-    match r with
-    | Error e -> Error e
-    | Ok v ->
-        match f v with
-        | Ok u -> Ok u
-        | Error m -> dFail DecodeCode.OutOfRange "a case its refinement admits" m""" ]
+              yield Template.text "fs-decode-refine.fs.txt" ]
         |> String.concat "\n\n"
+        |> fun text -> text.Replace("__DISC__", SourceLit.fsString disc)
 
     /// Phase 252 — the generated F# check of a hosted slot's declared FORMAT, emitted only
     /// when the vocabulary declares one ([[declaresHostedFormat]]). It restates
     /// [[HostedFormat.admits]] because the generated module carries no reference to this
     /// package; a test holds the two to the same answers.
-    let fsFormatHelper =
-        """// Phase 252 — a hosted slot's declared string format, checked before its host codec runs,
-// exactly as the interpreter and the TypeScript host check it.
-let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
-    let day (y: int) (m: int) (d: int) =
-        y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
-
-    let num (m: System.Text.RegularExpressions.Match) (i: int) = int m.Groups[i].Value
-
-    let ok =
-        match format, j with
-        | "date", JStr s ->
-            let m = System.Text.RegularExpressions.Regex.Match(s, "^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
-            m.Success && day (num m 1) (num m 2) (num m 3)
-        | "date-time", JStr s ->
-            let m =
-                System.Text.RegularExpressions.Regex.Match(
-                    s,
-                    "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$"
-                )
-
-            m.Success
-            && day (num m 1) (num m 2) (num m 3)
-            && num m 4 <= 23
-            && num m 5 <= 59
-            && num m 6 <= 59
-            && (not m.Groups[9].Success || (num m 9 <= 23 && num m 10 <= 59))
-        | "uuid", JStr s ->
-            System.Text.RegularExpressions.Regex.IsMatch(
-                s,
-                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-            )
-        | _ -> false
-
-    if ok then
-        Ok()
-    else
-        dFail DecodeCode.OutOfRange ("a '" + format + "' string") (Canonical.write Rendering.CrossHost j)"""
+    let fsFormatHelper = (Template.text "fs-format-helper.fs.txt")
 
 
     // -----------------------------------------------------------------------

@@ -43,12 +43,13 @@
          equality and node-holder analyses, the generic instantiations, the envelope layout.
          After Annotations (it reads `emitsObsolete` once), ahead of every emitter. -->
     <Compile Include="Emit/Decl.fs" />
-    <!-- Phase 524 - one slot traversal, a printer per backend (B S10). -->
+    <!-- Phase 524 - one traversal per codec question, a printer per backend (B S10); the
+         runtime preludes are template files (Templates/), read by name. -->
     <Compile Include="Emit/Printer.fs" />
+    <Compile Include="Emit/Template.fs" />
     <Compile Include="Emit/FSharpTypes.fs" />
     <Compile Include="Emit/FSharpDefaults.fs" />
     <Compile Include="Emit/FSharpDerive.fs" />
-    <Compile Include="Emit/FSharpCollecting.fs" />
     <Compile Include="Emit/FSharpCodec.fs" />
     <Compile Include="Emit/JsonSchema.fs" />
     <Compile Include="Emit/TypeScriptCodec.fs" />
@@ -82,6 +83,11 @@
     <Compile Include="FStar/Proofs.fs" />
     <Compile Include="FStar/Vectors.fs" />
     <Compile Include="FStar.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 524 - the generated modules' runtime preludes, copied unchanged into what the
+         generator emits; embedded under their file names (Template.text). -->
+    <EmbeddedResource Include="Templates/*" LogicalName="Templates/%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <!-- Phase 511 - the suite states the laws of the internal `Decl` resolution directly. -->

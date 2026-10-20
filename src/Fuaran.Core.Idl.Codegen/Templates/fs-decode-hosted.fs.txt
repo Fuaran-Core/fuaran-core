@@ -1,0 +1,7 @@
+// A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is
+// `OutOfRange` at the slot — any declared wire form has already been checked, so the value is
+// of the kind the slot takes and the codec does not admit it.
+let private dHosted (r: Result<'T, string>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error m -> dFail DecodeCode.OutOfRange "a value the slot's host codec admits" m

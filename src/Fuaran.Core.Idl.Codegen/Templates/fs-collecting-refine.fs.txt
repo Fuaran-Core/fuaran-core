@@ -1,0 +1,9 @@
+// A declared case refine over the COLLECTED members: every member decoded, and the refine's
+// refusal is `dRefine`'s — `OutOfRange` at the case's object, its sentence unchanged.
+let private cRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError list>) : Result<'U, DecodeError list> =
+    match r with
+    | Error es -> Error es
+    | Ok v ->
+        match f v with
+        | Ok u -> Ok u
+        | Error m -> cOne (dFail DecodeCode.OutOfRange "a case its refinement admits" m)
