@@ -7,26 +7,28 @@
 attribute Fuaran.Core.Idl.Declare RequireQualifiedAccess
 attribute Fuaran.Core.Idl.HostedFormat RequireQualifiedAccess
 attribute Fuaran.Core.Idl.HostedFormatModule RequireQualifiedAccess
+attribute Fuaran.Core.Idl.HostedRefusal RequireQualifiedAccess
 attribute Fuaran.Core.Idl.KeyOrder RequireQualifiedAccess
 attribute Fuaran.Core.Idl.NodeEnvelopeShape RequireQualifiedAccess
 attribute Fuaran.Core.Idl.ProposalModule RequireQualifiedAccess
 attribute Fuaran.Core.Idl.SourceLit RequireQualifiedAccess
 attribute Fuaran.Core.Idl.TypeParams RequireQualifiedAccess
+attribute Fuaran.Core.Idl.UnionTagRule RequireQualifiedAccess
 attribute Fuaran.Core.Idl.VocabularyFaultModule RequireQualifiedAccess
 ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.Deprecation..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.HardenPolicy..ctor(System.String, System.String, System.String, System.String, System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
-ctor Fuaran.Core.Idl.HostedCodec..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedFormat>)
+ctor Fuaran.Core.Idl.HostedCodec..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedFormat>, Fuaran.Core.Idl.HostedRefusal)
 ctor Fuaran.Core.Idl.Idl..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnion>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlRecord>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Fuaran.Core.Idl.WireShape, Fuaran.Core.Idl.HardenPolicy)
 ctor Fuaran.Core.Idl.IdlDefault..ctor(System.String, System.String, Fuaran.Core.Idl.IdlValue)
 ctor Fuaran.Core.Idl.IdlEnum..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlField..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlKind..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlRecord..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
-ctor Fuaran.Core.Idl.IdlUnion..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>, Fuaran.Core.Idl.Annotations)
-ctor Fuaran.Core.Idl.IdlUnionCase..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
+ctor Fuaran.Core.Idl.IdlUnion..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>, Fuaran.Core.Idl.Annotations, Fuaran.Core.Idl.UnionTagRule)
+ctor Fuaran.Core.Idl.IdlUnionCase..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedCodec>)
 ctor Fuaran.Core.Idl.Proposal..ctor(System.String, System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalFixture>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalEvidence>, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalAlternative>, System.String, System.String)
 ctor Fuaran.Core.Idl.ProposalAlternative..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.ProposalEvidence..ctor(System.String, System.String, System.String, System.Int32, System.String)
@@ -38,6 +40,8 @@ field Fuaran.Core.Idl.Artifact.version : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.Date : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.DateTime : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.Uuid : System.Int32 (literal)
+field Fuaran.Core.Idl.HostedRefusal+Tags.Sentence : System.Int32 (literal)
+field Fuaran.Core.Idl.HostedRefusal+Tags.Typed : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TBool : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TClosure : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TEnum : System.Int32 (literal)
@@ -92,6 +96,8 @@ field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerKind : System.Int32 (literal)
 field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerOp : System.Int32 (literal)
 field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerRecord : System.Int32 (literal)
 field Fuaran.Core.Idl.ProposalOwner+Tags.OwnerUnionCase : System.Int32 (literal)
+field Fuaran.Core.Idl.UnionTagRule+Tags.CaseName : System.Int32 (literal)
+field Fuaran.Core.Idl.UnionTagRule+Tags.LowerFirst : System.Int32 (literal)
 method Fuaran.Core.Idl.Artifact.canonicalise(Fuaran.Core.Idl.Idl) : Fuaran.Core.Idl.Idl
 method Fuaran.Core.Idl.Artifact.codecWith(Fuaran.Core.Idl.Artifact+Identity) : Fuaran.Core.Codec`1<Fuaran.Core.Idl.Idl>
 method Fuaran.Core.Idl.Artifact.identityOf(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Artifact+Identity, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
@@ -116,8 +122,10 @@ method Fuaran.Core.Idl.Decode.decode(Fuaran.Core.Idl.Idl, System.String) : Micro
 method Fuaran.Core.Idl.Decode.decodeDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Decode.decodeOp(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
 method Fuaran.Core.Idl.Decode.decodeOpDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
+method Fuaran.Core.Idl.Decode.decodeStrictDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Decode.value(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
 method Fuaran.Core.Idl.Decode.valueDetailed(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
+method Fuaran.Core.Idl.Decode.valueStrictDetailed(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Encode.encode(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Idl.Encode.encodeNode(Fuaran.Core.Idl.Idl, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.IdlValue>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Idl.Encode.encodeOp(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
@@ -129,6 +137,8 @@ method Fuaran.Core.Idl.IdlEnum.AnnotationsOf(System.String) : Fuaran.Core.Idl.An
 method Fuaran.Core.Idl.IdlEnum.CaseAccepting(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.IdlEnum.CaseOf(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.IdlEnum.WireOf(System.String) : System.String
+method Fuaran.Core.Idl.IdlUnion.CaseByWireTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlUnionCase>
+method Fuaran.Core.Idl.IdlUnion.WireTagOf(System.String) : System.String
 method Fuaran.Core.Idl.ProposalModule.applyDelta(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
 method Fuaran.Core.Idl.ProposalModule.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, System.String>
 method Fuaran.Core.Idl.ProposalModule.ofJsonDetailed(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, Fuaran.Core.DecodeError>
@@ -157,6 +167,7 @@ method Fuaran.Core.Idl.SourceLit.tsStringSingle(System.String) : System.String
 method Fuaran.Core.Idl.TransparentUnion.tag(Fuaran.Core.Idl.HardenPolicy, Fuaran.Core.Idl.IdlUnion) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.TypeParams.bind(Fuaran.Core.Idl.IdlUnion, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>>
 method Fuaran.Core.Idl.TypeParams.substitute(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.IdlType) : Fuaran.Core.Idl.IdlType
+method Fuaran.Core.Idl.UnionTagRule.Apply(System.String) : System.String
 method Fuaran.Core.Idl.VocabularyFaultModule.describe(Fuaran.Core.Idl.VocabularyFault) : System.String
 property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get } (static)
 property Fuaran.Core.Idl.Annotations.IsEmpty : System.Boolean { get }
@@ -195,6 +206,7 @@ record-field Fuaran.Core.Idl.HostedCodec.Decode #2 : System.String
 record-field Fuaran.Core.Idl.HostedCodec.Encode #1 : System.String
 record-field Fuaran.Core.Idl.HostedCodec.FSharp #0 : System.String
 record-field Fuaran.Core.Idl.HostedCodec.Format #4 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedFormat>
+record-field Fuaran.Core.Idl.HostedCodec.Refusal #5 : Fuaran.Core.Idl.HostedRefusal
 record-field Fuaran.Core.Idl.HostedCodec.Wire #3 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>
 record-field Fuaran.Core.Idl.Idl.Defaults #4 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>
 record-field Fuaran.Core.Idl.Idl.Enums #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>
@@ -231,8 +243,10 @@ record-field Fuaran.Core.Idl.IdlUnion.Annotations #3 : Fuaran.Core.Idl.Annotatio
 record-field Fuaran.Core.Idl.IdlUnion.Cases #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>
 record-field Fuaran.Core.Idl.IdlUnion.Name #0 : System.String
 record-field Fuaran.Core.Idl.IdlUnion.Params #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.IdlUnion.TagRule #4 : Fuaran.Core.Idl.UnionTagRule
 record-field Fuaran.Core.Idl.IdlUnionCase.Annotations #2 : Fuaran.Core.Idl.Annotations
 record-field Fuaran.Core.Idl.IdlUnionCase.Fields #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>
+record-field Fuaran.Core.Idl.IdlUnionCase.Hosted #3 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedCodec>
 record-field Fuaran.Core.Idl.IdlUnionCase.Tag #0 : System.String
 record-field Fuaran.Core.Idl.Proposal.Alternatives #8 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalAlternative>
 record-field Fuaran.Core.Idl.Proposal.Cluster #1 : System.String
@@ -275,6 +289,8 @@ type Fuaran.Core.Idl.HostedCodec (record)
 type Fuaran.Core.Idl.HostedFormat (union)
 type Fuaran.Core.Idl.HostedFormat+Tags (type)
 type Fuaran.Core.Idl.HostedFormatModule (module)
+type Fuaran.Core.Idl.HostedRefusal (union)
+type Fuaran.Core.Idl.HostedRefusal+Tags (type)
 type Fuaran.Core.Idl.Idl (record)
 type Fuaran.Core.Idl.IdlDefault (record)
 type Fuaran.Core.Idl.IdlEnum (record)
@@ -342,12 +358,16 @@ type Fuaran.Core.Idl.Sanitize (module)
 type Fuaran.Core.Idl.SourceLit (module)
 type Fuaran.Core.Idl.TransparentUnion (module)
 type Fuaran.Core.Idl.TypeParams (module)
+type Fuaran.Core.Idl.UnionTagRule (union)
+type Fuaran.Core.Idl.UnionTagRule+Tags (type)
 type Fuaran.Core.Idl.VocabularyFault (record)
 type Fuaran.Core.Idl.VocabularyFaultModule (module)
 type Fuaran.Core.Idl.WireShape (record)
 union-case Fuaran.Core.Idl.HostedFormat.Date #0()
 union-case Fuaran.Core.Idl.HostedFormat.DateTime #1()
 union-case Fuaran.Core.Idl.HostedFormat.Uuid #2()
+union-case Fuaran.Core.Idl.HostedRefusal.Sentence #0()
+union-case Fuaran.Core.Idl.HostedRefusal.Typed #1()
 union-case Fuaran.Core.Idl.IdlType.NewTEnum #4(enumName: System.String)
 union-case Fuaran.Core.Idl.IdlType.NewTFn #10(Item: Fuaran.Core.Idl.ClosureSig)
 union-case Fuaran.Core.Idl.IdlType.NewTHosted #13(Item: Fuaran.Core.Idl.HostedCodec)
@@ -401,3 +421,5 @@ union-case Fuaran.Core.Idl.ProposalOwner.NewOwnerOp #4(tag: System.String)
 union-case Fuaran.Core.Idl.ProposalOwner.NewOwnerRecord #1(name: System.String)
 union-case Fuaran.Core.Idl.ProposalOwner.NewOwnerUnionCase #2(union: System.String, case: System.String)
 union-case Fuaran.Core.Idl.ProposalOwner.OwnerEnvelope #3()
+union-case Fuaran.Core.Idl.UnionTagRule.CaseName #0()
+union-case Fuaran.Core.Idl.UnionTagRule.LowerFirst #1()

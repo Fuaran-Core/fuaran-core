@@ -73,13 +73,16 @@ let docIdl: Idl =
                 f "tone" (TEnum "Tone") Required
                 f "pair" (TRecord "Pair") Optional ] } ]
       Unions =
-        [ { Name = "Src"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Src"
             Params = []
             Cases =
-              [ { Tag = "Lit"
+              [ { Hosted = None
+                  Tag = "Lit"
                   Fields = [ f "value" TStr Required ]
                   Annotations = doc "The literal case: the value is the text." }
-                { Tag = "Ref"
+                { Hosted = None
+                  Tag = "Ref"
                   Fields = [ f "target" TStr Required ]
                   Annotations =
                     { Deprecated =

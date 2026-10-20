@@ -64,9 +64,11 @@ module internal FSharpTypes =
 
             tyR |> Result.map (sprintf "%s: %s" (ident f.Name))
 
-        c.Fields
-        |> List.map fieldDecl
-        |> concatR " * "
+        // Phase 550 — a case-level host codec's case carries the HOST payload, its fields as the
+        // codec's tuple type states them; the case's IDL fields are its wire members.
+        (match c.Hosted with
+         | Some h -> Ok(if h.FSharp.Trim() = "unit" then "" else h.FSharp)
+         | None -> c.Fields |> List.map fieldDecl |> concatR " * ")
         |> Result.map (fun fields ->
             let body =
                 if fields = "" then

@@ -723,6 +723,52 @@ module Declare =
                       (u.Cases
                        |> List.mapi (fun c case -> at @ [ key "cases"; item c; key "tag" ], case.Tag))
 
+              // Phase 550 — the tag-naming rule derives each case's WIRE tag from its name, so two
+              // distinct names can derive one tag (`Abc` and `abc` under `lowerFirst`): the hosts
+              // could not tell the two cases apart on the wire. A name given twice is refused above.
+              for c, case in List.indexed u.Cases do
+                  let wire = u.WireTagOf case.Tag
+
+                  match
+                      u.Cases
+                      |> List.take c
+                      |> List.tryFind (fun other -> other.Tag <> case.Tag && u.WireTagOf other.Tag = wire)
+                  with
+                  | Some other ->
+                      fault
+                          (at @ [ key "cases"; item c; key "tag" ])
+                          (sprintf
+                              "%s: case '%s' derives the wire tag '%s', which case '%s' already carries under the union's tag rule"
+                              owner
+                              case.Tag
+                              wire
+                              other.Tag)
+                  | None -> ()
+
+              // Phase 550 — a case-level host codec reads and writes the members its fields declare,
+              // so it declares no wire form of its own; and a transparent case has no members to hand
+              // it, being written bare.
+              for c, case in List.indexed u.Cases do
+                  match case.Hosted with
+                  | Some h ->
+                      let path = at @ [ key "cases"; item c; key "hosted" ]
+                      let caseOwner = sprintf "union '%s' case '%s'" u.Name case.Tag
+
+                      if h.Wire.IsSome || h.Format.IsSome then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: a case-level host codec declares no wire form or format — the case's fields state its members"
+                                  caseOwner)
+
+                      if TransparentUnion.tag idl.Harden u = Some case.Tag then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: a transparent case is written bare and has no members for a case-level host codec to write"
+                                  caseOwner)
+                  | None -> ()
+
               for c, case in List.indexed u.Cases do
                   let caseOwner = sprintf "union '%s' case '%s'" u.Name case.Tag
                   yield! annotationErrors (at @ [ key "cases"; item c ]) caseOwner case.Annotations

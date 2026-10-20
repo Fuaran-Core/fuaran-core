@@ -75,6 +75,8 @@ point.
 | a union case removed | `breaking-wire` | `exhaustive-match` | `UnionCaseRemoved` |
 | a union's type parameters moved | `host-surface-only` — the wire carries no type arguments | `type-name-reference` (the wrong arity) | `UnionParamsChanged` |
 | a union's transparent case | `breaking-wire` | `no-generated-shape-change` | `UnionTransparencyChanged` |
+| a union's tag-naming rule | `breaking-wire` | `no-generated-shape-change` | `UnionTagRuleChanged` |
+| a union case's case-level host codec | `undecided` | `full-literal-construction` — the host case's payload is the codec's | `UnionCaseHostedChanged` |
 | an enum added | `additive` | `no-generated-shape-change` | `EnumAdded` |
 | an enum removed | `breaking-wire` | `type-name-reference` | `EnumRemoved` |
 | an enum case added | `additive` | `exhaustive-match` | `EnumCaseAdded` |

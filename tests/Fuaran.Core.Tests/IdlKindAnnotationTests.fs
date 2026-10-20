@@ -77,10 +77,12 @@ let private plainIdl: Idl =
       // type-recursion group — the placement a real vocabulary's kinds land in, and
       // the one the attribute has to ride the `and` for.
       Unions =
-        [ { Name = "Src"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Src"
             Params = []
             Cases =
-              [ { Tag = "Lit"
+              [ { Hosted = None
+                  Tag = "Lit"
                   Fields = [ f "value" TStr Required ]
                   Annotations = Annotations.Empty } ]
             Annotations = Annotations.Empty } ]

@@ -269,10 +269,12 @@ let private silentPaths: (string * Idl) list =
       "union-case field",
       { probeIdl with
           Unions =
-              [ { Name = "Holder"
+              [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                  Name = "Holder"
                   Params = []
                   Cases =
-                    [ { Tag = "Some"
+                    [ { Hosted = None
+                        Tag = "Some"
                         Fields = [ badMapField ]
                         Annotations = Annotations.Empty } ]
                   Annotations = Annotations.Empty } ]
@@ -504,10 +506,12 @@ let valueCarryingDefaults =
               let idl =
                   { probeIdl with
                       Unions =
-                          [ { Name = "Holder"
+                          [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "Holder"
                               Params = []
                               Cases =
-                                [ { Tag = "Of"
+                                [ { Hosted = None
+                                    Tag = "Of"
                                     Fields = [ field "n" TInt Required ]
                                     Annotations = Annotations.Empty } ]
                               Annotations = Annotations.Empty } ]
@@ -659,10 +663,12 @@ let artifactRoundTrip =
               let transparent =
                   { refIdl with
                       Unions =
-                          [ { Name = "Text"
+                          [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "Text"
                               Params = []
                               Cases =
-                                [ { Tag = "Inline"
+                                [ { Hosted = None
+                                    Tag = "Inline"
                                     Fields =
                                       [ { Name = "text"
                                           Type = TStr
@@ -1219,7 +1225,8 @@ let private hostedPlantIdl: Idl =
                     field
                         "when"
                         (THosted
-                            { FSharp = "System.DateOnly"
+                            { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                              FSharp = "System.DateOnly"
                               Encode = plantedHostBody
                               Decode = "(fun _ -> Error \"planted decoder\")"
                               Wire = None

@@ -323,7 +323,8 @@ let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl
                       Annotations = Annotations.Empty
                       Type =
                         THosted
-                            { FSharp = "System.DateOnly"
+                            { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                              FSharp = "System.DateOnly"
                               Encode = "encDate"
                               Decode = "decDate"
                               Wire = wire
@@ -458,6 +459,32 @@ let private offDefaults: Idl =
         Wire =
             { WireShape.Default with
                 NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+    // Phase 550 — a union away from the case-name tag rule, with a typed case-level host codec.
+    |> fun idl ->
+        { idl with
+            Unions =
+                [ { Name = "Mark"
+                    Params = []
+                    Annotations = Annotations.Empty
+                    TagRule = UnionTagRule.LowerFirst
+                    Cases =
+                      [ { Tag = "Pinned"
+                          Fields =
+                            [ { Name = "at"
+                                Type = TStr
+                                Opt = Required
+                                Aliases = []
+                                Presence = None
+                                Annotations = Annotations.Empty } ]
+                          Annotations = Annotations.Empty
+                          Hosted =
+                            Some
+                                { FSharp = "string"
+                                  Encode = "fun s -> [ \"at\", JStr s ]"
+                                  Decode = "Decoder.field \"at\" Decoder.str"
+                                  Wire = None
+                                  Format = None
+                                  Refusal = HostedRefusal.Typed } } ] } ] }
 
 /// The same vocabulary AT every default the omit table names.
 let private atDefaults: Idl =
@@ -474,6 +501,12 @@ let private atDefaults: Idl =
                                 Aliases = []
                                 Annotations = Annotations.Empty }) })
         Enums = [ Declare.enumOf "Tone" [ "loud"; "quiet" ] ]
+        Unions =
+            offDefaults.Unions
+            |> List.map (fun u ->
+                { u with
+                    TagRule = UnionTagRule.CaseName
+                    Cases = u.Cases |> List.map (fun c -> { c with Hosted = None }) })
         Ops = []
         Wire = WireShape.Default }
 

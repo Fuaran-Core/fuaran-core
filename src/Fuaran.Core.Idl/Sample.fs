@@ -251,7 +251,7 @@ module Sample =
                         (List.length u.Decl.Params))
             | Some binding ->
                 let c = pickAt r ("union '" + u.Name + "'") candidates
-                VUnion(c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))
+                VUnion(u.Decl.WireTagOf c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))
         | WireForm.Undeclared(Undeclared.Union(name, _)) ->
             refuse ("union '" + name + "'") "the vocabulary does not declare it"
         | WireForm.Node ->

@@ -419,7 +419,8 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                   sField
                       "when"
                       (Fuaran.Core.Idl.THosted
-                          { FSharp = "System.DateOnly"
+                          { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                            FSharp = "System.DateOnly"
                             Encode = "encDate"
                             Decode = "decDate"
                             Wire = Some Fuaran.Core.Idl.TStr
@@ -433,13 +434,16 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                     sField "label" Fuaran.Core.Idl.TStr opt ]
                 Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
         Unions =
-            [ { Name = "Box"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Box"
                 Params = [ "T" ]
                 Cases =
-                  [ { Tag = "Empty"
+                  [ { Hosted = None
+                      Tag = "Empty"
                       Fields = []
                       Annotations = Fuaran.Core.Idl.Annotations.Empty }
-                    { Tag = "Full"
+                    { Hosted = None
+                      Tag = "Full"
                       Fields = [ sField "value" (Fuaran.Core.Idl.TVar "T") req ]
                       Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
                 Annotations = Fuaran.Core.Idl.Annotations.Empty } ]

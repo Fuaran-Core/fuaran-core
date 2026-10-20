@@ -366,7 +366,8 @@ let tests =
                                 [ f
                                       "liveRegion"
                                       (THosted
-                                          { FSharp = "HostPrelude.LiveRegionKind"
+                                          { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                                            FSharp = "HostPrelude.LiveRegionKind"
                                             Encode = "encLiveRegionKind"
                                             Decode = "decLiveRegionKind"
                                             Wire = None
@@ -435,18 +436,21 @@ let tests =
               let union cases =
                   { empty with
                       Unions =
-                          [ { Name = "Binding"
+                          [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "Binding"
                               Params = [ "T" ]
                               Cases = cases
                               Annotations = Annotations.Empty } ] }
 
               let stat: IdlUnionCase =
-                  { Tag = "Static"
+                  { Hosted = None
+                    Tag = "Static"
                     Fields = [ f "value" TStr Required ]
                     Annotations = Annotations.Empty }
 
               let state: IdlUnionCase =
-                  { Tag = "State"
+                  { Hosted = None
+                    Tag = "State"
                     Fields = [ f "key" TStr Required ]
                     Annotations = Annotations.Empty }
 
@@ -747,7 +751,8 @@ let private oneField (ty: IdlType) =
 let private hostedField (h: HostedCodec) = oneField (THosted h)
 
 let private dateCodec: HostedCodec =
-    { FSharp = "System.DateOnly"
+    { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+      FSharp = "System.DateOnly"
       Encode = "HostDate.encode"
       Decode = "HostDate.decode"
       Wire = None
@@ -1171,10 +1176,12 @@ let private typed (family: string) (typeAnn: Annotations) (fieldAnn: Annotations
 
     { empty with
         Unions =
-            [ { Name = "Source"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Source"
                 Params = []
                 Cases =
-                  [ { Tag = "Lit"
+                  [ { Hosted = None
+                      Tag = "Lit"
                       Fields = [ f "text" TStr Required ]
                       Annotations = Annotations.Empty } ]
                 Annotations = on "union" } ]

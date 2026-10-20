@@ -239,9 +239,14 @@ module internal DiffSnapshot =
                             cases
                             |> byName (str "tag") (fun c ->
                                 { Fields = readFields c
-                                  Annotations = readAnnotations c })
+                                  Annotations = readAnnotations c
+                                  Hosted =
+                                    field "hosted" c
+                                    |> Option.map (Canonical.write Rendering.CrossHost)
+                                    |> Option.defaultValue "" })
                           CaseOrder = cases |> List.choose (str "tag")
-                          TransparentCase = str "transparentCase" u })
+                          TransparentCase = str "transparentCase" u
+                          TagRule = str "tagRule" u |> Option.defaultValue "caseName" })
                   Enums =
                     arr "enums" artifact
                     |> byName (str "name") (fun e ->

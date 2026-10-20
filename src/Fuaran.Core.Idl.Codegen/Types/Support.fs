@@ -91,3 +91,18 @@ type GenSupport =
           AccessorSplice = None
           CaseRefines = Map.empty
           KindProjections = Map.empty }
+
+/// Phase 550 (DECISIONS.md D198) — the request for a CODEC-ONLY F# module: encoders and decoders for
+/// declarations whose types the HOST declares, with no type declaration of the module's own.
+type CodecOnly =
+    {
+        /// The unions, records and enums the module exposes, in the order their public entries
+        /// (`encode<Name>`, `decode<Name>`, `decode<Name>Strict`) are printed. A generic union's
+        /// entries take one encoder or decoder per type parameter, in declared order.
+        Roots: string list
+        /// Each declaration the roots reach → the full path of the host type it IS
+        /// (`"Fuaran.Core.InvokeError"`); a generic one is applied to its declared parameters. A
+        /// reached declaration with no entry is refused by name. Cases are matched and built through
+        /// the module's abbreviation of the path, so the host type may require qualified access or not.
+        HostTypes: Map<string, string>
+    }

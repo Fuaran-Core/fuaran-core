@@ -379,7 +379,8 @@ module internal FStarModel =
                 slotOf where t
                 |> Result.bind (fun s ->
                     fieldMembers idl subst (where + " (default)") c.Fields
-                    |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName s) c.Tag) ms authored)))
+                    |> Result.bind (fun ms ->
+                        ctorLit idl where (ctorName (slotName s) (u.WireTagOf c.Tag)) ms authored)))
 
     /// A constructor literal for a declared default, with each member taken from the authored
     /// field list under its own presence rule — the constructor's argument order is the declared
@@ -481,7 +482,8 @@ module internal FStarModel =
         {
             Order: Slot list
             Members: Map<string, Member list>
-            /// Union slot name to (case tag, members) in declaration order.
+            /// Union slot name to (case WIRE tag, members) in declaration order (the case name under
+            /// the default tag rule; Phase 550).
             Cases: Map<string, (string * Member list) list>
             /// The union slot names whose declared transparent case the model honours.
             Transparent: Map<string, string>
@@ -554,13 +556,15 @@ module internal FStarModel =
                                 | Error e -> Error e
                                 | Ok cs ->
                                     fieldMembers idl subst (n + "." + c.Tag) c.Fields
-                                    |> Result.map (fun ms -> (c.Tag, ms) :: cs))
+                                    |> Result.map (fun ms -> (u.WireTagOf c.Tag, ms) :: cs))
                             (Ok [])
                         |> Result.map List.rev
                         |> Result.bind (fun cs ->
                             caseMap[key] <- cs
 
-                            match TransparentUnion.tag idl.Harden u with
+                            // Phase 550 — the model is of the WIRE: each case is keyed by its wire tag,
+                            // the transparent case among them.
+                            match TransparentUnion.tag idl.Harden u |> Option.map u.WireTagOf with
                             | None -> Ok()
                             | Some tag ->
                                 // A transparent case encodes BARE, so its decoder arm reads the
