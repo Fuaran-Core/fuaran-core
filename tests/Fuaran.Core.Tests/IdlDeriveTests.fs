@@ -153,6 +153,8 @@ let private contravariantIdl =
                                                 TypeScript = "(m: Msg) => string"
                                                 Placeholder = "(fun (_: obj) -> \"\")" }
                                         Opt = Required
+                                        Aliases = []
+                                        Presence = None
                                         Annotations = Annotations.Empty } ]
                                   Annotations = Annotations.Empty } ] }) }
 
@@ -1102,11 +1104,13 @@ let declarationTests =
 // the fixed emission from the defect.
 // ---------------------------------------------------------------------------
 
-module private Projected =
+module internal Projected =
     let field name ty opt =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let req name ty = field name ty Required
@@ -1473,6 +1477,8 @@ module private DeclLaws =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let case tag fields =
@@ -1858,6 +1864,8 @@ module private NullChecked =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let case tag fields =
@@ -2384,6 +2392,8 @@ module private OptionalNode =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let kind tag fields =

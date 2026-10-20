@@ -58,9 +58,26 @@ module Gen =
     let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
         TypeScriptCodec.typescriptValueWith shape v
 
+    /// Phase 539 (DECISIONS.md D190) — the TypeScript codec reads each member under its one name and
+    /// has no presence condition, so it REFUSES a vocabulary that declares an alias or a presence
+    /// condition, naming the first, rather than emitting a codec that would read the canonical form
+    /// differently from the F# host. The declarations leg is unaffected: neither shape moves a type.
+    let private tsCodecAdmits (idl: Idl) : Result<unit, CodegenError> =
+        match Decl.canonicalFormDeclarations idl with
+        | [] -> Ok()
+        | what :: _ ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    what,
+                    "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
+                    "generate this vocabulary's codec with the F# backend, which applies it"
+                )
+            )
+
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScriptCodec.typescriptModule (Decl.resolve idl Map.empty kindTags)
+        tsCodecAdmits idl
+        |> Result.bind (fun () -> TypeScriptCodec.typescriptModule (Decl.resolve idl Map.empty kindTags))
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
     /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
@@ -74,7 +91,9 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags)
+        tsCodecAdmits idl
+        |> Result.bind (fun () ->
+            TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags))
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =

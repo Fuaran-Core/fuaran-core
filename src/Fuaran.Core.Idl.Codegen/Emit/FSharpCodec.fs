@@ -7,6 +7,7 @@ open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpTypes
 open Fuaran.Core.Idl.Emit.FSharpDefaults
+open Fuaran.Core.Idl.Emit.FSharpCanonicalForm
 
 /// The F# structural-layer CODEC: the encoder and decoder groups, the witness, the validator
 /// scaffold, and the module that assembles them around the type group.
@@ -134,14 +135,35 @@ let private encFloat (f: float) : JVal =
                     // the better test anyway — it says what it means. (`fsDefaultLit` admits
                     // only the EMPTY list, so there is no non-empty case to answer for.)
                     | TList _ -> sprintf "(if List.isEmpty %s then None else %s)" src present
-                    | _ -> sprintf "(if %s = %s then None else %s)" src dexpr present) }
+                    // Phase 539 — the empty-map default, tested as the list one is (`Map.isEmpty`
+                    // needs no equality at the value type; [[Decl.literal]] admits only the EMPTY map).
+                    | TMap _ -> sprintf "(if Map.isEmpty %s then None else %s)" src present
+                    // Phase 539 — a JSON default is compared as the interpreter compares it, by
+                    // canonical bytes, so a value holding the default's members in another order is
+                    // still at it.
+                    | TJson ->
+                        match d with
+                        | VJson j ->
+                            sprintf
+                                "(if Canonical.write Rendering.CrossHost %s = %s then None else %s)"
+                                src
+                                (SourceLit.fsString (Canonical.write Rendering.CrossHost j))
+                                present
+                        | _ -> sprintf "(if %s = %s then None else %s)" src dexpr present
+                    | _ -> sprintf "(if %s = %s then None else %s)" src dexpr present)
+          // Phase 539 — a member whose presence condition fails is omitted whatever it holds, as the
+          // interpreter omits it.
+          When =
+            fun fields srcOf c ->
+                presenceTest idl fields srcOf c
+                |> Result.map (fun test piece -> sprintf "(if %s then %s else None)" test piece) }
 
     /// A member read off the bound record variable `recv` (`s` for a spec/record encoder, `n` for
     /// the node envelope), as its piece of a `List.choose id` list.
-    let specPieceOf (idl: Idl) (recv: string) (f: IdlField) : Result<string, CodegenError> =
+    let specPieceOf (idl: Idl) (recv: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
         let p = memberEncPrinter idl
 
-        MemberEncTraversal.encMember p (p.Access recv f) f
+        MemberEncTraversal.encMember p fields (p.Access recv) f
         |> Result.map (MemberEncTraversal.print p)
 
     /// The members of a spec or record read off `s`, as the body of a `List.choose id` list.
@@ -389,9 +411,11 @@ let private encFloat (f: float) : JVal =
     let memberDecPrinter (idl: Idl) : MemberDecPrinter =
         { Slot = decPrinter
           Key = SourceLit.fsString
-          Req = sprintf "dReq %s __fs %s"
-          Opt = sprintf "dOpt %s __fs %s"
-          Def = sprintf "dDef %s __fs %s (%s)"
+          // Phase 539 — a member declaring an alias or a presence condition reads its canonical view.
+          Object = fun fields f -> memberView idl fields f |> Option.defaultValue "__fs"
+          Req = sprintf "dReq %s %s %s"
+          Opt = sprintf "dOpt %s %s %s"
+          Def = sprintf "dDef %s %s %s (%s)"
           Placeholder =
             function
             | TFn s -> s.Placeholder
@@ -399,10 +423,6 @@ let private encFloat (f: float) : JVal =
           HostOnlySentinel = sprintf "Ok (%s)"
           HostOnly = fun f -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
           DefaultLit = fsDefaultLit idl }
-
-    /// Reading one field back out, honouring the presence rule it was written under ([[MemberEncTraversal.encMember]]).
-    let decField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
-        MemberTraversal.decMember (memberDecPrinter idl) f
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -439,9 +459,14 @@ let private encFloat (f: float) : JVal =
     /// `WrongKind` — the interpreter's split, and since Phase 520 the interpreter's detail, so the
     /// projected sentence is the interpreter's too.
     let enumDecoder (e: IdlEnum) =
+        // Phase 539 — each declared alias decodes to its case, after the canonical arms.
         let arms =
-            e.Cases
-            |> List.map (fun c -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString (e.WireOf c)) e.Name c)
+            (e.Cases
+             |> List.map (fun c -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString (e.WireOf c)) e.Name c))
+            @ (e.Cases
+               |> List.collect (fun c ->
+                   e.AliasesOf c
+                   |> List.map (fun a -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString a) e.Name c)))
             |> String.concat "\n"
 
         sprintf
@@ -616,9 +641,9 @@ let private encFloat (f: float) : JVal =
     let colMemberPrinter (idl: Idl) : MemberDecPrinter =
         { memberDecPrinter idl with
             Slot = colPrinter
-            Req = sprintf "cReq %s __fs %s"
-            Opt = sprintf "cOpt %s __fs %s"
-            Def = sprintf "cDef %s __fs %s (%s)" }
+            Req = sprintf "cReq %s %s %s"
+            Opt = sprintf "cOpt %s %s %s"
+            Def = sprintf "cDef %s %s %s (%s)" }
 
     /// Read every member (in declaration order — the order the defects are reported in), then
     /// build `final` when all of them decoded, else answer every member's defects, concatenated in
@@ -1270,7 +1295,9 @@ let private encFloat (f: float) : JVal =
             // kind's own object; `Canonical.write Rendering.CrossHost` sorts keys, so splice order is
             // irrelevant. Nested emission is byte-identical to the pre-declarable form.
             let envelopePieces () =
-                decl.Envelope.Members |> List.map (specPieceOf idl "n") |> concatR "; "
+                decl.Envelope.Members
+                |> List.map (specPieceOf idl "n" decl.Envelope.Members)
+                |> concatR "; "
 
             let body =
                 match decl.Envelope.Kind, decl.Envelope.Members with
@@ -1461,6 +1488,10 @@ let private encFloat (f: float) : JVal =
               (sup.AccessorSplice |> Option.toList)
               decodeHelpers idl.Wire.Discriminator decl.Hosted (not sup.CaseRefines.IsEmpty)
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])
+              @ (if declaresCanonicalFormAnywhere idl then
+                     [ canonicalFormHelpers ]
+                 else
+                     [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               // Phase 337 — the parser's refusal through `Decoder.parse` (under `ReadOptions.strict`

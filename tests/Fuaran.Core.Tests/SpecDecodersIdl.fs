@@ -25,6 +25,8 @@ let private field name t opt : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 /// `Binding<'T>` — a case whose placeholder reaches the type-parameter decoder by its documented

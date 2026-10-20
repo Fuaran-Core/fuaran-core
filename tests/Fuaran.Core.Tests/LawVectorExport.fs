@@ -825,11 +825,15 @@ module LawVectorExport =
     let propagationPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, PropagationVectorExport.fileName)
 
+    let canonicalFormPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, CanonicalFormVectorExport.fileName)
+
     let emitted (corpusDir: string) : (string * string) list =
         [ capabilityPath corpusDir, Capabilities.render ()
           decimalPath corpusDir, Decimals.render ()
           fieldPath corpusDir, Fields.render ()
-          propagationPath corpusDir, PropagationVectorExport.renderAt (kitVersion ()) ]
+          propagationPath corpusDir, PropagationVectorExport.renderAt (kitVersion ())
+          canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt (kitVersion ()) ]
 
     // -----------------------------------------------------------------------
     //  Phase 394 — the corpus `laws/manifest.json` rows beside the files
@@ -855,6 +859,9 @@ module LawVectorExport =
         Path.Combine(familyDir corpusDir, manifestFileName)
 
     /// Each emitted family's row id in the corpus manifest, with the file that row names.
+    ///
+    /// `canonicalFormLaws` (Phase 539) is emitted and not yet listed, for the same reason and with the
+    /// same remedy: the corpus indexes it in the change-set that first carries the file.
     ///
     /// `propagationLaws` (Phase 538) is emitted and not yet listed: the corpus indexes it in the commit
     /// that first carries the file (fuaran#2328), and a row named here before the index holds it would

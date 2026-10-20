@@ -167,12 +167,15 @@ type internal MemberDecPrinter =
         Slot: SlotPrinter
         /// The member's wire key as a literal.
         Key: string -> string
-        /// A required member read with a decoder.
-        Req: string -> string -> string
+        /// The object a member of `fields` is read from (Phase 539: a member declaring an alias or a
+        /// presence condition is read from its canonical view of the object).
+        Object: IdlField list -> IdlField -> string
+        /// A required member read with a decoder, from its key, its object and its decoder.
+        Req: string -> string -> string -> string
         /// An optional member read with a decoder.
-        Opt: string -> string -> string
+        Opt: string -> string -> string -> string
         /// An omit-at-default member read with a decoder, restored to a literal when absent.
-        Def: string -> string -> string -> string
+        Def: string -> string -> string -> string -> string
         /// The value a SENTINEL slot (closure, `TFn`, opaque) decodes to.
         Placeholder: IdlType -> string
         /// A host-only sentinel slot, from its placeholder.
@@ -193,8 +196,9 @@ module internal MemberTraversal =
     /// present one must be its sentinel, and an optional one's PRESENCE is real wire information.
     /// Phase 124 — an omit-at-default member's restore and the encoder's omit test are rendered from
     /// ONE literal, so they cannot disagree.
-    let decMember (p: MemberDecPrinter) (f: IdlField) : Result<string, CodegenError> =
+    let decMember (p: MemberDecPrinter) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
         let key = p.Key f.Name
+        let o = p.Object fields f
 
         match f.Type with
         | TClosure
@@ -205,25 +209,26 @@ module internal MemberTraversal =
             SlotTraversal.slotFn p.Slot f.Type
             |> Result.map (fun d ->
                 match f.Opt with
-                | Required -> p.Req key d
-                | Optional -> p.Opt key d
-                | OmitDefault _ -> p.Def key d placeholder
+                | Required -> p.Req key o d
+                | Optional -> p.Opt key o d
+                | OmitDefault _ -> p.Def key o d placeholder
                 // Never on the wire — nothing to read, so take the placeholder.
                 | HostOnly -> p.HostOnlySentinel placeholder)
         | _ ->
             match f.Opt with
-            | Required -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Req key)
-            | Optional -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Opt key)
+            | Required -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Req key o)
+            | Optional -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Opt key o)
             | HostOnly -> p.HostOnly f
             | OmitDefault d ->
                 p.DefaultLit f.Type d
                 |> Result.bind (fun lit ->
-                    SlotTraversal.slotFn p.Slot f.Type |> Result.map (fun dfn -> p.Def key dfn lit))
+                    SlotTraversal.slotFn p.Slot f.Type
+                    |> Result.map (fun dfn -> p.Def key o dfn lit))
 
     /// Every member of an object read, in declaration order, each paired with its field.
     let decMembers (p: MemberDecPrinter) (fields: IdlField list) : Result<(IdlField * string) list, CodegenError> =
         fields
-        |> List.map (fun f -> decMember p f |> Result.map (fun e -> f, e))
+        |> List.map (fun f -> decMember p fields f |> Result.map (fun e -> f, e))
         |> sequenceR
 
     /// Reading the member `f` COLLECTING (Phase 377): a leaf member, and a host-only one, which
@@ -234,12 +239,13 @@ module internal MemberTraversal =
         (dec: MemberDecPrinter)
         (col: MemberDecPrinter)
         (lift: string -> string)
+        (fields: IdlField list)
         (f: IdlField)
         : Result<string, CodegenError> =
         match f.Opt with
-        | HostOnly -> decMember dec f |> Result.map lift
-        | _ when not (SlotTraversal.collectsOver f.Type) -> decMember dec f |> Result.map lift
-        | _ -> decMember col f
+        | HostOnly -> decMember dec fields f |> Result.map lift
+        | _ when not (SlotTraversal.collectsOver f.Type) -> decMember dec fields f |> Result.map lift
+        | _ -> decMember col fields f
 
     /// Every member of an object read collecting, in declaration order.
     let colMembers
@@ -249,7 +255,7 @@ module internal MemberTraversal =
         (fields: IdlField list)
         : Result<(IdlField * string) list, CodegenError> =
         fields
-        |> List.map (fun f -> colMember dec col lift f |> Result.map (fun e -> f, e))
+        |> List.map (fun f -> colMember dec col lift fields f |> Result.map (fun e -> f, e))
         |> sequenceR
 
 /// What a backend prints for a union DECODER, around the members [[MemberTraversal]] reads.
@@ -334,6 +340,10 @@ type internal MemberEncPrinter =
         /// The omission at the declared default `d` of the member read from `src` at type `t`: a
         /// wrapper around the member's present piece.
         OmitAt: string -> IdlType -> IdlValue -> Result<string -> string, CodegenError>
+        /// Phase 539 — a member's presence condition over its siblings in `fields` (each read from
+        /// the expression the name maps to): a wrapper around the member's piece that omits it
+        /// whenever the condition fails.
+        When: IdlField list -> (string -> string) -> PresenceCondition -> Result<string -> string, CodegenError>
     }
 
 /// The one traversal over a member's presence when it is WRITTEN, printed by a [[MemberEncPrinter]]
@@ -341,29 +351,50 @@ type internal MemberEncPrinter =
 /// on the wire, in any state (Phase 691); OmitDefault → omitted at its default).
 module internal MemberEncTraversal =
 
-    /// The member `f`, its value read from `src`.
-    let encMember (p: MemberEncPrinter) (src: string) (f: IdlField) : Result<MemberPiece, CodegenError> =
-        let key = p.Key f.Name
-
-        match f.Opt with
-        | HostOnly -> Ok(MemberPiece.Conditional p.Absent)
-        | Required ->
-            SlotTraversal.encApplied p.Applied src f.Type
-            |> Result.map (fun e -> MemberPiece.Always(key, e))
-        | Optional ->
-            SlotTraversal.encApplied p.Applied (p.OptionalVar src) f.Type
-            |> Result.map (fun e -> MemberPiece.Conditional(p.Optional src key e))
-        | OmitDefault d ->
-            SlotTraversal.encApplied p.Applied src f.Type
-            |> Result.bind (fun e ->
-                p.OmitAt src f.Type d
-                |> Result.map (fun omit -> MemberPiece.Conditional(omit (p.Present key e))))
-
     /// A piece as it reads in a list where some members may be absent.
     let print (p: MemberEncPrinter) (piece: MemberPiece) : string =
         match piece with
         | MemberPiece.Always(key, e) -> p.Present key e
         | MemberPiece.Conditional s -> s
+
+    /// The member `f` of `fields`, each member's value read from `at` (its binding or its access).
+    /// A member declaring a presence condition (Phase 539) is omitted whenever the condition fails.
+    let encMember
+        (p: MemberEncPrinter)
+        (fields: IdlField list)
+        (at: IdlField -> string)
+        (f: IdlField)
+        : Result<MemberPiece, CodegenError> =
+        let key = p.Key f.Name
+        let src = at f
+
+        let sibling (name: string) =
+            match fields |> List.tryFind (fun g -> g.Name = name) with
+            | Some g -> at g
+            | None -> name
+
+        let piece =
+            match f.Opt with
+            | HostOnly -> Ok(MemberPiece.Conditional p.Absent)
+            | Required ->
+                SlotTraversal.encApplied p.Applied src f.Type
+                |> Result.map (fun e -> MemberPiece.Always(key, e))
+            | Optional ->
+                SlotTraversal.encApplied p.Applied (p.OptionalVar src) f.Type
+                |> Result.map (fun e -> MemberPiece.Conditional(p.Optional src key e))
+            | OmitDefault d ->
+                SlotTraversal.encApplied p.Applied src f.Type
+                |> Result.bind (fun e ->
+                    p.OmitAt src f.Type d
+                    |> Result.map (fun omit -> MemberPiece.Conditional(omit (p.Present key e))))
+
+        piece
+        |> Result.bind (fun piece ->
+            match f.Presence with
+            | None -> Ok piece
+            | Some c ->
+                p.When fields sibling c
+                |> Result.map (fun guard -> MemberPiece.Conditional(guard (print p piece))))
 
     /// Every member of an object read off the bound variable `recv`, in declaration order.
     let encMembers
@@ -371,7 +402,7 @@ module internal MemberEncTraversal =
         (recv: string)
         (fields: IdlField list)
         : Result<MemberPiece list, CodegenError> =
-        fields |> List.map (fun f -> encMember p (p.Access recv f) f) |> sequenceR
+        fields |> List.map (encMember p fields (p.Access recv)) |> sequenceR
 
 /// What a backend prints for a union ENCODER, around the members [[MemberEncTraversal]] writes.
 type internal UnionEncPrinter =
@@ -402,7 +433,7 @@ module internal UnionEncTraversal =
             | CaseLayout.Bare(Error e) -> Error e
             | CaseLayout.Tagged ->
                 c.Fields
-                |> List.map (fun f -> MemberEncTraversal.encMember p.Member (p.CaseVar f) f)
+                |> List.map (MemberEncTraversal.encMember p.Member c.Fields p.CaseVar)
                 |> sequenceR
                 |> Result.map (p.Tagged u c))
         |> sequenceR
@@ -465,6 +496,10 @@ type internal LiteralPrinter =
         /// An enum literal, from the enum's name, the host case and the wire spelling.
         Enum: string -> string -> string -> string -> string
         EmptyList: string -> string
+        /// The empty map (Phase 539).
+        EmptyMap: string -> string
+        /// A JSON value at a `TJson` slot (Phase 539).
+        Json: string -> Fuaran.Core.JVal -> string
         /// A record literal from its declared members, printed in declaration order.
         Record: string -> IdlRecord -> (IdlField * string) list -> string
         /// A union case literal from its declared members, printed in declaration order.
@@ -483,9 +518,15 @@ type internal LiteralPrinter =
 /// with its placeholder, a required one with no value is refused), and a backend's
 /// [[LiteralPrinter]] only prints. The F# literal, the TypeScript omit test and the F* constructor
 /// are its printers, so no backend can admit a default another refuses.
+///
+/// Phase 539 — the empty map and a JSON value are admitted where the member's OWN type is the map
+/// or the JSON slot, and refused as a member of a record or union-case literal: neither has a
+/// PATTERN spelling, and the union encoder's omit test matches a default as a pattern. Refused
+/// here, once, so the F# literal and the TypeScript test agree on it by construction.
 module internal LiteralTraversal =
 
-    let rec print
+    let rec private printAt
+        (nested: bool)
         (p: LiteralPrinter)
         (idl: Idl)
         (src: string)
@@ -495,6 +536,10 @@ module internal LiteralTraversal =
         Decl.literal idl t v
         |> Result.bind (fun l ->
             match l with
+            | Literal.EmptyMap
+            | Literal.Json _ when nested -> Error(CodegenError.UnsupportedDefault(t, v))
+            | Literal.EmptyMap -> Ok(p.EmptyMap src)
+            | Literal.Json j -> Ok(p.Json src j)
             | Literal.Str s -> Ok(p.Str src s)
             | Literal.Int i -> Ok(p.Int src i)
             | Literal.Bool b -> Ok(p.Bool src b)
@@ -539,8 +584,8 @@ module internal LiteralTraversal =
             |> Decl.memberValue ValueSite.Literal f.Opt
             |> function
                 | MemberValue.Carries v
-                | MemberValue.IdentityDefault v -> print p idl at ft v
-                | MemberValue.Optional v -> print p idl at ft v |> Result.map p.Some
+                | MemberValue.IdentityDefault v -> printAt true p idl at ft v
+                | MemberValue.Optional v -> printAt true p idl at ft v |> Result.map p.Some
                 | MemberValue.Absent -> Ok(p.Absent at)
                 | MemberValue.Refused v -> refuse v
                 // Neither is answered at the literal site; a member with no value is refused.
@@ -548,6 +593,10 @@ module internal LiteralTraversal =
                 | MemberValue.Parameter -> refuse VAbsent
             |> Result.map (fun e -> f, e))
         |> sequenceR
+
+    /// A declared literal at its member's own type.
+    let print (p: LiteralPrinter) (idl: Idl) (src: string) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        printAt false p idl src t v
 
 /// The traversal's own recursion, handed to a backend's leaf arm so it can read a nested value
 /// (a map's entries, a hosted slot's declared wire form) by the same walk.

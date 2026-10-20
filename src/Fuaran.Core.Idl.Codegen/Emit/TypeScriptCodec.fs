@@ -222,6 +222,15 @@ module internal TypeScriptCodec =
           Enum = fun src _ _ wire -> src + " === " + SourceLit.tsString wire
           // Phase 1080 — an omitted-when-empty repeated slot.
           EmptyList = fun src -> src + ".length === 0"
+          // Phase 539 — the empty-map default, and a JSON default compared by canonical bytes, as the
+          // F# backend and the interpreter compare it.
+          EmptyMap = fun src -> "Object.keys(" + src + ").length === 0"
+          Json =
+            fun src j ->
+                "encJson("
+                + src
+                + ") === "
+                + SourceLit.tsString (Canonical.write Rendering.CrossHost j)
           Record = fun _ _ members -> members |> List.map snd |> String.concat " && "
           Union =
             fun src _ c members ->
@@ -256,14 +265,32 @@ module internal TypeScriptCodec =
           OmitAt =
             fun src t d ->
                 tsIsDefault idl disc src t d
-                |> Result.map (fun pred present -> "(" + pred + " ? null : " + present + ")") }
+                |> Result.map (fun pred present -> "(" + pred + " ? null : " + present + ")")
+          // Phase 539 — this codec does not apply a presence condition; [[Gen.typescriptModule]]
+          // refuses a vocabulary that declares one before any member is printed, and this refusal
+          // names it should one ever reach here.
+          When =
+            fun _ _ _ ->
+                Error(
+                    CodegenError.UnsupportedConstruct(
+                        "a presence condition",
+                        "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
+                        "generate this vocabulary's codec with the F# backend, which applies it"
+                    )
+                ) }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
     /// node envelope) — the F# side's `specPieceOf`.
-    let tsSpecPieceOf (idl: Idl) (disc: string) (recv: string) (f: IdlField) : Result<string, CodegenError> =
+    let tsSpecPieceOf
+        (idl: Idl)
+        (disc: string)
+        (recv: string)
+        (fields: IdlField list)
+        (f: IdlField)
+        : Result<string, CodegenError> =
         let p = tsMemberEncPrinter idl disc
 
-        MemberEncTraversal.encMember p (p.Access recv f) f
+        MemberEncTraversal.encMember p fields (p.Access recv) f
         |> Result.map (MemberEncTraversal.print p)
 
     /// The members of a spec or record read off `s`, as the body of a pairs array.
@@ -507,16 +534,17 @@ module internal TypeScriptCodec =
     let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { Slot = tsDecPrinter
           Key = SourceLit.tsString
-          Req = fun key d -> "dReq(" + key + ", fs, " + d + ")"
-          Opt = fun key d -> "dOpt(" + key + ", fs, " + d + ")"
-          Def = fun key d lit -> "dDef(" + key + ", fs, " + d + ", " + lit + ")"
+          Object = fun _ _ -> "fs"
+          Req = fun key o d -> "dReq(" + key + ", " + o + ", " + d + ")"
+          Opt = fun key o d -> "dOpt(" + key + ", " + o + ", " + d + ")"
+          Def = fun key o d lit -> "dDef(" + key + ", " + o + ", " + d + ", " + lit + ")"
           Placeholder = fun _ -> "null"
           HostOnlySentinel = id
           HostOnly = fun _ -> Ok "undefined"
           DefaultLit = tsDefaultLit idl disc }
 
-    let tsDecField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
-        MemberTraversal.decMember (tsMemberDecPrinter idl disc) f
+    let tsDecField (idl: Idl) (disc: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
+        MemberTraversal.decMember (tsMemberDecPrinter idl disc) fields f
 
     /// The object a TS decoder builds: `extra` (the discriminator, where one is written), then
     /// every member as read, in declaration order.
@@ -904,7 +932,9 @@ const plain = (pairs) =>
                 // Phase 111 — declared order keeps the construction order instead:
                 // id, kind, then the envelope as declared.
                 decl.Envelope.Members
-                |> List.map (fun f -> tsSpecPieceOf idl disc "n" f |> Result.map (fun p -> f.Name, p))
+                |> List.map (fun f ->
+                    tsSpecPieceOf idl disc "n" decl.Envelope.Members f
+                    |> Result.map (fun p -> f.Name, p))
                 |> sequenceR
                 |> Result.map (fun envelopePairs ->
                     let nodePairsUnsorted =
@@ -950,7 +980,7 @@ const plain = (pairs) =>
                     | [] -> Ok ""
                     | fields ->
                         fields
-                        |> List.map (tsSpecPieceOf idl disc "n")
+                        |> List.map (tsSpecPieceOf idl disc "n" fields)
                         |> concatR ", "
                         |> Result.map (fun pieces -> ".concat([" + pieces + "])")
 
@@ -984,7 +1014,7 @@ const plain = (pairs) =>
             let envelopeDecoded =
                 decl.Envelope.Members
                 |> List.map (fun f ->
-                    tsDecField idl disc f
+                    tsDecField idl disc decl.Envelope.Members f
                     |> Result.map (fun e -> ", " + SourceLit.tsKey f.Name + ": " + e))
                 |> concatR ""
 

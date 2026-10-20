@@ -55,6 +55,8 @@ let private f name ty opt : IdlField =
     { Name = name
       Type = ty
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 /// Diff two `Idl` values through the artifact, as the CLI does.
@@ -1044,6 +1046,7 @@ let descriptorTableTests =
                                   Cases = [ "P" ]
                                   Wires = []
                                   CaseAnnotations = []
+                                  Aliases = []
                                   Annotations = Annotations.Empty } ] }
 
                   let cs = diffOf before after |> List.map _.Change

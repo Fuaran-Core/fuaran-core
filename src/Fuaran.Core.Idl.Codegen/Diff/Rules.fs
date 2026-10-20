@@ -295,6 +295,31 @@ module internal DiffRules =
 
     let private always (cs: FSharpConsequence list) : Context -> FSharpConsequence list = fun _ -> cs
 
+    /// Phase 539 — an alias list's verdict: `Additive` when every spelling the old revision accepted
+    /// is still accepted (a decoder reads strictly more documents), a wire break when one is
+    /// withdrawn (a document in that spelling stops reading). Neither moves a generated declaration.
+    let private classifyAliases (subject: string) (before: string list) (after: string list) =
+        match before |> List.filter (fun a -> not (List.contains a after)) with
+        | [] ->
+            Additive,
+            sprintf
+                "%s accepts more spellings (%s → %s); every document that read still reads."
+                subject
+                (String.concat ", " before)
+                (String.concat ", " after),
+            "DECISIONS.md D190 (an alias is decode-only: accepted and normalised, never encoded)"
+        | withdrawn ->
+            BreakingWire,
+            sprintf
+                "%s withdrew the alias(es) %s — a document written in a withdrawn spelling no longer reads."
+                subject
+                (String.concat ", " withdrawn),
+            "DECISIONS.md D190 (an alias is decode-only: accepted and normalised, never encoded)"
+
+    /// The alias rows share one verdict and one documented shape.
+    let private aliasRow (subject: string) =
+        row subject "`additive` when no alias is withdrawn, `breaking-wire` otherwise" "none"
+
     /// The annotation rows share one verdict and one documented shape.
     let private annotationRow (subject: string) =
         row
@@ -676,6 +701,22 @@ module internal DiffRules =
                 (sprintf "enum case annotations %s: %s.\"%s\"" (if b = "" then "declared" else "changed") e w)
                 [ annotationRow "an enum case's annotation set" ]
 
+        | EnumCaseAliasesChanged(e, w, b, a) ->
+            rule
+                "EnumCaseAliasesChanged"
+                "46"
+                NoFamily
+                (e + "." + w)
+                (classifyAliases (sprintf "case `\"%s\"` of enum `%s`" w e) b a)
+                (always noShape)
+                (sprintf
+                    "enum case aliases changed: %s.\"%s\" : [%s] -> [%s]"
+                    e
+                    w
+                    (String.concat ", " b)
+                    (String.concat ", " a))
+                [ aliasRow "an enum case's alias list" ]
+
         | RecordAdded n ->
             rule
                 "RecordAdded"
@@ -980,6 +1021,42 @@ module internal DiffRules =
                 (sprintf "type annotations %s: %s %s" (if b = "" then "declared" else "changed") f n)
                 [ annotationRow "a union's, a record's or an enum's own annotation set" ]
 
+        | FieldAliasesChanged(o, n, b, a) ->
+            rule
+                "FieldAliasesChanged"
+                "68"
+                NoFamily
+                (o.Key + "/" + n)
+                (classifyAliases (sprintf "field `%s` on %s" n o.Describe) b a)
+                (always noShape)
+                (sprintf
+                    "field aliases changed: %s.%s : [%s] -> [%s]"
+                    o.Describe
+                    n
+                    (String.concat ", " b)
+                    (String.concat ", " a))
+                [ aliasRow "a field's alias list" ]
+
+        | FieldPresenceChanged(o, n, b, a) ->
+            let shown s = if s = "" then "none" else s
+
+            rule
+                "FieldPresenceChanged"
+                "69"
+                NoFamily
+                (o.Key + "/" + n)
+                (BreakingWire,
+                 sprintf
+                     "field `%s` on %s changed its presence condition (%s → %s) — the canonical bytes of every document in the configurations it governs move."
+                     n
+                     o.Describe
+                     (shown b)
+                     (shown a),
+                 "DECISIONS.md D190 (a member whose condition fails is absent from the canonical form)")
+                (always noShape)
+                (sprintf "field presence changed: %s.%s : %s -> %s" o.Describe n (shown b) (shown a))
+                [ row "a field's presence condition" "`breaking-wire`" "none" ]
+
         | DefaultAdded(kd, f, _) ->
             rule
                 "DefaultAdded"
@@ -1089,7 +1166,9 @@ module internal DiffRules =
               Wire = { Tag = ""; Shape = JObj [] }
               Host = { Blocks = [] }
               Presence = PresenceSnap.Required
-              Annotations = "" }
+              Annotations = ""
+              Aliases = []
+              PresenceCondition = "" }
 
         let owner = ONodeEnvelope
         let host: HostSurface = { Blocks = [] }
@@ -1116,6 +1195,7 @@ module internal DiffRules =
           EnumCaseRemoved("", "")
           EnumHostMappingChanged("", [], [])
           EnumCaseAnnotationsChanged("", "", "", "")
+          EnumCaseAliasesChanged("", "", [], [])
           RecordAdded ""
           RecordRemoved ""
           FieldAdded(owner, field)
@@ -1126,6 +1206,8 @@ module internal DiffRules =
           FieldAnnotationsChanged(owner, "", "", "")
           UnionCaseAnnotationsChanged("", "", "", "")
           TypeAnnotationsChanged("", "", "", "")
+          FieldAliasesChanged(owner, "", [], [])
+          FieldPresenceChanged(owner, "", "", "")
           DefaultAdded("", "", "")
           DefaultRemoved("", "", "")
           DefaultChanged("", "", "", "")

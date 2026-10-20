@@ -30,6 +30,12 @@ module internal DiffChanges =
                   if old.Annotations <> f.Annotations then
                       yield FieldAnnotationsChanged(owner, f.Name, old.Annotations, f.Annotations)
 
+                  if old.Aliases <> f.Aliases then
+                      yield FieldAliasesChanged(owner, f.Name, old.Aliases, f.Aliases)
+
+                  if old.PresenceCondition <> f.PresenceCondition then
+                      yield FieldPresenceChanged(owner, f.Name, old.PresenceCondition, f.PresenceCondition)
+
           for f in before do
               if not (Map.containsKey f.Name a) then
                   yield FieldRemoved(owner, f.Name, f) ]
@@ -182,7 +188,16 @@ module internal DiffChanges =
                                     let aw = a.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
 
                                     if bw <> aw then
-                                        EnumCaseAnnotationsChanged(name, w, bw, aw) ])
+                                        EnumCaseAnnotationsChanged(name, w, bw, aw)
+
+                            // Phase 539 — per-case aliases, over the cases both revisions carry.
+                            for w in a.WireCases do
+                                if List.contains w b.WireCases then
+                                    let bw = b.CaseAliases |> Map.tryFind w |> Option.defaultValue []
+                                    let aw = a.CaseAliases |> Map.tryFind w |> Option.defaultValue []
+
+                                    if bw <> aw then
+                                        EnumCaseAliasesChanged(name, w, bw, aw) ])
                       before.Enums
                       after.Enums
 

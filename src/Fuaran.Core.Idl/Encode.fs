@@ -167,6 +167,13 @@ module Encode =
                 | (f: IdlField) :: rest ->
                     match provided f.Name authored, f.Opt with
                     | _, HostOnly -> go acc rest
+                    // Phase 539 — a member whose presence condition fails carries no meaning, so the
+                    // canonical form omits it whatever it holds ([[WireForm.holdsAuthored]]).
+                    | _, _ when
+                        f.Presence
+                        |> Option.exists (fun c -> not (WireForm.holdsAuthored fields c authored))
+                        ->
+                        go acc rest
                     | (None | Some VAbsent), (Optional | OmitDefault _) -> go acc rest
                     | (None | Some VAbsent), Required -> Error(sprintf "required field '%s' is absent" f.Name)
                     // omit-at-default: a present value equal to the field's identity default

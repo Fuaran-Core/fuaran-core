@@ -842,6 +842,8 @@ module private SecondVocabulary =
         { Name = name
           Type = ty
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let kind tag fields : IdlKind =

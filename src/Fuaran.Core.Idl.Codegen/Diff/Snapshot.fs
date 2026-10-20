@@ -131,7 +131,16 @@ module internal DiffSnapshot =
                       Shape = canonical (stripHostSurface ty) }
                   Host = { Blocks = hostSurfaceOnly "" ty |> List.map (fun (p, h) -> p, canonical h) }
                   Presence = presence opt
-                  Annotations = readAnnotations v }
+                  Annotations = readAnnotations v
+                  Aliases =
+                    arr "aliases" v
+                    |> List.choose (function
+                        | JStr s -> Some s
+                        | _ -> None)
+                  PresenceCondition =
+                    match field "presence" v with
+                    | Some c -> Canonical.write Rendering.CrossHost c
+                    | None -> "" }
         | _ -> None
 
     let private readFields (owner: JVal) : FieldSnap list =
@@ -249,6 +258,21 @@ module internal DiffSnapshot =
                             | Some(JObj entries) ->
                                 entries
                                 |> List.map (fun (wire, block) -> wire, Canonical.write Rendering.CrossHost block)
+                                |> Map.ofList
+                            | _ -> Map.empty
+                          CaseAliases =
+                            match field "aliases" e with
+                            | Some(JObj entries) ->
+                                entries
+                                |> List.map (fun (wire, xs) ->
+                                    wire,
+                                    (match xs with
+                                     | JArr items ->
+                                         items
+                                         |> List.choose (function
+                                             | JStr s -> Some s
+                                             | _ -> None)
+                                     | _ -> []))
                                 |> Map.ofList
                             | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields

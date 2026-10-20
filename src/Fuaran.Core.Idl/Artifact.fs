@@ -148,8 +148,17 @@ module Artifact =
         | OmitDefault d -> OmitDefault(canonValue d)
         | other -> other
 
+    let private canonPresence (c: PresenceCondition) : PresenceCondition =
+        match c with
+        | WhenEquals(s, v) -> WhenEquals(s, canonValue v)
+        | other -> other
+
     let private canonFields (fs: IdlField list) : IdlField list =
-        fs |> List.map (fun f -> { f with Opt = canonOpt f.Opt })
+        fs
+        |> List.map (fun f ->
+            { f with
+                Opt = canonOpt f.Opt
+                Presence = f.Presence |> Option.map canonPresence })
 
     let private canonKind (k: IdlKind) : IdlKind =
         { k with Fields = canonFields k.Fields }
@@ -185,6 +194,12 @@ module Artifact =
                     CaseAnnotations =
                         e.CaseAnnotations
                         |> List.filter (fun (_, a) -> not a.IsEmpty)
+                        |> List.sortWith (fun (a, _) (b, _) -> ordinal (e.WireOf a) (e.WireOf b))
+                    // Phase 539 — addressed exactly as `CaseAnnotations` is; each alias list keeps
+                    // its order, which is its priority.
+                    Aliases =
+                        e.Aliases
+                        |> List.filter (fun (_, a) -> not (List.isEmpty a))
                         |> List.sortWith (fun (a, _) (b, _) -> ordinal (e.WireOf a) (e.WireOf b)) })
             |> sortedBy _.Name
           Records =
@@ -300,6 +315,20 @@ module Artifact =
               Default = []
               Omits = List.isEmpty }
 
+        /// Phase 539 — a member with no retired spelling writes no `aliases`.
+        let fieldAliases: Omission<string list> =
+            { Owner = "a field"
+              Key = "aliases"
+              Default = []
+              Omits = List.isEmpty }
+
+        /// Phase 539 — an enum none of whose cases declares an alias writes no `aliases`.
+        let enumAliases: Omission<(string * string list) list> =
+            { Owner = "an enum"
+              Key = "aliases"
+              Default = []
+              Omits = List.isEmpty }
+
         /// Phase 707 — an enum whose wire strings are its case names writes no `hostCases`.
         let hostCases: Omission<string list option> =
             { Owner = "an enum"
@@ -317,7 +346,9 @@ module Artifact =
           Omit.annotations.Owner, Omit.annotations.Key
           Omit.inProcessOnly.Owner, Omit.inProcessOnly.Key
           Omit.caseAnnotations.Owner, Omit.caseAnnotations.Key
-          Omit.hostCases.Owner, Omit.hostCases.Key ]
+          Omit.hostCases.Owner, Omit.hostCases.Key
+          Omit.fieldAliases.Owner, Omit.fieldAliases.Key
+          Omit.enumAliases.Owner, Omit.enumAliases.Key ]
 
     /// The member `o` declares, written away from its default and read as it when absent.
     let private omitting
@@ -737,17 +768,55 @@ module Artifact =
     let private annotated (get: 'R -> Annotations) (fs: CodecFields<'R, Annotations -> 'C>) : CodecFields<'R, 'C> =
         omitting Omit.annotations get annotations fs
 
+    /// A field's presence condition (Phase 539, DECISIONS.md D190): `$type`-tagged by its test, the
+    /// sibling it reads, and for an equality test the value, written as every authored value is.
+    let internal presenceCondition: Codec<PresenceCondition> =
+        Codec.union
+            "$type"
+            [ single
+                  "whenPresent"
+                  "sibling"
+                  (function
+                  | WhenPresent s -> Some s
+                  | _ -> None)
+                  WhenPresent
+                  Codec.string
+              single
+                  "whenAbsent"
+                  "sibling"
+                  (function
+                  | WhenAbsent s -> Some s
+                  | _ -> None)
+                  WhenAbsent
+                  Codec.string
+              Codec.case
+                  "whenEquals"
+                  (function
+                  | WhenEquals(s, v) -> Some(s, v)
+                  | _ -> None)
+                  WhenEquals
+                  (Codec.record (fun s v -> s, v)
+                   |> Codec.field "sibling" fst Codec.string
+                   |> Codec.field "value" snd idlValue) ]
+        |> declared "presence"
+
     /// One field object. Field lists keep their AUTHORED order (the module's ordering contract).
+    /// Phase 539 — `aliases` (in priority order) and `presence` follow the optionality, each
+    /// omitted when it says nothing, so a vocabulary that declares neither renders as it did.
     let internal field: Codec<IdlField> =
-        (Codec.record (fun name ty opt ann ->
+        (Codec.record (fun name ty opt aliases presence ann ->
             { Name = name
               Type = ty
               Opt = opt
+              Aliases = aliases
+              Presence = presence
               Annotations = ann })
         : CodecFields<IdlField, _>)
         |> Codec.field "name" _.Name Codec.string
         |> Codec.field "type" _.Type idlType
         |> Codec.field "optionality" _.Opt optionality
+        |> omitting Omit.fieldAliases _.Aliases (Codec.list Codec.string)
+        |> Codec.optField "presence" _.Presence presenceCondition
         |> annotated _.Annotations
         |> Codec.build
         |> declared "field"
@@ -815,6 +884,7 @@ module Artifact =
           WireCases: string list
           HostCases: string list option
           CaseAnnotations: (string * Annotations) list
+          Aliases: (string * string list) list
           Annotations: Annotations }
 
     /// `cases` is the wire contract (what a decoder must accept). `hostCases` appears ONLY for a
@@ -826,11 +896,12 @@ module Artifact =
     /// their own path.
     let private enumDecl: Codec<IdlEnum> =
         let entry =
-            (Codec.record (fun name cases hostCases caseAnnotations ann ->
+            (Codec.record (fun name cases hostCases caseAnnotations aliases ann ->
                 ({ Name = name
                    WireCases = cases
                    HostCases = hostCases
                    CaseAnnotations = caseAnnotations
+                   Aliases = aliases
                    Annotations = ann }
                 : EnumEntry))
             : CodecFields<EnumEntry, _>)
@@ -838,6 +909,9 @@ module Artifact =
             |> Codec.field "cases" _.WireCases (Codec.list Codec.string)
             |> omitting Omit.hostCases _.HostCases (Codec.map Some Option.get (Codec.list Codec.string))
             |> omitting Omit.caseAnnotations _.CaseAnnotations (Codec.entries annotations)
+            // Phase 539 — the lenient spellings of each case, keyed by the case's WIRE string as
+            // `caseAnnotations` is and for the same reason.
+            |> omitting Omit.enumAliases _.Aliases (Codec.entries (Codec.list Codec.string))
             // Phase 542 — the enum's OWN annotations.
             |> annotated _.Annotations
             |> Codec.build
@@ -858,29 +932,35 @@ module Artifact =
 
             mapped
             |> Result.bind (fun e ->
-                let resolved =
-                    raw.CaseAnnotations
+                // An entry keyed by a wire string resolves to its case, or is refused at its path.
+                let byCase (key: string) (entries: (string * 'A) list) =
+                    entries
                     |> List.map (fun (wire, a) ->
                         match e.CaseOf wire with
                         | Some case -> Ok(case, a)
                         | None ->
                             Error(
-                                [ PathSegment.Key "caseAnnotations"; PathSegment.Key wire ],
+                                [ PathSegment.Key key; PathSegment.Key wire ],
                                 RootDecodeCode.UnknownTag,
                                 "a case the enum declares",
                                 "case '" + wire + "'"
                             ))
 
-                match
-                    resolved
+                let caseAnnotations = byCase "caseAnnotations" raw.CaseAnnotations
+                let aliases = byCase "aliases" raw.Aliases
+
+                let faults xs =
+                    xs
                     |> List.choose (function
                         | Error f -> Some f
                         | Ok _ -> None)
-                with
+
+                match faults caseAnnotations @ faults aliases with
                 | [] ->
                     Ok
                         { e with
-                            CaseAnnotations = resolved |> List.choose Result.toOption
+                            CaseAnnotations = caseAnnotations |> List.choose Result.toOption
+                            Aliases = aliases |> List.choose Result.toOption
                             Annotations = raw.Annotations }
                 | faults -> Error faults)
 
@@ -891,6 +971,10 @@ module Artifact =
               CaseAnnotations =
                 e.CaseAnnotations
                 |> List.filter (fun (_, a) -> not a.IsEmpty)
+                |> List.map (fun (c, a) -> e.WireOf c, a)
+              Aliases =
+                e.Aliases
+                |> List.filter (fun (_, a) -> not (List.isEmpty a))
                 |> List.map (fun (c, a) -> e.WireOf c, a)
               Annotations = e.Annotations }
 

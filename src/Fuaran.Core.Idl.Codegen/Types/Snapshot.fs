@@ -103,6 +103,12 @@ type FieldSnap =
         /// it adds a doc comment and an `Obsolete` attribute — so folding it into [[Host]] would
         /// report a retirement marking as a signature move.
         Annotations: string
+        /// The member's retired spellings (Phase 539), in priority order; `[]` when the artifact
+        /// declares none, which is also how a revision predating the key reads.
+        Aliases: string list
+        /// The member's presence condition (Phase 539) as canonical JSON, `""` when it declares none.
+        /// Named apart from [[Presence]], the declared optionality.
+        PresenceCondition: string
     }
 
 /// What a field belongs to. `ONodeEnvelope` is the per-node field set beside
@@ -179,6 +185,9 @@ type EnumSnap =
         /// keys them on and canonically rendered — a case that says nothing is absent
         /// from the map, which is also how a revision predating the key reads.
         CaseAnnotations: Map<string, string>
+        /// Per-case aliases (Phase 539), keyed by the WIRE string as [[CaseAnnotations]] is; a case
+        /// declaring none is absent from the map.
+        CaseAliases: Map<string, string list>
     }
 
 /// One `idl.json` revision, keyed for lookup. Collections the artifact sorts

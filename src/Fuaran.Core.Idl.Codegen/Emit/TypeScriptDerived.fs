@@ -605,9 +605,9 @@ module internal TypeScriptDerived =
     let private tsColMemberPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { tsMemberDecPrinter idl disc with
             Slot = tsColPrinter
-            Req = fun key c -> "cReq(" + key + ", fs, " + c + ")"
-            Opt = fun key c -> "cOpt(" + key + ", fs, " + c + ")"
-            Def = fun key c lit -> "cDef(" + key + ", fs, " + c + ", " + lit + ")" }
+            Req = fun key o c -> "cReq(" + key + ", " + o + ", " + c + ")"
+            Opt = fun key o c -> "cOpt(" + key + ", " + o + ", " + c + ")"
+            Def = fun key o c lit -> "cDef(" + key + ", " + o + ", " + c + ", " + lit + ")" }
 
     /// Read every member in declaration order, then build the object [[tsFieldObject]] builds — the
     /// same keys in the same order — or throw every member's refusals, in that order.

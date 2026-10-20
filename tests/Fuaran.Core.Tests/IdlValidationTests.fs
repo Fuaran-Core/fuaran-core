@@ -23,6 +23,8 @@ let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 let private kind (tag: string) (fields: IdlField list) : IdlKind =
@@ -264,7 +266,8 @@ let declareErrorsTests =
                       { small with
                           Enums =
                               [ { level with
-                                    CaseAnnotations = [ "Medium", note ] } ] }
+                                    CaseAnnotations = [ "Medium", note ]
+                                    Aliases = [] } ] }
 
                   Expect.contains
                       (Declare.enumWireErrors byLiteral |> List.map _.Detail)

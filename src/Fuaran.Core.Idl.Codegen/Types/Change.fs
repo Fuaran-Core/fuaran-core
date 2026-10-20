@@ -87,6 +87,13 @@ type Change =
     /// side means "declared none". Never a wire event: an annotation changes no
     /// encoding in either direction.
     | FieldAnnotationsChanged of Owner * name: string * before: string * after: string
+    /// The member's retired spellings moved (Phase 539). Additive when every alias the old
+    /// revision accepted is still accepted; a wire break when one is withdrawn — a document
+    /// written in that spelling no longer reads.
+    | FieldAliasesChanged of Owner * name: string * before: string list * after: string list
+    /// The member's presence condition appeared, moved or vanished (Phase 539): the canonical
+    /// bytes of every document in the configurations it governs move — a wire break.
+    | FieldPresenceChanged of Owner * name: string * before: string * after: string
     /// The declared annotations on a union CASE moved (Phase 113).
     | UnionCaseAnnotationsChanged of union: string * case: string * before: string * after: string
     /// The declared annotations on a KIND or a tree-OP itself moved (Phase 119) —
@@ -101,6 +108,8 @@ type Change =
     /// case's wire string, which is how the artifact keys them and what a
     /// third-party reader sees.
     | EnumCaseAnnotationsChanged of enumName: string * wire: string * before: string * after: string
+    /// The lenient spellings of an enum case moved (Phase 539), graded as [[FieldAliasesChanged]].
+    | EnumCaseAliasesChanged of enumName: string * wire: string * before: string list * after: string list
     /// A smart-constructor (authoring) default appeared — not the wire-visible
     /// omit-at-default. Additive; `value` is canonical JSON.
     | DefaultAdded of kind: string * field: string * value: string

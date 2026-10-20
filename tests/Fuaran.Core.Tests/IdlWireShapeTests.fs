@@ -18,6 +18,8 @@ let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 let private baseIdl: Idl =

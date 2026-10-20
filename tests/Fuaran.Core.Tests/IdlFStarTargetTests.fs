@@ -134,6 +134,8 @@ let private tinyIdl (fieldType: IdlType) (opt: Optionality) : Idl =
               [ { Name = "member"
                   Type = fieldType
                   Opt = opt
+                  Aliases = []
+                  Presence = None
                   Annotations = Annotations.Empty } ]
             Annotations = Annotations.Empty } ]
       Unions = []
@@ -351,6 +353,8 @@ let private uiScaleIdl: Idl =
         { Name = name
           Type = t
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     let kind tag fields =
@@ -409,6 +413,8 @@ let private gridAt (k: int) : Idl =
         { Name = name
           Type = t
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     { uiScaleIdl with
@@ -435,6 +441,8 @@ let private defaultedFamilyIdl: Idl =
         { Name = name
           Type = t
           Opt = opt
+          Aliases = []
+          Presence = None
           Annotations = Annotations.Empty }
 
     { uiScaleIdl with
@@ -614,6 +622,8 @@ let idlFStarTargetTests =
                                       [ { Name = "value"
                                           Type = TVar "T"
                                           Opt = Required
+                                          Aliases = []
+                                          Presence = None
                                           Annotations = Annotations.Empty } ]
                                     Annotations = Annotations.Empty } ]
                               Annotations = Annotations.Empty }
@@ -633,6 +643,8 @@ let idlFStarTargetTests =
                                           [ { Name = "text"
                                               Type = TStr
                                               Opt = Required
+                                              Aliases = []
+                                              Presence = None
                                               Annotations = Annotations.Empty } ]
                                         Annotations = Annotations.Empty } ]
                                   Annotations = Annotations.Empty }
@@ -652,10 +664,14 @@ let idlFStarTargetTests =
                                           [ { Name = "text"
                                               Type = TStr
                                               Opt = Required
+                                              Aliases = []
+                                              Presence = None
                                               Annotations = Annotations.Empty }
                                             { Name = "lang"
                                               Type = TStr
                                               Opt = Required
+                                              Aliases = []
+                                              Presence = None
                                               Annotations = Annotations.Empty } ]
                                         Annotations = Annotations.Empty } ]
                                   Annotations = Annotations.Empty }
@@ -738,6 +754,8 @@ let idlFStarTargetTests =
                             [ { Name = "text"
                                 Type = TStr
                                 Opt = Required
+                                Aliases = []
+                                Presence = None
                                 Annotations = Annotations.Empty } ]
                           Annotations = Annotations.Empty }
                         { Tag = "Empty"
@@ -763,7 +781,10 @@ let idlFStarTargetTests =
 
               let rows: (string * IdlType * IdlValue * bool) list =
                   [ "an enum default by its HOST name (the wire spelling is `low`)", TEnum "Level", VEnum "Low", false
-                    "an empty map", TMap TStr, VMap [], false
+                    // Phase 539 — admitted by every backend since the empty-map default literal landed.
+                    "an empty map", TMap TStr, VMap [], true
+                    "an empty JSON object", TJson, VJson(JObj []), true
+                    "a non-empty map", TMap TStr, VMap [ "k", VStr "v" ], false
                     "the union's declared TRANSPARENT case",
                     TUnion("Text", []),
                     VUnion("Inline", [ "text", VStr "x" ]),
@@ -1024,6 +1045,8 @@ let idlFStarTargetTests =
                   [ { Name = name
                       Type = TStr
                       Opt = Required
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty } ]
 
               Expect.equal

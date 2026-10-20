@@ -503,6 +503,8 @@ module EmittedEncStr =
             { Name = n
               Type = t
               Opt = Required
+              Aliases = []
+              Presence = None
               Annotations = Annotations.Empty }
 
         let idl: Idl =

@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.36.0: breaking
+# class since v0.39.0: unchanged
 doc	capability	sha256:b2136d2d13925d93683cb22cab1fbda374ad4a22f1ab1008099ba55a8c8f71f7	{"$type":"capability","determinism":"clock","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"clock","host":"pure"},"holes":[{"addr":"s","kind":"value","name":"s","required":true,"space":{"$type":"intRange","max":1,"min":1}}],"name":"s"}}
 doc	capability / DeterminismFactor.ClockFactor	sha256:373db35d7ec9d96b157ca6486a8f0e8aca3db27430daa4d9690304a0666a6dfb	{"$type":"capability","determinism":"clock","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"clock","host":"pure"},"holes":[{"actionEffect":{"determinism":"clock","host":"pure"},"addr":"s","kind":"action","name":"s","required":true}],"name":"s"}}
 doc	capability / DeterminismFactor.NetworkFactor	sha256:c62498ff6835f9439256c987e6a9fbe370e55bf77c2e9e5429d32d62e05a0905	{"$type":"capability","determinism":"network","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"network","host":"pure"},"holes":[{"actionEffect":{"determinism":"network","host":"pure"},"addr":"s","kind":"action","name":"s","required":true}],"name":"s"}}

@@ -353,6 +353,8 @@ let private sField (name: string) (t: Fuaran.Core.Idl.IdlType) (opt: Fuaran.Core
     ({ Name = name
        Type = t
        Opt = opt
+       Aliases = []
+       Presence = None
        Annotations = Fuaran.Core.Idl.Annotations.Empty }
     : Fuaran.Core.Idl.IdlField)
 

@@ -325,9 +325,23 @@ module Proposal =
             | Required
             | Optional -> []
 
+        // Phase 539 — an alias is a RETIRED spelling of a member that already exists, and a presence
+        // condition a canonical-form rule over one: a delta that mints a member has neither to state
+        // (the proposal reader before the codec read neither, and minted the member without them).
+        let canonicalForm =
+            (if List.isEmpty f.Aliases then
+                 []
+             else
+                 [ [ PathSegment.Key "aliases" ], "no aliases on a minted member", "an alias list" ])
+            @ (match f.Presence with
+               | None -> []
+               | Some _ ->
+                   [ [ PathSegment.Key "presence" ], "no presence condition on a minted member", "a presence condition" ])
+
         admit
             (hostSurface [ PathSegment.Key "type" ] f.Type
              @ optionality
+             @ canonicalForm
              @ annotationRefusals [ PathSegment.Key "annotations" ] f.Annotations)
             f
 

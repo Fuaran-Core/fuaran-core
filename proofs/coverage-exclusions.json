@@ -918,6 +918,24 @@
     },
     {
       "members": [
+        "Idl.IdlEnum.AliasesOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A case's declared aliases (Phase 539); the canonical-form tests read it as a member, and the decoder's alias reading goes through CaseAccepting.",
+      "through": ".AliasesOf",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCanonicalFormTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlEnum.CaseAccepting"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Resolves a wire spelling or a declared alias to its case (Phase 539); the canonical-form tests call it as a member, and every alias vector of the canonical-form law set decodes through it.",
+      "through": ".CaseAccepting",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCanonicalFormTests.fs"
+    },
+    {
+      "members": [
         "Idl.IdlEnum.CaseOf"
       ],
       "class": "measured-elsewhere",

@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.36.0: breaking
+# class since v0.39.0: unchanged
 doc	envelope	sha256:22cb6b2257e056408a6cb74cf0eac197b81448eaf8d7b3ea423544bdc6e4c08e	{"$payload":"s","$profile":"s@1.1"}
 doc	envelope / JVal.JArr	sha256:5aa9f96ee6b3595182e7dcda22312b85ea770b6e77757d10222b855d243ff989	{"$payload":["s"],"$profile":"s@1.1"}
 doc	envelope / JVal.JBool	sha256:fd8722cc8258535b08496838de6001f518ca05f29411569ec11829daf7b5debd	{"$payload":true,"$profile":"s@1.1"}

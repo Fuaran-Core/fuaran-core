@@ -251,3 +251,77 @@ module internal WireForm =
     and requiredReachesNode (idl: Idl) (seen: Set<string>) (fields: IdlField list) : bool =
         fields
         |> List.exists (fun f -> f.Opt = Required && reachesNodeAtFloor idl seen f.Type)
+
+    // -----------------------------------------------------------------------
+    // Phase 539 (DECISIONS.md D190) — the MEMBER-level questions: under which spellings a member is
+    // read, and whether a conditionally-present member is meaningful. Answered once, here, so the
+    // encoder, the decoder and the sampler cannot disagree about either; the generated F# decoder
+    // renders the same reading over the raw object.
+    // -----------------------------------------------------------------------
+
+    /// The spellings a member is read under, in priority order: its canonical name, then its aliases.
+    let spellings (f: IdlField) : string list = f.Name :: f.Aliases
+
+    /// The member `f` in a wire object, read under its [[spellings]]: the spelling found and its value.
+    /// The canonical spelling wins when it is present; otherwise the first alias present is the member.
+    let memberAt (f: IdlField) (members: (string * JVal) list) : (string * JVal) option =
+        spellings f
+        |> List.tryPick (fun n -> members |> List.tryPick (fun (k, v) -> if k = n then Some(n, v) else None))
+
+    /// The wire values that decode to the scalar `v` at `t` — the canonical encoding, and for an enum
+    /// spelling every alias of its case as well. Empty for a value that is not a scalar (a presence
+    /// condition compares only scalars; [[Declare.errors]] refuses any other).
+    let scalarSpellings (idl: Idl) (t: IdlType) (v: IdlValue) : JVal list =
+        match ofType idl t, v with
+        | WireForm.Str, VStr s -> [ JStr s ]
+        | WireForm.Int, VInt i -> [ JInt i ]
+        | WireForm.Bool, VBool b -> [ JBool b ]
+        | WireForm.Enum e, VEnum w ->
+            match e.CaseAccepting w with
+            | Some case -> JStr(e.WireOf case) :: (e.AliasesOf case |> List.map JStr)
+            | None -> []
+        | _ -> []
+
+    let private fieldNamed (fields: IdlField list) (name: string) : IdlField option =
+        fields |> List.tryFind (fun f -> f.Name = name)
+
+    /// Whether a presence condition holds over a WIRE object's members (the decoder's question). The
+    /// sibling is read under its spellings; an `OmitDefault` sibling the object does not carry holds its
+    /// default.
+    let holdsOnWire (idl: Idl) (fields: IdlField list) (c: PresenceCondition) (members: (string * JVal) list) : bool =
+        let held (name: string) =
+            fieldNamed fields name
+            |> Option.bind (fun f -> memberAt f members |> Option.map (fun (_, j) -> f, j))
+
+        match c with
+        | WhenPresent s -> (held s).IsSome
+        | WhenAbsent s -> (held s).IsNone
+        | WhenEquals(s, v) ->
+            match held s, fieldNamed fields s with
+            | Some(f, j), _ -> scalarSpellings idl f.Type v |> List.contains j
+            | None, Some { Opt = OmitDefault d } -> d = v
+            | None, _ -> false
+
+    /// Whether a presence condition holds over AUTHORED members (the encoder's and the sampler's
+    /// question): an absent or `VAbsent` `OmitDefault` sibling holds its default.
+    let holdsAuthored (fields: IdlField list) (c: PresenceCondition) (authored: (string * IdlValue) list) : bool =
+        let held (name: string) =
+            match authored |> List.tryFind (fun (n, _) -> n = name) with
+            | Some(_, v) when v <> VAbsent -> Some v
+            | _ ->
+                match fieldNamed fields name with
+                | Some { Opt = OmitDefault d } -> Some d
+                | _ -> None
+
+        match c with
+        | WhenPresent s -> (held s).IsSome
+        | WhenAbsent s -> (held s).IsNone
+        | WhenEquals(s, v) -> held s = Some v
+
+    /// The member `f` as the DECODER reads it from a wire object: under its [[spellings]], and absent when its presence condition fails — so a
+    /// meaningless member decodes as its optionality's absence, exactly as if the document had not
+    /// carried it.
+    let readMember (idl: Idl) (fields: IdlField list) (f: IdlField) (members: (string * JVal) list) : JVal option =
+        match f.Presence with
+        | Some c when not (holdsOnWire idl fields c members) -> None
+        | _ -> memberAt f members |> Option.map snd

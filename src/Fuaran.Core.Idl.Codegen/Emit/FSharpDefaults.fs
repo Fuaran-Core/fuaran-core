@@ -65,6 +65,23 @@ module internal FSharpDefaults =
         | MemberValue.Parameter -> None
         | MemberValue.Refused v -> Some(Error(refuse v))
 
+    /// A JSON value as the F# `JVal` expression that builds it (Phase 539) — legal in an expression
+    /// position only, which is why [[LiteralTraversal]] admits it at the member's own type and never
+    /// nested. [[Decl.literal]] has already refused an ill-formed string and a non-finite number.
+    let rec fsJValLit (j: JVal) : string =
+        match j with
+        | JStr s -> "JStr " + SourceLit.fsString s
+        | JInt i -> sprintf "JInt(%d)" i
+        | JBool b -> if b then "JBool true" else "JBool false"
+        | JFloat f -> "JFloat(" + fsFloatLit f + ")"
+        | JArr xs -> "JArr [ " + (xs |> List.map fsJValLit |> String.concat "; ") + " ]"
+        | JObj ms ->
+            "JObj [ "
+            + (ms
+               |> List.map (fun (k, x) -> "(" + SourceLit.fsString k + ", " + fsJValLit x + ")")
+               |> String.concat "; ")
+            + " ]"
+
     /// Phase 524 — the F# printer of a declared literal ([[LiteralTraversal]]): the F# source form
     /// of a declared default VALUE — enums (`ToneVariant.Default`), scalars, the EMPTY LIST (Phase
     /// 1080), a nullary union case (`CellFormat.None`) and, since Phase 124, a VALUE-CARRYING union
@@ -76,6 +93,8 @@ module internal FSharpDefaults =
           Bool = fun _ b -> if b then "true" else "false"
           Enum = fun _ n case _ -> n + "." + case
           EmptyList = fun _ -> "[]"
+          EmptyMap = fun _ -> "Map.empty"
+          Json = fun _ j -> fsJValLit j
           Record =
             fun _ r members ->
                 members

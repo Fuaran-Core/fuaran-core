@@ -452,6 +452,27 @@ type Optionality =
     /// and whose wire form is fixed" — a host-only slot's wire form being *absence*.)
     | HostOnly
 
+/// **When a member is meaningful at all (Phase 539, DECISIONS.md D190)** — the presence condition of a
+/// field, stated against ONE sibling of the same owner. A member whose condition fails carries no meaning
+/// in that configuration, so it is ABSENT from the canonical form: the encoder omits it whatever it holds,
+/// the decoder accepts it and drops it (so it decodes as its [[Optionality]]'s absence — `None` for an
+/// `Optional` member, the default for an `OmitDefault` one), and the sampler draws it absent. When the
+/// condition holds the member is governed by its optionality exactly as an unconditional member is.
+///
+/// The sibling is read as the value it HOLDS, not as the bytes that carry it: a sibling absent on the wire
+/// holds its own declared default when it is `OmitDefault`, and a sibling written under one of its aliases
+/// is the sibling. [[Declare.errors]] admits a condition only on an `Optional` or `OmitDefault` member, over a
+/// sibling that is itself unconditional, declared, not host-only and not the member itself; [[WhenPresent]]
+/// and [[WhenAbsent]] need an `Optional` sibling (no other kind of member can be absent), and
+/// [[WhenEquals]] a scalar value (a string, an int, a bool or an enum spelling) at the sibling's type.
+and PresenceCondition =
+    /// Meaningful only when the sibling is present (an `Optional` sibling holding `Some`).
+    | WhenPresent of sibling: string
+    /// Meaningful only when the sibling is absent — `Grid.cols` under `templateColumns`.
+    | WhenAbsent of sibling: string
+    /// Meaningful only when the sibling holds `value` — `Select.values` under `multiple = true`.
+    | WhenEquals of sibling: string * value: IdlValue
+
 /// One named slot of a kind, op, union case, record or the node envelope — its wire member
 /// name, the type of its value, and when it appears on the wire.
 and IdlField =
@@ -463,6 +484,15 @@ and IdlField =
         Type: IdlType
         /// When the member is on the wire and what its absence means.
         Opt: Optionality
+        /// The member's RETIRED spellings (Phase 539, DECISIONS.md D190), in priority order: a decoder
+        /// accepts the member under any of them and normalises it to [[Name]], the one canonical
+        /// spelling every encoder writes. When the canonical spelling is present the aliases are
+        /// ignored; otherwise the first alias present is the member. `[]` — every field declared
+        /// before the slot existed — accepts the canonical spelling only.
+        Aliases: string list
+        /// When the member is meaningful at all (Phase 539) — see [[PresenceCondition]]. `None`, the
+        /// default, is a member governed by its optionality alone.
+        Presence: PresenceCondition option
         /// What is true ABOUT this field, as opposed to its shape (Phase 113).
         /// [[Annotations.Empty]] for a field that says nothing, which is every field
         /// declared before the set existed.
@@ -568,6 +598,12 @@ and IdlEnum =
         /// `[]` — the default, and every declaration written before Phase 119 — means no
         /// case says anything. Read it through [[AnnotationsOf]] rather than by lookup.
         CaseAnnotations: (string * Annotations) list
+        /// The lenient spellings a decoder accepts for a case (Phase 539, DECISIONS.md D190), keyed by
+        /// HOST case name like [[CaseAnnotations]] and as sparse: each alias is a wire string that
+        /// decodes to the case and re-encodes as its canonical [[WireOf]] spelling. `[]` — every enum
+        /// declared before the slot existed — accepts the canonical wire strings only. Read it through
+        /// [[CaseAccepting]] / [[AliasesOf]].
+        Aliases: (string * string list) list
         /// What is true ABOUT the enum as a TYPE (Phase 542), as distinct from any one
         /// of its cases ([[CaseAnnotations]]). [[Annotations.Empty]] for an enum that
         /// says nothing; the artifact then omits it.
@@ -608,6 +644,21 @@ and IdlEnum =
             match List.tryFindIndex (fun w -> w = wire) ws with
             | Some i when i < List.length this.Cases -> Some this.Cases[i]
             | _ -> None
+
+    /// The aliases declared for a HOST case name, or `[]` (Phase 539).
+    member this.AliasesOf(case: string) : string list =
+        this.Aliases
+        |> List.tryPick (fun (c, a) -> if c = case then Some a else None)
+        |> Option.defaultValue []
+
+    /// The host case name a DECODER reads `wire` as (Phase 539): [[CaseOf]] for a canonical wire
+    /// string, else the case declaring `wire` among its aliases, else `None`.
+    member this.CaseAccepting(wire: string) : string option =
+        match this.CaseOf wire with
+        | Some c -> Some c
+        | None ->
+            this.Aliases
+            |> List.tryPick (fun (c, a) -> if List.contains wire a then Some c else None)
 
     /// Every wire string this enum admits, in declaration order — what the
     /// schema's `enum` array, the TS decoder's case list and the sampler draw on.

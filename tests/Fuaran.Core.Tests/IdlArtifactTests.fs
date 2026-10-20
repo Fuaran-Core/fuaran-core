@@ -318,6 +318,8 @@ let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl
                 Fields =
                   [ { Name = "departs"
                       Opt = Required
+                      Aliases = []
+                      Presence = None
                       Annotations = Annotations.Empty
                       Type =
                         THosted
@@ -435,6 +437,8 @@ let private offDefaults: Idl =
                   [ { Name = "text"
                       Type = TStr
                       Opt = Required
+                      Aliases = [ "body" ]
+                      Presence = None
                       Annotations = note } ] } ]
         Unions = []
         Records = []
@@ -444,7 +448,8 @@ let private offDefaults: Idl =
                   CaseAnnotations =
                       [ "Quiet",
                         { Annotations.Empty with
-                            Since = Some "2" } ] } ]
+                            Since = Some "2" } ]
+                  Aliases = [ "Quiet", [ "hush" ] ] } ]
         Ops =
             [ { Tag = "Touch"
                 Category = "op"
@@ -466,6 +471,7 @@ let private atDefaults: Idl =
                         k.Fields
                         |> List.map (fun f ->
                             { f with
+                                Aliases = []
                                 Annotations = Annotations.Empty }) })
         Enums = [ Declare.enumOf "Tone" [ "loud"; "quiet" ] ]
         Ops = []
@@ -589,6 +595,8 @@ let codecTests =
                                 [ { Name = "run"
                                     Type = TClosure
                                     Opt = Optional
+                                    Aliases = []
+                                    Presence = None
                                     Annotations = Annotations.Empty } ] } ] }
 
               let text = Artifact.render closureIdl

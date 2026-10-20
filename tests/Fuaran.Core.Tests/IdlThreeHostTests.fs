@@ -703,6 +703,8 @@ let private opsOf (idl: Idl) (seed: int) (count: int) : Idl * IdlValue list =
                         [ { Name = "op"
                             Type = TOp
                             Opt = Required
+                            Aliases = []
+                            Presence = None
                             Annotations = Annotations.Empty } ]
                       Annotations = Annotations.Empty } ] }
 
@@ -851,6 +853,8 @@ let threeWay =
                           @ [ { Name = "zz"
                                 Type = TStr
                                 Opt = Required
+                                Aliases = []
+                                Presence = None
                                 Annotations = Annotations.Empty } ])
 
                   let body = "body", VUnion("Inline", [ "text", VStr "t" ])
@@ -955,6 +959,8 @@ let private reqField (name: string) (t: IdlType) : IdlField =
     { Name = name
       Type = t
       Opt = Required
+      Aliases = []
+      Presence = None
       Annotations = Annotations.Empty }
 
 [<Tests>]
@@ -1003,7 +1009,9 @@ let declarationRefusals =
                                   NodeFields =
                                       ReferenceIdl.refIdl.NodeFields
                                       @ [ { reqField name TStr with
-                                              Opt = Optional } ] }
+                                              Opt = Optional
+                                              Aliases = []
+                                              Presence = None } ] }
 
                           Expect.isError
                               (Artifact.parse (Artifact.render idl))
