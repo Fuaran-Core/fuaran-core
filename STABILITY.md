@@ -353,8 +353,8 @@ The first clause is a test output for every package (Phase 410, DECISIONS.md D14
 reads each packable package's built assembly and fails on a public method, or a public property of
 a function type, whose answer carries a tuple of three or more positions — through generic
 arguments, arrays and a returned function's range — so a package added later is held without being
-named. `OpStream.Dag`'s writes answer `Dag.CheckedAppend` and `Dag.IndexedAppend`, and its default
-order key is a `Dag.LaneKey`.
+named. Since `0.40.0` no `OpStream.Dag` answer carries a tuple of any width (Phase 529): each write
+answers one `Dag.Written` (the `Written` of its richer forms); its order key is a `Dag.LaneKey`.
 
 ## Stability-critical surfaces
 
