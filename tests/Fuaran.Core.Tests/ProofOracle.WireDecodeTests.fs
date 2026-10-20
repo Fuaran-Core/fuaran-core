@@ -132,57 +132,42 @@ let rec private everyValue (v: JVal) : JVal list =
     | JObj fields -> v :: (fields |> List.collect (fun (_, x) -> everyValue x))
     | _ -> [ v ]
 
-let private emptyTally =
-    { Disagreements = []
-      Accepted = 0
-      Refused = 0 }
+/// The combinator probes' render pair: each probe already carries both answers as text.
+let private probeTally = Tally.empty [ "Accepted"; "Refused" ]
 
 /// Run every probe over every value of `el`, folding the disagreements and the two outcome
 /// classes into `tally`.
 let private runProbes (bridge: JVal -> MJVal) (label: string) (el: JVal) (tally: Tally) : Tally =
-    everyValue el
-    |> List.fold
-        (fun acc v ->
-            decodeProbes bridge v
-            |> List.fold
-                (fun (a: Tally) probe ->
-                    let a =
-                        if probe.Production.StartsWith "Ok" then
-                            { a with Accepted = a.Accepted + 1 }
-                        else
-                            { a with Refused = a.Refused + 1 }
-
-                    if probe.Production <> probe.Oracle then
-                        { a with
-                            Disagreements =
-                                a.Disagreements
-                                @ [ sprintf
-                                        "%s: %s on %s\n  production: %s\n  oracle:     %s"
-                                        label
-                                        probe.Name
-                                        (Json.render v)
-                                        probe.Production
-                                        probe.Oracle ] }
-                    else
-                        a)
-                acc)
-        tally
+    tally
+    |> Differential.over (everyValue el) (fun v t ->
+        t
+        |> Differential.over (decodeProbes bridge v) (fun probe t ->
+            t
+            |> Tally.bump (
+                if probe.Production.StartsWith "Ok" then
+                    "Accepted"
+                else
+                    "Refused"
+            )
+            |> Differential.compareWith
+                Differential.text
+                (fun p m ->
+                    sprintf "%s: %s on %s\n  production: %s\n  oracle:     %s" label probe.Name (Json.render v) p m)
+                probe.Production
+                probe.Oracle))
 
 let private expectProbeAgreement (label: string) (t: Tally) =
-    match t.Disagreements with
-    | d :: _ -> failtestf "%s: the decode oracle and Wire.Decode DISAGREE\n%s" label d
-    | [] ->
-        // Both classes must have been reached, or the agreement certifies one arm only — the
-        // same vacuity posture the fold family's `expectAgreement` takes.
-        Expect.isGreaterThan
-            t.Accepted
-            0
-            (sprintf "%s: no probe was ACCEPTED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+    Differential.expectAgrees label t
+    // Both classes must have been reached, or the agreement certifies one arm only — the
+    // same vacuity posture the fold family's `expectAgreement` takes.
+    let accepted, refused = Tally.count "Accepted" t, Tally.count "Refused" t
 
-        Expect.isGreaterThan
-            t.Refused
-            0
-            (sprintf "%s: no probe was REFUSED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+    Expect.isGreaterThan
+        accepted
+        0
+        (sprintf "%s: no probe was ACCEPTED (accepted=%d refused=%d)" label accepted refused)
+
+    Expect.isGreaterThan refused 0 (sprintf "%s: no probe was REFUSED (accepted=%d refused=%d)" label accepted refused)
 
 // ---- the reference vocabulary, on the production side ----
 
@@ -782,7 +767,7 @@ let tests =
                           match Json.parse (File.ReadAllText path) with
                           | Error e -> failtestf "%s: not JSON (%s)" name e
                           | Ok v -> runProbes toModel name v acc)
-                      emptyTally
+                      probeTally
                   |> expectProbeAgreement "nodes/ fixtures"
 
           testCase "the decode oracle agrees with Wire.Decode over every ops/ fixture"
@@ -802,13 +787,13 @@ let tests =
                           match Json.parse (File.ReadAllText path) with
                           | Error e -> failtestf "%s: not JSON (%s)" name e
                           | Ok v -> runProbes toModel name v acc)
-                      emptyTally
+                      probeTally
                   |> expectProbeAgreement "ops/ fixtures"
 
           testCase "the decode oracle agrees with Wire.Decode over a generated JVal sample"
           <| fun _ ->
               let mutable rng = ConfRng.ofSeed 8100
-              let mutable tally = emptyTally
+              let mutable tally = probeTally
 
               for i in 1..400 do
                   let v, r' = genJ 0 rng
@@ -921,9 +906,9 @@ let tests =
               // The teeth. The blind bridge reads every wire integer as a float, so the oracle is
               // asked about a different value from the one production was asked about: `asInt`
               // must lose. A green report above is therefore a comparison that CAN fail.
-              let tally = runProbes toModelBlind "blind" (JObj [ "n", JInt 7 ]) emptyTally
+              let tally = runProbes toModelBlind "blind" (JObj [ "n", JInt 7 ]) probeTally
 
-              match tally.Disagreements with
+              match Tally.disagreements tally with
               | [] ->
                   failtest
                       "a blind bridge reads every integer as a float, so asInt must disagree — this comparison cannot lose"
@@ -934,14 +919,14 @@ let tests =
 
                   // … and it loses over the generated sample too, not only on a hand-made value.
                   let mutable rng = ConfRng.ofSeed 9100
-                  let mutable swept = emptyTally
+                  let mutable swept = probeTally
 
                   for _ in 1..60 do
                       let v, r' = genJ 0 rng
                       rng <- r'
                       swept <- runProbes toModelBlind "blind" v swept
 
-                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well"
+                  Differential.expectLoses "the blind bridge, over the generated sample as well" swept
 
           // ---- Phase 152: the decode surface under a MEMBER REORDERING ----
 
@@ -991,7 +976,7 @@ let tests =
                                       runProbes toModel (Path.GetFileNameWithoutExtension path) shuffled acc
                                   else
                                       acc)
-                          emptyTally
+                          probeTally
 
                   expectProbeAgreement "nodes/ fixtures, shuffled" probes
 

@@ -20,6 +20,186 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 
 // ---------------------------------------------------------------------------
+//  Phase 535 — THE DIFFERENTIAL HARNESS. Every `Proofs.Oracle` differential is the same loop:
+//  draw a case from a seeded pool, ask production and the extracted model, render both answers
+//  through the DU's render pair, record a disagreement when the renders differ, and count what the
+//  pool reached so an agreement that met nothing cannot read green. The October split left that
+//  loop copied once per model, each copy with its own tally record. It is written once here.
+//
+//  The tally is DECLARED: a differential names its counters, its reached-sets and its finding
+//  classes up front, and reading or writing an undeclared name fails the test. Without that a
+//  misspelt counter would read as zero, and an assertion `count a = count b` over two misspellings
+//  would hold vacuously.
+//
+//  The go-red arm is `Differential.expectLoses`: the same differential, handed a perturbed model or
+//  bridge, must disagree. A model whose differential cannot lose certifies nothing.
+// ---------------------------------------------------------------------------
+
+/// The finding class a comparison through a render pair records under.
+[<Literal>]
+let Disagreement = "disagreement"
+
+/// One differential's evidence: every finding under its class (newest first, as recorded), the
+/// named counters, and the named sets of classes the pool reached. Built and read through `Tally`.
+type Tally =
+    { Findings: Map<string, string list>
+      Counts: Map<string, int>
+      Reached: Map<string, Set<string>> }
+
+module Tally =
+    let private undeclared (what: string) (name: string) (declared: seq<string>) =
+        failtestf "the tally declares no %s %A (declared: %s)" what name (String.concat ", " declared)
+
+    /// A tally counting `counters`, recording `Disagreement` findings, reaching no set yet.
+    let empty (counters: string list) : Tally =
+        { Findings = Map.ofList [ Disagreement, [] ]
+          Counts = counters |> List.map (fun c -> c, 0) |> Map.ofList
+          Reached = Map.empty }
+
+    /// Declares the named reached-sets.
+    let sets (names: string list) (t: Tally) : Tally =
+        { t with
+            Reached = names |> List.fold (fun m n -> Map.add n Set.empty m) t.Reached }
+
+    /// Declares further finding classes beside `Disagreement`.
+    let classes (names: string list) (t: Tally) : Tally =
+        { t with
+            Findings = names |> List.fold (fun m n -> Map.add n [] m) t.Findings }
+
+    let add (name: string) (n: int) (t: Tally) : Tally =
+        match Map.tryFind name t.Counts with
+        | Some c ->
+            { t with
+                Counts = Map.add name (c + n) t.Counts }
+        | None -> undeclared "counter" name t.Counts.Keys
+
+    let bump (name: string) (t: Tally) : Tally = add name 1 t
+
+    /// `bump` when `cond` holds.
+    let bumpIf (cond: bool) (name: string) (t: Tally) : Tally = if cond then bump name t else t
+
+    let reach (set: string) (value: string) (t: Tally) : Tally =
+        match Map.tryFind set t.Reached with
+        | Some s ->
+            { t with
+                Reached = Map.add set (Set.add value s) t.Reached }
+        | None -> undeclared "reached-set" set t.Reached.Keys
+
+    let record (cls: string) (message: string) (t: Tally) : Tally =
+        match Map.tryFind cls t.Findings with
+        | Some ms ->
+            { t with
+                Findings = Map.add cls (message :: ms) t.Findings }
+        | None -> undeclared "finding class" cls t.Findings.Keys
+
+    let disagree (message: string) (t: Tally) : Tally = record Disagreement message t
+
+    let count (name: string) (t: Tally) : int =
+        match Map.tryFind name t.Counts with
+        | Some c -> c
+        | None -> undeclared "counter" name t.Counts.Keys
+
+    let reached (set: string) (t: Tally) : Set<string> =
+        match Map.tryFind set t.Reached with
+        | Some s -> s
+        | None -> undeclared "reached-set" set t.Reached.Keys
+
+    /// The findings of one class, in the order they were found.
+    let findings (cls: string) (t: Tally) : string list =
+        match Map.tryFind cls t.Findings with
+        | Some ms -> List.rev ms
+        | None -> undeclared "finding class" cls t.Findings.Keys
+
+    /// The disagreements, in the order they were found.
+    let disagreements (t: Tally) : string list = findings Disagreement t
+
+    /// Two tallies of the same declaration, summed.
+    let merge (a: Tally) (b: Tally) : Tally =
+        { Findings = Map.map (fun k ms -> (Map.tryFind k b.Findings |> Option.defaultValue []) @ ms) a.Findings
+          Counts = Map.map (fun k c -> c + (Map.tryFind k b.Counts |> Option.defaultValue 0)) a.Counts
+          Reached =
+            Map.map (fun k s -> Set.union s (Map.tryFind k b.Reached |> Option.defaultValue Set.empty)) a.Reached }
+
+/// The render pair of one answer DU: production's answer and the model's, each as the text the
+/// comparison reads. Two answers agree exactly when their renders are equal.
+type Differential<'P, 'M> =
+    { Production: 'P -> string
+      Model: 'M -> string }
+
+module Differential =
+    let pair (production: 'P -> string) (model: 'M -> string) : Differential<'P, 'M> =
+        { Production = production
+          Model = model }
+
+    /// Both sides already answer in text.
+    let text: Differential<string, string> = pair id id
+
+    /// Both sides answer in one F# type, read through `%A`.
+    let structural<'T> : Differential<'T, 'T> = pair (sprintf "%A") (sprintf "%A")
+
+    /// Records `message ()` as a disagreement unless `agree` — the primitive every check rides.
+    let check (agree: bool) (message: unit -> string) (t: Tally) : Tally =
+        if agree then t else Tally.disagree (message ()) t
+
+    /// Compares one answer pair through the render pair. `message` receives the two renders.
+    let compareWith
+        (d: Differential<'P, 'M>)
+        (message: string -> string -> string)
+        (production: 'P)
+        (model: 'M)
+        (t: Tally)
+        : Tally =
+        let p = d.Production production
+        let m = d.Model model
+        check (p = m) (fun () -> message p m) t
+
+    /// Compares one answer pair through the render pair, under the standard message.
+    let compare (d: Differential<'P, 'M>) (where: string) (production: 'P) (model: 'M) (t: Tally) : Tally =
+        compareWith d (fun p m -> sprintf "%s\n  production: %s\n  the model:  %s" where p m) production model t
+
+    /// The seeded loop: `trials` steps, each drawing from the generator state it is handed and
+    /// returning the state the next step draws from. The generator is the caller's (ConfRng, a
+    /// `System.Random`, an LCG) — the harness fixes the loop, not the pool.
+    let seededFrom (trials: int) (state0: 'R) (step: int -> 'R -> Tally -> 'R * Tally) (t0: Tally) : 'R * Tally =
+        let mutable r = state0
+        let mutable t = t0
+
+        for i in 1..trials do
+            let r', t' = step i r t
+            r <- r'
+            t <- t'
+
+        r, t
+
+    /// `seededFrom`, when no later loop draws from the state it leaves.
+    let seeded (trials: int) (state0: 'R) (step: int -> 'R -> Tally -> 'R * Tally) (t0: Tally) : Tally =
+        seededFrom trials state0 step t0 |> snd
+
+    /// The fixed-pool loop: every case, in order.
+    let over (cases: seq<'C>) (probe: 'C -> Tally -> Tally) (t0: Tally) : Tally =
+        Seq.fold (fun t c -> probe c t) t0 cases
+
+    /// The shrink hook: a case that `diverges` is reduced by `shrink` before it is reported, so the
+    /// finding names the smallest failing case the shrinker can reach.
+    let shrunk (diverges: 'C -> bool) (shrink: ('C -> bool) -> 'C -> 'C) (case: 'C) : 'C =
+        if diverges case then shrink diverges case else case
+
+    /// The agreement arm: no finding of any class, or the first five of each are printed.
+    let expectAgrees (label: string) (t: Tally) =
+        for KeyValue(cls, ms) in t.Findings do
+            if not (List.isEmpty ms) then
+                failtestf
+                    "%s: the oracle and production DISAGREE — %d %s finding(s):\n%s"
+                    label
+                    (List.length ms)
+                    cls
+                    (List.rev ms |> List.truncate 5 |> String.concat "\n")
+
+    /// The GO-RED arm: the same differential, handed a perturbed model or bridge, must disagree.
+    let expectLoses (label: string) (t: Tally) =
+        Expect.isNonEmpty (Tally.disagreements t) (sprintf "%s: the perturbed differential must DISAGREE" label)
+
+// ---------------------------------------------------------------------------
 //  The bridge — Core's types as the model reads them, and the model's back.
 // ---------------------------------------------------------------------------
 
@@ -301,11 +481,6 @@ let rec toModel (v: JVal) : MJVal =
     | JFloat f -> WireDecode.JFloat f
     | JArr xs -> WireDecode.JArr(xs |> List.map toModel)
     | JObj fields -> WireDecode.JObj(fields |> List.map (fun (k, v) -> k, toModel v))
-
-type Tally =
-    { Disagreements: string list
-      Accepted: int
-      Refused: int }
 
 // ---------------------------------------------------------------------------
 //  Phase 133 — the TREE ALGEBRA as a third oracle.
