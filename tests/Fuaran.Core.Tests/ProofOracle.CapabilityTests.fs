@@ -10,6 +10,7 @@ open Expecto
 // Phase 177 — the extracted FUNCTION-SEAM model, bound the same way and for the same reason:
 // production's `Fuaran.Core.Capability` module shares the model's name once `Fuaran.Core` is open.
 module ModelCap = Capability
+module ModelProp = Propagation
 
 open Fuaran.Core
 open Fuaran.Core.Tests
@@ -732,7 +733,7 @@ let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : C
 // ------------------------------------------------------------------------------------------
 // Phase 354 — the three sections of `proofs/Capability.fst` Phase 307 left unmodelled, each beside
 // the production function it names: the HANDLER TABLE (`Function.bindHandlers`), the CAPABILITY
-// PIPELINE (`CapabilityPipeline.typeCheck` / `eval` / `dirtySet` / `evalFrom`) and the CODECS
+// PIPELINE (`CapabilityPipeline.typeCheck` / `eval` / `dependencyMap` / `evalFrom`) and the CODECS
 // (`CapabilityCodec` for a signature and a capability, the pipeline's for its nodes).
 //
 // The draws reach what the sections' theorems are about and the Phase 307 generator did not:
@@ -1408,7 +1409,27 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
          | Ok(), Ok _ -> evaluated <- evaluated + 1
          | Ok(), Error _ -> evalRefused <- evalRefused + 1)
 
-        // ---- dirtySet and evalFrom ----
+        // ---- dependencyMap, the dirty set and evalFrom ----
+        // Phase 544: the model's dirty set is Propagation's closure instantiated at `deps_of`, and
+        // production's is Propagation's closure over `dependencyMap`, so the differential compares
+        // the INSTANTIATION (the edge relation each map names, which is what `pipeline_edge_iff`
+        // and the two closure theorems are stated over) and then the closure over it — model
+        // against production on both, never production against itself.
+        let pDeps = CapabilityPipeline.dependencyMap p
+        let mDeps = ModelCap.deps_of mp.p_nodes
+
+        let pEdges =
+            pDeps
+            |> Map.toSeq
+            |> Seq.collect (fun (n, rs) -> rs |> Seq.map (fun r -> n, r))
+            |> Set.ofSeq
+
+        let mEdges =
+            mDeps |> Seq.collect (fun (n, rs) -> rs |> Seq.map (fun r -> n, r)) |> Set.ofSeq
+
+        if pEdges <> mEdges then
+            diffs.Add(sprintf "seed %d: dependencyMap's edges differ (%A vs %A)" i pEdges mEdges)
+
         let nodeIds = p.Nodes |> List.map CapabilityPipeline.nodeId
         let mutable changed = []
 
@@ -1427,11 +1448,11 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
         let changedSet = Set.ofList changed
         let changedList = Set.toList changedSet
-        let pDirty = CapabilityPipeline.dirtySet changedSet p
-        let mDirty = Set.ofList (ModelCap.dirty_set changedList mp)
+        let pDirty = Propagation.dirtyFromChangedIds pDeps changedSet
+        let mDirty = Set.ofList (ModelProp.dirty_from_changed_ids mDeps changedList)
 
         if pDirty <> mDirty then
-            diffs.Add(sprintf "seed %d: dirtySet differs (%A vs %A)" i pDirty mDirty)
+            diffs.Add(sprintf "seed %d: the dirty set differs (%A vs %A)" i pDirty mDirty)
 
         // The new body: the old one, re-drawn at exactly the changed nodes — `agree_off`.
         let table1 =
@@ -2544,7 +2565,7 @@ let tests =
                   "and one disagreement is about WHICH undeclared key is named first"
 
           testCase
-              "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dirtySet and evalFrom over generated registries, pipelines, reorderings and change sets"
+              "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dependencyMap and evalFrom, and its dirty set with Propagation.dirtyFromChangedIds over that map, over generated registries, pipelines, reorderings and change sets"
           <| fun _ ->
               let t = underCulture "he-IL" (fun () -> pipeDifferential readers 3542 500)
 

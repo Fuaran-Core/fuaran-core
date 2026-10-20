@@ -2378,15 +2378,6 @@ let rec all_spaced : Prims.list<sig_entry>  ->  Prims.list<Prims.string>  ->  Pr
      end) && (all_spaced holes t))
      end))
 
-
-let rec subset : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (match (a) with
-| [] -> begin
-     true
-     end
-| (h)::t -> begin
-     ((ListAlgebra.mem h b) && (subset t b))
-     end))
-
 type handler_binding<'h> = {hb_handler : 'h; hb_effect : effect_class}
 
 
@@ -2648,23 +2639,6 @@ let bound_within = (fun ( hs  :  handler_map<'h> ) ( hole  :  (Prims.string * ef
      end
 | FStar_Pervasives_Native.None -> begin
      false
-     end))
-
-
-let union : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (ListAlgebra.app a (ListAlgebra.diff b a)))
-
-
-let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (ListAlgebra.mem h t) then begin
-     (dedup t)
-     end else begin
-     (h)::(dedup t)
-     end
      end))
 
 type arg_source =
@@ -3089,7 +3063,7 @@ let subsumes : feed_readers  ->  readers  ->  value_space  ->  value_space  ->  
      (all_len_in rd rl rh xs)
      end
 | (Enum (rs), Enum (xs)) -> begin
-     (subset xs rs)
+     (Propagation.subset xs rs)
      end
 | (AnyString, a) -> begin
      (not ((match (a) with
@@ -3567,150 +3541,13 @@ let eval = (fun ( fr  :  feed_readers ) ( rd  :  readers ) ( lk  :  capability_l
      end))
 
 
-type dmap = Prims.list<(Prims.string * Prims.list<Prims.string>)>
-
-
-let rec deps_of : Prims.list<pipeline_node>  ->  dmap = (fun ( ns  :  Prims.list<pipeline_node> ) -> (match (ns) with
+let rec deps_of : Prims.list<pipeline_node>  ->  Propagation.dmap = (fun ( ns  :  Prims.list<pipeline_node> ) -> (match (ns) with
 | [] -> begin
      []
      end
 | (n)::t -> begin
      ((((node_id n)), ((upstreams n))))::(deps_of t)
      end))
-
-
-let rec edge : dmap  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( deps  :  dmap ) ( n  :  Prims.string ) ( r  :  Prims.string ) -> (match (deps) with
-| [] -> begin
-     false
-     end
-| ((k, reads))::t -> begin
-     (((Prims.op_Equals k n) && (ListAlgebra.mem r reads)) || (edge t n r))
-     end))
-
-
-let rec pairs_of : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( nd  :  Prims.string ) ( reads  :  Prims.list<Prims.string> ) -> (match (reads) with
-| [] -> begin
-     []
-     end
-| (r)::t -> begin
-     (((r), (nd)))::(pairs_of nd t)
-     end))
-
-
-let rec pairs : dmap  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( deps  :  dmap ) -> (match (deps) with
-| [] -> begin
-     []
-     end
-| ((nd, reads))::t -> begin
-     (ListAlgebra.app (pairs_of nd reads) (pairs t))
-     end))
-
-
-let rec firsts : Prims.list<(Prims.string * Prims.string)>  ->  Prims.list<Prims.string> = (fun ( ps  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (ps) with
-| [] -> begin
-     []
-     end
-| ((r, uu___))::t -> begin
-     (r)::(firsts t)
-     end))
-
-
-let rec seconds_for : Prims.string  ->  Prims.list<(Prims.string * Prims.string)>  ->  Prims.list<Prims.string> = (fun ( k  :  Prims.string ) ( ps  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (ps) with
-| [] -> begin
-     []
-     end
-| ((r, n))::t -> begin
-      
-if (Prims.op_Equals r k) then begin
-     (n)::(seconds_for k t)
-     end else begin
-     (seconds_for k t)
-     end
-     end))
-
-
-let rec group_from : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Prims.string)>  ->  dmap = (fun ( ks  :  Prims.list<Prims.string> ) ( ps  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (ks) with
-| [] -> begin
-     []
-     end
-| (k)::t -> begin
-     (((k), ((dedup (seconds_for k ps)))))::(group_from t ps)
-     end))
-
-
-let dependents : dmap  ->  dmap = (fun ( deps  :  dmap ) -> (
-
-let ps = (pairs deps)
-in (group_from (dedup (firsts ps)) ps)))
-
-
-let dependents_of : dmap  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( nd  :  Prims.string ) -> (match ((assoc nd d)) with
-| FStar_Pervasives_Native.Some (ds) -> begin
-     ds
-     end
-| FStar_Pervasives_Native.None -> begin
-     []
-     end))
-
-
-let rec mem_pair : Prims.string  ->  Prims.string  ->  Prims.list<(Prims.string * Prims.string)>  ->  Prims.bool = (fun ( r  :  Prims.string ) ( n  :  Prims.string ) ( ps  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (ps) with
-| [] -> begin
-     false
-     end
-| ((r', n'))::t -> begin
-     (((Prims.op_Equals r r') && (Prims.op_Equals n n')) || (mem_pair r n t))
-     end))
-
-
-let rec next_of : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( s  :  Prims.list<Prims.string> ) -> (match (frontier) with
-| [] -> begin
-     s
-     end
-| (nd)::t -> begin
-     (next_of d t (match ((assoc nd d)) with
-| FStar_Pervasives_Native.Some (ds) -> begin
-     (union s ds)
-     end
-| FStar_Pervasives_Native.None -> begin
-     s
-     end))
-     end))
-
-
-let rec any_dep : dmap  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (match (frontier) with
-| [] -> begin
-     false
-     end
-| (nd)::t -> begin
-     ((ListAlgebra.mem x (dependents_of d nd)) || (any_dep d t x))
-     end))
-
-
-let rec range : dmap  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) -> (match (d) with
-| [] -> begin
-     []
-     end
-| ((uu___, vs))::t -> begin
-     (ListAlgebra.app vs (range t))
-     end))
-
-
-let rec grow : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( acc  :  Prims.list<Prims.string> ) -> (match (frontier) with
-| [] -> begin
-     acc
-     end
-| (uu___)::uu___1 -> begin
-     (
-
-let next = (next_of d frontier [])
-in (
-
-let fresh = (ListAlgebra.diff next acc)
-in (grow d fresh (union acc fresh))))
-     end))
-
-
-let dirty_set : Prims.list<Prims.string>  ->  pipeline  ->  Prims.list<Prims.string> = (fun ( changed  :  Prims.list<Prims.string> ) ( p  :  pipeline ) -> (grow (dependents (deps_of p.p_nodes)) changed changed))
 
 
 let rec eval_from_go = (fun ( rd  :  readers ) ( lk  :  capability_lookup ) ( spell1  :  'v  ->  Prims.string ) ( body  :  node_body<'v> ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( dirty  :  Prims.list<Prims.string> ) ( results  :  Prims.list<(Prims.string * 'v)> ) ( ns  :  Prims.list<pipeline_node> ) -> (match (ns) with
@@ -3747,7 +3584,7 @@ let eval_from = (fun ( fr  :  feed_readers ) ( rd  :  readers ) ( lk  :  capabil
      Error (EvalIllTyped (e))
      end
 | Ok (()) -> begin
-     (eval_from_go rd lk spell1 body prior (dirty_set changed p) [] p.p_nodes)
+     (eval_from_go rd lk spell1 body prior (Propagation.dirty_from_changed_ids (deps_of p.p_nodes) changed) [] p.p_nodes)
      end))
 
 
@@ -3756,7 +3593,7 @@ let rec ordered : Prims.list<Prims.string>  ->  Prims.list<pipeline_node>  ->  P
      true
      end
 | (n)::rest -> begin
-     (((not ((ListAlgebra.mem (node_id n) earlier))) && (subset (upstreams n) earlier)) && (ordered (ListAlgebra.app earlier (((node_id n))::[])) rest))
+     (((not ((ListAlgebra.mem (node_id n) earlier))) && (Propagation.subset (upstreams n) earlier)) && (ordered (ListAlgebra.app earlier (((node_id n))::[])) rest))
      end))
 
 type jval =
@@ -4868,7 +4705,7 @@ if (match ((space_wf rd (node_output n))) with
      end))
 
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "determinism-tag-of-clock-and-network"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({Twin.tname = "det-of-tag-reads-its-canonical-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({Twin.tname = "det-of-tag-refuses-another-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({Twin.tname = "a-bounded-repeat-is-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3")))}).s_required true))})::({Twin.tname = "an-unbounded-repeat-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString)}).s_required false))})::({Twin.tname = "a-repeat-over-no-count-is-not-total"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "r"; s_name = "r"; s_kind = RepeatHole (AnyString); s_required = false}) false))})::({Twin.tname = "a-repeat-over-a-float-range-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange ("0", "1"))}).s_required false))})::({Twin.tname = "a-repeat-past-the-cap-is-not-a-count"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000001")))) false) && (Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000000")))) true)))})::({Twin.tname = "repeated-names-each-repeat-in-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (repeated [] (("a")::("b")::("a")::("b")::("a")::[])) (("a")::("b")::("a")::[])))})::({Twin.tname = "a-second-address-is-the-duplicate"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} [] (({s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleAddr ("a")))))})::({Twin.tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (map_of_list (fun ( a  :  Prims.string ) ( b  :  Prims.string ) -> ((Prims.op_Equals a "a") || (Prims.op_Equals b "b"))) (((("b"), ((Prims.parse_int "1"))))::((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])) (((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])))})::({Twin.tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("stop"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (UnknownActionAddr ("stop", ("go")::[])))))})::({Twin.tname = "a-handler-on-a-data-hole-is-not-an-action-hole"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("title"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (NotAnActionHole ("title")))))})::({Twin.tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_effects (((("go"), ({hb_handler = (Prims.parse_int "0"); hb_effect = {host = WritesHost; determinism = deterministic}})))::[]) (((("go"), (pure_deterministic)))::[])) (Error (HandlerEffectExceedsCeiling ("go", pure_deterministic, {host = WritesHost; determinism = deterministic})))))})::({Twin.tname = "first-dup-is-the-first-id-seen-again"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_dup (("a")::("b")::("c")::("b")::("a")::[])) (FStar_Pervasives_Native.Some ("a"))))})::({Twin.tname = "an-edge-that-closes-a-cycle-is-named-from-the-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineCycle ("a", ("a")::("b")::[])))))})::({Twin.tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Source ("b", "ref", AnyString))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineForwardEdge ("a", "x", "b")))))})::({Twin.tname = "the-dirty-set-is-the-change-and-everything-downstream"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_set (("s")::[]) {p_nodes = (Source ("s", "ref", AnyString))::(Invoke ("a", "c", AnyString, ((("x"), (FromNode ("s"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::(Source ("t", "ref", AnyString))::[]}) (("s")::("a")::("b")::[])))})::({Twin.tname = "an-entry-kind-outside-the-tags-is-refused-at-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("x"))))::((("name"), (JStr ("x"))))::((("kind"), (JStr ("int"))))::((("required"), (JBool (true))))::((("space"), ((space_json AnyString))))::[]))) (Error ({d_code = UnknownTag; d_path = (Key ("kind"))::[]}))))})::({Twin.tname = "a-value-entry-without-a-space-is-refused-at-space"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("v"))))::((("name"), (JStr ("v"))))::((("kind"), (JStr ("value"))))::((("required"), (JBool (true))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("space"))::[]}))))})::({Twin.tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("a"))))::((("name"), (JStr ("a"))))::((("kind"), (JStr ("action"))))::((("required"), (JBool (false))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("actionEffect"))::[]}))))})::({Twin.tname = "a-slot-entry-reads-back-as-its-constraint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (entry_json {s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true})) (Ok ({s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true}))))})::({Twin.tname = "the-descriptor-spelling-of-a-space-is-refused-at-type"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (space_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("kind"), (JStr ("stringLen"))))::((("minLength"), (JInt ((Prims.parse_int "1")))))::((("maxLength"), (JInt ((Prims.parse_int "3")))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("$type"))::[]}))))})::({Twin.tname = "a-node-with-an-empty-output-space-is-refused-at-outputType"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (node_of_j {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (node_json (Source ("s", "ref", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))) (Error ({d_code = OutOfRange; d_path = (Key ("outputType"))::[]}))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "determinism-tag-of-clock-and-network"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({Twin.tname = "det-of-tag-reads-its-canonical-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({Twin.tname = "det-of-tag-refuses-another-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({Twin.tname = "a-bounded-repeat-is-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3")))}).s_required true))})::({Twin.tname = "an-unbounded-repeat-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString)}).s_required false))})::({Twin.tname = "a-repeat-over-no-count-is-not-total"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "r"; s_name = "r"; s_kind = RepeatHole (AnyString); s_required = false}) false))})::({Twin.tname = "a-repeat-over-a-float-range-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange ("0", "1"))}).s_required false))})::({Twin.tname = "a-repeat-past-the-cap-is-not-a-count"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000001")))) false) && (Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000000")))) true)))})::({Twin.tname = "repeated-names-each-repeat-in-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (repeated [] (("a")::("b")::("a")::("b")::("a")::[])) (("a")::("b")::("a")::[])))})::({Twin.tname = "a-second-address-is-the-duplicate"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} [] (({s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleAddr ("a")))))})::({Twin.tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (map_of_list (fun ( a  :  Prims.string ) ( b  :  Prims.string ) -> ((Prims.op_Equals a "a") || (Prims.op_Equals b "b"))) (((("b"), ((Prims.parse_int "1"))))::((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])) (((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])))})::({Twin.tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("stop"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (UnknownActionAddr ("stop", ("go")::[])))))})::({Twin.tname = "a-handler-on-a-data-hole-is-not-an-action-hole"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("title"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (NotAnActionHole ("title")))))})::({Twin.tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_effects (((("go"), ({hb_handler = (Prims.parse_int "0"); hb_effect = {host = WritesHost; determinism = deterministic}})))::[]) (((("go"), (pure_deterministic)))::[])) (Error (HandlerEffectExceedsCeiling ("go", pure_deterministic, {host = WritesHost; determinism = deterministic})))))})::({Twin.tname = "first-dup-is-the-first-id-seen-again"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_dup (("a")::("b")::("c")::("b")::("a")::[])) (FStar_Pervasives_Native.Some ("a"))))})::({Twin.tname = "an-edge-that-closes-a-cycle-is-named-from-the-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineCycle ("a", ("a")::("b")::[])))))})::({Twin.tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Source ("b", "ref", AnyString))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineForwardEdge ("a", "x", "b")))))})::({Twin.tname = "the-dirty-set-is-the-change-and-everything-downstream"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (Propagation.dirty_from_changed_ids (deps_of ((Source ("s", "ref", AnyString))::(Invoke ("a", "c", AnyString, ((("x"), (FromNode ("s"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::(Source ("t", "ref", AnyString))::[])) (("s")::[])) (("s")::("a")::("b")::[])))})::({Twin.tname = "an-entry-kind-outside-the-tags-is-refused-at-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("x"))))::((("name"), (JStr ("x"))))::((("kind"), (JStr ("int"))))::((("required"), (JBool (true))))::((("space"), ((space_json AnyString))))::[]))) (Error ({d_code = UnknownTag; d_path = (Key ("kind"))::[]}))))})::({Twin.tname = "a-value-entry-without-a-space-is-refused-at-space"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("v"))))::((("name"), (JStr ("v"))))::((("kind"), (JStr ("value"))))::((("required"), (JBool (true))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("space"))::[]}))))})::({Twin.tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("a"))))::((("name"), (JStr ("a"))))::((("kind"), (JStr ("action"))))::((("required"), (JBool (false))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("actionEffect"))::[]}))))})::({Twin.tname = "a-slot-entry-reads-back-as-its-constraint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (entry_json {s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true})) (Ok ({s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true}))))})::({Twin.tname = "the-descriptor-spelling-of-a-space-is-refused-at-type"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (space_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("kind"), (JStr ("stringLen"))))::((("minLength"), (JInt ((Prims.parse_int "1")))))::((("maxLength"), (JInt ((Prims.parse_int "3")))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("$type"))::[]}))))})::({Twin.tname = "a-node-with-an-empty-output-space-is-refused-at-outputType"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (node_of_j {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (node_json (Source ("s", "ref", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))) (Error ({d_code = OutOfRange; d_path = (Key ("outputType"))::[]}))))})::[]
 
 type gated_error =
 | GRefused of invoke_error

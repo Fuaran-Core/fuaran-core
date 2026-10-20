@@ -568,8 +568,8 @@ the actual re-evaluation stays domain-side. The dependency relation is a per-cal
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
 / `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias left at `0.37.0`)
 is FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the rest of the
-substrate. Since `0.39.0` `Fuaran.Core.Function` depends on it (Phase 510, D173; additive, a package edge and no moved
-signature): the pipeline's dirty set IS `dirtyFromChangedIds`, so this package is in every `Function` consumer's graph.
+substrate. Since `0.39.0` `Fuaran.Core.Function` depends on it (Phase 510, D173; a package edge, so this package is in every
+`Function` consumer's graph): the pipeline's dirty set IS `dirtyFromChangedIds (CapabilityPipeline.dependencyMap p)` — the `dirtySet` forward left on the same cut (Phase 544, breaking).
 
 ### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `0.37.0`)
 

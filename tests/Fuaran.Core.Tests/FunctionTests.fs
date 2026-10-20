@@ -1197,9 +1197,9 @@ let memoTests =
                       Expect.equal (Set.ofSeq incrInvoked) (Set.ofList [ "s1"; "a" ]) "only the dirty branch re-invoked"
 
                       Expect.equal
-                          (CapabilityPipeline.dirtySet (Set.ofList [ "s1" ]) p)
+                          (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.ofList [ "s1" ]))
                           (Set.ofList [ "s1"; "a" ])
-                          "dirtySet = changed ∪ dependents"
+                          "the dirty set = changed ∪ dependents"
 
           testCase "capabilityPipelineIncrementalLaws certify evalFrom ≡ eval + minimal reuse (Phase 62)"
           <| fun _ ->
@@ -1947,7 +1947,8 @@ let validatedDeclarationTests =
                   "c#n2#cb29bce7"
                   "an argument-less invoke"
 
-          testCase "dirtySet is Propagation's closure over the pipeline's FromNode edges (Phase 510)"
+          testCase
+              "dependencyMap is the pipeline's FromNode edges, and its dirty set is Propagation's closure over them (Phases 510, 544)"
           <| fun _ ->
               let p: CapabilityPipeline =
                   { Nodes =
@@ -1967,21 +1968,21 @@ let validatedDeclarationTests =
                         "b", Set.ofList [ "a"; "s2" ]
                         "d", Set.ofList [ "s2"; "b" ] ]
 
-              for changed in
-                  [ Set.empty
-                    Set.singleton "s1"
-                    Set.singleton "s2"
-                    Set.ofList [ "a"; "ghost" ]
-                    Set.singleton "d" ] do
-                  Expect.equal
-                      (CapabilityPipeline.dirtySet changed p)
-                      (Propagation.dirtyFromChangedIds deps changed)
-                      (sprintf "changed %A" changed)
-
               Expect.equal
-                  (CapabilityPipeline.dirtySet (Set.singleton "s1") p)
+                  (CapabilityPipeline.dependencyMap p)
+                  deps
+                  "the map is each id to the upstreams its FromNode edges name, a repeated id to the union"
+
+              // the closure over it is Propagation's — one name, no forward (Phase 544)
+              Expect.equal
+                  (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.singleton "s1"))
                   (Set.ofList [ "s1"; "a"; "b"; "d" ])
                   "s1 reaches a, b and, through b, the second d"
+
+              Expect.equal
+                  (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.ofList [ "a"; "ghost" ]))
+                  (Set.ofList [ "a"; "ghost"; "b"; "d" ])
+                  "a changed id the map does not hold is dirty and reaches nothing"
 
           testCase "the node kind leads the pipeline key: a Source and an Invoke never share one"
           <| fun _ ->

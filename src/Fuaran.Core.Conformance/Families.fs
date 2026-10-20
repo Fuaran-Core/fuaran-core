@@ -602,7 +602,7 @@ module Families =
           ("Conformance.capabilityPipelineIncrementalLaws", [], seam, []),
           Guarded [ "node reuse" ],
           none "an eval Error only records a failure",
-          "CapabilityPipeline.dirtySet CapabilityPipeline.evalFrom CapabilityPipeline.eval"
+          "CapabilityPipeline.dependencyMap Propagation.dirtyFromChangedIds CapabilityPipeline.evalFrom CapabilityPipeline.eval"
           ("Conformance.dirtyPropagationLaws", [], seam, []),
           Guarded [ "dirty frontier" ],
           none "no refused outcome is read",
