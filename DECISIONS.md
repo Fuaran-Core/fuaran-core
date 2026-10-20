@@ -218,8 +218,9 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 **Recorded by Phase 539.** `src/Fuaran.Core.Idl/` (`Idl.fs`, `WireForm.fs`, `Declare.fs`, `Encode.fs`,
 `Decode.fs`, `Sample.fs`, `Artifact.fs`, `Proposal.fs`), `src/Fuaran.Core.Idl.Codegen/` (`Emit/Decl.fs`,
 `Emit/FSharpDefaults.fs`, `Emit/FSharpCanonicalForm.fs`, `Emit/FSharpCodec.fs`, `Emit/TypeScriptCodec.fs`,
-`FStar.fs`, `Gen.fs`, `Diff.fs`), the law set `conformance/laws/canonical-form-laws.json`; rides the `0.39.0`
-draft (docs/releases/0.39.0.md, Breaking for F# consumers, additive on the wire). The three canonical-form
+`FStar.fs`, `Gen.fs`, `Diff.fs`), the law set `conformance/laws/canonical-form-laws.json`. Breaking for F# consumers,
+additive on the wire; it rides the draft slot after the released `0.39.0`, whose release-ledger entry
+carries it. The three canonical-form
 rules a UI vocabulary states in its specification (fuaran#2300) could carry only the first, the declared
 default, as IDL data; this entry gives the other two, and one literal form, a slot in the contract every
 backend reads.
