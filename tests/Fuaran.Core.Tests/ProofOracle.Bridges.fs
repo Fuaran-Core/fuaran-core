@@ -422,19 +422,17 @@ let disagreements
 
     perOrder @ invariance
 
-type Verdict =
-    { Failure: string option
-      Folded: int
-      Halted: int }
+/// The fold differential's tally: the lane sets that folded clean and those that halted.
+let foldTally = Tally.empty [ "Folded"; "Halted" ]
 
-let expectAgreement (label: string) (v: Verdict) =
-    match v.Failure with
-    | Some why -> failtest why
-    | None ->
-        // Both classes must have been exercised, or the agreement certifies one path only —
-        // the same vacuity posture as the pack's sample-adequacy guard.
-        Expect.isGreaterThan v.Folded 0 (sprintf "%s: no lane set folded (folded=%d halted=%d)" label v.Folded v.Halted)
-        Expect.isGreaterThan v.Halted 0 (sprintf "%s: no lane set halted (folded=%d halted=%d)" label v.Folded v.Halted)
+let expectAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees label t
+    let folded = Tally.count "Folded" t
+    let halted = Tally.count "Halted" t
+    // Both classes must have been exercised, or the agreement certifies one path only —
+    // the same vacuity posture as the pack's sample-adequacy guard.
+    Expect.isGreaterThan folded 0 (sprintf "%s: no lane set folded (folded=%d halted=%d)" label folded halted)
+    Expect.isGreaterThan halted 0 (sprintf "%s: no lane set halted (folded=%d halted=%d)" label folded halted)
 
 let strField (fields: (string * JVal) list) (k: string) : string option =
     fields
