@@ -2119,3 +2119,380 @@ let readerAdmissionTests =
           testCase "an admitted declaration still round-trips"
           <| fun _ ->
               Expect.equal (CapabilityCodec.decode (CapabilityCodec.encode intCap307)) (Ok intCap307) "round trip" ]
+
+// ---------------------------------------------------------------------------
+// Phase 528 - the capability-side seam baselines. Every refusal and declaration union the seam
+// writes is pinned here by its exact bytes, and every reader by the refusal it answers (through the
+// typed `DecodeError` where the reader is typed, its code and path; through the sentence where the
+// reader answers a string), so the codecs that replace these hand codecs (fuaran-core#551, derived
+// from the IDL) are held to the documents and journals already written. A case added to one of the
+// refusal unions without a row here reds `QueryTests`' tag-naming guard.
+// ---------------------------------------------------------------------------
+
+/// Every `InvokeError` case (and, through `illFormedCapability`, every `DeclarationFault` case) with
+/// the exact document `CapabilityCodec.encodeInvokeError` writes for it.
+let internal invokeBaselines528: (InvokeError * string) list =
+    [ NoSuchCapability("x", [ "a"; "b" ]), "{\"$type\":\"noSuchCapability\",\"id\":\"x\",\"known\":[\"a\",\"b\"]}"
+      DuplicateCapability "x", "{\"$type\":\"duplicateCapability\",\"id\":\"x\"}"
+      UnknownArg("a", [ "b"; "c" ]), "{\"$type\":\"unknownArg\",\"addr\":\"a\",\"declared\":[\"b\",\"c\"]}"
+      ArgOutOfSpace("a", IntRange(-1, 1), "9"),
+      "{\"$type\":\"argOutOfSpace\",\"addr\":\"a\",\"got\":\"9\",\"space\":{\"$type\":\"intRange\",\"max\":1,\"min\":-1}}"
+      RequiredArgsUnbound [ "a"; "b" ], "{\"$type\":\"requiredArgsUnbound\",\"addrs\":[\"a\",\"b\"]}"
+      UninvocableArg "a", "{\"$type\":\"uninvocableArg\",\"addr\":\"a\"}"
+      BodyFailed "boom", "{\"$type\":\"bodyFailed\",\"reason\":\"boom\"}"
+      NonTotalCapability("x", [ "r" ]), "{\"$type\":\"nonTotalCapability\",\"addrs\":[\"r\"],\"id\":\"x\"}"
+      IllFormedCapability("x", EmptySpace("a", Enum [])),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"emptySpace\",\"addr\":\"a\",\"space\":{\"$type\":\"enum\",\"values\":[]}},\"id\":\"x\"}"
+      IllFormedCapability("x", NonFiniteBound "b"),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"nonFiniteBound\",\"addr\":\"b\"},\"id\":\"x\"}"
+      IllFormedCapability("x", DuplicateHoleAddr "c"),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"duplicateHoleAddr\",\"addr\":\"c\"},\"id\":\"x\"}"
+      IllFormedCapability("x", HoleUnderSlot "n"),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"holeUnderSlot\",\"node\":\"n\"},\"id\":\"x\"}"
+      DuplicateArg "a", "{\"$type\":\"duplicateArg\",\"addr\":\"a\"}"
+      PolicyRefused("p", "r", [ "a" ]),
+      "{\"$type\":\"policyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
+      ApprovalRequired "p", "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}" ]
+
+/// What `CapabilityCodec.decodeInvokeError` answers for malformed documents, sentence for sentence.
+let private invokeRefusals528: (string * string) list =
+    [ "[]", "expected object, got array"
+      "{}", "missing property: $type"
+      "{\"$type\":1}", "expected string, got int"
+      "{\"$type\":\"nope\"}",
+      "unknown $type 'nope'; expected one of 'noSuchCapability', 'duplicateCapability', 'unknownArg', 'argOutOfSpace', 'requiredArgsUnbound', 'uninvocableArg', 'bodyFailed', 'nonTotalCapability', 'illFormedCapability', 'duplicateArg', 'policyRefused', 'approvalRequired'"
+      "{\"$type\":\"noSuchCapability\"}", "missing property: id"
+      "{\"$type\":\"noSuchCapability\",\"id\":\"x\",\"known\":[1]}", "expected string, got int"
+      "{\"$type\":\"argOutOfSpace\",\"addr\":\"a\",\"got\":\"g\",\"space\":{\"$type\":\"intRange\",\"min\":\"x\",\"max\":1}}",
+      "expected int, got string"
+      "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"nope\"}}",
+      "unknown $type 'nope'; expected one of 'emptySpace', 'nonFiniteBound', 'duplicateHoleAddr', 'holeUnderSlot'"
+      "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"holeUnderSlot\"}}",
+      "missing property: node"
+      "{\"$type\":\"policyRefused\",\"policy\":\"p\",\"reason\":\"r\"}", "missing property: allowed"
+      "{\"$type\":\"queryPolicyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}",
+      "unknown $type 'queryPolicyRefused'; expected one of 'noSuchCapability', 'duplicateCapability', 'unknownArg', 'argOutOfSpace', 'requiredArgsUnbound', 'uninvocableArg', 'bodyFailed', 'nonTotalCapability', 'illFormedCapability', 'duplicateArg', 'policyRefused', 'approvalRequired'" ]
+
+/// Every `Placement` case with the `placement` member a capability declaration writes for it.
+let private placementBaselines528: (Placement * string) list =
+    [ BuildTime, "{\"$type\":\"buildTime\"}"
+      Server, "{\"$type\":\"server\"}"
+      ClientDeclarative, "{\"$type\":\"clientDeclarative\"}"
+      ClientIsland Pyodide, "{\"$type\":\"clientIsland\",\"island\":\"pyodide\"}"
+      ClientIsland Fable, "{\"$type\":\"clientIsland\",\"island\":\"fable\"}"
+      ClientIsland Js, "{\"$type\":\"clientIsland\",\"island\":\"js\"}"
+      Precomputed, "{\"$type\":\"precomputed\"}" ]
+
+/// The declaration every placement refusal below is planted into, at its `placement` member.
+let private placementHost528 =
+    "{\"$type\":\"capability\",\"determinism\":\"deterministic\",\"id\":\"c\",\"placement\":{\"$type\":\"server\"},\"signature\":{\"effect\":{\"determinism\":\"deterministic\",\"host\":\"pure\"},\"holes\":[],\"name\":\"c\"}}"
+
+/// A planted `placement`, then the typed refusal under `Lenient` and under `Strict`, rendered as
+/// code, path and sentence (`DecodeError.render`).
+let private placementRefusals528: (string * string * string) list =
+    [ "{\"$type\":\"moon\"}",
+      "UnknownTag at $[\"placement\"][\"$type\"]: unknown $type 'moon'; expected one of 'buildTime', 'server', 'clientDeclarative', 'precomputed', 'clientIsland'",
+      "UnknownTag at $[\"placement\"][\"$type\"]: unknown $type 'moon'; expected one of 'buildTime', 'server', 'clientDeclarative', 'precomputed', 'clientIsland'"
+      "{\"$type\":\"clientIsland\"}",
+      "MissingField at $[\"placement\"][\"island\"]: missing property: island",
+      "MissingField at $[\"placement\"][\"island\"]: missing property: island"
+      "{\"$type\":\"clientIsland\",\"island\":\"lua\"}",
+      "UnknownTag at $[\"placement\"][\"island\"]: unknown value 'lua'; expected one of 'pyodide', 'fable', 'js'",
+      "UnknownTag at $[\"placement\"][\"island\"]: unknown value 'lua'; expected one of 'pyodide', 'fable', 'js'"
+      "{\"$type\":\"clientIsland\",\"island\":1}",
+      "WrongKind at $[\"placement\"][\"island\"]: expected string, got int",
+      "WrongKind at $[\"placement\"][\"island\"]: expected string, got int"
+      "{\"$type\":\"server\",\"x\":1}",
+      "OK",
+      "UndeclaredMember at $[\"placement\"][\"x\"]: undeclared member: 'x'; expected one of the members '$type'"
+      "{\"$type\":\"clientIsland\",\"island\":\"js\",\"x\":1}",
+      "OK",
+      "UndeclaredMember at $[\"placement\"][\"x\"]: undeclared member: 'x'; expected one of the members '$type', 'island'"
+      "{}",
+      "MissingField at $[\"placement\"][\"$type\"]: missing property: $type",
+      "MissingField at $[\"placement\"][\"$type\"]: missing property: $type"
+      "3",
+      "WrongKind at $[\"placement\"]: expected object, got int",
+      "WrongKind at $[\"placement\"]: expected object, got int" ]
+
+/// A `Deferred` document, then `decodeDeferred`'s answer and `decodeDeferredWith Strict`'s ("OK" for
+/// an accepted document), over a payload reader that takes a string.
+let private deferredRefusals528: (string * string * string) list =
+    [ "{\"$type\":\"ready\"}", "missing property: value", "missing property: value"
+      "{\"$type\":\"ready\",\"value\":1}",
+      "out of range: not a string; expected a payload its reader accepts",
+      "out of range: not a string; expected a payload its reader accepts"
+      "{\"$type\":\"failed\",\"message\":2}", "expected string, got int", "expected string, got int"
+      "{\"$type\":\"failed\"}", "missing property: message", "missing property: message"
+      "{\"$type\":\"later\"}",
+      "unknown $type 'later'; expected one of 'pending', 'ready', 'failed'",
+      "unknown $type 'later'; expected one of 'pending', 'ready', 'failed'"
+      "{\"$type\":\"pending\",\"x\":1}", "OK", "undeclared member: 'x'; expected one of the members '$type'"
+      "{\"$type\":\"ready\",\"value\":\"v\",\"x\":1}",
+      "OK",
+      "undeclared member: 'x'; expected one of the members '$type', 'value'"
+      "[]", "expected object, got array", "expected object, got array" ]
+
+/// A pipeline holding both `PipelineNode` cases and both `ArgSource` cases, as `encode` writes it.
+let private pipelineBaseline528 =
+    "{\"nodes\":[{\"$type\":\"source\",\"dataRef\":\"ref\",\"id\":\"s\",\"outputType\":{\"$type\":\"intRange\",\"max\":9,\"min\":0}},{\"$type\":\"invoke\",\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"literal\",\"value\":\"1\"}},{\"addr\":\"b\",\"source\":{\"$type\":\"fromNode\",\"node\":\"s\"}}],\"capabilityId\":\"cap\",\"id\":\"i\",\"outputType\":{\"$type\":\"anyString\"}}]}"
+
+/// A pipeline document, then `decodeDetailed`'s refusal (code, path and sentence).
+let private pipelineRefusals528: (string * string) list =
+    [ "{}", "MissingField at $[\"nodes\"]: missing property: nodes"
+      "{\"nodes\":[{\"$type\":\"sink\"}]}",
+      "UnknownTag at $[\"nodes\"][0][\"$type\"]: unknown $type 'sink'; expected one of 'source', 'invoke'"
+      "{\"nodes\":[{\"$type\":\"source\",\"id\":\"s\",\"dataRef\":\"r\"}]}",
+      "MissingField at $[\"nodes\"][0][\"outputType\"]: missing property: outputType"
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"constant\"}}]}]}",
+      "UnknownTag at $[\"nodes\"][0][\"args\"][0][\"source\"][\"$type\"]: unknown $type 'constant'; expected one of 'literal', 'fromNode'"
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"literal\"}}]}]}",
+      "MissingField at $[\"nodes\"][0][\"args\"][0][\"source\"][\"value\"]: missing property: value"
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"fromNode\",\"nodeId\":3}}]}]}",
+      "MissingField at $[\"nodes\"][0][\"args\"][0][\"source\"][\"node\"]: missing property: node" ]
+
+/// A schema delta amending every `FieldChange` case, as `SchemaDeltaCodec.encode` writes it.
+let private deltaBaseline528 =
+    "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"m\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}"
+
+/// A delta document, then the `ColumnError` `SchemaDeltaCodec.decode` answers (`%A`, whitespace folded).
+let private deltaRefusals528: (string * string) list =
+    [ "{\"added\":[],\"amended\":[{\"member\":\"colour\",\"name\":\"a\",\"to\":\"m\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
+      "MalformedShape \"amended.member: expected one of unit, label, description, ext; got 'colour'\""
+      "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"furlongs per quark\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
+      "MalformedShape \"amended.to: 'furlongs per quark' is not a unit the kit parses\""
+      "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"m\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":7,\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
+      "MalformedShape \"amended.key: expected string, got int\""
+      "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"m\"},{\"from\":1,\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
+      "MalformedShape \"amended.from: expected string, got int\"" ]
+
+/// Every `Rejection` case (both `NestRelation`s) with the exact document `RejectionCodec.render` writes.
+let internal rejectionBaselines528: (Rejection<string> * string) list =
+    [ Rejection.UnknownNode("t", [ "a"; "b" ]),
+      "{\"$type\":\"unknownNode\",\"addressable\":[\"a\",\"b\"],\"target\":\"t\"}"
+      DuplicateId "d", "{\"$type\":\"duplicateId\",\"id\":\"d\"}"
+      CannotRemoveRoot, "{\"$type\":\"cannotRemoveRoot\"}"
+      WouldNestUnderSelf("t", NestRelation.Self),
+      "{\"$type\":\"wouldNestUnderSelf\",\"relation\":\"self\",\"target\":\"t\"}"
+      WouldNestUnderSelf("t", NestRelation.Descendant),
+      "{\"$type\":\"wouldNestUnderSelf\",\"relation\":\"descendant\",\"target\":\"t\"}"
+      NotAContainer("t", "k"), "{\"$type\":\"notAContainer\",\"kindTag\":\"k\",\"target\":\"t\"}"
+      ReorderMismatch("p", [ "a" ], [ "b" ]),
+      "{\"$type\":\"reorderMismatch\",\"expected\":[\"a\"],\"got\":[\"b\"],\"parent\":\"p\"}"
+      Rejected("c", "m"), "{\"$type\":\"rejected\",\"code\":\"c\",\"message\":\"m\"}"
+      KeyedPosition("t", "h", 2), "{\"$type\":\"keyedPosition\",\"holder\":\"h\",\"slot\":2,\"target\":\"t\"}"
+      IllegalChild("c", "ck", "p", "pk", [ "x"; "y" ]),
+      "{\"$type\":\"illegalChild\",\"child\":\"c\",\"childKind\":\"ck\",\"legal\":[\"x\",\"y\"],\"parent\":\"p\",\"parentKind\":\"pk\"}"
+      StillReferenced("t", [ "r" ]), "{\"$type\":\"stillReferenced\",\"referrers\":[\"r\"],\"target\":\"t\"}"
+      RootIdMismatch("a", "b"), "{\"$type\":\"rootIdMismatch\",\"after\":\"b\",\"before\":\"a\"}" ]
+
+/// The capability every journal baseline below dispatches: a `Network` capability over one hole.
+let private netCap528 =
+    Capability.create
+        "net"
+        { Name = "net"
+          Holes =
+            [ { Addr = "n"
+                Name = "n"
+                Kind = ValueHole(IntRange(0, 9))
+                Required = true } ]
+          Effect =
+            { Host = ReadsHost
+              Determinism = Effect.network } }
+        Server
+
+let private netReg528 =
+    CapabilityRegistry.register netCap528 CapabilityRegistry.empty
+    |> Result.toOption
+    |> Option.get
+
+/// A captured journal as one line per record: seq, key, occurrence, determinism, phase, value, the
+/// previous hash and the hash.
+let internal journalLines528 (j: KeyedCapture list) : string list =
+    j
+    |> List.map (fun k ->
+        sprintf "%d|%s|%d|%s|%A|%s|%s|%s" k.Seq k.Key k.Occurrence k.Determinism k.Phase k.Value k.PrevHash k.Hash)
+
+/// The inverse of `journalLines528`: a journal read back from its pinned lines, as a journal written
+/// before this phase is read by a replay after it. The value sits between the first five fields and
+/// the two hashes, so a value holding `|` reads back whole.
+let internal journalOfLines528 (lines: string list) : KeyedCapture list =
+    lines
+    |> List.map (fun l ->
+        let parts = l.Split '|'
+        let n = parts.Length
+
+        { Seq = int parts[0]
+          Key = parts[1]
+          Occurrence = int parts[2]
+          Determinism = parts[3]
+          Phase =
+            match parts[4] with
+            | "Attempted" -> CapturePhase.Attempted
+            | "Completed" -> CapturePhase.Completed
+            | _ -> CapturePhase.Refused
+          Value = System.String.Join("|", parts[5 .. n - 3])
+          PrevHash = parts[n - 2]
+          Hash = parts[n - 1] })
+
+/// The keyed capture journal three dispatches write: a completion (`n = 1`), a body failure
+/// (`n = 2`) and an attempt left pending (`n = 3`).
+let private capabilityJournal528: string list =
+    [ "0|net#6d5af976|0|network|Attempted|null||e2917db8"
+      "1|net#6d5af976|0|network|Completed|\"ok\"|e2917db8|fbd5da43"
+      "2|net#955d7705|0|network|Attempted|null|fbd5da43|ccd0ca61"
+      "3|net#955d7705|0|network|Refused|\"down\"|ccd0ca61|5a78e47d"
+      "4|net#b95fee48|0|network|Attempted|null|5a78e47d|fc70fb5b" ]
+
+let private normalised (s: string) =
+    System.Text.RegularExpressions.Regex.Replace(s, "\\s+", " ")
+
+let private payload528 (j: JVal) : Result<string, string> =
+    match j with
+    | JStr s -> Ok s
+    | _ -> Error "not a string"
+
+let private answer528 (r: Result<'T, string>) : string =
+    match r with
+    | Ok _ -> "OK"
+    | Error e -> e
+
+[<Tests>]
+let seamBaselineTests528 =
+    testList
+        "Phase 528 - capability-side seam baselines"
+        [ testCase "every InvokeError and DeclarationFault case writes its pinned bytes and reads back"
+          <| fun _ ->
+              for e, doc in invokeBaselines528 do
+                  Expect.equal (CapabilityCodec.encodeInvokeError e) doc (sprintf "%A" e)
+                  Expect.equal (CapabilityCodec.decodeInvokeError doc) (Ok e) doc
+
+          testCase "the invoke-error reader answers each malformed document as pinned"
+          <| fun _ ->
+              for doc, refusal in invokeRefusals528 do
+                  Expect.equal (CapabilityCodec.decodeInvokeError doc) (Error refusal) doc
+
+          testCase "every Placement case writes its pinned member and reads back"
+          <| fun _ ->
+              let host = CapabilityCodec.decode placementHost528 |> Result.toOption |> Option.get
+
+              for p, mem in placementBaselines528 do
+                  let doc = CapabilityCodec.encode { host with Placement = p }
+                  Expect.stringContains doc ("\"placement\":" + mem + ",") (sprintf "%A" p)
+                  Expect.equal (CapabilityCodec.decode doc |> Result.map _.Placement) (Ok p) (sprintf "%A" p)
+
+          testCase "a planted placement is refused with its pinned code and path, under both policies"
+          <| fun _ ->
+              let render policy doc =
+                  match CapabilityCodec.decodeDetailedWith policy doc with
+                  | Ok _ -> "OK"
+                  | Error e -> DecodeError.render e
+
+              for planted, lenient, strict in placementRefusals528 do
+                  let doc = placementHost528.Replace("{\"$type\":\"server\"}", planted)
+                  Expect.notEqual doc placementHost528 "the plant landed"
+                  Expect.equal (render ReadPolicy.Lenient doc) lenient ("lenient " + planted)
+                  Expect.equal (render ReadPolicy.Strict doc) strict ("strict " + planted)
+
+          testCase "every Deferred case writes its pinned bytes, and its reader refuses as pinned"
+          <| fun _ ->
+              for d, doc in
+                  [ Pending, "{\"$type\":\"pending\"}"
+                    Ready "v", "{\"$type\":\"ready\",\"value\":\"v\"}"
+                    Failed "m", "{\"$type\":\"failed\",\"message\":\"m\"}" ] do
+                  Expect.equal (CapabilityCodec.encodeDeferred JStr d) doc (sprintf "%A" d)
+                  Expect.equal (CapabilityCodec.decodeDeferredWith ReadPolicy.Strict payload528 doc) (Ok d) doc
+
+              for doc, lenient, strict in deferredRefusals528 do
+                  Expect.equal (answer528 (CapabilityCodec.decodeDeferred payload528 doc)) lenient ("lenient " + doc)
+
+                  Expect.equal
+                      (answer528 (CapabilityCodec.decodeDeferredWith ReadPolicy.Strict payload528 doc))
+                      strict
+                      ("strict " + doc)
+
+          testCase "a pipeline writes its pinned bytes, and its reader refuses with the pinned code and path"
+          <| fun _ ->
+              let p =
+                  { Nodes =
+                      [ Source("s", "ref", IntRange(0, 9))
+                        Invoke("i", "cap", AnyString, [ "a", Literal "1"; "b", FromNode "s" ]) ] }
+
+              Expect.equal (CapabilityPipeline.encode p) pipelineBaseline528 "bytes"
+              Expect.equal (CapabilityPipeline.decode pipelineBaseline528) (Ok p) "round trip"
+
+              for doc, refusal in pipelineRefusals528 do
+                  Expect.equal
+                      (CapabilityPipeline.decodeDetailed doc |> Result.mapError DecodeError.render)
+                      (Error refusal)
+                      doc
+
+          testCase "a schema delta amending every FieldChange case writes its pinned bytes and refuses as pinned"
+          <| fun _ ->
+              let metre = Unit.parse "m" |> Result.toOption |> Option.get
+
+              let delta =
+                  { Added = []
+                    Removed = []
+                    Retyped = []
+                    Reordered = false
+                    Order = [ "a" ]
+                    Amended =
+                      [ "a", FieldChange.Unit(None, Some metre)
+                        "a", FieldChange.Label(Some "x", None)
+                        "a", FieldChange.Description(Some "d", Some "e")
+                        "a", FieldChange.Ext("k", None, Some "v") ] }
+
+              Expect.equal (SchemaDeltaCodec.encode delta) deltaBaseline528 "bytes"
+              Expect.equal (SchemaDeltaCodec.decode deltaBaseline528) (Ok delta) "round trip"
+
+              for doc, refusal in deltaRefusals528 do
+                  match SchemaDeltaCodec.decode doc with
+                  | Ok _ -> failtest ("accepted " + doc)
+                  | Error e -> Expect.equal (normalised (sprintf "%A" e)) refusal doc
+
+          testCase "every Rejection case renders its pinned bytes"
+          <| fun _ ->
+              for r, doc in rejectionBaselines528 do
+                  Expect.equal (RejectionCodec.render id r) doc (sprintf "%A" r)
+
+          testCase "the capability seam's captured journal is pinned record for record"
+          <| fun _ ->
+              let enc (s: string) = "\"" + s + "\""
+
+              let dispatch n body journal =
+                  (CapabilityRegistry.dispatchCaptured OpStream.defaultHash enc netReg528 "net" [ "n", n ] body journal)
+                      .Journal
+
+              let journal =
+                  []
+                  |> dispatch "1" (fun _ () -> Ready "ok")
+                  |> dispatch "2" (fun _ () -> Failed "down")
+                  |> dispatch "3" (fun _ () -> Pending)
+
+              Expect.equal (journalLines528 journal) capabilityJournal528 "the journal, byte for byte"
+
+          testCase "a journal written before this phase replays to the same answers and the same refusal"
+          <| fun _ ->
+              let journal = journalOfLines528 capabilityJournal528
+              Expect.equal (journalLines528 journal) capabilityJournal528 "the pinned lines read back"
+
+              let dec (s: string) =
+                  match Json.parse s with
+                  | Ok(JStr v) -> Ok v
+                  | _ -> Error "not a string"
+
+              let replay n =
+                  (CapabilityRegistry.dispatchReplayed
+                      dec
+                      netReg528
+                      "net"
+                      [ "n", n ]
+                      (fun _ () -> Ready "live")
+                      Map.empty
+                      journal)
+                      .Outcome
+
+              Expect.equal (replay "1") (Ok(Ready "ok")) "the completion"
+              Expect.equal (replay "2") (Error(ReplayFailure.Refused(BodyFailed "down"))) "the recorded refusal"
+              Expect.equal (replay "3") (Ok Pending) "the attempt that never settled" ]

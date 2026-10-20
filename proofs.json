@@ -4,19 +4,6 @@
   "$comment": "This repository's claims ladder, declared as data in the schema proofs/kit/LADDER.md specifies: what is PROVED, what is only TESTED, what is ASSUMED, and the POLICY the rungs rest on. Each row states what it claims in `statement` and what it does NOT cover in `boundary` (the load-bearing half); its history is the change `phase` cites, never prose here. `claim` is `statement` and `boundary` joined with one space, carried for the registry that still reads `claim`, and held to that join by the ladder family. Authored by hand, never generated, and CHECKED rather than trusted: the Proofs.Ladder family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs) holds every row to the tree, and the Proofs.Coverage family (ProofCoverageTests.fs) holds the rows to the shipped surface and pairs every differential to a theorem. A `not claimed` item is the ABSENCE of a row or a row's boundary, never a row at a level that asserts coverage.",
   "claims": [
     {
-      "id": "fold-confluence",
-      "level": "proved",
-      "statement": "On the model, for every N and every permutation of a lane set, the fold halts with the same canonical conflict report or folds to the same state, proved with no assume and no admit under --report_assumes error. It is a corollary of `fold-confluence-total`, kept because `Skeleton.fst` and the Core-to-domain template instantiate it.",
-      "boundary": "The fold half holds under `independence_diamond` for a lane set whose lanes all apply from the base, the halt half under no hypothesis at all; the lane-set premise is dropped only in `fold-confluence-total`.",
-      "claim": "On the model, for every N and every permutation of a lane set, the fold halts with the same canonical conflict report or folds to the same state, proved with no assume and no admit under --report_assumes error. It is a corollary of `fold-confluence-total`, kept because `Skeleton.fst` and the Core-to-domain template instantiate it. The fold half holds under `independence_diamond` for a lane set whose lanes all apply from the base, the halt half under no hypothesis at all; the lane-set premise is dropped only in `fold-confluence-total`.",
-      "phase": "fuaran-core#131",
-      "evidence": {
-        "theorem": "fold_confluence",
-        "model": "proofs/DagFold.fst",
-        "prover": "proofs/fstar-pin.json"
-      }
-    },
-    {
       "id": "fold-confluence-total",
       "level": "proved",
       "statement": "Fold confluence with NO hypothesis about the lane set: `fold_once` (F#: `FoldConfluence.foldOnce`, and `Dag.reconcileMany`'s lanes-apply step) replays every lane on its own from the base BEFORE composing anything and refuses a set with a rejecting lane with the set of rejecting lanes, so for every permutation of any lane set the outcome is the same fold, the same canonical halt report, or the same rejecting-lane set. The `lanes_apply` premise of the fold half is discharged by the fold itself (`rejecting_nil_iff`).",
@@ -59,7 +46,7 @@
       "phase": "fuaran-core#340",
       "evidence": {
         "theorem": "slot_writes_commute",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Footprint.slotEdit"
@@ -75,7 +62,7 @@
       "phase": "fuaran-core#300",
       "evidence": {
         "theorem": "reconcile_sound",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -88,7 +75,7 @@
       "phase": "fuaran-core#300",
       "evidence": {
         "theorem": "reconcile_fold_order_free",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.reconcileMany"
@@ -104,7 +91,7 @@
       "phase": "fuaran-core#300",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
           "the extracted reconcile partition is production's over the four shapes",
           "the extracted fold and production refuse a rejecting-lane pool identically, under every arrival order"
@@ -347,9 +334,9 @@
     {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "statement": "What of the DAG layer remains outside the model. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is modelled clause for clause and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`), and over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-maximal`). Production's current `deepest` is modelled too (`merge-base-as-it-runs`), and so are `commonBase` over N heads, the index's own four queries and `cut`'s kept set. The index's queries are modelled over its slots under the SLOT-AGREEMENT abstraction: a slot's bitset is read as the set of ids whose bits it sets, `Count[s]` as that set's size, a scan over slot positions as a pass over the set, and the index's order array as the whole DAG's drain, the order `Reach.ofDag` builds. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
+      "statement": "What of the DAG layer remains outside the model. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is modelled clause for clause as it runs, the private `deepest` included, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`), and over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-as-it-runs`). So are `commonBase` over N heads, the index's own four queries and `cut`'s kept set. The index's queries are modelled over its slots under the SLOT-AGREEMENT abstraction: a slot's bitset is read as the set of ids whose bits it sets, `Count[s]` as that set's size, a scan over slot positions as a pass over the set, and the index's order array as the whole DAG's drain, the order `Reach.ofDag` builds. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
       "boundary": "Outside the model: the hashing itself; the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with; the word layout under the slot-agreement reading; and `Reach.extend`'s splice of a new leaf into the order, which `Conformance.reachLaws` samples. WHICH maximal common ancestor `Dag.mergeBase` returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures.",
-      "claim": "What of the DAG layer remains outside the model. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is modelled clause for clause and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`), and over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-maximal`). Production's current `deepest` is modelled too (`merge-base-as-it-runs`), and so are `commonBase` over N heads, the index's own four queries and `cut`'s kept set. The index's queries are modelled over its slots under the SLOT-AGREEMENT abstraction: a slot's bitset is read as the set of ids whose bits it sets, `Count[s]` as that set's size, a scan over slot positions as a pass over the set, and the index's order array as the whole DAG's drain, the order `Reach.ofDag` builds. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`. Outside the model: the hashing itself; the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with; the word layout under the slot-agreement reading; and `Reach.extend`'s splice of a new leaf into the order, which `Conformance.reachLaws` samples. WHICH maximal common ancestor `Dag.mergeBase` returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures.",
+      "claim": "What of the DAG layer remains outside the model. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is modelled clause for clause as it runs, the private `deepest` included, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`), and over ANY two heads, a criss-cross merge included: it returns a common ancestor no other common ancestor descends from, or refuses exactly over disjoint histories (`merge-base-as-it-runs`). So are `commonBase` over N heads, the index's own four queries and `cut`'s kept set. The index's queries are modelled over its slots under the SLOT-AGREEMENT abstraction: a slot's bitset is read as the set of ids whose bits it sets, `Count[s]` as that set's size, a scan over slot positions as a pass over the set, and the index's order array as the whole DAG's drain, the order `Reach.ofDag` builds. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`. Outside the model: the hashing itself; the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with; the word layout under the slot-agreement reading; and `Reach.extend`'s splice of a new leaf into the order, which `Conformance.reachLaws` samples. WHICH maximal common ancestor `Dag.mergeBase` returns is the (closure size, id) tie-break, a policy and not a fact, and a deterministic function of the two closures.",
       "phase": "fuaran-core#134",
       "class": "model-bridge",
       "closes": "unscheduled",
@@ -419,7 +406,7 @@
       "phase": "fuaran-core#134",
       "evidence": {
         "theorem": "between_chain",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -432,7 +419,7 @@
       "phase": "fuaran-core#134",
       "evidence": {
         "theorem": "fold_confluence_dag",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -445,7 +432,7 @@
       "phase": "fuaran-core#134",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
           "production's betweenOps recovers the model's delta over the reference witness",
           "production's betweenOps recovers the model's delta over the reference witness at 4 lanes",
@@ -478,7 +465,7 @@
       "phase": "fuaran-core#142",
       "evidence": {
         "theorem": "topo_of_is_the_kahn_drain",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -491,7 +478,7 @@
       "phase": "fuaran-core#156",
       "evidence": {
         "theorem": "drain_deterministic",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.isAcyclic",
@@ -509,7 +496,7 @@
       "phase": "fuaran-core#156",
       "evidence": {
         "theorem": "drain_policies_agree",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.ancestorsOf",
@@ -526,7 +513,7 @@
       "phase": "fuaran-core#156",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
           "the extracted drain is production's topological order over every lane head",
           "the extracted drain is production's topological order over a MULTI-HEAD UNION",
@@ -551,7 +538,7 @@
       "phase": "fuaran-core#158",
       "evidence": {
         "theorem": "between_merged",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -564,7 +551,7 @@
       "phase": "fuaran-core#158",
       "evidence": {
         "theorem": "reconcile_many_merged_eq",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.reconcileMany",
@@ -575,13 +562,13 @@
     {
       "id": "merge-base-divergence",
       "level": "proved",
-      "statement": "`Dag.mergeBase` of two heads whose lanes hang off one merged node `m` is `m` — the divergence point, not the original base and not anything else the two heads share (`merge_base_is_divergence`). `merge_base` is production's function clause for clause: the intersection of the two ancestor closures, then the maximum by (closure size, id), with the size comparison spelled as a length comparison of de-duplicated closures so the oracle holds no integer. That `m` wins is production's own docstring sentence — a node strictly deeper than any of its own ancestors has a strictly larger closure — PROVED rather than argued: the closure is transitive (`anc_trans`), `m` lies in no proper ancestor's closure (`off_cycle`), and a distinct list strictly inside another is strictly shorter (`pigeon`). The maximum is therefore STRICT and the id tie-break is unexercised on this shape: the theorem holds for every `lt` whatsoever. Acyclicity is consumed as `off_cycle` and DERIVED from section 13's witness form by `off_cycle_of_witness` (an ancestor stands before its descendant in any topological enumeration, `anc_before`); `merge_base_is_divergence_acyclic` is the theorem with that bridge applied.",
+      "statement": "`Dag.mergeBase` of two heads whose lanes hang off one merged node `m` is `m` — the divergence point, not the original base and not anything else the two heads share (`merge_base_now_is_divergence`). The theorem is stated over production's `mergeBase` as it runs, the private `deepest` (`merge_base_now`): the intersection of the two ancestor closures, then the maximum by (closure size, id) over its MAXIMAL members when the common set drains completely and over all of them when it does not, with the size comparison spelled as a length comparison of de-duplicated closures so the oracle holds no integer. The common set is exactly `m`'s closure (`merged_common_is_the_closure`), and every member but `m` lies below a parent of `m`, which is itself a member, so `deepest`'s filter keeps `m` alone or nothing and either branch of the drain test answers `m`. That `m` beats every other member is production's own docstring sentence — a node strictly deeper than any of its own ancestors has a strictly larger closure — PROVED rather than argued: the closure is transitive (`anc_trans`), `m` lies in no proper ancestor's closure (`off_cycle`), and a distinct list strictly inside another is strictly shorter (`pigeon`). The maximum is therefore STRICT and the id tie-break is unexercised on this shape: the theorem holds for every `lt` whatsoever and every drain fuel. Acyclicity is consumed as `off_cycle` and DERIVED from section 13's witness form by `off_cycle_of_witness` (an ancestor stands before its descendant in any topological enumeration, `anc_before`); `merge_base_now_is_divergence_acyclic` is the theorem with that bridge applied.",
       "boundary": "Premises: those of `dag-delta-recovery-merged-head`, plus the two lanes' ids being disjoint — which is what `foldOnce` folds the actor into every node id for. NOT claimed: heads with several maximal common ancestors, which stays at `dag-outside-the-model`.",
-      "claim": "`Dag.mergeBase` of two heads whose lanes hang off one merged node `m` is `m` — the divergence point, not the original base and not anything else the two heads share (`merge_base_is_divergence`). `merge_base` is production's function clause for clause: the intersection of the two ancestor closures, then the maximum by (closure size, id), with the size comparison spelled as a length comparison of de-duplicated closures so the oracle holds no integer. That `m` wins is production's own docstring sentence — a node strictly deeper than any of its own ancestors has a strictly larger closure — PROVED rather than argued: the closure is transitive (`anc_trans`), `m` lies in no proper ancestor's closure (`off_cycle`), and a distinct list strictly inside another is strictly shorter (`pigeon`). The maximum is therefore STRICT and the id tie-break is unexercised on this shape: the theorem holds for every `lt` whatsoever. Acyclicity is consumed as `off_cycle` and DERIVED from section 13's witness form by `off_cycle_of_witness` (an ancestor stands before its descendant in any topological enumeration, `anc_before`); `merge_base_is_divergence_acyclic` is the theorem with that bridge applied. Premises: those of `dag-delta-recovery-merged-head`, plus the two lanes' ids being disjoint — which is what `foldOnce` folds the actor into every node id for. NOT claimed: heads with several maximal common ancestors, which stays at `dag-outside-the-model`.",
+      "claim": "`Dag.mergeBase` of two heads whose lanes hang off one merged node `m` is `m` — the divergence point, not the original base and not anything else the two heads share (`merge_base_now_is_divergence`). The theorem is stated over production's `mergeBase` as it runs, the private `deepest` (`merge_base_now`): the intersection of the two ancestor closures, then the maximum by (closure size, id) over its MAXIMAL members when the common set drains completely and over all of them when it does not, with the size comparison spelled as a length comparison of de-duplicated closures so the oracle holds no integer. The common set is exactly `m`'s closure (`merged_common_is_the_closure`), and every member but `m` lies below a parent of `m`, which is itself a member, so `deepest`'s filter keeps `m` alone or nothing and either branch of the drain test answers `m`. That `m` beats every other member is production's own docstring sentence — a node strictly deeper than any of its own ancestors has a strictly larger closure — PROVED rather than argued: the closure is transitive (`anc_trans`), `m` lies in no proper ancestor's closure (`off_cycle`), and a distinct list strictly inside another is strictly shorter (`pigeon`). The maximum is therefore STRICT and the id tie-break is unexercised on this shape: the theorem holds for every `lt` whatsoever and every drain fuel. Acyclicity is consumed as `off_cycle` and DERIVED from section 13's witness form by `off_cycle_of_witness` (an ancestor stands before its descendant in any topological enumeration, `anc_before`); `merge_base_now_is_divergence_acyclic` is the theorem with that bridge applied. Premises: those of `dag-delta-recovery-merged-head`, plus the two lanes' ids being disjoint — which is what `foldOnce` folds the actor into every node id for. NOT claimed: heads with several maximal common ancestors, which stays at `dag-outside-the-model`.",
       "phase": "fuaran-core#158",
       "evidence": {
-        "theorem": "merge_base_is_divergence",
-        "model": "proofs/DagFold.fst",
+        "theorem": "merge_base_now_is_divergence",
+        "model": "proofs/DagPrimitives.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.mergeBase"
@@ -591,13 +578,13 @@
     {
       "id": "merged-head-differential",
       "level": "tested",
-      "statement": "The extracted recovery, fold and `merge_base`, at `String.CompareOrdinal`, run beside production's `Dag.betweenOps`, `Dag.reconcileMany` and `Dag.mergeBase` over FOLD-PULL-FOLD unions built through production's own `Dag.append` / `Dag.merge`: round one's lanes off a base, their heads folded into one convergent head, round two's lanes appended off it. Per round-two head the delta is compared three ways — production's, the model's, and the lane that was appended, which is the theorem's own right-hand side — and the model's fuel premise is EVALUATED on every DAG, so a green run is one the theorems are about. Per pair of round-two heads the merge base is compared three ways likewise: production's, the model's, and the merged head. Adequacy guards: ops were recovered, a chain was walked, a merge base was located, and the merged head really had two-parent nodes beneath it — without the last the case would re-measure the earlier, unmerged shape. GO-RED: a locator that is the model's own `max_by` over the model's own intersection at the REVERSED key names the shallowest common ancestor — the ORIGINAL BASE rather than the divergence point — and must lose twice, on the merge base and on the delta recovered from the base it names.",
+      "statement": "The extracted recovery and fold, and `merge_base_now` (production's `deepest`), at `String.CompareOrdinal`, run beside production's `Dag.betweenOps`, `Dag.reconcileMany` and `Dag.mergeBase` over FOLD-PULL-FOLD unions built through production's own `Dag.append` / `Dag.merge`: round one's lanes off a base, their heads folded into one convergent head, round two's lanes appended off it. Per round-two head the delta is compared three ways — production's, the model's, and the lane that was appended, which is the theorem's own right-hand side — and the model's fuel premise is EVALUATED on every DAG, so a green run is one the theorems are about. Per pair of round-two heads the merge base is compared three ways likewise: production's, the model's, and the merged head. Adequacy guards: ops were recovered, a chain was walked, a merge base was located, and the merged head really had two-parent nodes beneath it — without the last the case would re-measure the earlier, unmerged shape. GO-RED: a locator that is the model's own `max_by` over the model's own intersection at the REVERSED key names the shallowest common ancestor — the ORIGINAL BASE rather than the divergence point — and must lose twice, on the merge base and on the delta recovered from the base it names.",
       "boundary": "Agreement over the sampled FOLD-PULL-FOLD unions only, at `String.CompareOrdinal`, never over all inputs.",
-      "claim": "The extracted recovery, fold and `merge_base`, at `String.CompareOrdinal`, run beside production's `Dag.betweenOps`, `Dag.reconcileMany` and `Dag.mergeBase` over FOLD-PULL-FOLD unions built through production's own `Dag.append` / `Dag.merge`: round one's lanes off a base, their heads folded into one convergent head, round two's lanes appended off it. Per round-two head the delta is compared three ways — production's, the model's, and the lane that was appended, which is the theorem's own right-hand side — and the model's fuel premise is EVALUATED on every DAG, so a green run is one the theorems are about. Per pair of round-two heads the merge base is compared three ways likewise: production's, the model's, and the merged head. Adequacy guards: ops were recovered, a chain was walked, a merge base was located, and the merged head really had two-parent nodes beneath it — without the last the case would re-measure the earlier, unmerged shape. GO-RED: a locator that is the model's own `max_by` over the model's own intersection at the REVERSED key names the shallowest common ancestor — the ORIGINAL BASE rather than the divergence point — and must lose twice, on the merge base and on the delta recovered from the base it names. Agreement over the sampled FOLD-PULL-FOLD unions only, at `String.CompareOrdinal`, never over all inputs.",
+      "claim": "The extracted recovery and fold, and `merge_base_now` (production's `deepest`), at `String.CompareOrdinal`, run beside production's `Dag.betweenOps`, `Dag.reconcileMany` and `Dag.mergeBase` over FOLD-PULL-FOLD unions built through production's own `Dag.append` / `Dag.merge`: round one's lanes off a base, their heads folded into one convergent head, round two's lanes appended off it. Per round-two head the delta is compared three ways — production's, the model's, and the lane that was appended, which is the theorem's own right-hand side — and the model's fuel premise is EVALUATED on every DAG, so a green run is one the theorems are about. Per pair of round-two heads the merge base is compared three ways likewise: production's, the model's, and the merged head. Adequacy guards: ops were recovered, a chain was walked, a merge base was located, and the merged head really had two-parent nodes beneath it — without the last the case would re-measure the earlier, unmerged shape. GO-RED: a locator that is the model's own `max_by` over the model's own intersection at the REVERSED key names the shallowest common ancestor — the ORIGINAL BASE rather than the divergence point — and must lose twice, on the merge base and on the delta recovered from the base it names. Agreement over the sampled FOLD-PULL-FOLD unions only, at `String.CompareOrdinal`, never over all inputs.",
       "phase": "fuaran-core#158",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
           "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union",
           "the fold FROM a merged head is the deltas-first fold over the round-two lanes",
@@ -3844,7 +3831,7 @@
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "replay_from_is_replay_to",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.checkpointAt",
@@ -3864,7 +3851,7 @@
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "truncation_preserves_replay",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.compactAt",
@@ -3916,22 +3903,6 @@
       }
     },
     {
-      "id": "merge-base-maximal",
-      "level": "proved",
-      "statement": "`Dag.mergeBase` over ANY two heads — a criss-cross merge, two merges of the same two lanes with two maximal common ancestors, included — either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_maximal`). The key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` returns a member nothing beats (`max_by_top`), and a strictly deeper node has a strictly larger closure (`strictly_deeper`). Production's own `deepest`, which sizes only the maximal members, is modelled beside the model's `merge_base` and proved to give the same answer over a witnessed closure (`merge-base-as-it-runs`).",
-      "boundary": "The premise is section 13's acyclicity witness for one head's closure (every id in it is off every cycle: `off_cycle_in_witness`). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures — not claimed here.",
-      "claim": "`Dag.mergeBase` over ANY two heads — a criss-cross merge, two merges of the same two lanes with two maximal common ancestors, included — either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_maximal`). The key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` returns a member nothing beats (`max_by_top`), and a strictly deeper node has a strictly larger closure (`strictly_deeper`). Production's own `deepest`, which sizes only the maximal members, is modelled beside the model's `merge_base` and proved to give the same answer over a witnessed closure (`merge-base-as-it-runs`). The premise is section 13's acyclicity witness for one head's closure (every id in it is off every cycle: `off_cycle_in_witness`). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures — not claimed here.",
-      "phase": "fuaran-core#437",
-      "evidence": {
-        "theorem": "merge_base_maximal",
-        "model": "proofs/DagFold.fst",
-        "prover": "proofs/fstar-pin.json",
-        "operations": [
-          "Dag.mergeBase"
-        ]
-      }
-    },
-    {
       "id": "conflicts-of-heads-is-the-sweep",
       "level": "proved",
       "statement": "`Dag.conflictsOfHeads` reports exactly the interfering pairs the proved pairwise sweep reports (`conflicts_of_heads_is_the_sweep`): renaming each reported NODE to its op gives the `LanesInterfere` report `reconcileMany` refuses with, conflict for conflict and in order, so it is empty exactly when that sweep is. `Dag.conflictsOfNodes` is modelled as production defines it, `conflicts` at `fun n -> footprintOf n.Op`, and the renaming lemmas (`map_all_conflicts` and below) hold for any projection.",
@@ -3940,7 +3911,7 @@
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "conflicts_of_heads_is_the_sweep",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.conflictsOfHeads",
@@ -3957,7 +3928,7 @@
       "phase": "fuaran-core#437",
       "evidence": {
         "theorem": "reach_of_dag_agrees",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.Reach.ancestors",
@@ -3969,15 +3940,15 @@
     {
       "id": "dag-primitives-differential",
       "level": "tested",
-      "statement": "The extracted section 18 to 21 functions run beside production's over DAGs a clone holds: `merge_base` beside `Dag.mergeBase` and `Dag.Reach.mergeBase` over criss-crosses, the answer checked to be a maximal common ancestor (guard: pairs with two maximal common ancestors were reached); `conflicts_of_heads` beside `Dag.conflictsOfHeads` over the four reconcile shapes under the domain's footprint, read canonically, and the report empty exactly when `reconcileMany` does not refuse with `LanesInterfere` (guards: both arms); the extracted index beside `Dag.Reach` and the walk over every ordered pair; and `checkpoint_at` / `replay_from` beside `Dag.checkpointAt` / `Dag.replayFrom` at every node and head of fold-pull-fold DAGs carrying a side merge, with `Dag.compactAt` at every node — its kept set held to `truncation_ok`, its DAG to the model's `truncate`, and its replays to the full DAG's (guards: a resumed replay, an uncovered and an unreached refusal, a compaction, a compaction keeping a band, a refused compaction). GO-RED: the checkpoint production took, handed to the model sealed at another node, disagrees with production.",
+      "statement": "The extracted section 18 to 21 functions (and `DagPrimitives`' `merge_base_now`) run beside production's over DAGs a clone holds: `merge_base_now` beside `Dag.mergeBase` and `Dag.Reach.mergeBase` over criss-crosses, the answer checked to be a maximal common ancestor (guard: pairs with two maximal common ancestors were reached); `conflicts_of_heads` beside `Dag.conflictsOfHeads` over the four reconcile shapes under the domain's footprint, read canonically, and the report empty exactly when `reconcileMany` does not refuse with `LanesInterfere` (guards: both arms); the extracted index beside `Dag.Reach` and the walk over every ordered pair; and `checkpoint_at` / `replay_from` beside `Dag.checkpointAt` / `Dag.replayFrom` at every node and head of fold-pull-fold DAGs carrying a side merge, with `Dag.compactAt` at every node — its kept set held to `truncation_ok`, its DAG to the model's `truncate`, and its replays to the full DAG's (guards: a resumed replay, an uncovered and an unreached refusal, a compaction, a compaction keeping a band, a refused compaction). GO-RED: the checkpoint production took, handed to the model sealed at another node, disagrees with production.",
       "boundary": "Agreement over the sampled DAGs only (DAGs a clone holds, the four reconcile shapes, fold-pull-fold DAGs carrying a side merge), never over all DAGs.",
-      "claim": "The extracted section 18 to 21 functions run beside production's over DAGs a clone holds: `merge_base` beside `Dag.mergeBase` and `Dag.Reach.mergeBase` over criss-crosses, the answer checked to be a maximal common ancestor (guard: pairs with two maximal common ancestors were reached); `conflicts_of_heads` beside `Dag.conflictsOfHeads` over the four reconcile shapes under the domain's footprint, read canonically, and the report empty exactly when `reconcileMany` does not refuse with `LanesInterfere` (guards: both arms); the extracted index beside `Dag.Reach` and the walk over every ordered pair; and `checkpoint_at` / `replay_from` beside `Dag.checkpointAt` / `Dag.replayFrom` at every node and head of fold-pull-fold DAGs carrying a side merge, with `Dag.compactAt` at every node — its kept set held to `truncation_ok`, its DAG to the model's `truncate`, and its replays to the full DAG's (guards: a resumed replay, an uncovered and an unreached refusal, a compaction, a compaction keeping a band, a refused compaction). GO-RED: the checkpoint production took, handed to the model sealed at another node, disagrees with production. Agreement over the sampled DAGs only (DAGs a clone holds, the four reconcile shapes, fold-pull-fold DAGs carrying a side merge), never over all DAGs.",
+      "claim": "The extracted section 18 to 21 functions (and `DagPrimitives`' `merge_base_now`) run beside production's over DAGs a clone holds: `merge_base_now` beside `Dag.mergeBase` and `Dag.Reach.mergeBase` over criss-crosses, the answer checked to be a maximal common ancestor (guard: pairs with two maximal common ancestors were reached); `conflicts_of_heads` beside `Dag.conflictsOfHeads` over the four reconcile shapes under the domain's footprint, read canonically, and the report empty exactly when `reconcileMany` does not refuse with `LanesInterfere` (guards: both arms); the extracted index beside `Dag.Reach` and the walk over every ordered pair; and `checkpoint_at` / `replay_from` beside `Dag.checkpointAt` / `Dag.replayFrom` at every node and head of fold-pull-fold DAGs carrying a side merge, with `Dag.compactAt` at every node — its kept set held to `truncation_ok`, its DAG to the model's `truncate`, and its replays to the full DAG's (guards: a resumed replay, an uncovered and an unreached refusal, a compaction, a compaction keeping a band, a refused compaction). GO-RED: the checkpoint production took, handed to the model sealed at another node, disagrees with production. Agreement over the sampled DAGs only (DAGs a clone holds, the four reconcile shapes, fold-pull-fold DAGs carrying a side merge), never over all DAGs.",
       "phase": "fuaran-core#437",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
-          "the extracted merge_base is production's over CRISS-CROSS merges, and is a maximal common ancestor",
+          "the extracted merge_base_now is production's over CRISS-CROSS merges, and is a maximal common ancestor",
           "the extracted conflicts_of_heads is production's Dag.conflictsOfHeads over the four shapes",
           "the extracted reachability index answers production's Reach and the walk over every pair",
           "the extracted checkpoint, replay_from and truncation are production's over every node and head",
@@ -3994,9 +3965,9 @@
     {
       "id": "merge-base-as-it-runs",
       "level": "proved",
-      "statement": "`Dag.mergeBase` as production computes it — the private `deepest`, which sizes only the MAXIMAL members of the common set when that set drains completely and every member when it does not — answers what the `mergeBase` model answers (`merge_base_now_is_merge_base`), so THEOREM 5 is about the code that runs (`merge_base_now_maximal`): a common ancestor no other common ancestor descends from, or a refusal exactly over disjoint histories. The member `List.maxBy` picks over the whole set is below no member — not below another one by maximality, and not below itself, which the witness forbids (`top_not_below`) — so it survives the filter and still beats every member left (`deepest_is_max_by`). Either branch of the drain test gives that answer, so the test needs no lemma of its own.",
-      "boundary": "Holds only over a left head whose closure carries section 13's acyclicity witness, which is what rules out a member below itself. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
-      "claim": "`Dag.mergeBase` as production computes it — the private `deepest`, which sizes only the MAXIMAL members of the common set when that set drains completely and every member when it does not — answers what the `mergeBase` model answers (`merge_base_now_is_merge_base`), so THEOREM 5 is about the code that runs (`merge_base_now_maximal`): a common ancestor no other common ancestor descends from, or a refusal exactly over disjoint histories. The member `List.maxBy` picks over the whole set is below no member — not below another one by maximality, and not below itself, which the witness forbids (`top_not_below`) — so it survives the filter and still beats every member left (`deepest_is_max_by`). Either branch of the drain test gives that answer, so the test needs no lemma of its own. Holds only over a left head whose closure carries section 13's acyclicity witness, which is what rules out a member below itself. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "statement": "`Dag.mergeBase` as production computes it — the private `deepest`, which sizes only the MAXIMAL members of the common set when that set drains completely and every member when it does not (`merge_base_now`) — over ANY two heads, a criss-cross merge (two merges of the same two lanes with two maximal common ancestors) included, either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_now_maximal`, THEOREM 5). The key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` over the whole common set returns a member nothing beats (`max_by_top`), a strictly deeper node has a strictly larger closure (`strictly_deeper`), and that maximum is therefore a maximal common ancestor (`max_common_is_maximal`). The member it picks is below no member — not below another one by maximality, and not below itself, which the witness forbids (`top_not_below`) — so it survives `deepest`'s filter and still beats every member left (`deepest_is_max_by`): `deepest` answers what the maximum over the whole set answers. Either branch of the drain test gives that answer, so the test needs no lemma of its own.",
+      "boundary": "Holds only over a left head whose closure carries section 13's acyclicity witness, which is what rules out a member below itself (every id in it is off every cycle: `off_cycle_in_witness`). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures — not claimed here. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "claim": "`Dag.mergeBase` as production computes it — the private `deepest`, which sizes only the MAXIMAL members of the common set when that set drains completely and every member when it does not (`merge_base_now`) — over ANY two heads, a criss-cross merge (two merges of the same two lanes with two maximal common ancestors) included, either refuses exactly when the heads share no ancestor, or returns a common ancestor that NO other common ancestor descends from (`merge_base_now_maximal`, THEOREM 5). The key (closure size, id) is a strict total order on ids (`deeper_strict_total`), so `List.maxBy` over the whole common set returns a member nothing beats (`max_by_top`), a strictly deeper node has a strictly larger closure (`strictly_deeper`), and that maximum is therefore a maximal common ancestor (`max_common_is_maximal`). The member it picks is below no member — not below another one by maximality, and not below itself, which the witness forbids (`top_not_below`) — so it survives `deepest`'s filter and still beats every member left (`deepest_is_max_by`): `deepest` answers what the maximum over the whole set answers. Either branch of the drain test gives that answer, so the test needs no lemma of its own. Holds only over a left head whose closure carries section 13's acyclicity witness, which is what rules out a member below itself (every id in it is off every cycle: `off_cycle_in_witness`). WHICH maximal common ancestor is returned is the tie-break, a policy, and a function of the two closures — not claimed here. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
       "phase": "fuaran-core#457",
       "evidence": {
         "theorem": "merge_base_now_maximal",
@@ -4302,7 +4273,7 @@
       "phase": "fuaran-core#309",
       "evidence": {
         "theorem": "replay_to_is_fold_over_drain",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.tryReplayTo"
@@ -4318,7 +4289,7 @@
       "phase": "fuaran-core#309",
       "evidence": {
         "theorem": "replay_to_unknown_head_is_refused",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.tryReplayTo"
@@ -4334,7 +4305,7 @@
       "phase": "fuaran-core#309",
       "evidence": {
         "theorem": "replay_to_deterministic",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },
@@ -4347,7 +4318,7 @@
       "phase": "fuaran-core#309",
       "evidence": {
         "theorem": "append_refuses_differing_node",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Dag.append",
@@ -4364,7 +4335,7 @@
       "phase": "fuaran-core#309",
       "evidence": {
         "family": "Proofs.Oracle",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "cases": [
           "the extracted replay_to is production's tryReplayTo over every union, with a missing-head arm",
           "a CYCLIC closure is refused as cyclic by both — and the acyclic control replays",
@@ -5214,7 +5185,7 @@
       "phase": "fuaran-core#311",
       "evidence": {
         "theorem": "total_order_by_is_a_linear_extension",
-        "model": "proofs/DagFold.fst",
+        "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json"
       }
     },

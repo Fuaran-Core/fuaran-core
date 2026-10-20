@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 379 claims — 274 proved across 35 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 377 claims — 272 proved across 36 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -29,8 +29,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; and, since Phase 158, `Dag.mergeBase` and `Dag.between` over a MERGED HEAD under that drain — the shape a clone folds after a pull — with `between_merged`, `reconcile_many_merged_eq` and `merge_base_is_divergence` proved; and, since Phase 300, the lanes-apply test inside `fold_once` and the reconcile's PARTITION of the region above the base, with `fold_confluence_total`, `reconcile_sound` and `reconcile_fold_order_free` proved. Every definition names its F# counterpart. |
-| `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence_total` and `fold_confluence_halt` proved, and since Phase 300 the lanes-apply test inside `fold_once` (sections 0–10). A small algebra whose list facts carry SMT patterns. Every definition names its F# counterpart. |
+| `DagClosure.fst` | The DAG beneath the fold (Phase 534 split it out of `DagFold.fst`, where it was sections 11–21; the section numbers are kept): since Phase 134, `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`, section 13.12); since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; since Phase 158, `Dag.between` over a MERGED HEAD under that drain, with `between_merged` and `reconcile_many_merged_eq` proved (the merge base it locates is `DagPrimitives`'); since Phase 300, the reconcile's PARTITION, with `reconcile_sound` and `reconcile_fold_order_free` proved; and sections 16–21 (replay, slot writes, the common set's maximum, `conflictsOfHeads`, the index, checkpoints). No SMT patterns, every lemma called by name. Opens `DagFold`. |
+| `oracle/DagFold.fs`, `oracle/DagClosure.fs` | **Generated** — the two models extracted to F# by F\*'s own code generator. The suite runs them beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `DecodeLayer.fst` | The typed DECODE LAYER and the CODEC COMBINATORS (Phase 436): `DecodePath.resolve`, `DecodeError`'s path operations and `resolvesIn`, every `Decoder` combinator that starts from a `JVal`, and `Codec`'s write and collecting read, clause for clause over `WireDecode`'s `jval` and generic in what they build, with the composed round trip, the collecting reader's totality and refusal paths that resolve proved as laws every block preserves (theorem 22). |
@@ -62,7 +63,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 ## The theorem
 
-`fold_confluence` (the last definition in `DagFold.fst`): for every lane set `ls1` and every
+`fold_confluence_total` (section 10 of `DagFold.fst`): for every lane set `ls1` and every
 re-arrangement `ls2` of it — any two lists related by the inductive permutation relation `perm`,
 Coq's `Permutation` — and every base state, `fold_once ls1` and `fold_once ls2` are **equivalent
 outcomes**:
@@ -91,7 +92,13 @@ promise about the domain: `lanes_apply` — every lane applies cleanly from the 
 Phase 300 the fold discharges it itself: `fold_once` (F#: `foldOnce`, `Dag.reconcileMany`'s
 lanes-apply step) replays every lane on its own from the base BEFORE composing anything and refuses a
 set with a rejecting lane with the SET of rejecting lanes, so `fold_confluence_total` holds with
-the diamond as its only hypothesis and the `lanes-apply` row is retired. Before that change a lane
+the diamond as its only hypothesis and the `lanes-apply` row is retired. **Phase 534 retired
+`fold_confluence` too**, the corollary that kept the old premise and its `fold-confluence` row: it
+was kept only because `Skeleton.fst` and the instantiation template called it, and both are
+discharged by `fold_confluence_total` now (the instance's statement keeps `lanes_apply` in its
+`requires`, unused by the proof). The ladder's `fold-confluence-total` row carries the claim, and
+nothing the retired row said is lost: its fold half is the total theorem under a stronger premise,
+and its halt half is `fold_confluence_halt`, unchanged. Before that change a lane
 set with a rejecting lane folded under one arrival order and rejected under another in production,
 and the pack blamed a domain that satisfies the diamond. **The halt half asks for neither** — `fold_confluence_halt` is stated and proved with no
 hypothesis about `apply` at all, because whether a lane set halts and what it halts with are
@@ -99,8 +106,8 @@ properties of the footprints alone.
 
 ### The DAG beneath it (Phase 134)
 
-`fold_confluence` is stated from the lane deltas. Production does not have them: it has a
-content-addressed DAG and rebuilds each lane's delta from it. Section 11 of `DagFold.fst` models
+`fold_confluence_total` is stated from the lane deltas. Production does not have them: it has a
+content-addressed DAG and rebuilds each lane's delta from it. Section 11 of `DagClosure.fst` models
 that step for the shape `foldOnce` builds and every local-first deployment has — **one shared base
 node and N linear chains, one per writer** — as `DagNode` / `Dag.T` / `Map.tryFind` /
 `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps`, clause for clause.
@@ -127,8 +134,9 @@ says nothing.
 **One step Phase 134 left ARGUED is now proved too (Phase 142).** Production chooses its
 topological order with Kahn's algorithm, draining a ready frontier smallest-id-first; the model
 takes the reverse of the parent walk. That "on a spine there is only one topological order anyway,
-so the two coincide" was a sentence in a comment and a row at level 3 of the ladder. Section 12 is
-that sentence, mechanised, in two lemmas over the same model:
+so the two coincide" was a sentence in a comment and a row at level 3 of the ladder. The spine
+case (section 12 until Phase 534; section 13.12 of `DagClosure.fst` since, beside the corollaries
+that re-derive it at the id order) is that sentence, mechanised, in two lemmas over the same model:
 
 - **`spine_order_forced`** — a DISTINCT enumeration of a spine's closure in which every node
   follows its own parent is that spine in append order, base first. A list argument: it names no
@@ -177,14 +185,14 @@ ladder's "not claimed" entry, and the `Proofs.Oracle` case that holds the refuti
 
 ### The drain over an abstract DAG (Phase 156)
 
-Section 12 proves the order on a SPINE. The shape a clone actually folds is the UNION of N lanes,
-and there the ready frontier is N wide once the base is drained — so the tie-break section 12 could
+The spine case proves the order on a SPINE. The shape a clone actually folds is the UNION of N lanes,
+and there the ready frontier is N wide once the base is drained — so the tie-break the spine case could
 leave as an unexercised parameter is what decides the sequence, and the determinism claim every
 convergent consumer rests on ("the same node set gives the same order on every machine") rests on
 it. Section 13 is that case, over an **abstract** node set: no `mint`, no lanes, no base, just
 nodes naming parents.
 
-It is section 12's own `kahn`, at the selector `pick_min lt`, and not a second drain. Three
+It is the spine case's own `kahn` (13.0), at the selector `pick_min lt`, and not a second drain. Three
 theorems, no admits:
 
 - **`drain_linear_extension`** — every node the drain places stands after every one of its in-set
@@ -198,9 +206,9 @@ theorems, no admits:
 
 **This is where the tie-break stops being decoration.** `frontier` answers in the work list's
 order, so a permuted node set hands the selector a permuted frontier; `pick_min` is invariant under
-that and section 12's `pick_head` is not. A drain taking the head of an unsorted frontier satisfies
+that and 13.0's `pick_head` is not. A drain taking the head of an unsorted frontier satisfies
 `picks_from_frontier` and FAILS `drain_deterministic` — which is the precise sense in which
-smallest-id-first is load-bearing. Section 12's two spine results are re-derived here as corollaries
+smallest-id-first is load-bearing. The spine case's two results are re-derived here as corollaries
 by instantiating its selector at `pick_min lt` (`spine_drain_is_the_parent_walk`,
 `spine_drain_is_append_order`), so the spine case is this section's special case rather than a
 parallel claim to keep in step.
@@ -264,7 +272,7 @@ Phase 134 proves the recovery for ONE base and N chains, and said in its "not cl
 DAG whose heads have already been merged — nodes with two parents, `mergeBase` on the path, a
 topological order that is a genuine choice — was outside every level. **That is the shape a clone
 holds after it has folded once and pulled again**, so an ordinary second fold rested on nothing
-the ladder named. Section 14 of `DagFold.fst` is that shape.
+the ladder named. Section 14 of `DagClosure.fst` is that shape.
 
 **The shape is abstract where it can be.** `m` is ANY node the DAG holds, and nothing is asked of
 what lies beneath it beyond acyclicity: no parentless base, no lanes, no particular merge
@@ -282,7 +290,7 @@ three drain theorems apply as they stand.
 |---|---|---|
 | `between_merged` / `between_ops_merged` | From a merged head `m` to a lane head hanging off it, the delta is that lane's own nodes — its ops — in append order and **nothing else**: not the first round beneath `m`, nothing from a sibling lane. | `Dag.between` / `Dag.betweenOps` |
 | `reconcile_many_merged_eq` / `fold_once_merged_eq` | The fold FROM the merged DAG is the deltas-first fold on the lanes that were appended, as Phase 134 proved it over a spine. | `Dag.reconcileMany` / `FoldConfluence.foldOnce` |
-| `merge_base_is_divergence` (`…_acyclic`) | The merge base of two lane heads off `m` is `m` — the divergence point, not the original base and not anything else they share. | `Dag.mergeBase` |
+| `merge_base_now_is_divergence` (`…_acyclic`, in `DagPrimitives.fst` since Phase 534) | The merge base of two lane heads off `m` is `m` — the divergence point, not the original base and not anything else they share. | `Dag.mergeBase` |
 
 **Why the drain's choice cannot reach the delta.** Beneath `m` the ready frontier is N wide and
 the order is whatever the tie-break makes it. `between_merged` does not care: the difference
@@ -292,8 +300,13 @@ over the DIFFERENCE rather than over the closure (`follows_spine_diff`, `distinc
 drain contributes exactly two facts, both Phase 156's: it is total on an acyclic set and it is a
 linear extension (`drain_total_on_acyclic`).
 
-**`merge_base` is production's function clause for clause, and the docstring's argued sentence is
-now a lemma.** The intersection of the two closures, then the maximum by (closure size, id). The
+**The merge base is production's function clause for clause, and the docstring's argued sentence is
+now a lemma.** Phase 158 modelled `mergeBase` as it then ran — the intersection of the two closures,
+then the maximum by (closure size, id) — and production has sized only the MAXIMAL common members
+since Phase 388; Phase 534 deleted the older model and states the theorem over the one that runs,
+`DagPrimitives.merge_base_now` (`merge_base_now_is_divergence`, same premises, every `lt`): every
+common member but `m` lies below a parent of `m`, so `deepest`'s filter keeps `m` or nothing, and
+`merged_common_is_the_closure` (section 14.6) gives the rest. The
 size comparison is `shorter` over the de-duplicated closures, so the extracted oracle still holds
 no integer. `Dag.mergeBase`'s own docstring says *"a node strictly deeper than any of its own
 ancestors has a strictly larger closure"*; here that is `strictly_deeper`, from three facts — the
@@ -308,14 +321,14 @@ whatsoever.
   (`merged_recovers`, `lane_ids_distinct`): every lane node is the node the DAG holds under its own
   id, and no lane id is an id in `m`'s closure. Phase 134's third clause — "the base's id is not
   one of the lane's" — is this clause at a base whose closure is more than itself.
-  `merge_base_is_divergence` also asks that the two lanes share no id, which is what `foldOnce`
+  `merge_base_now_is_divergence` also asks that the two lanes share no id, which is what `foldOnce`
   folds the actor into every node id for.
 - **Acyclicity, as Phase 156 takes it**: a topological enumeration supplied as a witness — per
   head for the drain (`head_drains`), and of `m`'s closure for `mergeBase`.
-  `merge_base_is_divergence` consumes it in the form it uses — `off_cycle`, "`m` is not its own
+  `merge_base_now_is_divergence` consumes it in the form it uses — `off_cycle`, "`m` is not its own
   proper ancestor" — and `off_cycle_of_witness` DERIVES that form from the witness (an ancestor
   stands before its descendant in any topological enumeration, `anc_before`), exactly as
-  `resolves_of_distinct` bridges Phase 134's premise. `merge_base_is_divergence_acyclic` is the
+  `resolves_of_distinct` bridges Phase 134's premise. `merge_base_now_is_divergence_acyclic` is the
   theorem with the bridge applied.
 - **Fuel — the model's own bound, discharged rather than assumed away.** `ancestors_of` walks with
   a list as fuel, and over a merged head the walk from a lane head reaches `m` with LESS of it than
@@ -400,7 +413,9 @@ Sections 18 to 21 take the DAG's later primitives from `tested` to `proved`. Eve
 the functions as production computes them, clause for clause, and the `dag-primitives-differential`
 row runs the extracted functions beside production's.
 
-- **Criss-cross merges** (`merge-base-maximal`, section 18). `merge_base_maximal`: over ANY two heads
+- **Criss-cross merges** (`merge-base-as-it-runs` since Phase 534, which retired the
+  `merge-base-maximal` row and the second `mergeBase` model it was stated over; section 18 keeps the
+  fact as `max_common_is_maximal`, and `DagPrimitives.merge_base_now_maximal` is the theorem). Over ANY two heads
   whose closure carries section 13's acyclicity witness, `Dag.mergeBase` refuses exactly when the
   heads share no ancestor, and otherwise returns a common ancestor that no other common ancestor
   descends from. Section 14 proved the base is the divergence point when the lanes hang off one
@@ -507,7 +522,7 @@ production's own `Dag.append` / `Dag.merge`, so the ids the model walks are the 
 minted. Per round-two head the delta is compared THREE ways: production's `Dag.betweenOps` from
 the merged head, the extracted `between_ops_drained` at `String.CompareOrdinal`, and the lane that
 was appended, which is `between_ops_merged`'s own right-hand side. Per pair of round-two heads the
-merge base is compared three ways likewise — `Dag.mergeBase`, the extracted `merge_base`, and the
+merge base is compared three ways likewise — `Dag.mergeBase`, the extracted `merge_base_now`, and the
 merged head. `Dag.reconcileMany` from the merged head is compared against the extracted
 `reconcile_many_drained` and against the deltas-first `reconcile_many` handed round two directly.
 The adequacy guards are the ones a green run could hide behind: ops were recovered, a chain was
@@ -563,7 +578,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    `drain_policies_agree` / `drain_refusal_characterised` say which of the two production call
    sites gets which. `drain_complete_is_acyclic` gives the converse of totality, so a complete
    drain and an acyclic set are an iff — which is exactly the length comparison `Dag.isAcyclic` and
-   `Dag.tryTopoOrder` make. Section 12's spine results are corollaries of this one at
+   `Dag.tryTopoOrder` make. The spine case's results (13.12) are corollaries of this one at
    `pick_min lt`.
 
    **And, since Phase 158, the delta recovery OVER A MERGED HEAD — the shape a clone folds after a
@@ -571,7 +586,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    from any node `m` to a lane head hanging off it, `Dag.between` under the Phase 156 drain returns
    that lane's own nodes in append order and nothing else. `reconcile_many_merged_eq` /
    `fold_once_merged_eq`: the fold from the merged DAG is the deltas-first fold.
-   `merge_base_is_divergence`: `Dag.mergeBase` of two such heads is `m`, with production's docstring
+   `merge_base_now_is_divergence`: `Dag.mergeBase` of two such heads is `m`, with production's docstring
    argument ("a strictly deeper node has a strictly larger closure") proved rather than argued.
    Premises: id distinctness exactly as Phase 134 states it, read at the merged head; acyclicity as
    Phase 156 takes it, with `off_cycle_of_witness` bridging the form `mergeBase` consumes; and the
@@ -610,8 +625,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      about the tree algebra and not about the fold.
    - **The lane set is no longer assumed to apply** (Phase 300). `fold_once` tests every lane on
      its own from the base before composing anything and refuses a rejecting set with the set of
-     rejecting lanes, so `fold_confluence_total` covers every lane set; the `lanes_apply` premise
-     survives only in the corollary `fold_confluence` that `Skeleton.fst` instantiates.
+     rejecting lanes, so `fold_confluence_total` covers every lane set; the corollary
+     `fold_confluence` that kept the `lanes_apply` premise is retired (Phase 534), and only the
+     instance statements in `Skeleton.fst` and the template still name the premise, unused.
    - **Node ids are distinct** — the hash-collision assumption, and since Phase 134 the ONLY thing
      the delta recovery assumes about content addressing. `Dag.nodeHash` is injective on
      (sorted parents, actor, encoded op) unless the hash collides; two nodes sharing a content id
@@ -624,7 +640,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      quantified rather than assumed, with the differential tying the first to production's.)_
    - _(**`Dag.mergeBase` over a criss-cross merge is outside the model** was an entry here from
      Phase 158 — which had narrowed "`Dag.mergeBase` is outside the model" to heads sharing SEVERAL
-     maximal common ancestors — and is RETIRED by Phase 437: `merge_base_maximal` proves the answer
+     maximal common ancestors — and is RETIRED by Phase 437: `merge_base_now_maximal` proves the answer
      is a common ancestor no other common ancestor descends from, over any two heads. Which maximal
      one is the tie-break, a policy, and that is said rather than assumed.)_
    - **The extractor and the F# compiler are trusted.** The proof leg holds the committed oracle
@@ -657,7 +673,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      have already been merged has nodes with two parents and `mergeBase` on its path, and neither
      is modelled, so a consumer folding over already-merged heads is outside every level here" —
      and is RETIRED by Phase 158. The theorem that replaces it is `between_merged`, with
-     `reconcile_many_merged_eq` above it and `merge_base_is_divergence` beside it: over a head
+     `reconcile_many_merged_eq` above it and `merge_base_now_is_divergence` beside it: over a head
      whose lane hangs off any already-merged node, the recovered delta is that lane, the fold is
      the deltas-first fold, and the merge base is the node the lanes diverged from — at level 1,
      on Phase 134's id-distinctness premise and Phase 156's acyclicity witness and nothing more.
@@ -1025,7 +1041,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Function` | 159 | 41 | 64 | 5 | 0 | 0 | 0 | 49 |
 | `Fuaran.Core.Idl` | 66 | 0 | 6 | 1 | 1 | 0 | 0 | 58 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
-| `Fuaran.Core.Idl.Codegen` | 47 | 8 | 0 | 0 | 0 | 0 | 0 | 39 |
+| `Fuaran.Core.Idl.Codegen` | 48 | 8 | 0 | 0 | 0 | 0 | 0 | 40 |
 | `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
 | `Fuaran.Core.OpStream` | 125 | 28 | 39 | 3 | 1 | 0 | 2 | 52 |
 | `Fuaran.Core.OpStream.Dag` | 87 | 38 | 26 | 0 | 0 | 0 | 0 | 23 |
@@ -1037,7 +1053,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Wire` | 143 | 64 | 12 | 3 | 2 | 0 | 0 | 62 |
-| **Total** | 1222 | 303 | 389 | 38 | 12 | 0 | 3 | 477 |
+| **Total** | 1223 | 303 | 389 | 38 | 12 | 0 | 3 | 478 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -1610,7 +1626,7 @@ why an entry's optional `contentionFactor` is provenance only. This repository's
   another module's cost. If either budget ever needs bumping by a large factor, check first that the
   option is still in force — losing it reads in the log exactly like ordinary growth.
 - **An SMT pattern on a rewriting lemma is a cliff, not a slope** (Phase 134's lesson, at
-  `DagFold.fst` section 11). `rev`, `app`, `ids_of` and `ops_of` rewrite into one another, and their
+  `DagClosure.fst` section 11). `rev`, `app`, `ids_of` and `ops_of` rewrite into one another, and their
   lemmas deliberately carry NO `SMTPat`: left to fire on their own they turn the delta-recovery
   query into one Z3 does not return from, where the module checks in seconds without them. Each is
   called by name at the point it is needed, which is also what makes the proof read as the
@@ -1685,7 +1701,8 @@ theorems (`DagFold`, `Chain`, `WireCanon`, `WireDecode`, `JsonParse`, `Limits`),
 instance (`TreeOps`, `Skeleton`, `Preservation`, `TreeDiff`) and `kit/templates/Instance.fst.template`
 — each entry saying which theorem the file carries and which obligations it asks a domain for, and
 the sources being the live files under this directory, so there is no second copy of any model here.
-A domain instantiates fold confluence at its own witness by copying `DagFold.fst`, filling the
+A domain instantiates fold confluence at its own witness by copying `DagFold.fst` (and `DagClosure.fst`
+when it uses the DAG beneath the fold), filling the
 template's fourteen holes — one of which, `{{DIAMOND}}`, is the obligation it proves — and adding the
 instance to its own roster (`modules.json`); the contract is stated under Theorem 2 and the procedure in
 `kit/README.md`. Not in the set: the six generated modules (`Vocabulary`, `DocVocabulary`,
@@ -6449,7 +6466,7 @@ test on a 1 MB thread, and no model here has a stack to prove it over.
 Four corrections of what the ladder said about the code that runs, each a row a consumer can read
 instead of a premise a consumer inherits.
 
-**`Dag.tryReplayTo` is a theorem over the proved drain** (`DagFold.fst` section 16). Every store the
+**`Dag.tryReplayTo` is a theorem over the proved drain** (`DagClosure.fst` section 16). Every store the
 plane holds is replayed through it, and it had no row. `replay_to` is `replayClosure` at one root,
 clause for clause — refuse an unknown head, drain the head's closure with section 13's id-ordered
 drain over section 14's closure, refuse a drain that did not place the whole closure as
@@ -7443,9 +7460,11 @@ DagFold is one of the leg's slower modules, and none of this needed to re-verify
 
 - **The merge base that runs** (`merge-base-as-it-runs`, section 1). `deepest` is modelled clause for
   clause: when the common set drains completely, only the members outside the closure of every
-  member's parents are sized; otherwise every member is. `merge_base_now_is_merge_base`: over a left
-  head whose closure is witnessed acyclic, it answers what Phase 158's model answers, so
-  `merge_base_maximal` is about the code that runs (`merge_base_now_maximal`). The member `List.maxBy`
+  member's parents are sized; otherwise every member is. `merge_base_now_maximal` (THEOREM 5): over
+  a left head whose closure is witnessed acyclic, it refuses exactly over disjoint histories or
+  returns a common ancestor no other common ancestor descends from. Until Phase 534 that was proved
+  of a second model and carried across by an equality between the two models; the second model is
+  deleted, and the theorem is stated here, standing on `DagClosure.max_common_is_maximal`. The member `List.maxBy`
   picks over the whole set is below no member. It is not below another member, by maximality. It is
   not below itself, because the witness puts a node's own id after its parents (`top_not_below`). So it
   survives the filter and still wins (`deepest_is_max_by`). Either branch of the drain test gives
@@ -7620,14 +7639,14 @@ condition at all because the closing brace cancels. What the actor field's self-
 composed with is the numeral's comma-freedom, which is the one premise new to the ladder.)_
 
 _(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
-`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. **And
+`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 13.12 of `DagClosure.fst`. **And
 the successor it named — the general order over a MERGE DAG, where the frontier widens past one and
 the tie-break has to be modelled for real — is DONE too**, Phase 156, section 13: the drain over an
 abstract acyclic node set at an abstract total order, proved deterministic, a linear extension and
 total, with the dangling-parent policy a parameter naming which production caller gets which. What
 those two did NOT take, and what travelled with `Dag.mergeBase`, was the delta RECOVERY over a
 merge DAG — **DONE as well**, Phase 158, section 14: `between_merged`, `reconcile_many_merged_eq`
-and `merge_base_is_divergence`, over a lane hanging off any already-merged node. What is left of
+and `merge_base_now_is_divergence`, over a lane hanging off any already-merged node. What is left of
 the DAG layer is a delta that itself merges, named in the ladder's "not claimed"; the criss-cross
 merge base it was named beside is proved since Phase 437.)_
 

@@ -272,13 +272,16 @@ let private cliDll () : string =
     else
         found |> Array.sortBy id |> Array.head
 
-/// Invoke the command; return its exit code and both streams joined.
+/// Invoke the command; return its exit code and its stdout. The tool has ONE output channel,
+/// refusals included (Phase 526), so every invocation here also asserts that stderr is empty — a
+/// refusal or a report that drifted onto the other stream fails the case that produced it.
 let private runCli (args: string) : int * string =
     let p =
         ChildProcess.run (ChildProcess.command "dotnet" ("\"" + cliDll () + "\" " + args))
         |> Result.defaultWith failwith
 
-    p.Exit, p.Stdout + "\n" + p.Stderr
+    Expect.equal p.Stderr "" (sprintf "`fuaran-core-idl %s` writes nothing on stderr" args)
+    p.Exit, p.Stdout
 
 let private quoted (name: string) = "\"" + fixturePath name + "\""
 
@@ -822,7 +825,68 @@ let tests =
               Expect.equal code 0 "table exits 0"
 
               for c in Diff.allConsequences do
-                  Expect.stringContains out (Diff.consequenceLabel c) "the table names every class") ]
+                  Expect.stringContains out (Diff.consequenceLabel c) "the table names every class")
+
+          // Phase 526 — one verb table: one parser, one refusal channel, the usage rendered from it.
+          testCase "every verb refuses the same way: one prefixed line on stdout, exit 2" (fun _ ->
+              let cases =
+                  [ "frobnicate", "fuaran-core-idl: unknown verb: frobnicate"
+                    "table extra", "fuaran-core-idl: unrecognised option: extra"
+                    "classify", "fuaran-core-idl: classify needs two paths: <before.json> <after.json>"
+                    sprintf "classify %s %s --expect" (quoted "before") (quoted "before"),
+                    "fuaran-core-idl: --expect needs a class"
+                    sprintf "classify %s %s --expect additive --expect breaking" (quoted "before") (quoted "before"),
+                    "fuaran-core-idl: --expect given twice"
+                    "spike-proposal", "fuaran-core-idl: spike-proposal needs a proposal document: <proposal.json>"
+                    "spike-proposal p.json --idl i.json --seed 1e3",
+                    "fuaran-core-idl: --seed takes an integer, not '1e3'" ]
+
+              for args, expected in cases do
+                  let code, out = runCli args
+                  Expect.equal code 2 (sprintf "`%s` refuses with exit 2" args)
+                  let last = out.TrimEnd('\n', '\r').Split('\n') |> Array.last
+                  Expect.equal (last.TrimEnd '\r') expected (sprintf "`%s` refuses in the one shape" args)
+
+              let bare, bareOut = runCli ""
+              Expect.equal bare 2 "no verb at all reaches no verdict"
+              Expect.stringContains bareOut "USAGE" "and prints the usage")
+
+          testCase "docs/idl-stability-classes.md's usage section IS the command's --help, byte for byte" (fun _ ->
+              // The hand-copied synopsis showed two of `classify`'s four flags (the redesign pass's
+              // D8); the section between the markers is now the rendered usage verbatim, so the next
+              // drift fails here with the text in the message, ready to paste.
+              let code, help = runCli "--help"
+              Expect.equal code 0 "--help exits 0"
+
+              for verb in [ "classify"; "table"; "spike-proposal" ] do
+                  Expect.stringContains help ("fuaran-core-idl " + verb) (sprintf "the usage names %s" verb)
+
+              for f in
+                  [ "--manifest"
+                    "--expect"
+                    "--support-before"
+                    "--support-after"
+                    "--idl"
+                    "--corpus"
+                    "--out"
+                    "--seed"
+                    "--vectors" ] do
+                  Expect.stringContains help f (sprintf "the usage names %s" f)
+
+              let text =
+                  (File.ReadAllText(Snapshots.repoFile "docs/idl-stability-classes.md")).Replace("\r\n", "\n")
+
+              let i = text.IndexOf "<!-- BEGIN USAGE"
+              let j = text.IndexOf "<!-- END USAGE -->"
+              Expect.isTrue (i >= 0 && j > i) "the document carries the usage section's markers"
+              let afterBegin = text.IndexOf("```\n", i) + 4
+              let closing = text.LastIndexOf("```\n", j)
+              let section = text.Substring(afterBegin, closing - afterBegin)
+
+              Expect.equal
+                  section
+                  (help.Replace("\r\n", "\n"))
+                  "docs/idl-stability-classes.md's usage section is stale — paste `fuaran-core-idl --help` between the markers") ]
 
 // ---------------------------------------------------------------------------
 // Phase 304 — the evolution differential: the class predicts what an OLD document does.

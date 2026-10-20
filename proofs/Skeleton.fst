@@ -3,9 +3,9 @@
    hypothesis DISCHARGED rather than assumed (fuaran-core Phase 133; widened to the whole
    operation alphabet by Phase 162).
 
-   `DagFold.fold_confluence` proves that any two arrival orders of one lane set reach equivalent
-   outcomes, under one domain hypothesis — `independence_diamond`, the promise that footprint-
-   independent operations which both apply at a state commute there. Phase 78/80 certify that
+   `DagFold.fold_confluence_total` proves that any two arrival orders of one lane set reach
+   equivalent outcomes, under one domain hypothesis — `independence_diamond`, the promise that
+   footprint-independent operations which both apply at a state commute there. Phase 78/80 certify that
    promise for this algebra by SAMPLING. `TreeOps.op_independence_diamond` proves it. This module
    is the composition, and it is deliberately thin: there is no new argument here, only the
    instantiation, which is the point — the two halves were designed to meet.
@@ -69,11 +69,11 @@ val skeleton_fold_confluence_halt
 let skeleton_fold_confluence_halt s0 ls1 ls2 p =
   fold_confluence_halt wapply op_fp s0 ls1 ls2 p
 
-(* THE THEOREM. `DagFold.fold_confluence`'s domain hypothesis is discharged by
-   `TreeOps.op_independence_diamond`, so what remains in the `requires` is `lanes_apply` — not a
-   promise about the domain but a statement about the lane set in hand, that every lane applies
-   cleanly from the base state, which is the lane set `FoldConfluence.foldOnce`'s generators
-   produce and the only one the fold half was ever about. *)
+(* THE THEOREM. `DagFold.fold_confluence_total`'s one hypothesis, the domain's diamond, is
+   discharged by `TreeOps.op_independence_diamond`, and the total theorem asks nothing of the lane set.
+   The `requires` still names `lanes_apply` — every lane applies cleanly from the base state, the
+   lane set `FoldConfluence.foldOnce`'s generators produce — because that is the statement this
+   instance has carried since it was cut; the proof below does not use it. *)
 val skeleton_fold_confluence
   (s0:tree) (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
   : Lemma (requires lanes_apply wapply ls1 s0)
@@ -81,7 +81,7 @@ val skeleton_fold_confluence
 
 let skeleton_fold_confluence s0 ls1 ls2 p =
   op_independence_diamond ();
-  fold_confluence wapply op_fp s0 ls1 ls2 p
+  fold_confluence_total wapply op_fp s0 ls1 ls2 p
 
 (* THE WIDENING, EVALUATED. The alphabet really did grow: a lane carrying a nested `Batch` is a
    lane this module could not previously be stated about, and `skeleton_fold` now takes one. The
