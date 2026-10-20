@@ -57,83 +57,57 @@ let rec private isCanonicalValue (v: JVal) : bool =
     | JObj fs -> fs |> List.forall (snd >> isCanonicalValue)
     | _ -> true
 
-type private CanonTally =
-    {
-        Docs: int
-        Diffs: string list
-        /// Objects carrying two or more DISTINCT keys — the shape rule 2's sort is observable on,
-        /// and therefore the shape the go-red needs to have met.
-        SortableObjects: int
-        /// Strings carrying a character rule 6 escapes.
-        EscapedStrings: int
-        /// Strings carrying a control character — the `\u00xx` arm specifically.
-        ControlStrings: int
-        /// Floats whose canonical token is in scientific notation — rule 5's other layout.
-        ScientificFloats: int
-        /// Canonical documents whose model round trip was checked.
-        RoundTrips: int
-    }
+/// The canonical encoder's tally: the documents read, the shapes each rule is observable on —
+/// objects with two or more DISTINCT keys (rule 2's sort, and so the shape the go-red needs to have
+/// met), strings carrying a character rule 6 escapes and those carrying a control character (the
+/// `\u00xx` arm specifically), floats in scientific notation (rule 5's other layout) — and the
+/// canonical documents whose model round trip was checked.
+let private canonTally =
+    Tally.empty
+        [ "Docs"
+          "SortableObjects"
+          "EscapedStrings"
+          "ControlStrings"
+          "ScientificFloats"
+          "RoundTrips" ]
 
-let private emptyCanonTally =
-    { Docs = 0
-      Diffs = []
-      SortableObjects = 0
-      EscapedStrings = 0
-      ControlStrings = 0
-      ScientificFloats = 0
-      RoundTrips = 0 }
+/// The encoder's render pair under one model wire: production's bytes and the model's.
+let private canonRender (w: WireCanon.wire<int, float>) : Differential<JVal, WireCanon.jval<int, float>> =
+    Differential.pair (Canonical.write Rendering.CrossHost) (WireCanon.render w >> canonFromChs)
 
-let rec private canonShape (v: JVal) (t: CanonTally) : CanonTally =
+let rec private canonShape (v: JVal) (t: Tally) : Tally =
     match v with
     | JStr s ->
-        let t =
-            if s |> Seq.exists (fun c -> c = '"' || c = '\\' || c < ' ') then
-                { t with
-                    EscapedStrings = t.EscapedStrings + 1 }
-            else
-                t
-
-        if s |> Seq.exists (fun c -> c < ' ') then
-            { t with
-                ControlStrings = t.ControlStrings + 1 }
-        else
-            t
+        t
+        |> Tally.bumpIf (s |> Seq.exists (fun c -> c = '"' || c = '\\' || c < ' ')) "EscapedStrings"
+        |> Tally.bumpIf (s |> Seq.exists (fun c -> c < ' ')) "ControlStrings"
     | JFloat f when System.Double.IsFinite f && (FloatLayout.canonical f).Contains "E" ->
-        { t with
-            ScientificFloats = t.ScientificFloats + 1 }
+        Tally.bump "ScientificFloats" t
     | JArr xs -> xs |> List.fold (fun acc x -> canonShape x acc) t
     | JObj fs ->
         let t =
-            if (fs |> List.map fst |> List.distinct |> List.length) >= 2 then
-                { t with
-                    SortableObjects = t.SortableObjects + 1 }
-            else
-                t
+            Tally.bumpIf ((fs |> List.map fst |> List.distinct |> List.length) >= 2) "SortableObjects" t
 
         fs |> List.fold (fun acc (_, x) -> canonShape x acc) t
     | _ -> t
 
 /// One document, asked of production and of the model. The comparison is the BYTES — which is the
 /// only comparison that means anything for an encoder whose whole job is to produce a digest input.
-let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: CanonTally) : CanonTally =
-    let expected = Canonical.write Rendering.CrossHost v
-    let got = canonFromChs (WireCanon.render w (canonToModel v))
-
-    let t = canonShape v { t with Docs = t.Docs + 1 }
-
-    if expected = got then
-        t
-    else
-        { t with
-            Diffs =
-                sprintf "%s: production rendered\n  %s\nthe model rendered\n  %s" label expected got
-                :: t.Diffs }
+let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: Tally) : Tally =
+    t
+    |> Tally.bump "Docs"
+    |> canonShape v
+    |> Differential.compareWith
+        (canonRender w)
+        (fun p m -> sprintf "%s: production rendered\n  %s\nthe model rendered\n  %s" label p m)
+        v
+        (canonToModel v)
 
 /// The value-level round trip, on the canonical subset: the model's own reader over the model's
 /// own rendering, against production's parser over production's rendering. A disagreement here
 /// says the reader and the encoder have drifted apart, which is the one way the injectivity
 /// theorem could be true of a model that is not this encoder.
-let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTally =
+let private canonRoundTrip (label: string) (v: JVal) (t: Tally) : Tally =
     if not (isCanonicalValue v) then
         t
     elif (Json.firstRepeatedMember v).IsSome then
@@ -144,12 +118,11 @@ let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTall
         match Json.read ReadOptions.strict (Canonical.write Rendering.CrossHost v) with
         | Result.Error(JsonRefusal.Malformed e) when e.Kind = DuplicateMember -> t
         | other ->
-            { t with
-                Diffs =
-                    sprintf "%s: a repeated member — production read %A, not a DuplicateMember refusal" label other
-                    :: t.Diffs }
+            Tally.disagree
+                (sprintf "%s: a repeated member — production read %A, not a DuplicateMember refusal" label other)
+                t
     else
-        let t = { t with RoundTrips = t.RoundTrips + 1 }
+        let t = Tally.bump "RoundTrips" t
 
         let modelSide =
             match WireCanon.read canonWire (WireCanon.render canonWire (canonToModel v)) with
@@ -162,13 +135,9 @@ let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTall
             | Result.Ok pv -> Result.Ok pv
             | Result.Error m -> Result.Error m
 
-        if modelSide = productionSide then
-            t
-        else
-            { t with
-                Diffs =
-                    sprintf "%s: round trip — production read %A, the model read %A" label productionSide modelSide
-                    :: t.Diffs }
+        t
+        |> Differential.check (modelSide = productionSide) (fun () ->
+            sprintf "%s: round trip — production read %A, the model read %A" label productionSide modelSide)
 
 // ---- the generated pool ----
 
@@ -243,32 +212,27 @@ let private genCanonValue (r: int ref) (depth: int) : JVal =
 
     go depth
 
-let private canonGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) (roundTrip: bool) : CanonTally =
-    let r = ref seed
-    let mutable t = emptyCanonTally
+/// The encoder's probe and, when asked, the round trip, on one document.
+let private canonCase (w: WireCanon.wire<int, float>) (roundTrip: bool) (label: string) (v: JVal) (t: Tally) =
+    let t = canonProbe w label v t
+    if roundTrip then canonRoundTrip label v t else t
 
-    for i in 1..trials do
-        let v = genCanonValue r 3
-        t <- canonProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+let private canonGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) (roundTrip: bool) : Tally =
+    canonTally
+    |> Differential.seeded trials (ref seed) (fun i r t ->
+        r, canonCase w roundTrip (sprintf "generated seed=%d iteration=%d" seed i) (genCanonValue r 3) t)
 
-        if roundTrip then
-            t <- canonRoundTrip (sprintf "generated seed=%d iteration=%d" seed i) v t
-
-    t
-
-let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundTrip: bool) : CanonTally =
-    let mutable t = emptyCanonTally
-
-    for name, text in JsonParseDiff.corpusTexts family do
+/// Every fixture of a corpus family, parsed — a fixture that does not parse fails the case.
+let private corpusValues (family: string) : (string * JVal) list =
+    JsonParseDiff.corpusTexts family
+    |> List.map (fun (name, text) ->
         match Json.parse text with
         | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
-        | Result.Ok v ->
-            t <- canonProbe w (sprintf "%s/%s" family name) v t
+        | Result.Ok v -> sprintf "%s/%s" family name, v)
 
-            if roundTrip then
-                t <- canonRoundTrip (sprintf "%s/%s" family name) v t
-
-    t
+let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundTrip: bool) : Tally =
+    canonTally
+    |> Differential.over (corpusValues family) (fun (label, v) t -> canonCase w roundTrip label v t)
 
 // ---- the guard (Phase 165): `WireCanon.try_render` beside `Canonical.tryWrite Rendering.CrossHost` ----
 
@@ -375,130 +339,78 @@ let rec private holdsIllFormed (v: JVal) : bool =
     | JObj fs -> fs |> List.exists (fun (k, x) -> not (strictlyEncodable k) || holdsIllFormed x)
     | _ -> false
 
-type private GuardTally =
-    {
-        Docs: int
-        Diffs: string list
-        /// Documents production refused.
-        Refused: int
-        /// Refusals whose path is two or more steps deep — the scan's recursion, not its leaf arm.
-        DeepRefusals: int
-        /// Refusals naming each of the three tokens.
-        NaNs: int
-        PosInfs: int
-        NegInfs: int
-        /// ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped
-        /// token or a zero — which is the set the guard must not refuse.
-        AcceptedNormalised: int
-        /// Refusals naming an ill-formed STRING (Phase 306), and those of them naming a member key.
-        StringRefusals: int
-        KeyRefusals: int
-        /// Documents holding BOTH faults, refused — for the float, which is looked for first.
-        BothFaults: int
-    }
-
-let private emptyGuardTally =
-    { Docs = 0
-      Diffs = []
-      Refused = 0
-      DeepRefusals = 0
-      NaNs = 0
-      PosInfs = 0
-      NegInfs = 0
-      AcceptedNormalised = 0
-      StringRefusals = 0
-      KeyRefusals = 0
-      BothFaults = 0 }
+/// The guard's tally: the documents read and those production refused; the refusals two or more
+/// steps deep (the scan's recursion, not its leaf arm) and those naming each of the three tokens;
+/// the ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped token
+/// or a zero, the set the guard must not refuse; the refusals naming an ill-formed STRING (Phase
+/// 306) and those of them naming a member key; and the documents holding BOTH faults, refused —
+/// for the float, which is looked for first.
+let private guardTally =
+    Tally.empty
+        [ "Docs"
+          "Refused"
+          "DeepRefusals"
+          "NaNs"
+          "PosInfs"
+          "NegInfs"
+          "AcceptedNormalised"
+          "StringRefusals"
+          "KeyRefusals"
+          "BothFaults" ]
 
 /// One document, asked of production's guard and of the model's. Three comparisons, each of which
 /// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
 /// `Canonical.write Rendering.CrossHost`'s bytes; and the verdict is `Error` precisely when the independent predicate
 /// says a non-finite float is present.
-let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: GuardTally) : GuardTally =
+let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: Tally) : Tally =
     let production = Canonical.tryWrite Rendering.CrossHost v
     let model = guardModelSide w v
-    let t = { t with Docs = t.Docs + 1 }
 
-    let diff (what: string) (t: GuardTally) =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %A\n  the model:  %A" label what production model
-                :: t.Diffs }
+    let message (what: string) =
+        sprintf "%s: %s\n  production: %A\n  the model:  %A" label what production model
+
+    // A finding about this document unless `holds`.
+    let expect (holds: bool) (what: string) (t: Tally) =
+        Differential.check holds (fun () -> message what) t
 
     let t =
-        if production = model then
-            t
-        else
-            diff "the guards disagree" t
+        t
+        |> Tally.bump "Docs"
+        |> Differential.compareWith Differential.structural (fun _ _ -> message "the guards disagree") production model
 
     match production with
     | Result.Ok bytes ->
-        let t =
-            if bytes = Canonical.write Rendering.CrossHost v then
-                t
-            else
-                diff "an accepted value did not render to Canonical.write Rendering.CrossHost's bytes" t
-
-        let t =
-            if holdsNonFinite v then
-                diff "production ACCEPTED a value holding a non-finite float" t
-            else
-                t
-
-        let t =
-            if holdsIllFormed v then
-                diff "production ACCEPTED a value holding an ill-formed string" t
-            else
-                t
-
-        if isCanonicalValue v then
-            t
-        else
-            { t with
-                AcceptedNormalised = t.AcceptedNormalised + 1 }
+        t
+        |> expect
+            (bytes = Canonical.write Rendering.CrossHost v)
+            "an accepted value did not render to Canonical.write Rendering.CrossHost's bytes"
+        |> expect (not (holdsNonFinite v)) "production ACCEPTED a value holding a non-finite float"
+        |> expect (not (holdsIllFormed v)) "production ACCEPTED a value holding an ill-formed string"
+        |> Tally.bumpIf (not (isCanonicalValue v)) "AcceptedNormalised"
     | Result.Error m ->
         let forString = m.StartsWith "ill-formed string"
-
-        let t =
-            if holdsNonFinite v || holdsIllFormed v || holdsRepeated v then
-                t
-            else
-                diff
-                    "production REFUSED a value holding no non-finite float, no ill-formed string and no repeated member"
-                    t
-
-        // The third refusal comes after the other two (Phase 462): a value holding either earlier
-        // fault is never refused for a repeated member.
-        let t =
-            if (holdsNonFinite v || holdsIllFormed v) && m.StartsWith "repeated member" then
-                diff "a value holding an earlier fault was refused for a repeated member" t
-            else
-                t
-
-        // The two refusals are ORDERED: a value holding a non-finite float is refused for it,
-        // whatever its strings are.
-        let t =
-            if holdsNonFinite v && forString then
-                diff "a value holding a non-finite float was refused for a string" t
-            else
-                t
-
         let steps = m |> Seq.filter (fun c -> c = '[') |> Seq.length
 
-        { t with
-            Refused = t.Refused + 1
-            DeepRefusals = t.DeepRefusals + (if steps >= 2 then 1 else 0)
-            NaNs = t.NaNs + (if m.Contains ": NaN at " then 1 else 0)
-            PosInfs = t.PosInfs + (if m.Contains ": Infinity at " then 1 else 0)
-            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0)
-            StringRefusals = t.StringRefusals + (if forString then 1 else 0)
-            KeyRefusals =
-                t.KeyRefusals
-                + (if forString && m.Contains ": a member key holds " then
-                       1
-                   else
-                       0)
-            BothFaults = t.BothFaults + (if holdsNonFinite v && holdsIllFormed v then 1 else 0) }
+        t
+        |> expect
+            (holdsNonFinite v || holdsIllFormed v || holdsRepeated v)
+            "production REFUSED a value holding no non-finite float, no ill-formed string and no repeated member"
+        // The third refusal comes after the other two (Phase 462): a value holding either earlier
+        // fault is never refused for a repeated member.
+        |> expect
+            (not ((holdsNonFinite v || holdsIllFormed v) && m.StartsWith "repeated member"))
+            "a value holding an earlier fault was refused for a repeated member"
+        // The two refusals are ORDERED: a value holding a non-finite float is refused for it,
+        // whatever its strings are.
+        |> expect (not (holdsNonFinite v && forString)) "a value holding a non-finite float was refused for a string"
+        |> Tally.bump "Refused"
+        |> Tally.bumpIf (steps >= 2) "DeepRefusals"
+        |> Tally.bumpIf (m.Contains ": NaN at ") "NaNs"
+        |> Tally.bumpIf (m.Contains ": Infinity at ") "PosInfs"
+        |> Tally.bumpIf (m.Contains ": -Infinity at ") "NegInfs"
+        |> Tally.bumpIf forString "StringRefusals"
+        |> Tally.bumpIf (forString && m.Contains ": a member key holds ") "KeyRefusals"
+        |> Tally.bumpIf (holdsNonFinite v && holdsIllFormed v) "BothFaults"
 
 /// The Phase 149 pool carries no non-finite float — it was built to measure the renderer, which
 /// has nothing to say about one. This walks a drawn value and replaces roughly one numeric leaf in
@@ -523,25 +435,15 @@ let private poisonCanonValue (r: int ref) (v: JVal) : JVal =
 
     go v
 
-let private guardGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
-    let r = ref seed
-    let mutable t = emptyGuardTally
-
-    for i in 1..trials do
+let private guardGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : Tally =
+    guardTally
+    |> Differential.seeded trials (ref seed) (fun i r t ->
         let v = poisonCanonValue r (genCanonValue r 3)
-        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+        r, guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t)
 
-    t
-
-let private guardCorpus (w: WireCanon.wire<int, float>) (family: string) : GuardTally =
-    let mutable t = emptyGuardTally
-
-    for name, text in JsonParseDiff.corpusTexts family do
-        match Json.parse text with
-        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
-        | Result.Ok v -> t <- guardProbe w (sprintf "%s/%s" family name) v t
-
-    t
+let private guardCorpus (w: WireCanon.wire<int, float>) (family: string) : Tally =
+    guardTally
+    |> Differential.over (corpusValues family) (fun (label, v) t -> guardProbe w label v t)
 
 /// The GO-RED instrument for the guard: a wire that cannot see NaN — it classifies one as finite,
 /// so the model's scan walks past it. Every document whose FIRST non-finite float is a NaN must
@@ -589,16 +491,12 @@ let private poisonCanonStrings (r: int ref) (v: JVal) : JVal =
 
 /// The Phase 165 pool, with its strings poisoned and — one document in three — its floats too, so
 /// the order of the two refusals is measured as well as each on its own.
-let private guardGeneratedIllFormed (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
-    let r = ref seed
-    let mutable t = emptyGuardTally
-
-    for i in 1..trials do
+let private guardGeneratedIllFormed (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : Tally =
+    guardTally
+    |> Differential.seeded trials (ref seed) (fun i r t ->
         let v = poisonCanonStrings r (genCanonValue r 3)
         let v = if i % 3 = 0 then poisonCanonValue r v else v
-        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
-
-    t
+        r, guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t)
 
 /// The GO-RED instrument for the string refusal: a wire whose well-formedness test accepts every
 /// string. The model then renders, or names a later float, wherever production refuses for a
@@ -610,56 +508,52 @@ let private guardWireStringBlind: WireCanon.wire<int, float> =
 // ---- the declared-key-order renderer (Phase 306): `WireCanon.render_ordered` beside
 //      `Canonical.write Rendering.Declared` ----
 
-type private OrderedTally =
-    {
-        Docs: int
-        Diffs: string list
-        /// Documents whose ordered rendering is NOT `Canonical.write Rendering.CrossHost`'s — an object authored out of
-        /// key order somewhere — without which this would be the Phase 149 differential again.
-        Unsorted: int
-        /// Canonical documents the model's reader returned EXACTLY, members in authored order.
-        ReadBack: int
-    }
+/// The declared-order renderer's tally: the documents read; those whose ordered rendering is NOT
+/// `Canonical.write Rendering.CrossHost`'s — an object authored out of key order somewhere —
+/// without which this would be the Phase 149 differential again; and the canonical documents the
+/// model's reader returned EXACTLY, members in authored order.
+let private orderedTally = Tally.empty [ "Docs"; "Unsorted"; "ReadBack" ]
+
+/// The declared-order render pair: production's `Rendering.Declared` bytes beside a model
+/// renderer — `render_ordered` in every real run, the sorting `render` in the go-red.
+let private orderedRender
+    (render: WireCanon.jval<int, float> -> WireCanon.ch list)
+    : Differential<JVal, WireCanon.jval<int, float>> =
+    Differential.pair (Canonical.write Rendering.Declared) (render >> canonFromChs)
+
+/// One document beside the declared-order renderer, counting it as unsorted when production's two
+/// renderers differ on it.
+let private orderedCompare
+    (render: WireCanon.jval<int, float> -> WireCanon.ch list)
+    (label: string)
+    (v: JVal)
+    (t: Tally)
+    : Tally =
+    t
+    |> Tally.bump "Docs"
+    |> Tally.bumpIf (Canonical.write Rendering.Declared v <> Canonical.write Rendering.CrossHost v) "Unsorted"
+    |> Differential.compareWith
+        (orderedRender render)
+        (fun p m -> sprintf "%s: the renderers disagree\n  production: %s\n  the model:  %s" label p m)
+        v
+        (canonToModel v)
 
 let private orderedProbe
     (render: WireCanon.jval<int, float> -> WireCanon.ch list)
     (label: string)
     (v: JVal)
-    (t: OrderedTally)
-    : OrderedTally =
-    let production = Canonical.write Rendering.Declared v
+    (t: Tally)
+    : Tally =
     let m = canonToModel v
-    let model = canonFromChs (render m)
-
-    let t =
-        { t with
-            Docs = t.Docs + 1
-            Unsorted =
-                t.Unsorted
-                + (if production <> Canonical.write Rendering.CrossHost v then
-                       1
-                   else
-                       0) }
-
-    let t =
-        if production = model then
-            t
-        else
-            { t with
-                Diffs =
-                    sprintf "%s: the renderers disagree\n  production: %s\n  the model:  %s" label production model
-                    :: t.Diffs }
+    let t = orderedCompare render label v t
 
     // `render_ordered_injective`'s engine, measured: on the canonical subset the reader returns
     // the value itself — no normal form, the members where the author put them.
     if isCanonicalValue v && not (holdsNonFinite v) then
         match WireCanon.read canonWire (WireCanon.render_ordered canonWire m) with
-        | WireCanon.Ok(back, []) when back = m -> { t with ReadBack = t.ReadBack + 1 }
+        | WireCanon.Ok(back, []) when back = m -> Tally.bump "ReadBack" t
         | other ->
-            { t with
-                Diffs =
-                    sprintf "%s: the reader did not return the value it was rendered from: %A" label other
-                    :: t.Diffs }
+            Tally.disagree (sprintf "%s: the reader did not return the value it was rendered from: %A" label other) t
     else
         t
 
@@ -667,19 +561,10 @@ let private orderedGenerated
     (render: WireCanon.jval<int, float> -> WireCanon.ch list)
     (seed: int)
     (trials: int)
-    : OrderedTally =
-    let r = ref seed
-
-    let mutable t =
-        { Docs = 0
-          Diffs = []
-          Unsorted = 0
-          ReadBack = 0 }
-
-    for i in 1..trials do
-        t <- orderedProbe render (sprintf "generated seed=%d iteration=%d" seed i) (genCanonValue r 3) t
-
-    t
+    : Tally =
+    orderedTally
+    |> Differential.seeded trials (ref seed) (fun i r t ->
+        r, orderedProbe render (sprintf "generated seed=%d iteration=%d" seed i) (genCanonValue r 3) t)
 
 [<Tests>]
 let tests =
@@ -692,33 +577,37 @@ let tests =
           <| fun _ ->
               let t = onBigStack (fun () -> canonCorpus canonWire "nodes" true)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
-
-              Expect.isGreaterThan t.Docs 100 (sprintf "the nodes/ family was read at all (%d fixtures)" t.Docs)
+              Differential.expectAgrees "the canon oracle, nodes/" t
 
               Expect.isGreaterThan
-                  t.SortableObjects
+                  (Tally.count "Docs" t)
+                  100
+                  (sprintf "the nodes/ family was read at all (%d fixtures)" (Tally.count "Docs" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "SortableObjects" t)
                   100
                   (sprintf
                       "fixtures carrying an object with two or more DISTINCT keys (%d) — rule 2's sort is unobservable without one"
-                      t.SortableObjects)
+                      (Tally.count "SortableObjects" t))
 
               Expect.isGreaterThan
-                  t.RoundTrips
+                  (Tally.count "RoundTrips" t)
                   100
-                  (sprintf "fixtures inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+                  (sprintf
+                      "fixtures inside the canonical subset, whose round trip was checked (%d)"
+                      (Tally.count "RoundTrips" t))
 
           testCase "the canon oracle agrees with Canonical.write Rendering.CrossHost over every ops/ fixture"
           <| fun _ ->
               let t = onBigStack (fun () -> canonCorpus canonWire "ops" true)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the canon oracle, ops/" t
 
-              Expect.isGreaterThan t.Docs 10 (sprintf "the ops/ family was read at all (%d fixtures)" t.Docs)
+              Expect.isGreaterThan
+                  (Tally.count "Docs" t)
+                  10
+                  (sprintf "the ops/ family was read at all (%d fixtures)" (Tally.count "Docs" t))
 
           testCase "the canon oracle agrees with Canonical.write Rendering.CrossHost over a generated JVal pool"
           <| fun _ ->
@@ -728,37 +617,41 @@ let tests =
               // order decides differently from code-point order), and rule 5's scientific layout.
               let t = onBigStack (fun () -> canonGenerated canonWire 1490 1200 true)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the canon oracle, generated" t
 
               // adequacy — a pool that never reached a shape measures nothing about the rule that
               // governs it. MEASURED at 1200 documents, seed 1490, and every threshold below sits
               // under its measurement with headroom and above zero.
               Expect.isGreaterThan
-                  t.SortableObjects
+                  (Tally.count "SortableObjects" t)
                   100
-                  (sprintf "documents carrying a sortable object (%d)" t.SortableObjects)
+                  (sprintf "documents carrying a sortable object (%d)" (Tally.count "SortableObjects" t))
 
               Expect.isGreaterThan
-                  t.EscapedStrings
+                  (Tally.count "EscapedStrings" t)
                   100
-                  (sprintf "strings carrying a character rule 6 escapes (%d)" t.EscapedStrings)
+                  (sprintf "strings carrying a character rule 6 escapes (%d)" (Tally.count "EscapedStrings" t))
 
               Expect.isGreaterThan
-                  t.ControlStrings
+                  (Tally.count "ControlStrings" t)
                   20
-                  (sprintf "strings carrying a CONTROL character — the \\u00xx arm specifically (%d)" t.ControlStrings)
+                  (sprintf
+                      "strings carrying a CONTROL character — the \\u00xx arm specifically (%d)"
+                      (Tally.count "ControlStrings" t))
 
               Expect.isGreaterThan
-                  t.ScientificFloats
+                  (Tally.count "ScientificFloats" t)
                   20
-                  (sprintf "floats whose canonical token is in scientific notation (%d)" t.ScientificFloats)
+                  (sprintf
+                      "floats whose canonical token is in scientific notation (%d)"
+                      (Tally.count "ScientificFloats" t))
 
               Expect.isGreaterThan
-                  t.RoundTrips
+                  (Tally.count "RoundTrips" t)
                   200
-                  (sprintf "documents inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+                  (sprintf
+                      "documents inside the canonical subset, whose round trip was checked (%d)"
+                      (Tally.count "RoundTrips" t))
 
           testCase "a model with rule 2's key order REVERSED loses — the comparison can fail"
           <| fun _ ->
@@ -770,26 +663,26 @@ let tests =
               let t = onBigStack (fun () -> canonGenerated canonWireGoRed 1490 1200 false)
 
               Expect.isGreaterThan
-                  t.SortableObjects
+                  (Tally.count "SortableObjects" t)
                   100
                   (sprintf
                       "the go-red run reached objects with two distinct keys at all (%d) — otherwise it proves nothing"
-                      t.SortableObjects)
+                      (Tally.count "SortableObjects" t))
 
-              Expect.isNonEmpty
-                  t.Diffs
-                  "a model that sorts object keys the other way MUST disagree with Canonical.write Rendering.CrossHost"
+              Differential.expectLoses
+                  "a model that sorts object keys the other way, against Canonical.write Rendering.CrossHost"
+                  t
 
               // and it must NOT disagree on everything: a document with no sortable object is
               // outside rule 2 entirely, and an instrument that reddened those too would be
               // measuring something other than the key order.
               Expect.isLessThan
-                  (List.length t.Diffs)
-                  t.Docs
+                  (List.length (Tally.disagreements t))
+                  (Tally.count "Docs" t)
                   (sprintf
                       "the reversed comparator disagreed on %d of %d documents — it must leave the ones with no sortable object alone"
-                      (List.length t.Diffs)
-                      t.Docs)
+                      (List.length (Tally.disagreements t))
+                      (Tally.count "Docs" t))
 
           // Phase 253 — `integral_float_reads_back`, the numeral premise section 7 adds for the
           // floats OUTSIDE the canonical subset, evaluated at production's own reader: a finite float
@@ -939,9 +832,8 @@ let tests =
               // Outside the canonical subset the theorems say nothing, but the DIFFERENTIAL still
               // has to agree — the model is a model of the whole encoder, not only of the part the
               // theorem covers, and a model that diverged here would be a model of something else.
-              let mutable t = emptyCanonTally
-
-              for v in
+              canonTally
+              |> Differential.over
                   [ JFloat nan
                     JFloat infinity
                     JFloat -infinity
@@ -957,14 +849,9 @@ let tests =
                     JArr []
                     JObj []
                     JObj [ "a", JFloat nan; "$type", JStr "X" ]
-                    JArr [ JFloat infinity; JObj [ "b", JArr [ JFloat -0.0 ] ] ] ] do
-                  t <- canonProbe canonWire "non-canonical arm" v t
-
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf
-                      "the canon oracle disagreed with production off the canonical subset:\n%s"
-                      (renderCanonDiffs t.Diffs))
+                    JArr [ JFloat infinity; JObj [ "b", JArr [ JFloat -0.0 ] ] ] ]
+                  (canonProbe canonWire "non-canonical arm")
+              |> Differential.expectAgrees "the canon oracle, off the canonical subset"
 
           // ---- the guard beside the canonical encoder (Phase 165) ----
 
@@ -1040,60 +927,64 @@ let tests =
               for family, floor in [ "nodes", 100; "ops", 10 ] do
                   let t = onBigStack (fun () -> guardCorpus canonWire family)
 
-                  Expect.isEmpty
-                      t.Diffs
-                      (sprintf
-                          "the guard oracle disagreed with production on %s/:\n%s"
-                          family
-                          (renderCanonDiffs t.Diffs))
+                  Differential.expectAgrees (sprintf "the guard oracle, %s/" family) t
 
                   Expect.isGreaterThan
-                      t.Docs
+                      (Tally.count "Docs" t)
                       floor
-                      (sprintf "the %s/ family was read at all (%d fixtures)" family t.Docs)
+                      (sprintf "the %s/ family was read at all (%d fixtures)" family (Tally.count "Docs" t))
 
                   // JSON cannot spell a non-finite float, so a parsed fixture cannot hold one: on
                   // the corpus the guard is `Ok (render v)` everywhere, which is the acceptance's
                   // "agrees with render on the corpus" measured rather than assumed.
-                  Expect.equal t.Refused 0 (sprintf "no %s/ fixture is refused" family)
+                  Expect.equal (Tally.count "Refused" t) 0 (sprintf "no %s/ fixture is refused" family)
 
           testCase
               "the guard oracle agrees with Canonical.tryWrite Rendering.CrossHost over a generated pool carrying non-finite floats"
           <| fun _ ->
               let t = onBigStack (fun () -> guardGenerated canonWire 1650 2400)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the guard oracle, non-finite floats" t
 
               // adequacy — MEASURED at 2400 documents, seed 1650: 398 refused (78 of them two or
               // more steps deep; 132 NaN, 146 +infinity, 120 -infinity) and 2002 accepted, 103 of
               // those carrying a float outside the canonical subset. Every threshold sits under
               // its measurement with headroom and above zero.
-              Expect.isGreaterThan t.Refused 200 (sprintf "documents the guard refused (%d)" t.Refused)
-
               Expect.isGreaterThan
-                  (t.Docs - t.Refused)
+                  (Tally.count "Refused" t)
                   200
-                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+                  (sprintf "documents the guard refused (%d)" (Tally.count "Refused" t))
 
               Expect.isGreaterThan
-                  t.DeepRefusals
+                  ((Tally.count "Docs" t) - (Tally.count "Refused" t))
+                  200
+                  (sprintf "documents the guard accepted (%d)" ((Tally.count "Docs" t) - (Tally.count "Refused" t)))
+
+              Expect.isGreaterThan
+                  (Tally.count "DeepRefusals" t)
                   40
                   (sprintf
                       "refusals two or more steps deep — the scan's recursion, not its leaf arm (%d)"
-                      t.DeepRefusals)
+                      (Tally.count "DeepRefusals" t))
 
-              Expect.isGreaterThan t.NaNs 60 (sprintf "refusals naming NaN (%d)" t.NaNs)
-              Expect.isGreaterThan t.PosInfs 60 (sprintf "refusals naming Infinity (%d)" t.PosInfs)
-              Expect.isGreaterThan t.NegInfs 60 (sprintf "refusals naming -Infinity (%d)" t.NegInfs)
+              Expect.isGreaterThan (Tally.count "NaNs" t) 60 (sprintf "refusals naming NaN (%d)" (Tally.count "NaNs" t))
 
               Expect.isGreaterThan
-                  t.AcceptedNormalised
+                  (Tally.count "PosInfs" t)
+                  60
+                  (sprintf "refusals naming Infinity (%d)" (Tally.count "PosInfs" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "NegInfs" t)
+                  60
+                  (sprintf "refusals naming -Infinity (%d)" (Tally.count "NegInfs" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "AcceptedNormalised" t)
                   50
                   (sprintf
                       "ACCEPTED documents carrying an integer-shaped float or a zero (%d) — the set the guard must not refuse"
-                      t.AcceptedNormalised)
+                      (Tally.count "AcceptedNormalised" t))
 
           testCase "a guard model that cannot see NaN loses — on exactly the documents a NaN decides"
           <| fun _ ->
@@ -1104,15 +995,18 @@ let tests =
               // infinity — and on NO other document, a refusal for an infinity included.
               let t = onBigStack (fun () -> guardGenerated guardWireGoRed 1650 2400)
 
-              Expect.isGreaterThan t.NaNs 60 (sprintf "the go-red run reached NaN refusals at all (%d)" t.NaNs)
+              Expect.isGreaterThan
+                  (Tally.count "NaNs" t)
+                  60
+                  (sprintf "the go-red run reached NaN refusals at all (%d)" (Tally.count "NaNs" t))
 
               Expect.equal
-                  (List.length t.Diffs)
-                  t.NaNs
+                  (List.length (Tally.disagreements t))
+                  (Tally.count "NaNs" t)
                   (sprintf
                       "the NaN-blind model disagreed on %d documents and production named a NaN on %d — they must be the same documents"
-                      (List.length t.Diffs)
-                      t.NaNs)
+                      (List.length (Tally.disagreements t))
+                      (Tally.count "NaNs" t))
 
           // ---- the guard's second refusal: ill-formed strings (Phase 306) ----
 
@@ -1121,22 +1015,35 @@ let tests =
           <| fun _ ->
               let t = onBigStack (fun () -> guardGeneratedIllFormed canonWire 3060 2400)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the guard oracle, ill-formed strings" t
 
               // adequacy — each class the refusal has, reached: a string refusal, one naming a
               // member key, one two or more steps deep, a document holding BOTH faults (refused for
               // its float, which `guardProbe` checks), and documents still accepted.
-              Expect.isGreaterThan t.StringRefusals 150 (sprintf "refusals naming a string (%d)" t.StringRefusals)
-              Expect.isGreaterThan t.KeyRefusals 20 (sprintf "… of them naming a member key (%d)" t.KeyRefusals)
-              Expect.isGreaterThan t.BothFaults 20 (sprintf "documents holding both faults (%d)" t.BothFaults)
-              Expect.isGreaterThan t.DeepRefusals 40 (sprintf "refusals two or more steps deep (%d)" t.DeepRefusals)
+              Expect.isGreaterThan
+                  (Tally.count "StringRefusals" t)
+                  150
+                  (sprintf "refusals naming a string (%d)" (Tally.count "StringRefusals" t))
 
               Expect.isGreaterThan
-                  (t.Docs - t.Refused)
+                  (Tally.count "KeyRefusals" t)
+                  20
+                  (sprintf "… of them naming a member key (%d)" (Tally.count "KeyRefusals" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "BothFaults" t)
+                  20
+                  (sprintf "documents holding both faults (%d)" (Tally.count "BothFaults" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "DeepRefusals" t)
+                  40
+                  (sprintf "refusals two or more steps deep (%d)" (Tally.count "DeepRefusals" t))
+
+              Expect.isGreaterThan
+                  ((Tally.count "Docs" t) - (Tally.count "Refused" t))
                   200
-                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+                  (sprintf "documents the guard accepted (%d)" ((Tally.count "Docs" t) - (Tally.count "Refused" t)))
 
           testCase "a guard model that cannot see an ill-formed string loses — on exactly the documents one decides"
           <| fun _ ->
@@ -1147,17 +1054,17 @@ let tests =
                   onBigStack (fun () -> guardGeneratedIllFormed guardWireStringBlind 3060 2400)
 
               Expect.isGreaterThan
-                  t.StringRefusals
+                  (Tally.count "StringRefusals" t)
                   150
-                  (sprintf "the go-red run reached string refusals (%d)" t.StringRefusals)
+                  (sprintf "the go-red run reached string refusals (%d)" (Tally.count "StringRefusals" t))
 
               Expect.equal
-                  (List.length t.Diffs)
-                  t.StringRefusals
+                  (List.length (Tally.disagreements t))
+                  (Tally.count "StringRefusals" t)
                   (sprintf
                       "the string-blind model disagreed on %d documents and production refused %d for a string — they must be the same documents"
-                      (List.length t.Diffs)
-                      t.StringRefusals)
+                      (List.length (Tally.disagreements t))
+                      (Tally.count "StringRefusals" t))
 
           // ---- the declared-key-order renderer (Phase 306) ----
 
@@ -1167,39 +1074,43 @@ let tests =
               let t =
                   onBigStack (fun () -> orderedGenerated (WireCanon.render_ordered canonWire) 3061 2400)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the ordered-render oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the ordered-render oracle" t
 
               Expect.isGreaterThan
-                  t.Unsorted
+                  (Tally.count "Unsorted" t)
                   200
-                  (sprintf "documents authored out of key order — where this renderer is not `render` (%d)" t.Unsorted)
+                  (sprintf
+                      "documents authored out of key order — where this renderer is not `render` (%d)"
+                      (Tally.count "Unsorted" t))
 
               Expect.isGreaterThan
-                  t.ReadBack
+                  (Tally.count "ReadBack" t)
                   500
-                  (sprintf "canonical documents the reader returned exactly, members in authored order (%d)" t.ReadBack)
+                  (sprintf
+                      "canonical documents the reader returned exactly, members in authored order (%d)"
+                      (Tally.count "ReadBack" t))
 
           testCase
               "a model that SORTS loses against Canonical.write Rendering.Declared — on exactly the documents authored out of order"
           <| fun _ ->
               // The go-red: `WireCanon.render` — rule 2 included — standing in for the ordered
               // renderer. It must lose wherever production's two renderers differ, and nowhere else.
-              let r = ref 3061
-              let mutable unsorted = 0
-              let mutable lost = 0
+              let t =
+                  orderedTally
+                  |> Differential.seeded 2400 (ref 3061) (fun i r t ->
+                      r,
+                      orderedCompare
+                          (WireCanon.render canonWire)
+                          (sprintf "generated seed=3061 iteration=%d" i)
+                          (genCanonValue r 3)
+                          t)
 
-              for _ in 1..2400 do
-                  let v = genCanonValue r 3
-                  let production = Canonical.write Rendering.Declared v
-                  let sorting = canonFromChs (WireCanon.render canonWire (canonToModel v))
-
-                  if production <> Canonical.write Rendering.CrossHost v then
-                      unsorted <- unsorted + 1
-
-                  if production <> sorting then
-                      lost <- lost + 1
+              let unsorted = Tally.count "Unsorted" t
 
               Expect.isGreaterThan unsorted 200 "the pool carries documents authored out of key order"
-              Expect.equal lost unsorted "the sorting model lost on those documents and on no other" ]
+              Differential.expectLoses "the sorting model" t
+
+              Expect.equal
+                  (List.length (Tally.disagreements t))
+                  unsorted
+                  "the sorting model lost on those documents and on no other" ]
