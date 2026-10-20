@@ -745,6 +745,7 @@
     },
     {
       "members": [
+        "Idl.Artifact.codecWith",
         "Idl.Artifact.identityOf",
         "Idl.Artifact.json",
         "Idl.Artifact.parse",
@@ -772,6 +773,18 @@
       "class": "measured-elsewhere",
       "reason": "The IDL artifact's codec and canonical form; the IDL decode-layer, refusal-vector and three-host tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Codec.defaultField",
+        "Codec.entries",
+        "Codec.narrow",
+        "Codec.recursive",
+        "Codec.schemaDocument"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The combinators the IDL artifact's codec is built from (Phase 527); no law family states their contract yet, and the artifact codec's tests and their own family stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [

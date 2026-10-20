@@ -245,8 +245,8 @@ The classes:
 
 An F# case renamed with its wire bytes untouched is not a wire move; that one is the managed gate's.
 A member reordering cannot occur in `Rendering.CrossHost` output, which sorts keys. The two emitters that are
-not `Rendering.CrossHost` (the IDL artifact's indented form, and the hand-assembled stream envelopes) are
-pinned by the hash, and a layout move there is `breaking`.
+not `Rendering.CrossHost` (the IDL artifact's indented form, `Artifact.codec`'s strict write and read since `0.40.0`, and the
+hand-assembled stream envelopes) are pinned by the hash, and a layout move there is `breaking`.
 
 **What it does not pin, named rather than assumed:**
 - **Decode.** A consumer pins what a package EMITS. A decode alias is outside the baseline, and

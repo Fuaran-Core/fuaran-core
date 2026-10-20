@@ -300,9 +300,12 @@ let tests =
 //
 // `render` wrote one domain's description into every artifact, so an authored
 // `idl.json` never re-rendered to itself. `renderWith` takes the identity and
-// `identityOf` reads it back; `render` keeps its bytes. A hosted slot's `wire` is a
-// type object when declared and `"json"` when not — the latter byte-for-byte what
-// every earlier artifact wrote.
+// `identityOf` reads it back. A hosted slot's `wire` is a type object when declared
+// and `"json"` when not — the latter byte-for-byte what every earlier artifact wrote.
+//
+// Phase 527 (D40 amended): `render` declares NO identity — no `name` and no
+// `description` — where it used to write the UI vocabulary's prose into every
+// artifact that declared none. A vocabulary that wants a description declares it.
 // ---------------------------------------------------------------------------
 
 let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl =
@@ -330,11 +333,17 @@ let identityAndWireFormTests =
         [ testCase "an authored identity re-renders to itself" (fun _ ->
               let identity: Artifact.Identity =
                   { Name = Some "trips"
-                    Description = "A packing list: trips hold bags, bags hold items." }
+                    Description = Some "A packing list: trips hold bags, bags hold items." }
 
               let text = Artifact.renderWith identity refIdl
 
               Expect.stringContains text "\"name\": \"trips\"" "the name is written"
+              Expect.stringContains text "\"description\": \"A packing list" "the description is written"
+
+              Expect.equal
+                  ((Artifact.codecWith identity).Write refIdl |> Result.map Artifact.renderJson)
+                  (Ok text)
+                  "renderWith is codecWith's write, laid out"
 
               match Artifact.identityOf text, Artifact.parse text with
               | Ok readBack, Ok idl ->
@@ -342,23 +351,33 @@ let identityAndWireFormTests =
                   Expect.equal (Artifact.renderWith readBack idl) text "and the artifact re-renders byte-for-byte"
               | e1, e2 -> failtestf "did not read back: %A / %A" e1 e2)
 
-          testCase "render keeps its bytes: no name, the default description" (fun _ ->
+          testCase "render declares no identity: no name and no description (D40 amended)" (fun _ ->
               let text = Artifact.render refIdl
 
-              Expect.equal
-                  text
-                  (Artifact.renderWith Artifact.defaultIdentity refIdl)
-                  "render is renderWith the default"
+              Expect.equal text (Artifact.renderWith Artifact.unnamed refIdl) "render is renderWith unnamed"
 
               match Json.parse text with
               | Ok(JObj members) ->
                   Expect.isFalse (members |> List.exists (fun (k, _) -> k = "name")) "no top-level name"
+
+                  Expect.isFalse
+                      (members |> List.exists (fun (k, _) -> k = "description"))
+                      "and no description: a vocabulary that declares none gets none"
               | other -> failtestf "the artifact is not an object: %A" other
 
               Expect.equal
                   (Artifact.identityOf text)
-                  (Ok Artifact.defaultIdentity)
-                  "an artifact without a name reads back as the default identity")
+                  (Ok Artifact.unnamed)
+                  "an artifact without either member reads back as the unnamed identity"
+
+              // The falsifier: a description alone is written alone, and read back.
+              let described: Artifact.Identity =
+                  { Name = None
+                    Description = Some "described" }
+
+              let withOne = Artifact.renderWith described refIdl
+              Expect.notEqual withOne text "a declared description moves the bytes"
+              Expect.equal (Artifact.identityOf withOne) (Ok described) "and reads back")
 
           testCase
               "a hosted slot's declared wire form and format round-trip, and an undeclared one is unchanged"
@@ -386,3 +405,457 @@ let identityAndWireFormTests =
                       (Artifact.render (hostedIdl (Some TStr) (Some HostedFormat.Date)))
                       "\"format\": \"date\""
                       "the format") ]
+
+// ---------------------------------------------------------------------------
+// Phase 527 — the artifact is a codec.
+//
+// `idl.json` is written, read and described by one `Codec<Idl>` built from `Wire`'s
+// combinators. What is pinned here: the omit rule is one table and every row of it holds in
+// both directions; the reader is strict and COLLECTS; the schema is a real 2020-12 document
+// that accepts every artifact the codec writes and refuses one it would not read; the
+// committed schema is the codec's; and the shared corpus's `idl.json` re-renders to itself.
+// The combinators the codec is the first in-repository consumer of are exercised beside it.
+// ---------------------------------------------------------------------------
+
+/// A vocabulary off every default the omit table names: an op, a flat wire shape, an annotated
+/// field and kind, a wire-mapped enum with a case annotation.
+let private offDefaults: Idl =
+    let note =
+        { Annotations.Empty with
+            InProcessOnly = true
+            Doc = Some "noted" }
+
+    { refIdl with
+        Kinds =
+            [ { Tag = "Note"
+                Category = "content"
+                Annotations = note
+                Fields =
+                  [ { Name = "text"
+                      Type = TStr
+                      Opt = Required
+                      Annotations = note } ] } ]
+        Unions = []
+        Records = []
+        Defaults = []
+        Enums =
+            [ { Declare.enumWith "Tone" [ "Loud", "loud"; "Quiet", "quiet" ] with
+                  CaseAnnotations =
+                      [ "Quiet",
+                        { Annotations.Empty with
+                            Since = Some "2" } ] } ]
+        Ops =
+            [ { Tag = "Touch"
+                Category = "op"
+                Annotations = Annotations.Empty
+                Fields = [] } ]
+        Wire =
+            { WireShape.Default with
+                NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+
+/// The same vocabulary AT every default the omit table names.
+let private atDefaults: Idl =
+    { offDefaults with
+        Kinds =
+            offDefaults.Kinds
+            |> List.map (fun k ->
+                { k with
+                    Annotations = Annotations.Empty
+                    Fields =
+                        k.Fields
+                        |> List.map (fun f ->
+                            { f with
+                                Annotations = Annotations.Empty }) })
+        Enums = [ Declare.enumOf "Tone" [ "loud"; "quiet" ] ]
+        Ops = []
+        Wire = WireShape.Default }
+
+/// Every member name anywhere in a JSON value.
+let rec private memberNames (j: JVal) : string list =
+    match j with
+    | JObj ms -> ms |> List.collect (fun (k, v) -> k :: memberNames v)
+    | JArr xs -> xs |> List.collect memberNames
+    | _ -> []
+
+let private schemaPath = "conformance/idl/idl.schema.json"
+
+/// The committed schema file: the codec's schema with its stamp — the generator and the SHA-256 of
+/// the unstamped rendering, so a hand edit is visible from the file alone (D164).
+let private stampedSchema () : string =
+    let body = Artifact.renderJson Artifact.schema
+
+    let emission =
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes body)
+        |> System.Convert.ToHexString
+        |> _.ToLowerInvariant()
+
+    match Artifact.schema with
+    | JObj members ->
+        Artifact.renderJson (
+            JObj(
+                ("$comment",
+                 JStr(
+                     "GENERATED by Fuaran.Core.Idl - the JSON Schema of idl.json (Artifact.schema). "
+                     + "Do not edit by hand: CORE_APPROVE_DOCS=idl-schema regenerates it. emission: sha256:"
+                     + emission
+                 ))
+                :: members
+            )
+        )
+    | other -> failtestf "the artifact schema is not an object: %A" other
+
+let private build (schema: JVal) : Json.Schema.JsonSchema =
+    Json.Schema.JsonSchema.FromText(
+        Canonical.write Rendering.CrossHost schema,
+        Json.Schema.BuildOptions(SchemaRegistry = Json.Schema.SchemaRegistry())
+    )
+
+let private accepts (schema: Json.Schema.JsonSchema) (text: string) : bool =
+    use doc = System.Text.Json.JsonDocument.Parse text
+
+    let options =
+        Json.Schema.EvaluationOptions(OutputFormat = Json.Schema.OutputFormat.Flag)
+
+    (schema.Evaluate(doc.RootElement, options)).IsValid
+
+let private withRoot (f: (string * JVal) list -> (string * JVal) list) (idl: Idl) : JVal =
+    match Artifact.json idl with
+    | JObj ms -> JObj(f ms)
+    | other -> failtestf "the artifact is not an object: %A" other
+
+[<Tests>]
+let codecTests =
+    testList
+        "Phase 527 — the artifact is a codec"
+        [ testCase "every row of the omit table is omitted at its default and written away from it" (fun _ ->
+              let at = memberNames (Artifact.json atDefaults) |> Set.ofList
+              let off = memberNames (Artifact.json offDefaults) |> Set.ofList
+
+              Expect.isNonEmpty Artifact.omitted "the table has rows"
+
+              for owner, key in Artifact.omitted do
+                  Expect.isFalse (at.Contains key) (sprintf "'%s' on %s is omitted at its default" key owner)
+                  Expect.isTrue (off.Contains key) (sprintf "'%s' on %s is written away from its default" key owner)
+
+              for v in [ atDefaults; offDefaults ] do
+                  Expect.equal
+                      (Artifact.parse (Artifact.render v))
+                      (Ok(Artifact.canonicalise v))
+                      "and each side reads back to its vocabulary")
+
+          testCase "the reader is strict and collects every defect at its path" (fun _ ->
+              let broken =
+                  MiniIdl.miniIdl
+                  |> withRoot (fun ms ->
+                      (ms |> List.filter (fun (k, _) -> k <> "records" && k <> "defaults"))
+                      @ [ "extra", JBool true ])
+
+              match Artifact.ofJsonDetailed broken with
+              | Ok _ -> failtest "a document missing two families and carrying an undeclared member read"
+              | Error es ->
+                  Expect.equal
+                      (es |> List.map (fun e -> e.Code, e.Path))
+                      [ DecodeCode.UndeclaredMember, [ PathSegment.Key "extra" ]
+                        DecodeCode.MissingField, [ PathSegment.Key "records" ]
+                        DecodeCode.MissingField, [ PathSegment.Key "defaults" ] ]
+                      "the undeclared member first, then each declared member's defect, each at its path")
+
+          testCase "a wrong encoding version is the one refusal, whatever else the document carries" (fun _ ->
+              let future =
+                  refIdl
+                  |> withRoot (fun ms ->
+                      (ms
+                       |> List.map (fun (k, v) ->
+                           if k = "version" then
+                               k, JInt(Artifact.version + 1)
+                           else
+                               k, v))
+                      @ [ "aMemberFromTheFuture", JBool true ])
+
+              match Artifact.ofJsonDetailed future with
+              | Error [ e ] ->
+                  Expect.equal (e.Code, e.Path) (DecodeCode.OutOfRange, [ PathSegment.Key "version" ]) "at the version"
+              | other -> failtestf "one refusal at the version: %A" other)
+
+          testCase "a sentinel is read back only as itself" (fun _ ->
+              let closureIdl =
+                  { atDefaults with
+                      Kinds =
+                          [ { Tag = "Act"
+                              Category = "action"
+                              Annotations = Annotations.Empty
+                              Fields =
+                                [ { Name = "run"
+                                    Type = TClosure
+                                    Opt = Optional
+                                    Annotations = Annotations.Empty } ] } ] }
+
+              let text = Artifact.render closureIdl
+              Expect.stringContains text "\"wire\": \"<closure>\"" "the sentinel is written"
+
+              match Artifact.parseDetailed (text.Replace("\"<closure>\"", "\"<redefined>\"")) with
+              | Error [ e ] ->
+                  Expect.equal e.Code DecodeCode.OutOfRange "a redefined sentinel is refused"
+                  Expect.equal (List.last e.Path) (PathSegment.Key "wire") "at the sentinel"
+              | other -> failtestf "one refusal at the sentinel: %A" other)
+
+          testCase "an enum's mapping refusals sit at their own paths" (fun _ ->
+              let enumAt (f: (string * JVal) list -> (string * JVal) list) =
+                  offDefaults
+                  |> withRoot (fun ms ->
+                      ms
+                      |> List.map (fun (k, v) ->
+                          match k, v with
+                          | "enums", JArr [ JObj e ] -> k, JArr [ JObj(f e) ]
+                          | _ -> k, v))
+
+              let shortHost =
+                  enumAt (List.map (fun (k, v) -> if k = "hostCases" then k, JArr [ JStr "Loud" ] else k, v))
+
+              match Artifact.ofJsonDetailed shortHost with
+              | Error [ e ] ->
+                  Expect.equal
+                      (e.Code, e.Path)
+                      (DecodeCode.OutOfRange,
+                       [ PathSegment.Key "enums"; PathSegment.Index 0; PathSegment.Key "hostCases" ])
+                      "a hostCases of the wrong length, at hostCases"
+              | other -> failtestf "one refusal at hostCases: %A" other
+
+              let unknownCase =
+                  enumAt (
+                      List.map (fun (k, v) ->
+                          match k, v with
+                          | "caseAnnotations", JObj [ (_, block) ] -> k, JObj [ "silent", block ]
+                          | _ -> k, v)
+                  )
+
+              match Artifact.ofJsonDetailed unknownCase with
+              | Error [ e ] ->
+                  Expect.equal
+                      (e.Code, e.Path)
+                      (DecodeCode.UnknownTag,
+                       [ PathSegment.Key "enums"
+                         PathSegment.Index 0
+                         PathSegment.Key "caseAnnotations"
+                         PathSegment.Key "silent" ])
+                      "an annotation on a case the enum does not declare, at its entry"
+              | other -> failtestf "one refusal at the entry: %A" other)
+
+          testCase "the schema is a 2020-12 document that accepts every artifact the codec writes" (fun _ ->
+              let schema = build Artifact.schema
+
+              for name, idl in
+                  [ "reference", refIdl
+                    "mini", MiniIdl.miniIdl
+                    "at defaults", atDefaults
+                    "off defaults", offDefaults ] do
+                  Expect.isTrue (accepts schema (Artifact.render idl)) (sprintf "'%s' is accepted" name)
+
+                  let identity: Artifact.Identity =
+                      { Name = Some "n"
+                        Description = Some "d" }
+
+                  Expect.isTrue
+                      (accepts schema (Artifact.renderWith identity idl))
+                      (sprintf "'%s' with an identity is accepted" name)
+
+              // The negative control: a validator that accepts everything certifies nothing.
+              let broken = (Artifact.render refIdl).Replace("\"kinds\":", "\"kindz\":")
+              Expect.isFalse (accepts schema broken) "a document the codec would not read is refused")
+
+          testCase "the schema carries each recursive definition once, at the root" (fun _ ->
+              match Artifact.schema with
+              | JObj ms ->
+                  Expect.equal
+                      (ms |> List.tryFind (fun (k, _) -> k = "$schema") |> Option.map snd)
+                      (Some(JStr "https://json-schema.org/draft/2020-12/schema"))
+                      "the dialect is named"
+
+                  match ms |> List.tryFind (fun (k, _) -> k = "$defs") with
+                  | Some(_, JObj defs) ->
+                      Expect.equal
+                          (defs |> List.map fst |> List.sort)
+                          [ "IdlType"; "IdlValue" ]
+                          "the two recursive codecs"
+                  | other -> failtestf "no root $defs: %A" other
+
+                  Expect.isEmpty
+                      (memberNames (JObj(ms |> List.filter (fun (k, _) -> k <> "$defs")))
+                       |> List.filter ((=) "$defs"))
+                      "and no definition is left below the root"
+              | other -> failtestf "the schema is not an object: %A" other)
+
+          testCase "the committed idl.schema.json is the codec's schema, stamped" (fun _ ->
+              let path = Repo.file schemaPath
+              let expected = stampedSchema ()
+              Approval.write Approval.Docs Approval.Files.IdlSchema path expected |> ignore
+
+              let committed =
+                  if System.IO.File.Exists path then
+                      System.IO.File.ReadAllText path
+                  else
+                      ""
+
+              Expect.equal
+                  committed
+                  expected
+                  (sprintf "%s is not the codec's schema - CORE_APPROVE_DOCS=idl-schema regenerates it" schemaPath))
+
+          testCase "the shared corpus's idl.json re-renders to itself through the codec" (fun _ ->
+              match SiblingCorpus.resolve ApplyVectorExport.familyDirName with
+              | SiblingCorpus.NotAsked why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let text = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "idl.json"))
+
+                  match Artifact.parseDetailed text, Artifact.identityOf text with
+                  | Ok idl, Ok identity ->
+                      Expect.equal (Artifact.renderWith identity idl) text "byte for byte, under its own identity"
+                      Expect.isTrue (accepts (build Artifact.schema) text) "and the schema accepts it"
+                  | e1, e2 -> failtestf "the corpus artifact did not read: %A / %A" e1 e2) ]
+
+// ---------------------------------------------------------------------------
+// Phase 527 — the combinators `Codec` gained for `Artifact.codec`, its first in-repository
+// production consumer (D122, D51).
+// ---------------------------------------------------------------------------
+
+type private Tree =
+    | Leaf of int
+    | Branch of Tree list
+
+let private built (r: Result<Codec<'T>, CodecDeclarationFault list>) : Codec<'T> =
+    match r with
+    | Ok c -> c
+    | Error fs -> failtestf "the declaration was refused: %A" fs
+
+[<Tests>]
+let combinatorTests =
+    testList
+        "Phase 527 — Codec.defaultField, entries, narrow, recursive and schemaDocument"
+        [ testCase "defaultField omits at the default and reads the fallback when absent" (fun _ ->
+              let c =
+                  Codec.record id
+                  |> Codec.defaultField "n" 0 ((=) 0) id Codec.int
+                  |> Codec.build
+                  |> built
+
+              Expect.equal (c.Write 0) (Ok(JObj [])) "omitted at the default"
+              Expect.equal (c.Write 3) (Ok(JObj [ "n", JInt 3 ])) "written away from it"
+              Expect.equal (c.ReadAll(JObj [])) (Ok 0) "absent reads as the fallback"
+              Expect.equal (c.ReadAll(JObj [ "n", JInt 0 ])) (Ok 0) "an explicit default reads"
+
+              match c.Schema with
+              | JObj ms ->
+                  Expect.equal (ms |> List.tryFind (fst >> (=) "required")) (Some("required", JArr [])) "not required"
+              | other -> failtestf "%A" other)
+
+          testCase "entries reads every member under its own key and reports every defect" (fun _ ->
+              let c = Codec.entries Codec.int
+              let v = [ "b", 2; "a", 1 ]
+
+              match c.Write v with
+              | Ok j -> Expect.equal (c.ReadAll j) (Ok v) "round-trips in authored order"
+              | Error f -> failtestf "%A" f
+
+              match c.ReadAll(JObj [ "a", JStr "x"; "b", JInt 1; "c", JBool true ]) with
+              | Error es ->
+                  Expect.equal
+                      (es |> List.map _.Path)
+                      [ [ PathSegment.Key "a" ]; [ PathSegment.Key "c" ] ]
+                      "each at its key"
+              | Ok v -> failtestf "read %A" v)
+
+          testCase "narrow raises each refusal by walking its path" (fun _ ->
+              let positive =
+                  Codec.entries Codec.int
+                  |> Codec.narrow
+                      (fun xs ->
+                          match xs |> List.filter (fun (_, n) -> n < 0) with
+                          | [] -> Ok xs
+                          | bad ->
+                              Error
+                                  [ for k, n in bad ->
+                                        [ PathSegment.Key k ], RootDecodeCode.OutOfRange, "a positive count", string n ])
+                      id
+
+              match positive.ReadAll(JObj [ "a", JInt -1; "b", JInt 2; "c", JInt -3 ]) with
+              | Error es ->
+                  Expect.equal
+                      (es |> List.map (fun e -> e.Code, e.Path))
+                      [ DecodeCode.OutOfRange, [ PathSegment.Key "a" ]
+                        DecodeCode.OutOfRange, [ PathSegment.Key "c" ] ]
+                      "every refusal, each where it says"
+              | Ok v -> failtestf "read %A" v
+
+              // A path the document does not hold is refused where the walk stops, never trusted.
+              let lying =
+                  Codec.int
+                  |> Codec.narrow
+                      (fun _ -> Error [ [ PathSegment.Key "nowhere" ], RootDecodeCode.OutOfRange, "x", "y" ])
+                      id
+
+              match lying.ReadAll(JInt 1) with
+              | Error [ e ] -> Expect.equal (e.Code, e.Path) (DecodeCode.WrongKind, []) "the walk stops at the value"
+              | other -> failtestf "%A" other)
+
+          testCase "recursive declares a self-referential codec whose schema hoists to one definition" (fun _ ->
+              let tree: Codec<Tree> =
+                  Codec.recursive "Tree" (fun self ->
+                      Codec.union
+                          "$type"
+                          [ Codec.case
+                                "leaf"
+                                (function
+                                | Leaf n -> Some n
+                                | _ -> None)
+                                Leaf
+                                (Codec.record id |> Codec.field "n" id Codec.int)
+                            Codec.case
+                                "branch"
+                                (function
+                                | Branch ts -> Some ts
+                                | _ -> None)
+                                Branch
+                                (Codec.record id |> Codec.field "of" id (Codec.list self)) ]
+                      |> built)
+
+              let v = Branch [ Leaf 1; Branch [ Leaf 2 ] ]
+
+              match tree.Write v with
+              | Ok j -> Expect.equal (tree.ReadAll j) (Ok v) "round-trips through itself"
+              | Error f -> failtestf "%A" f
+
+              let pair =
+                  Codec.record (fun a b -> a, b)
+                  |> Codec.field "a" fst tree
+                  |> Codec.field "b" snd tree
+                  |> Codec.build
+                  |> built
+
+              let document = Codec.schemaDocument pair
+
+              match document with
+              | JObj ms ->
+                  match ms |> List.tryFind (fun (k, _) -> k = "$defs") with
+                  | Some(_, JObj defs) -> Expect.equal (List.map fst defs) [ "Tree" ] "one definition, used twice"
+                  | other -> failtestf "no $defs: %A" other
+
+                  Expect.isEmpty
+                      (memberNames (JObj(ms |> List.filter (fun (k, _) -> k <> "$defs")))
+                       |> List.filter ((=) "$defs"))
+                      "none left below the root"
+              | other -> failtestf "%A" other
+
+              let schema = build document
+
+              Expect.isTrue
+                  (accepts
+                      schema
+                      """{"a":{"$type":"leaf","n":1},"b":{"$type":"branch","of":[{"$type":"leaf","n":2}]}}""")
+                  "a valid pair"
+
+              Expect.isFalse
+                  (accepts
+                      schema
+                      """{"a":{"$type":"leaf","n":1},"b":{"$type":"branch","of":[{"$type":"leaf","n":"x"}]}}""")
+                  "a nested defect is refused") ]

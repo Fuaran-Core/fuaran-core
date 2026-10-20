@@ -306,6 +306,10 @@ module Files =
     [<Literal>]
     let Contributing = "CONTRIBUTING"
 
+    /// The JSON Schema of `idl.json` (Phase 527), the artifact codec's schema stamped (IdlArtifactTests).
+    [<Literal>]
+    let IdlSchema = "idl-schema"
+
 // The pure reading of a switch's value; the one place the truthiness rule lives.
 let parse (value: string) : Request =
     match value with

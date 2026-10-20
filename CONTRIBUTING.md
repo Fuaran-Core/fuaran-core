@@ -67,7 +67,7 @@ rendered from the registry (`CORE_APPROVE_DOCS=CONTRIBUTING` rewrites it):
 | `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
 | `CORE_APPROVE_LADDER` | `proofs/README.md` | `ladder` or `operations` |
 | `CORE_APPROVE_README` | `README.md` | `README` |
-| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json`, `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md` | `doc-coverage`, `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies` or `CONTRIBUTING` |
+| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json`, `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md`, `conformance/idl/idl.schema.json` | `doc-coverage`, `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies`, `CONTRIBUTING` or `idl-schema` |
 | `FUARAN_REGEN` | `tests/Fuaran.Core.Tests/MiniGenerated.fs`, `tests/Fuaran.Core.Tests/DocGenerated.fs`, `tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs`, `tests/Fuaran.Core.Tests/DeriveGenerated.fs`, `tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs`, `tests/Fuaran.Core.Tests/snapshots/spike.json` | `MiniGenerated`, `DocGenerated`, `DocAnnotatedGenerated`, `DeriveGenerated`, `SpecDecodersGenerated` or `spike` |
 
 Absent, empty, `0` or `false` is no. `1` or `true` rewrites every file the switch governs. Any other
