@@ -1088,3 +1088,150 @@ let supportInputTests =
 
           testCase "the mapping table carries the support row" (fun _ ->
               Expect.stringContains Diff.mappingTable "`SupportChanged`" "a row for the case") ]
+
+// ---------------------------------------------------------------------------
+// Phase 548 — a TYPE's own annotations (Phase 542) are read and graded. A union, a record or an
+// enum gaining, losing or changing its marking is graded exactly as the same move on one of its
+// members is, and an unannotated pair yields no new change.
+// ---------------------------------------------------------------------------
+
+let private marked: Annotations =
+    { Annotations.Empty with
+        Deprecated =
+            Some
+                { Replacement = None
+                  Message = Some "retired in the next release" } }
+
+let private documented (text: string) : Annotations =
+    { Annotations.Empty with
+        Doc = Some text }
+
+/// One union, one record and one enum, the type-level annotations of the named family set to
+/// `typeAnn` and the `value` field of the record (the member the type-level grade is compared
+/// with) set to `fieldAnn`.
+let private typed (family: string) (typeAnn: Annotations) (fieldAnn: Annotations) : Idl =
+    let on fam =
+        if fam = family then typeAnn else Annotations.Empty
+
+    { empty with
+        Unions =
+            [ { Name = "Source"
+                Params = []
+                Cases =
+                  [ { Tag = "Lit"
+                      Fields = [ f "text" TStr Required ]
+                      Annotations = Annotations.Empty } ]
+                Annotations = on "union" } ]
+        Records =
+            [ { Name = "Span"
+                Fields =
+                  [ { f "value" TStr Required with
+                        Annotations = fieldAnn } ]
+                Annotations = on "record" } ]
+        Enums =
+            [ { Declare.enumOf "Tone" [ "Quiet"; "Loud" ] with
+                  Annotations = on "enum" } ] }
+
+let private typeMoves (cs: Diff.Classification list) =
+    cs
+    |> List.filter (fun c ->
+        match c.Change with
+        | Diff.TypeAnnotationsChanged _ -> true
+        | _ -> false)
+
+/// The grade the same annotation move takes on the record's `value` field.
+let private memberGrade (before: Annotations) (after: Annotations) : Diff.Severity =
+    match
+        diffOf (typed "" Annotations.Empty before) (typed "" Annotations.Empty after)
+        |> List.filter (fun c ->
+            match c.Change with
+            | Diff.FieldAnnotationsChanged(Diff.ORecord "Span", "value", _, _) -> true
+            | _ -> false)
+    with
+    | [ c ] -> c.Severity
+    | other -> failtestf "expected one field-annotation change, got %A" other
+
+let private names = [ "union", "Source"; "record", "Span"; "enum", "Tone" ]
+
+[<Tests>]
+let typeAnnotationTests =
+    testList
+        "Idl diff — type-level annotations (Phase 548)"
+        [ for family, name in names do
+              for label, before, after in
+                  [ "gaining a deprecation", Annotations.Empty, marked
+                    "losing a deprecation", marked, Annotations.Empty
+                    "changing only its doc", documented "a span", documented "a run of text" ] do
+                  testCase (sprintf "a %s %s is graded as a member's equivalent is" family label) (fun _ ->
+                      let cs =
+                          diffOf (typed family before Annotations.Empty) (typed family after Annotations.Empty)
+
+                      match typeMoves cs with
+                      | [ c ] ->
+                          match c.Change with
+                          | Diff.TypeAnnotationsChanged(fam, n, _, _) ->
+                              Expect.equal (fam, n) (family, name) "the type is named by family and name"
+                          | other -> failtestf "unexpected %A" other
+
+                          Expect.equal c.Severity (memberGrade before after) "the member's grade, exactly"
+
+                          Expect.equal
+                              (Diff.consequences c)
+                              [ Diff.NoGeneratedShapeChange ]
+                              "an annotation moves no generated shape"
+
+                          Expect.hasLength cs 1 "and nothing else is reported"
+                      | other -> failtestf "expected one type-annotation change, got %A" other)
+
+          testCase "a first marking is additive and a withdrawal host-surface, as for a member" (fun _ ->
+              let grade b a =
+                  diffOf (typed "enum" b Annotations.Empty) (typed "enum" a Annotations.Empty)
+                  |> typeMoves
+                  |> List.map _.Severity
+
+              Expect.equal (grade Annotations.Empty marked) [ Diff.Additive ] "marking a whole type breaks nothing"
+              Expect.equal (grade marked Annotations.Empty) [ Diff.HostSurfaceOnly ] "un-retiring it is a plain change")
+
+          testCase "an unannotated pair of artifacts yields no new change" (fun _ ->
+              let plain = typed "" Annotations.Empty Annotations.Empty
+              Expect.isEmpty (diffOf plain plain) "identical unannotated artifacts diff to nothing"
+
+              let grown =
+                  { plain with
+                      Records =
+                          plain.Records
+                          @ [ { Name = "Extra"
+                                Fields = [ f "n" TInt Required ]
+                                Annotations = Annotations.Empty } ] }
+
+              Expect.isEmpty (typeMoves (diffOf plain grown)) "a type added unannotated is no annotation move")
+
+          testCase "a type that arrives already marked is its addition, not an annotation move" (fun _ ->
+              let plain = typed "" Annotations.Empty Annotations.Empty
+
+              let grown =
+                  { plain with
+                      Records =
+                          plain.Records
+                          @ [ { Name = "Extra"
+                                Fields = [ f "n" TInt Required ]
+                                Annotations = marked } ] }
+
+              let cs = diffOf plain grown
+              Expect.isEmpty (typeMoves cs) "no annotation row for a type the old revision lacks"
+
+              Expect.exists cs (fun c -> c.Change = Diff.RecordAdded "Extra") "it is reported as the addition it is")
+
+          testCase "a pre-542 artifact (no type-level key) reads as unannotated" (fun _ ->
+              match Diff.parse (art (typed "union" marked Annotations.Empty)) with
+              | Ok snap ->
+                  Expect.equal
+                      (snap.TypeAnnotations |> Map.find ("union", "Source") <> "")
+                      true
+                      "the marked union's set is read"
+
+                  Expect.equal (snap.TypeAnnotations |> Map.find ("record", "Span")) "" "absent reads as empty"
+              | Error e -> failtestf "artifact did not read back: %s" e)
+
+          testCase "the mapping table carries the type-annotation row" (fun _ ->
+              Expect.stringContains Diff.mappingTable "`TypeAnnotationsChanged`" "a row for the case") ]

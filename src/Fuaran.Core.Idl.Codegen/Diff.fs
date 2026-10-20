@@ -207,6 +207,12 @@ module Diff =
             Enums: Map<string, EnumSnap>
             /// Non-discriminated records by name → their fields in authored order.
             Records: Map<string, FieldSnap list>
+            /// Phase 548 — a union's, a record's or an enum's OWN annotation set (Phase 542),
+            /// keyed `(family, name)` with `family` one of `"union"` / `"record"` / `"enum"`, and
+            /// canonically rendered — `""` when it declares none or the revision predates the
+            /// key, so every pre-542 artifact reads as it always did. A map beside the type maps
+            /// for the reason [[KindAnnotations]] is one beside [[Kinds]].
+            TypeAnnotations: Map<string * string, string>
             /// `(kind, field) -> canonical value` — the smart-constructor defaults
             /// (`IdlDefault`), NOT the wire-visible `omitDefault` optionality.
             Defaults: Map<string * string, string>
@@ -491,6 +497,14 @@ module Diff =
                                 |> Map.ofList
                             | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields
+                  TypeAnnotations =
+                    [ "union", "unions"; "record", "records"; "enum", "enums" ]
+                    |> List.collect (fun (family, key) ->
+                        arr key artifact
+                        |> byName (str "name") readAnnotations
+                        |> Map.toList
+                        |> List.map (fun (name, ann) -> (family, name), ann))
+                    |> Map.ofList
                   Defaults =
                     arr "defaults" artifact
                     |> List.choose (fun d ->
@@ -666,6 +680,11 @@ module Diff =
         /// Never a wire event — support is host-language source — and the one row that used
         /// to read `unchanged` when only the support beside the vocabulary had moved.
         | SupportChanged of key: string * before: string option * after: string option
+        /// Phase 548 — the declared annotations on a whole TYPE moved: a union, a record or an
+        /// enum (Phase 542), named by `family` (`"union"` / `"record"` / `"enum"`) and `name`.
+        /// Graded exactly as a kind's or a member's marking is ([[KindAnnotationsChanged]]):
+        /// never a wire event, `Additive` on a first marking, `HostSurfaceOnly` otherwise.
+        | TypeAnnotationsChanged of family: string * name: string * before: string * after: string
 
     /// The addition and removal of a field are a `FieldOptionalityChanged` seen
     /// from too far away only when the name matches; everything else pairs by
@@ -2070,6 +2089,26 @@ module Diff =
               [ annotationRow "a union case's annotation set" ]
 
           rule
+              "TypeAnnotationsChanged"
+              "67"
+              NoFamily
+              (function
+              | TypeAnnotationsChanged(f, n, _, _) -> f + ":" + n
+              | c -> misapplied "TypeAnnotationsChanged" c)
+              (function
+              // Phase 548 — the same three grades a kind's or a member's marking takes, for the
+              // same reason: a type-level marking is no more on the wire than theirs, so marking
+              // a whole union, record or enum for retirement costs no breaking bump.
+              | TypeAnnotationsChanged(f, n, b, a) -> classifyAnnotations (sprintf "%s `%s`" f n) b a
+              | c -> misapplied "TypeAnnotationsChanged" c)
+              (always noShape)
+              (function
+              | TypeAnnotationsChanged(f, n, b, _) ->
+                  sprintf "type annotations %s: %s %s" (if b = "" then "declared" else "changed") f n
+              | c -> misapplied "TypeAnnotationsChanged" c)
+              [ annotationRow "a union's, a record's or an enum's own annotation set" ]
+
+          rule
               "DefaultAdded"
               "70"
               NoFamily
@@ -2331,6 +2370,13 @@ module Diff =
                       (fun name b a -> diffFields (ORecord name) b a)
                       before.Records
                       after.Records
+
+              // Phase 548 — a type's own annotations, over the types both revisions carry in
+              // the same family: one that arrived or left is already its `…Added` / `…Removed`.
+              for KeyValue((family, name), ann) in after.TypeAnnotations do
+                  match Map.tryFind (family, name) before.TypeAnnotations with
+                  | Some old when old <> ann -> TypeAnnotationsChanged(family, name, old, ann)
+                  | _ -> ()
 
               yield! diffFields ONodeEnvelope before.NodeFields after.NodeFields
 

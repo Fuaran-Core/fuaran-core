@@ -17,7 +17,7 @@ ctor Fuaran.Core.Idl.Diff+EnumSnap..ctor(Microsoft.FSharp.Collections.FSharpList
 ctor Fuaran.Core.Idl.Diff+FieldSnap..ctor(System.String, System.String, System.String, System.String, System.String, System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.Diff+Host..ctor(System.String, System.String, Fuaran.Core.Idl.Diff+HostRole)
 ctor Fuaran.Core.Idl.Diff+Obligation..ctor(System.String, Fuaran.Core.Idl.Diff+Strength, System.String)
-ctor Fuaran.Core.Idl.Diff+Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, System.String, System.String)
+ctor Fuaran.Core.Idl.Diff+Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, System.String, System.String)
 ctor Fuaran.Core.Idl.Diff+UnionSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Diff+Verdict..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, Fuaran.Core.Versioning+Evolution, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>, System.String, System.String)
 ctor Fuaran.Core.Idl.FStarTarget+Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
@@ -64,6 +64,7 @@ field Fuaran.Core.Idl.Diff+Change+Tags.OpRemoved : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.RecordAdded : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.RecordRemoved : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.SupportChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.TypeAnnotationsChanged : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.UnionAdded : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.UnionCaseAdded : System.Int32 (literal)
 field Fuaran.Core.Idl.Diff+Change+Tags.UnionCaseAnnotationsChanged : System.Int32 (literal)
@@ -212,20 +213,21 @@ record-field Fuaran.Core.Idl.Diff+Host.Role #2 : Fuaran.Core.Idl.Diff+HostRole
 record-field Fuaran.Core.Idl.Diff+Obligation.Note #2 : System.String
 record-field Fuaran.Core.Idl.Diff+Obligation.Strength #1 : Fuaran.Core.Idl.Diff+Strength
 record-field Fuaran.Core.Idl.Diff+Obligation.Surface #0 : System.String
-record-field Fuaran.Core.Idl.Diff+Snapshot.Defaults #9 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Defaults #10 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Enums #7 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>
-record-field Fuaran.Core.Idl.Diff+Snapshot.Harden #13 : System.String
+record-field Fuaran.Core.Idl.Diff+Snapshot.Harden #14 : System.String
 record-field Fuaran.Core.Idl.Diff+Snapshot.KindAnnotations #3 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Diff+Snapshot.KindCategory #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Kinds #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
-record-field Fuaran.Core.Idl.Diff+Snapshot.NodeFields #10 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>
+record-field Fuaran.Core.Idl.Diff+Snapshot.NodeFields #11 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>
 record-field Fuaran.Core.Idl.Diff+Snapshot.OpAnnotations #5 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Ops #4 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Records #8 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
-record-field Fuaran.Core.Idl.Diff+Snapshot.Support #11 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Support #12 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.TypeAnnotations #9 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Unions #6 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>
 record-field Fuaran.Core.Idl.Diff+Snapshot.Version #0 : System.Int32
-record-field Fuaran.Core.Idl.Diff+Snapshot.Wire #12 : System.String
+record-field Fuaran.Core.Idl.Diff+Snapshot.Wire #13 : System.String
 record-field Fuaran.Core.Idl.Diff+UnionSnap.CaseOrder #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.Diff+UnionSnap.Cases #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>
 record-field Fuaran.Core.Idl.Diff+UnionSnap.Params #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
@@ -312,6 +314,7 @@ type Fuaran.Core.Idl.Diff+Change+RecordAdded (type)
 type Fuaran.Core.Idl.Diff+Change+RecordRemoved (type)
 type Fuaran.Core.Idl.Diff+Change+SupportChanged (type)
 type Fuaran.Core.Idl.Diff+Change+Tags (type)
+type Fuaran.Core.Idl.Diff+Change+TypeAnnotationsChanged (type)
 type Fuaran.Core.Idl.Diff+Change+UnionAdded (type)
 type Fuaran.Core.Idl.Diff+Change+UnionCaseAdded (type)
 type Fuaran.Core.Idl.Diff+Change+UnionCaseAnnotationsChanged (type)
@@ -409,6 +412,7 @@ union-case Fuaran.Core.Idl.Diff+Change.NewOpRemoved #8(tag: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewRecordAdded #20(name: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewRecordRemoved #21(name: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewSupportChanged #34(key: System.String, before: Microsoft.FSharp.Core.FSharpOption`1<System.String>, after: Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+union-case Fuaran.Core.Idl.Diff+Change.NewTypeAnnotationsChanged #35(family: System.String, name: System.String, before: System.String, after: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewUnionAdded #9(name: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewUnionCaseAdded #11(union: System.String, case: System.String)
 union-case Fuaran.Core.Idl.Diff+Change.NewUnionCaseAnnotationsChanged #28(union: System.String, case: System.String, before: System.String, after: System.String)
