@@ -452,3 +452,214 @@ module internal CollectingTraversal =
                 else
                     Ok(p.Spec k None))))
         |> concatR "\n\n"
+
+/// What a backend prints for an ADMITTED declared literal ([[Decl.literal]]) — a value in source,
+/// or a test that a value read from `src` is that literal. Every field takes `src`, the expression
+/// the literal is compared against; a printer that writes a value ignores it.
+type internal LiteralPrinter =
+    {
+        Str: string -> string -> string
+        Int: string -> int -> string
+        Float: string -> float -> string
+        Bool: string -> bool -> string
+        /// An enum literal, from the enum's name, the host case and the wire spelling.
+        Enum: string -> string -> string -> string -> string
+        EmptyList: string -> string
+        /// A record literal from its declared members, printed in declaration order.
+        Record: string -> IdlRecord -> (IdlField * string) list -> string
+        /// A union case literal from its declared members, printed in declaration order.
+        Union: string -> IdlUnion -> IdlUnionCase -> (IdlField * string) list -> string
+        /// An optional member carrying a value, from the value printed.
+        Some: string -> string
+        /// An optional member carrying none.
+        Absent: string -> string
+        /// Where a member's value is read from, under the object read from `src`.
+        Path: string -> IdlField -> string
+    }
+
+/// Phase 524 (511.t4) — the one traversal over a declared literal: [[Decl.literal]] decides what is
+/// admitted (the admissibility every backend shares, Phase 525), [[Decl.memberValue]] at the
+/// LITERAL site decides each member's value (a host-only member is refused rather than filled
+/// with its placeholder, a required one with no value is refused), and a backend's
+/// [[LiteralPrinter]] only prints. The F# literal, the TypeScript omit test and the F* constructor
+/// are its printers, so no backend can admit a default another refuses.
+module internal LiteralTraversal =
+
+    let rec print
+        (p: LiteralPrinter)
+        (idl: Idl)
+        (src: string)
+        (t: IdlType)
+        (v: IdlValue)
+        : Result<string, CodegenError> =
+        Decl.literal idl t v
+        |> Result.bind (fun l ->
+            match l with
+            | Literal.Str s -> Ok(p.Str src s)
+            | Literal.Int i -> Ok(p.Int src i)
+            | Literal.Bool b -> Ok(p.Bool src b)
+            // A whole-valued float authored as an integer reads as a float here — the canonical
+            // artifact writes one that way (the same asymmetry `dFloat` carries on decode).
+            | Literal.Float f -> Ok(p.Float src f)
+            | Literal.Enum(n, case) ->
+                let wire =
+                    match v with
+                    | VEnum spelling -> spelling
+                    | _ -> case
+
+                Ok(p.Enum src n case wire)
+            | Literal.EmptyList -> Ok(p.EmptyList src)
+            | Literal.Record(r, authored) ->
+                members p idl src Map.empty r.Fields authored |> Result.map (p.Record src r)
+            | Literal.Union(u, args, c, authored) ->
+                // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed` is a
+                // one-argument constructor whatever an `IdlValue` happens to carry (Phase 124).
+                let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
+                members p idl src subst c.Fields authored |> Result.map (p.Union src u c))
+
+    and private members
+        (p: LiteralPrinter)
+        (idl: Idl)
+        (src: string)
+        (subst: Map<string, IdlType>)
+        (fields: IdlField list)
+        (authored: (string * IdlValue) list)
+        : Result<(IdlField * string) list, CodegenError> =
+        fields
+        |> List.map (fun f ->
+            let ft = TypeParams.substitute subst f.Type
+            let at = p.Path src f
+
+            let refuse v =
+                Error(CodegenError.UnsupportedDefault(ft, v))
+
+            authored
+            |> List.tryFind (fun (n, _) -> n = f.Name)
+            |> Option.map snd
+            |> Decl.memberValue ValueSite.Literal f.Opt
+            |> function
+                | MemberValue.Carries v
+                | MemberValue.IdentityDefault v -> print p idl at ft v
+                | MemberValue.Optional v -> print p idl at ft v |> Result.map p.Some
+                | MemberValue.Absent -> Ok(p.Absent at)
+                | MemberValue.Refused v -> refuse v
+                // Neither is answered at the literal site; a member with no value is refused.
+                | MemberValue.Placeholder
+                | MemberValue.Parameter -> refuse VAbsent
+            |> Result.map (fun e -> f, e))
+        |> sequenceR
+
+/// The traversal's own recursion, handed to a backend's leaf arm so it can read a nested value
+/// (a map's entries, a hosted slot's declared wire form) by the same walk.
+type internal ValueWalk =
+    {
+        /// A nested value at its type.
+        Value: IdlType -> IdlValue -> Result<string, CodegenError>
+    }
+
+/// What a backend prints for an AUTHORED value in source (the scaffold leg, Phase 252/317): a value
+/// of the generated types, built under every presence rule its declaration states.
+type internal ValuePrinter =
+    {
+        /// A value that does not fit its declaration, named by `what`.
+        Mismatch: string -> CodegenError
+        /// The backend's arm for a leaf pair (a scalar, a map, JSON, a hosted or sentinel slot), or
+        /// `None` when it has none for the pair.
+        Leaf: ValueWalk -> IdlType -> IdlValue -> Result<string, CodegenError> option
+        /// An admitted enum value, from its declaration and its wire spelling.
+        Enum: IdlType -> IdlValue -> Result<string, CodegenError>
+        List: string list -> string
+        /// A member's value under the one presence rule at the SCAFFOLD site, or `None` where the
+        /// backend writes nothing for it; handed the walk at the member's type.
+        Member:
+            IdlField -> MemberValue -> (IdlValue -> Result<string, CodegenError>) -> Result<string option, CodegenError>
+        Record: IdlRecord -> (IdlField * string) list -> string
+        Union: IdlUnion -> IdlUnionCase -> (IdlField * string) list -> string
+        /// A node, from its id, its kind, the kind's members and the envelope's members.
+        Node: string -> IdlKind -> (IdlField * string) list -> (IdlField * string) list -> string
+        /// What remains, refused by the backend's own construct.
+        Unmatched: IdlType -> IdlValue -> CodegenError
+    }
+
+/// The one traversal over an authored value against its declaration: the lookups and their
+/// refusals, the union case and its arity, the members under [[Decl.memberValue]] at the SCAFFOLD
+/// site (a host-only member has no wire projection, so a wire value at its name is not its value),
+/// a node and its envelope; a backend's [[ValuePrinter]] prints.
+module internal ValueTraversal =
+
+    let rec value (p: ValuePrinter) (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        let mismatch what = Error(p.Mismatch what)
+
+        match p.Leaf { Value = value p idl } t v with
+        | Some r -> r
+        | None ->
+            match t, v with
+            | TEnum name, VEnum wire ->
+                match CodegenLookup.tryEnum idl name with
+                | None -> mismatch (sprintf "a value of the undeclared enum '%s'" name)
+                | Some e when (e.CaseOf wire).IsNone ->
+                    mismatch (sprintf "the wire string %A, which enum '%s' does not admit" wire name)
+                | Some _ -> p.Enum t v
+            | TList inner, VList xs -> xs |> List.map (value p idl inner) |> sequenceR |> Result.map p.List
+            | TUnion(name, args), VUnion(tag, fields) ->
+                match CodegenLookup.tryUnion idl name with
+                | None -> mismatch (sprintf "a value of the undeclared union '%s'" name)
+                | Some u when List.length u.Params <> List.length args ->
+                    mismatch (sprintf "union '%s' applied to %d type arguments" name (List.length args))
+                | Some u ->
+                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    | None -> mismatch (sprintf "the case '%s', which union '%s' does not declare" tag name)
+                    | Some c ->
+                        let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
+
+                        members p idl (sprintf "union case '%s.%s'" name tag) subst c.Fields fields
+                        |> Result.map (p.Union u c)
+            | TRecord name, VRecord fields ->
+                match CodegenLookup.tryRecord idl name with
+                | None -> mismatch (sprintf "a value of the undeclared record '%s'" name)
+                | Some r ->
+                    members p idl ("record '" + name + "'") Map.empty r.Fields fields
+                    |> Result.map (p.Record r)
+            // Phase 698 — the enveloped form. The envelope's members and the kind's go through the
+            // SAME presence rule, so the two halves of a node cannot drift.
+            | TNode, VNode(id, kindTag, fields) -> node p idl id [] kindTag fields
+            | TNode, VNodeEnv(id, envelope, kindTag, fields) -> node p idl id envelope kindTag fields
+            | _, VAbsent -> mismatch "an absent value (VAbsent) in a value position"
+            | _ -> Error(p.Unmatched t v)
+
+    and private node p idl (id: string) envelope (kindTag: string) fields : Result<string, CodegenError> =
+        match CodegenLookup.tryKind idl kindTag with
+        | None -> Error(p.Mismatch(sprintf "a node of the undeclared kind '%s'" kindTag))
+        | Some k ->
+            match
+                members p idl ("kind '" + kindTag + "'") Map.empty k.Fields fields,
+                members p idl "node envelope" Map.empty idl.NodeFields envelope
+            with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok kindMembers, Ok envMembers -> Ok(p.Node id k kindMembers envMembers)
+
+    /// The members of an object under their declared presence, in declaration order, each with the
+    /// value the backend writes for it (a member it writes nothing for is left out).
+    and private members
+        (p: ValuePrinter)
+        (idl: Idl)
+        (where: string)
+        (subst: Map<string, IdlType>)
+        (declared: IdlField list)
+        (authored: (string * IdlValue) list)
+        : Result<(IdlField * string) list, CodegenError> =
+        declared
+        |> List.map (fun f ->
+            let f =
+                { f with
+                    Type = TypeParams.substitute subst f.Type }
+
+            let offered = authored |> List.tryFind (fun (n, _) -> n = f.Name) |> Option.map snd
+
+            match Decl.memberValue ValueSite.Scaffold f.Opt offered with
+            | MemberValue.Refused _
+            | MemberValue.Parameter -> Error(p.Mismatch(sprintf "%s without its required field '%s'" where f.Name))
+            | mv -> p.Member f mv (value p idl f.Type) |> Result.map (Option.map (fun e -> f, e)))
+        |> sequenceR
+        |> Result.map (List.choose id)

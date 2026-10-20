@@ -205,106 +205,44 @@ module internal TypeScriptCodec =
     let tsEncApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
         SlotTraversal.encApplied tsEncPrinter var t
 
-    /// TS boolean predicate: is `src` at the omit-when-default field's identity default?
+    /// Phase 524 — the TypeScript printer of a declared literal as a TEST
+    /// ([[LiteralTraversal]]): a boolean predicate that the value read from `src` is the literal.
     /// Enums render as wire strings (`s.tone === "Default"`); nullary unions as
     /// discriminator-tagged objects (`s.format.$type === "None"`); since Phase 124 a
     /// VALUE-CARRYING union case conjoins a test per declared field
-    /// (`s.value.$type === "Fixed" && s.value.value === 0`), nested to any depth.
+    /// (`s.value.$type === "Fixed" && s.value.value === 0`), nested to any depth. An absent
+    /// optional is a real conjunct (`s.value.name === undefined`), not a skip: the encoder omits
+    /// that key, so a value carrying it is NOT at the default and must not be.
     ///
-    /// **This predicate decides what the TS backend admits as a default at all**, because it is
-    /// the harder half: JS has no structural equality, so every admissible shape has to reduce to
-    /// a chain of `===` (plus the one `.length === 0` an empty array needs, arrays comparing by
-    /// reference). [[tsDefaultLit]] takes its admissibility from here rather than deciding
-    /// separately — an encoder that cannot TEST for a default must not have a decoder that
-    /// RESTORES it, or the two halves of the round trip disagree silently, which is the class
-    /// Phase 124 exists to close.
-    let rec tsIsDefault
-        (idl: Idl)
-        (disc: string)
-        (src: string)
-        (t: IdlType)
-        (d: IdlValue)
-        : Result<string, CodegenError> =
-        let refuse () =
-            Error(CodegenError.UnsupportedDefault(t, d))
+    /// JS has no structural equality, so every admitted shape reduces to a chain of `===` (plus
+    /// the one `.length === 0` an empty array needs, arrays comparing by reference). What is
+    /// admitted is [[Decl.literal]]'s, the admissibility the F# backend prints from too, so a
+    /// default the F# host honours is one this host can test for.
+    let tsPredicatePrinter (disc: string) : LiteralPrinter =
+        { Str = fun src s -> src + " === " + SourceLit.tsString s
+          Int = fun src i -> src + " === " + string i
+          Float = fun src f -> src + " === " + invariantFloat f
+          Bool = fun src b -> src + " === " + (if b then "true" else "false")
+          // A `VEnum` carries the WIRE string, which is what this host holds.
+          Enum = fun src _ _ wire -> src + " === " + SourceLit.tsString wire
+          // Phase 1080 — an omitted-when-empty repeated slot.
+          EmptyList = fun src -> src + ".length === 0"
+          Record = fun _ _ members -> members |> List.map snd |> String.concat " && "
+          Union =
+            fun src _ c members ->
+                (tsDiscProp disc src + " === " + SourceLit.tsString c.Tag)
+                :: (members |> List.map snd)
+                |> String.concat " && "
+          Some = id
+          Absent = fun src -> src + " === undefined"
+          Path = fun src f -> src + "." + f.Name }
 
-        match t, d with
-        // A `VEnum` carries the WIRE string; one the enum does not admit is refused, as the F#
-        // backend refuses it (Phase 292) and as the encoder refuses the value.
-        | TEnum n, VEnum c ->
-            if idl.Enums |> List.exists (fun e -> e.Name = n && List.contains c e.WireCases) then
-                Ok(src + " === " + SourceLit.tsString c)
-            else
-                refuse ()
-        // Refused as the F# backend refuses it, so the two agree (D33).
-        | TStr, VStr s when not (SourceLit.isWellFormed s) -> refuse ()
-        | TStr, VStr s -> Ok(src + " === " + SourceLit.tsString s)
-        | TInt, VInt i -> Ok(src + " === " + string i)
-        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(src + " === " + invariantFloat f)
-        | TFloat, VInt i -> Ok(src + " === " + invariantFloat (float i))
-        | TBool, VBool b -> Ok(src + " === " + (if b then "true" else "false"))
-        // Phase 1080 — an omitted-when-empty repeated slot. `.length === 0` rather
-        // than an equality test, because JS arrays compare by reference.
-        | TList _, VList [] -> Ok(src + ".length === 0")
-        | TRecord n, VRecord authored ->
-            match CodegenLookup.tryRecord idl n with
-            | None -> refuse ()
-            | Some r ->
-                r.Fields
-                |> List.map (fun rf -> tsIsDefaultField idl disc src Map.empty rf authored)
-                |> concatR " && "
-        | TUnion(n, args), VUnion(tag, authored) ->
-            match CodegenLookup.tryUnion idl n with
-            | None -> refuse ()
-            | Some u when List.length u.Params <> List.length args -> refuse ()
-            // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
-            // below nor the tagged literal [[tsDefaultLit]] renders would be about the value the
-            // encoder actually sees. Refused rather than guessed at. (Unreachable before Phase
-            // 124: a transparent case holds exactly one field, so it was never nullary.) Since
-            // the 2026-09-13 ruling the test is [[isDeclaredTransparentCase]], which `fsDefaultLit`
-            // calls too — the rule is about the WIRE, so it cannot belong to one backend.
-            | Some u when isDeclaredTransparentCase idl u tag -> refuse ()
-            | Some u ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None -> refuse ()
-                | Some c ->
-                    let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
-
-                    c.Fields
-                    |> List.map (fun cf -> tsIsDefaultField idl disc src subst cf authored)
-                    |> sequenceR
-                    |> Result.map (fun conjuncts ->
-                        (tsDiscProp disc src + " === " + SourceLit.tsString tag) :: conjuncts
-                        |> String.concat " && ")
-        | _ -> refuse ()
-
-    /// One declared member of a union case or a record, as a conjunct of the predicate above.
-    /// An absent optional is a real conjunct (`s.value.name === undefined`), not a skip: the
-    /// encoder omits that key, so a value carrying it is NOT at the default and must not be.
-    and tsIsDefaultField
-        (idl: Idl)
-        (disc: string)
-        (src: string)
-        (subst: Map<string, IdlType>)
-        (f: IdlField)
-        (authored: (string * IdlValue) list)
-        : Result<string, CodegenError> =
-        let ft = TypeParams.substitute subst f.Type
-        let member' = src + "." + f.Name
-
-        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-        | Some(_, av) when av <> VAbsent ->
-            match f.Opt with
-            // A host-only slot never reaches the wire, so the JS object the encoder sees has no
-            // member to test — a default that depends on one is not testable at all.
-            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
-            | _ -> tsIsDefault idl disc member' ft av
-        | _ ->
-            match f.Opt with
-            | Optional -> Ok(member' + " === undefined")
-            | OmitDefault dd -> tsIsDefault idl disc member' ft dd
-            | HostOnly
-            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
+    /// TS boolean predicate: is `src` at the omit-when-default field's identity default? Printed by
+    /// [[tsPredicatePrinter]]. **This predicate decides what the TS backend admits as a default**,
+    /// and [[tsDefaultLit]] takes its admissibility from here: an encoder that cannot TEST for a
+    /// default must not have a decoder that RESTORES it (Phase 124).
+    let tsIsDefault (idl: Idl) (disc: string) (src: string) (t: IdlType) (d: IdlValue) : Result<string, CodegenError> =
+        LiteralTraversal.print (tsPredicatePrinter disc) idl src t d
 
     /// Phase 524 — the TypeScript printer of a member WRITTEN under its presence
     /// ([[MemberEncTraversal.encMember]]): a `[key, enc]` pair, or `null` (filtered) where the
