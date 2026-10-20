@@ -420,7 +420,8 @@ let scaffoldRefusalTests =
                   + "\"\n"
 
               let fsx =
-                  dllRef "Fuaran.Core.Wire.dll"
+                  dllRef "Fuaran.Core.Text.dll"
+                  + dllRef "Fuaran.Core.Wire.dll"
                   + dllRef "Fuaran.Core.Tree.dll"
                   + dllRef "Fuaran.Core.Validator.dll"
                   + decls

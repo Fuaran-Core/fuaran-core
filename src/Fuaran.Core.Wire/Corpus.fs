@@ -108,8 +108,9 @@ module Corpus =
     // The fixed corpus runs hand-written fixtures; this generates a wide random sample of valid
     // `JVal` and asserts the parser and renderer stay mutually consistent — exactly the depth /
     // escaping / number-format coverage the fixtures cannot enumerate by hand. Seed-replayable so a
-    // counterexample reproduces, and drawn from the spine's one kernel, `Xorshift32` (beside this
-    // file since Phase 495), so the sample is the same on .NET and under Fable.
+    // counterexample reproduces, and drawn from the spine's one kernel, `Xorshift32` (in the text
+    // kernel since Phase 531, read through its `InternalsVisibleTo`), so the sample is the same on
+    // .NET and under Fable.
     //
     // Until Phase 495 it drew from an inlined uint32 LCG (`st * 1664525u + 1013904223u`, seeded by
     // `uint32 seed * 2654435761u`) — the arithmetic class `Xorshift32`'s header records as broken
@@ -153,17 +154,31 @@ module Corpus =
     /// back (`Json.firstIllFormedString`, the scan the guarded renderers refuse on).
     let private allStringsWellFormed (v: JVal) : bool = (Json.firstIllFormedString v).IsNone
 
+    // The three functions that name `Xorshift32` are `NoInlining` (DECISIONS.md D129): the kernel is
+    // internal to `Fuaran.Core.Text` (Phase 531), and a body naming it that the F# optimiser copied
+    // into a caller's assembly would fail there with `MethodAccessException`.
+
+    /// The kernel's seed, as the generator's advancing state.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private seededState (seed: int) : uint32 ref = ref (Xorshift32.seeded seed)
+
+    /// Advance `state` one step, and answer the top 31 bits of the new state.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private advance (state: uint32 ref) : int =
+        state.Value <- Xorshift32.step state.Value
+        Xorshift32.value state.Value
+
+    /// A value in `[0, n)` by the kernel's high-bit rejection draw, advancing `state` in place.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private drawBelow (state: uint32 ref) (n: int) : int =
+        Xorshift32.below (fun () -> advance state, ()) n () |> fst
+
     /// Generate one random valid `JVal` from `seed`, nesting no deeper than `maxDepth`. Every choice
     /// is `Xorshift32.below` over one advancing state, so a seed names one sample on every pipeline.
     /// Internal, not private: the conformance kit's `fuzz/*` parity rows read the sample itself.
     let internal genJVal (seed: int) (maxDepth: int) : JVal =
-        let state = ref (Xorshift32.seeded seed)
-
-        let draw () =
-            state.Value <- Xorshift32.step state.Value
-            Xorshift32.value state.Value, ()
-
-        let pick (n: int) = Xorshift32.below draw n () |> fst
+        let state = seededState seed
+        let pick (n: int) = drawBelow state n
 
         let randStr () =
             let len = pick 6

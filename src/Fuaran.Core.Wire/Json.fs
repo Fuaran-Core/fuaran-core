@@ -271,107 +271,17 @@ module RenderFault =
 /// over canonical wire JSON.
 module Json =
 
-    // ---- THE ESCAPE'S FAST PATH (Phase 365) ----
-    // Most strings a document carries have nothing to escape, so the escape scans before it copies:
-    // `firstEscapable` finds the first character the rule touches, and a string with none is used
-    // whole. When there is one, `appendEscapedFrom` appends each clean run with ONE ranged append
-    // and spells only the escaped characters, from a table rather than a format call. The bytes
-    // are the rule's, unchanged; `StringEscapeVectors` and `StringEscapeTests` hold them.
+    /// THE string escape of the spine (Phase 287): `"` as `\"`, `\` as `\\`, and every control
+    /// character `U+0000`–`U+001F` as lower-case `\u00xx`, with no short form — the escaped body,
+    /// quotes excluded, and `s` itself when there is nothing to escape. It is `JsonString.escape`, the
+    /// one body in the text kernel (Phase 531) every writer of the spine spells a string through,
+    /// `Rendering.CrossHost` and the op stream's lines included. The parser accepts both the short
+    /// and the `\u` spelling, so nothing changes on read.
+    let escape (s: string) : string = JsonString.escape s
 
-    /// The `\u00xx` spelling of each control character `U+0000`–`U+001F`, lower-case hex, built
-    /// once so that no escape formats a number.
-    let private controlEscapes: string[] =
-        let hex = "0123456789abcdef"
-        Array.init 0x20 (fun c -> "\\u00" + string hex[c >>> 4] + string hex[c &&& 0xF])
-
-    /// The index of the first character of `s` the rule escapes — `"`, `\` or a control character
-    /// below `U+0020` — or `-1` when there is none. Under Fable it is one native regex search,
-    /// which the Phase 365 harness measured faster under node than the loop on long clean strings
-    /// (the `escape-free` escape case, 0.21 ms to 0.12 ms) and no slower elsewhere; the class is
-    /// the same three, code unit by code unit, so the index is the loop's.
-#if FABLE_COMPILER
-    [<Fable.Core.Emit("$0.search(/[\"\\\\\\u0000-\\u001f]/)")>]
-    let private firstEscapable (s: string) : int = Fable.Core.Util.jsNative
-#else
-    let private firstEscapable (s: string) : int =
-        let mutable i = 0
-        let mutable found = -1
-
-        while found < 0 && i < s.Length do
-            let code = int s[i]
-
-            if code < 0x20 || code = 0x22 || code = 0x5C then
-                found <- i
-            else
-                i <- i + 1
-
-        found
-#endif
-
-    /// Append the escaped body of `s` to `sb`, given that `first` is the index of its first
-    /// escapable character: the clean prefix and every later clean run as one ranged append each.
-    let private appendEscapedFrom (sb: System.Text.StringBuilder) (s: string) (first: int) : unit =
-        if first > 0 then
-            sb.Append(s, 0, first) |> ignore
-
-        // `start` is where the clean run not yet appended begins.
-        let mutable start = first
-
-        for i in first .. s.Length - 1 do
-            let code = int s[i]
-
-            if code < 0x20 || code = 0x22 || code = 0x5C then
-                if i > start then
-                    sb.Append(s, start, i - start) |> ignore
-
-                (if code = 0x22 then sb.Append("\\\"")
-                 elif code = 0x5C then sb.Append("\\\\")
-                 else sb.Append(controlEscapes[code]))
-                |> ignore
-
-                start <- i + 1
-
-        if s.Length > start then
-            sb.Append(s, start, s.Length - start) |> ignore
-
-    /// THE string escape of the spine (Phase 287; DECISIONS.md "the spine owns the string-escaping
-    /// rule"). Exactly three classes are escaped and nothing else: `"` as `\"`, `\` as `\\`, and
-    /// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex — including `\n`,
-    /// `\r` and `\t`, which have NO short form here. It is byte-for-byte the UI host's
-    /// `CanonicalJson.appendRawString` and the TypeScript twin's escaper, so a hash pre-image that
-    /// carries a string means one thing on every host. `Rendering.CrossHost` escapes through this function
-    /// too; the one copy the standalone layers keep (`JsonString.quote` in `Fuaran.Core.OpStream`,
-    /// public as `Jsonl.quote` — D2 forbids it a reference here; `Actor.encode` spells
-    /// through it, and `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` has spelled through it rather than
-    /// a copy of its own since Phase 388) is held value-identical to it by `StringEscapeVectors` in the
-    /// conformance kit. Beside that copy sits its legacy twin, `JsonString.quoteLegacy`: the `V1`
-    /// profile's spelling, which `escapeWith EncodingProfile.V1` writes on this side, the two held to
-    /// one table by `EncodingProfileVectors`. The parser accepts
-    /// both the short and the `\u` spelling, so nothing changes on read.
-    ///
-    /// A string with nothing to escape is returned AS IT IS (Phase 365): the scan finds the first
-    /// escapable character, and only a string that has one is copied — its clean runs appended
-    /// whole, one ranged append each, and only the escaped characters spelled one at a time.
-    let escape (s: string) : string =
-        let first = firstEscapable s
-
-        if first < 0 then
-            s
-        else
-            let sb = System.Text.StringBuilder(s.Length + 16)
-            appendEscapedFrom sb s first
-            sb.ToString()
-
-    /// `escape s` appended to `sb` (Phase 365) — the same bytes, written into the caller's own
-    /// builder, so a writer that is already building a document makes no intermediate string per
-    /// value. A string with nothing to escape is appended whole.
-    let escapeInto (sb: System.Text.StringBuilder) (s: string) : unit =
-        let first = firstEscapable s
-
-        if first < 0 then
-            sb.Append(s) |> ignore
-        else
-            appendEscapedFrom sb s first
+    /// `escape s` appended to `sb` (Phase 365) — `JsonString.escapeInto`: the same bytes, written into
+    /// the caller's own builder, so a writer already building a document makes no string per value.
+    let escapeInto (sb: System.Text.StringBuilder) (s: string) : unit = JsonString.escapeInto sb s
 
     // ---- THE WRITER (Phase 306) ----
     // One iterative writer stands behind every named `Rendering` (Phase 520: `Json.render` and
@@ -455,31 +365,15 @@ module Json =
 
         sb.ToString()
 
-    /// `EncodingProfile.V1`'s string escape, FROZEN (Phase 360): the body `Json.escape` had in
-    /// `0.30.0`, kept as its own copy rather than written in terms of the live `escape`, so no later
-    /// change to the live path — a rewrite for speed, a further byte change — can move a `V1` byte.
-    /// `EncodingProfileVectors` pins its output for every character it escapes against bytes the
-    /// published `0.30.0` binary produced.
-    let private appendEscapedV1 (sb: System.Text.StringBuilder) (s: string) : unit =
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
-            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
-
     /// THE writer of every named `Rendering` (Phase 520): `v` under `r`'s escape, member order and
     /// float rule, with no whitespace. Each string is escaped straight into the writer's builder
-    /// (`escapeInto`, Phase 365), never through an intermediate string; `StringEscape.ShortControls`
-    /// through the frozen `V1` copy. `Canonical.write` is this function; `render` is it at `V2`.
+    /// (`JsonString.escapeInto`, Phase 365), never through an intermediate string;
+    /// `StringEscape.ShortControls` through the frozen `V1` body (`JsonString.escapeLegacyInto`). `Canonical.write` is this function; `render` is it at `V2`.
     let internal writeRendering (r: Rendering) (v: JVal) : string =
         let appendEscaped =
             match r.Escape with
-            | StringEscape.ShortControls -> appendEscapedV1
-            | StringEscape.AllControlsHex -> escapeInto
+            | StringEscape.ShortControls -> JsonString.escapeLegacyInto
+            | StringEscape.AllControlsHex -> JsonString.escapeInto
 
         let floatText =
             match r.Floats with
@@ -509,9 +403,9 @@ module Json =
         match profile with
         | EncodingProfile.V1 ->
             let sb = System.Text.StringBuilder()
-            appendEscapedV1 sb s
+            JsonString.escapeLegacyInto sb s
             sb.ToString()
-        | EncodingProfile.V2 -> escape s
+        | EncodingProfile.V2 -> JsonString.escape s
 
     /// `render` under a store's declared profile (Phase 360) — `Canonical.write (Rendering.ofProfile
     /// profile)`, spelled by the profile a content-addressed store declares, so its stored ids
@@ -600,26 +494,10 @@ module Json =
     /// The index of the first UTF-16 unit of `s` that is not part of a character (Phase 306): a
     /// high surrogate (`D800`–`DBFF`) not followed at once by a low one, or a low surrogate
     /// (`DC00`–`DFFF`) with no high one before it. `None` where `s` is well-formed UTF-16 — the
-    /// strings that have code points, and the only ones `parse` accepts.
+    /// strings that have code points, and the only ones `parse` accepts. The index of
+    /// `Hash.firstIllFormedUnit`, the spine's one well-formedness rule (Phase 531).
     let firstIllFormedUnit (s: string) : int option =
-        let n = s.Length
-        let mutable k = 0
-        let mutable found = None
-
-        while found.IsNone && k < n do
-            let u = int s[k]
-
-            if u >= 0xD800 && u <= 0xDBFF then
-                if k + 1 < n && int s[k + 1] >= 0xDC00 && int s[k + 1] <= 0xDFFF then
-                    k <- k + 2
-                else
-                    found <- Some k
-            elif u >= 0xDC00 && u <= 0xDFFF then
-                found <- Some k
-            else
-                k <- k + 1
-
-        found
+        Hash.firstIllFormedUnit s |> Option.map _.Index
 
     /// True where `s` is well-formed UTF-16 (`firstIllFormedUnit s = None`).
     let isWellFormedUtf16 (s: string) : bool = (firstIllFormedUnit s).IsNone
@@ -803,48 +681,10 @@ module Json =
     /// The parser holds every number token to it before reading one, so a leading zero (`01`), a
     /// point with no digit before or after it (`-.5`, `1.`, `1.e5`) and an exponent with no digit
     /// (`1e`, `1e+`) are each a `MalformedNumber` — where the scanner used to hand such a token to a
-    /// host number reader that accepted some of them, and not the same ones on every host.
-    let isJsonNumber (tok: string) : bool =
-        let n = tok.Length
-
-        let isDigit (k: int) = k < n && tok[k] >= '0' && tok[k] <= '9'
-
-        let rec digitsFrom (k: int) =
-            if isDigit k then digitsFrom (k + 1) else k
-
-        // The integer part from `k`: a lone `0`, or a non-zero digit and any digits after it.
-        let afterInt (k: int) =
-            if k < n && tok[k] = '0' then Some(k + 1)
-            elif isDigit k then Some(digitsFrom k)
-            else None
-
-        // An optional `.` and at least one digit.
-        let afterFrac (k: int) =
-            if k < n && tok[k] = '.' then
-                let e = digitsFrom (k + 1)
-                if e > k + 1 then Some e else None
-            else
-                Some k
-
-        // An optional `e`/`E`, an optional sign, and at least one digit.
-        let afterExp (k: int) =
-            if k < n && (tok[k] = 'e' || tok[k] = 'E') then
-                let s =
-                    if k + 1 < n && (tok[k + 1] = '+' || tok[k + 1] = '-') then
-                        k + 2
-                    else
-                        k + 1
-
-                let e = digitsFrom s
-                if e > s then Some e else None
-            else
-                Some k
-
-        let start = if n > 0 && tok[0] = '-' then 1 else 0
-
-        match afterInt start |> Option.bind afterFrac |> Option.bind afterExp with
-        | Some k -> k = n
-        | None -> false
+    /// host number reader that accepted some of them, and not the same ones on every host. The
+    /// grammar is the text kernel's (`JsonSyntax.isNumber`, Phase 531), the one the op stream's line
+    /// reader holds a bare literal to.
+    let isJsonNumber (tok: string) : bool = JsonSyntax.isNumber tok
 
     /// Internal signal for the recursive-descent parser; never escapes the parse entry points.
     /// Carries the classified kind, the message, and the position captured at the raise site.
@@ -940,11 +780,8 @@ module Json =
         // is bounds-guarded by `i < n`.
         let peek () = if i < n then input[i] else '\000'
 
-        let isWs c =
-            c = ' ' || c = '\t' || c = '\n' || c = '\r'
-
         let skipWs () =
-            while i < n && isWs input[i] do
+            while i < n && JsonSyntax.isWhitespace input[i] do
                 i <- i + 1
 
         // Where a value is due: whitespace skipped, end of input refused, and the character a value
@@ -963,151 +800,46 @@ module Json =
             else
                 fail ExpectedToken ("expected '" + string c + "'")
 
-        let hexDigit (c: char) : int =
-            if c >= '0' && c <= '9' then int c - int '0'
-            elif c >= 'a' && c <= 'f' then int c - int 'a' + 10
-            elif c >= 'A' && c <= 'F' then int c - int 'A' + 10
-            else fail BadHexDigit "bad hex digit in \\u escape"
+        // A string is read by the text kernel's grammar (Phase 531: `JsonSyntax.readString`, the one
+        // string reader of the spine, which the op stream's line reader reads by too): every escape
+        // held to the grammar, no raw control character, and well-formed UTF-16 whichever spelling
+        // each unit arrived in (Phase 299) — a lone or ill-ordered surrogate has no code point, so a
+        // digest over it cannot mean one thing on every host. One pass, by runs (Phase 366): an
+        // escape-free string is one `Substring`, and one with an escape is decoded into this
+        // scanner's one buffer. The kernel's refusal is placed here at its cursor, with this parser's
+        // kind and sentence — the ill-formed string and the raw control as `BadEscape`, the kind that
+        // already names "this string's content is not well-formed" — and the string bound's breach
+        // after the unit that would be its `max + 1`-th code point (Phase 465).
+        let stringBuffer = System.Text.StringBuilder()
 
-        let isHighSurrogate (u: int) = u >= 0xD800 && u <= 0xDBFF
-        let isLowSurrogate (u: int) = u >= 0xDC00 && u <= 0xDFFF
-
-        // A string is well-formed UTF-16 or it is REFUSED (Phase 299): every high surrogate is
-        // followed at once by a low one, and every low one follows a high one — whichever spelling
-        // each unit arrived in, a raw character or a `\u` escape. A lone or ill-ordered surrogate
-        // has no code point, so a string carrying one is not a string of characters, and a digest
-        // over it cannot mean one thing on every host (UTF-8 has no encoding for it; the platform
-        // encoders each substitute their own replacement). Both spellings are refused as
-        // `BadEscape`, the kind that already names "this string's content is not well-formed",
-        // rather than a new kind every exhaustive match would have to learn.
-        //
-        // The string is read by RUNS (Phase 366): `scanRun` walks an escape-free stretch up to the
-        // next `"` or `\`, checking the pairing of each unit as it passes and advancing `i` before
-        // the check exactly as the one-unit-at-a-time reader did, so every refusal keeps its kind,
-        // message and position; the stretch is then taken whole — by one `Substring` when the
-        // closing quote ends the first run (the common string, with no builder at all), or by one
-        // ranged `Append` into the builder an escape made necessary. The pairing state is carried
-        // across runs and escapes alike, so a pair may be split between the two spellings.
         let parseString () : string =
             expect '"'
-            // The last unit taken was a high surrogate still waiting for its low half.
-            let mutable pendingHigh = false
-            // The code points taken so far (Phase 465): a low half completing a pending high is
-            // not a new one, so a unit is counted exactly when nothing is pending.
-            let mutable codePoints = 0
 
-            let check (u: int) =
-                if pendingHigh && not (isLowSurrogate u) then
+            match JsonSyntax.readString input (i - 1) limits.MaxStringLength stringBuffer with
+            | Ok(struct (value, stop)) ->
+                i <- stop
+                value
+            | Error r ->
+                i <- r.Cursor
+
+                match r.Fault with
+                | JsonStringFault.Unterminated -> fail UnterminatedString "unterminated string"
+                | JsonStringFault.UnterminatedEscape -> fail UnterminatedEscape "unterminated escape"
+                | JsonStringFault.TruncatedUnicodeEscape -> fail TruncatedUnicodeEscape "truncated \\u escape"
+                | JsonStringFault.BadHexDigit -> fail BadHexDigit "bad hex digit in \\u escape"
+                | JsonStringFault.UnknownEscape e -> fail BadEscape ("bad escape '\\" + string e + "'")
+                | JsonStringFault.RawControl c ->
+                    fail
+                        BadEscape
+                        ("unescaped control character U+00"
+                         + string ("0123456789ABCDEF"[int c >>> 4])
+                         + string ("0123456789ABCDEF"[int c &&& 15])
+                         + " in a string")
+                | JsonStringFault.HighWithoutLow ->
                     fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
-                elif not pendingHigh && isLowSurrogate u then
+                | JsonStringFault.LowWithoutHigh ->
                     fail BadEscape "ill-formed string: a low surrogate with no high surrogate before it"
-
-                if not pendingHigh then
-                    // The string bound, on the way down: a unit that would be the `max + 1`-th
-                    // code point is refused here, after it and before it is appended — whichever
-                    // spelling it arrived in, and before the run it sits in is copied.
-                    if codePoints >= limits.MaxStringLength then
-                        breach JsonLimit.StringLength
-
-                    codePoints <- codePoints + 1
-
-                pendingHigh <- isHighSurrogate u
-
-            // Advance `i` over an escape-free run; it stops AT the `"` or `\` that ends it, or at `n`.
-            let scanRun () =
-                let mutable go = true
-
-                while go && i < n do
-                    let c = input[i]
-
-                    if c = '"' || c = '\\' then
-                        go <- false
-                    elif c < ' ' then
-                        // Phase 462: a raw C0 control is refused AT the character. The grammar
-                        // requires it escaped, and no conformant encoder writes it raw.
-                        fail
-                            BadEscape
-                            ("unescaped control character U+00"
-                             + string ("0123456789ABCDEF"[int c >>> 4])
-                             + string ("0123456789ABCDEF"[int c &&& 15])
-                             + " in a string")
-                    else
-                        i <- i + 1
-                        check (int c)
-
-            let start = i
-            scanRun ()
-
-            if i >= n then
-                fail UnterminatedString "unterminated string"
-
-            if input[i] = '"' then
-                i <- i + 1
-
-                if pendingHigh then
-                    fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
-
-                input.Substring(start, i - 1 - start)
-            else
-                let sb = System.Text.StringBuilder()
-                sb.Append(input, start, i - start) |> ignore
-
-                let append (u: int) =
-                    check u
-                    sb.Append(char u) |> ignore
-
-                let mutable fin = false
-
-                while not fin do
-                    // `i` is at the `"` or `\` that ended the last run, or at `n`.
-                    if i >= n then
-                        fail UnterminatedString "unterminated string"
-
-                    let c = input[i]
-                    i <- i + 1
-
-                    if c = '"' then
-                        if pendingHigh then
-                            fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
-
-                        fin <- true
-                    else
-                        if i >= n then
-                            fail UnterminatedEscape "unterminated escape"
-
-                        let e = input[i]
-                        i <- i + 1
-
-                        match e with
-                        | '"' -> append (int '"')
-                        | '\\' -> append (int '\\')
-                        | '/' -> append (int '/')
-                        | 'n' -> append (int '\n')
-                        | 'r' -> append (int '\r')
-                        | 't' -> append (int '\t')
-                        | 'b' -> append (int '\b')
-                        | 'f' -> append (int '\f')
-                        | 'u' ->
-                            if i + 4 > n then
-                                fail TruncatedUnicodeEscape "truncated \\u escape"
-
-                            let code =
-                                (hexDigit input[i] <<< 12)
-                                + (hexDigit input[i + 1] <<< 8)
-                                + (hexDigit input[i + 2] <<< 4)
-                                + hexDigit input[i + 3]
-
-                            i <- i + 4
-                            append code
-                        | _ -> fail BadEscape ("bad escape '\\" + string e + "'")
-
-                        let s = i
-                        scanRun ()
-
-                        if i > s then
-                            sb.Append(input, s, i - s) |> ignore
-
-                sb.ToString()
+                | JsonStringFault.TooLong -> breach JsonLimit.StringLength
 
         let isDigitAt (k: int) =
             k < n && input[k] >= '0' && input[k] <= '9'
@@ -1499,38 +1231,6 @@ module Json =
                 | None -> reraise ()
 
 
-    // The input's UTF-8 length, counted off its UTF-16 units — Fable-clean, and the count a host
-    // handed a decoded string must make (a native length under-counts a CJK document threefold). A
-    // lone surrogate counts the three bytes a replacement character takes; the parser refuses it
-    // anyway.
-    let private utf8Length (s: string) : int64 =
-        let mutable total = 0L
-        let mutable k = 0
-
-        while k < s.Length do
-            let c = int s[k]
-
-            if c < 0x80 then
-                total <- total + 1L
-                k <- k + 1
-            elif c < 0x800 then
-                total <- total + 2L
-                k <- k + 1
-            elif
-                c >= 0xD800
-                && c <= 0xDBFF
-                && k + 1 < s.Length
-                && int s[k + 1] >= 0xDC00
-                && int s[k + 1] <= 0xDFFF
-            then
-                total <- total + 4L
-                k <- k + 2
-            else
-                total <- total + 3L
-                k <- k + 1
-
-        total
-
     /// The document-bytes bound (Phase 465), checked before a character is read: the breach at the
     /// root, or `None` when the input encodes within it. One comparison when the input cannot
     /// encode past the bound (three bytes a unit is the most a unit costs; a pair is four for two),
@@ -1538,7 +1238,7 @@ module Json =
     let internal documentBytesBreach (limits: JsonLimits) (input: string) : JsonRefusal option =
         let bytesOver =
             int64 input.Length * 3L > int64 limits.MaxDocumentBytes
-            && utf8Length input > int64 limits.MaxDocumentBytes
+            && Hash.utf8ByteCount input > int64 limits.MaxDocumentBytes
 
         if bytesOver then
             Some(

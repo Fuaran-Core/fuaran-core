@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Text</PackageId>
+    <Description>Fuaran.Core.Text — the text kernel below Tree, Wire and OpStream: the FNV-1a cache hash and the pinned pure SHA-256 digest, the typed Digest, the UTF-8 encoding and the UTF-16 well-formedness rule, the one JSON string escape (live and frozen legacy), the strict lexical grammar of a JSON string and number token, and the encoding profiles. Every byte the spine hashes, escapes or scans is produced here, once. FSharp.Core only, Fable-clean.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Phase 531 (DECISIONS.md D2 as amended): the kernel the three standalone packages above stand
+         on, so a content address, a chain hash and a JSONL line are produced by one body of code
+         rather than by copies held equal by vectors. Hash.fs first: the escape and the scanner name
+         nothing in it, but the digest and the UTF-16 rule are the kernel's foundation. -->
+    <Compile Include="Hash.fs" />
+    <Compile Include="EncodingProfile.fs" />
+    <Compile Include="JsonString.fs" />
+    <Compile Include="JsonSyntax.fs" />
+    <Compile Include="Xorshift32.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- `Digest`'s bytes-level constructor is internal (DECISIONS.md D122, route B): `Fuaran.Core.Tree`
+         mints its own-content digests through it, and `Fuaran.Core.ContentAddress` its profile-pinned
+         one over `Canonical`'s text. The xorshift32 kernel (`Xorshift32`) is internal too, read by the
+         three packages that draw from it: `Corpus.genJVal` in Wire, the IDL sampler and the conformance
+         kit's `ConfRng`. Every reader names a granted member only from a `NoInlining` function
+         (D129); CrossAssemblyInliningTests holds that, and fails on a grant nothing reads. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tree" />
+    <InternalsVisibleTo Include="Fuaran.Core.ContentAddress" />
+    <InternalsVisibleTo Include="Fuaran.Core.Wire" />
+    <InternalsVisibleTo Include="Fuaran.Core.Idl" />
+    <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

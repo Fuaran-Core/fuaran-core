@@ -419,6 +419,10 @@ module Tree =
     /// U+FFFD, as `Hash.sha256Hex` always has, so its `Hex` is exactly the `Hash.sha256Hex` the
     /// Phase 314 maps held (`Digest.tryOfFields` is the guarded form, for a caller minting a digest
     /// it will publish).
+    /// `NoInlining` (D129): `Digest.ofSha256Bytes` is the text kernel's internal, shared with this
+    /// package by `InternalsVisibleTo` (Phase 531), and a body naming it copied into a caller's assembly
+    /// would fail there.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let private digestOfPreimage (preimage: string) : Digest =
         preimage |> Hash.utf8Bytes |> Digest.ofSha256Bytes
 

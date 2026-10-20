@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.OpStream</PackageId>
-    <Description>Fuaran.Core.OpStream — append-only hash-chained op stream + deterministic replay + JSONL persistence, generic over an (apply, encode, decode) witness. The highest-genericity core layer; the linear spine the branching-DAG generalisation builds on. FSharp.Core only; Fable-clean on encode and decode alike - the one JSONL scanner (Jsonl) is self-contained and runs under both pipelines.</Description>
+    <Description>Fuaran.Core.OpStream — append-only hash-chained op stream + deterministic replay + JSONL persistence, generic over an (apply, encode, decode) witness. The highest-genericity core layer; the linear spine the branching-DAG generalisation builds on. Over the Fuaran.Core.Text kernel (hash, escape, string and number grammar); FSharp.Core only; Fable-clean on encode and decode alike - the JSONL line reader (Jsonl) runs under both pipelines.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- Phase 296: one file per concern; since Phase 516 each concern file IS its public module (the
@@ -16,6 +16,13 @@
     <Compile Include="Compacted.fs" />
     <Compile Include="Capture.fs" />
     <Compile Include="Attributed.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 531 (DECISIONS.md D2 as amended): standalone over the text kernel. The chain hashes,
+         the string escape and the string and number grammar of the line reader are the kernel's,
+         where this package carried value-identical copies before; it still references no Wire and
+         no Tree. -->
+    <ProjectReference Include="..\Fuaran.Core.Text\Fuaran.Core.Text.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

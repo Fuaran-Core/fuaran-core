@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Fuaran.Core.Text/Fuaran.Core.Text.fsproj" />
     <Project Path="src/Fuaran.Core.Tree/Fuaran.Core.Tree.fsproj" />
     <Project Path="src/Fuaran.Core.Ops/Fuaran.Core.Ops.fsproj" />
     <Project Path="src/Fuaran.Core.OpStream/Fuaran.Core.OpStream.fsproj" />

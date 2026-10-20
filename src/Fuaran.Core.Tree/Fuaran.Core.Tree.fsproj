@@ -4,21 +4,15 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Tree</PackageId>
-    <Description>Fuaran.Core.Tree — generic tree addressing / walking / content-hash escape over a domain-witness record. Owns no base node type; generic over a '`Kind`-tag witness and an '`Id` witness (the string-vs-Guid identity axis resolved as a parameter). FSharp.Core only, Fable-clean.</Description>
+    <Description>Fuaran.Core.Tree — generic tree addressing / walking / content-hash escape over a domain-witness record. Owns no base node type; generic over a '`Kind`-tag witness and an '`Id` witness (the string-vs-Guid identity axis resolved as a parameter). Over the Fuaran.Core.Text kernel; FSharp.Core only, Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The `Hash` module — the FNV-1a cache fingerprint and the pinned pure SHA-256 digest. Its own
-         file rather than Tree.fs's head: the digest is consumed across the spine and by domains that
-         never touch a tree, and folding a crypto primitive into the tree-walking file would have made
-         its home an accident of where `fnv1a` first happened to be needed. First — Tree.fs's content
-         hashes fold through it. -->
-    <Compile Include="Hash.fs" />
     <Compile Include="Tree.fs" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Phase 382 (DECISIONS.md D122, route B): `Digest`'s bytes-level constructor is internal, and
-         the one package that holds the profile-pinned constructor over `Canonical`'s text may call it. -->
-    <InternalsVisibleTo Include="Fuaran.Core.ContentAddress" />
+    <!-- Phase 531: the hash, the digest and the UTF-8 rule Tree.fs folds through live in the text
+         kernel below this package (DECISIONS.md D2 as amended). -->
+    <ProjectReference Include="..\Fuaran.Core.Text\Fuaran.Core.Text.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
