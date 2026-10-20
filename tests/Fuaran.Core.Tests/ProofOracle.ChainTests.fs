@@ -206,22 +206,14 @@ let private dagTampers (otherOp: 'Op -> 'Op) (dag: Dag.T<'Op>) : (string * Dag.T
           for p in n.Parents do
               yield sprintf "drop-parent@%s" p, DagOf.nodes (Map.remove p dag.Nodes) ]
 
-type private WalkerTally =
-    {
-        Failure: string option
-        /// Intact structures compared — a run that never met one has not tested the agreeing case.
-        Intact: int
-        /// Tampers compared, and how many production actually DETECTED. A run whose tampers were all
-        /// invisible has compared two walkers that both said "intact" and measured nothing.
-        Tampers: int
-        Detected: int
-    }
+/// The walker tally. `Intact`: intact structures compared — a run that never met one has not tested
+/// the agreeing case. `Tampers` compared, and how many production actually `Detected`: a run whose
+/// tampers were all invisible has compared two walkers that both said "intact" and measured nothing.
+let private walkerTally = Tally.empty [ "Intact"; "Tampers"; "Detected" ]
 
-let private emptyWalkerTally =
-    { Failure = None
-      Intact = 0
-      Tampers = 0
-      Detected = 0 }
+/// One tamper compared: counted, and counted as detected when production's verdict is not `intact`.
+let private tamperCounted (intact: 'V) (production: 'V) (t: Tally) : Tally =
+    t |> Tally.bump "Tampers" |> Tally.bumpIf (production <> intact) "Detected"
 
 /// Run the DAG walker differential over `iterations` generated lane sets from one pool.
 let private dagDifferential
@@ -234,51 +226,41 @@ let private dagDifferential
     (laneCount: int)
     (seed: int)
     (iterations: int)
-    : WalkerTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable t = emptyWalkerTally
-
-    let note (why: string) =
-        if t.Failure.IsNone then
-            t <- { t with Failure = Some why }
-
-    for _ in 1..iterations do
+    : Tally =
+    let step (_: int) (rng: ConfRng.T) (t: Tally) =
         let lanes, r' = gen.Lanes laneCount rng
-        rng <- r'
         let dag = dagUnder prodHash w gen.BaseOp lanes
 
-        match mintsProductionIds prodHash w dag with
-        | Some why -> note (sprintf "%s: seed=%d %s" label seed why)
-        | None -> ()
-
-        let compare (what: string) (d: Dag.T<'Op>) : DagVerdict =
+        // The verdicts are compared as VALUES (Phase 147: the reason as a class, not a spelling);
+        // the renders only say what differed.
+        let compare (what: string) (d: Dag.T<'Op>) (t: Tally) : DagVerdict * Tally =
             let p, m = dagVerdicts prodHash modelHash w d
 
-            if p <> m then
-                note (
-                    sprintf
-                        "%s: seed=%d tamper=%s\n%s\n  production: %s\n  model:      %s"
-                        label
-                        seed
-                        what
-                        (renderLanes w.Encode lanes)
-                        (renderDagVerdict p)
-                        (renderDagVerdict m)
-                )
+            p,
+            t
+            |> Differential.check (p = m) (fun () ->
+                sprintf
+                    "%s: seed=%d tamper=%s\n%s\n  production: %s\n  model:      %s"
+                    label
+                    seed
+                    what
+                    (renderLanes w.Encode lanes)
+                    (renderDagVerdict p)
+                    (renderDagVerdict m))
 
-            p
+        let tamper (what: string, d: Dag.T<'Op>) (t: Tally) : Tally =
+            let p, t = compare what d t
+            tamperCounted DagIntact p t
 
-        if compare "none" dag = DagIntact then
-            t <- { t with Intact = t.Intact + 1 }
+        let t =
+            match mintsProductionIds prodHash w dag with
+            | Some why -> Tally.disagree (sprintf "%s: seed=%d %s" label seed why) t
+            | None -> t
 
+        let p, t = compare "none" dag t
+        let t = Tally.bumpIf (p = DagIntact) "Intact" t
         let singles = dagTampers otherOp dag
-
-        for (what, tampered) in singles do
-            let p = compare what tampered
-            t <- { t with Tampers = t.Tampers + 1 }
-
-            if p <> DagIntact then
-                t <- { t with Detected = t.Detected + 1 }
+        let t = Differential.over singles tamper t
 
         // Phase 311: TWO tampers at once, so the walkers must agree on WHICH break comes first —
         // production names the earliest in its walk, and the model is handed that walk.
@@ -300,40 +282,37 @@ let private dagDifferential
                 |> Option.map (fun k -> k, what, d.Nodes[k]))
             |> List.distinctBy (fun (k, _, _) -> k)
 
-        for (i, (k1, w1, n1)) in List.indexed perNode do
-            for (j, (k2, w2, n2)) in List.indexed perNode do
-                if i < j then
-                    let both: Dag.T<'Op> = DagOf.nodes (dag.Nodes |> Map.add k1 n1 |> Map.add k2 n2)
+        let pairs =
+            [ for (i, (k1, w1, n1)) in List.indexed perNode do
+                  for (j, (k2, w2, n2)) in List.indexed perNode do
+                      if i < j then
+                          yield w1 + " and " + w2, DagOf.nodes (dag.Nodes |> Map.add k1 n1 |> Map.add k2 n2) ]
 
-                    let p = compare (w1 + " and " + w2) both
-                    t <- { t with Tampers = t.Tampers + 1 }
+        r', Differential.over pairs tamper t
 
-                    if p <> DagIntact then
-                        t <- { t with Detected = t.Detected + 1 }
-
-    t
+    Differential.seeded iterations (ConfRng.ofSeed seed) step walkerTally
 
 // ---- the linear chain ----
 
-let rec private posOfInt (i: int) : Chain.pos =
+let rec posOfInt (i: int) : Chain.pos =
     if i <= 0 then
         Chain.PZero
     else
         Chain.PSucc(posOfInt (i - 1))
 
-let rec private intOfPos (p: Chain.pos) : int =
+let rec intOfPos (p: Chain.pos) : int =
     match p with
     | Chain.PZero -> 0
     | Chain.PSucc m -> 1 + intOfPos m
 
 /// F#'s `string (seq: int)`, which the model takes as a parameter for the same reason it takes the
 /// hash: rendering an integer is not something a model of a hash chain owns.
-let private showPos (p: Chain.pos) : string = string (intOfPos p)
+let showPos (p: Chain.pos) : string = string (intOfPos p)
 
 /// Production's records as the model reads them. `Seq` is a Peano numeral here (the extraction
 /// carries no integers — `proofs/README.md`, finding 2), so a tampered NEGATIVE sequence is
 /// outside what this bridge can carry and the tampers below stay non-negative.
-let private toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
+let toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
     rs
     |> List.map (fun r ->
         { Chain.rseq = posOfInt r.Seq
@@ -438,64 +417,52 @@ let private chainDifferential
     (gen: LaneGen<'Op, 'State>)
     (seed: int)
     (iterations: int)
-    : WalkerTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable t = emptyWalkerTally
-
-    let note (why: string) =
-        if t.Failure.IsNone then
-            t <- { t with Failure = Some why }
-
-    for _ in 1..iterations do
+    : Tally =
+    let step (_: int) (rng: ConfRng.T) (t: Tally) =
         // One lane's ops, appended as one writer's linear stream.
         let lanes, r' = gen.Lanes 2 rng
-        rng <- r'
         let ops = List.concat lanes
         let rs = chainUnder prodHash w gen.State0 (Human "writer") ops
 
-        let compare (what: string) (records: OpRecord<'Op> list) : ChainVerdict =
+        let compare (what: string) (records: OpRecord<'Op> list) (t: Tally) : ChainVerdict * Tally =
             let p, m = chainVerdicts prodHash modelHash w records
 
-            if p <> m then
-                note (
-                    sprintf
-                        "%s: seed=%d tamper=%s ops=[%s]\n  production: %s\n  model:      %s"
-                        label
-                        seed
-                        what
-                        (ops |> List.map w.Encode |> String.concat "; ")
-                        (renderChainVerdict p)
-                        (renderChainVerdict m)
-                )
+            p,
+            t
+            |> Differential.check (p = m) (fun () ->
+                sprintf
+                    "%s: seed=%d tamper=%s ops=[%s]\n  production: %s\n  model:      %s"
+                    label
+                    seed
+                    what
+                    (ops |> List.map w.Encode |> String.concat "; ")
+                    (renderChainVerdict p)
+                    (renderChainVerdict m))
 
-            p
+        let tamper (what: string, tampered: OpRecord<'Op> list) (t: Tally) : Tally =
+            let p, t = compare what tampered t
+            tamperCounted ChainIntact p t
 
-        if not (List.isEmpty rs) then
-            if compare "none" rs = ChainIntact then
-                t <- { t with Intact = t.Intact + 1 }
+        if List.isEmpty rs then
+            r', t
+        else
+            let p, t = compare "none" rs t
+            let t = Tally.bumpIf (p = ChainIntact) "Intact" t
+            r', Differential.over (chainTampers otherOp rs) tamper t
 
-            for (what, tampered) in chainTampers otherOp rs do
-                let p = compare what tampered
-                t <- { t with Tampers = t.Tampers + 1 }
+    Differential.seeded iterations (ConfRng.ofSeed seed) step walkerTally
 
-                if p <> ChainIntact then
-                    t <- { t with Detected = t.Detected + 1 }
+let private expectWalkerAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees label t
+    Expect.isGreaterThan (Tally.count "Intact" t) 0 (sprintf "%s: no intact structure was compared" label)
+    Expect.isGreaterThan (Tally.count "Tampers" t) 0 (sprintf "%s: no tamper was compared" label)
 
-    t
-
-let private expectWalkerAgreement (label: string) (t: WalkerTally) =
-    match t.Failure with
-    | Some why -> failtest why
-    | None ->
-        Expect.isGreaterThan t.Intact 0 (sprintf "%s: no intact structure was compared" label)
-        Expect.isGreaterThan t.Tampers 0 (sprintf "%s: no tamper was compared" label)
-
-        // The teeth's vacuity guard, and the one that matters most here: two walkers that both say
-        // "intact" agree perfectly and certify nothing. Detection has to have HAPPENED.
-        Expect.isGreaterThan
-            t.Detected
-            0
-            (sprintf "%s: every tamper went undetected, so the agreement is vacuous" label)
+    // The teeth's vacuity guard, and the one that matters most here: two walkers that both say
+    // "intact" agree perfectly and certify nothing. Detection has to have HAPPENED.
+    Expect.isGreaterThan
+        (Tally.count "Detected" t)
+        0
+        (sprintf "%s: every tamper went undetected, so the agreement is vacuous" label)
 
 /// A deliberately NON-INJECTIVE `HashFn`: `nodeHash` hands it the joined parents and
 /// `actorEncoded + "|" + encodedOp`, and this folds only up to the first `|` — so the actor
@@ -549,17 +516,13 @@ let private toModelReplayed (v: ReplayVerdict<'State, 'Rej>) : Chain.replayed<'S
     | HaltedAt(i, e) -> Chain.Halted(posOfInt i, e)
 
 /// The witness's reducer, as the model takes it — the ONLY thing section 7 asks of a domain.
-let private chainApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : Chain.applied<'State, 'Rej> =
+let chainApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : Chain.applied<'State, 'Rej> =
     match w.Apply op st with
     | Ok s -> Chain.Applied s
     | Error e -> Chain.Refused e
 
 /// Production's two compaction entry points. They differ in the snapshot's hash pre-image and in
 /// nothing else, which is why the model takes the payload as a parameter.
-type private SnapshotMode =
-    | StateHashed
-    | ChainOnly
-
 let private prodCompact
     (mode: SnapshotMode)
     (hashFn: HashFn)
@@ -570,8 +533,8 @@ let private prodCompact
     (n: int)
     : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
     match mode with
-    | StateHashed -> SnapshotMatrix.compact hashFn stateEnc w state0 rs n
-    | ChainOnly -> SnapshotMatrix.compactChainOnly hashFn w state0 rs n
+    | SnapshotMode.Strict -> SnapshotMatrix.compact hashFn stateEnc w state0 rs n
+    | SnapshotMode.ChainOnly -> SnapshotMatrix.compactChainOnly hashFn w state0 rs n
 
 let private prodVerifyAcross
     (mode: SnapshotMode)
@@ -582,15 +545,15 @@ let private prodVerifyAcross
     (tail: OpRecord<'Op> list)
     : bool =
     match mode with
-    | StateHashed -> SnapshotMatrix.verifyAcross hashFn stateEnc w snap tail
-    | ChainOnly -> SnapshotMatrix.verifyAcrossChainOnly hashFn w snap tail
+    | SnapshotMode.Strict -> SnapshotMatrix.verifyAcross hashFn stateEnc w snap tail
+    | SnapshotMode.ChainOnly -> SnapshotMatrix.verifyAcrossChainOnly hashFn w snap tail
 
-let private modelPay (mode: SnapshotMode) (stateEnc: 'State -> string) : Chain.pos -> 'State -> string =
+let modelPay (mode: SnapshotMode) (stateEnc: 'State -> string) : Chain.pos -> 'State -> string =
     match mode with
-    | StateHashed -> Chain.snap_payload showPos stateEnc
-    | ChainOnly -> Chain.snap_payload_chain_only showPos
+    | SnapshotMode.Strict -> Chain.snap_payload showPos stateEnc
+    | SnapshotMode.ChainOnly -> Chain.snap_payload_chain_only showPos
 
-let private toModelSnapshot (s: Snapshot<'State>) : Chain.snapshot<'State> =
+let toModelSnapshot (s: Snapshot<'State>) : Chain.snapshot<'State> =
     { Chain.sseq = posOfInt s.Seq
       Chain.sstate = s.State
       Chain.sprev = s.PrevHash
@@ -615,40 +578,26 @@ let private modelCompactVerdict (r: Chain.compacted<'Op, 'State>) : CompactVerdi
     | Chain.Compacted(s, tail) -> CompactedTo(intOfPos s.sseq, s.sstate, s.sprev, s.shash, tail)
     | Chain.CompactRefused e -> CompactRefusedWith e
 
-type private SnapshotTally =
-    {
-        Failure: string option
-        /// Compactions compared, and the two refusal classes among them.
-        Compactions: int
-        OutOfRange: int
-        PrefixRefused: int
-        /// Bounded replays that reached a state, and ones that HALTED in the tail at a boundary past
-        /// zero — the only place the theorem's `offset` is observable.
-        Accepted: int
-        HaltedPastZero: int
-        /// Boundaries production verified across, and ones it rejected.
-        VerifiedAcross: int
-        RejectedAcross: int
-        /// Compactions that verify across although the ORIGINAL does not: a tamper in the discarded
-        /// prefix. `compact_verifies_iff_original`'s premise, observed being load-bearing.
-        PrefixTamperUnseen: int
-        /// Tampers of a compacted TAIL, and how many production's boundary walker found.
-        TailTampers: int
-        TailDetected: int
-    }
-
-let private emptySnapshotTally =
-    { Failure = None
-      Compactions = 0
-      OutOfRange = 0
-      PrefixRefused = 0
-      Accepted = 0
-      HaltedPastZero = 0
-      VerifiedAcross = 0
-      RejectedAcross = 0
-      PrefixTamperUnseen = 0
-      TailTampers = 0
-      TailDetected = 0 }
+/// The snapshot tally. `Compactions` compared, and the two refusal classes among them
+/// (`OutOfRange`, `PrefixRefused`). Bounded replays that reached a state (`Accepted`), and ones that
+/// HALTED in the tail at a boundary past zero (`HaltedPastZero`) — the only place the theorem's
+/// `offset` is observable. Boundaries production verified across (`VerifiedAcross`), and ones it
+/// rejected (`RejectedAcross`). `PrefixTamperUnseen`: compactions that verify across although the
+/// ORIGINAL does not — a tamper in the discarded prefix, `compact_verifies_iff_original`'s premise
+/// observed being load-bearing. `TailTampers` of a compacted tail, and how many production's
+/// boundary walker found (`TailDetected`).
+let private snapshotTally =
+    Tally.empty
+        [ "Compactions"
+          "OutOfRange"
+          "PrefixRefused"
+          "Accepted"
+          "HaltedPastZero"
+          "VerifiedAcross"
+          "RejectedAcross"
+          "PrefixTamperUnseen"
+          "TailTampers"
+          "TailDetected" ]
 
 let private snapshotDifferential
     (label: string)
@@ -660,19 +609,11 @@ let private snapshotDifferential
     (gen: LaneGen<'Op, 'State>)
     (seed: int)
     (iterations: int)
-    : SnapshotTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable t = emptySnapshotTally
-
-    let note (why: string) =
-        if t.Failure.IsNone then
-            t <- { t with Failure = Some why }
-
+    : Tally =
     let apply = chainApply w
 
-    for _ in 1..iterations do
+    let step (_: int) (rng: ConfRng.T) (t: Tally) =
         let lanes, r' = gen.Lanes 2 rng
-        rng <- r'
         let ops = List.concat lanes
         let intact = chainUnder prodHash w gen.State0 (Human "writer") ops
 
@@ -696,7 +637,7 @@ let private snapshotDifferential
                 (toModelSnapshot snap)
                 (toChainRecords tail)
 
-        let compareAt (what: string) (rs: OpRecord<'Op> list) (mode: SnapshotMode) (n: int) =
+        let compareAt (what: string, rs: OpRecord<'Op> list, mode: SnapshotMode, n: int) (t: Tally) : Tally =
             let here = where what mode n
             let p = prodCompact mode prodHash stateEnc w gen.State0 rs n
 
@@ -712,73 +653,40 @@ let private snapshotDifferential
                     (posOfInt n)
 
             let pv, mv = prodCompactVerdict p, modelCompactVerdict m
-
-            t <-
-                { t with
-                    Compactions = t.Compactions + 1 }
-
-            if pv <> mv then
-                note (sprintf "%s\n  compact, production: %A\n  compact, model:      %A" here pv mv)
-
             let pOrigin = prodReplayVerdict (OpStream.replay w gen.State0 rs)
-
             let mOrigin = modelReplayVerdict (Chain.replay apply gen.State0 (toChainRecords rs))
 
-            if pOrigin <> mOrigin then
-                note (sprintf "%s\n  replay, production: %A\n  replay, model:      %A" here pOrigin mOrigin)
+            let t =
+                t
+                |> Tally.bump "Compactions"
+                |> Differential.check (pv = mv) (fun () ->
+                    sprintf "%s\n  compact, production: %A\n  compact, model:      %A" here pv mv)
+                |> Differential.check (pOrigin = mOrigin) (fun () ->
+                    sprintf "%s\n  replay, production: %A\n  replay, model:      %A" here pOrigin mOrigin)
 
             match p with
+            | Error _ when n > List.length rs -> Tally.bump "OutOfRange" t
             | Error _ ->
-                if n > List.length rs then
-                    t <- { t with OutOfRange = t.OutOfRange + 1 }
-                else
-                    t <-
-                        { t with
-                            PrefixRefused = t.PrefixRefused + 1 }
-
-                    // `compact_refusal_is_the_origins`, held of production: an in-range refusal is
-                    // the origin's own halt, inside the prefix.
+                // `compact_refusal_is_the_origins`, held of production: an in-range refusal is the
+                // origin's own halt, inside the prefix.
+                let theOrigins =
                     match pOrigin with
-                    | HaltedAt(i, _) when i < n -> ()
-                    | other ->
-                        note (
-                            sprintf "%s\n  compact refused an in-range boundary, but the origin replay is %A" here other
-                        )
+                    | HaltedAt(i, _) -> i < n
+                    | ReplayedTo _ -> false
+
+                t
+                |> Tally.bump "PrefixRefused"
+                |> Differential.check theOrigins (fun () ->
+                    sprintf "%s\n  compact refused an in-range boundary, but the origin replay is %A" here pOrigin)
             | Ok(snap, tail) ->
                 let pFrom = prodReplayVerdict (SnapshotMatrix.replayFrom w snap tail)
 
                 let mFrom =
                     modelReplayVerdict (Chain.replay_from apply (toModelSnapshot snap) (toChainRecords tail))
 
-                if pFrom <> mFrom then
-                    note (sprintf "%s\n  replayFrom, production: %A\n  replayFrom, model:      %A" here pFrom mFrom)
-
                 // `replay_from_snapshot_eq`, held of PRODUCTION's two values.
                 let shifted = modelReplayVerdict (Chain.offset (posOfInt n) (toModelReplayed pFrom))
-
-                if shifted <> pOrigin then
-                    note (
-                        sprintf
-                            "%s\n  replay from the origin:                %A\n  replayFrom, read at the origin's index: %A"
-                            here
-                            pOrigin
-                            shifted
-                    )
-
-                match pFrom with
-                | ReplayedTo _ -> t <- { t with Accepted = t.Accepted + 1 }
-                | HaltedAt _ when n > 0 ->
-                    t <-
-                        { t with
-                            HaltedPastZero = t.HaltedPastZero + 1 }
-                | HaltedAt _ -> ()
-
                 let pAcross, mAcross = across mode snap tail
-
-                if pAcross <> mAcross then
-                    note (
-                        sprintf "%s\n  verifyAcross, production: %b\n  verify_across, model:    %b" here pAcross mAcross
-                    )
 
                 // `compact_preserves_verify`, held of PRODUCTION's three values.
                 let whole = OpStream.verifyChain (OpStream.canonical prodHash w) rs
@@ -786,92 +694,101 @@ let private snapshotDifferential
                 let prefix =
                     OpStream.verifyChain (OpStream.canonical prodHash w) (List.truncate n rs)
 
-                if whole <> (prefix && pAcross) then
-                    note (
+                let tailTamper (tamper: string, tail': OpRecord<'Op> list) (t: Tally) : Tally =
+                    let pT, mT = across mode snap tail'
+
+                    t
+                    |> Tally.bump "TailTampers"
+                    |> Differential.check (pT = mT) (fun () ->
+                        sprintf
+                            "%s tail-tamper=%s\n  verifyAcross, production: %b\n  verify_across, model:    %b"
+                            here
+                            tamper
+                            pT
+                            mT)
+                    |> Tally.bumpIf (not pT) "TailDetected"
+
+                let replayed (t: Tally) : Tally =
+                    match pFrom with
+                    | ReplayedTo _ -> Tally.bump "Accepted" t
+                    | HaltedAt _ when n > 0 -> Tally.bump "HaltedPastZero" t
+                    | HaltedAt _ -> t
+
+                let t =
+                    t
+                    |> Differential.check (pFrom = mFrom) (fun () ->
+                        sprintf "%s\n  replayFrom, production: %A\n  replayFrom, model:      %A" here pFrom mFrom)
+                    |> Differential.check (shifted = pOrigin) (fun () ->
+                        sprintf
+                            "%s\n  replay from the origin:                %A\n  replayFrom, read at the origin's index: %A"
+                            here
+                            pOrigin
+                            shifted)
+                    |> replayed
+                    |> Differential.check (pAcross = mAcross) (fun () ->
+                        sprintf
+                            "%s\n  verifyAcross, production: %b\n  verify_across, model:    %b"
+                            here
+                            pAcross
+                            mAcross)
+                    |> Differential.check (whole = (prefix && pAcross)) (fun () ->
                         sprintf
                             "%s\n  verifyChain whole=%b, but verifyChain prefix=%b and verifyAcross=%b"
                             here
                             whole
                             prefix
-                            pAcross
-                    )
-
-                if pAcross then
-                    t <-
-                        { t with
-                            VerifiedAcross = t.VerifiedAcross + 1 }
-
-                    if not whole then
-                        t <-
-                            { t with
-                                PrefixTamperUnseen = t.PrefixTamperUnseen + 1 }
-                else
-                    t <-
-                        { t with
-                            RejectedAcross = t.RejectedAcross + 1 }
+                            pAcross)
+                    |> Tally.bumpIf pAcross "VerifiedAcross"
+                    |> Tally.bumpIf (pAcross && not whole) "PrefixTamperUnseen"
+                    |> Tally.bumpIf (not pAcross) "RejectedAcross"
 
                 // Every tamper of the compacted TAIL — of the intact stream only, so a detection
                 // here is a detection of THIS tamper and not of one the stream already carried.
                 if what = "none" then
-                    for (tamper, tail') in chainTampers otherOp tail do
-                        let pT, mT = across mode snap tail'
+                    Differential.over (chainTampers otherOp tail) tailTamper t
+                else
+                    t
 
-                        t <-
-                            { t with
-                                TailTampers = t.TailTampers + 1 }
+        let cases =
+            [ if not (List.isEmpty intact) then
+                  for (what, rs) in ("none", intact) :: chainTampers otherOp intact do
+                      for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
+                          for n in 0 .. List.length rs + 1 do
+                              yield what, rs, mode, n ]
 
-                        if pT <> mT then
-                            note (
-                                sprintf
-                                    "%s tail-tamper=%s\n  verifyAcross, production: %b\n  verify_across, model:    %b"
-                                    here
-                                    tamper
-                                    pT
-                                    mT
-                            )
+        r', Differential.over cases compareAt t
 
-                        if not pT then
-                            t <-
-                                { t with
-                                    TailDetected = t.TailDetected + 1 }
+    Differential.seeded iterations (ConfRng.ofSeed seed) step snapshotTally
 
-        if not (List.isEmpty intact) then
-            for (what, rs) in ("none", intact) :: chainTampers otherOp intact do
-                for mode in [ StateHashed; ChainOnly ] do
-                    for n in 0 .. List.length rs + 1 do
-                        compareAt what rs mode n
+let private expectSnapshotAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees label t
+    // Every class the two theorems speak about has to have been MET, or the agreement above is
+    // about less than it claims.
+    Expect.isGreaterThan (Tally.count "Accepted" t) 0 (sprintf "%s: no bounded replay reached a state" label)
 
-    t
+    Expect.isGreaterThan
+        (Tally.count "HaltedPastZero" t)
+        0
+        (sprintf "%s: no bounded replay halted past boundary zero, so the index offset was never observable" label)
 
-let private expectSnapshotAgreement (label: string) (t: SnapshotTally) =
-    match t.Failure with
-    | Some why -> failtest why
-    | None ->
-        // Every class the two theorems speak about has to have been MET, or the agreement above is
-        // about less than it claims.
-        Expect.isGreaterThan t.Accepted 0 (sprintf "%s: no bounded replay reached a state" label)
+    Expect.isGreaterThan (Tally.count "OutOfRange" t) 0 (sprintf "%s: no out-of-range boundary was compared" label)
 
-        Expect.isGreaterThan
-            t.HaltedPastZero
-            0
-            (sprintf "%s: no bounded replay halted past boundary zero, so the index offset was never observable" label)
+    Expect.isGreaterThan (Tally.count "PrefixRefused" t) 0 (sprintf "%s: no compaction was refused on its prefix" label)
 
-        Expect.isGreaterThan t.OutOfRange 0 (sprintf "%s: no out-of-range boundary was compared" label)
-        Expect.isGreaterThan t.PrefixRefused 0 (sprintf "%s: no compaction was refused on its prefix" label)
-        Expect.isGreaterThan t.VerifiedAcross 0 (sprintf "%s: no boundary verified" label)
-        Expect.isGreaterThan t.RejectedAcross 0 (sprintf "%s: no boundary was rejected" label)
+    Expect.isGreaterThan (Tally.count "VerifiedAcross" t) 0 (sprintf "%s: no boundary verified" label)
+    Expect.isGreaterThan (Tally.count "RejectedAcross" t) 0 (sprintf "%s: no boundary was rejected" label)
 
-        Expect.isGreaterThan
-            t.PrefixTamperUnseen
-            0
-            (sprintf "%s: no prefix tamper was compacted away, so the corollary's premise was never exercised" label)
+    Expect.isGreaterThan
+        (Tally.count "PrefixTamperUnseen" t)
+        0
+        (sprintf "%s: no prefix tamper was compacted away, so the corollary's premise was never exercised" label)
 
-        Expect.isGreaterThan t.TailTampers 0 (sprintf "%s: no tail tamper was compared" label)
+    Expect.isGreaterThan (Tally.count "TailTampers" t) 0 (sprintf "%s: no tail tamper was compared" label)
 
-        Expect.isGreaterThan
-            t.TailDetected
-            0
-            (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
+    Expect.isGreaterThan
+        (Tally.count "TailDetected" t)
+        0
+        (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
 
 // ---------------------------------------------------------------------------
 //  Phase 193 — the signed head (`proofs/Chain.fst`, section 8)
@@ -1027,45 +944,28 @@ let private spliceCases (otherOp: 'Op -> 'Op) (steps: (Actor * 'Op) list) : Spli
             Model = Chain.Dropped(posOfInt (n + 2))
             Steps = steps } ]
 
-type private SignedTally =
-    {
-        Failure: string option
-        /// Chains signed, and keyrings drawn with more than one key.
-        Signed: int
-        MultiKey: int
-        /// A verifier whose ring lacks the signing key, and an attestation re-labelled to another
-        /// key of the same ring: both refused, on the intact chain.
-        UnknownKeyRefused: int
-        WrongKeyRefused: int
-        /// Re-minted splices compared; those the WALKER accepted (all of them, or the re-mint is
-        /// not one); those the signature refused; and the no-op ones that stayed accepted.
-        Splices: int
-        WalkerBlind: int
-        Refused: int
-        NoOpAccepted: int
-        ReplacedRefused: int
-        InsertedRefused: int
-        DroppedRefused: int
-        /// In-place tampers — no re-mint — which the walker finds before the signature is asked.
-        InPlace: int
-        InPlaceRefused: int
-    }
-
-let private emptySignedTally =
-    { Failure = None
-      Signed = 0
-      MultiKey = 0
-      UnknownKeyRefused = 0
-      WrongKeyRefused = 0
-      Splices = 0
-      WalkerBlind = 0
-      Refused = 0
-      NoOpAccepted = 0
-      ReplacedRefused = 0
-      InsertedRefused = 0
-      DroppedRefused = 0
-      InPlace = 0
-      InPlaceRefused = 0 }
+/// The signed-head tally. Chains `Signed`, and keyrings drawn with more than one key (`MultiKey`).
+/// A verifier whose ring lacks the signing key (`UnknownKeyRefused`), and an attestation re-labelled
+/// to another key of the same ring (`WrongKeyRefused`): both refused, on the intact chain. Re-minted
+/// `Splices` compared; those the WALKER accepted (`WalkerBlind` — all of them, or the re-mint is not
+/// one); those the signature `Refused`, by class (`ReplacedRefused`, `InsertedRefused`,
+/// `DroppedRefused`); and the no-op ones that stayed accepted (`NoOpAccepted`). `InPlace` tampers —
+/// no re-mint — which the walker finds before the signature is asked (`InPlaceRefused`).
+let private signedTally =
+    Tally.empty
+        [ "Signed"
+          "MultiKey"
+          "UnknownKeyRefused"
+          "WrongKeyRefused"
+          "Splices"
+          "WalkerBlind"
+          "Refused"
+          "NoOpAccepted"
+          "ReplacedRefused"
+          "InsertedRefused"
+          "DroppedRefused"
+          "InPlace"
+          "InPlaceRefused" ]
 
 let private drawKeyring (rng: ConfRng.T) : Keyring * ConfRng.T =
     let count, r1 = ConfRng.intBelow 3 rng
@@ -1086,236 +986,224 @@ let private signedHeadDifferential
     (gen: LaneGen<'Op, 'State>)
     (seed: int)
     (iterations: int)
-    : SignedTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable t = emptySignedTally
-
-    let note (why: string) =
-        if t.Failure.IsNone then
-            t <- { t with Failure = Some why }
-
+    : Tally =
     let writer = Human "writer"
 
-    for _ in 1..iterations do
+    /// One intact, non-empty chain under one keyring: its head, its signature, and every re-minted
+    /// splice and in-place tamper of it.
+    let probeChain (ring: Keyring) (sink: IAttestationSink) (intact: OpRecord<'Op> list) (t: Tally) : Tally =
+        let steps = intact |> List.map (fun r -> r.Actor, r.Op)
+
+        let cs: Chain.cstep<'Op> list =
+            steps
+            |> List.map (fun (a, o) ->
+                { Chain.cactor = Actor.encode a
+                  Chain.cop = o })
+
+        let here (what: string) =
+            sprintf
+                "%s: seed=%d %s keys=%d active=%s ops=[%s]"
+                label
+                seed
+                what
+                (List.length ring.Keys)
+                ring.Active
+                (steps |> List.map (snd >> w.Encode) |> String.concat "; ")
+
+        // `OpStream.head` against `chain_head`, and the premise the theorem carries about it.
+        let pHead = OpStream.head StreamConfig.canonical intact
+        let mHead = Chain.chain_head (toChainRecords intact)
+
+        // The model's re-mint is production's `append`, record for record.
+        let mBuilt = Chain.build_chain modelHash showPos w.Encode "" Chain.PZero cs
+
+        // `attestHead` against `attest_head`.
+        let pAtt = Attestation.attestHead sink StreamConfig.canonical intact
+        let mAtt = Chain.attest_head (modelSign sink) (toChainRecords intact)
+
+        let attested =
+            match pAtt, mAtt with
+            | Some p, Chain.Found m -> toModelAtt p = m
+            | None, Chain.Missing -> true
+            | _ -> false
+
+        let t =
+            t
+            |> Differential.check (pHead = mHead) (fun () ->
+                sprintf "%s\n  head, production: %s\n  chain_head, model: %s" (here "intact") pHead mHead)
+            |> Differential.check (pHead <> "") (fun () ->
+                sprintf "%s\n  a non-empty chain's head is the empty-chain sentinel" (here "intact"))
+            |> Differential.check (mBuilt = toChainRecords intact) (fun () ->
+                sprintf "%s\n  build_chain does not mint the records production appended" (here "intact"))
+            |> Differential.check (remint prodHash w.Encode steps = intact) (fun () ->
+                sprintf "%s\n  the test's own re-mint does not reproduce production's append" (here "intact"))
+            |> Differential.check attested (fun () ->
+                sprintf "%s\n  attestHead, production: %A\n  attest_head, model:    %A" (here "intact") pAtt mAtt)
+
+        match pAtt with
+        | None -> t
+        | Some att ->
+            let accepts (verifier: IAttestationSink) (a: Attestation) (rs: OpRecord<'Op> list) : bool * bool =
+                (OpStream.verifyChain (OpStream.canonical prodHash w) rs
+                 && Attestation.verifyAttestation verifier StreamConfig.canonical a rs),
+                Chain.accepts_signed
+                    modelHash
+                    showPos
+                    w.Encode
+                    ""
+                    (modelVerify verifier)
+                    (toModelAtt a)
+                    (toChainRecords rs)
+
+            /// Production's verdict, after recording any disagreement with the model's.
+            let agree (what: string) (p: bool, m: bool) (t: Tally) : bool * Tally =
+                p,
+                t
+                |> Differential.check (p = m) (fun () ->
+                    sprintf "%s\n  accepted, production: %b\n  accepts_signed, model: %b" (here what) p m)
+
+            let t =
+                t |> Tally.bump "Signed" |> Tally.bumpIf (List.length ring.Keys > 1) "MultiKey"
+
+            // The round trip: the chain that was signed is accepted.
+            let accepted, t = agree "intact" (accepts sink att intact) t
+
+            let t =
+                Differential.check
+                    accepted
+                    (fun () ->
+                        sprintf "%s\n  the chain that was signed is refused under its own attestation" (here "intact"))
+                    t
+
+            // KEYRINGS. A verifier that does not hold the signing key refuses; so does the same
+            // signature re-labelled to another key of the ring.
+            let stranger =
+                sinkOf
+                    { ring with
+                        Keys = ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) }
+
+            let accepted, t = agree "unknown-key" (accepts stranger att intact) t
+            let t = Tally.bumpIf (not accepted) "UnknownKeyRefused" t
+
+            let relabelled (other: string, _: string) (t: Tally) : Tally =
+                let accepted, t =
+                    agree ("relabelled-to-" + other) (accepts sink { att with KeyId = other } intact) t
+
+                Tally.bumpIf (not accepted) "WrongKeyRefused" t
+
+            let t =
+                Differential.over (ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId)) relabelled t
+
+            // THE SPLICES, each re-minted.
+            let splice (sp: SpliceCase<'Op>) (t: Tally) : Tally =
+                let pForged = remint prodHash w.Encode sp.Steps
+
+                let mForged =
+                    Chain.build_chain modelHash showPos w.Encode "" Chain.PZero (Chain.apply_splice cs sp.Model)
+
+                let changes = Chain.splice_changes cs sp.Model
+
+                let t =
+                    t
+                    |> Differential.check (toChainRecords pForged = mForged) (fun () ->
+                        sprintf "%s\n  apply_splice + build_chain does not mint the production forgery" (here sp.Name))
+                    |> Differential.check (changes = (sp.Steps <> steps)) (fun () ->
+                        sprintf
+                            "%s\n  splice_changes says %b, but the production steps %s"
+                            (here sp.Name)
+                            changes
+                            (if sp.Steps <> steps then "moved" else "did not move"))
+
+                let walker = OpStream.verifyChain (OpStream.canonical prodHash w) pForged
+                let accepted, t = agree sp.Name (accepts sink att pForged) t
+                let refused = changes && not accepted
+
+                t
+                |> Tally.bump "Splices"
+                |> Tally.bumpIf walker "WalkerBlind"
+                |> Differential.check walker (fun () ->
+                    sprintf
+                        "%s\n  the re-mint does not verify, so it is not the tamper the theorem is about"
+                        (here sp.Name))
+                // `signed_head_rejects_splice`, held of PRODUCTION's own verdict.
+                |> Differential.check (not (changes && accepted)) (fun () ->
+                    sprintf "%s\n  a re-minted splice is ACCEPTED under the original attestation" (here sp.Name))
+                |> Differential.check (changes || accepted) (fun () ->
+                    sprintf "%s\n  a splice that changes nothing is refused" (here sp.Name))
+                |> Tally.bumpIf refused "Refused"
+                |> Tally.bumpIf
+                    (refused
+                     && (match sp.Model with
+                         | Chain.Replaced _ -> true
+                         | _ -> false))
+                    "ReplacedRefused"
+                |> Tally.bumpIf
+                    (refused
+                     && (match sp.Model with
+                         | Chain.Inserted _ -> true
+                         | _ -> false))
+                    "InsertedRefused"
+                |> Tally.bumpIf
+                    (refused
+                     && (match sp.Model with
+                         | Chain.Dropped _ -> true
+                         | _ -> false))
+                    "DroppedRefused"
+                |> Tally.bumpIf (not changes && accepted) "NoOpAccepted"
+
+            let t = Differential.over (spliceCases otherOp steps) splice t
+
+            // In place, with NO re-mint: the walker's own business, and the composition must
+            // still agree.
+            let inPlace (tamper: string, rs': OpRecord<'Op> list) (t: Tally) : Tally =
+                let t = Tally.bump "InPlace" t
+                let accepted, t = agree ("in-place " + tamper) (accepts sink att rs') t
+                Tally.bumpIf (not accepted) "InPlaceRefused" t
+
+            Differential.over (chainTampers otherOp intact) inPlace t
+
+    let step (_: int) (rng: ConfRng.T) (t: Tally) =
         let lanes, r' = gen.Lanes 2 rng
         let ring, r'' = drawKeyring r'
-        rng <- r''
         let sink = sinkOf ring
         let intact = chainUnder prodHash w gen.State0 writer (List.concat lanes)
 
-        if not (List.isEmpty intact) then
-            let steps = intact |> List.map (fun r -> r.Actor, r.Op)
+        r'',
+        (if List.isEmpty intact then
+             t
+         else
+             probeChain ring sink intact t)
 
-            let cs: Chain.cstep<'Op> list =
-                steps
-                |> List.map (fun (a, o) ->
-                    { Chain.cactor = Actor.encode a
-                      Chain.cop = o })
+    Differential.seeded iterations (ConfRng.ofSeed seed) step signedTally
 
-            let here (what: string) =
-                sprintf
-                    "%s: seed=%d %s keys=%d active=%s ops=[%s]"
-                    label
-                    seed
-                    what
-                    (List.length ring.Keys)
-                    ring.Active
-                    (steps |> List.map (snd >> w.Encode) |> String.concat "; ")
+let private expectSignedAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees label t
+    let count name = Tally.count name t
+    // Every class the two theorems speak about has to have been MET.
+    Expect.isGreaterThan (count "Signed") 0 (sprintf "%s: no chain was signed" label)
+    Expect.isGreaterThan (count "MultiKey") 0 (sprintf "%s: no keyring held more than one key" label)
 
-            // `OpStream.head` against `chain_head`, and the premise the theorem carries about it.
-            let pHead = OpStream.head StreamConfig.canonical intact
-            let mHead = Chain.chain_head (toChainRecords intact)
+    Expect.isGreaterThan (count "UnknownKeyRefused") 0 (sprintf "%s: no verifier lacking the key was compared" label)
 
-            if pHead <> mHead then
-                note (sprintf "%s\n  head, production: %s\n  chain_head, model: %s" (here "intact") pHead mHead)
+    Expect.isGreaterThan (count "WrongKeyRefused") 0 (sprintf "%s: no re-labelled attestation was compared" label)
+    Expect.isGreaterThan (count "Splices") 0 (sprintf "%s: no splice was compared" label)
 
-            if pHead = "" then
-                note (sprintf "%s\n  a non-empty chain's head is the empty-chain sentinel" (here "intact"))
+    Expect.equal
+        (count "WalkerBlind")
+        (count "Splices")
+        (sprintf "%s: a re-minted splice failed verifyChain, so it was not the rewrite the theorem is about" label)
 
-            // The model's re-mint is production's `append`, record for record.
-            let mBuilt = Chain.build_chain modelHash showPos w.Encode "" Chain.PZero cs
+    Expect.isGreaterThan (count "ReplacedRefused") 0 (sprintf "%s: no replaced op was refused" label)
+    Expect.isGreaterThan (count "InsertedRefused") 0 (sprintf "%s: no inserted op was refused" label)
+    Expect.isGreaterThan (count "DroppedRefused") 0 (sprintf "%s: no dropped op was refused" label)
 
-            if mBuilt <> toChainRecords intact then
-                note (sprintf "%s\n  build_chain does not mint the records production appended" (here "intact"))
+    Expect.isGreaterThan
+        (count "NoOpAccepted")
+        0
+        (sprintf "%s: no splice that changes nothing was accepted, so `splice_changes` was never load-bearing" label)
 
-            if remint prodHash w.Encode steps <> intact then
-                note (sprintf "%s\n  the test's own re-mint does not reproduce production's append" (here "intact"))
-
-            // `attestHead` against `attest_head`.
-            let pAtt = Attestation.attestHead sink StreamConfig.canonical intact
-            let mAtt = Chain.attest_head (modelSign sink) (toChainRecords intact)
-
-            (match pAtt, mAtt with
-             | Some p, Chain.Found m when toModelAtt p = m -> ()
-             | None, Chain.Missing -> ()
-             | _ ->
-                 note (
-                     sprintf "%s\n  attestHead, production: %A\n  attest_head, model:    %A" (here "intact") pAtt mAtt
-                 ))
-
-            match pAtt with
-            | None -> ()
-            | Some att ->
-                t <-
-                    { t with
-                        Signed = t.Signed + 1
-                        MultiKey = t.MultiKey + (if List.length ring.Keys > 1 then 1 else 0) }
-
-                let accepts (verifier: IAttestationSink) (a: Attestation) (rs: OpRecord<'Op> list) : bool * bool =
-                    (OpStream.verifyChain (OpStream.canonical prodHash w) rs
-                     && Attestation.verifyAttestation verifier StreamConfig.canonical a rs),
-                    Chain.accepts_signed
-                        modelHash
-                        showPos
-                        w.Encode
-                        ""
-                        (modelVerify verifier)
-                        (toModelAtt a)
-                        (toChainRecords rs)
-
-                let agree (what: string) (p: bool, m: bool) =
-                    if p <> m then
-                        note (sprintf "%s\n  accepted, production: %b\n  accepts_signed, model: %b" (here what) p m)
-
-                    p
-
-                // The round trip: the chain that was signed is accepted.
-                if not (agree "intact" (accepts sink att intact)) then
-                    note (
-                        sprintf "%s\n  the chain that was signed is refused under its own attestation" (here "intact")
-                    )
-
-                // KEYRINGS. A verifier that does not hold the signing key refuses; so does the same
-                // signature re-labelled to another key of the ring.
-                let stranger =
-                    sinkOf
-                        { ring with
-                            Keys = ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) }
-
-                if not (agree "unknown-key" (accepts stranger att intact)) then
-                    t <-
-                        { t with
-                            UnknownKeyRefused = t.UnknownKeyRefused + 1 }
-
-                for (other, _) in ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) do
-                    if not (agree ("relabelled-to-" + other) (accepts sink { att with KeyId = other } intact)) then
-                        t <-
-                            { t with
-                                WrongKeyRefused = t.WrongKeyRefused + 1 }
-
-                // THE SPLICES, each re-minted.
-                for sp in spliceCases otherOp steps do
-                    let pForged = remint prodHash w.Encode sp.Steps
-
-                    let mForged =
-                        Chain.build_chain modelHash showPos w.Encode "" Chain.PZero (Chain.apply_splice cs sp.Model)
-
-                    if toChainRecords pForged <> mForged then
-                        note (
-                            sprintf
-                                "%s\n  apply_splice + build_chain does not mint the production forgery"
-                                (here sp.Name)
-                        )
-
-                    let changes = Chain.splice_changes cs sp.Model
-
-                    if changes <> (sp.Steps <> steps) then
-                        note (
-                            sprintf
-                                "%s\n  splice_changes says %b, but the production steps %s"
-                                (here sp.Name)
-                                changes
-                                (if sp.Steps <> steps then "moved" else "did not move")
-                        )
-
-                    let walker = OpStream.verifyChain (OpStream.canonical prodHash w) pForged
-                    let accepted = agree sp.Name (accepts sink att pForged)
-
-                    t <-
-                        { t with
-                            Splices = t.Splices + 1
-                            WalkerBlind = t.WalkerBlind + (if walker then 1 else 0) }
-
-                    if not walker then
-                        note (
-                            sprintf
-                                "%s\n  the re-mint does not verify, so it is not the tamper the theorem is about"
-                                (here sp.Name)
-                        )
-
-                    // `signed_head_rejects_splice`, held of PRODUCTION's own verdict.
-                    if changes && accepted then
-                        note (
-                            sprintf "%s\n  a re-minted splice is ACCEPTED under the original attestation" (here sp.Name)
-                        )
-
-                    if not changes && not accepted then
-                        note (sprintf "%s\n  a splice that changes nothing is refused" (here sp.Name))
-
-                    if changes && not accepted then
-                        t <-
-                            { t with
-                                Refused = t.Refused + 1
-                                ReplacedRefused =
-                                    t.ReplacedRefused
-                                    + (match sp.Model with
-                                       | Chain.Replaced _ -> 1
-                                       | _ -> 0)
-                                InsertedRefused =
-                                    t.InsertedRefused
-                                    + (match sp.Model with
-                                       | Chain.Inserted _ -> 1
-                                       | _ -> 0)
-                                DroppedRefused =
-                                    t.DroppedRefused
-                                    + (match sp.Model with
-                                       | Chain.Dropped _ -> 1
-                                       | _ -> 0) }
-
-                    if not changes && accepted then
-                        t <-
-                            { t with
-                                NoOpAccepted = t.NoOpAccepted + 1 }
-
-                // In place, with NO re-mint: the walker's own business, and the composition must
-                // still agree.
-                for (tamper, rs') in chainTampers otherOp intact do
-                    t <- { t with InPlace = t.InPlace + 1 }
-
-                    if not (agree ("in-place " + tamper) (accepts sink att rs')) then
-                        t <-
-                            { t with
-                                InPlaceRefused = t.InPlaceRefused + 1 }
-
-    t
-
-let private expectSignedAgreement (label: string) (t: SignedTally) =
-    match t.Failure with
-    | Some why -> failtest why
-    | None ->
-        // Every class the two theorems speak about has to have been MET.
-        Expect.isGreaterThan t.Signed 0 (sprintf "%s: no chain was signed" label)
-        Expect.isGreaterThan t.MultiKey 0 (sprintf "%s: no keyring held more than one key" label)
-        Expect.isGreaterThan t.UnknownKeyRefused 0 (sprintf "%s: no verifier lacking the key was compared" label)
-        Expect.isGreaterThan t.WrongKeyRefused 0 (sprintf "%s: no re-labelled attestation was compared" label)
-        Expect.isGreaterThan t.Splices 0 (sprintf "%s: no splice was compared" label)
-
-        Expect.equal
-            t.WalkerBlind
-            t.Splices
-            (sprintf "%s: a re-minted splice failed verifyChain, so it was not the rewrite the theorem is about" label)
-
-        Expect.isGreaterThan t.ReplacedRefused 0 (sprintf "%s: no replaced op was refused" label)
-        Expect.isGreaterThan t.InsertedRefused 0 (sprintf "%s: no inserted op was refused" label)
-        Expect.isGreaterThan t.DroppedRefused 0 (sprintf "%s: no dropped op was refused" label)
-
-        Expect.isGreaterThan
-            t.NoOpAccepted
-            0
-            (sprintf "%s: no splice that changes nothing was accepted, so `splice_changes` was never load-bearing" label)
-
-        Expect.isGreaterThan t.InPlace 0 (sprintf "%s: no in-place tamper was compared" label)
-        Expect.equal t.InPlaceRefused t.InPlace (sprintf "%s: an in-place tamper was accepted" label)
+    Expect.isGreaterThan (count "InPlace") 0 (sprintf "%s: no in-place tamper was compared" label)
+    Expect.equal (count "InPlaceRefused") (count "InPlace") (sprintf "%s: an in-place tamper was accepted" label)
 
 // ---- the corpus dag/ family, as a source of SHAPES ----
 
@@ -1502,17 +1390,9 @@ let private payloadSpliceDifferential
     (gen: LaneGen<'Op, 'State>)
     (seed: int)
     (iterations: int)
-    : WalkerTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable t = emptyWalkerTally
-
-    let note (why: string) =
-        if t.Failure.IsNone then
-            t <- { t with Failure = Some why }
-
-    for _ in 1..iterations do
+    : Tally =
+    let step (_: int) (rng: ConfRng.T) (t: Tally) =
         let lanes, r' = gen.Lanes 2 rng
-        rng <- r'
         let ops = List.concat lanes
         // Two writers, so an actor-and-op splice can change the actor as well as the op.
         let rs =
@@ -1531,37 +1411,37 @@ let private payloadSpliceDifferential
                 (gen.State0, OpStream.empty)
             |> snd
 
-        let compare (what: string) (records: OpRecord<'Op> list) : ChainVerdict =
+        let compare (what: string) (records: OpRecord<'Op> list) (t: Tally) : ChainVerdict * Tally =
             let p, m = chainVerdicts prodHash modelHash w records
 
-            if p <> m then
-                note (
-                    sprintf
-                        "%s: seed=%d splice=%s ops=[%s]\n  production: %s\n  model:      %s"
-                        label
-                        seed
-                        what
-                        (ops |> List.map w.Encode |> String.concat "; ")
-                        (renderChainVerdict p)
-                        (renderChainVerdict m)
-                )
+            p,
+            t
+            |> Differential.check (p = m) (fun () ->
+                sprintf
+                    "%s: seed=%d splice=%s ops=[%s]\n  production: %s\n  model:      %s"
+                    label
+                    seed
+                    what
+                    (ops |> List.map w.Encode |> String.concat "; ")
+                    (renderChainVerdict p)
+                    (renderChainVerdict m))
 
-            p
+        let splice (what: string, spliced: OpRecord<'Op> list) (t: Tally) : Tally =
+            let p, t = compare what spliced t
+
+            t
+            |> tamperCounted ChainIntact p
+            |> Differential.check (p <> ChainIntact) (fun () ->
+                sprintf "%s: seed=%d splice=%s went UNDETECTED by production" label seed what)
 
         if List.length rs > 1 then
-            if compare "none" rs = ChainIntact then
-                t <- { t with Intact = t.Intact + 1 }
+            let p, t = compare "none" rs t
+            let t = Tally.bumpIf (p = ChainIntact) "Intact" t
+            r', Differential.over (payloadSplices rs) splice t
+        else
+            r', t
 
-            for (what, spliced) in payloadSplices rs do
-                let p = compare what spliced
-                t <- { t with Tampers = t.Tampers + 1 }
-
-                if p <> ChainIntact then
-                    t <- { t with Detected = t.Detected + 1 }
-                else
-                    note (sprintf "%s: seed=%d splice=%s went UNDETECTED by production" label seed what)
-
-    t
+    Differential.seeded iterations (ConfRng.ofSeed seed) step walkerTally
 
 [<Tests>]
 let tests =
@@ -1781,16 +1661,22 @@ let tests =
                   Expect.equal p DagIntact "the rebuilt DAG is intact"
                   Expect.equal m p "and the model agrees"
 
-                  let mutable detected = 0
+                  let tampers =
+                      walkerTally
+                      |> Differential.over (dagTampers (fun (o: string) -> o + " ") dag) (fun (what, tampered) t ->
+                          let tp, tm = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW tampered
 
-                  for (what, tampered) in dagTampers (fun (o: string) -> o + " ") dag do
-                      let tp, tm = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW tampered
-                      Expect.equal tm tp (sprintf "tamper %s: the two walkers disagree" what)
+                          t
+                          |> Differential.check (tm = tp) (fun () ->
+                              sprintf "tamper %s: the two walkers disagree" what)
+                          |> tamperCounted DagIntact tp)
 
-                      if tp <> DagIntact then
-                          detected <- detected + 1
+                  Differential.expectAgrees "the corpus dag/ shapes' tampers" tampers
 
-                  Expect.isGreaterThan detected 0 "the tampers were found, so the agreement is not vacuous"
+                  Expect.isGreaterThan
+                      (Tally.count "Detected" tampers)
+                      0
+                      "the tampers were found, so the agreement is not vacuous"
 
                   // Phase 64.1 on the shape only this family supplies: a merge node's id does not
                   // depend on which head the reconciler called left. This is the production side of
@@ -2259,7 +2145,7 @@ let tests =
                       3720
                       3
 
-              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+              Differential.expectLoses "a snapshot model hashing with a different function" t
 
               // And it is caught where it should be: on one intact stream, production verifies
               // across its own compaction and the perturbed model does not.
@@ -2415,12 +2301,12 @@ let tests =
 
               let prodWith (mode: SnapshotMode) (n: int) =
                   match mode with
-                  | StateHashed ->
+                  | SnapshotMode.Strict ->
                       SnapshotMatrix.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n
-                  | ChainOnly ->
+                  | SnapshotMode.ChainOnly ->
                       SnapshotMatrix.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n
 
-              for mode in [ StateHashed; ChainOnly ] do
+              for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
                   for n in 0 .. List.length rs do
                       let p = prodWith mode n
 
@@ -2492,7 +2378,7 @@ let tests =
 
               Expect.equal
                   (SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1)
-                  (prodWith StateHashed 1)
+                  (prodWith SnapshotMode.Strict 1)
                   "past zero the canonical compact and compactWith cfg are the same value"
 
           testCase
@@ -2603,7 +2489,7 @@ let tests =
                       3820
                       3
 
-              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+              Differential.expectLoses "a signed-head model hashing with a different function" t
 
           testCase
               "under a sink that verifies EVERYTHING a re-minted splice is accepted — signature_binds is load-bearing, to production and to the model alike"
@@ -2623,13 +2509,12 @@ let tests =
                       3830
                       3
 
-              match t.Failure with
-              | Some why ->
-                  Expect.stringContains
-                      why
-                      "ACCEPTED under the original attestation"
-                      "the differential fails on the theorem's conclusion, not on a model/production disagreement"
-              | None -> failtest "a sink that does not bind must let a re-minted splice through"
+              Differential.expectLoses "a sink that does not bind must let a re-minted splice through" t
+
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "ACCEPTED under the original attestation"
+                  "the differential fails on the theorem's conclusion, not on a model/production disagreement"
 
               // And it is the MODEL's verdict too: one chain, one op replaced and re-minted.
               let steps =

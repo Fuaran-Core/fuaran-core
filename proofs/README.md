@@ -3366,7 +3366,7 @@ capture stops exhausted, never answered live), and **`capture_value_tamper_detec
 BUNDLED premise (`cap_value_injective`): §6b's decomposition of the record envelope was not repeated
 for the capture envelope. The label vocabulary and the escaper are parameters, as the hash is.
 
-The bridge is `tests/Fuaran.Core.Tests/ProofOracleCompactedTests.fs` (`compacted-stream-differential`,
+The bridge is `tests/Fuaran.Core.Tests/ProofOracle.CompactedTests.fs` (`compacted-stream-differential`,
 `capture-journal-differential`): every `(n, k)` pair of a seeded stream pool in both snapshot modes,
 a starved snapshot so the prefix refusal is met, append after compaction at every boundary, the key
 index at every boundary, and recorded, tampered, replayed and truncated capture journals. Before it
