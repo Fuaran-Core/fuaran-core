@@ -1673,7 +1673,8 @@ module private Seam550 =
             "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
 
         let script =
-            dll "Fuaran.Core.Wire.dll"
+            dll "Fuaran.Core.Text.dll"
+            + dll "Fuaran.Core.Wire.dll"
             + "open Fuaran.Core\n"
             + hostSource
             + "\n"
@@ -1962,7 +1963,8 @@ let seamCodecs550 =
                       "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
 
                   let script =
-                      dll "Fuaran.Core.Wire.dll"
+                      dll "Fuaran.Core.Text.dll"
+                      + dll "Fuaran.Core.Wire.dll"
                       + dll "Fuaran.Core.Tree.dll"
                       + dll "Fuaran.Core.Validator.dll"
                       + "open Fuaran.Core\n"
