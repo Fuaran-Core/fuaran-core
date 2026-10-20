@@ -457,6 +457,458 @@ type ColumnError =
     /// `validity` arrays disagreeing on the wire.
     | RaggedColumns of column: string * expected: int * got: int
 
+/// THE SCALAR SET AS A TABLE (Phase 514, DECISIONS.md D178): what one column type does with one
+/// value, as one row per type — the storage element it holds, how a cell becomes one and one
+/// becomes a cell, how a JSON value is read into one and written from one, the slot an absent row
+/// carries, and the refusal of a value the canonical form cannot carry. The walks every type
+/// shares — `Column.ofCells` and decode filling the storage, `ColumnCodec` writing it,
+/// `Table.validate` scanning it, and the one-cell reader and writer — are written ONCE over a row,
+/// so a new scalar type is one row here and one arm in each of the two dispatches below.
+///
+/// The row holds SCALAR functions only, never an element loop (DECISIONS.md D145.5): the loops a
+/// row is handed to are the few per-column walks named above, and the aggregate loops are not rows
+/// at all — they keep their monomorphic typed arms, as does `Column.cell`, the per-row read. A
+/// timestamp row's element is the PAIR its two vectors hold at one row (the floor epoch second and
+/// the fraction at the row's unit), a struct so a .NET walk allocates nothing per row; it is the one
+/// row whose storage is not a single vector, so its `Build` and its view are written as its own.
+[<NoComparison; NoEquality>]
+type internal TypeOps<'T> =
+    {
+        /// Storage for `n` rows holding the type's zero, allocated at the row's own element type
+        /// (so a Fable build keeps its typed array).
+        Alloc: int -> 'T[]
+        /// A cell as the element a column of the type holds (`ValueNone` for `Null`), widened as
+        /// `ColumnType.widens` allows; a cell of another type is the `TypeMismatch` naming it, and a
+        /// date or timestamp whose text is not canonical the `MalformedShape` naming the form. The
+        /// string is the column's name.
+        OfCell: string -> Cell -> Result<'T voption, ColumnError>
+        /// One PRESENT JSON value as an element, or the refusal naming the column.
+        ReadJson: string -> JVal -> Result<'T, ColumnError>
+        /// The JSON value a present element is written as.
+        WriteJson: 'T -> JVal
+        /// The value an absent row's slot carries in the `values` array: a wire placeholder of the
+        /// column's JSON kind, never a cell (Phase 299) — a reader skips a masked slot without
+        /// decoding it, so the `""` a date or timestamp column carries is never read as one.
+        AbsentSlot: JVal
+        /// The cell an element is read back as.
+        ToCell: 'T -> Cell
+        /// For a type with elements the codec cannot carry: the test a present element passes when
+        /// it can, and the refusal naming one that fails it, for the named column at a row. `None`
+        /// for a type whose every element is carriable. The test is the one call a scan makes per
+        /// row; the refusal is built only for a row that fails it.
+        Uncarriable: (('T -> bool) * (string -> int -> 'T -> ColumnError)) option
+        /// The storage over a filled element array and its validity.
+        Build: 'T[] -> Validity -> ColumnData
+    }
+
+/// A computation over the row of a type whose element type the caller cannot name (F# has no
+/// existential type): `TypeOps.ofType` hands it the row.
+type internal TypeOpsUser<'R> =
+    /// Run over the row.
+    abstract Use<'T> : TypeOps<'T> -> 'R
+
+/// A computation over a column's storage: `TypeOps.ofData` hands it the row of the storage's type
+/// and the element at each row.
+type internal ColumnDataUser<'R> =
+    /// Run over the row and the element reader.
+    abstract Use<'T> : TypeOps<'T> * (int -> 'T) -> 'R
+
+/// The rows of the scalar set, the two dispatches that hand one over, and the one fill.
+module internal TypeOps =
+
+    /// The refusal of a cell outside the type `ty`, as the `TypeMismatch` naming the cell's type;
+    /// `Null` is the absent row.
+    let private outside (name: string) (ty: ColumnType) (c: Cell) : Result<'T voption, ColumnError> =
+        match Cell.typeOf c with
+        | Some t -> Error(TypeMismatch(name, ty, ColumnType.tag t))
+        | None -> Ok ValueNone
+
+    /// The refusal of a `Date` cell whose text is not canonical (Phase 422: the integer storage
+    /// cannot hold it) — the `MalformedShape` `Table.validate` named for it before.
+    let private notCanonicalDate (name: string) : ColumnError =
+        MalformedShape(
+            name
+            + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
+        )
+
+    /// As `notCanonicalDate`, for an instant.
+    let private notCanonicalInstant (name: string) : ColumnError =
+        MalformedShape(
+            name
+            + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ with one to nine fraction digits and no trailing zero, naming an instant that exists"
+        )
+
+    /// What a timestamp column at `unit` holds, as the sentence both of its range refusals open
+    /// with — `Column.ofTimestamps`'s raise and `Table.validate`'s refusal (Phase 431, D145.6).
+    let timestampRange (name: string) (unit: TimeUnit) : string =
+        name
+        + ": a "
+        + ColumnType.tag (TimestampType unit)
+        + " column holds whole epoch seconds from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z and a fraction in [0, "
+        + string (TimeUnit.scale unit)
+        + "); "
+
+    /// The fraction vector a timestamp column at `unit` keeps for `fraction`: `None` for a seconds
+    /// column and wherever no PRESENT row has a fraction (Phase 422's normal form), else the vector.
+    let normalFraction (unit: TimeUnit) (fraction: int[]) (validity: Validity) : Vector<int> option =
+        let mutable any = false
+        let mutable i = 0
+
+        while not any && i < fraction.Length do
+            if fraction[i] <> 0 && Validity.isPresent i validity then
+                any <- true
+
+            i <- i + 1
+
+        match unit with
+        | TimeUnit.Seconds -> None
+        | _ when not any -> None
+        | _ -> Some(Vector.adopt fraction)
+
+    // ---- reading one JSON value: each row's `ReadJson` (Phase 417; `ColumnCodec`'s seven private
+    // readers until Phase 514) ----
+    // Each reads one present value as an element of its column type's storage, or refuses it: a
+    // float column accepts an integer JSON token (lossless widening); a timestamp column accepts an
+    // epoch number (`epochInstant`); every other type requires its exact JSON kind, as a
+    // `TypeMismatch` naming the kind found.
+    //
+    // A decimal column (`0.33.0`) reads a STRING of decimal text and canonicalises it, so `12.50`
+    // decodes to `Decimal "12.5"`; it reads an integer token, which is exact — whichever
+    // constructor the parser chose for it (Phase 299): a token past int32 arrives as a whole-valued
+    // `JFloat`, and within the int53 guard its value IS its digits, so `3000000000` decodes as `12`
+    // always did. It REFUSES a fractional number token, and a whole-valued one past 2^53, as a
+    // `TypeMismatch`: that value has been through a float by the time it arrives here, and a type
+    // whose purpose is exactness cannot accept a value it cannot vouch for. An emitter writes a
+    // decimal as a string.
+    //
+    // A date or timestamp column (Phase 299) reads only its canonical ISO-8601 text
+    // (`TemporalText`), and an epoch number only where the instant it names falls in the years the
+    // canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`. Since Phase 422 it
+    // reads them into integers: a date's day count, an instant's epoch second and its fraction at the
+    // column's unit. An instant whose fraction is finer than the unit is a `MalformedShape` naming the
+    // coarsest unit that holds it — text the column cannot read, as the corpus has pinned since Phase
+    // 299 (`timestamp-fractional-second`). An epoch number is exact in every unit: the parser refuses
+    // an integer token past 2^53 before any column reads it, and one at or past 9e15 is a `TypeMismatch`.
+
+    /// The largest magnitude a whole-valued float token carries exactly: 2^53, the parser's int53
+    /// guard. A decimal column reads a whole-valued `JFloat` up to it and no further.
+    let private int53Max = 9007199254740992.0
+
+    /// A present value of the wrong JSON kind for the column `colName` of type `ty`.
+    let private mismatch (colName: string) (ty: ColumnType) (v: JVal) : Result<'T, ColumnError> =
+        Error(TypeMismatch(colName, ty, JVal.kindName v))
+
+    /// A present value of the right kind whose text or number the column cannot hold.
+    let private notCanonical (colName: string) (what: string) : Result<'T, ColumnError> =
+        Error(MalformedShape(colName + ": " + what))
+
+    /// The refusal of a date or timestamp text that is not canonical, naming the form.
+    let private notCanonicalText (colName: string) (ty: ColumnType) (form: string) : Result<'T, ColumnError> =
+        notCanonical
+            colName
+            ("a "
+             + ColumnType.tag ty
+             + " value must be canonical ISO-8601 text, "
+             + form
+             + ", naming a moment that exists")
+
+    /// An epoch number as the instant it names in a column at `unit` (DECISIONS.md D143.5), as its
+    /// epoch second and its fraction scaled to the unit. A `timestamp` (seconds) column keeps Phase 94's
+    /// reading — models emit epoch instants against their own correct `"timestamp"` schema; unit by
+    /// magnitude: ≥ 1e11 ⇒ milliseconds, truncated to the second, else seconds (epoch-seconds stay below
+    /// 1e11 until year 5138). A sub-second column reads the number IN ITS OWN UNIT, with no magnitude
+    /// guess. Refused where the instant falls outside the years the canonical form spells (Phase 299).
+    let private epochInstant (colName: string) (unit: TimeUnit) (i: int64) : Result<struct (float * int), ColumnError> =
+        let second, fraction =
+            match unit with
+            | TimeUnit.Seconds -> (if abs i >= 100_000_000_000L then i / 1000L else i), 0L
+            | _ ->
+                let scale = int64 (TimeUnit.scale unit)
+                let s = (if i < 0L then i - scale + 1L else i) / scale
+                s, i - s * scale
+
+        if TemporalText.isInstantInRange unit (float second) (int fraction) then
+            Ok(struct (float second, int fraction))
+        else
+            notCanonical
+                colName
+                ("the epoch "
+                 + string i
+                 + " names an instant outside the years 0000-9999 the canonical timestamp spells")
+
+    // ---- the rows ----
+
+    let private ints: TypeOps<int> =
+        { Alloc = Array.zeroCreate
+          OfCell =
+            fun name c ->
+                match c with
+                | Int i -> Ok(ValueSome i)
+                | other -> outside name IntType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JInt i -> Ok i
+                | _ -> mismatch name IntType v
+          WriteJson = JInt
+          AbsentSlot = JInt 0
+          ToCell = Int
+          Uncarriable = None
+          Build = fun xs v -> Ints(Vector.adopt xs, v) }
+
+    let private floats: TypeOps<float> =
+        { Alloc = Array.zeroCreate
+          OfCell =
+            fun name c ->
+                match c with
+                | Float f -> Ok(ValueSome f)
+                | Int i -> Ok(ValueSome(float i))
+                | other -> outside name FloatType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JFloat f -> Ok f
+                | JInt i -> Ok(float i)
+                | _ -> mismatch name FloatType v
+          WriteJson = JFloat
+          AbsentSlot = JFloat 0.0
+          ToCell = Float
+          // The wire has no non-finite float. The test admits exactly the floats `JVal.nonFiniteToken`
+          // names no token for, so the refusal always has one.
+          Uncarriable =
+            Some(
+                (fun f -> not (System.Double.IsNaN f || System.Double.IsInfinity f)),
+                fun name _ f -> NonFiniteFloat(name, JVal.nonFiniteToken f |> Option.defaultValue (string f))
+            )
+          Build = fun xs v -> Floats(Vector.adopt xs, v) }
+
+    let private bools: TypeOps<bool> =
+        { Alloc = Array.zeroCreate
+          OfCell =
+            fun name c ->
+                match c with
+                | Bool b -> Ok(ValueSome b)
+                | other -> outside name BoolType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JBool b -> Ok b
+                | _ -> mismatch name BoolType v
+          WriteJson = JBool
+          AbsentSlot = JBool false
+          ToCell = Bool
+          Uncarriable = None
+          Build = fun xs v -> Bools(Vector.adopt xs, v) }
+
+    let private strs: TypeOps<string> =
+        { Alloc = fun n -> Array.create n ""
+          OfCell =
+            fun name c ->
+                match c with
+                | Str s -> Ok(ValueSome s)
+                | other -> outside name StringType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JStr s -> Ok s
+                | _ -> mismatch name StringType v
+          WriteJson = JStr
+          AbsentSlot = JStr ""
+          ToCell = Str
+          Uncarriable = None
+          Build = fun xs v -> Strs(Vector.adopt xs, v) }
+
+    let private dates: TypeOps<int> =
+        { Alloc = Array.zeroCreate
+          OfCell =
+            fun name c ->
+                match c with
+                | Date s ->
+                    match TemporalText.tryDays s with
+                    | Some d -> Ok(ValueSome d)
+                    | None -> Error(notCanonicalDate name)
+                | other -> outside name DateType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JStr s ->
+                    match TemporalText.tryDays s with
+                    | Some d -> Ok d
+                    | None -> notCanonicalText name DateType "YYYY-MM-DD"
+                | _ -> mismatch name DateType v
+          WriteJson = fun d -> JStr(TemporalText.dateText d)
+          AbsentSlot = JStr ""
+          ToCell = fun d -> Date(TemporalText.dateText d)
+          Uncarriable =
+            Some(
+                TemporalText.isDayInRange,
+                fun name _ d ->
+                    MalformedShape(
+                        name
+                        + ": a date column holds days since 1970-01-01 from "
+                        + string TemporalText.MinDay
+                        + " (0000-01-01) to "
+                        + string TemporalText.MaxDay
+                        + " (9999-12-31); "
+                        + string d
+                        + " names no day the canonical form spells"
+                    )
+            )
+          Build = fun xs v -> Dates(Vector.adopt xs, v) }
+
+    let private timestamps (unit: TimeUnit) : TypeOps<struct (float * int)> =
+        let ty = TimestampType unit
+
+        { Alloc = fun n -> Array.create n (struct (0.0, 0))
+          OfCell =
+            fun name c ->
+                match c with
+                | Timestamp s when not (TemporalText.isCanonicalTimestamp s) -> Error(notCanonicalInstant name)
+                | Timestamp s ->
+                    match TemporalText.tryInstant unit s with
+                    | Some(second, fraction) -> Ok(ValueSome(struct (second, fraction)))
+                    // An instant finer than the unit: the `TypeMismatch` naming the coarsest unit
+                    // that holds it, which does not widen into this one.
+                    | None -> outside name ty c
+                | other -> outside name ty other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JStr s ->
+                    match TemporalText.tryInstant unit s with
+                    | Some(second, fraction) -> Ok(struct (second, fraction))
+                    | None when TemporalText.isCanonicalTimestamp s ->
+                        notCanonical
+                            name
+                            ("a "
+                             + ColumnType.tag ty
+                             + " value's fraction is finer than the column's unit holds: "
+                             + ColumnType.tag (TimestampType(TemporalText.unitOf s))
+                             + " or finer is needed")
+                    | None -> notCanonicalText name ty "YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ"
+                // Epoch-seconds fit Int32 (so arrive as JInt); epoch-milliseconds overflow the
+                // parser's Int32 path and arrive as a whole-valued JFloat.
+                | JInt i -> epochInstant name unit (int64 i)
+                | JFloat f when f = floor f && abs f < 9e15 -> epochInstant name unit (int64 f)
+                | _ -> mismatch name ty v
+          WriteJson = fun (struct (second, fraction)) -> JStr(TemporalText.instantText unit second fraction)
+          AbsentSlot = JStr ""
+          ToCell = fun (struct (second, fraction)) -> Timestamp(TemporalText.instantText unit second fraction)
+          Uncarriable =
+            Some(
+                (fun (struct (second, fraction)) -> TemporalText.isInstantInRange unit second fraction),
+                fun name i _ ->
+                    MalformedShape(
+                        timestampRange name unit
+                        + "row "
+                        + string i
+                        + " holds an instant the canonical form cannot spell"
+                    )
+            )
+          Build =
+            fun pairs v ->
+                let seconds = Array.zeroCreate<float> pairs.Length
+                let fraction = Array.zeroCreate<int> pairs.Length
+
+                for i in 0 .. pairs.Length - 1 do
+                    let struct (second, f) = pairs[i]
+                    seconds[i] <- second
+                    fraction[i] <- f
+
+                Timestamps(unit, Vector.adopt seconds, normalFraction unit fraction v, v) }
+
+    let private decimals: TypeOps<string> =
+        { Alloc = fun n -> Array.create n DecimalText.zero
+          OfCell =
+            fun name c ->
+                match c with
+                | Decimal s -> Ok(ValueSome s)
+                | Int i -> Ok(ValueSome(string i))
+                | other -> outside name DecimalType other
+          ReadJson =
+            fun name v ->
+                match v with
+                | JInt i -> Ok(string i)
+                | JFloat f when f = floor f && abs f <= int53Max -> Ok(string (int64 f))
+                | JStr s ->
+                    match DecimalText.tryCanonical s with
+                    | Some canonical -> Ok canonical
+                    | None ->
+                        notCanonical
+                            name
+                            "a decimal value must be decimal text — an optional '-', digits, and an optional '.' followed by digits, with no exponent, sign '+', separator or white space"
+                | _ -> mismatch name DecimalType v
+          WriteJson = JStr
+          AbsentSlot = JStr DecimalText.zero
+          ToCell = Decimal
+          Uncarriable =
+            Some(
+                DecimalText.isCanonical,
+                fun name _ _ ->
+                    MalformedShape(
+                        name
+                        + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
+                    )
+            )
+          Build = fun xs v -> Decimals(Vector.adopt xs, v) }
+
+    // ---- the two dispatches: the only matches over the scalar set a shared walk needs ----
+
+    /// Run `u` over the row of the type `t`.
+    let ofType (t: ColumnType) (u: TypeOpsUser<'R>) : 'R =
+        match t with
+        | IntType -> u.Use ints
+        | FloatType -> u.Use floats
+        | BoolType -> u.Use bools
+        | StringType -> u.Use strs
+        | DateType -> u.Use dates
+        | TimestampType unit -> u.Use(timestamps unit)
+        | DecimalType -> u.Use decimals
+
+    /// Run `u` over the row of the storage's type and the element at each row of it (a row past the
+    /// end is the vector's range error, as an indexed read always was).
+    let ofData (d: ColumnData) (u: ColumnDataUser<'R>) : 'R =
+        match d with
+        | Ints(xs, _) -> u.Use(ints, (fun i -> xs[i]))
+        | Floats(xs, _) -> u.Use(floats, (fun i -> xs[i]))
+        | Bools(xs, _) -> u.Use(bools, (fun i -> xs[i]))
+        | Strs(xs, _) -> u.Use(strs, (fun i -> xs[i]))
+        | Dates(xs, _) -> u.Use(dates, (fun i -> xs[i]))
+        | Timestamps(unit, xs, f, _) -> u.Use(timestamps unit, (fun i -> struct (xs[i], ColumnStorage.fractionAt f i)))
+        | Decimals(xs, _) -> u.Use(decimals, (fun i -> xs[i]))
+
+    /// THE FILL — the typed storage of the rows of `source`, row `i` read by `read i` in row order
+    /// (an element, `ValueNone` for an absent row, or the refusal that stops the walk): the type's
+    /// zero at every absent row, and `AllValid` where no row is absent (Phase 420). `Column.ofCells`
+    /// and the codec's decode are this one walk, over a cell list and over the `values` array beside
+    /// its `validity`; until Phase 514 each was a walk of its own with a seven-arm match beside it.
+    let inline fill
+        (ops: TypeOps<'T>)
+        (source: 'S list)
+        (read: int -> 'S -> Result<'T voption, ColumnError>)
+        : Result<ColumnData, ColumnError> =
+        let n = List.length source
+        let out = ops.Alloc n
+        let mask = Array.zeroCreate<bool> n
+        let mutable fault = None
+        let mutable i = 0
+        let mutable rest = source
+
+        while fault.IsNone && not rest.IsEmpty do
+            match read i rest.Head with
+            | Ok(ValueSome v) ->
+                out[i] <- v
+                mask[i] <- true
+            | Ok ValueNone -> ()
+            | Error e -> fault <- Some e
+
+            i <- i + 1
+            rest <- rest.Tail
+
+        match fault with
+        | Some e -> Error e
+        | None -> Ok(ops.Build out (Validity.ofVector (Vector.adopt mask)))
+
 /// Column reads, the typed builders and readers, the cell-list bridge, and the pinned aggregate
 /// semantics — the single `aggregate` the compute layer's grouping and pivoting call rather than copy.
 module Column =
@@ -545,17 +997,7 @@ module Column =
         (validity: Validity)
         : Column =
         let refuse (detail: string) =
-            raise (
-                System.ArgumentException(
-                    name
-                    + ": a "
-                    + ColumnType.tag (TimestampType unit)
-                    + " column holds whole epoch seconds from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z and a fraction in [0, "
-                    + string (TimeUnit.scale unit)
-                    + "); "
-                    + detail
-                )
-            )
+            raise (System.ArgumentException(TypeOps.timestampRange name unit + detail))
 
         match fraction with
         | Some f when f.Length <> seconds.Length ->
@@ -635,144 +1077,6 @@ module Column =
 
     // ---- the cell-list bridge (Phase 417) ----
 
-    /// The refusal of a `Date` or `Timestamp` cell whose text is not canonical (Phase 422: the
-    /// integer storage cannot hold it) — the `MalformedShape` `Table.validate` named for it before.
-    let internal notCanonicalDate (name: string) : ColumnError =
-        MalformedShape(
-            name
-            + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
-        )
-
-    /// As `notCanonicalDate`, for an instant.
-    let internal notCanonicalInstant (name: string) : ColumnError =
-        MalformedShape(
-            name
-            + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ with one to nine fraction digits and no trailing zero, naming an instant that exists"
-        )
-
-    /// The fraction vector a timestamp column at `unit` keeps for `fraction`: `None` for a seconds
-    /// column and wherever no PRESENT row has a fraction (Phase 422's normal form), else the vector.
-    let internal normalFraction (unit: TimeUnit) (fraction: int[]) (validity: Validity) : Vector<int> option =
-        let mutable any = false
-        let mutable i = 0
-
-        while not any && i < fraction.Length do
-            if fraction[i] <> 0 && Validity.isPresent i validity then
-                any <- true
-
-            i <- i + 1
-
-        match unit with
-        | TimeUnit.Seconds -> None
-        | _ when not any -> None
-        | _ -> Some(Vector.adopt fraction)
-
-    /// The typed storage of `cells` for a column of type `ty`, or the first present cell it cannot
-    /// hold, in row order: a cell whose type does not widen into `ty` (`ColumnType.widens`) as the
-    /// `TypeMismatch` naming it, and a `Date` or `Timestamp` whose text is not canonical as a
-    /// `MalformedShape` (Phase 422 — the integer storage cannot hold it). A widened cell is
-    /// normalised (an `Int` in a float column to its float, in a decimal column to its digits, an
-    /// instant into a finer unit's scaled fraction); the type's zero is written at every absent row,
-    /// and a list with no `Null` is `AllValid` (Phase 420). Everything else a cell can carry is held
-    /// as found — a non-finite float, decimal text that is not canonical — and is `Table.validate`'s
-    /// to refuse at the codec, as before.
-    let private storageOfCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<ColumnData, ColumnError> =
-        let n = List.length cells
-        let mask = Array.zeroCreate<bool> n
-
-        /// Fill `out` from the cells through `pick`, which reads the typed value of a present cell
-        /// that fits, or names the refusal.
-        let fill (out: 'T[]) (pick: Cell -> Result<'T option, ColumnError>) =
-            let mutable fault = None
-            let mutable i = 0
-            let mutable rest = cells
-
-            while fault.IsNone && not rest.IsEmpty do
-                match pick rest.Head with
-                | Ok(Some v) ->
-                    out[i] <- v
-                    mask[i] <- true
-                | Ok None -> ()
-                | Error e -> fault <- Some e
-
-                i <- i + 1
-                rest <- rest.Tail
-
-            match fault with
-            | Some e -> Error e
-            | None -> Ok(out, Validity.ofVector (Vector.adopt mask))
-
-        let typed (out: 'T[]) pick =
-            fill out pick |> Result.map (fun (xs, v) -> Vector.adopt xs, v)
-
-        let outside (c: Cell) : Result<'T option, ColumnError> =
-            match Cell.typeOf c with
-            | Some t -> Error(TypeMismatch(name, ty, ColumnType.tag t))
-            | None -> Ok None
-
-        match ty with
-        | IntType ->
-            typed (Array.zeroCreate n) (fun c ->
-                match c with
-                | Int i -> Ok(Some i)
-                | other -> outside other)
-            |> Result.map Ints
-        | FloatType ->
-            typed (Array.zeroCreate n) (fun c ->
-                match c with
-                | Float f -> Ok(Some f)
-                | Int i -> Ok(Some(float i))
-                | other -> outside other)
-            |> Result.map Floats
-        | BoolType ->
-            typed (Array.zeroCreate n) (fun c ->
-                match c with
-                | Bool b -> Ok(Some b)
-                | other -> outside other)
-            |> Result.map Bools
-        | StringType ->
-            typed (Array.create n "") (fun c ->
-                match c with
-                | Str s -> Ok(Some s)
-                | other -> outside other)
-            |> Result.map Strs
-        | DateType ->
-            typed (Array.zeroCreate n) (fun c ->
-                match c with
-                | Date s ->
-                    match TemporalText.tryDays s with
-                    | Some d -> Ok(Some d)
-                    | None -> Error(notCanonicalDate name)
-                | other -> outside other)
-            |> Result.map Dates
-        | TimestampType unit ->
-            let fraction = Array.zeroCreate<int> n
-
-            fill (Array.create n (0.0, 0)) (fun c ->
-                match c with
-                | Timestamp s when not (TemporalText.isCanonicalTimestamp s) -> Error(notCanonicalInstant name)
-                | Timestamp s ->
-                    match TemporalText.tryInstant unit s with
-                    | Some pair -> Ok(Some pair)
-                    | None -> outside c
-                | other -> outside other)
-            |> Result.map (fun (pairs: (float * int)[], v) ->
-                let seconds = Array.zeroCreate<float> n
-
-                for i in 0 .. n - 1 do
-                    let (second, f) = pairs[i]
-                    seconds[i] <- second
-                    fraction[i] <- f
-
-                Timestamps(unit, Vector.adopt seconds, normalFraction unit fraction v, v))
-        | DecimalType ->
-            typed (Array.create n DecimalText.zero) (fun c ->
-                match c with
-                | Decimal s -> Ok(Some s)
-                | Int i -> Ok(Some(string i))
-                | other -> outside other)
-            |> Result.map Decimals
-
     /// A column of type `ty` holding `cells`, in row order — the migration bridge from the `Cell
     /// list` column (Phase 417), and the one construction that reads cells. It REFUSES the first
     /// present cell whose type does not widen into `ty` (`ColumnType.widens`), as the `TypeMismatch`
@@ -780,11 +1084,19 @@ module Column =
     /// so no column can. A widened cell is normalised at construction, as decode normalises it: an
     /// `Int` in a float column is held as its float and read back as a `Float`, and in a decimal
     /// column as its digits and read back as a `Decimal`. What the type CAN hold is held as found
-    /// and refused where it always was — a non-finite float, and decimal, date or timestamp text
-    /// that is not canonical, by `Table.validate` and so by `ColumnCodec.tryEncode`; a `Decimal`
-    /// whose text is not decimal by `Column.aggregate`.
+    /// and refused where it always was — a non-finite float, and decimal text that is not
+    /// canonical, by `Table.validate` and so by `ColumnCodec.tryEncode`; a `Decimal` whose text is
+    /// not decimal by `Column.aggregate`. A `Date` or `Timestamp` whose text is not
+    /// canonical cannot be held (Phase 422: the storage is integers) and is refused HERE, as the
+    /// `MalformedShape` naming the form. The first refusal in row order is the answer; the type's
+    /// zero is written at every absent row, and a list with no `Null` is `AllValid` (Phase 420). It
+    /// is `TypeOps.fill` over the type's row (Phase 514), the walk decode runs too.
     let ofCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<Column, ColumnError> =
-        storageOfCells name ty cells
+        TypeOps.ofType
+            ty
+            { new TypeOpsUser<Result<ColumnData, ColumnError>> with
+                member _.Use ops =
+                    TypeOps.fill ops cells (fun _ c -> ops.OfCell name c) }
         |> Result.map (fun data -> { Name = name; Data = data })
 
     /// The column's cells, in row order — a `Null` at every absent row (Phase 417). The bridge back
@@ -912,7 +1224,7 @@ module Column =
         | Some e -> Error e
         | None ->
             let validity = Validity.ofList (values |> List.map Option.isSome)
-            Ok(ofTimestamps name unit (Vector.adopt seconds) (normalFraction unit fraction validity) validity)
+            Ok(ofTimestamps name unit (Vector.adopt seconds) (TypeOps.normalFraction unit fraction validity) validity)
 #endif
 
 

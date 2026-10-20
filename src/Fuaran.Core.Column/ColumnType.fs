@@ -47,23 +47,11 @@ module ColumnType =
         | TimestampType TimeUnit.Nanoseconds -> "timestamp_ns"
         | DecimalType -> "decimal"
 
-    /// The type's position in `all` — the identity `widens` compares by, as an integer (Phase 353).
-    let private ordinal (t: ColumnType) : int =
-        match t with
-        | IntType -> 0
-        | FloatType -> 1
-        | BoolType -> 2
-        | StringType -> 3
-        | DateType -> 4
-        | TimestampType TimeUnit.Seconds -> 5
-        | DecimalType -> 6
-        | TimestampType TimeUnit.Milliseconds -> 7
-        | TimestampType TimeUnit.Microseconds -> 8
-        | TimestampType TimeUnit.Nanoseconds -> 9
-
-    /// The full closed set of valid type tags — the `UnknownType` enumeration (and the encode order).
-    /// The three sub-second timestamp units (Phase 422) are APPENDED after `DecimalType`, so the
-    /// enumeration keeps its earlier prefix in its earlier order.
+    /// The full closed set of valid type tags — the `UnknownType` enumeration (and the encode order),
+    /// and THE order of the scalar set: since Phase 514 there is no second one (a private `ordinal`
+    /// spelled the same order again as a match, for `widens`). The three sub-second timestamp units
+    /// (Phase 422) are APPENDED after `DecimalType`, so the enumeration keeps its earlier prefix in its
+    /// earlier order.
     let all =
         [ IntType
           FloatType
@@ -101,10 +89,11 @@ module ColumnType =
     /// lossless; a finer unit never widens into a coarser one.
     ///
     /// Read by pattern, not by `=` (Phase 353): a union's `=` is a structural-equality call under
-    /// Fable, and `Column.aggregate` asks this once per cell. The identity is `ordinal`'s, whose
-    /// match is exhaustive, so a new type cannot silently fail to widen into itself.
+    /// Fable, and `Column.aggregate` asks this once per cell. The identity is `tag`'s — one wire tag
+    /// per type, and its match is exhaustive, so a new type cannot silently fail to widen into
+    /// itself (Phase 514; a second exhaustive match, `ordinal`, carried it until then).
     let widens (from: ColumnType) (target: ColumnType) : bool =
         match from, target with
         | IntType, (FloatType | DecimalType) -> true
         | TimestampType a, TimestampType b -> TimeUnit.widens a b
-        | _ -> ordinal from = ordinal target
+        | _ -> tag from = tag target

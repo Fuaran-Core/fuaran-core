@@ -99,7 +99,9 @@ method Fuaran.Core.ColumnCodec.encode(Fuaran.Core.DataSource) : System.String
 method Fuaran.Core.ColumnCodec.encodeJson(Fuaran.Core.DataSource) : Fuaran.Core.JVal
 method Fuaran.Core.ColumnCodec.errorString(Fuaran.Core.ColumnError) : System.String
 method Fuaran.Core.ColumnCodec.fieldJson(Fuaran.Core.Field) : Fuaran.Core.JVal
+method Fuaran.Core.ColumnCodec.readCell(System.String, Fuaran.Core.ColumnType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Cell, Fuaran.Core.ColumnError>
 method Fuaran.Core.ColumnCodec.tryEncode(Fuaran.Core.DataSource) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.ColumnError>
+method Fuaran.Core.ColumnCodec.writeCell(System.String, Fuaran.Core.ColumnType, Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.ColumnError>
 method Fuaran.Core.ColumnData.Equals(System.Object) : System.Boolean
 method Fuaran.Core.ColumnData.GetHashCode() : System.Int32
 method Fuaran.Core.ColumnModule.aggType(Fuaran.Core.AggFn, Fuaran.Core.ColumnType) : Fuaran.Core.ColumnType

@@ -441,7 +441,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
   are the cross-host contract: two hosts encode a column to byte-identical wire (same null / coercion /
   ordering / **canonical-float** semantics — floats route through `Wire.Canon.canonicalFloat`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
-  a coercion/widening rule is a **major** bump.
+  a coercion/widening rule is a **major** bump. Since `0.39.0` (Phase 514, DECISIONS.md D178) `ColumnCodec.readCell` / `writeCell` read and write ONE value exactly as decode and encode do at a present row of a column of its type (a predicate's literal and a query argument are carried by them), and what each scalar type does with a value is one internal row per type (`TypeOps`) every per-column walk reads; a one-cell reader or writer that answers other than the codec is breaking.
 - **The typed column storage (Phase 417, `0.37.0`)** — a `Column` is `{ Name; Data }`, its `Data` one
   case of `ColumnData` per column type, each an opaque immutable `Vector<'T>` of values beside a
   `Validity` (Phase 420: `AllValid`, holding no mask, for a column with no absent row, or a `Mask` of one
