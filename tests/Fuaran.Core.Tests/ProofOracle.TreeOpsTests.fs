@@ -42,87 +42,15 @@ let private modelFpParts (f: DagFold.footprint) =
       asSet (f.slot_reads |> List.map slotKey)
       asSet (f.slot_writes |> List.map slotKey) ]
 
-type private TreeTally =
-    {
-        Diffs: string list
-        Accepted: int
-        Rejected: int
-        Classes: Set<string>
-        /// The op kinds that were ACCEPTED somewhere (Phase 309) — the pool's adequacy over the
-        /// whole alphabet, `UpdateNode` and `Batch` included.
-        AcceptedKinds: Set<string>
-    }
+/// The footprint's render pair: the six address sets, membership read as sets on both sides.
+let private footprint: Differential<Footprint, DagFold.footprint> =
+    Differential.pair (prodFpParts >> sprintf "%A") (modelFpParts >> sprintf "%A")
 
-let private emptyTreeTally =
-    { Diffs = []
-      Accepted = 0
-      Rejected = 0
-      Classes = Set.empty
-      AcceptedKinds = Set.empty }
-
-/// One (op, state) asked of both sides. `opBridge` carries the op across given the STATE it is
-/// asked at — the faithful bridge ignores the state; the Phase 290 mis-nesting mutant reads it.
-let private treeProbeWith
-    (bridge: RNode -> TreeOps.tree)
-    (opBridge: RNode -> SkeletonOp<RNode, string> -> TreeOps.op)
-    (op: SkeletonOp<RNode, string>)
-    (st: RNode)
-    (acc: TreeTally)
-    : TreeTally =
-    let mop = opBridge st op
-    let mst = bridge st
-    let where = sprintf "op %s at tree %s" (treeW.Encode op) (prodTreeHash st)
-
-    let fpDiff =
-        let p = prodFpParts (Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ])
-        let m = modelFpParts (TreeOps.op_fp mop)
-
-        if p <> m then
-            [ sprintf "footprint differs — %s\n  production: %A\n  oracle:     %A" where p m ]
-        else
-            []
-
-    let prod = Ops.apply Policy.none (OpScope.plain nodew idw) op st
-    let model = TreeOps.apply mop mst
-
-    let applyDiff, accepted, rejected, cls =
-        match prod, model with
-        | Ok pt, DagFold.Ok mt ->
-            let ph = prodTreeHash pt
-            let mh = modelTreeHash mt
-
-            // Phase 302 — compared STRUCTURALLY; the digests stay in the message only.
-            (if prodShape pt <> modelShape mt then
-                 [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
-             else
-                 []),
-            1,
-            0,
-            None
-        | Error pe, DagFold.Error me ->
-            let pc = prodRejClass pe
-            let mc = modelRejClass me
-
-            (if pc <> mc then
-                 [ sprintf "rejection class differs — %s\n  production: %s\n  oracle:     %s" where pc mc ]
-             else
-                 []),
-            0,
-            1,
-            Some pc
-        | Ok _, DagFold.Error me ->
-            [ sprintf "production ACCEPTED but the oracle rejected (%s) — %s" (modelRejClass me) where ], 0, 0, None
-        | Error pe, DagFold.Ok _ ->
-            [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodRejClass pe) where ], 0, 0, None
-
-    { acc with
-        Diffs = acc.Diffs @ fpDiff @ applyDiff
-        Accepted = acc.Accepted + accepted
-        Rejected = acc.Rejected + rejected
-        Classes =
-            match cls with
-            | Some c -> Set.add c acc.Classes
-            | None -> acc.Classes }
+/// The tree tally. `AcceptedKinds` is the op kinds ACCEPTED somewhere (Phase 309) — the pool's
+/// adequacy over the whole alphabet, `UpdateNode` and `Batch` included.
+let private treeTally =
+    Tally.empty [ "Accepted"; "Rejected" ]
+    |> Tally.sets [ "Classes"; "AcceptedKinds" ]
 
 /// The op kind, for the tally — `LawKit.opKindOf`'s vocabulary.
 let private skeletonKind (op: SkeletonOp<RNode, string>) : string =
@@ -134,6 +62,36 @@ let private skeletonKind (op: SkeletonOp<RNode, string>) : string =
     | Batch _ -> "batch"
     | UpdateNode _ -> "update"
 
+/// One (op, state) asked of both sides. `opBridge` carries the op across given the STATE it is
+/// asked at — the faithful bridge ignores the state; the Phase 290 mis-nesting mutant reads it.
+let private treeProbeWith
+    (bridge: RNode -> TreeOps.tree)
+    (opBridge: RNode -> SkeletonOp<RNode, string> -> TreeOps.op)
+    (op: SkeletonOp<RNode, string>)
+    (st: RNode)
+    (t: Tally)
+    : Tally =
+    let mop = opBridge st op
+    let mst = bridge st
+    let where = sprintf "op %s at tree %s" (treeW.Encode op) (prodTreeHash st)
+
+    let prod = Ops.apply Policy.none (OpScope.plain nodew idw) op st
+    let model = TreeOps.apply mop mst
+
+    let t =
+        t
+        |> Differential.compareWith
+            footprint
+            (fun p m -> sprintf "footprint differs — %s\n  production: %s\n  oracle:     %s" where p m)
+            (Ops.footprint Policy.none (OpScope.plain nodew idw) [ op ])
+            (TreeOps.op_fp mop)
+        |> PreservationTests.applyAgreement where prod model
+
+    match prod, model with
+    | Ok _, DagFold.Ok _ -> t |> Tally.bump "Accepted" |> Tally.reach "AcceptedKinds" (skeletonKind op)
+    | Error pe, DagFold.Error _ -> t |> Tally.bump "Rejected" |> Tally.reach "Classes" (prodRejClass pe)
+    | _ -> t
+
 /// Every op the generator yields, plus the refusals, asked at every state a prefix of the
 /// generated pool reaches — the same construction the Phase 132 diamond family uses, and for the
 /// same reason: a check at the base tree alone measures one instance.
@@ -142,13 +100,9 @@ let private treeDifferentialWith
     (opBridge: RNode -> SkeletonOp<RNode, string> -> TreeOps.op)
     (seed: int)
     (trials: int)
-    : TreeTally =
-    let mutable r = ConfRng.ofSeed seed
-    let mutable tally = emptyTreeTally
-
-    for _ in 1..trials do
+    : Tally =
+    let step _ (r: ConfRng.T) (t: Tally) =
         let lanes, r' = treeLaneGen.Lanes 3 r
-        r <- r'
         let generated = List.concat lanes
 
         let states =
@@ -161,19 +115,15 @@ let private treeDifferentialWith
                 ([ treeBase ], treeBase)
             |> fst
 
-        for op in generated @ drawnUpdatesAndBatches states generated @ treeRefusals do
-            for st in states do
-                let before = tally.Accepted
-                tally <- treeProbeWith bridge opBridge op st tally
+        r',
+        Differential.over
+            (generated @ drawnUpdatesAndBatches states generated @ treeRefusals)
+            (fun op t -> Differential.over states (treeProbeWith bridge opBridge op) t)
+            t
 
-                if tally.Accepted > before then
-                    tally <-
-                        { tally with
-                            AcceptedKinds = Set.add (skeletonKind op) tally.AcceptedKinds }
+    Differential.seeded trials (ConfRng.ofSeed seed) step treeTally
 
-    tally
-
-let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials: int) : TreeTally =
+let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials: int) : Tally =
     treeDifferentialWith bridge (fun _ -> toModelOpWith bridge) seed trials
 
 /// The MIS-NESTING mutant (Phase 290) — the go-red instrument for the digest's shape claim. An
@@ -197,6 +147,10 @@ let private toModelOpMisNest (st: RNode) (op: SkeletonOp<RNode, string>) : TreeO
         | None -> TreeOps.InsertChild(p, toModelTree node)
     | other -> toModelOpWith toModelTree other
 
+/// The diamond tally: `Met` counts the (pair, state) triples where both halves of the guarded algebra
+/// accept — the theorem's premise met in earnest — and `BatchMet` those of them carrying a batch.
+let private diamondTally = Tally.empty [ "Met"; "BatchMet" ]
+
 /// The theorem's own instance on the EXTRACTED code: for every pair the model's `independent`
 /// declares disjoint and every state where both halves of the guarded algebra accept, the two
 /// orders agree. `oracleFp` is the footprint the check runs under — the real one in the green
@@ -205,27 +159,31 @@ let private modelDiamondBreaks
     (oracleFp: TreeOps.op -> DagFold.footprint)
     (ops: TreeOps.op list)
     (states: TreeOps.tree list)
-    : string list * int =
-    let mutable met = 0
-    let mutable breaks = []
-
-    for a in ops do
-        for b in ops do
+    (t: Tally)
+    : Tally =
+    Differential.over
+        (List.allPairs ops ops)
+        (fun (a, b) t ->
             if DagFold.independent (oracleFp a) (oracleFp b) then
-                for s in states do
-                    match TreeOps.wapply a s, TreeOps.wapply b s with
-                    | DagFold.Ok sa, DagFold.Ok sb ->
-                        met <- met + 1
+                Differential.over
+                    states
+                    (fun s t ->
+                        match TreeOps.wapply a s, TreeOps.wapply b s with
+                        | DagFold.Ok sa, DagFold.Ok sb ->
+                            let commutes =
+                                match TreeOps.wapply b sa, TreeOps.wapply a sb with
+                                | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> true
+                                | _ -> false
 
-                        match TreeOps.wapply b sa, TreeOps.wapply a sb with
-                        | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> ()
-                        | _ ->
-                            breaks <-
-                                breaks
-                                @ [ sprintf "the extracted model breaks the diamond at a well-formed tree" ]
-                    | _ -> ()
-
-    breaks, met
+                            t
+                            |> Tally.bump "Met"
+                            |> Differential.check commutes (fun () ->
+                                sprintf "the extracted model breaks the diamond at a well-formed tree")
+                        | _ -> t)
+                    t
+            else
+                t)
+        t
 
 // ---- Phase 438: the build-once index (`proofs/TreeOps.fst` section 23) ----
 
@@ -281,19 +239,12 @@ let private indexStates (seed: int) (trials: int) : RNode list =
 
     reached @ repeated
 
-type private IndexTally =
-    {
-        Diffs: string list
-        /// Trees carrying an id twice that the comparison met.
-        Repeated: int
-        /// Lookups whose path was at least three ids long.
-        Deep: int
-        /// Ordered pairs production read as stale / as fresh.
-        Stale: int
-        Fresh: int
-        /// Stale pairs one reparent apart that keep every node's id, kind and child count.
-        Reparents: int
-    }
+/// The index tally. `Repeated` counts trees carrying an id twice that the comparison met; `Deep`
+/// lookups whose path was at least three ids long; `Stale` / `Fresh` the ordered pairs production
+/// read as stale / as fresh; and `Reparents` the stale pairs one reparent apart that keep every
+/// node's id, kind and child count.
+let private indexTally =
+    Tally.empty [ "Repeated"; "Deep"; "Stale"; "Fresh"; "Reparents" ]
 
 /// The model's node carries no content (`index-node-is-its-record`), so production's freshness is
 /// compared through the same view: an encoder that reads nothing. Phase 447's content conjunct is
@@ -303,117 +254,126 @@ let private noContent (_: RNode) = ""
 /// The model's `ix_*` beside production's `Tree.Index` over every tree and every id (plus an absent
 /// one), and — over a well-formed tree — both beside the walks the index caches. `fresh` is the
 /// model freshness check under test: the faithful one is `TreeOps.ix_is_fresh_for`.
-let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) (states: RNode list) : IndexTally =
-    let diffs = ResizeArray<string>()
-    let mutable repeated, deep, stale, freshN, reparents = 0, 0, 0, 0, 0
+let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) (states: RNode list) : Tally =
+    let agrees (what: string) (t: RNode) x p m =
+        Differential.check (p = m) (fun () ->
+            sprintf "%s differs at %s in %A:\n  production %A\n  model      %A" what x (toModelTree t) p m)
 
-    let differs (what: string) (t: RNode) x p m =
-        diffs.Add(sprintf "%s differs at %s in %A:\n  production %A\n  model      %A" what x (toModelTree t) p m)
-
-    for t in states do
+    let perTree (t: RNode) (tally: Tally) =
         let m = toModelTree t
         let built = Tree.Index.build nodew idw t
         let mix = TreeOps.ix_build m
         let wf = Tree.isWellFormed nodew idw t
 
-        if not wf then
-            repeated <- repeated + 1
-
         // Phase 518: production's `build` IS the refusing builder, so it stands beside the model's
         // `ix_try_build`; the model's lenient `ix_build` has no production counterpart over a
         // malformed tree any more, and the lookups are compared where production holds an index.
-        match built, TreeOps.ix_try_build m with
-        | Ok _, DagFold.Ok _ -> ()
-        | Error d, DagFold.Error d' when d = d' -> ()
-        | p, q -> differs "build" t "-" (Result.isOk p) q
+        let tally =
+            match built, TreeOps.ix_try_build m with
+            | Ok _, DagFold.Ok _ -> tally
+            | Error d, DagFold.Error d' when d = d' -> tally
+            | p, q ->
+                Tally.disagree
+                    (sprintf
+                        "%s differs at %s in %A:\n  production %A\n  model      %A"
+                        "build"
+                        "-"
+                        (toModelTree t)
+                        (Result.isOk p)
+                        q)
+                    tally
+
+        let tally = Tally.bumpIf (not wf) "Repeated" tally
 
         match built with
-        | Error _ -> ()
+        | Error _ -> tally
         | Ok pix ->
-            for x in Tree.ids nodew t @ [ "absent-438" ] do
-                let prod =
-                    (Tree.Index.tryFind idw x pix |> Option.map toModelTree,
-                     Tree.Index.parentOf idw x pix |> Option.map toModelTree,
-                     Tree.Index.path idw x pix,
-                     Tree.Index.depth idw x pix |> Option.map bigint,
-                     Tree.Index.ancestors idw x pix |> List.map toModelTree)
+            Differential.over
+                (Tree.ids nodew t @ [ "absent-438" ])
+                (fun x tally ->
+                    let prod =
+                        (Tree.Index.tryFind idw x pix |> Option.map toModelTree,
+                         Tree.Index.parentOf idw x pix |> Option.map toModelTree,
+                         Tree.Index.path idw x pix,
+                         Tree.Index.depth idw x pix |> Option.map bigint,
+                         Tree.Index.ancestors idw x pix |> List.map toModelTree)
 
-                let model =
-                    (ofMOpt (TreeOps.ix_try_find x mix),
-                     ofMOpt (TreeOps.ix_parent_of x mix),
-                     ofMOpt (TreeOps.ix_path x mix),
-                     ofMOpt (TreeOps.ix_depth x mix),
-                     TreeOps.ix_ancestors x mix)
+                    let model =
+                        (ofMOpt (TreeOps.ix_try_find x mix),
+                         ofMOpt (TreeOps.ix_parent_of x mix),
+                         ofMOpt (TreeOps.ix_path x mix),
+                         ofMOpt (TreeOps.ix_depth x mix),
+                         TreeOps.ix_ancestors x mix)
 
-                if prod <> model then
-                    differs "an index lookup" t x prod model
+                    let deep =
+                        match Tree.Index.path idw x pix with
+                        | Some p when List.length p >= 3 -> true
+                        | _ -> false
 
-                match Tree.Index.path idw x pix with
-                | Some p when List.length p >= 3 -> deep <- deep + 1
-                | _ -> ()
+                    let tally =
+                        tally |> agrees "an index lookup" t x prod model |> Tally.bumpIf deep "Deep"
 
-                if wf then
-                    // Theorem 1 at production and at the model: the index is the walk it caches.
-                    let walk =
-                        (Tree.tryFind nodew idw x t |> Option.map toModelTree,
-                         Tree.parentOf nodew idw x t |> Option.map toModelTree,
-                         Tree.path nodew idw x t,
-                         Tree.depth nodew idw x t |> Option.map bigint,
-                         Tree.ancestors nodew idw x t |> List.map toModelTree)
+                    if wf then
+                        // Theorem 1 at production and at the model: the index is the walk it caches.
+                        let walk =
+                            (Tree.tryFind nodew idw x t |> Option.map toModelTree,
+                             Tree.parentOf nodew idw x t |> Option.map toModelTree,
+                             Tree.path nodew idw x t,
+                             Tree.depth nodew idw x t |> Option.map bigint,
+                             Tree.ancestors nodew idw x t |> List.map toModelTree)
 
-                    let modelWalk =
-                        (ofMOpt (TreeOps.find_in x m),
-                         ofMOpt (TreeOps.ix_parent_walk x m),
-                         ofMOpt (TreeOps.ix_path_walk x m),
-                         ofMOpt (TreeOps.ix_depth_walk x m),
-                         TreeOps.ix_ancestors_walk x m)
+                        let modelWalk =
+                            (ofMOpt (TreeOps.find_in x m),
+                             ofMOpt (TreeOps.ix_parent_walk x m),
+                             ofMOpt (TreeOps.ix_path_walk x m),
+                             ofMOpt (TreeOps.ix_depth_walk x m),
+                             TreeOps.ix_ancestors_walk x m)
 
-                    if walk <> prod then
-                        differs "production's index against production's walk" t x prod walk
-
-                    if modelWalk <> walk then
-                        differs "the model's walk against production's walk" t x walk modelWalk
+                        tally
+                        |> agrees "production's index against production's walk" t x prod walk
+                        |> agrees "the model's walk against production's walk" t x walk modelWalk
+                    else
+                        tally)
+                tally
 
     // Theorems 2 and 3: every ordered pair, the tree an index was built from included.
-    for t0 in states do
+    let perBuilt (t0: RNode) (tally: Tally) =
         match Tree.Index.build nodew idw t0 with
-        | Error _ -> ()
+        | Error _ -> tally
         | Ok pix ->
             let mix = TreeOps.ix_build (toModelTree t0)
 
-            for t in states do
-                let p = Tree.Index.isFreshFor nodew idw noContent t pix
-                let q = fresh (toModelTree t) mix
+            Differential.over
+                states
+                (fun t tally ->
+                    let p = Tree.Index.isFreshFor nodew idw noContent t pix
+                    let q = fresh (toModelTree t) mix
 
-                if p <> q then
-                    differs "isFreshFor" t (sprintf "an index of %A" (toModelTree t0)) p q
+                    let tally =
+                        agrees "isFreshFor" t (sprintf "an index of %A" (toModelTree t0)) p q tally
 
-                if p then
-                    freshN <- freshN + 1
+                    if p then
+                        tally
+                        |> Tally.bump "Fresh"
+                        |> Differential.check
+                            (not (
+                                toModelTree t <> toModelTree t0
+                                && Tree.isWellFormed nodew idw t
+                                && Tree.isWellFormed nodew idw t0
+                            ))
+                            (fun () -> sprintf "production read a changed tree as fresh: %A against %A" t t0)
+                    else
+                        let blind (u: RNode) =
+                            Tree.preorder nodew u
+                            |> List.map (fun n -> n.Id, n.Kind, List.length n.Children)
+                            |> List.sort
 
-                    if
-                        toModelTree t <> toModelTree t0
-                        && Tree.isWellFormed nodew idw t
-                        && Tree.isWellFormed nodew idw t0
-                    then
-                        diffs.Add(sprintf "production read a changed tree as fresh: %A against %A" t t0)
-                else
-                    stale <- stale + 1
+                        tally |> Tally.bump "Stale" |> Tally.bumpIf (blind t = blind t0) "Reparents")
+                tally
 
-                    let blind (u: RNode) =
-                        Tree.preorder nodew u
-                        |> List.map (fun n -> n.Id, n.Kind, List.length n.Children)
-                        |> List.sort
-
-                    if blind t = blind t0 then
-                        reparents <- reparents + 1
-
-    { Diffs = List.ofSeq diffs
-      Repeated = repeated
-      Deep = deep
-      Stale = stale
-      Fresh = freshN
-      Reparents = reparents }
+    indexTally
+    |> Differential.over states perTree
+    |> Differential.over states perBuilt
 
 /// The go-red's freshness: the model's check with each record narrowed to (id, kind, child COUNT)
 /// and the parent links unread — a check that does not read the child ids.
@@ -430,42 +390,50 @@ let tests =
           <| fun _ ->
               let t = treeDifferential toModelTree 1330 30
 
-              match t.Diffs with
-              | d :: _ -> failtestf "the tree oracle and production DISAGREE\n%s" d
-              | [] ->
-                  // The pack's sample-adequacy posture: an agreement that never met a rejection
-                  // certifies one arm only, and one that never met an acceptance certifies none.
-                  Expect.isGreaterThan
-                      t.Accepted
-                      0
-                      (sprintf "(op, state) pairs were ACCEPTED (accepted=%d rejected=%d)" t.Accepted t.Rejected)
+              Differential.expectAgrees "the tree oracle" t
 
-                  Expect.isGreaterThan
-                      t.Rejected
-                      0
-                      (sprintf "(op, state) pairs were REJECTED (accepted=%d rejected=%d)" t.Accepted t.Rejected)
+              // The pack's sample-adequacy posture: an agreement that never met a rejection
+              // certifies one arm only, and one that never met an acceptance certifies none.
+              Expect.isGreaterThan
+                  (Tally.count "Accepted" t)
+                  0
+                  (sprintf
+                      "(op, state) pairs were ACCEPTED (accepted=%d rejected=%d)"
+                      (Tally.count "Accepted" t)
+                      (Tally.count "Rejected" t))
 
-                  // Every rejection class the plain `apply` can raise was reached — named rather
-                  // than counted, because a count cannot say WHICH arm went unexercised.
-                  // `NotAContainer` is `Ops.apply` under `OpScope.contained`'s alone and `Rejected` is the domain-side
-                  // extension point Core never raises, so the reachable set is these five.
-                  for cls in
-                      [ "UnknownNode"
-                        "DuplicateId"
-                        "CannotRemoveRoot"
-                        "WouldNestUnderSelf"
-                        "ReorderMismatch" ] do
-                      Expect.isTrue
-                          (Set.contains cls t.Classes)
-                          (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+              Expect.isGreaterThan
+                  (Tally.count "Rejected" t)
+                  0
+                  (sprintf
+                      "(op, state) pairs were REJECTED (accepted=%d rejected=%d)"
+                      (Tally.count "Accepted" t)
+                      (Tally.count "Rejected" t))
 
-                  // Phase 309 — the whole alphabet was ACCEPTED somewhere, the two kinds the lane
-                  // generator never draws included: an update and a batch reach the differential
-                  // by generation, not by two hand-written cases.
-                  for kind in [ "insert"; "remove"; "move"; "reorder"; "batch"; "update" ] do
-                      Expect.isTrue
-                          (Set.contains kind t.AcceptedKinds)
-                          (sprintf "the pool ACCEPTED a %s somewhere (accepted kinds: %A)" kind t.AcceptedKinds)
+              // Every rejection class the plain `apply` can raise was reached — named rather
+              // than counted, because a count cannot say WHICH arm went unexercised.
+              // `NotAContainer` is `Ops.apply` under `OpScope.contained`'s alone and `Rejected` is the domain-side
+              // extension point Core never raises, so the reachable set is these five.
+              for cls in
+                  [ "UnknownNode"
+                    "DuplicateId"
+                    "CannotRemoveRoot"
+                    "WouldNestUnderSelf"
+                    "ReorderMismatch" ] do
+                  Expect.isTrue
+                      (Set.contains cls (Tally.reached "Classes" t))
+                      (sprintf "the sample reached a %s rejection (reached: %A)" cls (Tally.reached "Classes" t))
+
+              // Phase 309 — the whole alphabet was ACCEPTED somewhere, the two kinds the lane
+              // generator never draws included: an update and a batch reach the differential
+              // by generation, not by two hand-written cases.
+              for kind in [ "insert"; "remove"; "move"; "reorder"; "batch"; "update" ] do
+                  Expect.isTrue
+                      (Set.contains kind (Tally.reached "AcceptedKinds" t))
+                      (sprintf
+                          "the pool ACCEPTED a %s somewhere (accepted kinds: %A)"
+                          kind
+                          (Tally.reached "AcceptedKinds" t))
 
           testCase "a tree oracle handed a blind bridge DISAGREES with Ops.apply"
           <| fun _ ->
@@ -476,11 +444,12 @@ let tests =
               // is therefore known to be a comparison that can fail.
               let t = treeDifferential toModelTreeBlind 1330 3
 
-              Expect.isNonEmpty t.Diffs "a bridge that erases every kind tag must lose the result comparison"
+              Differential.expectLoses "a bridge that erases every kind tag must lose the result comparison" t
 
               Expect.isTrue
-                  (t.Diffs |> List.exists (fun d -> d.Contains "accepted result differs"))
-                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head t.Diffs))
+                  (Tally.disagreements t
+                   |> List.exists (fun d -> d.Contains "accepted result differs"))
+                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head (Tally.disagreements t)))
 
           testCase "a tree oracle handed a MIS-NESTING op bridge DISAGREES with Ops.apply — the digest sees the shape"
           <| fun _ ->
@@ -492,18 +461,19 @@ let tests =
               // result hash and on nothing else: every verdict still agrees.
               let t = treeDifferentialWith toModelTree toModelOpMisNest 1330 3
 
-              Expect.isNonEmpty t.Diffs "a bridge that re-nests an insert must lose the result comparison"
+              Differential.expectLoses "a bridge that re-nests an insert must lose the result comparison" t
 
               Expect.isTrue
-                  (t.Diffs |> List.exists (fun d -> d.Contains "accepted result differs"))
-                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head t.Diffs))
+                  (Tally.disagreements t
+                   |> List.exists (fun d -> d.Contains "accepted result differs"))
+                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head (Tally.disagreements t)))
 
               // The mutant re-parents the insert, so its FOOTPRINT names a different parent too —
               // expected, and not the claim. What must NOT move is any VERDICT: the mutant inserts
               // under a node that exists exactly when the original parent does, so accept/reject
               // agrees at every state, and the shape is visible ONLY through the result hash.
               let verdictMoved =
-                  t.Diffs
+                  Tally.disagreements t
                   |> List.filter (fun d ->
                       d.Contains "ACCEPTED but"
                       || d.Contains "REJECTED but"
@@ -544,12 +514,9 @@ let tests =
               // (id, kind) rendered exactly as the production label here renders it, so the
               // theorem is known to be about the string the memo keys on and not a lookalike.
               let render (i: string, k: string) = encWitnessNode i k
-              let mutable r = ConfRng.ofSeed 1332
-              let mutable states = 0
 
-              for _ in 1..30 do
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 3 r
-                  r <- r'
 
                   let reached =
                       List.concat lanes
@@ -561,13 +528,22 @@ let tests =
                           ([ treeBase ], treeBase)
                       |> fst
 
-                  for st in reached do
-                      states <- states + 1
+                  r',
+                  Differential.over
+                      reached
+                      (fun st t ->
+                          Expect.equal
+                              (Tree.encodePreimage nodew (fun n -> encWitnessNode n.Id n.Kind) st)
+                              (Hash.canonicalFields (TreeOps.fields render string (TreeOps.shape (toModelTree st))))
+                              (sprintf
+                                  "production's pre-image is the model's rendered shape at tree %s"
+                                  (prodTreeHash st))
 
-                      Expect.equal
-                          (Tree.encodePreimage nodew (fun n -> encWitnessNode n.Id n.Kind) st)
-                          (Hash.canonicalFields (TreeOps.fields render string (TreeOps.shape (toModelTree st))))
-                          (sprintf "production's pre-image is the model's rendered shape at tree %s" (prodTreeHash st))
+                          Tally.bump "States" t)
+                      t
+
+              let t = Differential.seeded 30 (ConfRng.ofSeed 1332) step (Tally.empty [ "States" ])
+              let states = Tally.count "States" t
 
               Expect.isGreaterThan states 30 (sprintf "states reached (%d)" states)
 
@@ -597,13 +573,8 @@ let tests =
               // the model also carries `op_independence_diamond` over the whole alphabet, batches
               // included; its evidence is the case below rather than a widening of this one, so
               // that the two alphabets stay separately measured.
-              let mutable r = ConfRng.ofSeed 1331
-              let mutable breaks = []
-              let mutable met = 0
-
-              for _ in 1..60 do
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 3 r
-                  r <- r'
                   let ops = List.concat lanes
 
                   let states =
@@ -624,19 +595,21 @@ let tests =
                           | _ -> true)
                       |> List.map (toModelOpWith toModelTree)
 
-                  let b, m = modelDiamondBreaks TreeOps.op_fp mops (states |> List.map toModelTree)
-                  breaks <- breaks @ b
-                  met <- met + m
+                  r', modelDiamondBreaks TreeOps.op_fp mops (states |> List.map toModelTree) t
 
-              match breaks with
-              | why :: _ -> failtest why
-              | [] ->
-                  // The premise here is narrower than the Phase 132 family's: `wapply` demands a
-                  // well-formed state AND a well-formed result, so a (pair, state) triple counts
-                  // only where both halves of the guarded algebra accept. Measured at 60 trials:
-                  // 155. The threshold is below that with room and is there to catch a generator
-                  // that stops producing independent pairs, not to pin the number.
-                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+              let t = Differential.seeded 60 (ConfRng.ofSeed 1331) step diamondTally
+
+              Differential.expectAgrees "the extracted tree model's diamond" t
+
+              // The premise here is narrower than the Phase 132 family's: `wapply` demands a
+              // well-formed state AND a well-formed result, so a (pair, state) triple counts
+              // only where both halves of the guarded algebra accept. Measured at 60 trials:
+              // 155. The threshold is below that with room and is there to catch a generator
+              // that stops producing independent pairs, not to pin the number.
+              Expect.isGreaterThan
+                  (Tally.count "Met" t)
+                  100
+                  (sprintf "the sample met the diamond's premise in earnest (met=%d)" (Tally.count "Met" t))
 
           testCase "a blind footprint BREAKS the extracted model's diamond — the measurement can fail"
           <| fun _ ->
@@ -660,12 +633,16 @@ let tests =
                   (DagFold.independent (TreeOps.op_fp x) (TreeOps.op_fp y))
                   "the two same-parent inserts are NOT independent — the shared structural parent"
 
-              let breaks, met = modelDiamondBreaks blind [ x; y ] [ s0 ]
-              Expect.isGreaterThan met 0 "the blind run met the premise, so it had something to measure"
+              let t = modelDiamondBreaks blind [ x; y ] [ s0 ] diamondTally
 
-              Expect.isNonEmpty
-                  breaks
+              Expect.isGreaterThan
+                  (Tally.count "Met" t)
+                  0
+                  "the blind run met the premise, so it had something to measure"
+
+              Differential.expectLoses
                   "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
+                  t
 
           // ---- Phase 162 — the same diamond over the WHOLE alphabet, nested batches included ----
 
@@ -685,14 +662,8 @@ let tests =
               // the claim a single wrapping would not exercise. Only inserts and reorders are
               // wrapped: a batch carrying a remove or a move RELOCATES, and such a pair was already
               // closed by Phase 133 without any lift.
-              let mutable r = ConfRng.ofSeed 1620
-              let mutable breaks = []
-              let mutable met = 0
-              let mutable batchMet = 0
-
-              for _ in 1..20 do
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 3 r
-                  r <- r'
                   let ops = List.concat lanes
 
                   let states =
@@ -729,35 +700,43 @@ let tests =
                          | o :: _ -> [ TreeOps.Batch [ TreeOps.Batch [ o ] ] ]
                          | [] -> [])
 
-                  let b, m = modelDiamondBreaks TreeOps.op_fp (leaves @ batches) states
-                  breaks <- breaks @ b
-                  met <- met + m
-
-                  // The adequacy this family cannot read off `met`: how many of the met pairs
+                  // The adequacy this family cannot read off `Met`: how many of the met pairs
                   // carried a batch at all. Without it the pool could collapse to leaves and the
                   // widening would be measured by nothing while the case still passed. Measured at
                   // 20 trials, seed 1620: met=156 of which batchMet=91. The thresholds are below
                   // both with room and are there to catch a generator that stops producing
                   // independent pairs, not to pin the numbers.
-                  for a in batches do
-                      for bb in leaves @ batches do
-                          if DagFold.independent (TreeOps.op_fp a) (TreeOps.op_fp bb) then
-                              for s in states do
-                                  match TreeOps.wapply a s, TreeOps.wapply bb s with
-                                  | DagFold.Ok _, DagFold.Ok _ -> batchMet <- batchMet + 1
-                                  | _ -> ()
+                  let batchMet =
+                      List.allPairs batches (leaves @ batches)
+                      |> List.filter (fun (a, bb) -> DagFold.independent (TreeOps.op_fp a) (TreeOps.op_fp bb))
+                      |> List.sumBy (fun (a, bb) ->
+                          states
+                          |> List.filter (fun s ->
+                              match TreeOps.wapply a s, TreeOps.wapply bb s with
+                              | DagFold.Ok _, DagFold.Ok _ -> true
+                              | _ -> false)
+                          |> List.length)
 
-              match breaks with
-              | why :: _ -> failtest why
-              | [] ->
-                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+                  r',
+                  t
+                  |> modelDiamondBreaks TreeOps.op_fp (leaves @ batches) states
+                  |> Tally.add "BatchMet" batchMet
 
-                  Expect.isGreaterThan
-                      batchMet
-                      0
-                      (sprintf
-                          "the pool met the premise on pairs carrying a BATCH — the shape Phase 133 left open (batchMet=%d)"
-                          batchMet)
+              let t = Differential.seeded 20 (ConfRng.ofSeed 1620) step diamondTally
+
+              Differential.expectAgrees "the extracted model's batch diamond" t
+
+              Expect.isGreaterThan
+                  (Tally.count "Met" t)
+                  100
+                  (sprintf "the sample met the diamond's premise in earnest (met=%d)" (Tally.count "Met" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "BatchMet" t)
+                  0
+                  (sprintf
+                      "the pool met the premise on pairs carrying a BATCH — the shape Phase 133 left open (batchMet=%d)"
+                      (Tally.count "BatchMet" t))
 
           // ---- Phase 143 — the precision ceiling: the pinned unknown-parent clause is NECESSARY ----
 
@@ -921,14 +900,17 @@ let tests =
               // a failure: since Phase 447 the check is exact, and no premise allows one.
               let t = indexDifferential TreeOps.ix_is_fresh_for (indexStates 4380 10)
 
-              match t.Diffs with
-              | d :: _ -> failtestf "the index model and production DISAGREE\n%s" d
-              | [] ->
-                  Expect.isGreaterThan t.Repeated 0 "the pool met trees carrying an id twice"
-                  Expect.isGreaterThan t.Deep 0 "the pool met paths at least three ids long"
-                  Expect.isGreaterThan t.Stale 0 "the pool met stale indexes"
-                  Expect.isGreaterThan t.Fresh 0 "the pool met fresh indexes"
-                  Expect.isGreaterThan t.Reparents 0 "the pool met a stale pair that only a child id tells apart"
+              Differential.expectAgrees "the index model" t
+
+              Expect.isGreaterThan (Tally.count "Repeated" t) 0 "the pool met trees carrying an id twice"
+              Expect.isGreaterThan (Tally.count "Deep" t) 0 "the pool met paths at least three ids long"
+              Expect.isGreaterThan (Tally.count "Stale" t) 0 "the pool met stale indexes"
+              Expect.isGreaterThan (Tally.count "Fresh" t) 0 "the pool met fresh indexes"
+
+              Expect.isGreaterThan
+                  (Tally.count "Reparents" t)
+                  0
+                  "the pool met a stale pair that only a child id tells apart"
 
           testCase "a model freshness that ignores a reparent DISAGREES with Index.isFreshFor"
           <| fun _ ->
@@ -947,11 +929,11 @@ let tests =
 
               let t = indexDifferential blindFresh (indexStates 4380 2)
 
-              Expect.isNonEmpty t.Diffs "a freshness check blind to the child ids must lose the comparison"
+              Differential.expectLoses "a freshness check blind to the child ids must lose the comparison" t
 
               Expect.isTrue
-                  (t.Diffs |> List.forall (fun d -> d.StartsWith "isFreshFor"))
-                  (sprintf "only the freshness arm moved — got:\n%s" (List.head t.Diffs))
+                  (Tally.disagreements t |> List.forall (fun d -> d.StartsWith "isFreshFor"))
+                  (sprintf "only the freshness arm moved — got:\n%s" (List.head (Tally.disagreements t)))
 
           testCase "the retired stamp's collision pair reads as stale: freshness is exact"
           <| fun _ ->
@@ -992,15 +974,8 @@ let tests =
               // Every lane of every trial, as a script, at every state a prefix of the pool reaches
               // — so the scripts routinely name nodes the state holds (the resolved arms), nodes it
               // does not (the pure arm), and ops that do not apply (the state lost, the rest pure).
-              let mutable r = ConfRng.ofSeed 5000
-              let mutable diffs = []
-              let mutable compared = 0
-              let mutable resolved = 0
-              let mutable fellBack = 0
-
-              for _ in 1..30 do
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 3 r
-                  r <- r'
                   let generated = List.concat lanes
 
                   let states =
@@ -1020,53 +995,56 @@ let tests =
                       @ (treeRefusals
                          |> List.map (fun o -> [ o; InsertChild("root", RNode.leaf "late" "para" "") ]))
 
-                  for script in scripts do
-                      for st in states do
-                          let prod = Ops.footprintIn Policy.none (OpScope.plain nodew idw) st script
+                  let probe (script: SkeletonOp<RNode, string> list) (st: RNode) (t: Tally) =
+                      let prod = Ops.footprintIn Policy.none (OpScope.plain nodew idw) st script
 
-                          let model =
-                              TreeOps.fp_in_all (toModelTree st) (script |> List.map (toModelOpWith toModelTree))
+                      let model =
+                          TreeOps.fp_in_all (toModelTree st) (script |> List.map (toModelOpWith toModelTree))
 
-                          compared <- compared + 1
+                      let relocates =
+                          script
+                          |> List.exists (function
+                              | RemoveNode _
+                              | MoveNode _
+                              | UpdateNode _ -> true
+                              | _ -> false)
 
-                          let relocates =
-                              script
-                              |> List.exists (function
-                                  | RemoveNode _
-                                  | MoveNode _
-                                  | UpdateNode _ -> true
-                                  | _ -> false)
+                      t
+                      |> Tally.bump "Compared"
+                      |> Tally.bumpIf (relocates && Set.isEmpty prod.UnknownParentWrites) "Resolved"
+                      |> Tally.bumpIf (relocates && not (Set.isEmpty prod.UnknownParentWrites)) "FellBack"
+                      |> Differential.compareWith
+                          footprint
+                          (fun p m ->
+                              sprintf
+                                  "script %s at %s: production %s, model %s"
+                                  (script |> List.map treeW.Encode |> String.concat ";")
+                                  (prodTreeHash st)
+                                  p
+                                  m)
+                          prod
+                          model
 
-                          if relocates then
-                              if Set.isEmpty prod.UnknownParentWrites then
-                                  resolved <- resolved + 1
-                              else
-                                  fellBack <- fellBack + 1
+                  r', Differential.over scripts (fun script t -> Differential.over states (probe script) t) t
 
-                          if prodFpParts prod <> modelFpParts model then
-                              diffs <-
-                                  sprintf
-                                      "script %s at %s: production %A, model %A"
-                                      (script |> List.map treeW.Encode |> String.concat ";")
-                                      (prodTreeHash st)
-                                      (prodFpParts prod)
-                                      (modelFpParts model)
-                                  :: diffs
+              let t =
+                  Differential.seeded 30 (ConfRng.ofSeed 5000) step (Tally.empty [ "Compared"; "Resolved"; "FellBack" ])
 
-              match diffs with
-              | d :: _ -> failtestf "the base-aware footprint oracle and production DISAGREE\n%s" d
-              | [] ->
-                  Expect.isGreaterThan compared 0 "scripts were compared"
+              let resolved, fellBack = Tally.count "Resolved" t, Tally.count "FellBack" t
 
-                  Expect.isGreaterThan
-                      resolved
-                      0
-                      (sprintf "the pool reached a script the base RESOLVED (resolved=%d fellBack=%d)" resolved fellBack)
+              Differential.expectAgrees "the base-aware footprint oracle" t
 
-                  Expect.isGreaterThan
-                      fellBack
-                      0
-                      (sprintf "and one that fell back to the pure arm (resolved=%d fellBack=%d)" resolved fellBack)
+              Expect.isGreaterThan (Tally.count "Compared" t) 0 "scripts were compared"
+
+              Expect.isGreaterThan
+                  resolved
+                  0
+                  (sprintf "the pool reached a script the base RESOLVED (resolved=%d fellBack=%d)" resolved fellBack)
+
+              Expect.isGreaterThan
+                  fellBack
+                  0
+                  (sprintf "and one that fell back to the pure arm (resolved=%d fellBack=%d)" resolved fellBack)
 
           testCase
               "the base-aware differential is not production against itself: the model's PURE footprint disagrees with Ops.footprintIn"
@@ -1097,21 +1075,47 @@ let tests =
               // state commutes there; and `footprint_in_refines`: every pair the pure footprint
               // frees, the base-aware one frees. A pair with a move on one side is counted, so the
               // sample is known to reach the move half of the theorem.
-              let mutable r = ConfRng.ofSeed 5001
-              let mutable independent = 0
-              let mutable freed = 0
-              let mutable pureFree = 0
-              let mutable moved = 0
-
               let rec carriesMove (op: SkeletonOp<RNode, string>) =
                   match op with
                   | MoveNode _ -> true
                   | Batch ops -> List.exists carriesMove ops
                   | _ -> false
 
-              for _ in 1..40 do
+              let probe (mt: TreeOps.tree) (a: SkeletonOp<RNode, string>, b: SkeletonOp<RNode, string>) (t: Tally) =
+                  let ma = toModelOpWith toModelTree a
+                  let mb = toModelOpWith toModelTree b
+                  let fa = TreeOps.op_fp_in mt ma
+                  let fb = TreeOps.op_fp_in mt mb
+                  let pureInd = DagFold.independent (TreeOps.op_fp ma) (TreeOps.op_fp mb)
+                  let baseInd = DagFold.independent fa fb
+
+                  if pureInd then
+                      Expect.isTrue baseInd "a pair the pure footprint frees is refused by the base-aware one"
+
+                  let t = Tally.bumpIf pureInd "PureFree" t
+
+                  match TreeOps.apply ma mt, TreeOps.apply mb mt with
+                  | DagFold.Ok ta, DagFold.Ok tb when baseInd ->
+                      match TreeOps.apply mb ta, TreeOps.apply ma tb with
+                      | DagFold.Ok x, DagFold.Ok y ->
+                          Expect.equal
+                              (modelTreeHash x)
+                              (modelTreeHash y)
+                              (sprintf "the two orders of %s and %s differ" (treeW.Encode a) (treeW.Encode b))
+                      | _ ->
+                          failtestf
+                              "an independent pair failed to apply in one order: %s / %s"
+                              (treeW.Encode a)
+                              (treeW.Encode b)
+
+                      t
+                      |> Tally.bump "Independent"
+                      |> Tally.bumpIf (not pureInd) "Freed"
+                      |> Tally.bumpIf (carriesMove a || carriesMove b) "Moved"
+                  | _ -> t
+
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 2 r
-                  r <- r'
                   let generated = List.concat lanes
 
                   let states =
@@ -1126,56 +1130,30 @@ let tests =
 
                   let ops = generated @ drawnUpdatesAndBatches states generated
 
-                  for st in states do
-                      let mt = toModelTree st
+                  r',
+                  Differential.over
+                      states
+                      (fun st t -> Differential.over (List.allPairs ops ops) (probe (toModelTree st)) t)
+                      t
 
-                      for a in ops do
-                          for b in ops do
-                              let ma = toModelOpWith toModelTree a
-                              let mb = toModelOpWith toModelTree b
-                              let fa = TreeOps.op_fp_in mt ma
-                              let fb = TreeOps.op_fp_in mt mb
-                              let pureInd = DagFold.independent (TreeOps.op_fp ma) (TreeOps.op_fp mb)
-                              let baseInd = DagFold.independent fa fb
+              let t =
+                  Differential.seeded
+                      40
+                      (ConfRng.ofSeed 5001)
+                      step
+                      (Tally.empty [ "Independent"; "Freed"; "PureFree"; "Moved" ])
 
-                              if pureInd then
-                                  pureFree <- pureFree + 1
-
-                                  Expect.isTrue
-                                      baseInd
-                                      "a pair the pure footprint frees is refused by the base-aware one"
-
-                              match TreeOps.apply ma mt, TreeOps.apply mb mt with
-                              | DagFold.Ok ta, DagFold.Ok tb when baseInd ->
-                                  independent <- independent + 1
-
-                                  if not pureInd then
-                                      freed <- freed + 1
-
-                                  if carriesMove a || carriesMove b then
-                                      moved <- moved + 1
-
-                                  match TreeOps.apply mb ta, TreeOps.apply ma tb with
-                                  | DagFold.Ok x, DagFold.Ok y ->
-                                      Expect.equal
-                                          (modelTreeHash x)
-                                          (modelTreeHash y)
-                                          (sprintf
-                                              "the two orders of %s and %s differ"
-                                              (treeW.Encode a)
-                                              (treeW.Encode b))
-                                  | _ ->
-                                      failtestf
-                                          "an independent pair failed to apply in one order: %s / %s"
-                                          (treeW.Encode a)
-                                          (treeW.Encode b)
-                              | _ -> ()
+              let independent, pureFree = Tally.count "Independent" t, Tally.count "PureFree" t
 
               Expect.isGreaterThan independent 0 "the pool met an independent pair"
-              Expect.isGreaterThan moved 0 "and one with a move on a side, which the theorem's move half is about"
 
               Expect.isGreaterThan
-                  freed
+                  (Tally.count "Moved" t)
+                  0
+                  "and one with a move on a side, which the theorem's move half is about"
+
+              Expect.isGreaterThan
+                  (Tally.count "Freed" t)
                   0
                   (sprintf
                       "and one only the base-aware footprint frees (independent=%d pureFree=%d)"

@@ -178,46 +178,40 @@ let private modelDiffRender (r: DagFold.outcome<TreeOps.op list, TreeDiff.diff_e
     | DagFold.Error(TreeDiff.DuplicateIdInTree d) -> sprintf "err:DuplicateIdInTree(%s)" d
     | DagFold.Error(TreeDiff.TargetNotAContainer(p, k)) -> sprintf "err:TargetNotAContainer(%s,%s)" p k
 
-type private DiffTally =
-    {
-        Diffs: string list
-        Pairs: int
-        /// pairs whose script carries at least one operation of each kind — counted per kind,
-        /// because a pool that never removed anything could not have met the order go-red
-        Inserted: int
-        Removed: int
-        Moved: int
-        Reordered: int
-        /// pairs the two draws made identical — the empty script, worth reaching at all
-        Empty: int
-        /// contained diffs that produced a script, and ones refused for containment
-        Contained: int
-        ContainerRefused: int
-        /// pairs where the removes-first permutation of the SAME four blocks fails to reconstruct
-        OrderBroken: int
-        Predicates: Set<string>
-    }
+/// The diff's render pair — the verdict, and the script operation for operation.
+let private diffScript
+    : Differential<
+          Result<SkeletonOp<RNode, string> list, Rejection<string>>,
+          DagFold.outcome<TreeOps.op list, TreeDiff.diff_error>
+       > =
+    Differential.pair prodDiffRender modelDiffRender
 
-let private emptyDiffTally =
-    { Diffs = []
-      Pairs = 0
-      Inserted = 0
-      Removed = 0
-      Moved = 0
-      Reordered = 0
-      Empty = 0
-      Contained = 0
-      ContainerRefused = 0
-      OrderBroken = 0
-      Predicates = Set.empty }
+/// The diff tally. `Inserted` / `Removed` / `Moved` / `Reordered` count pairs whose script carries at
+/// least one operation of that kind — per kind, because a pool that never removed anything could
+/// not have met the order go-red; `Empty` the pairs the two draws made identical (the empty script,
+/// worth reaching at all); `Contained` / `ContainerRefused` the contained diffs that produced a
+/// script and the ones refused for containment; and `OrderBroken` the pairs where the removes-first
+/// permutation of the SAME four blocks fails to reconstruct.
+let private diffTally =
+    Tally.empty
+        [ "Pairs"
+          "Inserted"
+          "Removed"
+          "Moved"
+          "Reordered"
+          "Empty"
+          "Contained"
+          "ContainerRefused"
+          "OrderBroken" ]
+    |> Tally.sets [ "Predicates" ]
 
 let private diffProbe
     (containedDiff: ContainedDiff)
     (kinds: Set<string>)
     (before: RNode)
     (after: RNode)
-    (acc: DiffTally)
-    : DiffTally =
+    (t: Tally)
+    : Tally =
     let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
     let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
     let mb = toModelTree before
@@ -230,92 +224,89 @@ let private diffProbe
     let model = TreeDiff.to_ops mb ma
 
     // 1. the verdict and the script, operation for operation
-    let scriptDiff =
-        if prodDiffRender prod <> modelDiffRender model then
-            [ sprintf
-                  "toOps differs — %s\n  production: %s\n  oracle:     %s"
-                  where
-                  (prodDiffRender prod)
-                  (modelDiffRender model) ]
-        else
-            []
+    let t =
+        Differential.compareWith
+            diffScript
+            (fun p m -> sprintf "toOps differs — %s\n  production: %s\n  oracle:     %s" where p m)
+            prod
+            model
+            t
 
     // 2-4. reconstruction, applyability, and the PROVED shape asked of the shipped script
-    let roundTripDiff, ins, rem, mov, reo, emptyScript, orderBroken =
+    let t =
         match prod with
         | Error e ->
-            [ sprintf "toOps REFUSED an independently generated well-formed pair (%A) — %s" e where ], 0, 0, 0, 0, 0, 0
+            Tally.disagree (sprintf "toOps REFUSED an independently generated well-formed pair (%A) — %s" e where) t
         | Ok ops ->
             let rebuilt = Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before
 
-            let reconstruction =
+            let reconstruction (t: Tally) =
                 match rebuilt with
-                | Ok t when prodTreeHash t = prodTreeHash after -> []
-                | Ok t -> [ sprintf "applyAll(toOps) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash t) ]
+                | Ok r when prodTreeHash r = prodTreeHash after -> t
+                | Ok r ->
+                    Tally.disagree
+                        (sprintf "applyAll(toOps) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash r))
+                        t
                 | Error { Applied = i; Rejection = e } ->
-                    [ sprintf "applyAll(toOps) was REFUSED at step %d (%s) — %s" i (prodRejClass e) where ]
+                    Tally.disagree
+                        (sprintf "applyAll(toOps) was REFUSED at step %d (%s) — %s" i (prodRejClass e) where)
+                        t
 
-            let applyability =
+            let applyability (t: Tally) =
                 match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before with
-                | Ok() -> []
+                | Ok() -> t
                 | Error(i, e) ->
-                    [ sprintf "canApplyAll REFUSED the emitted script at step %d (%s) — %s" i (prodRejClass e) where ]
+                    Tally.disagree
+                        (sprintf "canApplyAll REFUSED the emitted script at step %d (%s) — %s" i (prodRejClass e) where)
+                        t
 
             // the theorem, asked of the engine: `script_shape` is the conjunction of the four block
             // characterisations `diff_script_shape` proves, evaluated over production's own output
-            let shape =
+            let shape (t: Tally) =
                 let mops = ops |> List.map (toModelOpWith toModelTree)
 
-                if TreeDiff.all_ops (TreeDiff.script_shape mb ma) mops then
-                    []
-                else
-                    [ sprintf
-                          "the shipped script violates the PROVED block shape — %s\n  script: %s"
-                          where
-                          (ops |> List.map renderProdOp |> String.concat ";") ]
+                Differential.check
+                    (TreeDiff.all_ops (TreeDiff.script_shape mb ma) mops)
+                    (fun () ->
+                        sprintf
+                            "the shipped script violates the PROVED block shape — %s\n  script: %s"
+                            where
+                            (ops |> List.map renderProdOp |> String.concat ";"))
+                    t
 
             let has f = ops |> List.exists f
 
             let broken =
                 match Ops.applyAll Policy.none (OpScope.plain nodew idw) (removesFirst ops) before with
-                | Ok t when prodTreeHash t = prodTreeHash after -> 0
-                | _ -> 1
+                | Ok r when prodTreeHash r = prodTreeHash after -> false
+                | _ -> true
 
-            reconstruction @ applyability @ shape,
-            (if
-                 has (function
-                     | InsertChild _ -> true
-                     | _ -> false)
-             then
-                 1
-             else
-                 0),
-            (if
-                 has (function
-                     | RemoveNode _ -> true
-                     | _ -> false)
-             then
-                 1
-             else
-                 0),
-            (if
-                 has (function
-                     | MoveNode _ -> true
-                     | _ -> false)
-             then
-                 1
-             else
-                 0),
-            (if
-                 has (function
-                     | ReorderChildren _ -> true
-                     | _ -> false)
-             then
-                 1
-             else
-                 0),
-            (if List.isEmpty ops then 1 else 0),
-            broken
+            t
+            |> reconstruction
+            |> applyability
+            |> shape
+            |> Tally.bumpIf
+                (has (function
+                    | InsertChild _ -> true
+                    | _ -> false))
+                "Inserted"
+            |> Tally.bumpIf
+                (has (function
+                    | RemoveNode _ -> true
+                    | _ -> false))
+                "Removed"
+            |> Tally.bumpIf
+                (has (function
+                    | MoveNode _ -> true
+                    | _ -> false))
+                "Moved"
+            |> Tally.bumpIf
+                (has (function
+                    | ReorderChildren _ -> true
+                    | _ -> false))
+                "Reordered"
+            |> Tally.bumpIf (List.isEmpty ops) "Empty"
+            |> Tally.bumpIf broken "OrderBroken"
 
     // 5-6. the container-aware mirror, and the executor a contained script belongs to
     let prodC =
@@ -323,83 +314,96 @@ let private diffProbe
 
     let modelC = containedDiff mCanHold mb ma
 
-    let containedDiffs, contained, refused =
-        let agreement =
-            if prodDiffRender prodC <> modelDiffRender modelC then
-                [ sprintf
-                      "toOpsContained differs — %s\n  production: %s\n  oracle:     %s"
-                      where
-                      (prodDiffRender prodC)
-                      (modelDiffRender modelC) ]
-            else
-                []
+    let t =
+        Differential.compareWith
+            diffScript
+            (fun p m -> sprintf "toOpsContained differs — %s\n  production: %s\n  oracle:     %s" where p m)
+            prodC
+            modelC
+            t
 
+    let t =
         match prodC with
         | Ok ops ->
-            let recon =
+            let recon (t: Tally) =
                 match Ops.applyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
-                | Ok t when prodTreeHash t = prodTreeHash after -> []
-                | Ok t ->
-                    [ sprintf "applyAllWith(toOpsContained) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash t) ]
+                | Ok r when prodTreeHash r = prodTreeHash after -> t
+                | Ok r ->
+                    Tally.disagree
+                        (sprintf
+                            "applyAllWith(toOpsContained) did NOT reconstruct — %s\n  got: %s"
+                            where
+                            (prodTreeHash r))
+                        t
                 | Error { Applied = i; Rejection = e } ->
-                    [ sprintf "applyAllWith REFUSED a contained script at step %d (%s) — %s" i (prodRejClass e) where ]
+                    Tally.disagree
+                        (sprintf "applyAllWith REFUSED a contained script at step %d (%s) — %s" i (prodRejClass e) where)
+                        t
 
-            let dry =
+            let dry (t: Tally) =
                 match Ops.canApplyAll Policy.none (OpScope.contained canHold nodew idw) ops before with
-                | Ok() -> []
+                | Ok() -> t
                 | Error(i, e) ->
-                    [ sprintf
-                          "canApplyAllWith REFUSED a contained script at step %d (%s) — the emitted parents were supposed to be containers — %s"
-                          i
-                          (prodRejClass e)
-                          where ]
+                    Tally.disagree
+                        (sprintf
+                            "canApplyAllWith REFUSED a contained script at step %d (%s) — the emitted parents were supposed to be containers — %s"
+                            i
+                            (prodRejClass e)
+                            where)
+                        t
 
-            agreement @ recon @ dry, 1, 0
+            t |> recon |> dry |> Tally.bump "Contained"
         | Error(NotAContainer(p, k)) ->
             let located =
                 match Tree.tryFind nodew idw p after with
-                | Some n when not (List.isEmpty (nodew.Children n)) && not (canHold n) && nodew.KindTag n = k -> []
-                | _ ->
-                    [ sprintf
-                          "TargetNotAContainer(%s,%s) does not locate a childful non-container of `after` — %s"
-                          p
-                          k
-                          where ]
+                | Some n when not (List.isEmpty (nodew.Children n)) && not (canHold n) && nodew.KindTag n = k -> true
+                | _ -> false
 
-            agreement @ located, 0, 1
-        | Error e ->
-            agreement
-            @ [ sprintf "toOpsContained refused with %A on a well-formed pair — %s" e where ],
-            0,
-            0
+            t
+            |> Differential.check located (fun () ->
+                sprintf "TargetNotAContainer(%s,%s) does not locate a childful non-container of `after` — %s" p k where)
+            |> Tally.bump "ContainerRefused"
+        | Error e -> Tally.disagree (sprintf "toOpsContained refused with %A on a well-formed pair — %s" e where) t
 
-    { Diffs = acc.Diffs @ scriptDiff @ roundTripDiff @ containedDiffs
-      Pairs = acc.Pairs + 1
-      Inserted = acc.Inserted + ins
-      Removed = acc.Removed + rem
-      Moved = acc.Moved + mov
-      Reordered = acc.Reordered + reo
-      Empty = acc.Empty + emptyScript
-      Contained = acc.Contained + contained
-      ContainerRefused = acc.ContainerRefused + refused
-      OrderBroken = acc.OrderBroken + orderBroken
-      Predicates = Set.add (showKinds kinds) acc.Predicates }
+    t |> Tally.bump "Pairs" |> Tally.reach "Predicates" (showKinds kinds)
 
-let private diffDifferential' (containedDiff: ContainedDiff) (seed: int) (trials: int) : DiffTally =
-    let mutable r = ConfRng.ofSeed seed
-    let mutable tally = emptyDiffTally
-
-    for _ in 1..trials do
+let private diffDifferential' (containedDiff: ContainedDiff) (seed: int) (trials: int) : Tally =
+    let step _ (r: ConfRng.T) (t: Tally) =
         let before, r1 = genPairTree r
         let after, r2 = genPairTree r1
         let kinds, r3 = drawCanHold r2
-        r <- r3
-        tally <- diffProbe containedDiff kinds before after tally
+        r3, diffProbe containedDiff kinds before after t
 
-    tally
+    Differential.seeded trials (ConfRng.ofSeed seed) step diffTally
 
-let private diffDifferential (seed: int) (trials: int) : DiffTally =
+let private diffDifferential (seed: int) (trials: int) : Tally =
     diffDifferential' TreeDiff.to_ops_contained seed trials
+
+/// The Phase 141 generator keys every node's kind off its id, so a survivor never changes kind and
+/// the content-aware diff's two update blocks would be empty on every pair; this re-kinds a third of
+/// a tree's non-root nodes, seeded and replayable, so the blocks are reached.
+let rec private redrawKinds (r0: ConfRng.T) (t: RNode) : RNode * ConfRng.T =
+    let flip, r1 = ConfRng.intBelow 3 r0
+
+    let kind, r2 =
+        if t.Id <> "root" && flip = 0 then
+            let i, r' = ConfRng.intBelow (List.length containerKinds) r1
+            containerKinds[i], r'
+        else
+            t.Kind, r1
+
+    let children, r3 =
+        t.Children
+        |> List.fold
+            (fun (acc, r) c ->
+                let c', r' = redrawKinds r c
+                acc @ [ c' ], r')
+            ([], r2)
+
+    { t with
+        Kind = kind
+        Children = children },
+    r3
 
 [<Tests>]
 let tests =
@@ -421,43 +425,13 @@ let tests =
           testCase
               "the content-aware diff oracle agrees with Diff.toOpsContainedWith under a drawn predicate, and both scripts apply under it"
           <| fun _ ->
-              // The Phase 141 generator keys every node's kind off its id, so a survivor never changes
-              // kind and the two update blocks would be empty on every pair; re-kind a third of
-              // `after`'s non-root nodes, seeded and replayable, so the blocks are reached.
-              let rec rekind (r0: ConfRng.T) (t: RNode) : RNode * ConfRng.T =
-                  let flip, r1 = ConfRng.intBelow 3 r0
-
-                  let kind, r2 =
-                      if t.Id <> "root" && flip = 0 then
-                          let i, r' = ConfRng.intBelow (List.length containerKinds) r1
-                          containerKinds[i], r'
-                      else
-                          t.Kind, r1
-
-                  let children, r3 =
-                      t.Children
-                      |> List.fold
-                          (fun (acc, r) c ->
-                              let c', r' = rekind r c
-                              acc @ [ c' ], r')
-                          ([], r2)
-
-                  { t with
-                      Kind = kind
-                      Children = children },
-                  r3
-
-              let mutable r = ConfRng.ofSeed 30507
-              let mutable accepted = 0
-              let mutable withUpdate = 0
-              let mutable disagreements = []
-
-              for i in 1..800 do
+              // The Phase 141 generator keys every node's kind off its id; `redrawKinds` re-kinds a
+              // third of `after`'s non-root nodes so the two update blocks are reached.
+              let step (i: int) (r: ConfRng.T) (t: Tally) =
                   let before, r1 = genPairTree r
                   let after, r2 = genPairTree r1
-                  let after, r2 = rekind r2 after
+                  let after, r2 = redrawKinds r2 after
                   let kinds, r3 = drawCanHold r2
-                  r <- r3
                   let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
                   let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
                   let encode (n: RNode) = nodew.KindTag n
@@ -469,29 +443,22 @@ let tests =
 
                   let model = TreeDiff.to_ops_contained_with mCanHold mb ma
 
-                  if prodDiffRender prod <> modelDiffRender model then
-                      disagreements <-
-                          sprintf
-                              "#%d under canHold={%s}\n  production: %s\n  oracle:     %s"
-                              i
-                              (showKinds kinds)
-                              (prodDiffRender prod)
-                              (modelDiffRender model)
-                          :: disagreements
+                  let t =
+                      Differential.compareWith
+                          diffScript
+                          (fun p m ->
+                              sprintf
+                                  "#%d under canHold={%s}\n  production: %s\n  oracle:     %s"
+                                  i
+                                  (showKinds kinds)
+                                  p
+                                  m)
+                          prod
+                          model
+                          t
 
                   match prod, model with
                   | Ok pops, DagFold.Ok mops ->
-                      accepted <- accepted + 1
-
-                      if
-                          pops
-                          |> List.exists (fun o ->
-                              match o with
-                              | UpdateNode _ -> true
-                              | _ -> false)
-                      then
-                          withUpdate <- withUpdate + 1
-
                       Expect.equal
                           (Preservation.apply_contained_all mCanHold mops mb)
                           (DagFold.Ok ma)
@@ -507,20 +474,28 @@ let tests =
                               (sprintf "#%d: production's script lands on after" i)
                       | Error { Applied = j; Rejection = e } ->
                           failtestf "#%d: production's content-aware script was REFUSED at %d: %A" i j e
-                  | _ -> ()
 
-              match disagreements with
-              | [] -> ()
-              | ds ->
-                  failtestf
-                      "Diff.toOpsContainedWith and the extracted model DISAGREE on %d pair(s):\n%s"
-                      (List.length ds)
-                      (String.concat "\n" (List.rev ds))
+                      r3,
+                      t
+                      |> Tally.bump "Accepted"
+                      |> Tally.bumpIf
+                          (pops
+                           |> List.exists (fun o ->
+                               match o with
+                               | UpdateNode _ -> true
+                               | _ -> false))
+                          "WithUpdate"
+                  | _ -> r3, t
 
-              Expect.isGreaterThan accepted 100 "the pool produced scripts, not only refusals"
+              let t =
+                  Differential.seeded 800 (ConfRng.ofSeed 30507) step (Tally.empty [ "Accepted"; "WithUpdate" ])
+
+              Differential.expectAgrees "Diff.toOpsContainedWith and the extracted model" t
+
+              Expect.isGreaterThan (Tally.count "Accepted" t) 100 "the pool produced scripts, not only refusals"
 
               Expect.isGreaterThan
-                  withUpdate
+                  (Tally.count "WithUpdate" t)
                   50
                   "the pool reached content changes (a differential over pairs with no rewrite measures nothing of the two blocks)"
 
@@ -530,42 +505,12 @@ let tests =
               // and emits no rewrite; on every pair where production emitted one the comparison must
               // lose. (The predicate reads the kind too, so the blind model may also refuse where
               // production accepts — either way a disagreement, which is what is asserted.)
-              // The Phase 141 generator keys every node's kind off its id, so a survivor never changes
-              // kind and the two update blocks would be empty on every pair; re-kind a third of
-              // `after`'s non-root nodes, seeded and replayable, so the blocks are reached.
-              let rec rekind (r0: ConfRng.T) (t: RNode) : RNode * ConfRng.T =
-                  let flip, r1 = ConfRng.intBelow 3 r0
-
-                  let kind, r2 =
-                      if t.Id <> "root" && flip = 0 then
-                          let i, r' = ConfRng.intBelow (List.length containerKinds) r1
-                          containerKinds[i], r'
-                      else
-                          t.Kind, r1
-
-                  let children, r3 =
-                      t.Children
-                      |> List.fold
-                          (fun (acc, r) c ->
-                              let c', r' = rekind r c
-                              acc @ [ c' ], r')
-                          ([], r2)
-
-                  { t with
-                      Kind = kind
-                      Children = children },
-                  r3
-
-              let mutable r = ConfRng.ofSeed 30508
-              let mutable withUpdate = 0
-              let mutable lost = 0
-
-              for _ in 1..1000 do
+              // The rewrites are reached through `redrawKinds`, as in the case above.
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let before, r1 = genPairTree r
                   let after, r2 = genPairTree r1
-                  let after, r2 = rekind r2 after
+                  let after, r2 = redrawKinds r2 after
                   let kinds, r3 = drawCanHold r2
-                  r <- r3
                   let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
                   let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
                   let encode (n: RNode) = nodew.KindTag n
@@ -584,14 +529,24 @@ let tests =
                           | UpdateNode _ -> true
                           | _ -> false)
                       ->
-                      withUpdate <- withUpdate + 1
+                      r3,
+                      t
+                      |> Tally.bump "WithUpdate"
+                      |> Tally.bumpIf (diffScript.Production prod <> diffScript.Model model) "Lost"
+                  | _ -> r3, t
 
-                      if prodDiffRender prod <> modelDiffRender model then
-                          lost <- lost + 1
-                  | _ -> ()
+              let t =
+                  Differential.seeded 1000 (ConfRng.ofSeed 30508) step (Tally.empty [ "WithUpdate"; "Lost" ])
 
-              Expect.isGreaterThan withUpdate 50 "the sample reached pairs whose script carries a rewrite"
-              Expect.equal lost withUpdate "every such pair lost under the blind bridge"
+              Expect.isGreaterThan
+                  (Tally.count "WithUpdate" t)
+                  50
+                  "the sample reached pairs whose script carries a rewrite"
+
+              Expect.equal
+                  (Tally.count "Lost" t)
+                  (Tally.count "WithUpdate" t)
+                  "every such pair lost under the blind bridge"
 
           // ---- the diff, over pairs nobody derived from one another (Phase 141) ----
 
@@ -603,36 +558,51 @@ let tests =
               // the draw happened to give them.
               let t = diffDifferential 1410 240
 
-              Expect.isEmpty t.Diffs (sprintf "the diff oracle disagreed with production:\n%s" (renderDiffs t.Diffs))
+              Differential.expectAgrees "the diff oracle" t
 
               // adequacy — a run that never removed anything, or never reordered, would certify a
               // pass that never fired. MEASURED at 240 pairs, seed 1410: 179 scripts insert, 146
               // remove, 140 move, 168 reorder, 3 pairs came out identical, 80 contained diffs
               // produced a script and 160 were refused for containment, all 8 predicates drawn.
               // Every threshold below is under its measurement with headroom and above zero.
-              Expect.isGreaterThan t.Inserted 40 (sprintf "pairs whose script INSERTS (%d)" t.Inserted)
-              Expect.isGreaterThan t.Removed 40 (sprintf "pairs whose script REMOVES (%d)" t.Removed)
-              Expect.isGreaterThan t.Moved 40 (sprintf "pairs whose script MOVES (%d)" t.Moved)
-              Expect.isGreaterThan t.Reordered 20 (sprintf "pairs whose script REORDERS (%d)" t.Reordered)
+              Expect.isGreaterThan
+                  (Tally.count "Inserted" t)
+                  40
+                  (sprintf "pairs whose script INSERTS (%d)" (Tally.count "Inserted" t))
 
               Expect.isGreaterThan
-                  t.Contained
+                  (Tally.count "Removed" t)
+                  40
+                  (sprintf "pairs whose script REMOVES (%d)" (Tally.count "Removed" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Moved" t)
+                  40
+                  (sprintf "pairs whose script MOVES (%d)" (Tally.count "Moved" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Reordered" t)
+                  20
+                  (sprintf "pairs whose script REORDERS (%d)" (Tally.count "Reordered" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Contained" t)
                   20
                   (sprintf
                       "contained diffs that produced a script and were certified through applyAllWith (%d)"
-                      t.Contained)
+                      (Tally.count "Contained" t))
 
               Expect.isGreaterThan
-                  t.ContainerRefused
+                  (Tally.count "ContainerRefused" t)
                   20
                   (sprintf
                       "contained diffs REFUSED for containment (%d) — otherwise the refusal half of the mirror is never reached"
-                      t.ContainerRefused)
+                      (Tally.count "ContainerRefused" t))
 
               Expect.isGreaterThan
-                  (Set.count t.Predicates)
+                  (Set.count (Tally.reached "Predicates" t))
                   5
-                  (sprintf "several DIFFERENT canHold predicates were drawn (%A)" t.Predicates)
+                  (sprintf "several DIFFERENT canHold predicates were drawn (%A)" (Tally.reached "Predicates" t))
 
           testCase "the four-pass ORDER is load-bearing — removes before inserts loses"
           <| fun _ ->
@@ -646,17 +616,19 @@ let tests =
               let t = diffDifferential 1410 240
 
               Expect.isGreaterThan
-                  t.Removed
+                  (Tally.count "Removed" t)
                   40
-                  (sprintf "the run reached scripts that remove at all (%d) — otherwise it proves nothing" t.Removed)
+                  (sprintf
+                      "the run reached scripts that remove at all (%d) — otherwise it proves nothing"
+                      (Tally.count "Removed" t))
 
               Expect.isGreaterThan
-                  t.OrderBroken
+                  (Tally.count "OrderBroken" t)
                   10
                   (sprintf
                       "an emission order with the REMOVES FIRST must fail to reconstruct (broken=%d of %d pairs) — the same four blocks, permuted"
-                      t.OrderBroken
-                      t.Pairs)
+                      (Tally.count "OrderBroken" t)
+                      (Tally.count "Pairs" t))
 
           // MEASURED: 52 of 240 pairs. Not all of them, and that is the honest shape of the
           // claim — the permutation is harmless on a pair whose removals happen to hold no
@@ -672,21 +644,22 @@ let tests =
               let t = diffDifferential' diffGoRedContained 1410 240
 
               Expect.isGreaterThan
-                  t.ContainerRefused
+                  (Tally.count "ContainerRefused" t)
                   20
                   (sprintf
                       "the go-red run met pairs whose `after` nests under a non-container (%d) — otherwise it proves nothing"
-                      t.ContainerRefused)
+                      (Tally.count "ContainerRefused" t))
 
-              Expect.isNonEmpty
-                  t.Diffs
+              Differential.expectLoses
                   "a contained diff that never checks the after tree MUST disagree with Diff.toOpsContained"
+                  t
 
               Expect.isTrue
-                  (t.Diffs |> List.exists (fun d -> d.Contains "toOpsContained differs"))
+                  (Tally.disagreements t
+                   |> List.exists (fun d -> d.Contains "toOpsContained differs"))
                   (sprintf
                       "the disagreement is the one this phase is about — production refuses the pair up front, the unchecked one emits a script. Got:\n%s"
-                      (List.head t.Diffs))
+                      (List.head (Tally.disagreements t)))
 
           testCase "the reconstruction hypothesis is NECESSARY — a pair whose shared id changes KIND loses"
           <| fun _ ->
@@ -702,26 +675,20 @@ let tests =
               // structural diff cannot express the change (the content-aware `Diff.toOpsWith` can,
               // Phase 305), not that the model agrees with it about anything;
               // the model's own counterexample is `TreeDiff.kinds_agree_is_necessary`, proved.
-              let mutable r = ConfRng.ofSeed 1410
-              let mutable shared = 0
-              let mutable lost = 0
-              let mutable refused = 0
-
-              for _ in 1..240 do
+              let step _ (r: ConfRng.T) (t: Tally) =
                   let before, r1 = genPairTree r
                   let after0, r2 = genPairTree r1
                   // drawn and discarded, so the RNG stream matches the green run's pair for pair
                   let _, r3 = drawCanHold r2
-                  r <- r3
                   let after = reKind diffKindShifted after0
 
                   let sharedIds =
                       Set.intersect (Set.ofList (idsOfTree before)) (Set.ofList (idsOfTree after))
                       |> Set.remove "root"
 
-                  if not (Set.isEmpty sharedIds) then
-                      shared <- shared + 1
-
+                  if Set.isEmpty sharedIds then
+                      r3, t
+                  else
                       match Diff.toOps Policy.none (OpScope.plain nodew idw) before after with
                       | Error e ->
                           // `diff_refusals_exact` says the only refusals are a root-id mismatch and
@@ -729,13 +696,25 @@ let tests =
                           // refusal, which is half of why it is dangerous.
                           failtestf "toOps REFUSED a well-formed pair over a kind disagreement (%A)" e
                       | Ok ops ->
-                          match Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before with
-                          | Error _ -> refused <- refused + 1
-                          | Ok() -> ()
+                          let refused =
+                              Result.isError (Ops.canApplyAll Policy.none (OpScope.plain nodew idw) ops before)
 
-                          match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before with
-                          | Ok t when prodTreeHash t = prodTreeHash after -> ()
-                          | _ -> lost <- lost + 1
+                          let lost =
+                              match Ops.applyAll Policy.none (OpScope.plain nodew idw) ops before with
+                              | Ok t when prodTreeHash t = prodTreeHash after -> false
+                              | _ -> true
+
+                          r3,
+                          t
+                          |> Tally.bump "Shared"
+                          |> Tally.bumpIf refused "Refused"
+                          |> Tally.bumpIf lost "Lost"
+
+              let t =
+                  Differential.seeded 240 (ConfRng.ofSeed 1410) step (Tally.empty [ "Shared"; "Lost"; "Refused" ])
+
+              let shared, lost, refused =
+                  Tally.count "Shared" t, Tally.count "Lost" t, Tally.count "Refused" t
 
               // MEASURED at 240 pairs, seed 1410: 163 pairs share a non-root id, all 163 fail to
               // reconstruct, 0 fail applicability. Run the other way — `reKind diffKindOf`, which
