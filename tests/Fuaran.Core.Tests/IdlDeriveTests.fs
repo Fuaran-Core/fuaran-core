@@ -2384,3 +2384,82 @@ let typeAnnotationTests =
                   | Some(code, _, err) ->
                       Expect.notEqual code 0 "without the suppression the strict build refuses it"
                       Expect.stringContains err "FS0044" "and refuses it for the deprecated type") ]
+
+// ---------------------------------------------------------------------------
+// Phase 545 — an OPTIONAL node field is a keyed position, not a child, in the node witness
+// whether or not the module requests StructuralAccess. The private witness used to read node
+// fields by type alone, so `Hint: Node option` was emitted as `[ s.Hint ]` in the children arm
+// and the module refused to compile (FS0001) unless StructuralAccess was requested.
+// ---------------------------------------------------------------------------
+
+module private OptionalNode =
+    let field name ty opt =
+        { Name = name
+          Type = ty
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let kind tag fields =
+        { Tag = tag
+          Category = "c"
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    /// A kind holding a node and an optional node, one holding only an optional node, and a leaf.
+    let idl: Idl =
+        { Enums = []
+          Unions = []
+          Records = []
+          Kinds =
+            [ kind "Box" [ field "child" TNode Required; field "hint" TNode Optional ]
+              kind "Tip" [ field "hint" TNode Optional ]
+              kind "Leaf" [ field "label" TStr Required ] ]
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared }
+
+    let emitted (ds: Gen.Derivation list) =
+        Projected.emitted (Gen.fsharpModuleDerived Gen.GenSupport.Empty ds "OptionalNode" idl [ "Box"; "Tip"; "Leaf" ])
+
+    let probe =
+        String.concat
+            "\n"
+            [ "let leaf (id: string) : Node = { Id = id; Kind = NodeKind.Leaf { Label = id } }"
+              "let box: Node = { Id = \"b\"; Kind = NodeKind.Box { Child = leaf \"c\"; Hint = Some(leaf \"h\") } }"
+              "let tip: Node = { Id = \"t\"; Kind = NodeKind.Tip { Hint = Some(leaf \"h\") } }"
+              "let ids (ns: Node list) = ns |> List.map (fun n -> n.Id) |> String.concat \",\""
+              "printfn \"box\t%s\" (ids (nodeWitness.Children box))"
+              "printfn \"tip\t%s\" (ids (nodeWitness.Children tip))"
+              "let swapped = nodeWitness.ReplaceChildren box [ leaf \"d\" ]"
+              "match swapped.Kind with"
+              "| NodeKind.Box s -> printfn \"swapped\t%s\t%s\" s.Child.Id (s.Hint |> Option.map (fun h -> h.Id) |> Option.defaultValue \"-\")"
+              "| _ -> printfn \"swapped\tlost\"" ]
+
+    let compile (moduleText: string) =
+        Projected.runFsiWith "--checknulls+ --warnaserror+ " (Projected.scriptOf "OptionalNode" moduleText probe)
+
+[<Tests>]
+let optionalNodeWitnessTests =
+    testList
+        "Phase 545 - the node witness treats an optional node field as a keyed position"
+        [ for label, ds in
+              [ "without StructuralAccess", []
+                "with StructuralAccess", [ Gen.Derivation.StructuralAccess ] ] do
+              testCase (sprintf "%s, the children arm holds only the required node" label) (fun _ ->
+                  let src = OptionalNode.emitted ds
+                  Expect.stringContains src "| NodeKind.Box s -> [ s.Child ]" "the box's child, and not its hint"
+                  Expect.isFalse (src.Contains "[ s.Hint ]") "an optional node is never a child")
+
+              testCase
+                  (sprintf "%s, it compiles under nullness checking with warnings as errors and keeps the hint" label)
+                  (fun _ ->
+                      match OptionalNode.compile (OptionalNode.emitted ds) with
+                      | None -> skiptest "dotnet not on PATH - the nullness-checked compile is skipped"
+                      | Some(code, out, err) ->
+                          Expect.equal code 0 (sprintf "the emission compiles: %s" err)
+                          let out = out.Replace("\r\n", "\n")
+                          Expect.stringContains out "box\tc\n" "the box's one child"
+                          Expect.stringContains out "tip\t\n" "a kind holding only an optional node has no children"
+                          Expect.stringContains out "swapped\td\th" "a replacement keeps the keyed hint") ]
