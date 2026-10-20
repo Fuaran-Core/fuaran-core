@@ -149,64 +149,13 @@ module internal TypeScriptCodec =
         | VJson j -> Canonical.write Rendering.CrossHost j
 
     /// The point-free TS encoder reference for a type (used where a codec must be
-    /// passed — a generic union's type-parameter codec).
-    let rec tsEncFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "encStr"
-        | TInt -> Ok "encInt"
-        | TBool -> Ok "encBool"
-        | TFloat -> Ok "encFloat"
-        | TEnum _ -> Ok "encStr" // an enum value IS its wire string
-        | TVar v -> Ok("enc" + v)
-        | TNode -> Ok "encodeNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the TypeScript encoder backend" t)
-        | TUnion(n, []) -> Ok("enc" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map tsEncFn
-            |> concatR ", "
-            |> Result.map (fun a -> "((x) => enc" + n + "(" + a + ", x))")
-        | TList inner ->
-            tsEncFn inner
-            |> Result.map (fun e -> "((xs) => '[' + xs.map(" + e + ").join(',') + ']')")
-        // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure
-        | TFn _ -> Ok "(() => '\"<closure>\"')"
-        | TOpaque -> Ok "(() => '\"<opaque>\"')"
-        // Phase 252 — a hosted slot that declares its wire form is written THROUGH it, so
-        // the bytes are that type's canonical ones.
-        | THosted h when h.Wire.IsSome ->
-            match hostedWireRefusal "the TypeScript encoder backend" h with
-            | Some e -> Error e
-            | None -> tsEncFn h.Wire.Value
-        // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
-        // A hosted slot is verbatim JSON to the TS backend, like the interpreter.
-        | TJson
-        | THosted _ -> Ok "encJson"
-        | TRecord n -> Ok("enc" + n)
-        | TMap vt ->
-            tsEncFn vt
-            |> Result.map (fun e ->
-                "((m) => '{' + Object.keys(m).sort().map((k) => encStr(k) + ':' + ("
-                + e
-                + ")(m[k])).join(',') + '}')")
+    /// passed — a generic union's type-parameter codec). Phase 524 — the one slot traversal
+    /// ([[SlotTraversal.encFn]]) under the TypeScript printer.
+    let tsEncFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.encFn Printers.tsEnc t
 
     /// The applied TS encode expression for a value of `t` bound to `var`.
     let tsEncApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TList inner ->
-            tsEncFn inner
-            |> Result.map (fun e -> "'[' + " + var + ".map(" + e + ").join(',') + ']'")
-        | TUnion(n, (_ :: _ as args)) ->
-            args
-            |> List.map tsEncFn
-            |> concatR ", "
-            |> Result.map (fun a -> "enc" + n + "(" + a + ", " + var + ")")
-        | TNode -> Ok("encodeNode(" + var + ")")
-        | _ -> tsEncFn t |> Result.map (fun e -> e + "(" + var + ")")
+        SlotTraversal.encApplied Printers.tsEnc var t
 
     /// TS boolean predicate: is `src` at the omit-when-default field's identity default?
     /// Enums render as wire strings (`s.tone === "Default"`); nullary unions as

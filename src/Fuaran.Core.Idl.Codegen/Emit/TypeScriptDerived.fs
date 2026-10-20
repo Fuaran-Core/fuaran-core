@@ -556,17 +556,19 @@ module internal TypeScriptDerived =
 
         /// `None`: no value without the caller. `Some(Ok None)`: the member is absent.
         let fieldValue (declared: IdlValue option) (f: IdlField) : Result<string option, CodegenError> option =
-            match declared, f.Opt with
-            | _, OmitDefault d ->
+            // Phase 524 (511.t4) — the TypeScript printer of the one presence rule's CONSTRUCTOR site.
+            match Decl.memberValue ValueSite.Constructor f.Opt declared with
+            | MemberValue.IdentityDefault d ->
                 if sentinel f.Type then
                     Some(Ok(Some "null"))
                 else
                     Some(tsDefaultLit idl disc f.Type d |> Result.map Some)
-            | Some v, Required
-            | Some v, Optional -> Some(typescriptValue idl f.Type v |> Result.map Some)
-            | None, Required -> None
-            | None, Optional
-            | _, HostOnly -> Some(Ok None)
+            | MemberValue.Carries v
+            | MemberValue.Optional v -> Some(typescriptValue idl f.Type v |> Result.map Some)
+            | MemberValue.Parameter -> None
+            | MemberValue.Absent
+            | MemberValue.Placeholder -> Some(Ok None)
+            | MemberValue.Refused v -> Some(Error(CodegenError.UnsupportedDefault(f.Type, v)))
 
         let value
             (name: string)

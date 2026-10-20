@@ -25,8 +25,8 @@ open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
-open Fuaran.Core.Tests.DeriveGenerated
 open Fuaran.Core.Idl.Codegen.Types
+open Fuaran.Core.Tests.DeriveGenerated
 
 let private idw: IdWitness<string> =
     { ToString = id
@@ -1448,9 +1448,9 @@ let projectedKindTests =
           testCase "the diff sees a change to either member as a support change" (fun _ ->
               let snap (sup: GenSupport) =
                   match
-                      Diff.snapshotWith
-                          (Artifact.json Projected.idl)
-                          (Some(SupportArtifact.json { Support = sup; HostPrelude = None }))
+                      Diff.parse
+                          (Artifact.render Projected.idl)
+                          (Some(SupportArtifact.render { Support = sup; HostPrelude = None }))
                   with
                   | Ok s -> s.Support
                   | Error e -> failtestf "snapshot: %s" e

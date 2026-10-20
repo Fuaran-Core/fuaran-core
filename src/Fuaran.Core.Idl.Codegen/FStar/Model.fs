@@ -67,6 +67,8 @@ module internal FStarModel =
             /// `None` for a required member; `Some None` for an optional one; `Some (Some lit)`
             /// for an omit-default whose default renders as the F* literal `lit`.
             Presence: string option option
+            /// The declared optionality — what the one presence rule ([[Decl.memberValue]]) reads.
+            Opt: Optionality
         }
 
     // -----------------------------------------------------------------------
@@ -372,13 +374,20 @@ module internal FStarModel =
                         else
                             None)
 
+                // Phase 524 (511.t4) — the F* printer of the one presence rule's LITERAL site. The
+                // model's members carry no host-only field, so the only refusal is the required
+                // member with no value.
                 let part =
-                    match authoredValue, m.Presence with
-                    | None, Some None -> Ok "None"
-                    | None, Some(Some d) -> Ok d
-                    | None, None -> unmodellable ("a default omitting the required member '" + m.Name + "'") where
-                    | Some av, Some None -> defaultLit idl where m.Type av |> Result.map (fun e -> "(Some " + e + ")")
-                    | Some av, _ -> defaultLit idl where m.Type av |> Result.map (fun e -> "(" + e + ")")
+                    match Decl.memberValue ValueSite.Literal m.Opt authoredValue with
+                    | MemberValue.Absent -> Ok "None"
+                    | MemberValue.IdentityDefault d -> defaultLit idl where m.Type d
+                    | MemberValue.Optional av ->
+                        defaultLit idl where m.Type av |> Result.map (fun e -> "(Some " + e + ")")
+                    | MemberValue.Carries av -> defaultLit idl where m.Type av |> Result.map (fun e -> "(" + e + ")")
+                    | MemberValue.Refused _
+                    | MemberValue.Placeholder
+                    | MemberValue.Parameter ->
+                        unmodellable ("a default omitting the required member '" + m.Name + "'") where
 
                 match part with
                 | Error e -> Error e
@@ -425,7 +434,8 @@ module internal FStarModel =
                             ({ Name = f.Name
                                Type = ft
                                Slot = slot
-                               Presence = p }
+                               Presence = p
+                               Opt = f.Opt }
                              :: acc)
                             t
 

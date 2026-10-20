@@ -22,9 +22,7 @@ let limit = 2000
 /// The files that stay whole over `limit` (DECISIONS.md D125), repository-relative, each with
 /// the reason it is not divided.
 let exceptions: (string * string) list =
-    [ "src/Fuaran.Core.Idl.Codegen/Diff.fs",
-      "the public module `Diff` holds its public types nested (`Diff+Snapshot`, `Diff+Change`, `Diff+Verdict`), and F# compiles one module from one file; dividing it renames them in api/ (D125)"
-      "src/Fuaran.Core.OpStream.Dag/DagOpStream.fs",
+    [ "src/Fuaran.Core.OpStream.Dag/DagOpStream.fs",
       "the public module `Dag` holds its public types nested, and F# compiles one module from one file; dividing it renames them in api/ (D125)" ]
 
 /// Every finding over `(path, lineCount)` pairs: a file over `limit` the exceptions do not name, an

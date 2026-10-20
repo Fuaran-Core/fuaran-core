@@ -6,6 +6,7 @@ open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 127 — the one classifier entry point, the F# consequence table, and the
@@ -136,10 +137,10 @@ module private Fixtures =
                     Field = "loudness"
                     Value = VEnum "Plain" } ] }
 
-let private verdict (before: Idl) (after: Idl) : Diff.Verdict =
-    match Diff.classifyDiff before after with
+let private verdict (before: Idl) (after: Idl) : Verdict =
+    match Diff.ofValues (before, None) (after, None) with
     | Ok v -> v
-    | Error e -> failtestf "classifyDiff did not read its own artifact back: %s" e
+    | Error e -> failtestf "ofValues did not read its own artifact back: %s" e
 
 let private consequencesOf (before: Idl) (after: Idl) =
     (verdict before after).FSharpConsequences
@@ -293,12 +294,12 @@ let tests =
 
               let byText =
                   match
-                      Diff.classifyArtifacts
-                          (Artifact.render Fixtures.baseIdl)
-                          (Artifact.render Fixtures.requiredFieldAdded)
+                      Diff.ofArtifacts
+                          (Artifact.render Fixtures.baseIdl, None)
+                          (Artifact.render Fixtures.requiredFieldAdded, None)
                   with
                   | Ok v -> v
-                  | Error e -> failtestf "classifyArtifacts: %s" e
+                  | Error e -> failtestf "ofArtifacts: %s" e
 
               Expect.equal byText.Changes byValue.Changes "same rows"
               Expect.equal byText.Evolution byValue.Evolution "same wire evolution"
@@ -309,7 +310,7 @@ let tests =
                   "same F# consequences — the two entry points are one classifier")
 
           testCase "an unreadable artifact is a typed Error, not an exception" (fun _ ->
-              match Diff.classifyArtifacts "{ not json" (Artifact.render Fixtures.baseIdl) with
+              match Diff.ofArtifacts ("{ not json", None) (Artifact.render Fixtures.baseIdl, None) with
               | Ok _ -> failtest "a malformed artifact classified successfully"
               | Error e -> Expect.stringStarts e "old: " "the error names which side failed")
 
@@ -325,19 +326,19 @@ let tests =
               let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
 
               Expect.isTrue
-                  (v.Changes |> List.exists (fun c -> c.Severity = Diff.BreakingWire))
+                  (v.Changes |> List.exists (fun c -> c.Severity = BreakingWire))
                   "the wire axis reports the wire break"
 
               Expect.isFalse v.BreaksEmitters "and no row is merely an emitter break"
 
               Expect.contains
                   v.FSharpConsequences
-                  Diff.FullLiteralConstruction
+                  FullLiteralConstruction
                   "and the F# axis reports the construction break"
 
               Expect.contains
                   v.FSharpConsequences
-                  Diff.StalePackageSlot
+                  StalePackageSlot
                   "a shape change always carries the stale-slot consequence")
 
           testCase "an OPTIONAL field added: additive on the wire, and STILL a construction break" (fun _ ->
@@ -348,29 +349,26 @@ let tests =
               Expect.isFalse v.BreaksEmitters "additive for emitters"
               Expect.equal (Diff.verdictClass v |> Diff.classLabel) "additive" "and additive as a class"
 
-              Expect.contains
-                  v.FSharpConsequences
-                  Diff.FullLiteralConstruction
-                  "yet every full literal stops compiling")
+              Expect.contains v.FSharpConsequences FullLiteralConstruction "yet every full literal stops compiling")
 
           testCase "a union case added is a match consequence, not a construction one" (fun _ ->
               let cs = consequencesOf Fixtures.baseIdl Fixtures.unionCaseAdded
-              Expect.contains cs Diff.ExhaustiveMatch "the DU gained a case"
+              Expect.contains cs ExhaustiveMatch "the DU gained a case"
 
               Expect.isFalse
-                  (List.contains Diff.FullLiteralConstruction cs)
+                  (List.contains FullLiteralConstruction cs)
                   "no record literal moved — the two sites are not interchangeable")
 
           testCase "an enum case added is a match consequence too" (fun _ ->
               Expect.contains
                   (consequencesOf Fixtures.baseIdl Fixtures.enumCaseAdded)
-                  Diff.ExhaustiveMatch
+                  ExhaustiveMatch
                   "an enum emits as a closed DU, so the same site breaks")
 
           testCase "a kind removed breaks matches over the node-kind discriminator" (fun _ ->
               Expect.contains
                   (consequencesOf Fixtures.baseIdl Fixtures.kindRemoved)
-                  Diff.ExhaustiveMatch
+                  ExhaustiveMatch
                   "a kind is a case of the generated node-kind DU")
 
           testCase "an optionality move that keeps the record member still moves the smart constructor" (fun _ ->
@@ -387,11 +385,11 @@ let tests =
 
               Expect.contains
                   v.FSharpConsequences
-                  Diff.FullLiteralConstruction
+                  FullLiteralConstruction
                   "the F# axis reports the construction break at `mkNote`'s call sites"
 
               Expect.isFalse
-                  (List.contains Diff.NoGeneratedShapeChange v.FSharpConsequences)
+                  (List.contains NoGeneratedShapeChange v.FSharpConsequences)
                   "and does not also claim nothing moved")
 
           testCase "an identical pair is unchanged, with no consequences at all" (fun _ ->
@@ -422,20 +420,20 @@ let tests =
               let v = verdict Fixtures.baseIdl Fixtures.optionalFieldAdded
 
               match Diff.bumpProfile Versioning.Capability.coreV1 v with
-              | Diff.Bump.Bumped p ->
+              | Bump.Bumped p ->
                   Expect.equal (Versioning.Capability.render p) "core@1.1" "the minor moved, the major did not"
-              | Diff.Bump.Undecided _ -> failtest "an additive revision was reported undecided")
+              | Bump.Undecided _ -> failtest "an additive revision was reported undecided")
 
           testCase "a breaking-wire revision bumps the MAJOR and resets the minor" (fun _ ->
               let v = verdict Fixtures.baseIdl Fixtures.kindRemoved
 
               Expect.isTrue
-                  (v.Changes |> List.exists (fun c -> c.Severity = Diff.BreakingWire))
+                  (v.Changes |> List.exists (fun c -> c.Severity = BreakingWire))
                   "a removed kind is a wire break"
 
               match Diff.bumpProfile { Name = "core"; Major = 1; Minor = 7 } v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
-              | Diff.Bump.Undecided _ -> failtest "a wire break was reported undecided")
+              | Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
+              | Bump.Undecided _ -> failtest "a wire break was reported undecided")
 
           testCase "a REQUIRED field added bumps the MAJOR: a Behind consumer must not tolerate it" (fun _ ->
               // Phase 304. Until this phase the row rode the minor, and a consumer
@@ -444,8 +442,8 @@ let tests =
               let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
 
               match Diff.bumpProfile { Name = "core"; Major = 1; Minor = 3 } v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
-              | Diff.Bump.Undecided _ -> failtest "reported undecided"
+              | Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
+              | Bump.Undecided _ -> failtest "reported undecided"
 
               Expect.equal (Diff.verdictClass v |> Diff.classLabel) "breaking" "the gate class is breaking")
 
@@ -459,16 +457,16 @@ let tests =
               let v = verdict Fixtures.defaultOnRequired Fixtures.baseIdl
 
               match Diff.bumpProfile Versioning.Capability.coreV1 v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.1" "minor"
-              | Diff.Bump.Undecided _ -> failtest "reported undecided"
+              | Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.1" "minor"
+              | Bump.Undecided _ -> failtest "reported undecided"
 
               Expect.isTrue v.BreaksEmitters "and the emitter obligation is carried, not lost"
               Expect.equal (Diff.verdictClass v |> Diff.classLabel) "breaking" "the gate class is breaking")
 
           testCase "an additive revision with no rows leaves the profile where it is" (fun _ ->
               match Diff.bumpProfile Versioning.Capability.coreV1 (verdict Fixtures.baseIdl Fixtures.baseIdl) with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.0" "no movement"
-              | Diff.Bump.Undecided _ -> failtest "an unchanged pair was reported undecided")
+              | Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.0" "no movement"
+              | Bump.Undecided _ -> failtest "an unchanged pair was reported undecided")
 
           testCase "the class vocabulary round-trips, and an unknown label is refused" (fun _ ->
               for c in Diff.allClasses do
@@ -478,11 +476,11 @@ let tests =
               Expect.isNone (Diff.classOfLabel "safe") "an unknown label is None, never a default")
 
           testCase "the exit codes separate absorbable, breaking and undecided" (fun _ ->
-              Expect.equal (Diff.exitCode Diff.VerdictClass.Unchanged) 0 "unchanged"
-              Expect.equal (Diff.exitCode Diff.VerdictClass.HostSurface) 0 "host-surface"
-              Expect.equal (Diff.exitCode Diff.VerdictClass.Additive) 0 "additive"
-              Expect.equal (Diff.exitCode Diff.VerdictClass.Breaking) 3 "breaking"
-              Expect.equal (Diff.exitCode Diff.VerdictClass.Undecided) 4 "undecided")
+              Expect.equal (Diff.exitCode VerdictClass.Unchanged) 0 "unchanged"
+              Expect.equal (Diff.exitCode VerdictClass.HostSurface) 0 "host-surface"
+              Expect.equal (Diff.exitCode VerdictClass.Additive) 0 "additive"
+              Expect.equal (Diff.exitCode VerdictClass.Breaking) 3 "breaking"
+              Expect.equal (Diff.exitCode VerdictClass.Undecided) 4 "undecided")
 
           testCase "the verdict block names the class, the evolution and the consequences" (fun _ ->
               let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
@@ -544,14 +542,14 @@ let tests =
                   let headsMoved = beforeHeads <> constructorHeads (generatedModule after)
 
                   Expect.equal
-                      (List.contains Diff.FullLiteralConstruction cs)
+                      (List.contains FullLiteralConstruction cs)
                       (membersMoved || headsMoved)
                       (sprintf
                           "%s: the construction consequence tracks the emitted record members and the smart constructors' parameter lists"
                           name)
 
                   Expect.equal
-                      (List.contains Diff.ExhaustiveMatch cs)
+                      (List.contains ExhaustiveMatch cs)
                       casesMoved
                       (sprintf "%s: the match consequence tracks the emitted DU cases" name))
 
@@ -690,7 +688,7 @@ let tests =
                       (Diff.mappingTable.Replace("\r\n", "\n"))
                       "docs/idl-stability-classes.md's generated section is stale — paste `Diff.mappingTable` between the markers"
 
-                  for case in Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<Diff.Change> do
+                  for case in Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<Change> do
                       Expect.stringContains
                           Diff.mappingTable
                           (sprintf "`%s`" case.Name)
@@ -867,16 +865,16 @@ module private Evolution304 =
     /// The six perturbation families of Phase 304, the loosening split by the class it lands
     /// in. Each carries the severity the table promises, so a classifier that drifts from the
     /// table fails here before the hosts are asked.
-    let perturbations: (string * Idl * Diff.Severity) list =
-        [ "added optional", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Optional ]), Diff.Additive
-          "added required", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Required ]), Diff.BreakingWire
-          "tightened optional to required", retype "loudness" (fun x -> { x with Opt = Required }), Diff.BreakingWire
-          "loosened required to optional", retype "body" (fun x -> { x with Opt = Optional }), Diff.Additive
+    let perturbations: (string * Idl * Severity) list =
+        [ "added optional", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Optional ]), Additive
+          "added required", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Required ]), BreakingWire
+          "tightened optional to required", retype "loudness" (fun x -> { x with Opt = Required }), BreakingWire
+          "loosened required to optional", retype "body" (fun x -> { x with Opt = Optional }), Additive
           "loosened required to omitDefault",
           retype "body" (fun x -> { x with Opt = OmitDefault(VStr "") }),
-          Diff.BreakingWire
-          "widened int to float", retype "count" (fun x -> { x with Type = TFloat }), Diff.Additive
-          "narrowed float to int", retype "ratio" (fun x -> { x with Type = TInt }), Diff.BreakingWire ]
+          BreakingWire
+          "widened int to float", retype "count" (fun x -> { x with Type = TFloat }), Additive
+          "narrowed float to int", retype "ratio" (fun x -> { x with Type = TInt }), BreakingWire ]
 
     /// The old documents, as bytes. The planted three reach what a sampler may miss: an
     /// absent optional member (tightening), a member on the omit-at-default value (loosening
@@ -999,9 +997,9 @@ let evolutionDifferential =
                   (sprintf "%s: the verdict predicts what the interpreter and the TypeScript decoder do" name)
                   (fun _ ->
                       let v =
-                          match Diff.classifyDiff Evolution304.oldIdl newIdl with
+                          match Diff.ofValues (Evolution304.oldIdl, None) (newIdl, None) with
                           | Ok v -> v
-                          | Error e -> failtestf "classifyDiff: %s" e
+                          | Error e -> failtestf "ofValues: %s" e
 
                       let severity =
                           match v.Changes with
@@ -1012,7 +1010,7 @@ let evolutionDifferential =
 
                       let docs = Evolution304.corpus
                       let interp = docs |> List.map (Evolution304.interpreter newIdl)
-                      let predicted = severity <> Diff.BreakingWire
+                      let predicted = severity <> BreakingWire
 
                       Expect.equal
                           (Evolution304.survives docs interp)

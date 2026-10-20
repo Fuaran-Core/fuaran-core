@@ -70,6 +70,26 @@ module internal FSharpDefaults =
     let isDeclaredTransparentCase (idl: Idl) (u: IdlUnion) (tag: string) : bool =
         TransparentUnion.tag idl.Harden u = Some tag
 
+    /// Phase 524 (511.t4) — the F# PRINTER of a [[MemberValue]] (the one presence rule,
+    /// [[Decl.memberValue]]): `value` prints a carried value (a declared literal, or a scaffolded
+    /// authored value), `identity` an omit-default member's identity default, `refuse` spells the
+    /// site's refusal. `None` is a constructor parameter.
+    let fsMember
+        (value: IdlValue -> Result<string, CodegenError>)
+        (identity: IdlValue -> Result<string, CodegenError>)
+        (refuse: IdlValue -> CodegenError)
+        (f: IdlField)
+        (mv: MemberValue)
+        : Result<string, CodegenError> option =
+        match mv with
+        | MemberValue.Carries v -> Some(value v)
+        | MemberValue.Optional v -> Some(value v |> Result.map (fun e -> "Some(" + e + ")"))
+        | MemberValue.IdentityDefault d -> Some(identity d)
+        | MemberValue.Absent -> Some(Ok "None")
+        | MemberValue.Placeholder -> Some(hostOnlyLit f)
+        | MemberValue.Parameter -> None
+        | MemberValue.Refused v -> Some(Error(refuse v))
+
     /// The F# source form of a declared default VALUE — enums (`ToneVariant.Default`), scalars,
     /// the EMPTY LIST (Phase 1080), a nullary union case (`CellFormat.None`) and, since Phase 124,
     /// a VALUE-CARRYING union case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record,
@@ -129,10 +149,10 @@ module internal FSharpDefaults =
                     | [] -> u.Name + "." + c.Tag
                     | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (String.concat ", " ps)))
 
-    /// One declared field of a union case or a record, rendered from the authored value set —
-    /// honouring the same presence rules the encoder writes it under. A HostOnly slot is refused
-    /// rather than filled with its placeholder: the placeholder is an arbitrary host EXPRESSION
-    /// (`ignore`), which is not legal in the pattern position the encoder's omit test needs.
+    /// One declared field of a union case or a record, rendered from the authored value set at
+    /// the LITERAL site of the one presence rule ([[Decl.memberValue]]): a host-only member is
+    /// refused rather than filled with its placeholder (an arbitrary host EXPRESSION, not legal in
+    /// the pattern position the encoder's omit test needs), as is a required one with no value.
     and fsDefaultField
         (idl: Idl)
         (subst: Map<string, IdlType>)
@@ -140,20 +160,15 @@ module internal FSharpDefaults =
         (authored: (string * IdlValue) list)
         : Result<string, CodegenError> =
         let ft = TypeParams.substitute subst f.Type
+        let lit = fsDefaultLit idl ft
+        let refuse v = CodegenError.UnsupportedDefault(ft, v)
 
-        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-        | Some(_, av) when av <> VAbsent ->
-            match f.Opt with
-            | Optional -> fsDefaultLit idl ft av |> Result.map (fun e -> "Some(" + e + ")")
-            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
-            | Required
-            | OmitDefault _ -> fsDefaultLit idl ft av
-        | _ ->
-            match f.Opt with
-            | Optional -> Ok "None"
-            | OmitDefault d -> fsDefaultLit idl ft d
-            | HostOnly
-            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
+        authored
+        |> List.tryFind (fun (n, _) -> n = f.Name)
+        |> Option.map snd
+        |> Decl.memberValue ValueSite.Literal f.Opt
+        |> fsMember lit lit refuse f
+        |> Option.defaultWith (fun () -> Error(refuse VAbsent))
 
 
     // -----------------------------------------------------------------------
@@ -177,16 +192,12 @@ module internal FSharpDefaults =
     /// such value and must be passed (a `Required` field with no declared default). This is the
     /// one rule both the `mk<Kind>` smart constructors and the derived default records apply, so a
     /// default record and a constructor called with the same arguments cannot disagree.
+    /// Phase 524 (511.t4) — the CONSTRUCTOR site of the one presence rule ([[Decl.memberValue]]).
     let fieldValue (idl: Idl) (declared: IdlValue option) (f: IdlField) : Result<string, CodegenError> option =
-        match declared, f.Opt with
-        | Some v, Required -> Some(fsDefaultLit idl f.Type v)
-        | Some v, Optional -> Some(fsDefaultLit idl f.Type v |> Result.map (fun e -> "Some(" + e + ")"))
-        | None, Required -> None
-        | None, Optional -> Some(Ok "None")
-        // HostOnly: not a ctor param either — the field takes its placeholder.
-        | _, HostOnly -> Some(hostOnlyLit f)
-        // OmitDefault: not a ctor param — the field takes its identity default.
-        | _, OmitDefault d -> Some(fsDefaultLit idl f.Type d)
+        let lit = fsDefaultLit idl f.Type
+
+        Decl.memberValue ValueSite.Constructor f.Opt declared
+        |> fsMember lit lit (fun v -> CodegenError.UnsupportedDefault(f.Type, v)) f
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`fsDefaultLit` — GP4/GP5).
@@ -230,23 +241,19 @@ module internal FSharpDefaults =
         let envelopeAssigns: Result<string, CodegenError> =
             idl.NodeFields
             |> List.map (fun f ->
-                let assign e = sprintf "; %s = %s" (pascal f.Name) e
-
-                match f.Opt with
-                | Optional -> Ok(sprintf "; %s = None" (pascal f.Name))
-                | OmitDefault d -> fsDefaultLit idl f.Type d |> Result.map assign
-                | HostOnly -> hostOnlyLit f |> Result.map assign
-                | Required ->
-                    match envelopeDefaultFor f.Name with
-                    | Some d -> fsDefaultLit idl f.Type d |> Result.map assign
-                    | None ->
-                        Error(
-                            CodegenError.RequiredEnvelopeField(
-                                f.Name,
-                                f.Type,
-                                "declare it Optional or OmitDefault, or carry a declared default for it (an IdlDefault whose Kind is the empty envelope address)"
-                            )
-                        ))
+                // Phase 524 (511.t4) — the envelope member takes the CONSTRUCTOR site's value, as a
+                // kind's field does ([[fieldValue]]); the one difference is the parameter, which
+                // the envelope has no place for and refuses by name.
+                match fieldValue idl (envelopeDefaultFor f.Name) f with
+                | Some r -> r |> Result.map (sprintf "; %s = %s" (pascal f.Name))
+                | None ->
+                    Error(
+                        CodegenError.RequiredEnvelopeField(
+                            f.Name,
+                            f.Type,
+                            "declare it Optional or OmitDefault, or carry a declared default for it (an IdlDefault whose Kind is the empty envelope address)"
+                        )
+                    ))
             |> concatR ""
 
         let ctor (k: IdlKind) : Result<string, CodegenError> =

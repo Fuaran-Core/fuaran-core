@@ -115,8 +115,8 @@ let main argv =
         let manifest =
             rest |> List.tryHead |> Option.filter System.IO.File.Exists |> Option.map read
 
-        match Fuaran.Core.Idl.Diff.run manifest (read oldPath) (read newPath) with
-        | Ok text ->
+        match Fuaran.Core.Idl.Diff.run manifest (read oldPath, None) (read newPath, None) with
+        | Ok(text, _) ->
             printf "%s" text
             0
         | Error e ->

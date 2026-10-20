@@ -1025,7 +1025,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Function` | 159 | 41 | 64 | 5 | 0 | 0 | 0 | 49 |
 | `Fuaran.Core.Idl` | 63 | 0 | 6 | 1 | 1 | 0 | 0 | 55 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
-| `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
+| `Fuaran.Core.Idl.Codegen` | 47 | 8 | 0 | 0 | 0 | 0 | 0 | 39 |
 | `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
 | `Fuaran.Core.OpStream` | 125 | 28 | 39 | 3 | 1 | 0 | 2 | 52 |
 | `Fuaran.Core.OpStream.Dag` | 87 | 38 | 26 | 0 | 0 | 0 | 0 | 23 |
@@ -1037,7 +1037,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Wire` | 138 | 64 | 12 | 3 | 2 | 0 | 0 | 57 |
-| **Total** | 1223 | 303 | 389 | 38 | 13 | 0 | 3 | 477 |
+| **Total** | 1214 | 303 | 389 | 38 | 12 | 0 | 3 | 469 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -4991,7 +4991,7 @@ directions. Both halves are in the model for that reason.
   rather than a green.
 - **The same artifact perturbed once per OPTIONALITY CLASS** (Phase 200), for §15.4's field rows —
   `optional`, `required`, `hostOnly`, one added field each, read back through
-  `Diff.classifyArtifacts`. Two things are compared per perturbation: the row's SEVERITY, clause
+  `Diff.ofArtifacts`. Two things are compared per perturbation: the row's SEVERITY, clause
   for clause against `Diff.classifyFieldAdd`, and the PROFILE the revision mints, computed end to
   end on each side — `Diff.bumpProfile` beside the model's own `classify_field_add` →
   `evolution_of` → `bump`. The row's subject string is production's own, recovered through the

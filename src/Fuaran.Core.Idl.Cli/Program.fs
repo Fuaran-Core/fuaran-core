@@ -215,7 +215,7 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
                 refuse (String.concat "\n" unreadable)
             else
 
-                match Diff.runVerdictWith manifestText beforeText afterText supportBefore supportAfter with
+                match Diff.run manifestText (beforeText, supportBefore) (afterText, supportAfter) with
                 | Error e -> refuse e
                 | Ok(text, verdict) ->
                     printf "%s" text

@@ -4,6 +4,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.ReferenceIdl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 179 — the artifact always carries its `harden` block.
@@ -89,9 +90,9 @@ let private policies: (string * HardenPolicy) list =
 let private at (policy: HardenPolicy) : Idl = { refIdl with Harden = policy }
 
 /// A diff row reporting that the declared hardening vocabulary moved.
-let private hardenRow (c: Diff.Classification) =
+let private hardenRow (c: Classification) =
     match c.Change with
-    | Diff.HardenPolicyChanged _ -> true
+    | HardenPolicyChanged _ -> true
     | _ -> false
 
 [<Tests>]
@@ -273,7 +274,7 @@ let tests =
                     Expect.notEqual before after "the bytes did move — otherwise this proves nothing"
 
                     for label, a, b in [ "forwards", before, after; "backwards", after, before ] do
-                        match Diff.classifyArtifacts a b with
+                        match Diff.ofArtifacts (a, None) (b, None) with
                         | Error m -> failtestf "'%s': the classifier refused the pair: %s" label m
                         | Ok verdict ->
                             Expect.isEmpty
@@ -287,7 +288,7 @@ let tests =
                     let before = Artifact.render (at retiredDefaultTokens)
                     let after = Artifact.render (at HardenPolicy.Undeclared)
 
-                    match Diff.classifyArtifacts before after with
+                    match Diff.ofArtifacts (before, None) (after, None) with
                     | Error m -> failtestf "the classifier refused the pair: %s" m
                     | Ok verdict ->
                         Expect.isNonEmpty

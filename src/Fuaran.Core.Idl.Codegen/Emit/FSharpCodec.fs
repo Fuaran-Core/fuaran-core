@@ -22,55 +22,13 @@ module internal FSharpCodec =
     // -----------------------------------------------------------------------
 
     /// Point-free encoder *function* for a type (`'a -> JVal`) — used where an encoder
-    /// must be passed (a generic union's type-parameter codec).
-    let rec encFn (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TStr -> Ok "JStr"
-        | TInt -> Ok "JInt"
-        | TBool -> Ok "JBool"
-        // NOT the bare `JFloat` constructor: a non-finite double has no JSON number
-        // spelling and rides as a quoted sentinel string (`encodeHelpers` below).
-        // `TInt` keeps its constructor — WIRE_FORMAT §7 truncates at a float slot.
-        | TFloat -> Ok "encFloat"
-        | TEnum n -> Ok("enc" + n)
-        | TVar v -> Ok("enc" + v)
-        | TUnion(n, []) -> Ok("enc" + n)
-        | TUnion(n, args) ->
-            args
-            |> List.map encFn
-            |> concatR " "
-            |> Result.map (fun a -> "(enc" + n + " " + a + ")")
-        | TNode -> Ok "encNode"
-        // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
-        // [[opVocabularySlot]] for why the arm exists and what it says.
-        | TKind
-        | TOp -> Error(opVocabularySlot "the F# encoder emitter" t)
-        | TList inner -> encFn inner |> Result.map (sprintf "(fun __xs -> JArr(List.map %s __xs))")
-        // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure
-        | TFn _ -> Ok "(fun _ -> JStr \"<closure>\")"
-        | TOpaque -> Ok "(fun _ -> JStr \"<opaque>\")"
-        // Phase 676 — verbatim passthrough. `Canonical.write Rendering.CrossHost` already sorts keys Ordinal,
-        // escapes per rule 6 and lays floats out per rule 5, so identity inherits all
-        // three rather than re-implementing them — the risk this phase named.
-        | TJson -> Ok "id"
-        // The named host encode expression, verbatim ('host -> JVal). Canonicality is
-        // inherited: the host codec builds a JVal that renders through the same Canon.
-        | THosted h -> Ok h.Encode
-        | TRecord n -> Ok("enc" + n)
-        | TMap vt ->
-            encFn vt
-            |> Result.map (sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))")
+    /// must be passed (a generic union's type-parameter codec). Phase 524 — the one slot
+    /// traversal ([[SlotTraversal.encFn]]) under the F# printer.
+    let encFn (t: IdlType) : Result<string, CodegenError> = SlotTraversal.encFn Printers.fsEnc t
 
     /// The applied JVal expression for a value of `t` bound to `var`.
     let encApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
-        match t with
-        | TList inner -> encFn inner |> Result.map (fun e -> sprintf "JArr(List.map %s %s)" e var)
-        | TNode -> Ok(sprintf "encNode %s" var)
-        | TClosure
-        | TFn _ -> Ok "JStr \"<closure>\""
-        | TOpaque -> Ok "JStr \"<opaque>\""
-        | _ -> encFn t |> Result.map (fun e -> sprintf "%s %s" e var)
+        SlotTraversal.encApplied Printers.fsEnc var t
 
     /// The encode-side helper prelude, emitted once per module — the mirror of
     /// [[decodeHelpers]]. Only the float slot needs one: every other primitive is
@@ -1733,21 +1691,15 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               // Phase 694 — JVal-level accessors for host codecs that splice
               // generated encodings into a larger canonical document (the
               // tier's TreeOp codec re-points at these when the hand-written
-              // node encoder is deleted). Node + kind always; the two envelope
-              // records only when the vocabulary declares them (the spike
-              // vocabulary has neither).
+              // node encoder is deleted): the node and its kind, for every
+              // vocabulary. An accessor for any other declaration is the
+              // vocabulary's to declare through the accessor splice — Phase 524
+              // removed the two this generic emitter wrote by one vocabulary's
+              // record NAMES (C93).
               [ sprintf
                     "/// JVal-level accessors (Phase 694) — for host codecs that splice generated\n/// encodings into a larger canonical document (e.g. a TreeOp codec).\nlet encodeNodeJson (n: Node%s) : JVal = encNode n"
                     nodeArgs
                 sprintf "let encodeNodeKindJson (k: NodeKind%s) : JVal = encNodeKind k" nodeArgs ]
-              (if records |> List.exists (fun r -> r.Name = "StateBehaviour") then
-                   [ sprintf "let encodeStateBehaviourJson (s: StateBehaviour%s) : JVal = encStateBehaviour s" nodeArgs ]
-               else
-                   [])
-              (if records |> List.exists (fun r -> r.Name = "SemanticStyle") then
-                   [ "let encodeSemanticStyleJson (s: SemanticStyle) : JVal = encSemanticStyle s" ]
-               else
-                   [])
               (sup.AccessorSplice |> Option.toList)
               decodeHelpers idl.Wire.Discriminator decl.Hosted (not sup.CaseRefines.IsEmpty)
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])

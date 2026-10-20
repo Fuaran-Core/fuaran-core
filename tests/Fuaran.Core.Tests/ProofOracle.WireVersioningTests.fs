@@ -98,9 +98,9 @@ let private pinnedIdlText () =
 /// The kind tags an `idl.json` text declares, read through the production artifact differ rather
 /// than by picking the JSON apart here.
 let private kindTagsOf (label: string) (text: string) : Set<string> =
-    match Fuaran.Core.Idl.Diff.parse text with
+    match Fuaran.Core.Idl.Diff.parse text None with
     | Result.Error m -> failtestf "the %s idl.json did not snapshot: %s" label m
-    | Result.Ok(snap: Fuaran.Core.Idl.Diff.Snapshot) -> snap.Kinds |> Map.toList |> List.map fst |> Set.ofList
+    | Result.Ok(snap: Fuaran.Core.Idl.Codegen.Types.Snapshot) -> snap.Kinds |> Map.toList |> List.map fst |> Set.ofList
 
 /// Rewrite the `kinds` array of an `idl.json` JVal. Every perturbation below is one of these.
 let private mapKinds (f: JVal list -> JVal list) (idl: JVal) : JVal =
@@ -238,13 +238,13 @@ module IdlDiff = Fuaran.Core.Idl.Diff
 
 /// The model's `severity` as production's, so the comparison is one equality over the shipped type
 /// rather than a pair of shape tests.
-let private ofModelSeverity (s: WireVersioning.severity) : IdlDiff.Severity =
+let private ofModelSeverity (s: WireVersioning.severity) : Fuaran.Core.Idl.Codegen.Types.Severity =
     match s with
-    | WireVersioning.SAdditive -> IdlDiff.Additive
-    | WireVersioning.SBreakingForEmitters -> IdlDiff.BreakingForEmitters
-    | WireVersioning.SBreakingWire -> IdlDiff.BreakingWire
-    | WireVersioning.SHostSurfaceOnly -> IdlDiff.HostSurfaceOnly
-    | WireVersioning.SUnclassifiable -> IdlDiff.Unclassifiable
+    | WireVersioning.SAdditive -> Fuaran.Core.Idl.Codegen.Types.Additive
+    | WireVersioning.SBreakingForEmitters -> Fuaran.Core.Idl.Codegen.Types.BreakingForEmitters
+    | WireVersioning.SBreakingWire -> Fuaran.Core.Idl.Codegen.Types.BreakingWire
+    | WireVersioning.SHostSurfaceOnly -> Fuaran.Core.Idl.Codegen.Types.HostSurfaceOnly
+    | WireVersioning.SUnclassifiable -> Fuaran.Core.Idl.Codegen.Types.Unclassifiable
 
 /// A model profile as the three components a publisher reads. The counters cross a width boundary
 /// in the other direction from `toModelProfile` — the model's `nat` extracts to `BigInteger` — so
@@ -258,7 +258,7 @@ let private profileTriple (p: WireVersioning.profile) : string * int * int =
 /// matters: the partition is exactly what this family compares, so it must not be an input to the
 /// comparison. A row that moves neither set contributes to neither, and its subject is read by
 /// nothing.
-let private subjectOf (c: IdlDiff.Classification) : string =
+let private subjectOf (c: Fuaran.Core.Idl.Codegen.Types.Classification) : string =
     match IdlDiff.evolution [ c ] with
     | Versioning.Evolution.Additive(s :: _) -> s
     | Versioning.Evolution.Breaking(s :: _, _) -> s
@@ -270,8 +270,8 @@ type private FieldAddMeasurement =
     {
         /// The optionality class the perturbation declared, read back out of the artifact.
         OptClass: string
-        ProductionSeverity: IdlDiff.Severity
-        ModelSeverity: IdlDiff.Severity
+        ProductionSeverity: Fuaran.Core.Idl.Codegen.Types.Severity
+        ModelSeverity: Fuaran.Core.Idl.Codegen.Types.Severity
         /// The profile `core@1.0` bumps to, as `Diff.bumpProfile` computes it.
         ProductionProfile: string * int * int
         /// The same, computed end to end by the model: its own `classify_field_add`, its own
@@ -283,7 +283,7 @@ type private FieldAddMeasurement =
     }
 
 let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: string) : FieldAddMeasurement =
-    match IdlDiff.classifyArtifacts beforeText afterText with
+    match IdlDiff.ofArtifacts (beforeText, None) (afterText, None) with
     | Result.Error m -> failtestf "the `%s` field-add perturbation did not classify: %s" optClass m
     | Result.Ok v ->
         let row =
@@ -298,7 +298,7 @@ let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: st
 
         let declared =
             match row.Change with
-            | IdlDiff.FieldAdded(_, f) -> f.OptClass
+            | Fuaran.Core.Idl.Codegen.Types.FieldAdded(_, f) -> f.Presence.Class
             | other -> failtestf "the `%s` perturbation's only row is %A, not a FieldAdded" optClass other
 
         let subject = canonToChs (subjectOf row)
@@ -314,8 +314,8 @@ let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: st
 
         let productionProfile =
             match IdlDiff.bumpProfile Versioning.Capability.coreV1 v with
-            | IdlDiff.Bump.Bumped p -> p.Name, p.Major, p.Minor
-            | IdlDiff.Bump.Undecided rows ->
+            | Fuaran.Core.Idl.Codegen.Types.Bump.Bumped p -> p.Name, p.Major, p.Minor
+            | Fuaran.Core.Idl.Codegen.Types.Bump.Undecided rows ->
                 failtestf "the `%s` field-add perturbation left %d rows undecided" optClass (List.length rows)
 
         { OptClass = declared

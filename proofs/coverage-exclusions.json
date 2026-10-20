@@ -1041,16 +1041,16 @@
       "members": [
         "Idl.Diff.changes",
         "Idl.Diff.classify",
-        "Idl.Diff.classifyDiff",
-        "Idl.Diff.classifyDiffWith",
         "Idl.Diff.consequences",
         "Idl.Diff.exitCode",
         "Idl.Diff.obligations",
+        "Idl.Diff.ofValues",
         "Idl.Diff.run",
+        "Idl.Diff.verdict",
         "Idl.Diff.verdictClass"
       ],
       "class": "measured-elsewhere",
-      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
+      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `ofArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/IdlDiffTests.fs"
     },
     {
@@ -1062,34 +1062,8 @@
         "Idl.Diff.verdictBlock"
       ],
       "class": "measured-elsewhere",
-      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
+      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `ofArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.snapshot"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireVersioningTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.classifyArtifactsWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The support-aware classifier; `classifyArtifacts` (on the ladder) is it with no support documents.",
-      "through": "Diff.classifyArtifacts",
-      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.parseWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Snapshot parse with an optional support document; reached through `classifyArtifacts`.",
-      "through": "Diff.classifyArtifacts",
-      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [
@@ -1099,50 +1073,6 @@
       "reason": "The advisory report text; `run` renders it, and the diff tests read that output.",
       "through": "Diff.run",
       "standIn": "tests/Fuaran.Core.Tests/IdlDiffTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.runVerdict"
-      ],
-      "class": "forward",
-      "reason": "`runVerdictWith` with no support document on either side.",
-      "forwardsTo": "Idl.Diff.runVerdictWith"
-    },
-    {
-      "members": [
-        "Idl.Diff.runVerdictWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "What the CLI's `classify` verb runs; the stability-class tests drive the verb in a child process with and without each side's support document.",
-      "through": "--support-before",
-      "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.runWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The support-aware report path behind the CLI's `classify` verb (through `runVerdictWith`); the stability-class tests drive the verb in a child process with and without each side's support document.",
-      "through": "--support-before",
-      "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.snapshotWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Snapshot construction with an optional support document; reached through `classifyArtifacts`.",
-      "through": "Diff.classifyArtifacts",
-      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
-    },
-    {
-      "members": [
-        "Idl.Diff.verdictOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The verdict over two snapshots; `classifyArtifacts` returns it.",
-      "through": "Diff.classifyArtifacts",
-      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [
@@ -1233,7 +1163,6 @@
       "members": [
         "Idl.Trust.checkHardenPolicy",
         "Idl.Trust.harden",
-        "Idl.Trust.hardenOrRefuse",
         "Idl.Trust.scaffoldFSharp"
       ],
       "class": "measured-elsewhere",

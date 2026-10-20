@@ -223,22 +223,15 @@ module internal Scaffold =
         (f: IdlField)
         (authored: IdlValue option)
         : Result<string, CodegenError> =
-        match authored with
-        | None
-        | Some VAbsent ->
-            match f.Opt with
-            | Optional -> Ok "None"
-            | HostOnly -> hostOnlyLit f
-            | OmitDefault d -> fsDefaultLit idl f.Type d
-            | Required -> Error(valueMismatch (sprintf "%s without its required field '%s'" where f.Name))
-        | Some fv ->
-            match f.Opt with
-            // A host-only field has no wire projection, so a wire value at its name is not
-            // its value — take the placeholder.
-            | HostOnly -> hostOnlyLit f
-            | Optional -> emitValue hosted idl f.Type fv |> Result.map (fun s -> "Some(" + s + ")")
-            | OmitDefault _
-            | Required -> emitValue hosted idl f.Type fv
+        // Phase 524 (511.t4) — the SCAFFOLD site of the one presence rule: a host-only field has
+        // no wire projection, so a wire value at its name is not its value; it takes the
+        // placeholder.
+        let missing =
+            valueMismatch (sprintf "%s without its required field '%s'" where f.Name)
+
+        Decl.memberValue ValueSite.Scaffold f.Opt authored
+        |> fsMember (emitValue hosted idl f.Type) (fsDefaultLit idl f.Type) (fun _ -> missing) f
+        |> Option.defaultWith (fun () -> Error missing)
 
     /// Record-field assignments (`Label = …; Icon = Some …`) for one declared field
     /// list against one authored field list, honouring every presence rule. Shared

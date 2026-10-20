@@ -380,8 +380,8 @@ module internal ProposalSpike =
                   candidateLeg input.Base post p.Fixtures ]
 
             let cost =
-                match Diff.run None (Artifact.render input.Base) (Artifact.render post) with
-                | Ok text -> text
+                match Diff.ofArtifacts (Artifact.render input.Base, None) (Artifact.render post, None) with
+                | Ok verdict -> Diff.report "none declared (no manifest given)" [] verdict
                 | Error e -> "(cost report unavailable: " + e + ")"
 
             Ok

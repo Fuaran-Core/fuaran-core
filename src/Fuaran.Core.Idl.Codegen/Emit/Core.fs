@@ -71,10 +71,8 @@ type CodegenError =
     /// of their own decisions made the member necessary, which the vocabulary's name
     /// would not.
     ///
-    /// Reached only from `Trust.hardenOrRefuse` / `Trust.checkHardenPolicy` — the
-    /// opt-in entry points. `Trust.harden` cannot raise it: its signature returns a
-    /// value, and changing that would break every caller of a published function to
-    /// deliver a refusal only an undeclared policy can trigger.
+    /// Raised by `Trust.checkHardenPolicy` and by `Trust.harden`, which checks the policy
+    /// before it hardens anything (Phase 180 made the checked path the only one).
     | UndeclaredHardenToken of member_: string * needed: string
     /// Phase 195 — a node-envelope field declared [[Optionality.Required]] with no default
     /// to fill it from. A smart constructor fills the envelope with an identity value so the
