@@ -45,7 +45,8 @@ let private binding: IdlUnion =
             Annotations = Annotations.Empty }
           { Tag = "Ref"
             Fields = [ field "name" TStr Required ]
-            Annotations = Annotations.Empty } ] }
+            Annotations = Annotations.Empty } ]
+      Annotations = Annotations.Empty }
 
 /// The kind that carries a `Binding<int>`, so the placeholder's arm is reached from a public entry.
 let private bind: IdlKind =

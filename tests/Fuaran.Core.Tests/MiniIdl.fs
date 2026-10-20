@@ -41,7 +41,8 @@ let miniIdl: Idl =
                         Type = TStr
                         Opt = Required
                         Annotations = Annotations.Empty } ]
-                  Annotations = Annotations.Empty } ] }
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty }
           // The parameterised union — `Binding<'T>`; `'T` flows into the case fields.
           { Name = "Binding"
             Params = [ "T" ]
@@ -100,7 +101,8 @@ let miniIdl: Idl =
                   // was asked for.
                   Annotations =
                     { Annotations.Empty with
-                        InProcessOnly = true } } ] }
+                        InProcessOnly = true } } ]
+            Annotations = Annotations.Empty }
           { Name = "Format"
             Params = []
             Cases =
@@ -117,7 +119,8 @@ let miniIdl: Idl =
                         Type = TInt
                         Opt = Required
                         Annotations = Annotations.Empty } ]
-                  Annotations = Annotations.Empty } ] }
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty }
           { Name = "Action"
             Params = []
             Cases =
@@ -143,7 +146,8 @@ let miniIdl: Idl =
                         Type = TJson
                         Opt = Required
                         Annotations = Annotations.Empty } ]
-                  Annotations = Annotations.Empty } ] }
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty }
           // Fuaran-UI 0.2.0 Box unification: Dashboard/Card/Stack/GridLayout → one `Box`
           // kind with `role` + a `layout` mode (Auto / Flex{direction,wrap} / Grid{cols}).
           { Name = "LayoutMode"
@@ -173,7 +177,8 @@ let miniIdl: Idl =
                         Type = TStr
                         Opt = Optional
                         Annotations = Annotations.Empty } ]
-                  Annotations = Annotations.Empty } ] } ]
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty } ]
       Kinds =
         [ { Tag = "Heading"
             Category = "Display"

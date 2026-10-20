@@ -131,7 +131,17 @@ module internal FSharpTypes =
             |> List.map (fun c -> doc ("case:" + e.Name + "." + c) "    " + enumCaseDecl e c)
             |> String.concat "\n"
 
+        // Phase 542 — the enum's OWN annotations, after the support doc (the
+        // [[memberDocLines]] precedence) and ahead of the attributes; empty for an enum
+        // that says nothing, so its emission is the lines it always was.
+        let annotated =
+            annotationDocLines "" e.Annotations
+            @ (obsoleteAttr e.Annotations |> Option.toList)
+            |> List.map (fun l -> l + "\n")
+            |> String.concat ""
+
         doc ("type:" + e.Name) ""
+        + annotated
         + "[<RequireQualifiedAccess>]\n"
         + sprintf "type %s =\n%s" e.Name cases
 
@@ -152,6 +162,14 @@ module internal FSharpTypes =
         let nodeArgs = declParams msg "Node" []
         let kindArgs = declParams msg "NodeKind" []
 
+        // Phase 542 — a union's or record's comment slot: its support doc, then its OWN
+        // annotation lines ([[memberDocLines]]), or `None` when it has neither — so an
+        // unannotated declaration's slot is exactly the support lookup it always was.
+        let typeComment (name: string) (a: Annotations) =
+            match memberDocLines "" (docOpt ("type:" + name)) a with
+            | [] -> None
+            | lines -> Some(String.concat "\n" lines)
+
         let unionBody (u: IdlUnion) =
             u.Cases
             |> List.map (fun c ->
@@ -159,8 +177,8 @@ module internal FSharpTypes =
                 |> Result.map (fun d -> doc ("case:" + u.Name + "." + c.Tag) "    " + d))
             |> concatR "\n"
             |> Result.map (fun cases ->
-                docOpt ("type:" + u.Name),
-                [ "[<RequireQualifiedAccess>]" ],
+                typeComment u.Name u.Annotations,
+                "[<RequireQualifiedAccess>]" :: (obsoleteAttr u.Annotations |> Option.toList),
                 sprintf "%s%s =\n%s" u.Name (declParams msg u.Name u.Params) cases)
 
         // Phase 945 — field docs land above the field line, at field indent.
@@ -202,8 +220,8 @@ module internal FSharpTypes =
         let recordBody (r: IdlRecord) =
             fieldDecls r.Name r.Fields
             |> Result.map (fun fields ->
-                docOpt ("type:" + r.Name),
-                eqAttr ("R:" + r.Name),
+                typeComment r.Name r.Annotations,
+                (obsoleteAttr r.Annotations |> Option.toList) @ eqAttr ("R:" + r.Name),
                 declBody r.Name r.Fields fields + eqMembers ("R:" + r.Name) r.Name r.Fields)
 
         let specBody (k: IdlKind) =

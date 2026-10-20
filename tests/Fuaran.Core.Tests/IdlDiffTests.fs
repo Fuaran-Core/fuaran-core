@@ -355,14 +355,16 @@ let tests =
                                             Decode = "decLiveRegionKind"
                                             Wire = None
                                             Format = None })
-                                      Optional ] } ] }
+                                      Optional ]
+                              Annotations = Annotations.Empty } ] }
 
               let declared =
                   { empty with
                       Enums = [ Declare.enumWith "LiveRegionKind" [ "Polite", "polite" ] ]
                       Records =
                           [ { Name = "Accessibility"
-                              Fields = [ f "liveRegion" (TEnum "LiveRegionKind") Optional ] } ] }
+                              Fields = [ f "liveRegion" (TEnum "LiveRegionKind") Optional ]
+                              Annotations = Annotations.Empty } ] }
 
               let cs = diffOf hosted declared
 
@@ -419,7 +421,8 @@ let tests =
                       Unions =
                           [ { Name = "Binding"
                               Params = [ "T" ]
-                              Cases = cases } ] }
+                              Cases = cases
+                              Annotations = Annotations.Empty } ] }
 
               let stat: IdlUnionCase =
                   { Tag = "Static"
@@ -987,7 +990,8 @@ let descriptorTableTests =
                               [ { Name = "E"
                                   Cases = [ "P" ]
                                   Wires = []
-                                  CaseAnnotations = [] } ] }
+                                  CaseAnnotations = []
+                                  Annotations = Annotations.Empty } ] }
 
                   let cs = diffOf before after |> List.map _.Change
 

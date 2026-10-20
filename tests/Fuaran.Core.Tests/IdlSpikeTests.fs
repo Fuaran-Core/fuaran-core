@@ -900,14 +900,16 @@ module private SecondVocabulary =
                       Annotations = Annotations.Empty }
                     { Tag = "Borrowed"
                       Fields = [ field "lender" TStr Required ]
-                      Annotations = Annotations.Empty } ] } ]
+                      Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty } ]
           Enums =
             [ Declare.enumWith "Category" [ "Clothing", "clothing"; "Documents", "documents"; "FirstAid", "first-aid" ] ]
           Records =
             [ { Name = "Weight"
                 Fields =
                   [ field "grams" TInt Required
-                    field "approximate" TBool (OmitDefault(VBool false)) ] } ]
+                    field "approximate" TBool (OmitDefault(VBool false)) ]
+                Annotations = Annotations.Empty } ]
           Defaults = []
           NodeFields = []
           Ops = []

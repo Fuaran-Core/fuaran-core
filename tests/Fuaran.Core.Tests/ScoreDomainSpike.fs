@@ -133,7 +133,10 @@ let private kind tag category fields : IdlKind =
       Annotations = Annotations.Empty
       Fields = fields }
 
-let private record name fields : IdlRecord = { Name = name; Fields = fields }
+let private record name fields : IdlRecord =
+    { Name = name
+      Fields = fields
+      Annotations = Annotations.Empty }
 
 let private children = req "children" (TList TNode)
 

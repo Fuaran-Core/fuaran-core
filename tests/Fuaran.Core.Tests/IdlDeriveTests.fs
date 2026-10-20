@@ -1139,7 +1139,8 @@ module private Projected =
           Unions =
             [ { Name = "Rule"
                 Params = []
-                Cases = [ case "Always" []; case "Equals" [ req "key" TStr; req "value" TStr ] ] }
+                Cases = [ case "Always" []; case "Equals" [ req "key" TStr; req "value" TStr ] ]
+                Annotations = Annotations.Empty }
               { Name = "Trigger"
                 Params = []
                 Cases =
@@ -1152,10 +1153,12 @@ module private Projected =
                                   { FSharp = "int -> 'Msg"
                                     TypeScript = "(x: int) => Msg"
                                     Placeholder = "(fun (_: int) -> box \"<closure>\")" }) ]
-                    case "Manual" [ req "label" TStr ] ] } ]
+                    case "Manual" [ req "label" TStr ] ]
+                Annotations = Annotations.Empty } ]
           Records =
             [ { Name = "Step"
-                Fields = [ req "label" TStr; req "body" TNode ] } ]
+                Fields = [ req "label" TStr; req "body" TNode ]
+                Annotations = Annotations.Empty } ]
           Kinds =
             [ { Tag = "Gate"
                 Category = "flow"
@@ -1498,7 +1501,8 @@ module private DeclLaws =
             Records =
                 MiniIdl.miniIdl.Records
                 @ [ { Name = "Style"
-                      Fields = [ field "tone" (TEnum "Tone") Required ] } ]
+                      Fields = [ field "tone" (TEnum "Tone") Required ]
+                      Annotations = Annotations.Empty } ]
             NodeFields = [ field "style" (TRecord "Style") Optional ] }
 
     /// Every vocabulary the suite carries ahead of this file, named.
@@ -1594,7 +1598,8 @@ module private DeclLaws =
                     Params = [ "T" ]
                     Cases =
                       [ case "Leaf" [ field "value" (TVar "T") Required ]
-                        case "Deeper" [ field "next" (TUnion("Grow", [ TList(TVar "T") ])) Required ] ] } ]
+                        case "Deeper" [ field "next" (TUnion("Grow", [ TList(TVar "T") ])) Required ] ]
+                    Annotations = Annotations.Empty } ]
             Kinds =
                 [ { Tag = "Holder"
                     Category = "x"
@@ -1889,7 +1894,8 @@ module private NullChecked =
                 Params = [ "T" ]
                 Cases =
                   [ case "Lit" [ field "value" (TVar "T") Required ]
-                    case "Path" [ field "path" TStr Required ] ] } ]
+                    case "Path" [ field "path" TStr Required ] ]
+                Annotations = Annotations.Empty } ]
           Records = []
           Kinds =
             [ kind
@@ -2163,3 +2169,218 @@ let collectingOverrideTests =
                       | Some(code, out, err) ->
                           Expect.equal code 0 (sprintf "%s compiles: %s" name err)
                           Expect.stringContains out "ok" (name + " ran")) ]
+
+// ---------------------------------------------------------------------------
+// Phase 542 — a union, record or enum annotated as a TYPE: the artifact carries it as an optional
+// member, the F# and TypeScript declarations print it above the type, and a type that says
+// nothing emits exactly what it always did.
+// ---------------------------------------------------------------------------
+
+module TypeAnnotated =
+
+    let doc (text: string) =
+        { Annotations.Empty with
+            Doc = Some text }
+
+    let unionDoc = "What a rule decides: whether a node is shown."
+    let recordDoc = "Who owns a section.\nSecond line, kept verbatim."
+
+    let enumDoc =
+        "How urgent a section is. A */ in prose cannot end the TypeScript block."
+
+    let enumAnnotations =
+        { doc enumDoc with
+            Deprecated =
+                Some
+                    { Replacement = Some "Measure"
+                      Message = None } }
+
+    /// The derivations vocabulary with one union, one record and one enum annotated as a type.
+    let idl: Idl =
+        let base' = DeriveIdl.deriveIdl
+
+        { base' with
+            Unions =
+                base'.Unions
+                |> List.map (fun u ->
+                    if u.Name = "Rule" then
+                        { u with Annotations = doc unionDoc }
+                    else
+                        u)
+            Records =
+                base'.Records
+                |> List.map (fun r ->
+                    if r.Name = "Owner" then
+                        { r with Annotations = doc recordDoc }
+                    else
+                        r)
+            Enums = base'.Enums |> List.map (fun e -> { e with Annotations = enumAnnotations }) }
+
+    let fsharp (idl: Idl) =
+        Projected.emitted (Gen.fsharpModuleWith Gen.GenSupport.Empty "TypeAnnotated" idl (tags idl))
+
+    let typescript (idl: Idl) =
+        Projected.emitted (Gen.typescriptDeclarations idl (tags idl))
+
+    let lines (s: string) =
+        s.Replace("\r\n", "\n").Split('\n') |> Array.toList
+
+    /// The lines of `longer` that are not in `shorter`, when `shorter` is `longer` with only those
+    /// lines deleted; `None` when anything else differs.
+    let added (shorter: string) (longer: string) : string list option =
+        let rec go (s: string list) (l: string list) (acc: string list) =
+            match s, l with
+            | [], rest -> Some(List.rev acc @ rest)
+            | _, [] -> None
+            | x :: xs, y :: ys when x = y -> go xs ys acc
+            | _, y :: ys -> go s ys (y :: acc)
+
+        go (lines shorter) (lines longer) []
+
+    /// The `annotations` members the artifact writes on its unions, records and enums.
+    let typeAnnotationKeys (idl: Idl) : int =
+        match Artifact.json idl with
+        | JObj root ->
+            [ "unions"; "records"; "enums" ]
+            |> List.sumBy (fun key ->
+                match List.tryFind (fun (k, _) -> k = key) root with
+                | Some(_, JArr items) ->
+                    items
+                    |> List.filter (function
+                        | JObj ms -> ms |> List.exists (fun (k, _) -> k = "annotations")
+                        | _ -> false)
+                    |> List.length
+                | _ -> 0)
+        | _ -> failtest "the artifact is an object"
+
+[<Tests>]
+let typeAnnotationTests =
+    testList
+        "Phase 542 - unions, records and enums annotated as types"
+        [ testCase "an annotated artifact round-trips, each type's annotations verbatim" (fun _ ->
+              match Artifact.parse (Artifact.render TypeAnnotated.idl) with
+              | Error e -> failtestf "the artifact did not read back: %s" e
+              | Ok back ->
+                  Expect.equal
+                      back
+                      (Artifact.canonicalise TypeAnnotated.idl)
+                      "the read-back vocabulary is the declared one"
+
+                  let union = back.Unions |> List.find (fun u -> u.Name = "Rule")
+                  let record = back.Records |> List.find (fun r -> r.Name = "Owner")
+                  Expect.equal union.Annotations.Doc (Some TypeAnnotated.unionDoc) "the union's doc"
+
+                  Expect.equal
+                      record.Annotations.Doc
+                      (Some TypeAnnotated.recordDoc)
+                      "the record's doc, line break kept"
+
+                  Expect.equal back.Enums.Head.Annotations TypeAnnotated.enumAnnotations "the enum's whole set"
+                  Expect.equal back.Enums.Head.CaseAnnotations [] "no case annotation was implied")
+
+          testCase "an unannotated type writes no annotations member; each annotated type writes exactly one" (fun _ ->
+              Expect.equal
+                  (TypeAnnotated.typeAnnotationKeys DeriveIdl.deriveIdl)
+                  0
+                  "nothing for a type that says nothing"
+
+              Expect.equal (TypeAnnotated.typeAnnotationKeys TypeAnnotated.idl) 3 "one per annotated type"
+
+              match TypeAnnotated.added (Artifact.render DeriveIdl.deriveIdl) (Artifact.render TypeAnnotated.idl) with
+              | None -> failtest "the annotated artifact is the unannotated one plus inserted lines"
+              | Some extra -> Expect.isNonEmpty extra "the annotations were written")
+
+          testCase "the F# declarations print each type's doc above it, and gain nothing else" (fun _ ->
+              let plain = TypeAnnotated.fsharp DeriveIdl.deriveIdl
+              let annotated = TypeAnnotated.fsharp TypeAnnotated.idl
+
+              Expect.stringContains
+                  annotated
+                  ("/// " + TypeAnnotated.unionDoc + "\n[<RequireQualifiedAccess>]\ntype Rule =")
+                  "the union's doc sits directly above it"
+
+              Expect.stringContains
+                  annotated
+                  "/// Who owns a section.\n/// Second line, kept verbatim.\nand Owner ="
+                  "the record's doc, one /// line per authored line"
+
+              Expect.stringContains
+                  annotated
+                  ("/// "
+                   + TypeAnnotated.enumDoc
+                   + "\n/// **Deprecated.** Use `Measure` instead.\n[<System.Obsolete(")
+                  "the enum's doc, its deprecation note, then its attribute"
+
+              Expect.stringContains
+                  annotated
+                  "#nowarn \"44\""
+                  "a deprecated type suppresses the warning in its own layer"
+
+              match TypeAnnotated.added (Snapshots.unstamped plain) (Snapshots.unstamped annotated) with
+              | None -> failtest "the annotated module is the unannotated one plus inserted lines"
+              | Some extra ->
+                  for l in extra do
+                      Expect.isTrue
+                          (l.StartsWith "///"
+                           || l.StartsWith "[<System.Obsolete("
+                           || l.StartsWith "#nowarn")
+                          (sprintf "an added line is a doc, attribute or suppression line: %s" l))
+
+          testCase "the TypeScript declarations carry each type's doc as a JSDoc block above it" (fun _ ->
+              let plain = TypeAnnotated.typescript DeriveIdl.deriveIdl
+              let annotated = TypeAnnotated.typescript TypeAnnotated.idl
+
+              Expect.stringContains
+                  annotated
+                  ("/**\n * " + TypeAnnotated.unionDoc + "\n */\nexport type Rule = ")
+                  "the union's block"
+
+              Expect.stringContains
+                  annotated
+                  "/**\n * Who owns a section.\n * Second line, kept verbatim.\n */\nexport type Owner = "
+                  "the record's block"
+
+              Expect.stringContains
+                  annotated
+                  "/**\n * How urgent a section is. A *\\/ in prose cannot end the TypeScript block.\n * @deprecated Use `Measure` instead.\n */\nexport type Priority = "
+                  "the enum's block, its */ broken, its deprecation a JSDoc tag"
+
+              match TypeAnnotated.added (Snapshots.unstamped plain) (Snapshots.unstamped annotated) with
+              | None -> failtest "the annotated declarations are the unannotated ones plus inserted lines"
+              | Some extra ->
+                  for l in extra do
+                      Expect.isTrue
+                          (l = "/**" || l = " */" || l.StartsWith " * ")
+                          (sprintf "an added line is a JSDoc line: %s" l))
+
+          testCase "the annotated F# compiles under nullness checking with warnings as errors" (fun _ ->
+              // Through Phase 541's compiled emission (structural access + the collecting decoders,
+              // the vocabulary's boxing placeholder upcast), so this judges the emitter's text alone.
+              let src = Overrides.emitted "TypeAnnotated" TypeAnnotated.idl
+
+              match
+                  Projected.runFsiWith
+                      "--checknulls+ --warnaserror+ "
+                      (Projected.scriptOf "TypeAnnotated" src "printfn \"ok\"")
+              with
+              | None -> skiptest "dotnet not on PATH - the nullness-checked compile is skipped"
+              | Some(code, out, err) ->
+                  Expect.equal code 0 (sprintf "the annotated module compiles: %s" err)
+                  Expect.stringContains out "ok" "it ran"
+
+                  // The go-red: without the suppression the deprecated enum's own layer fails
+                  // the strict build (FS0044), so the attribute is real and the `#nowarn` is why it passes.
+                  let unsuppressed =
+                      src.Split('\n')
+                      |> Array.filter (fun l -> not (l.StartsWith "#nowarn \"44\""))
+                      |> String.concat "\n"
+
+                  match
+                      Projected.runFsiWith
+                          "--checknulls+ --warnaserror+ "
+                          (Projected.scriptOf "TypeAnnotated" unsuppressed "printfn \"ok\"")
+                  with
+                  | None -> ()
+                  | Some(code, _, err) ->
+                      Expect.notEqual code 0 "without the suppression the strict build refuses it"
+                      Expect.stringContains err "FS0044" "and refuses it for the deprecated type") ]

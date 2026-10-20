@@ -122,7 +122,8 @@ let tests =
                           [ { Name = "Bad"
                               Cases = [ "A"; "B" ]
                               Wires = [ "a" ]
-                              CaseAnnotations = [] } ] }
+                              CaseAnnotations = []
+                              Annotations = Annotations.Empty } ] }
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"
@@ -135,7 +136,8 @@ let tests =
                           [ { Name = "Bad"
                               Cases = [ "A"; "B" ]
                               Wires = [ "x"; "x" ]
-                              CaseAnnotations = [] } ] }
+                              CaseAnnotations = []
+                              Annotations = Annotations.Empty } ] }
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"

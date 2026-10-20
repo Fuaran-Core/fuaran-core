@@ -260,7 +260,8 @@ let private silentPaths: (string * Idl) list =
       { probeIdl with
           Records =
               [ { Name = "Bag"
-                  Fields = [ badMapField ] } ]
+                  Fields = [ badMapField ]
+                  Annotations = Annotations.Empty } ]
           Kinds = [ oneKind [ field "bag" (TRecord "Bag") Required ] ] }
       "union-case field",
       { probeIdl with
@@ -270,7 +271,8 @@ let private silentPaths: (string * Idl) list =
                   Cases =
                     [ { Tag = "Some"
                         Fields = [ badMapField ]
-                        Annotations = Annotations.Empty } ] } ]
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty } ]
           Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) Required ] ] }
       "kind-spec field",
       { probeIdl with
@@ -504,7 +506,8 @@ let valueCarryingDefaults =
                               Cases =
                                 [ { Tag = "Of"
                                     Fields = [ field "n" TInt Required ]
-                                    Annotations = Annotations.Empty } ] } ]
+                                    Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty } ]
                       Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) (OmitDefault(VUnion("Of", []))) ] ] }
 
               Gen.fsharpModule "Phase124.Nullary" idl (probeTags idl)
@@ -662,7 +665,8 @@ let artifactRoundTrip =
                                           Type = TStr
                                           Opt = Required
                                           Annotations = Annotations.Empty } ]
-                                    Annotations = Annotations.Empty } ] } ]
+                                    Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty } ]
                       Harden =
                           { refIdl.Harden with
                               TransparentUnions = [ "Text", "Inline" ] }

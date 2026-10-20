@@ -288,9 +288,14 @@ module Artifact =
         // from the vocabulary's declared [[HardenPolicy.TransparentUnions]] (Phase 116;
         // it was derived from a hard-coded union name before that), and surfaced per
         // union because that is where a third-party decoder needs it.
-        match TransparentUnion.tag policy u with
-        | Some tag -> JObj(baseFields @ [ "transparentCase", JStr tag ])
-        | None -> JObj baseFields
+        let transparent =
+            match TransparentUnion.tag policy u with
+            | Some tag -> [ "transparentCase", JStr tag ]
+            | None -> []
+
+        // Phase 542 — the union's OWN annotations, last and on a kind's terms: omitted
+        // entirely when the union says nothing, so every pre-542 `idl.json` is byte-identical.
+        JObj(baseFields @ transparent @ annotationsJson u.Annotations)
 
     // -----------------------------------------------------------------------
     // Phase 114 - the ordering contract as a function over the MODEL.
@@ -489,12 +494,19 @@ module Artifact =
                                    ) ]
                              else
                                  [])
+                          // Phase 542 — the enum's OWN annotations, omitted when empty.
+                          @ annotationsJson e.Annotations
                       ))
               )
               "records",
               JArr(
                   idl.Records
-                  |> List.map (fun r -> JObj [ "name", JStr r.Name; "fields", fieldsJson r.Fields ])
+                  |> List.map (fun r ->
+                      // Phase 542 — the record's OWN annotations, omitted when empty.
+                      JObj(
+                          [ "name", JStr r.Name; "fields", fieldsJson r.Fields ]
+                          @ annotationsJson r.Annotations
+                      ))
               )
               "defaults",
               JArr(
@@ -1008,7 +1020,9 @@ module Artifact =
                     // the two could then disagree — so it stays ignored.
                     { Name = name
                       Params = ps
-                      Cases = cases })))
+                      Cases = cases
+                      Annotations = Annotations.Empty })))
+        |> Result.bind (fun u -> readAnnotations v |> Result.map (fun ann -> { u with Annotations = ann }))
 
     let private readStrings (name: string) (v: JVal) : Result<string list, DecodeError> =
         arrAt name (scalar ("'" + name + "' has a non-string entry") Decoder.str) v
@@ -1061,21 +1075,12 @@ module Artifact =
             readStrings "cases" v
             |> Result.bind (fun wireCases ->
                 match Decoder.tryMember "hostCases" v with
-                | None ->
-                    Ok
-                        { Name = name
-                          Cases = wireCases
-                          Wires = []
-                          CaseAnnotations = [] }
+                | None -> Ok(Declare.enumOf name wireCases)
                 | Some _ ->
                     readStrings "hostCases" v
                     |> Result.bind (fun hostCases ->
                         if List.length hostCases = List.length wireCases then
-                            Ok
-                                { Name = name
-                                  Cases = hostCases
-                                  Wires = wireCases
-                                  CaseAnnotations = [] }
+                            Ok(Declare.enumWith name (List.zip hostCases wireCases))
                         else
                             refuse
                                 DecodeCode.OutOfRange
@@ -1087,11 +1092,23 @@ module Artifact =
             // than alongside it.
             |> Result.bind (fun e ->
                 readCaseAnnotations e v
-                |> Result.map (fun anns -> { e with CaseAnnotations = anns })))
+                |> Result.bind (fun anns ->
+                    readAnnotations v
+                    |> Result.map (fun ann ->
+                        { e with
+                            CaseAnnotations = anns
+                            Annotations = ann }))))
 
     let private readRecord (v: JVal) : Result<IdlRecord, DecodeError> =
         strAt "name" v
-        |> Result.bind (fun name -> readFields v |> Result.map (fun fields -> { Name = name; Fields = fields }))
+        |> Result.bind (fun name ->
+            readFields v
+            |> Result.bind (fun fields ->
+                readAnnotations v
+                |> Result.map (fun ann ->
+                    { Name = name
+                      Fields = fields
+                      Annotations = ann })))
 
     let private readDefault (v: JVal) : Result<IdlDefault, DecodeError> =
         strAt "kind" v

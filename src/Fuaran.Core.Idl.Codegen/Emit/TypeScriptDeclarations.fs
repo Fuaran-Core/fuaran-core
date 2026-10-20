@@ -168,6 +168,47 @@ module internal TypeScriptDeclarations =
            |> String.concat " | ")
         + "; path: Array<string | number>; expected: string; message: string };"
 
+    /// Phase 542 — a union's, record's or enum's OWN annotations as a JSDoc block above its
+    /// `export type`: the authored doc first, then `@deprecated` / `@since` and the in-process
+    /// note. A JSDoc tag is TRUE here, where it is not on a generated function (the argument
+    /// at `tsAnnotationLines`): the declaration it sits on IS the vocabulary type. Each line is
+    /// split and sanitised by [[SourceLit.tsCommentLines]], and a `*/` in authored text is
+    /// broken so it cannot end the block. Empty for a type that says nothing, so an
+    /// unannotated vocabulary's declarations are byte-identical.
+    let internal tsTypeDocBlock (a: Annotations) : string =
+        let text (s: string option) =
+            s |> Option.map SourceLit.tsCommentLines |> Option.defaultValue []
+
+        let lines =
+            text a.Doc
+            @ [ match a.Deprecated with
+                | Some d ->
+                    "@deprecated"
+                    + (match said d.Replacement with
+                       | Some r -> " Use `" + r + "` instead."
+                       | None -> "")
+                    + (match said d.Message with
+                       | Some m -> " " + m
+                       | None -> "")
+                | None -> ()
+
+                if a.InProcessOnly then
+                    "In-process only: no wire projection, so a value of this type is lost across a wire boundary."
+
+                match said a.Since with
+                | Some v -> "@since " + v
+                | None -> () ]
+            |> List.collect SourceLit.tsCommentLines
+
+        match lines with
+        | [] -> ""
+        | ls ->
+            "/**\n"
+            + (ls
+               |> List.map (fun l -> if l = "" then " *" else " * " + l.Replace("*/", "*\\/"))
+               |> String.concat "\n")
+            + "\n */\n"
+
     /// The declared TypeScript type of an IDL type, as the declaration file spells it: a declared
     /// enum, record or union by its own name, a node as `Node`, and a sentinel, JSON or undeclared
     /// hosted slot as `unknown`. Shared by [[typescriptDeclarations]] and the derived members'
@@ -261,7 +302,8 @@ module internal TypeScriptDeclarations =
             enums
             |> List.map (fun e ->
                 Ok(
-                    "export type "
+                    tsTypeDocBlock e.Annotations
+                    + "export type "
                     + e.Name
                     + " = "
                     + orNever (e.WireCases |> List.map SourceLit.tsString)
@@ -272,7 +314,7 @@ module internal TypeScriptDeclarations =
             records
             |> List.map (fun r ->
                 objectType [] r.Fields
-                |> Result.map (fun o -> "export type " + r.Name + " = " + o + ";"))
+                |> Result.map (fun o -> tsTypeDocBlock r.Annotations + "export type " + r.Name + " = " + o + ";"))
 
         let unionDecls =
             unions
@@ -280,7 +322,14 @@ module internal TypeScriptDeclarations =
                 u.Cases
                 |> List.map (fun c -> objectType [ disc + ": " + SourceLit.tsString c.Tag ] c.Fields)
                 |> sequenceR
-                |> Result.map (fun cases -> "export type " + u.Name + generic u.Params + " = " + orNever cases + ";"))
+                |> Result.map (fun cases ->
+                    tsTypeDocBlock u.Annotations
+                    + "export type "
+                    + u.Name
+                    + generic u.Params
+                    + " = "
+                    + orNever cases
+                    + ";"))
 
         let specDecls =
             kinds

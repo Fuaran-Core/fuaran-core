@@ -146,7 +146,8 @@ let refIdl: Idl =
                               Message = Some "A by-name slot cannot be resolved without a host registry." }
                       InProcessOnly = false
                       Since = Some "0.1.0"
-                      Doc = None } } ] }
+                      Doc = None } } ]
+            Annotations = Annotations.Empty }
           { Name = "Text"
             Params = []
             Cases =
@@ -157,7 +158,8 @@ let refIdl: Idl =
                           { Annotations.Empty with
                               InProcessOnly = true }
                           (opt "args" (TMap TStr))
-                      req "key" TStr ] ] } ]
+                      req "key" TStr ] ]
+            Annotations = Annotations.Empty } ]
       Enums =
         [ Declare.enumOf "LayoutKind" [ "Stack"; "Row"; "Grid" ]
           // A wire-mapped enum (Phase 707): host identifiers an F# DU can spell, wire
@@ -166,9 +168,11 @@ let refIdl: Idl =
           Declare.enumOf "Strictness" [ "StrictReplay"; "AdvisoryWarning" ] ]
       Records =
         [ { Name = "ContentHash"
-            Fields = [ req "hash" TStr; req "strictness" (TEnum "Strictness") ] }
+            Fields = [ req "hash" TStr; req "strictness" (TEnum "Strictness") ]
+            Annotations = Annotations.Empty }
           { Name = "Point"
-            Fields = [ req "x" TFloat; req "y" TFloat ] } ]
+            Fields = [ req "x" TFloat; req "y" TFloat ]
+            Annotations = Annotations.Empty } ]
       // Declared defaults for the generated smart constructors. Scalars and enum cases
       // only, because that is what the F# emitter can write a default EXPRESSION for
       // (`CodegenError.UnsupportedDefault` refuses the rest) — so a composite default

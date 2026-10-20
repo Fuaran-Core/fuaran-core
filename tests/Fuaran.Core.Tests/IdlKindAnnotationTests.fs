@@ -79,7 +79,8 @@ let private plainIdl: Idl =
             Cases =
               [ { Tag = "Lit"
                   Fields = [ f "value" TStr Required ]
-                  Annotations = Annotations.Empty } ] } ]
+                  Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty } ]
       Enums = [ Declare.enumOf "Tone" [ "Plain"; "Loud"; "Quiet" ] ]
       Records = []
       Defaults = []
@@ -273,7 +274,8 @@ let tests =
                           [ { Name = "Tone"
                               Cases = [ "Plain" ]
                               Wires = []
-                              CaseAnnotations = [ "Screaming", since "0.18.0" ] } ] }
+                              CaseAnnotations = [ "Screaming", since "0.18.0" ]
+                              Annotations = Annotations.Empty } ] }
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"

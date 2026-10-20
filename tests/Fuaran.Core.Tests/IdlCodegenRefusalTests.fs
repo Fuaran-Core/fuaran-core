@@ -212,7 +212,8 @@ let tests =
                               Cases =
                                 [ { Tag = "Pair"
                                     Fields = [ f "a" TStr Required; f "b" TStr Required ]
-                                    Annotations = Annotations.Empty } ] } ]
+                                    Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty } ]
                       Harden =
                           { HardenPolicy.Undeclared with
                               TransparentUnions = [ "Src", "Pair" ] } }
@@ -271,7 +272,8 @@ let private unionIdl: Idl =
                 Cases =
                   [ { Tag = "Inline"
                       Fields = [ f "text" TStr Required ]
-                      Annotations = Annotations.Empty } ] } ] }
+                      Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty } ] }
 
 let private unsupported (what: string) (r: Result<string, CodegenError>) : string =
     match expectRefusal what r with

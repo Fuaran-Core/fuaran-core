@@ -428,7 +428,8 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
             [ { Name = "Point"
                 Fields =
                   [ sField "x" Fuaran.Core.Idl.TFloat req
-                    sField "label" Fuaran.Core.Idl.TStr opt ] } ]
+                    sField "label" Fuaran.Core.Idl.TStr opt ]
+                Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
         Unions =
             [ { Name = "Box"
                 Params = [ "T" ]
@@ -438,7 +439,8 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                       Annotations = Fuaran.Core.Idl.Annotations.Empty }
                     { Tag = "Full"
                       Fields = [ sField "value" (Fuaran.Core.Idl.TVar "T") req ]
-                      Annotations = Fuaran.Core.Idl.Annotations.Empty } ] } ]
+                      Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
+                Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
         NodeFields = [ sField "hint" Fuaran.Core.Idl.TStr opt ] }
 
 /// `Sample.trySampleNodes` then each node's canonical encoding — or the refusal, as one line.
