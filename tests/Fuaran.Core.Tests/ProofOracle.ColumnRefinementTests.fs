@@ -135,49 +135,21 @@ module private RefinementDiff =
             | _ -> Int 5
         | DecimalType -> Float 1.5
 
-    type Tally =
-        {
-            Draws: int
-            Diffs: string list
-            /// Draws `ofCells` built, and refused.
-            Built: int
-            Refused: int
-            /// Built draws holding a widened `Int`; built draws holding a `Null`.
-            Widened: int
-            WithNull: int
-            /// Built draws on which the LITERAL bridge — `toCells (ofCells cs)` held to `cs` — lost.
-            LiteralLost: int
-            /// The column types drawn, and the refusal classes reached.
-            Types: Set<string>
-            Classes: Set<string>
-        }
+    /// The refinement tally: the draws; those `ofCells` built, and refused; the built draws holding
+    /// a widened `Int`, and holding a `Null`; the built draws on which the LITERAL bridge —
+    /// `toCells (ofCells cs)` held to `cs` — lost; and the column types drawn and the refusal
+    /// classes reached.
+    let private refinementTally =
+        Tally.empty [ "Draws"; "Built"; "Refused"; "Widened"; "WithNull"; "LiteralLost" ]
+        |> Tally.sets [ "Types"; "Classes" ]
 
-    let empty =
-        { Draws = 0
-          Diffs = []
-          Built = 0
-          Refused = 0
-          Widened = 0
-          WithNull = 0
-          LiteralLost = 0
-          Types = Set.empty
-          Classes = Set.empty }
-
-    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                :: t.Diffs }
+    let private compareText = ColumnDiff.compareText
 
     /// One drawn cell list, asked of production and of the model: `ofCells` (the verdict, the
     /// refusal's class, and the cells of what each built); `toCells` of the production column read
     /// through its typed vector; and the literal bridge, counted rather than asserted.
     let probe (label: string) (name: string) (ty: ColumnType) (cells: Cell list) (widened: bool) (t: Tally) : Tally =
-        let t =
-            { t with
-                Draws = t.Draws + 1
-                Types = t.Types.Add(ColumnType.tag ty) }
-
+        let t = t |> Tally.bump "Draws" |> Tally.reach "Types" (ColumnType.tag ty)
         let modelCells = cells |> List.map ColumnDiff.toModelCell
         let prod = Column.ofCells name ty cells
 
@@ -192,27 +164,9 @@ module private RefinementDiff =
             let viaModel = ColumnRefinement.to_cells (toTyped pc) |> showModelCells
             let modelOwn = ColumnRefinement.to_cells mc |> showModelCells
 
-            let t =
-                if showCells prodCells = modelOwn then
-                    t
-                else
-                    diff label "toCells (ofCells cells)" (showCells prodCells) modelOwn t
-
-            let t =
-                if showCells prodCells = viaModel then
-                    t
-                else
-                    diff label "to_cells of the production column through toArray" (showCells prodCells) viaModel t
-
             // the mask, and the model's `Equals` between the two typed columns
             let prodMask = Column.mask pc |> Vector.toArray |> List.ofArray
             let modelMask = ColumnRefinement.data_mask mc.col_data
-
-            let t =
-                if prodMask = modelMask then
-                    t
-                else
-                    diff label "the validity mask" (sprintf "%A" prodMask) (sprintf "%A" modelMask) t
 
             // The model's `Equals` between the two typed columns. The model's `=` on a float is its
             // carrier's, and F#'s says no NaN equals itself, where production's identity
@@ -232,33 +186,38 @@ module private RefinementDiff =
                     : ColumnRefinement.typed_column<int, float>)
                 | _ -> c
 
-            let t =
+            let modelEquals =
                 if ColumnRefinement.col_eq (comparable (toTyped pc)) (comparable mc) then
-                    t
+                    "equal"
                 else
-                    diff label "ColumnData.Equals between production's column and the model's" "equal" "unequal" t
+                    "unequal"
 
+            t
+            |> compareText label "toCells (ofCells cells)" (showCells prodCells) modelOwn
+            |> compareText label "to_cells of the production column through toArray" (showCells prodCells) viaModel
+            |> compareText label "the validity mask" (sprintf "%A" prodMask) (sprintf "%A" modelMask)
+            |> compareText label "ColumnData.Equals between production's column and the model's" "equal" modelEquals
+            |> Tally.bump "Built"
+            |> Tally.bumpIf widened "Widened"
+            |> Tally.bumpIf (cells |> List.exists (fun c -> c = Null)) "WithNull"
             // the literal bridge: production's `toCells` against the cells it was handed
-            let lost = showCells prodCells <> showCells cells
-
-            { t with
-                Built = t.Built + 1
-                Widened = t.Widened + (if widened then 1 else 0)
-                WithNull = t.WithNull + (if cells |> List.exists (fun c -> c = Null) then 1 else 0)
-                LiteralLost = t.LiteralLost + (if lost then 1 else 0) }
+            |> Tally.bumpIf (showCells prodCells <> showCells cells) "LiteralLost"
         | Result.Error pe, WireColumn.Bad me ->
             let p = ColumnDiff.prodClass pe
-            let m = ColumnDiff.modelClass me
 
-            let t = if p = m then t else diff label "ofCells refused" p m t
-
-            { t with
-                Refused = t.Refused + 1
-                Classes = t.Classes.Add(p.Split(' ')[0]) }
+            t
+            |> compareText label "ofCells refused" p (ColumnDiff.modelClass me)
+            |> Tally.bump "Refused"
+            |> Tally.reach "Classes" (p.Split(' ')[0])
         | Result.Ok pc, WireColumn.Bad me ->
-            diff label "ofCells" ("ok " + showCells (Column.toCells pc)) ("refused " + ColumnDiff.modelClass me) t
+            compareText
+                label
+                "ofCells"
+                ("ok " + showCells (Column.toCells pc))
+                ("refused " + ColumnDiff.modelClass me)
+                t
         | Result.Error pe, WireColumn.Good mc ->
-            diff
+            compareText
                 label
                 "ofCells"
                 ("refused " + ColumnDiff.prodClass pe)
@@ -274,9 +233,8 @@ module private RefinementDiff =
             r.Value <- nextCanonSeed r.Value
             r.Value % n
 
-        let mutable t = empty
-
-        for i in 1..trials do
+        refinementTally
+        |> Differential.seeded trials r (fun i r t ->
             let ty = ColumnDiff.modelTypes[draw ColumnDiff.modelTypes.Length]
             let rows = draw 5
             let drawn = [ for _ in 1..rows -> cellOf draw ty ]
@@ -290,29 +248,18 @@ module private RefinementDiff =
                 else
                     cells
 
-            t <- probe (sprintf "generated seed=%d iteration=%d" seed i) "c" ty cells widened t
+            r, probe (sprintf "generated seed=%d iteration=%d" seed i) "c" ty cells widened t)
 
-        t
-
-    type TableTally =
-        { Tables: int
-          TableDiffs: string list
-          Valid: int
-          Refusals: Set<string> }
+    /// The typed-table tally: the tables drawn, those `validate` accepts, and the refusal classes.
+    let private tableTally =
+        Tally.empty [ "Tables"; "Valid" ] |> Tally.sets [ "Refusals" ]
 
     /// One drawn table (the Phase 306 pools), asked of production and of the typed model:
     /// `Table.validate` beside `validate_t`, `encodeJson` beside `encode_json_t` — both over the
     /// typed column — and `validate_t` beside the list model's `validate` of the table's image,
     /// which is `validate_agrees` evaluated on the extracted code.
-    let probeTable (label: string) (table: Table) (t: TableTally) : TableTally =
+    let probeTable (label: string) (table: Table) (t: Tally) : Tally =
         let tt = toTypedTable table
-        let t = { t with Tables = t.Tables + 1 }
-
-        let tdiff (what: string) (prod: string) (model: string) (t: TableTally) =
-            { t with
-                TableDiffs =
-                    sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                    :: t.TableDiffs }
 
         let prodV =
             match Table.validate table with
@@ -326,49 +273,25 @@ module private RefinementDiff =
 
         let modelV = showT (ColumnRefinement.validate_t host tt)
         let listV = showT (WireColumn.validate host (ColumnRefinement.to_list_table tt))
-
-        let t =
-            if prodV = modelV then
-                t
-            else
-                tdiff "validate" prodV modelV t
-
-        let t =
-            if modelV = listV then
-                t
-            else
-                tdiff "validate_t against the list model's validate through the map" modelV listV t
-
-        let t =
-            if prodV = "ok" then
-                { t with Valid = t.Valid + 1 }
-            else
-                { t with
-                    Refusals = t.Refusals.Add(prodV.Substring(8).Split(' ')[0]) }
-
         let prodJson = Json.render (ColumnCodec.encodeJson (Embedded table))
 
         let modelJson =
             Json.render (canonOfModel (ColumnRefinement.encode_json_t host (ColumnRefinement.TEmbedded tt)))
 
-        if prodJson = modelJson then
-            t
-        else
-            tdiff "encodeJson" prodJson modelJson t
-
-    let generatedTables (seed: int) (trials: int) (wild: int) : TableTally =
-        let r = ref seed
-
-        let mutable t =
-            { Tables = 0
-              TableDiffs = []
-              Valid = 0
-              Refusals = Set.empty }
-
-        for i in 1..trials do
-            t <- probeTable (sprintf "generated seed=%d iteration=%d" seed i) (ColumnDiff.genTable r wild) t
-
         t
+        |> Tally.bump "Tables"
+        |> compareText label "validate" prodV modelV
+        |> compareText label "validate_t against the list model's validate through the map" modelV listV
+        |> (if prodV = "ok" then
+                Tally.bump "Valid"
+            else
+                Tally.reach "Refusals" (prodV.Substring(8).Split(' ')[0]))
+        |> compareText label "encodeJson" prodJson modelJson
+
+    let generatedTables (seed: int) (trials: int) (wild: int) : Tally =
+        tableTally
+        |> Differential.seeded trials (ref seed) (fun i r t ->
+            r, probeTable (sprintf "generated seed=%d iteration=%d" seed i) (ColumnDiff.genTable r wild) t)
 
     // ---- Phase 420: the two-case validity (`ColumnRefinement` section 7) ----
 
@@ -381,13 +304,10 @@ module private RefinementDiff =
     /// A row count as the model writes one: a list of that length.
     let units (n: int) : unit list = List.replicate n ()
 
-    type ValidityTally =
-        { Draws: int
-          Diffs: string list
-          Normalised: int
-          Masked: int
-          EqualMixed: int
-          UnequalMixed: int }
+    /// The validity tally: the draws; those the constructors made `AllValid`, and kept as a `Mask`;
+    /// and the mixed pairs (`AllValid` beside a `Mask`) found equal, and unequal.
+    let private validityTally =
+        Tally.empty [ "Draws"; "Normalised"; "Masked"; "EqualMixed"; "UnequalMixed" ]
 
     /// Drawn masks and validities beside the model's: the normalising constructors against
     /// `of_mask`, `Validity.toMask` against `to_mask`, and column equality over one values vector
@@ -397,25 +317,12 @@ module private RefinementDiff =
         (seed: int)
         (trials: int)
         (reading: unit list -> ColumnRefinement.validity_rep -> ColumnRefinement.validity_rep -> bool)
-        : ValidityTally =
+        : Tally =
         let r = ref seed
 
         let draw (n: int) =
             r.Value <- nextCanonSeed r.Value
             r.Value % n
-
-        let mutable t =
-            { Draws = 0
-              Diffs = []
-              Normalised = 0
-              Masked = 0
-              EqualMixed = 0
-              UnequalMixed = 0 }
-
-        let diff (label: string) (what: string) (p: string) (m: string) =
-            t <-
-                { t with
-                    Diffs = sprintf "%s: %s - production %s, model %s" label what p m :: t.Diffs }
 
         /// A validity of a column of `n` rows, from every corner the representation has: `AllValid`,
         /// a built (normalised) mask, a hand-built all-true `Mask` of the right length or of another,
@@ -428,27 +335,32 @@ module private RefinementDiff =
             | 3 -> Mask(Vector.ofArray (Array.create (max 0 (n + 1 - draw 3)) true))
             | _ -> Mask(Vector.ofArray (Array.init n (fun _ -> draw 3 <> 0)))
 
-        for i in 1..trials do
+        /// A validity as the model holds it, as text — the representations compared.
+        let rep (v: ColumnRefinement.validity_rep) = sprintf "%A" v
+
+        validityTally
+        |> Differential.seeded trials r (fun i r t ->
             let label = sprintf "generated seed=%d iteration=%d" seed i
             let n = draw 7
             let bits = List.init n (fun _ -> draw 4 <> 0)
 
             // the normalising constructors, against `of_mask`
             let built = Validity.ofList bits
-            let modelBuilt = ColumnRefinement.of_mask bits
+            let modelBuilt = rep (ColumnRefinement.of_mask bits)
 
-            if toModelValidity built <> modelBuilt then
-                diff label "Validity.ofList" (sprintf "%A" built) (sprintf "%A" modelBuilt)
-
-            if toModelValidity (Validity.ofArray (Array.ofList bits)) <> modelBuilt then
-                diff
+            let t =
+                t
+                |> compareText label "Validity.ofList" (rep (toModelValidity built)) modelBuilt
+                |> compareText
                     label
                     "Validity.ofArray"
-                    (sprintf "%A" (Validity.ofArray (Array.ofList bits)))
-                    (sprintf "%A" modelBuilt)
-
-            if toModelValidity (Validity.ofVector (Vector.ofList bits)) <> modelBuilt then
-                diff label "Validity.ofVector" "a different validity" (sprintf "%A" modelBuilt)
+                    (rep (toModelValidity (Validity.ofArray (Array.ofList bits))))
+                    modelBuilt
+                |> compareText
+                    label
+                    "Validity.ofVector"
+                    (rep (toModelValidity (Validity.ofVector (Vector.ofList bits))))
+                    modelBuilt
 
             // the materialised mask, against `to_mask`
             let a = validityOf n
@@ -456,16 +368,10 @@ module private RefinementDiff =
             let prodMask = Validity.toMask n a |> Vector.toArray |> List.ofArray
             let modelMask = ColumnRefinement.to_mask (units n) (toModelValidity a)
 
-            if prodMask <> modelMask then
-                diff label "Validity.toMask" (sprintf "%A" prodMask) (sprintf "%A" modelMask)
-
             // column equality over ONE values vector, against the model's reading of the validities
             let values = Vector.init n id
             let prodEqual = Column.ofInts "c" values a = Column.ofInts "c" values b
             let modelEqual = reading (units n) (toModelValidity a) (toModelValidity b)
-
-            if prodEqual <> modelEqual then
-                diff label (sprintf "equality of %A and %A" a b) (string prodEqual) (string modelEqual)
 
             let mixed =
                 match a, b with
@@ -473,15 +379,14 @@ module private RefinementDiff =
                 | Mask _, AllValid -> true
                 | _ -> false
 
-            t <-
-                { t with
-                    Draws = t.Draws + 1
-                    Normalised = t.Normalised + (if built = AllValid then 1 else 0)
-                    Masked = t.Masked + (if built = AllValid then 0 else 1)
-                    EqualMixed = t.EqualMixed + (if mixed && prodEqual then 1 else 0)
-                    UnequalMixed = t.UnequalMixed + (if mixed && not prodEqual then 1 else 0) }
-
-        t
+            r,
+            t
+            |> compareText label "Validity.toMask" (sprintf "%A" prodMask) (sprintf "%A" modelMask)
+            |> compareText label (sprintf "equality of %A and %A" a b) (string prodEqual) (string modelEqual)
+            |> Tally.bump "Draws"
+            |> Tally.bump (if built = AllValid then "Normalised" else "Masked")
+            |> Tally.bumpIf (mixed && prodEqual) "EqualMixed"
+            |> Tally.bumpIf (mixed && not prodEqual) "UnequalMixed")
 
 [<Tests>]
 let tests =
@@ -502,31 +407,43 @@ let tests =
               let wild = onBigStack (fun () -> RefinementDiff.generated 4192 2200 true)
 
               for (name, t) in [ "the fitting pool", fitting; "the wild pool", wild ] do
-                  Expect.isEmpty
-                      t.Diffs
-                      (sprintf
-                          "%s: the refinement oracle disagreed with production:\n%s"
-                          name
-                          (renderCanonDiffs t.Diffs))
+                  Differential.expectAgrees (name + ": the refinement oracle") t
 
               // adequacy: every type, nulls, widened cells; and the refusal
-              Expect.equal fitting.Built fitting.Draws "every draw of the fitting pool builds"
+              Expect.equal
+                  (Tally.count "Built" fitting)
+                  (Tally.count "Draws" fitting)
+                  "every draw of the fitting pool builds"
 
               Expect.equal
-                  fitting.Types
+                  (Tally.reached "Types" fitting)
                   (ColumnDiff.modelTypes |> List.map ColumnType.tag |> Set.ofList)
                   "every column type the list model spells was drawn"
 
-              Expect.isGreaterThan fitting.Widened 150 (sprintf "draws holding a widened Int (%d)" fitting.Widened)
-              Expect.isGreaterThan fitting.WithNull 400 (sprintf "draws holding a Null (%d)" fitting.WithNull)
-              Expect.isGreaterThan wild.Refused 150 (sprintf "the wild pool reached ofCells' refusal (%d)" wild.Refused)
+              Expect.isGreaterThan
+                  (Tally.count "Widened" fitting)
+                  150
+                  (sprintf "draws holding a widened Int (%d)" (Tally.count "Widened" fitting))
+
+              Expect.isGreaterThan
+                  (Tally.count "WithNull" fitting)
+                  400
+                  (sprintf "draws holding a Null (%d)" (Tally.count "WithNull" fitting))
+
+              Expect.isGreaterThan
+                  (Tally.count "Refused" wild)
+                  150
+                  (sprintf "the wild pool reached ofCells' refusal (%d)" (Tally.count "Refused" wild))
 
               Expect.equal
-                  wild.Classes
+                  (Tally.reached "Classes" wild)
                   (Set.ofList [ "TypeMismatch"; "MalformedShape" ])
                   "and the refusals are the two classes ofCells has: a cell outside the type (an instant finer than its unit included), and temporal text it cannot hold"
 
-              Expect.isGreaterThan wild.Built 800 (sprintf "the wild pool still builds (%d)" wild.Built)
+              Expect.isGreaterThan
+                  (Tally.count "Built" wild)
+                  800
+                  (sprintf "the wild pool still builds (%d)" (Tally.count "Built" wild))
 
           testCase
               "the typed validate and encodeJson agree with production through the refinement, over the column pools"
@@ -538,11 +455,12 @@ let tests =
               let wild = onBigStack (fun () -> RefinementDiff.generatedTables 3064 3000 1)
 
               for (name, t) in [ "the valid pool", valid; "the wild pool", wild ] do
-                  Expect.isEmpty
-                      t.TableDiffs
-                      (sprintf "%s: the typed model disagreed with production:\n%s" name (renderCanonDiffs t.TableDiffs))
+                  Differential.expectAgrees (name + ": the typed model") t
 
-              Expect.equal valid.Valid valid.Tables "every table of the first pool is one validate accepts"
+              Expect.equal
+                  (Tally.count "Valid" valid)
+                  (Tally.count "Tables" valid)
+                  "every table of the first pool is one validate accepts"
 
               for cls in
                   [ "Malformed"
@@ -551,8 +469,8 @@ let tests =
                     "NonFiniteFloat"
                     "MalformedShape" ] do
                   Expect.isTrue
-                      (wild.Refusals.Contains cls)
-                      (sprintf "the wild pool reached a %s refusal (reached: %A)" cls wild.Refusals)
+                      ((Tally.reached "Refusals" wild).Contains cls)
+                      (sprintf "the wild pool reached a %s refusal (reached: %A)" cls (Tally.reached "Refusals" wild))
 
           testCase "a bridge that drops the widening normalisation loses — on exactly the widened draws"
           <| fun _ ->
@@ -562,10 +480,18 @@ let tests =
               // says the right-hand side is `norm_cells`, which moves exactly those cells.
               let t = onBigStack (fun () -> RefinementDiff.generated 4191 2200 false)
 
-              Expect.isEmpty t.Diffs (sprintf "the pool is the clean one above:\n%s" (renderCanonDiffs t.Diffs))
-              Expect.isGreaterThan t.Widened 150 "the pool holds widened draws"
-              Expect.isGreaterThan (t.Built - t.Widened) 500 "and draws with nothing to widen"
-              Expect.equal t.LiteralLost t.Widened "the literal bridge lost on the widened draws, and on no other"
+              Differential.expectAgrees "the pool is the clean one above" t
+              Expect.isGreaterThan (Tally.count "Widened" t) 150 "the pool holds widened draws"
+
+              Expect.isGreaterThan
+                  ((Tally.count "Built" t) - (Tally.count "Widened" t))
+                  500
+                  "and draws with nothing to widen"
+
+              Expect.equal
+                  (Tally.count "LiteralLost" t)
+                  (Tally.count "Widened" t)
+                  "the literal bridge lost on the widened draws, and on no other"
 
           testCase
               "the two-case validity oracle agrees with production: the normalising constructors, toMask, and column equality (Phase 420)"
@@ -575,23 +501,30 @@ let tests =
               // against column equality over one values vector, so only the validities differ.
               let t = RefinementDiff.generatedValidities 4201 3000 ColumnRefinement.same_mask
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the validity oracle disagreed with production:\n%s" (String.concat "\n" (List.rev t.Diffs)))
+              Differential.expectAgrees "the validity oracle" t
 
               // adequacy: both cases built, and both answers of the mixed comparison reached
-              Expect.isGreaterThan t.Normalised 300 (sprintf "draws the constructors made AllValid (%d)" t.Normalised)
-              Expect.isGreaterThan t.Masked 300 (sprintf "draws they kept as a Mask (%d)" t.Masked)
+              Expect.isGreaterThan
+                  (Tally.count "Normalised" t)
+                  300
+                  (sprintf "draws the constructors made AllValid (%d)" (Tally.count "Normalised" t))
 
               Expect.isGreaterThan
-                  t.EqualMixed
-                  50
-                  (sprintf "AllValid beside an all-true Mask of the length, found equal (%d)" t.EqualMixed)
+                  (Tally.count "Masked" t)
+                  300
+                  (sprintf "draws they kept as a Mask (%d)" (Tally.count "Masked" t))
 
               Expect.isGreaterThan
-                  t.UnequalMixed
+                  (Tally.count "EqualMixed" t)
                   50
-                  (sprintf "AllValid beside any other Mask, found unequal (%d)" t.UnequalMixed)
+                  (sprintf
+                      "AllValid beside an all-true Mask of the length, found equal (%d)"
+                      (Tally.count "EqualMixed" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "UnequalMixed" t)
+                  50
+                  (sprintf "AllValid beside any other Mask, found unequal (%d)" (Tally.count "UnequalMixed" t))
 
           testCase "a model that compares the validities' representations loses - on the mixed equal pairs"
           <| fun _ ->
@@ -608,5 +541,9 @@ let tests =
 
               let t = RefinementDiff.generatedValidities 4201 3000 representational
 
-              Expect.isGreaterThan t.EqualMixed 50 "the pool holds the mixed equal pairs"
-              Expect.equal t.Diffs.Length t.EqualMixed "the representational model lost on those, and on no other" ]
+              Expect.isGreaterThan (Tally.count "EqualMixed" t) 50 "the pool holds the mixed equal pairs"
+
+              Expect.equal
+                  (List.length (Tally.disagreements t))
+                  (Tally.count "EqualMixed" t)
+                  "the representational model lost on those, and on no other" ]

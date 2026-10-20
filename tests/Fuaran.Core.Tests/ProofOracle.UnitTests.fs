@@ -27,13 +27,22 @@ let tests =
               // CANONICAL in the model's sense — the premise `parse_render` is stated over.
               let t = onBigStack (fun () -> UnitDiff.generated 428 600)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the unit oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the unit oracle" t
 
-              Expect.isGreaterThan t.Texts 700 (sprintf "texts asked of both parsers (%d)" t.Texts)
-              Expect.isGreaterThan t.Parsed 650 (sprintf "texts both parsed (%d)" t.Parsed)
-              Expect.equal t.NotCanonical 0 "every unit the shipped parser answers is canonical in the model"
+              Expect.isGreaterThan
+                  (Tally.count "Texts" t)
+                  700
+                  (sprintf "texts asked of both parsers (%d)" (Tally.count "Texts" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Parsed" t)
+                  650
+                  (sprintf "texts both parsed (%d)" (Tally.count "Parsed" t))
+
+              Expect.equal
+                  (Tally.count "NotCanonical" t)
+                  0
+                  "every unit the shipped parser answers is canonical in the model"
 
               for cls in
                   [ "Empty"
@@ -45,8 +54,8 @@ let tests =
                     "PrefixNotAllowed"
                     "NumericFactor" ] do
                   Expect.isTrue
-                      (t.Refusals.Contains cls)
-                      (sprintf "the corpus reached a %s refusal (reached: %A)" cls t.Refusals)
+                      ((Tally.reached "Refusals" t).Contains cls)
+                      (sprintf "the corpus reached a %s refusal (reached: %A)" cls (Tally.reached "Refusals" t))
 
           testCase "the unit oracle agrees with mul, div, pow, compatible and conversionFactor over drawn pairs"
           <| fun _ ->
@@ -56,21 +65,22 @@ let tests =
               // which is where uniqueness of the reduced form, not proved, is held.
               let t = onBigStack (fun () -> UnitDiff.generated 428 600)
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the unit oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
-
-              Expect.isGreaterThan t.Pairs 1100 (sprintf "pairs asked of the algebra (%d)" t.Pairs)
+              Differential.expectAgrees "the unit oracle" t
 
               Expect.isGreaterThan
-                  t.Compatible
+                  (Tally.count "Pairs" t)
+                  1100
+                  (sprintf "pairs asked of the algebra (%d)" (Tally.count "Pairs" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Compatible" t)
                   600
-                  (sprintf "compatible pairs, with a factor on both sides (%d)" t.Compatible)
+                  (sprintf "compatible pairs, with a factor on both sides (%d)" (Tally.count "Compatible" t))
 
               Expect.isGreaterThan
-                  t.Overflowed
+                  (Tally.count "Overflowed" t)
                   400
-                  (sprintf "pairs where the big power left the bound on both sides (%d)" t.Overflowed)
+                  (sprintf "pairs where the big power left the bound on both sides (%d)" (Tally.count "Overflowed" t))
 
           testCase "a canonicaliser that skips the merge loses - on exactly the reordered draws"
           <| fun _ ->
@@ -81,13 +91,18 @@ let tests =
               let t = onBigStack (fun () -> UnitDiff.concatenated 428 600)
 
               Expect.isGreaterThan
-                  t.Reordered
+                  (Tally.count "Reordered" t)
                   150
-                  (sprintf "pairs whose concatenation is not the merge (%d)" t.Reordered)
+                  (sprintf "pairs whose concatenation is not the merge (%d)" (Tally.count "Reordered" t))
 
               Expect.isGreaterThan
-                  (t.Pairs - t.Reordered)
+                  ((Tally.count "Pairs" t) - (Tally.count "Reordered" t))
                   50
-                  (sprintf "pairs whose concatenation is the merge (%d)" (t.Pairs - t.Reordered))
+                  (sprintf
+                      "pairs whose concatenation is the merge (%d)"
+                      ((Tally.count "Pairs" t) - (Tally.count "Reordered" t)))
 
-              Expect.equal t.LiteralLost t.Reordered "the concatenation lost on the reordered pairs, and on no other" ]
+              Expect.equal
+                  (Tally.count "LiteralLost" t)
+                  (Tally.count "Reordered" t)
+                  "the concatenation lost on the reordered pairs, and on no other" ]
