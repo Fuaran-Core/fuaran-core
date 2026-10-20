@@ -2728,7 +2728,7 @@ let parse_render_roundtrip (#num #flt: eqtype) (w: wire num flt)
 (* THE POLICY IS UNOBSERVABLE ON CANONICAL OUTPUT — theorem 1's `NullPolicy` fork, which lives in
    the member loop and nowhere else, never fires on bytes this encoder produced. A corollary of
    the two theorems above rather than a third one, and worth stating because the two policies are
-   what a caller of `Json.parseDetailedWithPolicy` chooses between. *)
+   what a caller of `Json.read` chooses between (`ReadOptions.Null`). *)
 [@@ noextract_to "FSharp"]
 let parse_render_is_policy_independent (#num #flt: eqtype) (w: wire num flt)
                                        (fr: list JP.ch -> JP.freadv) (cap: string)

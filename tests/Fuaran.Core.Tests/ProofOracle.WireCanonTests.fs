@@ -141,8 +141,8 @@ let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTall
         // repeated member. Section 6's reader reads exactly what `render` emits, repeated keys
         // included; production's parser refuses the text. The bridge theorem carries the
         // distinct-keys hypothesis, and here the refusal itself is what is held.
-        match Json.parseDetailed (Canon.render v) with
-        | Result.Error e when e.Kind = DuplicateMember -> t
+        match Json.read ReadOptions.strict (Canon.render v) with
+        | Result.Error(JsonRefusal.Malformed e) when e.Kind = DuplicateMember -> t
         | other ->
             { t with
                 Diffs =

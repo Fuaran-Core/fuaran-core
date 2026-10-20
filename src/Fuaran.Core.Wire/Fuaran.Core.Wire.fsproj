@@ -15,7 +15,6 @@
     <Compile Include="DecodePath.fs" />
     <Compile Include="DecodeError.fs" />
     <Compile Include="Decoder.fs" />
-    <Compile Include="Decode.fs" />
     <Compile Include="Versioning.fs" />
     <Compile Include="Xorshift32.fs" />
     <Compile Include="Corpus.fs" />

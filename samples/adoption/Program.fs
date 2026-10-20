@@ -119,7 +119,7 @@ let encodeOp (SetText(id, text)) =
     Json.render (Json.kindObj "setText" [ "id", JStr id; "text", JStr text ])
 
 let decodeOp (s: string) : Result<DomainOp, string> =
-    Decode.parse s
+    Json.parse s
     |> Result.bind (fun el ->
         Decoder.describing (Decoder.field "id" Decoder.str) el
         |> Result.bind (fun id ->

@@ -7,8 +7,8 @@ namespace Fuaran.Core
 /// unknown node kind from an unknown case) is an instance of one of these.
 [<RequireQualifiedAccess>]
 type DecodeCode =
-    /// The input is not JSON text the reader can parse (any parser refusal but its nesting cap). Its
-    /// path is the root.
+    /// The input is not JSON text the reader can parse (malformed text; a passed bound, the nesting
+    /// cap included, is `LimitExceeded`). Its path is the root.
     | InvalidJson
     /// A required member is absent. The path NAMES the absent member: every step but the last
     /// resolves in the document, to an object that does not carry the last.
@@ -162,20 +162,14 @@ module DecodeError =
             | _ -> false
         | _ -> (DecodePath.resolve e.Path doc).IsSome
 
-    /// A parser refusal as a decode refusal at the root: the nesting cap is `LimitExceeded`, every
-    /// other class `InvalidJson`; the sentence is the one `Json.parse` returns.
-    let ofJsonError (e: JsonError) : DecodeError =
-        match e.Kind with
-        | MaxDepthExceeded -> make DecodeCode.LimitExceeded "nesting within the parser's cap" (Json.formatJsonError e)
-        | _ -> make DecodeCode.InvalidJson "JSON text" (Json.formatJsonError e)
-
-    /// A limited parse's refusal as a decode refusal (Phase 465): malformed text exactly as
-    /// `ofJsonError` reads it, and a breach as `LimitExceeded` AT THE BREACH'S PATH, naming the limit
-    /// and its declared value and never the input — so a host maps the one code to its own envelope
-    /// and never reports a breach as `InvalidJson`.
+    /// A reader's refusal as a decode refusal (Phase 465; the one projection since Phase 519):
+    /// malformed text is `InvalidJson` at the root, in the sentence `Json.parse` returns, and a
+    /// breach is `LimitExceeded` AT THE BREACH'S PATH, naming the limit and its declared value and
+    /// never the input — the depth cap's breach included, on every reader — so a host maps the one
+    /// code to its own envelope and never reports a breach as `InvalidJson`.
     let ofJsonRefusal (r: JsonRefusal) : DecodeError =
         match r with
-        | JsonRefusal.Malformed e -> ofJsonError e
+        | JsonRefusal.Malformed e -> make DecodeCode.InvalidJson "JSON text" (Json.formatJsonError e)
         | JsonRefusal.LimitExceeded b ->
             let name = JsonLimit.name b.Limit
 

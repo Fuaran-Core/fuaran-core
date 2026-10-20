@@ -20,7 +20,7 @@ let private sw: StreamWitness<NoteOp, string list, string> =
       Encode = fun (Note s) -> Json.render (Json.kindObj "note" [ "text", JStr s ])
       Decode =
         fun json ->
-            Decode.parse json
+            Json.parse json
             |> Result.bind (fun el -> Decoder.describing (Decoder.field "text" Decoder.str) el |> Result.map Note) }
 
 let private h = OpStream.defaultHash

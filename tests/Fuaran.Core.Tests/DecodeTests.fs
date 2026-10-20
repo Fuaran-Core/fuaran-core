@@ -162,16 +162,42 @@ let tests =
               | Ok v -> failtestf "expected reject, got %A" v
 
           // Phase 10 — nesting cap: deep input is a named Error, never a stack-overflow crash.
-          testCase "parseWith rejects nesting deeper than the cap, naming the depth"
+          // Phase 519 — the cap is `ReadOptions.Limits.MaxDepth`, and passing it is a `Depth` breach
+          // at the path of the container opened at it.
+          testCase "read rejects nesting deeper than the cap as a Depth breach at the container's path"
           <| fun _ ->
               let nest d =
                   String.replicate d "[" + String.replicate d "]"
-              // cap = 3: depth-3 is fine, depth-4 is refused
-              Expect.isOk (Json.parseWith 3 (nest 3)) "depth at the cap parses"
 
-              match Json.parseWith 3 (nest 4) with
-              | Error m -> Expect.stringContains m "max nesting depth" "names the depth cap"
-              | Ok _ -> failtest "expected a depth Error"
+              let cap3 =
+                  { ReadOptions.strict with
+                      Limits = JsonLimits.depthOnly 3 }
+              // cap = 3: depth-3 is fine, depth-4 is refused
+              Expect.isOk (Json.read cap3 (nest 3)) "depth at the cap parses"
+
+              match Json.read cap3 (nest 4) with
+              | Error(JsonRefusal.LimitExceeded b) ->
+                  Expect.equal b.Limit JsonLimit.Depth "the depth bound"
+                  Expect.equal b.Declared 3 "its declared value"
+
+                  Expect.equal
+                      b.Path
+                      [ PathSegment.Index 0; PathSegment.Index 0; PathSegment.Index 0 ]
+                      "the container's path"
+
+                  Expect.equal b.Position 3 "at the bracket that opens it"
+              | other -> failtestf "expected a depth breach, got %A" other
+
+          testCase "ReadOptions.strict is the parser's own cap and the strict null policy"
+          <| fun _ ->
+              Expect.equal
+                  ReadOptions.strict.Limits
+                  (JsonLimits.depthOnly Json.defaultMaxDepth)
+                  "the default cap, no other bound"
+
+              Expect.equal ReadOptions.strict.Null RejectNull "every null refused"
+              Expect.equal ReadOptions.tolerantOfNull.Null EraseMemberNull "the tolerant read erases a member null"
+              Expect.equal ReadOptions.tolerantOfNull.Limits ReadOptions.strict.Limits "and bounds nothing else"
 
           testCase "default parse tolerates ordinary nesting and a deep run does not crash"
           <| fun _ ->
@@ -180,7 +206,11 @@ let tests =
               Expect.isOk (Json.parse deep) "400-deep parses under the default cap"
               // beyond the default cap: a named Error, not an exception
               let tooDeep = String.replicate 600 "[" + String.replicate 600 "]"
-              Expect.isError (Json.parse tooDeep) "600-deep exceeds the default cap"
+              // The string form's sentence did not move when the cap became a breach (Phase 519).
+              Expect.equal
+                  (Json.parse tooDeep)
+                  (Error "not valid JSON: max nesting depth 512 exceeded at position 512")
+                  "600-deep exceeds the default cap, named as it always was"
 
           // Phase 12 — non-finite floats: encode-time guard, not un-parseable wire.
           testCase "tryRender rejects non-finite floats, naming the token"
@@ -202,11 +232,12 @@ let tests =
               | Error m -> failtestf "expected Ok, got Error %s" m
 
           // Phase 22 — structured parse error: a caller can branch on Kind + Position.
-          testCase "parseDetailed classifies failures by kind and position"
+          testCase "read classifies failures by kind and position"
           <| fun _ ->
               let kindOfErr input =
-                  match Json.parseDetailed input with
-                  | Error e -> Some(e.Kind)
+                  match Json.read ReadOptions.strict input with
+                  | Error(JsonRefusal.Malformed e) -> Some(e.Kind)
+                  | Error(JsonRefusal.LimitExceeded _)
                   | Ok _ -> None
 
               Expect.equal (kindOfErr "null") (Some JsonErrorKind.NullNotRepresentable) "null rejected by kind"
@@ -220,23 +251,18 @@ let tests =
                   (Some JsonErrorKind.UnexpectedEndOfInput)
                   "open arrays run to EOF"
 
-              // depth cap classifies as MaxDepthExceeded
-              match Json.parseDetailedWith 3 (String.replicate 4 "[" + String.replicate 4 "]") with
-              | Error e -> Expect.equal e.Kind JsonErrorKind.MaxDepthExceeded "depth cap kind"
-              | Ok _ -> failtest "expected a depth error"
-
               // a real position is carried
-              match Json.parseDetailed "  @" with
-              | Error e ->
+              match Json.read ReadOptions.strict "  @" with
+              | Error(JsonRefusal.Malformed e) ->
                   Expect.equal e.Kind JsonErrorKind.UnexpectedChar "unexpected char kind"
                   Expect.equal e.Position 2 "position points at the '@'"
-              | Ok _ -> failtest "expected an unexpected-char error"
+              | other -> failtestf "expected an unexpected-char error, got %A" other
 
-          testCase "parse string errors are byte-identical to parseDetailed reformatted"
+          testCase "parse string errors are byte-identical to read's refusal reformatted"
           <| fun _ ->
               for input in [ "null"; "\"abc"; "{\"k\":1} x"; "@" ] do
-                  match Json.parse input, Json.parseDetailed input with
-                  | Error s, Error e ->
+                  match Json.parse input, Json.read ReadOptions.strict input with
+                  | Error s, Error(JsonRefusal.Malformed e) ->
                       Expect.equal
                           s
                           ("not valid JSON: " + e.Message + " at position " + string e.Position)

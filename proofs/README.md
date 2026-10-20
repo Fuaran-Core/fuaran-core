@@ -40,7 +40,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Phase 191 added section 7, SNAPSHOT AND BOUNDED REPLAY: `OpStream.compact` / `replayFrom` / `verifyAcross` with the domain reducer as a parameter, `replay_from_snapshot_eq` and `compact_preserves_verify` proved, and the two places the chartered sentences were too strong stated as theorems. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved; since Phase 462 the two decode-determinism refusals every wire shares (a repeated member name, a raw control inside a string) are the model's own, exhibited by `repeated_member_refused` and `raw_control_refused`; since Phase 465 the descent takes a limits record (`lims`: string, items and members bounds, each `Unbounded` or a budget) and the limited entry point `parse_limited` lifts every breach to the distinct `RLimit`, with `limited_at_no_bound_is_the_parser`, `limit_never_reported_as_malformed`, `string_bound_exact` and `items_bound_exact` proved (section 13). This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — the `Json.read` scanner's `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved; since Phase 462 the two decode-determinism refusals every wire shares (a repeated member name, a raw control inside a string) are the model's own, exhibited by `repeated_member_refused` and `raw_control_refused`; since Phase 465 the descent takes a limits record (`lims`: string, items and members bounds, each `Unbounded` or a budget) and the limited entry point `parse_limited` lifts every breach to the distinct `RLimit`, with `limited_at_no_bound_is_the_parser`, `limit_never_reported_as_malformed`, `string_bound_exact` and `items_bound_exact` proved (section 13). This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. Since Phase 286, section 12 models the KEYED engine (`Ops.applyContainedKeyed`) over a two-list tree and shows its insert is the unkeyed insert over the keyed walk, so uniqueness is preserved over every keyed position a domain declares (`keyed_apply_preserves_wf`); that section is not extracted. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -1026,7 +1026,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
-| `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
+| `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
 | `Fuaran.Core.OpStream` | 126 | 28 | 54 | 3 | 1 | 0 | 2 | 38 |
 | `Fuaran.Core.OpStream.Dag` | 91 | 38 | 30 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 56 | 21 | 12 | 14 | 0 | 0 | 0 | 9 |
@@ -1035,9 +1035,9 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Tree` | 65 | 16 | 8 | 1 | 2 | 0 | 0 | 38 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
-| `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Wire` | 157 | 67 | 16 | 3 | 2 | 0 | 0 | 69 |
-| **Total** | 1235 | 306 | 411 | 38 | 13 | 0 | 3 | 464 |
+| `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
+| `Fuaran.Core.Wire` | 138 | 66 | 14 | 3 | 2 | 0 | 0 | 53 |
+| **Total** | 1230 | 305 | 413 | 38 | 13 | 0 | 3 | 458 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -2226,7 +2226,7 @@ minutes after, because the helper's pattern then fires throughout the encoder to
 a recursive-descent parser over bytes — the depth bound, escape handling, the int53 token guard,
 the `MaxDepthExceeded` and `TrailingCharacters` classes — and it is the one place in this stack an
 EverParse-shaped approach might apply. It is a separate phase. Everything the theorem says begins
-at a `JVal` that already exists; `Decode.parse` and `Decode.parseTolerantOfNull` are one-line
+at a `JVal` that already exists; `Json.parse` and `Decoder.parse` are one-line
 delegates to the parser and are not modelled either.
 
 So **the programme's §6 wording "the decoder is total" is spent on the combinator layer alone.** It
@@ -2249,8 +2249,8 @@ itself is modelled where a domain meets it, as the reference vocabulary's `decod
 
 ### Where the Phase 102 policy actually lives
 
-`NullPolicy` is a parameter of `Json.parseDetailedWithPolicy` **and of nothing else**, and `JVal`
-has no null constructor — so no `Decode` combinator can see a null, and none takes a policy
+`NullPolicy` is a parameter of a read (`ReadOptions.Null`) **and of nothing else**, and `JVal`
+has no null constructor — so no `Decoder` combinator can see a null, and none takes a policy
 parameter. What the policy is, at the layer this theorem is about, is a **document-level read
 normalisation** upstream of every combinator: erase object-member nulls, refuse a null that has no
 absence to erase it to.
@@ -2459,7 +2459,7 @@ agreeing on accept-vs-refuse alone would not notice a decoder that named the wro
 | a generated `JVal` sample | the same 12 probes over 400 seed-replayable documents, key alphabet drawn from the reference vocabulary's own member names | yes (asserted) |
 | the reference vocabulary | 150 generated nodes encoded and decoded, model against the same decoder written from the shipped combinators — the round-trip theorem's instance on the extracted code | accept path |
 | the same, refused | every corpus `nodes/` value and 400 generated documents through both node decoders | refuse path (asserted) |
-| the read policy | 7 hand-written null positions + 400 generated documents carrying the token at every position, rendered to wire text and read by `Json.parseDetailedWithPolicy` under BOTH policies | yes, and the policy is asserted to have FIRED |
+| the read policy | 7 hand-written null positions + 400 generated documents carrying the token at every position, rendered to wire text and read by `Json.read` under BOTH policies | yes, and the policy is asserted to have FIRED |
 | the same corpus, SHUFFLED (Phase 152) | every value of every `nodes/` and `ops/` fixture, members reordered at every depth, 4 seeded shuffles each: production against ITSELF across the shuffle, and the oracle against production on the shuffled document | refuse path (asserted) |
 | the reference vocabulary, shuffled | 150 generated nodes encoded and reordered, 4 shuffles each, plus 300 generated documents | both (each asserted where its pool reaches it) |
 
@@ -3630,7 +3630,7 @@ next contended afternoon's finding. `measuredSeconds` is re-recorded at 19; the 
 ## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 
 `JsonParse.fst` is this directory's fifth model, and the boundary theorem 1 named. It models
-`Json.parseDetailedWithPolicy` — the core parser every other entry point is a one-line wrapper over
+`Json.read` at no bound but the cap — the one read every other reader is a wrapper over
 — clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes and the
 `\uXXXX` path, `parseNumber` with the Int32 and int53 token guards, the two literals, and the mutual
 `parseValue` / `parseObject` / `parseArray` with the explicit depth counter, including the
@@ -3786,7 +3786,7 @@ the rest of this theorem leaves it.
 ### What the corpus covers
 
 The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracle.JsonParseTests.fs`) runs the
-extracted model beside `Json.parseDetailedWithPolicy` over the same TEXT. Every probe renders both
+extracted model beside `Json.read` (at no bound but the cap) over the same TEXT. Every probe renders both
 answers into one string carrying the outcome class, the decoded value and — on a failure — the
 KIND, the POSITION and the MESSAGE. The position is the half most likely to drift silently, which is
 why it is compared rather than described.
@@ -3835,8 +3835,9 @@ the output says so.
    query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. The module
    carries a scoped `--ext context_pruning` (72s against 128s) for the reason `TreeOps.fst` gives at
    the same line.
-2. **Differentially tested.** The extracted model agrees with `Json.parseDetailedWithPolicy` over
-   the pools above, on class, value, kind, position and message, under both policies. Agreement is
+2. **Differentially tested.** The extracted model agrees with `Json.read` (at no bound but the cap) over
+   the pools above, on class, value, kind, position and message (the cap's refusal on position,
+   through the model's lift), under both policies. Agreement is
    over those pools, never over all inputs.
 3. **Assumed, and stated as such.**
    - **The float readback.** `Double.TryParse`'s three-valued verdict is a parameter, instantiated by
@@ -4643,7 +4644,7 @@ the two together: section 14 of `WireCanon.fst` proves it. See the section below
 
 Two models of the same language sat beside each other from Phase 146 with no lemma joining them.
 Theorem 7 proved that a reader for the grammar `Canon.render` emits **exists** and inverts it;
-theorem 4 proved that `Json.parseDetailedWithPolicy` is **total** and that its refusals are
+theorem 4 proved that the parser (`Json.read` at no bound but the cap) is **total** and that its refusals are
 classified. Neither said they were reading the same language, so the round trip a consumer actually
 performs — render here, parse there — was measured by the differential over the corpus and proved
 nowhere. That is what "measured, not proved" meant for this row.

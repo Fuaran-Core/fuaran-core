@@ -1,8 +1,9 @@
 module Fuaran.Core.Tests.RegistryLifecycleTests
 
 // ---------------------------------------------------------------------------
-// Phase 316 — a registry is a lattice, not an append log. The four registries (capability,
-// function, query, validator) each gain `unregister` / `replace` / `restrict` / `union`; the
+// Phase 316 — a registry is a lattice, not an append log. The registries (capability, function,
+// query, validator, and since Phase 521 the column validator's, the fifth) each carry `unregister` /
+// `replace` / `restrict` / `union`; the
 // function registry is opaque, so its result index cannot drift from its entries; a content pack
 // unloads; and a paged query reaches its resolver through the seam with a key per page. The
 // sampled laws are `Conformance.registryLaws`, `packLoadingLaws` and `queryLaws`; these are the
@@ -66,6 +67,11 @@ let private family (id: string) : RuleFamily<unit, string> = { Id = id; Run = fu
 let private rules (ids: string list) : Validator.RuleRegistry<unit, string> =
     Validator.ofFamilies (ids |> List.map family) |> orFail
 
+let private colRule (id: string) : ColumnRule = ColumnValidator.rule id (fun _ -> [])
+
+let private colRules (ids: string list) : ColumnValidator.Registry =
+    ColumnValidator.ofRules (ids |> List.map colRule) |> orFail
+
 let private capIds r =
     CapabilityRegistry.enumerate r |> List.map _.Id
 
@@ -81,7 +87,7 @@ let private ofKind (kind: string) (r: FunctionRegistry) : string list =
 let tests =
     testList
         "Registry lifecycle (Phase 316)"
-        [ testCase "unregister undoes register on a fresh id, on all four registries"
+        [ testCase "unregister undoes register on a fresh id, on all five registries"
           <| fun _ ->
               let cr = caps [ "a"; "b" ]
 
@@ -116,6 +122,13 @@ let tests =
                   (Ok [ "a"; "b" ])
                   "validator"
 
+              Expect.equal
+                  (ColumnValidator.register (colRule "c") (colRules [ "a"; "b" ])
+                   |> Result.bind (ColumnValidator.unregister "c")
+                   |> Result.map ColumnValidator.enumerate)
+                  (Ok [ "a"; "b" ])
+                  "column validator"
+
           testCase "an unheld id is refused by each seam's own unknown-id error, naming the held ids"
           <| fun _ ->
               Expect.equal
@@ -139,6 +152,14 @@ let tests =
               | Error(RegistrationError.UnknownRule("z", [ "b"; "a" ])) -> ()
               | other -> failtestf "expected UnknownRule naming the registration order, got %A" other
 
+              match ColumnValidator.unregister "z" (colRules [ "b"; "a" ]) with
+              | Error(RegistrationError.UnknownRule("z", [ "b"; "a" ])) -> ()
+              | other -> failtestf "column validator: expected UnknownRule naming the registration order, got %A" other
+
+              match ColumnValidator.replace (colRule "z") (colRules [ "a" ]) with
+              | Error(RegistrationError.UnknownRule("z", [ "a" ])) -> ()
+              | other -> failtestf "column validator replace: expected UnknownRule, got %A" other
+
           testCase "replace swaps the entry under its id through the admission gate, and keeps the validator's order"
           <| fun _ ->
               let cr = caps [ "a"; "b" ]
@@ -158,6 +179,18 @@ let tests =
 
               let vr = rules [ "a"; "b"; "c" ] |> Validator.replace (family "b") |> orFail
               Expect.equal (Validator.enumerate vr) [ "a"; "b"; "c" ] "position kept"
+
+              let swapped =
+                  ColumnValidator.rule "b" (fun _ -> [ Defect.create "X" Severity.Error "swapped" None ])
+
+              let cr = colRules [ "a"; "b"; "c" ] |> ColumnValidator.replace swapped |> orFail
+              Expect.equal (ColumnValidator.enumerate cr) [ "a"; "b"; "c" ] "column validator: position kept"
+
+              Expect.equal
+                  (ColumnValidator.validate cr (Table.empty)
+                   |> List.map (fun d -> d.Code, d.Family))
+                  [ "X", "b" ]
+                  "column validator: the replacement is what runs, under its id"
 
           testCase "restrict narrows to the ids kept, never widening"
           <| fun _ ->
@@ -180,6 +213,12 @@ let tests =
                   (Validator.restrict keep (rules [ "c"; "b"; "a" ]) |> Validator.enumerate)
                   [ "b" ]
                   "validator"
+
+              Expect.equal
+                  (ColumnValidator.restrict (Set.ofList [ "b"; "a"; "z" ]) (colRules [ "c"; "b"; "a" ])
+                   |> ColumnValidator.enumerate)
+                  [ "b"; "a" ]
+                  "column validator, in registration order"
 
               let restricted = CapabilityRegistry.restrict keep (caps [ "a"; "b" ])
 
@@ -218,6 +257,16 @@ let tests =
               match Validator.union (rules [ "a" ]) (rules [ "a" ]) with
               | Error(RegistrationError.DuplicateRule("a", [ "a" ])) -> ()
               | other -> failtestf "expected DuplicateRule, got %A" other
+
+              Expect.equal
+                  (ColumnValidator.union (colRules [ "b" ]) (colRules [ "a" ])
+                   |> Result.map ColumnValidator.enumerate)
+                  (Ok [ "b"; "a" ])
+                  "column validator keeps each side's order"
+
+              match ColumnValidator.union (colRules [ "a"; "c" ]) (colRules [ "b"; "c" ]) with
+              | Error(RegistrationError.DuplicateRule("c", [ "a"; "c" ])) -> ()
+              | other -> failtestf "column validator: expected DuplicateRule, got %A" other
 
           testCase "the function registry's index follows every edit — no phantom, no miss"
           <| fun _ ->

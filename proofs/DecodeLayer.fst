@@ -9,9 +9,9 @@
        first-member `step`.
      - `src/Fuaran.Core.Wire/DecodeError.fs` — `DecodeCode`, `RootDecodeCode` (Phase 443),
        `DecodeError.make` / `under` / `within` / `resolvesIn`.
-     - `src/Fuaran.Core.Wire/Decoder.fs` — every combinator but the four that start from TEXT
-       (`parse`, `parseWith`, `ofString`, which are `Json.parse` and a bind, and `describing`,
-       which answers the sentence): `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`,
+     - `src/Fuaran.Core.Wire/Decoder.fs` — every combinator but the two that are not over a value
+       (`parse`, which starts from TEXT and is `Json.read` with its refusal lifted, and
+       `describing`, which answers the sentence): `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`,
        `missing`, `tryMember`, the six kind readers, `field` / `optField` / `fieldOr`, `at`,
        `mapListIndexed` / `list` / `boundedList` / `listAll`, `sequence` / `all`, `oneOf`,
        `tagDispatch` / `tagDispatchWith` / `kindDispatch`, `intRange`, `undeclared` / `members` /

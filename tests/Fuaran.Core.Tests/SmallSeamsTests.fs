@@ -236,13 +236,13 @@ let private validatorTests =
           testCase "column rule ids are injective over their parameters"
           <| fun _ ->
               Expect.notEqual
-                  (ColumnValidator.unique [ "a,b" ]).Id
-                  (ColumnValidator.unique [ "a"; "b" ]).Id
+                  (ColumnValidator.unique [ "a,b" ]).RuleId
+                  (ColumnValidator.unique [ "a"; "b" ]).RuleId
                   "a comma in a column name is not a column boundary"
 
               Expect.notEqual
-                  (ColumnValidator.inRange "a" 0.0 1.0).Id
-                  (ColumnValidator.inRange "a" 0.0 2.0).Id
+                  (ColumnValidator.inRange "a" 0.0 1.0).RuleId
+                  (ColumnValidator.inRange "a" 0.0 2.0).RuleId
                   "two ranges over one column are two rules"
 
           testCase "ColumnValidator.validateTagged stamps each finding with its rule"
@@ -252,8 +252,8 @@ let private validatorTests =
 
               match ColumnValidator.validateTagged reg (table [ "a", IntType, [ Null; Int 1 ] ]) with
               | [ id, d ] ->
-                  Expect.equal id rule.Id "tagged with the rule id"
-                  Expect.equal d.Family rule.Id "stamped"
+                  Expect.equal id rule.RuleId "tagged with the rule id"
+                  Expect.equal d.Family rule.RuleId "stamped"
               | other -> failtestf "expected one finding, got %A" other
 
           testCase "inRange refuses a NaN bound and reports NaN and unreadable cells"
@@ -335,7 +335,7 @@ let private validatorTests =
               // quadratic indexing made 4x rows cost ~16x; linear costs ~4x
               Expect.isLessThan large (max 2000.0 (10.0 * small)) "100,000 rows within a linear budget"
 
-          testCase "asCheck puts a tree family and a column rule in versioned packs"
+          testCase "asCheck puts a tree family in a versioned pack, and a column rule is a pack check as it is"
           <| fun _ ->
               let pack: Validator.Pack<RNode, string> =
                   { Name = "p"
@@ -349,7 +349,7 @@ let private validatorTests =
               let colPack: Validator.Pack<Table, string> =
                   { Name = "q"
                     Version = "2"
-                    Rules = [ ColumnValidator.asCheck (ColumnValidator.notNull "a") ] }
+                    Rules = [ ColumnValidator.notNull "a" ] }
 
               Expect.equal
                   (Validator.runPack colPack (table [ "a", IntType, [ Null ] ]) |> List.length)

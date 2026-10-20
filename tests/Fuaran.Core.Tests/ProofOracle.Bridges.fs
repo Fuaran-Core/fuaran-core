@@ -458,8 +458,12 @@ let drawnUpdatesAndBatches
     updates @ batches
 
 // ---------------------------------------------------------------------------
-//  The PARSER differential (Phase 146) — `JsonParse.parse` beside
-//  `Json.parseDetailedWithPolicy`.
+//  The PARSER differential (Phase 146) — `JsonParse.parse` beside `Json.read` at a cap and no
+//  other bound (`JsonLimits.depthOnly`; until Phase 519 the unlimited `parseDetailedWithPolicy`,
+//  which every reader now runs through the limited scanner instead). The model's own theorem
+//  `limited_at_no_bound_is_the_parser` is the relation between the two: at no bound but the cap they
+//  answer the same, the cap's `MaxDepthExceeded` lifted to the `Depth` breach at the same position —
+//  so a breach and the model's cap refusal render as ONE line, and every other answer as before.
 //
 //  Everything above this line begins at a `JVal` that already exists, which is exactly the
 //  boundary Phase 135's theorem 1 drew. What runs here is the model of the recursive-descent
@@ -641,10 +645,23 @@ module JsonParseDiff =
         | RejectNull -> JsonParse.RejectNull
         | EraseMemberNull -> JsonParse.EraseMemberNull
 
+    /// The depth cap's one rendering, on both sides (Phase 519): production's `Depth` breach and the
+    /// model's `MaxDepthExceeded` at the same position are the same answer by the lift.
+    let depthLine (position: int) : string =
+        sprintf "limit %s @%d" (JsonLimit.name JsonLimit.Depth) position
+
     let prodAnswer (policy: NullPolicy) (maxDepth: int) (input: string) : string =
-        match Json.parseDetailedWithPolicy policy maxDepth input with
+        match
+            Json.read
+                { Null = policy
+                  Limits = JsonLimits.depthOnly maxDepth }
+                input
+        with
         | Ok v -> "ok " + renderProd v
-        | Error e -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
+        | Error(JsonRefusal.Malformed e) -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
+        | Error(JsonRefusal.LimitExceeded b) when b.Limit = JsonLimit.Depth -> depthLine b.Position
+        // No other bound is set, so none can be passed; rendered apart so a defect shows.
+        | Error(JsonRefusal.LimitExceeded b) -> sprintf "limit %s @%d (not the cap)" (JsonLimit.name b.Limit) b.Position
 
     /// The model's answer. `modelBudget` and `cap` are separate arguments only so the go-red case
     /// can hand the model a cap production is not using; every real run passes `budget maxDepth`.
@@ -657,6 +674,8 @@ module JsonParseDiff =
         : string =
         match JsonParse.parse floatRead (string cap) (modelPolicy policy) modelBudget (bridge input) with
         | JsonParse.ROk v -> "ok " + renderModel v
+        // The lift (`limited_at_no_bound_is_the_parser`): the cap's refusal is the Depth breach.
+        | JsonParse.RErr(JsonParse.MaxDepthExceeded, _, at) -> depthLine (input.Length - List.length at)
         | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
         // `parse` runs at no bound and never answers this (`limited_at_no_bound_is_the_parser`);
         // the arm is for the match's totality.
@@ -692,7 +711,7 @@ module JsonParseDiff =
     /// Production's answer under a limits record. A breach renders as `limit <name> @<position>`:
     /// the model does not carry the path, which the decode vectors compare instead.
     let prodAnswerLimited (policy: NullPolicy) (limits: JsonLimits) (input: string) : string =
-        match Json.parseWithLimits policy limits input with
+        match Json.read { Null = policy; Limits = limits } input with
         | Ok v -> "ok " + renderProd v
         | Error(JsonRefusal.Malformed e) -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
         | Error(JsonRefusal.LimitExceeded b) -> sprintf "limit %s @%d" (JsonLimit.name b.Limit) b.Position
@@ -742,6 +761,15 @@ module JsonParseDiff =
 
             if p <> m then
                 bad.Add(sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
+
+            // The sweep compares in the regime the differential was written for — an unbounded-
+            // equivalent parser — so its cap sits above every input it is handed, and an input
+            // that reaches it is a defect of the pool, not an agreement (Phase 519). The cap's own
+            // boundary is the deep/wide family's, which straddles it on purpose.
+            if p.StartsWith "limit " then
+                bad.Add(
+                    sprintf "%s: input %s reached the sweep's cap %d — the pool left its regime" name input maxDepth
+                )
 
         List.ofSeq bad, accepted, refused
 

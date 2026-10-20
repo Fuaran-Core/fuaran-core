@@ -60,14 +60,12 @@ module SchemaDeltaCodec =
     /// The canonical wire string for a delta. Total: every delta encodes.
     let encode (d: SchemaDelta) : string = Canon.render (encodeJson d)
 
-    let private fault (ctx: string) (f: Decode.Fault) : ColumnError =
-        match f with
-        | Decode.MissingProperty name -> MissingField name
-        | Decode.WrongKind(expected, got) -> MalformedShape(ctx + ": expected " + expected + ", got " + got)
+    let private field (name: string) (el: JVal) : Result<JVal, ColumnError> =
+        Decoder.field name Decoder.json el
+        |> Result.mapError (ColumnCodec.ofDecodeError name)
 
-    let private field (name: string) (el: JVal) : Result<JVal, ColumnError> = Decode.propWith (fault name) name el
-
-    let private text (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
+    let private text (ctx: string) (el: JVal) : Result<string, ColumnError> =
+        Decoder.str el |> Result.mapError (ColumnCodec.ofDecodeError ctx)
 
     let private columnType (ctx: string) (el: JVal) : Result<ColumnType, ColumnError> =
         text ctx el
@@ -78,7 +76,7 @@ module SchemaDeltaCodec =
 
     let private items (name: string) (read: JVal -> Result<'a, ColumnError>) (el: JVal) : Result<'a list, ColumnError> =
         field name el
-        |> Result.bind (Decode.arrayWith (fault name))
+        |> Result.bind (Decoder.items >> Result.mapError (ColumnCodec.ofDecodeError name))
         |> Result.bind (fun xs ->
             let rec go acc =
                 function
@@ -92,7 +90,7 @@ module SchemaDeltaCodec =
 
     /// An optional text member of an `amended` entry: absent is `None`, present must be a string.
     let private optionalText (ctx: string) (name: string) (el: JVal) : Result<string option, ColumnError> =
-        match Decode.tryProp name el with
+        match Decoder.tryMember name el with
         | None -> Ok None
         | Some v -> text (ctx + "." + name) v |> Result.map Some
 
@@ -155,7 +153,7 @@ module SchemaDeltaCodec =
             |> Result.bind (fun removed ->
                 items "retyped" retypedEntry el
                 |> Result.bind (fun retyped ->
-                    (match Decode.tryProp "amended" el with
+                    (match Decoder.tryMember "amended" el with
                      | None -> Ok []
                      | Some _ -> items "amended" amendedEntry el)
                     |> Result.bind (fun amended ->
@@ -177,9 +175,9 @@ module SchemaDeltaCodec =
 
     /// Decode a wire string into a delta (a JSON-syntax failure is `NotJson`).
     let decode (s: string) : Result<SchemaDelta, ColumnError> =
-        match Json.parseDetailed s with
-        | Error e -> Error(NotJson e)
-        | Ok el -> decodeJson el
+        Json.read ReadOptions.strict s
+        |> Result.mapError ColumnCodec.ofJsonRefusal
+        |> Result.bind decodeJson
 
     /// The `Corpus.Codec` over `SchemaDelta`, for the conformance corpus tooling.
     let codec: Corpus.Codec<SchemaDelta> =

@@ -151,7 +151,7 @@ module Counter =
 
     let decode (s: string) : Result<CounterOp, string> =
         let parsed =
-            Decode.parse s
+            Json.parse s
             |> Result.bind (fun el ->
                 Decoder.describing (Decoder.field "kind" Decoder.str) el
                 |> Result.bind (fun k ->

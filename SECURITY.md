@@ -37,8 +37,8 @@ is correspondingly narrow. Two documented, by-design properties are **not** vuln
 ## What is bounded, and what is the host's to bound
 
 - **Nesting is bounded.** `Json.parse` refuses text nested past `Json.defaultMaxDepth` (512) by name
-  (`MaxDepthExceeded`), and `Json.parseWith` / `parseDetailedWith` take the cap as an argument, so a host
-  that wants a tighter one passes it. The renderers cap nothing: a value built in memory is not untrusted
+  (the `Depth` breach), and every reader takes the cap in its `ReadOptions` (`Json.read`, `Decoder.parse`,
+  `Reader.read`), so a host that wants a tighter one passes it. The renderers cap nothing: a value built in memory is not untrusted
   wire data, and they use an explicit stack rather than the thread's.
 - **Size is not bounded by Core.** String length, array length, node count and document bytes are the
   host's to limit before the text reaches the parser (DECISIONS.md D84: Core is not a host of the UI wire

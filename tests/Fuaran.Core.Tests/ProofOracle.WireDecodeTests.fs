@@ -440,7 +440,7 @@ type private PolicyTally =
         Fired: int
     }
 
-/// The model's reader beside `Json.parseDetailedWithPolicy`, under both policies, on the same
+/// The model's reader beside `Json.read` at the parser's own cap, under both policies, on the same
 /// document — compared on the outcome class, the decoded value AND the message, the last of
 /// which is the half that distinguishes the tolerant policy's "no absence to erase it to"
 /// refusal from the strict policy's blanket one.
@@ -449,9 +449,15 @@ let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
 
     let side (policy: NullPolicy) (mp: WireDecode.null_policy) =
         let production =
-            match Json.parseDetailedWithPolicy policy Json.defaultMaxDepth text with
+            match
+                Json.read
+                    { ReadOptions.strict with
+                        Null = policy }
+                    text
+            with
             | Ok v -> "Ok " + Json.render v
-            | Error e -> "Error " + e.Message
+            | Error(JsonRefusal.Malformed e) -> "Error " + e.Message
+            | Error(JsonRefusal.LimitExceeded b) -> sprintf "Breach %A" b
 
         let oracle =
             match WireDecode.read mp d with

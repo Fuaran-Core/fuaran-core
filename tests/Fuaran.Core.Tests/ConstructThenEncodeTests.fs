@@ -48,8 +48,7 @@ let rec private decodeNode el : Result<RNode, string> =
                       Eff = Effect.pureDeterministic
                       Children = kids }))))
 
-let private decode (s: string) =
-    Decode.parse s |> Result.bind decodeNode
+let private decode (s: string) = Json.parse s |> Result.bind decodeNode
 
 let codec: Corpus.Codec<RNode> = { Encode = encode; Decode = decode }
 

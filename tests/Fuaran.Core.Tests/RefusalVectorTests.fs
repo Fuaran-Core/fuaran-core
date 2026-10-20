@@ -43,7 +43,7 @@ module RefusalCorpus =
     type Vector =
         {
             Name: string
-            /// `json` — `Json.parseDetailed`, the refusal class a `JsonErrorKind`; `column` —
+            /// `json` — `Json.read ReadOptions.strict`, the refusal class a `JsonErrorKind`; `column` —
             /// `ColumnCodec.decode`, the class a `ColumnError` case (`NotJson/<kind>` for a parse failure);
             /// `profile` (Phase 306) — `Versioning.Profile.tryParse`, whose one refusal class is
             /// `MalformedProfile` and whose acceptance is the profile's canonical string.
@@ -217,9 +217,10 @@ module RefusalCorpus =
     let outcome (v: Vector) : Result<string, string> =
         match v.Codec with
         | "json" ->
-            match Json.parseDetailed v.Input with
+            match Json.read ReadOptions.strict v.Input with
             | Ok jv -> Ok(Canon.render jv)
-            | Error e -> Error(caseName (box e.Kind))
+            | Error(JsonRefusal.Malformed e) -> Error(caseName (box e.Kind))
+            | Error(JsonRefusal.LimitExceeded b) -> Error("LimitExceeded/" + JsonLimit.name b.Limit)
         | "profile" ->
             match Versioning.Profile.tryParse v.Input with
             | Ok p -> Ok(Versioning.Profile.render p)
@@ -292,81 +293,78 @@ let tests =
               Expect.equal (List.distinct names) names "vector names are unique"
 
           // Phase 462 — a row binds every ENTRY POINT that turns JSON text into a value, not one
-          // parser. Each `json` vector is put to every one Core has, and each must give the
-          // answer `parseDetailed` gives: the same refusal (kind, message, position) in each
-          // entry point's own error type, or an acceptance of the same value.
+          // parser. Since Phase 519 there are four readers — `Json.read`, `Json.parse`,
+          // `Decoder.parse` and `Reader.read` — and each `json` vector is put to every one, under
+          // both named read options, and each must give the answer `Json.read ReadOptions.strict`
+          // gives: the same refusal in each reader's own error type, or an acceptance of the same
+          // value.
           testCase "every json vector gets one answer at every decode entry point"
           <| fun _ ->
-              let rec walk (r: Json.Reader) (input: string) : unit =
+              let rec walk (r: Reader) (input: string) : unit =
                   // A structural reading through the Reader's own object and array loops.
                   match input.TrimStart() with
-                  | t when t.StartsWith "{" -> Json.Reader.members (fun _ r -> Json.Reader.value r |> ignore) r
-                  | t when t.StartsWith "[" -> Json.Reader.items (fun r -> Json.Reader.value r |> ignore) r
-                  | _ -> Json.Reader.value r |> ignore
+                  | t when t.StartsWith "{" -> Reader.members (fun _ r -> Reader.value r |> ignore) r
+                  | t when t.StartsWith "[" -> Reader.items (fun r -> Reader.value r |> ignore) r
+                  | _ -> Reader.value r |> ignore
 
               for v in RefusalCorpus.vectors |> List.filter (fun v -> v.Codec = "json") do
-                  let reference = Json.parseDetailed v.Input
-                  let asText = Json.parse v.Input
+                  let reference = Json.read ReadOptions.strict v.Input
+                  let typed = reference |> Result.mapError DecodeError.ofJsonRefusal
 
-                  let detailed =
-                      [ "parseDetailedWith 512", Json.parseDetailedWith 512 v.Input
-                        "parseDetailedWithPolicy RejectNull", Json.parseDetailedWithPolicy RejectNull 512 v.Input
-                        // no vector carries a null, so the tolerant policy has nothing to erase
-                        "parseDetailedTolerantOfNull", Json.parseDetailedTolerantOfNull v.Input ]
-
-                  for name, got in detailed do
-                      Expect.equal got reference (sprintf "%s: %s" v.Name name)
-
-                  let text =
-                      [ "parseWith 512", Json.parseWith 512 v.Input
-                        "parseWithPolicy RejectNull", Json.parseWithPolicy RejectNull 512 v.Input
-                        "parseTolerantOfNull", Json.parseTolerantOfNull v.Input
-                        "Decode.parse", Decode.parse v.Input
-                        "Decode.parseTolerantOfNull", Decode.parseTolerantOfNull v.Input ]
-
-                  for name, got in text do
-                      Expect.equal got asText (sprintf "%s: %s" v.Name name)
-
+                  // no vector carries a null, so the tolerant policy has nothing to erase
                   Expect.equal
-                      (Decoder.parse v.Input)
-                      (reference |> Result.mapError DecodeError.ofJsonError)
-                      (sprintf "%s: Decoder.parse" v.Name)
+                      (Json.read ReadOptions.tolerantOfNull v.Input)
+                      reference
+                      (sprintf "%s: Json.read tolerantOfNull" v.Name)
 
-                  let readerAnswer (reading: Json.Reader -> unit) =
-                      match Json.Reader.read reading v.Input with
-                      | Ok() -> Ok()
-                      | Error(Json.ReadError.Malformed e) -> Error e
-                      | Error(Json.ReadError.Mismatch(at, expected)) ->
-                          failtestf "%s: the Reader answered a shape mismatch at %d (%s)" v.Name at expected
+                  match reference, Json.parse v.Input with
+                  | Ok a, Ok b -> Expect.equal b a (sprintf "%s: Json.parse" v.Name)
+                  | Error(JsonRefusal.Malformed e), Error m ->
+                      Expect.equal
+                          m
+                          ("not valid JSON: " + e.Message + " at position " + string e.Position)
+                          (sprintf "%s: Json.parse" v.Name)
+                  | a, b -> failtestf "%s: Json.read answered %A, Json.parse %A" v.Name a b
 
-                  let expected = reference |> Result.map ignore
-                  Expect.equal (readerAnswer (Json.Reader.value >> ignore)) expected (sprintf "%s: Reader.value" v.Name)
+                  for name, options in [ "strict", ReadOptions.strict; "tolerantOfNull", ReadOptions.tolerantOfNull ] do
+                      Expect.equal (Decoder.parse options v.Input) typed (sprintf "%s: Decoder.parse %s" v.Name name)
 
-                  Expect.equal
-                      (readerAnswer (fun r -> walk r v.Input))
-                      expected
-                      (sprintf "%s: Reader structural" v.Name)
+                      let expected = typed |> Result.map ignore
+
+                      Expect.equal
+                          (Reader.read options (Reader.value >> ignore) v.Input)
+                          expected
+                          (sprintf "%s: Reader.value %s" v.Name name)
+
+                      Expect.equal
+                          (Reader.read options (fun r -> walk r v.Input) v.Input)
+                          expected
+                          (sprintf "%s: Reader structural %s" v.Name name)
 
           // Phase 462 — an erased member null is NOT an occurrence of its name (D157): the tolerant
           // read is the strict read of the document with its member nulls deleted (Phase 190), and
           // a repeated name the deletion removes was never there.
           testCase "an erased member null does not count as an occurrence of its name"
           <| fun _ ->
-              Expect.equal (Json.parseTolerantOfNull """{"a":null,"a":1}""") (Json.parse """{"a":1}""") "erased first"
+              let tolerant = Json.read ReadOptions.tolerantOfNull
+              let strict = Json.read ReadOptions.strict
 
-              Expect.equal (Json.parseTolerantOfNull """{"a":1,"a":null}""") (Json.parse """{"a":1}""") "erased second"
+              Expect.equal (tolerant """{"a":null,"a":1}""") (strict """{"a":1}""") "erased first"
 
-              match Json.parseDetailedTolerantOfNull """{"a":1,"a":2}""" with
-              | Error e -> Expect.equal e.Kind DuplicateMember "two surviving members still repeat"
-              | Ok v -> failtestf "accepted %A" v
+              Expect.equal (tolerant """{"a":1,"a":null}""") (strict """{"a":1}""") "erased second"
+
+              match tolerant """{"a":1,"a":2}""" with
+              | Error(JsonRefusal.Malformed e) ->
+                  Expect.equal e.Kind DuplicateMember "two surviving members still repeat"
+              | other -> failtestf "expected DuplicateMember, got %A" other
 
           testCase "a repeated member is refused at its name's opening quote"
           <| fun _ ->
-              match Json.parseDetailed """{"a":1,"b":2,"a":3}""" with
-              | Error e ->
+              match Json.read ReadOptions.strict """{"a":1,"b":2,"a":3}""" with
+              | Error(JsonRefusal.Malformed e) ->
                   Expect.equal e.Kind DuplicateMember "kind"
                   Expect.equal e.Position 13 "at the second \"a\""
-              | Ok v -> failtestf "accepted %A" v
+              | other -> failtestf "expected DuplicateMember, got %A" other
 
           // The amendment's culture leg: the corpus answers the same under a culture whose negative
           // sign is not U+002D, because the parser's integer reader is the invariant one.

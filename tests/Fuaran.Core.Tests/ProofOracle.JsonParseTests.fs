@@ -231,10 +231,28 @@ let tests =
                   "ok "
                   "a document nested to the cap is accepted"
 
-              Expect.stringContains
+              // Past the cap, production's Depth breach and the model's cap refusal meet at the
+              // bracket that opens the fourth array — the lift, at and past the bound, for both
+              // families (Phase 519).
+              Expect.equal
                   (JsonParseDiff.prodAnswer RejectNull 3 (JsonParseDiff.nestArr 4))
-                  "MaxDepthExceeded"
-                  "and one nested past it is refused by name"
+                  (JsonParseDiff.depthLine 3)
+                  "and one nested past it is the Depth breach at its bracket"
+
+              Expect.equal
+                  (JsonParseDiff.modelAnswer
+                      JsonParseDiff.toChs
+                      RejectNull
+                      3
+                      (JsonParseDiff.budget 3)
+                      (JsonParseDiff.nestArr 4))
+                  (JsonParseDiff.depthLine 3)
+                  "the model's cap refusal renders as the same line"
+
+              Expect.equal
+                  (JsonParseDiff.prodAnswer RejectNull 0 "{}")
+                  (JsonParseDiff.depthLine 0)
+                  "a cap of 0 refuses the root object at its brace"
 
               let wide =
                   [ for n in [ 0; 1; 2; 10; 64 ] do
@@ -335,7 +353,7 @@ let tests =
               let breached =
                   pools
                   |> List.choose (fun (_, r, input) ->
-                      match Json.parseWithLimits RejectNull r input with
+                      match Json.read { ReadOptions.strict with Limits = r } input with
                       | Error(JsonRefusal.LimitExceeded b) -> Some b.Limit
                       | _ -> None)
                   |> Set.ofList
@@ -409,7 +427,7 @@ let tests =
               let m =
                   JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) input
 
-              Expect.stringContains p "MaxDepthExceeded" "production refuses at the cap it was given"
+              Expect.stringStarts p "limit depth" "production refuses at the cap it was given"
               Expect.stringStarts m "ok " "and an over-budgeted model does not"
               Expect.notEqual p m "so the depth comparison can lose"
 
@@ -425,6 +443,37 @@ let tests =
                             yield k ]
 
               Expect.isNonEmpty disagreements "the over-budgeted model must disagree somewhere in the family"
+
+          // Phase 519: the differential's production subject moved to `Json.read` and a breach
+          // renders through the lift, so the go-red is put to a PLANTED PRODUCTION defect too — a
+          // production depth guard one level loose (the cap production is handed is one past the
+          // model's) must disagree, on the hand-made input and over the family.
+          testCase "a PRODUCTION depth guard one level loose DISAGREES with the model"
+          <| fun _ ->
+              let loose (cap: int) (input: string) =
+                  JsonParseDiff.prodAnswer RejectNull (cap + 1) input
+
+              let model (cap: int) (input: string) =
+                  JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull cap (JsonParseDiff.budget cap) input
+
+              let input = JsonParseDiff.nestArr 4
+              Expect.stringStarts (loose 3 input) "ok " "the loose production accepts past the cap"
+              Expect.equal (model 3 input) (JsonParseDiff.depthLine 3) "the model refuses at it"
+
+              let disagreements =
+                  [ for cap in 0..8 do
+                        for k in 0..8 do
+                            if loose cap (JsonParseDiff.nestArr k) <> model cap (JsonParseDiff.nestArr k) then
+                                yield cap, k ]
+
+              // Exactly the inputs nested past each cap: one past it the loose guard accepts what the
+              // model refuses, and further past it both refuse, a bracket apart. Every input within
+              // a cap agrees, so the instrument is not red merely for being crude.
+              Expect.equal
+                  (List.sort disagreements)
+                  [ for cap in 0..8 do
+                        for k in cap + 1 .. 8 -> cap, k ]
+                  "the loose guard is seen past every cap, and nowhere within one"
 
           testCase "a model handed a BLIND bridge DISAGREES with production"
           <| fun _ ->

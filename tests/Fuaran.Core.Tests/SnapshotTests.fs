@@ -23,7 +23,7 @@ let private sw: StreamWitness<CounterOp, int, string> =
             | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
       Decode =
         fun s ->
-            Decode.parse s
+            Json.parse s
             |> Result.bind (fun el ->
                 Decoder.describing (Decoder.field "kind" Decoder.str) el
                 |> Result.bind (fun k ->

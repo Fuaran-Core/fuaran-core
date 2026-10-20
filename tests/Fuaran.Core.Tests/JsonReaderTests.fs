@@ -1,16 +1,17 @@
 module Fuaran.Core.Tests.JsonReaderTests
 
-// Phase 368 — `Json.Reader`, the typed reading of a document, held to `Json.parseDetailed`.
+// Phase 368 — `Reader`, the typed reading of a document, held to `Decoder.parse` (Phase 519: out
+// of `Json`, its refusal a `DecodeError`, under the same `ReadOptions` as every reader).
 //
 // The reader runs the parser's own scanner (`Json.Scanner`), so it has no grammar of its own to be
 // wrong about; what it adds is the typed collection and the shape checks. Its contract is stated
-// against `parseDetailed` and nothing else, so every test here computes the expected outcome by
-// calling `parseDetailed` and typing its tree, never by restating what the answer ought to be:
+// against `Decoder.parse` and nothing else, so every test here computes the expected outcome by
+// calling `Decoder.parse` and typing its tree, never by restating what the answer ought to be:
 //
-//   - a document `parseDetailed` refuses is refused with `ReadError.Malformed` carrying exactly
-//     `parseDetailed`'s error — kind, message AND position — whatever the reading asked for;
-//   - a document it accepts is read to what typing its tree gives, or refused with
-//     `ReadError.Mismatch` exactly when that typing fails.
+//   - a document `Decoder.parse` refuses is refused with exactly `Decoder.parse`'s refusal —
+//     code, path AND sentence, the sentence carrying the position — whatever the reading asked for;
+//   - a document it accepts is read to what typing its tree gives, or refused with `WrongKind` at
+//     the value's path exactly when that typing fails.
 //
 // The differential runs every reading below over the parser corpus (the json vectors of the codec
 // refusal corpus, Phase 299), the wire benchmark's five corpora (Phase 364), and a deterministic
@@ -23,19 +24,17 @@ open Fuaran.Core
 
 let private inv = System.Globalization.CultureInfo.InvariantCulture
 
-/// An outcome as comparable text: the typed value rendered, a grammar refusal in full, or a mismatch.
-let private malformed (e: JsonError) =
-    sprintf "malformed %A @%d %s" e.Kind e.Position e.Message
-
-let private readerOutcome (render: 'a -> string) (r: Result<'a, Json.ReadError>) : string =
+/// An outcome as comparable text: the typed value rendered, the document's refusal in full, or a
+/// mismatch (the one `WrongKind` a reading answers: `Decoder.parse` never does).
+let private readerOutcome (render: 'a -> string) (r: Result<'a, DecodeError>) : string =
     match r with
     | Ok a -> "ok " + render a
-    | Error(Json.ReadError.Malformed e) -> malformed e
-    | Error(Json.ReadError.Mismatch _) -> "mismatch"
+    | Error e when e.Code = DecodeCode.WrongKind -> "mismatch"
+    | Error e -> DecodeError.render e
 
 let private specOutcome (typing: JVal -> 'a option) (render: 'a -> string) (input: string) : string =
-    match Json.parseDetailed input with
-    | Error e -> malformed e
+    match Decoder.parse ReadOptions.strict input with
+    | Error e -> DecodeError.render e
     | Ok v ->
         match typing v with
         | Some a -> "ok " + render a
@@ -83,20 +82,20 @@ type private Reading =
       Reader: string -> string
       Spec: string -> string }
 
-let private reading (name: string) (r: Json.Reader -> 'a) (typing: JVal -> 'a option) (render: 'a -> string) =
+let private reading (name: string) (r: Reader -> 'a) (typing: JVal -> 'a option) (render: 'a -> string) =
     { Name = name
-      Reader = fun input -> readerOutcome render (Json.Reader.read r input)
+      Reader = fun input -> readerOutcome render (Reader.read ReadOptions.strict r input)
       Spec = specOutcome typing render }
 
 /// The `items` and `members` readings collect what their callbacks read.
-let private itemsOfValues (r: Json.Reader) : JVal list =
+let private itemsOfValues (r: Reader) : JVal list =
     let acc = ResizeArray<JVal>()
-    Json.Reader.items (fun r -> acc.Add(Json.Reader.value r)) r
+    Reader.items (fun r -> acc.Add(Reader.value r)) r
     List.ofSeq acc
 
-let private membersOfValues (r: Json.Reader) : (string * JVal) list =
+let private membersOfValues (r: Reader) : (string * JVal) list =
     let acc = ResizeArray<string * JVal>()
-    Json.Reader.members (fun k r -> acc.Add((k, Json.Reader.value r))) r
+    Reader.members (fun k r -> acc.Add((k, Reader.value r))) r
     List.ofSeq acc
 
 /// The compute repository's incremental state, as its first consumer would read it: the `tokens`
@@ -105,15 +104,15 @@ type private Member =
     | Tokens of string[]
     | Other of JVal
 
-let private stateShaped (r: Json.Reader) : (string * Member) list =
+let private stateShaped (r: Reader) : (string * Member) list =
     let acc = ResizeArray<string * Member>()
 
-    Json.Reader.members
+    Reader.members
         (fun k r ->
             if k = "tokens" then
-                acc.Add((k, Tokens(Json.Reader.strings r)))
+                acc.Add((k, Tokens(Reader.strings r)))
             else
-                acc.Add((k, Other(Json.Reader.value r))))
+                acc.Add((k, Other(Reader.value r))))
         r
 
     List.ofSeq acc
@@ -141,10 +140,10 @@ let private renderState (fs: (string * Member) list) =
     |> String.concat ";"
 
 let private readings: Reading list =
-    [ reading "value" Json.Reader.value Some Json.render
-      reading "strings" Json.Reader.strings (arrayOf asStr) renderStrings
-      reading "floats" Json.Reader.floats (arrayOf asNum) renderFloats
-      reading "ints" Json.Reader.ints (arrayOf asInt) renderInts
+    [ reading "value" Reader.value Some Json.render
+      reading "strings" Reader.strings (arrayOf asStr) renderStrings
+      reading "floats" Reader.floats (arrayOf asNum) renderFloats
+      reading "ints" Reader.ints (arrayOf asInt) renderInts
       reading
           "items"
           itemsOfValues
@@ -164,7 +163,7 @@ let private readings: Reading list =
           "items-of-strings"
           (fun r ->
               let acc = ResizeArray<string[]>()
-              Json.Reader.items (fun r -> acc.Add(Json.Reader.strings r)) r
+              Reader.items (fun r -> acc.Add(Reader.strings r)) r
               List.ofSeq acc)
           (function
           | JArr xs -> xs |> List.map (arrayOf asStr) |> allSome
@@ -358,26 +357,29 @@ let private shifted (outcome: string) : string =
     let m =
         System.Text.RegularExpressions.Regex.Match(
             outcome,
-            "^(malformed \\S+ @)(\\d+)( .*)$",
+            "^(InvalidJson at .* at position )(\\d+)$",
             System.Text.RegularExpressions.RegexOptions.Singleline
         )
 
     if m.Success then
-        m.Groups[1].Value + string (int m.Groups[2].Value + 1) + m.Groups[3].Value
+        m.Groups[1].Value + string (int m.Groups[2].Value + 1)
     else
         outcome
 
-let private mismatchAt (r: Result<'a, Json.ReadError>) =
+let private mismatchAt (r: Result<'a, DecodeError>) =
     match r with
-    | Error(Json.ReadError.Mismatch(pos, expected)) -> Some(pos, expected)
+    | Error e when e.Code = DecodeCode.WrongKind -> Some(e.Path, e.Expected)
     | _ -> None
+
+let private read (reading: Reader -> 'a) (input: string) =
+    Reader.read ReadOptions.strict reading input
 
 [<Tests>]
 let tests =
     testList
         "JsonReader"
         [ test
-              "every reading agrees with parseDetailed, refusal for refusal, over the parser corpus and the generated pool" {
+              "every reading agrees with Decoder.parse, refusal for refusal, over the parser corpus and the generated pool" {
               Expect.isGreaterThan corpusInputs.Length 20 "the codec refusal corpus carries its json vectors"
 
               for r in readings do
@@ -409,7 +411,7 @@ let tests =
               Expect.equal (f.Reader floats) (f.Spec floats) "floats"
               Expect.stringStarts (f.Reader floats) "ok " "the float corpus is read"
 
-              match Json.Reader.read stateShaped state with
+              match read stateShaped state with
               | Ok fs ->
                   match List.find (fun (k, _) -> k = "tokens") fs with
                   | _, Tokens a -> Expect.equal a.Length Fuaran.Core.WireBench.Corpus.stateTokens "every token read"
@@ -417,97 +419,135 @@ let tests =
               | Error e -> failtestf "%A" e
           }
 
-          test "a mismatch names the value's position and the shape asked for" {
-              Expect.equal (mismatchAt (Json.Reader.read Json.Reader.strings "[\"a\",1]")) (Some(5, "a string")) "item"
+          // Phase 519: a mismatch is `WrongKind` AT THE PATH of the value (it was a position and no
+          // path); the sentence keeps the position.
+          test "a mismatch names the value's path and the shape asked for" {
+              let item = PathSegment.Index
+              Expect.equal (mismatchAt (read Reader.strings "[\"a\",1]")) (Some([ item 1 ], "a string")) "item"
+
+              match read Reader.strings "[\"a\",1]" with
+              | Error e -> Expect.equal e.Message "expected a string at position 5" "the sentence keeps the position"
+              | Ok v -> failtestf "read %A" v
 
               Expect.equal
-                  (mismatchAt (Json.Reader.read Json.Reader.strings " [ \"a\" ,\n 1 ]"))
-                  (Some(10, "a string"))
+                  (mismatchAt (read Reader.strings " [ \"a\" ,\n 1 ]"))
+                  (Some([ item 1 ], "a string"))
                   "after whitespace"
 
-              Expect.equal (mismatchAt (Json.Reader.read Json.Reader.strings "{\"a\":1}")) (Some(0, "an array")) "root"
+              Expect.equal (mismatchAt (read Reader.strings "{\"a\":1}")) (Some([], "an array")) "root"
 
               Expect.equal
-                  (mismatchAt (Json.Reader.read Json.Reader.ints "[1,2.5]"))
-                  (Some(3, "an Int32 integer"))
+                  (mismatchAt (read Reader.ints "[1,2.5]"))
+                  (Some([ item 1 ], "an Int32 integer"))
                   "a float is not an int"
 
               Expect.equal
-                  (mismatchAt (Json.Reader.read Json.Reader.ints "[2147483648]"))
-                  (Some(1, "an Int32 integer"))
+                  (mismatchAt (read Reader.ints "[2147483648]"))
+                  (Some([ item 0 ], "an Int32 integer"))
                   "past Int32 parse reads a JFloat"
 
-              Expect.equal
-                  (mismatchAt (Json.Reader.read Json.Reader.floats "[1,\"2\"]"))
-                  (Some(3, "a number"))
-                  "a string"
+              Expect.equal (mismatchAt (read Reader.floats "[1,\"2\"]")) (Some([ item 1 ], "a number")) "a string"
 
               Expect.equal
-                  (mismatchAt (
-                      Json.Reader.read
-                          (Json.Reader.members (fun _ r -> Json.Reader.ints r |> ignore))
-                          "{\"a\":[1],\"b\":{}}"
-                  ))
-                  (Some(13, "an array"))
+                  (mismatchAt (read (Reader.members (fun _ r -> Reader.ints r |> ignore)) "{\"a\":[1],\"b\":{}}"))
+                  (Some([ PathSegment.Key "b" ], "an array"))
                   "inside a member"
+
+              Expect.equal
+                  (mismatchAt (read (Reader.items (Reader.strings >> ignore)) "[[\"a\"],[\"b\",2]]"))
+                  (Some([ item 1; item 1 ], "a string"))
+                  "nested"
+
+              // The path resolves in the document, as every decode refusal's does.
+              let doc = "{\"a\":[1],\"b\":{}}"
+
+              match read (Reader.members (fun _ r -> Reader.ints r |> ignore)) doc, Json.parse doc with
+              | Error e, Ok v -> Expect.isTrue (DecodeError.resolvesIn v e) "the mismatch's path resolves"
+              | other -> failtestf "%A" other
           }
 
           test "a grammar refusal anywhere outranks a mismatch, and is parse's own" {
               for input in [ "[\"a\", 1, tru]"; "[1, \"x\"] ]"; "[\"a\", 2, \"\\uD83D\"]"; "{\"a\":1,}" ] do
                   let expected =
-                      match Json.parseDetailed input with
+                      match Decoder.parse ReadOptions.strict input with
                       | Error e -> e
                       | Ok _ -> failtestf "%s parses" input
 
-                  Expect.equal
-                      (Json.Reader.read Json.Reader.strings input)
-                      (Error(Json.ReadError.Malformed expected))
-                      input
+                  Expect.equal (read Reader.strings input) (Error expected) input
           }
 
-          test "the depth cap is parse's, at the same position" {
+          test "the depth cap is parse's: the Depth breach at the path of the container opened at it" {
               let deep = String.replicate 600 "[" + String.replicate 600 "]"
-              let rec nestedItems (r: Json.Reader) = Json.Reader.items nestedItems r
+              let rec nestedItems (r: Reader) = Reader.items nestedItems r
 
               let expected =
-                  match Json.parseDetailed deep with
+                  match Decoder.parse ReadOptions.strict deep with
                   | Error e -> e
                   | Ok _ -> failtest "600 levels parse"
 
-              Expect.equal expected.Kind MaxDepthExceeded "parse's refusal is the cap"
-              Expect.equal (Json.Reader.read nestedItems deep) (Error(Json.ReadError.Malformed expected)) "the reader's"
+              Expect.equal expected.Code DecodeCode.LimitExceeded "parse's refusal is the cap"
+              Expect.equal expected.Path (List.replicate 512 (PathSegment.Index 0)) "at the 513th array"
+              Expect.equal (read nestedItems deep) (Error expected) "the reader's"
 
               let shallow = String.replicate 512 "[" + String.replicate 512 "]"
-              Expect.equal (Json.Reader.read nestedItems shallow) (Ok()) "512 levels read, as they parse"
+              Expect.equal (read nestedItems shallow) (Ok()) "512 levels read, as they parse"
+          }
+
+          // Phase 519: the reader takes `ReadOptions`, so it enforces every bound `Json.read` does,
+          // with `Decoder.parse`'s refusal; it ran at the strict cap and nothing else before.
+          test "the reader enforces a limits record and a null policy as Decoder.parse does" {
+              let items2 =
+                  { ReadOptions.strict with
+                      Limits =
+                          { JsonLimits.depthOnly 512 with
+                              MaxArrayLength = 2 } }
+
+              for input in [ "[1,2,3]"; "[1,2]"; "[1,2,3" ] do
+                  Expect.equal
+                      (Reader.read items2 Reader.ints input
+                       |> Result.map (fun xs -> JArr [ for x in xs -> JInt x ]))
+                      (Decoder.parse items2 input)
+                      input
+
+              let bytes4 =
+                  { ReadOptions.strict with
+                      Limits =
+                          { JsonLimits.depthOnly 512 with
+                              MaxDocumentBytes = 4 } }
+
+              Expect.equal
+                  (Reader.read bytes4 Reader.value "\"\u65E5\"")
+                  (Decoder.parse bytes4 "\"\u65E5\"")
+                  "the document-bytes bound, before a character is read"
+
+              Expect.equal
+                  (Reader.read ReadOptions.tolerantOfNull Reader.value "{\"a\":null,\"b\":1}")
+                  (Ok(JObj [ "b", JInt 1 ]))
+                  "the tolerant policy"
           }
 
           test "a reading that reads no value, or two where one is due, is a programming error" {
               Expect.throwsT<System.InvalidOperationException>
-                  (fun () -> Json.Reader.read (fun _ -> ()) "[]" |> ignore)
+                  (fun () -> read (fun _ -> ()) "[]" |> ignore)
                   "nothing read"
 
               Expect.throwsT<System.InvalidOperationException>
-                  (fun () ->
-                      Json.Reader.read (fun r -> Json.Reader.value r, Json.Reader.value r) "[]"
-                      |> ignore)
+                  (fun () -> read (fun r -> Reader.value r, Reader.value r) "[]" |> ignore)
                   "two values read"
 
               Expect.throwsT<System.InvalidOperationException>
-                  (fun () -> Json.Reader.read (Json.Reader.members (fun _ _ -> ())) "{\"a\":1}" |> ignore)
+                  (fun () -> read (Reader.members (fun _ _ -> ())) "{\"a\":1}" |> ignore)
                   "a member not read"
 
               Expect.throwsT<System.InvalidOperationException>
-                  (fun () -> Json.Reader.read (Json.Reader.items (fun _ -> ())) "[1]" |> ignore)
+                  (fun () -> read (Reader.items (fun _ -> ())) "[1]" |> ignore)
                   "an item not read"
 
-              Expect.equal
-                  (Json.Reader.read (Json.Reader.items (fun _ -> ())) "[]")
-                  (Ok())
-                  "an empty array has nothing due"
+              Expect.equal (read (Reader.items (fun _ -> ())) "[]") (Ok()) "an empty array has nothing due"
           } ]
 
-// Phase 465 — `Json.parseWithLimits`, the LIMITED parse: held to `parseDetailed` at the parser's own
-// cap, and to its record at every bound. The bounds are enforced on the way down, so each test below
+// Phase 465 — the LIMITED parse (`Json.read` under a limits record since Phase 519): held to the
+// strict read where no bound but the cap can be reached, and to its record at every bound. The bounds are enforced on the way down, so each test below
 // pins where a breach is raised (the path and the position) as well as that it is.
 
 let private wide: JsonLimits =
@@ -517,13 +557,17 @@ let private wide: JsonLimits =
       MaxObjectMembers = 100000
       MaxDocumentBytes = 1 <<< 25 }
 
+let private under (limits: JsonLimits) : ReadOptions =
+    { ReadOptions.strict with
+        Limits = limits }
+
 let private breach (limits: JsonLimits) (input: string) : JsonLimitBreach =
-    match Json.parseWithLimits RejectNull limits input with
+    match Json.read (under limits) input with
     | Error(JsonRefusal.LimitExceeded b) -> b
     | other -> failtestf "%s: expected a breach, got %A" input other
 
 let private accepted (limits: JsonLimits) (input: string) : JVal =
-    match Json.parseWithLimits RejectNull limits input with
+    match Json.read (under limits) input with
     | Ok v -> v
     | Error e -> failtestf "%s: expected acceptance, got %A" input e
 
@@ -531,15 +575,13 @@ let private accepted (limits: JsonLimits) (input: string) : JVal =
 let limits =
     testList
         "JsonLimits"
-        [ test "at the parser's own cap the limited parse IS parseDetailed, over the corpus and the pool" {
+        [ test "a record whose bounds the pool never reaches reads as the strict read, over the corpus and the pool" {
               let mutable ok = 0
               let mutable refused = 0
 
               for input in pool do
-                  let expected = Json.parseDetailed input |> Result.mapError JsonRefusal.Malformed
-
-                  let actual =
-                      Json.parseWithLimits RejectNull (JsonLimits.depthOnly Json.defaultMaxDepth) input
+                  let expected = Json.read ReadOptions.strict input
+                  let actual = Json.read (under wide) input
 
                   Expect.equal actual expected input
 
@@ -550,24 +592,17 @@ let limits =
               Expect.isGreaterThan ok 50 "accepted documents in the pool"
               Expect.isGreaterThan refused 1000 "refused documents in the pool"
 
-              // The one answer that differs in SHAPE: the depth cap is the `Depth` breach at the
-              // cap's own position, with the path to the bracket that passed it.
+              // The depth cap is the `Depth` breach at the bracket that passed it, with the path to
+              // it — under the strict options as under any record (Phase 519).
               let deep = String.replicate 600 "[" + String.replicate 600 "]"
 
-              let cap =
-                  match Json.parseDetailed deep with
-                  | Error e -> e
-                  | Ok _ -> failtest "600 levels parse"
-
-              Expect.equal cap.Kind MaxDepthExceeded "parse's refusal is the cap"
-
               Expect.equal
-                  (breach (JsonLimits.depthOnly Json.defaultMaxDepth) deep)
+                  (breach ReadOptions.strict.Limits deep)
                   { Limit = JsonLimit.Depth
                     Declared = Json.defaultMaxDepth
                     Path = List.replicate Json.defaultMaxDepth (PathSegment.Index 0)
-                    Position = cap.Position }
-                  "the limited parse lifts it to the Depth breach"
+                    Position = Json.defaultMaxDepth }
+                  "the strict read's cap is the Depth breach"
           }
 
           test
@@ -661,7 +696,10 @@ let limits =
 
               // An erased member null is not a member.
               Expect.equal
-                  (Json.parseWithLimits EraseMemberNull { wide with MaxObjectMembers = 1 } "{\"a\":null,\"b\":1}")
+                  (Json.read
+                      { Null = EraseMemberNull
+                        Limits = { wide with MaxObjectMembers = 1 } }
+                      "{\"a\":null,\"b\":1}")
                   (Ok(JObj [ "b", JInt 1 ]))
                   "tolerant"
 
@@ -688,14 +726,14 @@ let limits =
                   JsonLimit.ArrayLength
                   "a breach before the malformed tail"
 
-              match Json.parseWithLimits RejectNull { wide with MaxArrayLength = 2 } "[1,%,3,4]" with
+              match Json.read (under { wide with MaxArrayLength = 2 }) "[1,%,3,4]" with
               | Error(JsonRefusal.Malformed e) -> Expect.equal e.Kind UnexpectedChar "malformed text before the breach"
               | other -> failtestf "expected malformed, got %A" other
           }
 
           test
-              "Decoder.parseWithLimits maps a breach to LimitExceeded at its path, never echoing the input, and malformed text to InvalidJson" {
-              match Decoder.parseWithLimits { wide with MaxArrayLength = 2 } "{\"a\":[1,2,3]}" with
+              "Decoder.parse maps a breach to LimitExceeded at its path, never echoing the input, and malformed text to InvalidJson" {
+              match Decoder.parse (under { wide with MaxArrayLength = 2 }) "{\"a\":[1,2,3]}" with
               | Error e ->
                   Expect.equal e.Code DecodeCode.LimitExceeded "code"
                   Expect.equal e.Path [ PathSegment.Key "a" ] "path"
@@ -704,7 +742,7 @@ let limits =
                   Expect.isFalse (e.Message.Contains "[1,2,3]") "never echoes the input"
               | Ok v -> failtestf "accepted %A" v
 
-              match Decoder.parseWithLimits wide "{" with
+              match Decoder.parse (under wide) "{" with
               | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "malformed text is InvalidJson"
               | Ok v -> failtestf "accepted %A" v
           } ]

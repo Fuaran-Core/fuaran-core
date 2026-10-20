@@ -312,7 +312,7 @@ module Decode =
 
     /// The parser's refusal under this module's own prefix (`parse failed: …`).
     let private parsed (json: string) : Result<JVal, DecodeError> =
-        Decoder.parse json
+        Decoder.parse ReadOptions.strict json
         |> Result.mapError (DecodeError.reword (fun m -> "parse failed: " + m))
 
     /// Decode one parsed JSON value at a declared type, answering a typed refusal (Phase 310): its

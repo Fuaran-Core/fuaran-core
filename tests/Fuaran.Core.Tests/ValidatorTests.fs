@@ -329,3 +329,220 @@ let tests =
               for seed in [ 1; 4242; 90210 ] do
                   for r in Conformance.columnarValidatorLaws seed 12 do
                       Expect.isTrue r.Passed (sprintf "seed %d: %s — %A" seed r.Law r.Counterexample) ]
+
+// ---- Phase 521: `Rules<'Subject,'Id>` — one framework, one walker, the column rules on vectors ----
+
+let private orFail521 (r: Result<'a, RegistrationError>) : 'a =
+    match r with
+    | Ok v -> v
+    | Error e -> failtestf "unexpected refusal %A" e
+
+/// A rule over a plain string subject: the framework is subject-generic, a table or a tree root is one
+/// instance among others.
+let private wordRule (id: string) (word: string) : Validator.PackCheck<string, int> =
+    { RuleId = id
+      Run =
+        fun text ->
+            text.Split ' '
+            |> Array.toList
+            |> List.indexed
+            |> List.choose (fun (i, w) ->
+                if w = word then
+                    Some(Defect.create "WORD" Severity.Warning ("the word " + word) (Some i))
+                else
+                    None) }
+
+/// The `inRange` the rule was before Phase 521, over `Column.toCells` — the oracle the typed-storage
+/// walk must agree with, row for row and code for code.
+let private inRangeOverCells (column: string) (lo: float) (hi: float) (c: Column) : (string * string option) list =
+    Column.toCells c
+    |> List.indexed
+    |> List.choose (fun (i, cell) ->
+        let v =
+            match cell with
+            | Int n -> Some(Some(float n))
+            | Float f when System.Double.IsNaN f -> Some None
+            | Float f -> Some(Some f)
+            | Decimal s ->
+                match DecimalText.tryToFloat s, DecimalText.compare s DecimalText.zero with
+                | Some f, _ -> Some(Some f)
+                | None, Some c when c < 0 -> Some(Some -infinity)
+                | None, Some _ -> Some(Some infinity)
+                | None, None -> Some None
+            | _ -> None
+
+        match v with
+        | Some None -> Some(ColumnValidator.NotANumberCode, Some(column + "#" + string i))
+        | Some(Some x) when x < lo || x > hi -> Some(ColumnValidator.InRangeCode, Some(column + "#" + string i))
+        | _ -> None)
+
+[<Tests>]
+let rulesTests =
+    testList
+        "Validator.Rules (Phase 521)"
+        [ testCase "a registry over any subject: the lifecycle, refused in RegistrationError"
+          <| fun _ ->
+              let rs =
+                  Validator.Rules.ofChecks [ wordRule "a" "x"; wordRule "b" "y" ] |> orFail521
+
+              Expect.equal (Validator.Rules.enumerate rs) [ "a"; "b" ] "registration order"
+              Expect.equal (Validator.Rules.tryFind "b" rs |> Option.map _.RuleId) (Some "b") "found"
+              Expect.isNone (Validator.Rules.tryFind "z" rs) "not held"
+
+              match Validator.Rules.register (wordRule "a" "q") rs with
+              | Error(RegistrationError.DuplicateRule("a", [ "a"; "b" ])) -> ()
+              | other -> failtestf "a repeated id must be refused, got %A" other
+
+              match Validator.Rules.ofChecks [ wordRule "a" "x"; wordRule "a" "y" ] with
+              | Error(RegistrationError.DuplicateRule("a", [ "a" ])) -> ()
+              | other -> failtestf "ofChecks refuses the first repeat, got %A" other
+
+              Expect.equal
+                  (Validator.Rules.register (wordRule "c" "z") rs
+                   |> Result.bind (Validator.Rules.unregister "c")
+                   |> Result.map Validator.Rules.enumerate)
+                  (Ok [ "a"; "b" ])
+                  "unregister undoes register"
+
+              match Validator.Rules.unregister "z" rs, Validator.Rules.replace (wordRule "z" "q") rs with
+              | Error(RegistrationError.UnknownRule("z", [ "a"; "b" ])), Error(RegistrationError.UnknownRule("z", _)) ->
+                  ()
+              | other -> failtestf "an unheld id is UnknownRule, got %A" other
+
+              let swapped = Validator.Rules.replace (wordRule "a" "y") rs |> orFail521
+              Expect.equal (Validator.Rules.enumerate swapped) [ "a"; "b" ] "position kept"
+
+              Expect.equal
+                  (Validator.Rules.run swapped "y x y" |> List.map (fun (id, d) -> id, d.Node))
+                  [ "a", Some 0; "a", Some 2; "b", Some 0; "b", Some 2 ]
+                  "the replacement runs under its id"
+
+              Expect.equal
+                  (Validator.Rules.restrict (Set.ofList [ "b"; "z" ]) rs
+                   |> Validator.Rules.enumerate)
+                  [ "b" ]
+                  "restrict never widens"
+
+              Expect.equal
+                  (Validator.Rules.union (Validator.Rules.ofChecks [ wordRule "c" "z" ] |> orFail521) rs
+                   |> Result.map Validator.Rules.enumerate)
+                  (Ok [ "c"; "a"; "b" ])
+                  "union keeps each side's order"
+
+              match Validator.Rules.union rs rs with
+              | Error(RegistrationError.DuplicateRule("a", [ "a"; "b" ])) -> ()
+              | other -> failtestf "a shared id is refused, got %A" other
+
+              Expect.isEmpty (Validator.Rules.run Validator.Rules.empty "x") "the empty registry finds nothing"
+
+          testCase "the one walker: stamped findings, a throwing rule is one RULE-FAULT and the rest still run"
+          <| fun _ ->
+              let throwing: Validator.PackCheck<string, int> =
+                  { RuleId = "boom"
+                    Run = fun _ -> failwith "kaput" }
+
+              let rs = Validator.Rules.ofChecks [ throwing; wordRule "a" "x" ] |> orFail521
+
+              match Validator.Rules.run rs "x" with
+              | [ ("boom", fault); ("a", found) ] ->
+                  Expect.equal fault.Code Validator.FamilyFaultCode "the fault"
+                  Expect.equal fault.Family "boom" "stamped with the throwing rule"
+                  Expect.equal found.Family "a" "stamped, whatever the body wrote"
+              | other -> failtestf "expected a fault then a finding, got %A" other
+
+          testCase "a tree family in Rules through asCheck finds what runAllTagged finds"
+          <| fun _ ->
+              let tree =
+                  RNode.node "root" "doc" [ RNode.node "a" "section" []; RNode.leaf "p" "para" "" ]
+
+              let rs =
+                  Validator.Rules.ofChecks
+                      [ Validator.asCheck nodew noEmptyPara
+                        Validator.asCheck nodew sectionsNonEmpty ]
+                  |> orFail521
+
+              Expect.equal (Validator.Rules.run rs tree) (Validator.runAllTagged nodew registry tree) "one walk"
+
+          testCase "the column registry IS Rules at the table: validateTagged is Rules.run"
+          <| fun _ ->
+              let t: Table =
+                  { Schema = [ Field.create "a" IntType ]
+                    Columns = [ cellColumn "a" IntType [ Null; Int 1; Int 7 ] ] }
+
+              let reg =
+                  ColumnValidator.ofRules [ ColumnValidator.notNull "a"; ColumnValidator.inRange "a" 0.0 5.0 ]
+                  |> orFail521
+
+              Expect.equal (ColumnValidator.validateTagged reg t) (Validator.Rules.run reg t) "one walk"
+
+              Expect.equal
+                  (ColumnValidator.validate reg t |> List.map (fun d -> d.Code, d.Node))
+                  [ ColumnValidator.NotNullCode, Some "a#0"
+                    ColumnValidator.InRangeCode, Some "a#2" ]
+                  "verdicts unchanged"
+
+          testCase "every stock column code is the literal it always spelled"
+          <| fun _ ->
+              Expect.equal
+                  [ ColumnValidator.NoColumnCode
+                    ColumnValidator.NotNullCode
+                    ColumnValidator.OfTypeCode
+                    ColumnValidator.InRangeCode
+                    ColumnValidator.UniqueCode
+                    ColumnValidator.BadRangeCode
+                    ColumnValidator.NotANumberCode
+                    ColumnValidator.RaggedCode ]
+                  [ "COL-NOCOL"
+                    "COL-NOTNULL"
+                    "COL-OFTYPE"
+                    "COL-INRANGE"
+                    "COL-UNIQUE"
+                    "COL-BADRANGE"
+                    "COL-NAN"
+                    "COL-RAGGED" ]
+                  "the codes hosts compare are unchanged"
+
+          testCase "inRange on the typed storage agrees with the cell walk it replaced"
+          <| fun _ ->
+              let columns =
+                  [ cellColumn "c" IntType [ Int -3; Null; Int 0; Int 10; Int 11 ]
+                    cellColumn "c" FloatType [ Float nan; Float 0.5; Null; Float infinity; Float -0.0; Int 4 ]
+                    cellColumn
+                        "c"
+                        DecimalType
+                        [ Decimal "1.5"
+                          Null
+                          Decimal "-2"
+                          Decimal("9" + String.replicate 400 "9")
+                          Decimal "10" ]
+                    // a decimal column built by hand around text that is not decimal: unreadable, a finding
+                    Column.ofDecimals "c" (Vector.ofArray [| "1"; "abc"; "-1" + String.replicate 400 "0" |]) AllValid
+                    cellColumn "c" StringType [ Str "50"; Null ]
+                    cellColumn "c" BoolType [ Bool true ]
+                    cellColumn "c" DateType [ Date "2020-01-01" ] ]
+
+              for c in columns do
+                  let t: Table =
+                      { Schema = [ Field.create "c" c.Type ]
+                        Columns = [ c ] }
+
+                  Expect.equal
+                      ((ColumnValidator.inRange "c" 0.0 10.0).Run t
+                       |> List.map (fun d -> d.Code, d.Node))
+                      (inRangeOverCells "c" 0.0 10.0 c)
+                      (sprintf "%s column" (ColumnType.tag c.Type))
+
+          testCase "unique on the typed storage: absent key cells are one value, tokens decide equality"
+          <| fun _ ->
+              let t: Table =
+                  { Schema = [ Field.create "k" DecimalType; Field.create "n" IntType ]
+                    Columns =
+                      [ cellColumn "k" DecimalType [ Decimal "1.5"; Decimal "1.50"; Null; Null; Decimal "2" ]
+                        cellColumn "n" IntType [ Int 1; Int 1; Null; Null; Int 1 ] ] }
+
+              Expect.equal
+                  ((ColumnValidator.unique [ "k"; "n" ]).Run t
+                   |> List.map (fun d -> d.Code, d.Node))
+                  [ ColumnValidator.UniqueCode, Some "k,n#1"
+                    ColumnValidator.UniqueCode, Some "k,n#3" ]
+                  "1.5 = 1.50, and a repeated all-absent key is a repeat" ]

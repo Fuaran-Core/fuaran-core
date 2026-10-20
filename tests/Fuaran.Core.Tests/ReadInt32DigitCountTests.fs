@@ -12,7 +12,7 @@ module Fuaran.Core.Tests.ReadInt32DigitCountTests
 // same shapes (the results file).
 //
 // Every reader is compared on the token as `readInt32` sees it, and every token that is a JSON number
-// is also compared through `parseDetailed` — the value with its case, or the refusal's kind, message
+// is also compared through `Json.read` — the value with its case, or the refusal's kind, message
 // and position — so a reader that moved would show in the decode as well as in the function.
 
 open Expecto
@@ -186,7 +186,11 @@ let private shown (r: Result<JVal, JsonError>) : string =
     | Ok v -> sprintf "ok %s %s" (kind v) (Json.render v)
     | Error e -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
 
-let private decoded (input: string) : string = shown (Json.parseDetailed input)
+let private decoded (input: string) : string =
+    match Json.read ReadOptions.strict input with
+    | Ok v -> shown (Ok v)
+    | Error(JsonRefusal.Malformed e) -> shown (Error e)
+    | Error(JsonRefusal.LimitExceeded b) -> sprintf "breach %A" b
 
 /// Where `candidate` and the reference disagree, as the reader answers.
 let private disagreements (candidate: string -> int option) : (string * int option * int option) list =

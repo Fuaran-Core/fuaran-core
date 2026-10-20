@@ -986,7 +986,10 @@ let private underCulture (name: string) (f: unit -> 'a) : 'a =
         Globalization.CultureInfo.CurrentCulture <- saved
 
 let private parseKind (text: string) : Result<JVal, JsonErrorKind> =
-    Json.parseDetailed text |> Result.mapError _.Kind
+    match Json.read ReadOptions.strict text with
+    | Ok v -> Ok v
+    | Error(JsonRefusal.Malformed e) -> Error e.Kind
+    | Error(JsonRefusal.LimitExceeded _) -> Error MaxDepthExceeded
 
 [<Tests>]
 let grammarTests =
@@ -1032,11 +1035,11 @@ let grammarTests =
               for text in [ "01"; "-01"; "[00]"; "1."; "-.5"; "1.e5"; "{\"a\":01}" ] do
                   Expect.equal (parseKind text) (Error MalformedNumber) (sprintf "%s is refused" text)
 
-              match Json.parseDetailed "01" with
-              | Error e ->
+              match Json.read ReadOptions.strict "01" with
+              | Error(JsonRefusal.Malformed e) ->
                   Expect.equal e.Message "malformed number: 01" "the token, in the message it always had"
                   Expect.equal e.Position 2 "at the token's end"
-              | Ok v -> failtestf "01 parsed as %A" v
+              | other -> failtestf "01 answered %A" other
 
               Expect.equal (Json.parse "-0") (Ok(JInt 0)) "a lone zero, signed, is a number"
               Expect.equal (Json.parse "0.5") (Ok(JFloat 0.5)) "a zero before the point is a number"
@@ -1127,19 +1130,10 @@ let grammarTests =
 
               Expect.equal (Canon.canonicalFloat nan) "\"NaN\"" "the canonical layout quotes the same token"
 
-          testCase "the Decode combinators run over a caller's error type"
+          // Phase 519 deleted the string-error twin (`Decode`) and its `Fault`; the typed layer's
+          // string form spells the two structural faults in the words the twin's did.
+          testCase "the typed layer's string form spells the structural faults"
           <| fun _ ->
-              let fault (f: Decode.Fault) = f
-              Expect.equal (Decode.propWith fault "x" (JObj [])) (Error(Decode.MissingProperty "x")) "missing"
-
-              Expect.equal
-                  (Decode.propWith fault "x" (JInt 1))
-                  (Error(Decode.WrongKind("object", "int")))
-                  "not an object"
-
-              Expect.equal (Decode.arrayWith fault (JArr [ JInt 1 ])) (Ok [ JInt 1 ]) "an array"
-              Expect.equal (Decode.stringWith fault (JBool true)) (Error(Decode.WrongKind("string", "bool"))) "a bool"
-
               Expect.equal
                   (Decoder.describing (Decoder.field "x" Decoder.json) (JObj []))
                   (Error "missing property: x")
@@ -1147,14 +1141,9 @@ let grammarTests =
 
               Expect.equal (Decoder.describing Decoder.str (JInt 1)) (Error "expected string, got int") "…all of them"
 
-              // `Decode.describe` spells a `Fault` in those same words, so a `…With` combinator handed
-              // it answers what the retired string-error helpers answered (Phase 386).
-              Expect.equal
-                  (Decode.arrayWith Decode.describe (JInt 1))
-                  (Error "expected array, got int")
-                  "describe spells a wrong kind"
+              Expect.equal (Decoder.describing Decoder.items (JInt 1)) (Error "expected array, got int") "a wrong kind"
 
               Expect.equal
-                  (Decode.propWith Decode.describe "x" (JObj []))
-                  (Error "missing property: x")
-                  "describe spells a missing member" ]
+                  (Decoder.describing (Decoder.field "x" Decoder.json) (JInt 1))
+                  (Error "expected object, got int")
+                  "a member read from a non-object" ]

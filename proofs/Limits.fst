@@ -42,7 +42,7 @@ let max_node_depth : nat = 24
    whether it carries a node, a spec, or a rule-12 payload. This is the one `Canon.fst` takes. *)
 (* This is the FORMAT's limit, modelled as a premise. It is NOT the shipped parser's cap: Core is not a
    section 21 host (DECISIONS.md D84, ruled 2026-10-01; refined by D159, 2026-10-15), and
-   `Json.defaultMaxDepth` is 512, a bound of the parser's own, configurable through `Json.parseWith`.
+   `Json.defaultMaxDepth` is 512, a bound of the parser's own, configurable through `ReadOptions`.
    Since Phase 465 the ENFORCEMENT of this bound, of `max_string_length`, of `max_array_length` (over
    items and over members) and of `max_document_bytes` is modelled — `JsonParse.fst` section 13, the
    limited entry point `parse_limited` over a `lims` record — so a host that instantiates those budgets

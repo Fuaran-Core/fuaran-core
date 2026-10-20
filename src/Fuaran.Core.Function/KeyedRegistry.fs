@@ -30,6 +30,13 @@ open System.Runtime.CompilerServices
 //  D118.7), so a registry outside this package is built on the same gate
 //  rather than beside it.
 //
+//  Its registration-ordered twin is `Validator.Ordered` in `Fuaran.Core.Validator`
+//  (Phase 521): the same four lifecycle verbs and the same laws over a LIST,
+//  because a validator registry's order is its run order (D117.2). It carries
+//  the two list-ordered registries, `Validator.RuleRegistry` and `Validator.Rules`
+//  (whose instance at a column table is `ColumnValidator.Registry`), so the five
+//  registries stand on one lattice in two orders and on no hand-written verb.
+//
 //  FSharp.Core only, Fable-clean, total.
 // ============================================================================
 

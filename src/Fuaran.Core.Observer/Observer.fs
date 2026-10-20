@@ -92,8 +92,10 @@ type ObserverWitness<'Input, 'Flag> =
 
 /// One registered node (Phase 298): its live input, the parent it was
 /// declared under (`None` for a root), and the flags last derived from the
-/// input — the change-gate's baseline.
-type ObserverEntry<'Input, 'Flag> =
+/// input — the change-gate's baseline. Internal since `0.39.0` (Phase 523):
+/// it is the element of `ObserverState`'s private map, and nothing outside
+/// the state reads or builds one.
+type internal ObserverEntry<'Input, 'Flag> =
     {
         /// The most recent input given to `register` or `update`.
         Current: 'Input
@@ -110,26 +112,22 @@ type ObserverEntry<'Input, 'Flag> =
 /// place, unregistering removes it. That order is what makes `observeTree`
 /// deterministic: a `Dictionary`'s enumeration, which the class used, reuses
 /// freed slots after a removal on .NET and does not under Fable.
+///
+/// **Opaque since `0.39.0` (Phase 523, DECISIONS.md D117.3).** The order is a
+/// derived index of the entries, so the representation is private: `empty`,
+/// `register`, `update` and `unregister` are the only constructors, each keeps
+/// the order exactly the registered ids, each once, and `isRegistered` /
+/// `registered` read it. A state whose order disagrees with its entries cannot
+/// be built, so the defect family that named one (`ObserverDefect`) and the
+/// checked walk that refused one (`tryObserveTree`) are gone with it.
 type ObserverState<'Input, 'Flag> =
-    {
-        /// The registered nodes keyed by node id.
-        Entries: Map<string, ObserverEntry<'Input, 'Flag>>
-        /// Exactly the keys of `Entries`, oldest registration first.
-        Order: string list
-    }
-
-/// How a hand-built `ObserverState` breaks its documented invariant — `Order` is exactly the keys
-/// of `Entries`, each once (Phase 383). Both fields are public, so a state no `register` produced can
-/// say anything; `ObserverWitness.tryObserveTree` names the first breach rather than walking it.
-/// `RequireQualifiedAccess`: `ObserverDefect.UnregisteredInOrder`, …
-[<RequireQualifiedAccess>]
-type ObserverDefect =
-    /// `Order` names `nodeId`, and `Entries` holds no entry for it.
-    | UnregisteredInOrder of nodeId: string
-    /// `Order` names `nodeId` more than once.
-    | RepeatedInOrder of nodeId: string
-    /// `Entries` holds `nodeId`, and `Order` does not name it.
-    | UnorderedEntry of nodeId: string
+    private
+        {
+            /// The registered nodes keyed by node id.
+            Entries: Map<string, ObserverEntry<'Input, 'Flag>>
+            /// Exactly the keys of `Entries`, oldest registration first.
+            Order: string list
+        }
 
 /// The observer functions over the witness (Phase 298). Every function is
 /// pure: a registration or update returns the new state and the emission it
@@ -237,6 +235,14 @@ module ObserverWitness =
               Input = e.Current
               Flags = e.LastFlags })
 
+    /// Whether `nodeId` is registered — what `snapshot` answers `Some` for.
+    let isRegistered (st: ObserverState<'Input, 'Flag>) (nodeId: string) : bool = Map.containsKey nodeId st.Entries
+
+    /// The registered node ids, oldest registration first: a re-registered id keeps
+    /// its place, and an id registered again after `unregister` joins the end. The
+    /// order `observeTree` walks each level in.
+    let registered (st: ObserverState<'Input, 'Flag>) : string list = st.Order
+
     /// Every observation reachable from `root` (inclusive) over the declared
     /// parent graph, breadth-first — by level, then by registration order
     /// within a level. Empty when `root` is not registered.
@@ -247,10 +253,6 @@ module ObserverWitness =
     /// forever; and the children map is built once per call in one pass over
     /// the registration order, with a two-list queue, where the class rebuilt
     /// it and appended the queue with `@`.
-    ///
-    /// **Total over any state value (Phase 383).** Both fields of `ObserverState` are public, so an
-    /// `Order` id with no entry is read as unregistered — never walked, never a throw — exactly as
-    /// `snapshot` reads it. `tryObserveTree` refuses such a state with the `ObserverDefect` it holds.
     let observeTree (st: ObserverState<'Input, 'Flag>) (root: string) : Observation<'Input, 'Flag> list =
         if not (Map.containsKey root st.Entries) then
             []
@@ -284,33 +286,3 @@ module ObserverWitness =
                     walk acc' rest back' seen'
 
             walk [] [ root ] [] (Set.singleton root)
-
-    /// `observeTree` over a state checked first (Phase 383): `Error` with the first breach of the
-    /// state's invariant — an `Order` id with no entry, an id `Order` repeats (both in `Order`'s
-    /// order), then an entry `Order` omits (in id order) — and `Ok (observeTree st root)` for a state
-    /// `register` / `update` / `unregister` could have produced.
-    let tryObserveTree
-        (st: ObserverState<'Input, 'Flag>)
-        (root: string)
-        : Result<Observation<'Input, 'Flag> list, ObserverDefect> =
-        let rec scan (seen: Set<string>) (ids: string list) =
-            match ids with
-            | [] ->
-                st.Entries
-                |> Map.toList
-                |> List.tryPick (fun (id, _) ->
-                    if Set.contains id seen then
-                        None
-                    else
-                        Some(ObserverDefect.UnorderedEntry id))
-            | id :: rest ->
-                if not (Map.containsKey id st.Entries) then
-                    Some(ObserverDefect.UnregisteredInOrder id)
-                elif Set.contains id seen then
-                    Some(ObserverDefect.RepeatedInOrder id)
-                else
-                    scan (Set.add id seen) rest
-
-        match scan Set.empty st.Order with
-        | Some defect -> Error defect
-        | None -> Ok(observeTree st root)

@@ -1260,10 +1260,11 @@
     },
     {
       "members": [
-        "ObserverWitness.tryObserveTree"
+        "ObserverWitness.isRegistered",
+        "ObserverWitness.registered"
       ],
       "class": "measured-elsewhere",
-      "reason": "Checks a hand-built state's invariant (Order is exactly the keys of Entries, each once) and then walks it with the rostered `observeTree` (Phase 383); each defect it names, and its agreement with the walk on a built state, are example-tested.",
+      "reason": "The opaque state's two readers (Phase 523): membership and the registration order, each example-tested over register, re-register, unregister and update; the observer family also holds both against snapshot and its drawn script.",
       "standIn": "tests/Fuaran.Core.Tests/ObserverTests.fs"
     },
     {
@@ -1843,12 +1844,28 @@
     },
     {
       "members": [
-        "ColumnValidator.asCheck",
         "ColumnValidator.validateTagged"
       ],
       "class": "measured-elsewhere",
       "reason": "Column-validator registry and tagged validation beside the rostered rule constructors and `validate`; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Validator.Rules.empty",
+        "Validator.Rules.enumerate",
+        "Validator.Rules.ofChecks",
+        "Validator.Rules.register",
+        "Validator.Rules.replace",
+        "Validator.Rules.restrict",
+        "Validator.Rules.run",
+        "Validator.Rules.tryFind",
+        "Validator.Rules.union",
+        "Validator.Rules.unregister"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion), Phase 521: the registration-ordered lattice and the one walk over a domain's own rules. The validator tests name each verb, its refusals and the walk's agreement with `runAllTagged` and `ColumnValidator.validateTagged`.",
+      "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
     },
     {
       "members": [
@@ -1979,48 +1996,6 @@
     },
     {
       "members": [
-        "Decode.arrayWith",
-        "Decode.propWith",
-        "Decode.stringWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
-    },
-    {
-      "members": [
-        "Decode.parse"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
-    },
-    {
-      "members": [
-        "Decode.tryProp"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
-        "Decode.parseTolerantOfNull"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
-    },
-    {
-      "members": [
-        "Decode.describe"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "A decode fault in the words the retired string-error helpers used; a `…With` combinator handed it answers in those words.",
-      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
-    },
-    {
-      "members": [
         "DecodeError.codeName",
         "DecodeError.tryCodeOfName",
         "DecodePath.ofJson",
@@ -2049,15 +2024,6 @@
     },
     {
       "members": [
-        "DecodeError.ofJsonError"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Lifts a JSON parse error into the typed decode error; `Decoder.parseWith` returns it for unparsable text.",
-      "through": "Decoder.parseWith",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
-    },
-    {
-      "members": [
         "DecodeError.reword"
       ],
       "class": "measured-elsewhere",
@@ -2071,16 +2037,6 @@
       ],
       "class": "trivial",
       "reason": "Builds the four-member object (code, path, expected, message); no computation beyond `DecodePath.toJson`."
-    },
-    {
-      "members": [
-        "Decoder.ofString",
-        "Decoder.parse",
-        "Decoder.parseWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The typed decoder's TEXT entry points (Phase 310): `Json.parse` with its refusal lifted by `DecodeError.ofJsonError`, then a decoder. Phase 436 modelled every combinator that starts from a `JVal`; these start from text, which is the parser's, and the decode-layer tests and the `conformance/decode/` vectors stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
     },
     {
       "members": [
@@ -2120,9 +2076,6 @@
     {
       "members": [
         "Json.kindObj",
-        "Json.parseDetailed",
-        "Json.parseDetailedWith",
-        "Json.parseWith",
         "Json.render",
         "Json.tryRender"
       ],
@@ -2158,14 +2111,6 @@
     },
     {
       "members": [
-        "Json.parseTolerantOfNullWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
-    },
-    {
-      "members": [
         "Json.firstNonFinite"
       ],
       "class": "measured-elsewhere",
@@ -2182,15 +2127,6 @@
     },
     {
       "members": [
-        "Json.parseWithPolicy"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Policy-parameterised parse to a string error; `parseTolerantOfNullWith` is it under the tolerant policy.",
-      "through": "Json.parseTolerantOfNullWith",
-      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
-    },
-    {
-      "members": [
         "Json.tryEncode"
       ],
       "class": "forward",
@@ -2199,16 +2135,16 @@
     },
     {
       "members": [
-        "Json.Reader.floats",
-        "Json.Reader.ints",
-        "Json.Reader.items",
-        "Json.Reader.members",
-        "Json.Reader.read",
-        "Json.Reader.strings",
-        "Json.Reader.value"
+        "Reader.floats",
+        "Reader.ints",
+        "Reader.items",
+        "Reader.members",
+        "Reader.read",
+        "Reader.strings",
+        "Reader.value"
       ],
       "class": "measured-elsewhere",
-      "reason": "The typed reading of a document (Phase 368) runs the parser's own scanner, so the modelled grammar is the parser's; what the reader adds is typed collection and shape checks, held to parseDetailed refusal for refusal (kind, message, position) by a differential over the codec refusal corpus, the wire benchmark corpora and a generated pool.",
+      "reason": "The typed reading of a document (Phase 368; out of `Json` at Phase 519) runs the parser's own scanner under the caller's `ReadOptions`, so the modelled grammar is the parser's; what the reader adds is typed collection and shape checks, held to `Decoder.parse` refusal for refusal (code, path, sentence) by a differential over the codec refusal corpus, the wire benchmark corpora and a generated pool, and a shape mismatch is `WrongKind` at the value's path.",
       "standIn": "tests/Fuaran.Core.Tests/JsonReaderTests.fs"
     },
     {

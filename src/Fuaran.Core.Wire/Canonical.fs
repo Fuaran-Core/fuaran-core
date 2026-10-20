@@ -52,11 +52,11 @@ module Canonical =
                     Error("repeated member has no canonical rendering of its own: " + what + " at " + path)
                 | None -> Ok(write profile v)
 
-    /// Read canonical text — or any JSON text — as a value, the refusal typed as a `DecodeError` at
-    /// the root. It accepts BOTH escaping spellings of a control character (`\n` and `\u000a`), so
-    /// text written under any profile reads back as the one value it encodes; the profile is a
-    /// fact about writing, never about reading.
-    let read (text: string) : Result<JVal, DecodeError> = Decoder.parse text
+    /// Read canonical text — or any JSON text — as a value under `ReadOptions.strict`, the refusal
+    /// typed as a `DecodeError` (`Decoder.parse`). It accepts BOTH escaping spellings of a control
+    /// character (`\n` and `\u000a`), so text written under any profile reads back as the one
+    /// value it encodes; the profile is a fact about writing, never about reading.
+    let read (text: string) : Result<JVal, DecodeError> = Decoder.parse ReadOptions.strict text
 
     /// `true` exactly when `text` is the canonical text, under `profile`, of the value it reads
     /// as: it parses, the value has a guarded rendering, and that rendering is `text` byte for

@@ -94,9 +94,10 @@ let private shown (r: Result<JVal, JsonErrorKind * string * int>) : string =
 /// What production says of `tok` bare and as an array's one item, beside what `decide` says.
 let private pairs (decide: string -> Result<JVal, JsonErrorKind * string>) (tok: string) : (string * string) list =
     let prod (input: string) =
-        match Json.parseDetailed input with
+        match Json.read ReadOptions.strict input with
         | Ok v -> Ok v
-        | Error e -> Error(e.Kind, e.Message, e.Position)
+        | Error(JsonRefusal.Malformed e) -> Error(e.Kind, e.Message, e.Position)
+        | Error(JsonRefusal.LimitExceeded b) -> Error(MaxDepthExceeded, "a breach", b.Position)
 
     let expected (wrap: JVal -> JVal) (offset: int) =
         match decide tok with
@@ -249,9 +250,10 @@ let tests =
           test "the boundary is pinned by name, both sides of 2^53 and of 1e17" {
               let says (tok: string) =
                   shown (
-                      match Json.parseDetailed tok with
+                      match Json.read ReadOptions.strict tok with
                       | Ok v -> Ok v
-                      | Error e -> Error(e.Kind, e.Message, e.Position)
+                      | Error(JsonRefusal.Malformed e) -> Error(e.Kind, e.Message, e.Position)
+                      | Error(JsonRefusal.LimitExceeded b) -> Error(MaxDepthExceeded, "a breach", b.Position)
                   )
 
               Expect.equal (says "9007199254740992") "ok 9007199254740992" "2^53 is int53-safe"

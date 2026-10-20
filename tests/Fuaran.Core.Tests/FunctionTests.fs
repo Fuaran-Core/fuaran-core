@@ -2082,7 +2082,7 @@ let readerAdmissionTests =
               match
                   CapabilityCodec.decodeJsonDetailedWith
                       ReadPolicy.Lenient
-                      (Decode.parse text |> Result.toOption |> Option.get)
+                      (Json.parse text |> Result.toOption |> Option.get)
               with
               | Error e ->
                   Expect.equal e.Message (InvokeError.describe (NonTotalCapability("c", [ "r" ]))) "the totality half"

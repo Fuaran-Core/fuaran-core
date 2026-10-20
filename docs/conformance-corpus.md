@@ -472,14 +472,16 @@ why the rows cost no legitimate document and is the admission test a further row
 
 Three rules sit beside the rows:
 
-- **Every entry point answers alike.** `Json.parse`, `parseWith`, `parseDetailed*`, the tolerant reads
-  (`parseTolerantOfNull*`, `parseWithPolicy`), `Decode.parse*`, `Decoder.parse*` and `Json.Reader.read`
-  share one scanner (Phase 368), and a test holds each of them to one answer per `json` vector in
-  `refusals/`. A reader a wire host carries beside Core's (the generated TypeScript reader is one)
+- **Every entry point answers alike.** There are four readers over one scanner (Phase 368), each
+  taking the read's `ReadOptions` (its null policy and its limits record; Phase 519): `Json.read` (the
+  parser's own refusal), `Json.parse` (its one string form, under `ReadOptions.strict`), `Reader.read`
+  (typed values, a shape mismatch `WrongKind` at the value's path) and `Decoder.parse` (the decode
+  error contract). A test holds each of them, under both null policies, to one answer per `json`
+  vector in `refusals/`. A reader a wire host carries beside Core's (the generated TypeScript reader is one)
   answers every row identically or declares the row it diverges on as a conformance gap, never as a
   second dialect.
 - **An erased member null is not an occurrence of its name.** Under `EraseMemberNull`
-  (`parseTolerantOfNull`), `{"a":null,"a":1}` and `{"a":1,"a":null}` both read as `{"a":1}`: the
+  (`ReadOptions.tolerantOfNull`), `{"a":null,"a":1}` and `{"a":1,"a":null}` both read as `{"a":1}`: the
   tolerant read is the strict read of the document with its member nulls deleted (a proved bridge,
   Phase 190), and the deletion leaves no name behind. Under the strict policy the same documents are
   the null's refusal. Decision record: DECISIONS.md D157.
@@ -492,9 +494,10 @@ Three rules sit beside the rows:
 Core states no limit VALUES and is not a host of any wire's limits section (DECISIONS.md D84, ruled
 2026-10-01; refined by D159, 2026-10-15): its 512 nesting cap is its own stack guard, deliberately
 looser than any wire's bound, so Core never refuses a document a wire says a host must accept, and its
-refusal there is `MaxDepthExceeded` (`LimitExceeded` in the decode error contract). What Core offers is
-the MECHANISM (Phase 465): `Json.parseWithLimits policy limits input` — and `Decoder.parseWithLimits`,
-its typed-decode form — takes a `JsonLimits` record and enforces each bound ON THE WAY DOWN, before the
+refusal there is the `Depth` breach at the container opened past it, exactly as under a host's record
+(`LimitExceeded` at that path in the decode error contract; Phase 519). What Core offers is the
+MECHANISM (Phase 465): every reader takes a `JsonLimits` record in its `ReadOptions` (`Json.read`, and
+`Decoder.parse` and `Reader.read` over it) and enforces each bound ON THE WAY DOWN, before the
 container, unit, item or member it guards is read, so nothing past a bound is ever read or built. Each
 wire keeps its own values, units and error envelope and cites Core for the mechanism alone; a host
 passes its specification's numbers and maps the breach to its own envelope.
@@ -510,10 +513,10 @@ passes its specification's numbers and maps the breach to its own envelope.
 A breach is `JsonRefusal.LimitExceeded` — a `JsonLimitBreach` naming the limit, its declared value, the
 path and the position, never the input — and `LimitExceeded` at that path in the decode error contract,
 with a sentence naming the limit and the value (`limit arrayLength of 2 exceeded`). It is NEVER
-`InvalidJson`, and malformed text is never a breach: `JsonRefusal.Malformed` carries exactly the refusal
-`parseDetailed` gives the text. The first fault in document order wins, whichever kind it is. The
-pre-existing entry points run under `JsonLimits.depthOnly 512` and answer every document as they always
-have. The `decode/` family carries one vector per bound at the bound (accepted) and one past it, each
+`InvalidJson`, and malformed text is never a breach: `JsonRefusal.Malformed` carries the parser's
+classified refusal of the text. The first fault in document order wins, whichever kind it is.
+`ReadOptions.strict` carries `JsonLimits.depthOnly 512`, under which only the depth cap can be
+passed. The `decode/` family carries one vector per bound at the bound (accepted) and one past it, each
 declaring its `limits` record, with the astral and CJK vectors that fail a host whose unit is wrong by
 name. The model (`proofs/JsonParse.fst`, section 13) proves the limited entry point at no bound is the
 parser, that a breach is never reported as malformed, and the string and items bounds exact on their

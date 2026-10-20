@@ -18,7 +18,7 @@ let private encodeOp =
     | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
 
 let private decodeOp (s: string) : Result<CounterOp, string> =
-    Decode.parse s
+    Json.parse s
     |> Result.bind (fun el ->
         Decoder.describing (Decoder.field "kind" Decoder.str) el
         |> Result.bind (fun k ->

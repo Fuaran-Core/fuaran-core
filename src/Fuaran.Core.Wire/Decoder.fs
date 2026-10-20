@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
-/// A decoder over the typed refusal (Phase 310). `Decode.Decoder` is its string-error twin, kept
-/// for one draft.
+/// A decoder over the typed refusal (Phase 310) — the one decode layer since Phase 519 deleted its
+/// string-error twin.
 type Decoder<'T> = JVal -> Result<'T, DecodeError>
 
 /// The typed decode combinators (Phase 310). Each returns `Result<_, DecodeError>`; a refusal
@@ -432,21 +432,194 @@ module Decoder =
 
     // ---- text ----
 
-    /// Parse JSON text, a parser refusal as a decode refusal at the root (`DecodeError.ofJsonError`).
-    let parseWith (maxDepth: int) (json: string) : Result<JVal, DecodeError> =
-        Json.parseDetailedWith maxDepth json |> Result.mapError DecodeError.ofJsonError
+    /// Parse JSON text under `options` (Phase 519: `Json.read`, its refusal through
+    /// `DecodeError.ofJsonRefusal`): malformed text is `InvalidJson` at the root, and a passed
+    /// bound — the nesting cap included — `LimitExceeded` at the breach's path, naming the limit and
+    /// its declared value. `ReadOptions.strict` is the parser's own cap and no other bound; a wire
+    /// host enforces its own specification's limits by passing them here.
+    let parse (options: ReadOptions) (json: string) : Result<JVal, DecodeError> =
+        Json.read options json |> Result.mapError DecodeError.ofJsonRefusal
 
-    /// `parseWith` at the parser's default nesting cap.
-    let parse (json: string) : Result<JVal, DecodeError> = parseWith Json.defaultMaxDepth json
+/// A cursor over one document, handed to the reading function `Reader.read` runs (Phase 368; out of
+/// `Json` at Phase 519, beside the refusal it answers). Each `Reader` function reads exactly ONE
+/// value where one is due; reading none, or two, where one is due is a programming error and raises
+/// `InvalidOperationException`.
+[<Sealed>]
+type Reader internal (scan: Json.Scanner) =
+    let mutable due = true
+    let mutable depth = 0
+    member internal _.Scan = scan
 
-    /// Parse JSON text under a limits record (Phase 465, `Json.parseWithLimits` at the strict null
-    /// policy): a breach is `LimitExceeded` at the breach's path, naming the limit and its declared
-    /// value (`DecodeError.ofJsonRefusal`); malformed text is `InvalidJson` at the root as `parse`
-    /// reports it. The route by which a wire host enforces its own specification's limits through
-    /// Core's parse alone.
-    let parseWithLimits (limits: JsonLimits) (json: string) : Result<JVal, DecodeError> =
-        Json.parseWithLimits RejectNull limits json
-        |> Result.mapError DecodeError.ofJsonRefusal
+    member internal _.Due
+        with get () = due
+        and set (v: bool) = due <- v
 
-    /// Parse JSON text and decode it with `d`.
-    let ofString (d: Decoder<'T>) (json: string) : Result<'T, DecodeError> = parse json |> Result.bind d
+    member internal _.Depth
+        with get () = depth
+        and set (v: int) = depth <- v
+
+/// A reader for a large document whose consumer wants typed values, not the `JVal` tree (Phase
+/// 368). `Json.read` builds a `JVal` for every value and a list cell for every element, and a
+/// consumer then walks the tree a second time to type it; for a large homogeneous array that is most
+/// of the decode's allocation (DECISIONS.md D121). A reading here takes such an array straight into
+/// a `string[]` / `float[]` / `int[]`, and takes any other value as the `JVal` `Json.read` would
+/// have built for it.
+///
+/// It is the SAME grammar as `Json.read`, not a second one: every token, structure, bound and
+/// end-of-input rule is the scanner `Json.read` runs, under the same `ReadOptions`. The refusals
+/// agree exactly (Phase 519): a document `Json.read` refuses is refused with
+/// `DecodeError.ofJsonRefusal` of that refusal, whatever the reading asked for, and a document it
+/// accepts is refused only with `WrongKind` AT THE PATH of the value that is not the shape asked
+/// for. A reading that succeeds returns what typing `Json.read`'s tree the same way would.
+[<RequireQualifiedAccess>]
+module Reader =
+    /// Internal signal for a shape mismatch: the path to the value, the shape expected there, and
+    /// the value's position. Never escapes `read`.
+    exception private ReadMismatch of PathSegment list * string * int
+
+    let private mismatch (s: Json.Scanner) (at: int) (expected: string) : 'a =
+        raise (ReadMismatch(s.Path, expected, at))
+
+    let private take (r: Reader) =
+        if not r.Due then
+            invalidOp "Reader: a value was read where none was due (a reading reads exactly one value)"
+
+        r.Due <- false
+
+    // A container where one is due: the value's start, which must be `opening`, else a mismatch at
+    // that value (a character no value starts with is the grammar's to refuse: the mismatch defers
+    // to `Json.read`, which names it).
+    let private opening (r: Reader) (c: char) (expected: string) : Json.Scanner =
+        take r
+        let s = r.Scan
+
+        if s.ValueStart() <> c then
+            mismatch s s.Pos expected
+
+        s
+
+    // Run `f` where exactly one value is due, one level deeper.
+    let private nested (r: Reader) (f: unit -> unit) =
+        let d = r.Depth
+        r.Due <- true
+        r.Depth <- d + 1
+        f ()
+
+        if r.Due then
+            invalidOp "Reader: a member or item was not read (a reading reads exactly one value)"
+
+        r.Depth <- d
+
+    // A homogeneous array, each element taken by `element` at its value start.
+    let private arrayOf (r: Reader) (element: Json.Scanner -> unit) =
+        let s = opening r '[' "an array"
+        s.Array(r.Depth, (fun () -> element s))
+
+    /// Any value, as `Json.read` builds it.
+    let value (r: Reader) : JVal =
+        take r
+        r.Scan.Value r.Depth
+
+    /// An array of strings, into a `string[]`.
+    let strings (r: Reader) : string[] =
+        let acc = ResizeArray<string>()
+
+        arrayOf r (fun s ->
+            if s.ValueStart() <> '"' then
+                mismatch s s.Pos "a string"
+
+            acc.Add(s.String()))
+
+        acc.ToArray()
+
+    /// An array of numbers — the `JInt` and `JFloat` items of `Json.read`, read as `JVal.asFloat`
+    /// reads them — into a `float[]`.
+    let floats (r: Reader) : float[] =
+        let acc = ResizeArray<float>()
+
+        arrayOf r (fun s ->
+            let c = s.ValueStart()
+
+            if not (c = '-' || (c >= '0' && c <= '9')) then
+                mismatch s s.Pos "a number"
+
+            acc.Add(s.Number()))
+
+        acc.ToArray()
+
+    /// An array of the integers `Json.read` reads as `JInt` (an integer token within Int32), into an
+    /// `int[]`. Any other number is a mismatch, as it would be a `JFloat` in the tree.
+    let ints (r: Reader) : int[] =
+        let acc = ResizeArray<int>()
+
+        arrayOf r (fun s ->
+            let c = s.ValueStart()
+            let at = s.Pos
+
+            if not (c = '-' || (c >= '0' && c <= '9')) then
+                mismatch s at "an Int32 integer"
+
+            s.Number() |> ignore
+
+            if not s.NumberIsInt then
+                mismatch s at "an Int32 integer"
+
+            acc.Add s.NumberInt)
+
+        acc.ToArray()
+
+    /// An array, calling `item` once per element in order; `item` reads the element.
+    let items (item: Reader -> unit) (r: Reader) : unit =
+        let s = opening r '[' "an array"
+        s.Array(r.Depth, (fun () -> nested r (fun () -> item r)))
+
+    /// An object, calling `onMember key` once per member in AUTHORED order; `onMember` reads the
+    /// member's value. A repeated member name is refused (`DuplicateMember`, Phase 462) when the
+    /// scanner reaches it, as `Json.read` refuses it.
+    let members (onMember: string -> Reader -> unit) (r: Reader) : unit =
+        let s = opening r '{' "an object"
+        s.Object(r.Depth, (fun key -> nested r (fun () -> onMember key r)))
+
+    /// Read `input` under `options` with `reading`, which reads exactly one value (the document's),
+    /// then require nothing but whitespace after it — the document `Json.read` reads, read typed.
+    /// A refusal is a `DecodeError`: the document's own refusal as `Decoder.parse` reports it, or a
+    /// shape mismatch as `WrongKind` at the path of the value, its `Expected` the shape asked for.
+    let read (options: ReadOptions) (reading: Reader -> 'a) (input: string) : Result<'a, DecodeError> =
+        match Json.documentBytesBreach options.Limits input with
+        | Some breach -> Error(DecodeError.ofJsonRefusal breach)
+        | None ->
+            let s = Json.Scanner(options.Null, options.Limits, input)
+            let r = Reader(s)
+
+            try
+                let a = reading r
+
+                if r.Due then
+                    invalidOp "Reader.read: the reading read no value"
+
+                s.SkipWs()
+
+                if s.Pos <> s.Length then
+                    Error(
+                        DecodeError.ofJsonRefusal (
+                            JsonRefusal.Malformed
+                                { Position = s.Pos
+                                  Message = "trailing characters"
+                                  Kind = TrailingCharacters }
+                        )
+                    )
+                else
+                    Ok a
+            with
+            | ReadMismatch(path, expected, at) ->
+                // A refusal anywhere in the document outranks a shape mismatch, so a document
+                // `Json.read` refuses is refused with its refusal whatever was asked.
+                match Json.read options input with
+                | Error refusal -> Error(DecodeError.ofJsonRefusal refusal)
+                | Ok _ ->
+                    let sentence = "expected " + expected + " at position " + string at
+                    Error(DecodeError.within path (DecodeError.make DecodeCode.WrongKind expected sentence))
+            | e ->
+                match s.Refusal e with
+                | Some refusal -> Error(DecodeError.ofJsonRefusal refusal)
+                | None -> reraise ()
