@@ -262,6 +262,15 @@
     },
     {
       "members": [
+        "ColumnCodec.readCell",
+        "ColumnCodec.writeCell"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one-cell reader and writer (Phase 514): one value read and written through its type's row as the modelled `decodeJson` / `encodeJson` read and write it at a present row; a differential against the one-row table document through those two, at every type, stands in.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
         "ColumnType.ofTag"
       ],
       "class": "measured-elsewhere",

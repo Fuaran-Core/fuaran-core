@@ -325,50 +325,26 @@ module internal QueryShape =
         | ColumnPredicate.IsNull _
         | ColumnPredicate.IsNotNull _ -> None
 
-    /// The one-cell table a literal is checked, written and read as — so a literal is carried by
-    /// THE cell codec the column strand owns, exactly as a query argument is (`decodeArgsJson`).
-    let private oneCell (column: string) (ty: ColumnType) (c: Cell) : Table =
-        // Admission held the literal to its column's type, so the first build succeeds; a cell that
-        // somehow does not fit is carried at its own type rather than raised on (total, Phase 417).
-        let col =
-            match Column.ofCells column ty [ c ] with
-            | Ok col -> col
-            | Error _ ->
-                match Column.ofCells column (Cell.typeOf c |> Option.defaultValue ty) [ c ] with
-                | Ok col -> col
-                | Error _ -> Column.ofStrs column Vector.empty AllValid
-
-        { Schema = [ Field.create column col.Type ]
-          Columns = [ col ] }
-
-    /// A literal's JSON value: the value the column codec writes for that one cell. A literal is
-    /// written only after admission, which holds it to its column's exact type and to what
-    /// `Table.validate` accepts, so the one-cell document always has the shape matched here; the
-    /// fallback (the whole document) is unreachable for an admitted declaration and is total
-    /// rather than a throw.
-    ///
-    /// A date or timestamp literal whose text its column cannot hold (Phase 422: the column holds
-    /// integers) is written as its text, as it was before, rather than through the fallback.
+    /// A literal's JSON value: the value the column codec writes for that cell in a column of its
+    /// type (`ColumnCodec.writeCell`, Phase 514 — a one-cell table document run through the whole
+    /// codec until then, with the same bytes). A literal is written only after admission, which
+    /// holds it to its column's exact type, so the first write succeeds. A literal its type cannot
+    /// hold is written total rather than raised on: a date or timestamp as its text (Phase 422: the
+    /// column holds integers, the text is what was declared), any other cell at its own type, which
+    /// holds every cell of it.
     let private literalJson (ty: ColumnType) (c: Cell) : JVal =
-        match c with
-        | Date s
-        | Timestamp s when Result.isError (Column.ofCells "v" ty [ c ]) -> JStr s
-        | _ ->
-            match ColumnCodec.encodeJson (Embedded(oneCell "v" ty c)) with
-            | JObj [ _; "columns", JObj [ _, JObj [ "values", JArr [ v ]; _ ] ] ] -> v
-            | other -> other
+        match ColumnCodec.writeCell "v" ty c, c with
+        | Ok v, _ -> v
+        | Error _, (Date s | Timestamp s) -> JStr s
+        | Error _, other ->
+            ColumnCodec.writeCell "v" (Cell.typeOf other |> Option.defaultValue ty) other
+            |> Result.defaultValue (JStr "")
 
-    /// A literal read back at the type its document states, through the column codec's one cell
-    /// decoder; `None` when the value is not one a column of that type carries.
+    /// A literal read back at the type its document states, through the column codec's one-cell
+    /// reader (`ColumnCodec.readCell`); `None` when the value is not one a column of that type
+    /// carries.
     let private literalOf (column: string) (ty: ColumnType) (v: JVal) : Cell option =
-        let doc =
-            JObj
-                [ "schema", JArr [ JObj [ "name", JStr column; "type", JStr(ColumnType.tag ty) ] ]
-                  "columns", JObj [ column, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
-
-        match ColumnCodec.decodeJson doc with
-        | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Some(Column.cell 0 c)
-        | _ -> None
+        ColumnCodec.readCell column ty v |> Result.toOption
 
     /// A predicate as its wire document: `"$type"` its tag, `column`, and — for a comparison — the
     /// literal's `type` and `value`, or — for `contains` — its `text`.

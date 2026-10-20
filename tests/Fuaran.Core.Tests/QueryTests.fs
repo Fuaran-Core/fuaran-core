@@ -688,6 +688,58 @@ let whereOrderByTests =
               Expect.equal (QueryCodec.decode text) (Ok shaped) "lenient"
               Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok shaped) "strict"
 
+          testCase "a literal of every column type round-trips with the bytes the column codec writes (Phase 514)"
+          <| fun _ ->
+              // One column of each of the ten types, an equality on each: the literal's bytes are the
+              // column codec's one-cell writer's, and they read back through its one-cell reader.
+              let literals =
+                  [ IntType, Int -7, "-7"
+                    FloatType, Float 1.25, "1.25"
+                    BoolType, Bool true, "true"
+                    StringType, Str "UK", "\"UK\""
+                    DateType, Date "2026-01-01", "\"2026-01-01\""
+                    TimestampType TimeUnit.Seconds, Timestamp "2026-01-01T00:00:01Z", "\"2026-01-01T00:00:01Z\""
+                    DecimalType, Decimal "-0.05", "\"-0.05\""
+                    TimestampType TimeUnit.Milliseconds,
+                    Timestamp "2026-01-01T00:00:01.25Z",
+                    "\"2026-01-01T00:00:01.25Z\""
+                    TimestampType TimeUnit.Microseconds,
+                    Timestamp "2026-01-01T00:00:01.000125Z",
+                    "\"2026-01-01T00:00:01.000125Z\""
+                    TimestampType TimeUnit.Nanoseconds,
+                    Timestamp "2026-01-01T00:00:01.000000125Z",
+                    "\"2026-01-01T00:00:01.000000125Z\"" ]
+
+
+              Expect.equal
+                  (literals |> List.map (fun (ty, _, _) -> ty))
+                  ColumnType.all
+                  "every column type, in ColumnType.all's order"
+
+              let q =
+                  { sampleQuery with
+                      ResultSchema = literals |> List.mapi (fun i (ty, _, _) -> Field.create (sprintf "c%d" i) ty)
+                      Where =
+                          literals
+                          |> List.mapi (fun i (_, cell, _) -> ColumnPredicate.EqualTo(sprintf "c%d" i, cell)) }
+
+              let text = QueryCodec.encode q
+
+              literals
+              |> List.iteri (fun i (ty, _, bytes) ->
+                  Expect.stringContains
+                      text
+                      (sprintf
+                          "{\"$type\":\"equalTo\",\"column\":\"c%d\",\"type\":\"%s\",\"value\":%s}"
+                          i
+                          (ColumnType.tag ty)
+                          bytes)
+                      (ColumnType.tag ty))
+
+              Expect.isOk (QueryRegistry.register q QueryRegistry.empty) "the registry admits every literal"
+              Expect.equal (QueryCodec.decode text) (Ok q) "lenient"
+              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok q) "strict"
+
           testCase
               "a declaration's result fields carry a unit, a label, a description and extensions through the codec and the registry (Phase 427)"
           <| fun _ ->

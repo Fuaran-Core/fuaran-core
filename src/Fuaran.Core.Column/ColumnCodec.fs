@@ -22,53 +22,24 @@ module ColumnCodec =
 
     // ---- encode (Fable-clean `JVal` construction → `Canon.render`) ----
 
-    /// THE ABSENT SLOT — the value a `Null` cell's slot carries in the `values` array (Phase 299).
-    /// The validity mask, not this value, says the cell is absent; the slot exists only because the
-    /// Fuaran wire has no JSON `null`, so the array needs a value there. It is a WIRE placeholder of
-    /// the column's JSON kind and never a cell: a reader skips a masked slot without decoding it, so
-    /// the `""` a date or timestamp column carries is never read as a date. (Until this phase it was
-    /// produced through a public `Cell.defaultFor`, which built `Date ""` — a cell no date column
-    /// accepts. The bytes are unchanged.)
-    let private absentSlot (ty: ColumnType) : JVal =
-        match ty with
-        | IntType -> JInt 0
-        | FloatType -> JFloat 0.0
-        | BoolType -> JBool false
-        | StringType
-        | DateType
-        | TimestampType _ -> JStr ""
-        | DecimalType -> JStr DecimalText.zero
-
     /// One column's `values` and `validity` arrays, walked off the typed storage (Phase 417): the
     /// element at a present row as its JSON value, the absent slot at an absent one — never what
     /// the vector happens to hold there — so the bytes are those the `Cell list` column wrote. A
     /// widened cell was normalised at construction, so a float column writes floats and a decimal
     /// column its texts, as the cell encoder wrote them before. An `AllValid` column (Phase 420)
     /// holds no mask and writes its all-true validity array directly, without materialising one.
+    /// What a value and an absent slot are written as is the type's row (`TypeOps`, Phase 514).
     let private columnJson (c: Column) : JVal =
         let n = Column.length c
         let rows = Column.validity c
         let present (i: int) = Validity.isPresent i rows
 
         let values =
-            match c.Data with
-            | Ints(xs, _) -> List.init n (fun i -> if present i then JInt xs[i] else absentSlot IntType)
-            | Floats(xs, _) -> List.init n (fun i -> if present i then JFloat xs[i] else absentSlot FloatType)
-            | Bools(xs, _) -> List.init n (fun i -> if present i then JBool xs[i] else absentSlot BoolType)
-            | Dates(xs, _) ->
-                List.init n (fun i ->
-                    if present i then
-                        JStr(TemporalText.dateText xs[i])
-                    else
-                        absentSlot DateType)
-            | Timestamps(u, xs, f, _) ->
-                List.init n (fun i ->
-                    if present i then
-                        JStr(TemporalText.instantText u xs[i] (ColumnStorage.fractionAt f i))
-                    else
-                        absentSlot c.Type)
-            | Strs(xs, _)
-            | Decimals(xs, _) -> List.init n (fun i -> if present i then JStr xs[i] else absentSlot c.Type)
+            TypeOps.ofData
+                c.Data
+                { new ColumnDataUser<JVal list> with
+                    member _.Use(ops, get) =
+                        List.init n (fun i -> if present i then ops.WriteJson(get i) else ops.AbsentSlot) }
 
         let validity = List.init n (fun i -> JBool(present i))
         JObj [ "values", JArr values; "validity", JArr validity ]
@@ -152,164 +123,6 @@ module ColumnCodec =
     let private asArr (ctx: string) (el: JVal) : Result<JVal list, ColumnError> = Decode.arrayWith (fault ctx) el
 
     let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
-
-    /// The largest magnitude a whole-valued float token carries exactly: 2^53, the parser's int53
-    /// guard. A decimal column reads a whole-valued `JFloat` up to it and no further.
-    let private int53Max = 9007199254740992.0
-
-    /// The refusals one present value can meet, for the column `colName` of type `ty` (Phase 417;
-    /// `decodeCell`'s until then, now shared by the typed readers below).
-    let private valueFaults (colName: string) (ty: ColumnType) =
-        let mismatch (v: JVal) =
-            Error(TypeMismatch(colName, ty, JVal.kindName v))
-
-        let notCanonical (what: string) =
-            Error(MalformedShape(colName + ": " + what))
-
-        mismatch, notCanonical
-
-    /// The refusal of a date or timestamp text that is not canonical, naming the form.
-    let private notCanonicalText
-        (notCanonical: string -> Result<'T, ColumnError>)
-        (ty: ColumnType)
-        (form: string)
-        : Result<'T, ColumnError> =
-        notCanonical (
-            "a "
-            + ColumnType.tag ty
-            + " value must be canonical ISO-8601 text, "
-            + form
-            + ", naming a moment that exists"
-        )
-
-    /// An epoch number as the instant it names in a column at `unit` (DECISIONS.md D143.5), as its
-    /// epoch second and its fraction scaled to the unit. A `timestamp` (seconds) column keeps Phase 94's
-    /// reading — models emit epoch instants against their own correct `"timestamp"` schema; unit by
-    /// magnitude: ≥ 1e11 ⇒ milliseconds, truncated to the second, else seconds (epoch-seconds stay below
-    /// 1e11 until year 5138). A sub-second column reads the number IN ITS OWN UNIT, with no magnitude
-    /// guess. Refused where the instant falls outside the years the canonical form spells (Phase 299).
-    let private epochInstant
-        (notCanonical: string -> Result<float * int, ColumnError>)
-        (unit: TimeUnit)
-        (i: int64)
-        : Result<float * int, ColumnError> =
-        let second, fraction =
-            match unit with
-            | TimeUnit.Seconds -> (if abs i >= 100_000_000_000L then i / 1000L else i), 0L
-            | _ ->
-                let scale = int64 (TimeUnit.scale unit)
-                let s = (if i < 0L then i - scale + 1L else i) / scale
-                s, i - s * scale
-
-        if TemporalText.isInstantInRange unit (float second) (int fraction) then
-            Ok(float second, int fraction)
-        else
-            notCanonical (
-                "the epoch "
-                + string i
-                + " names an instant outside the years 0000-9999 the canonical timestamp spells"
-            )
-
-    // ---- the typed readers (Phase 417; one `decodeCell` answering a `Cell` until then) ----
-    // Each reads one present value as an element of its column type's storage, or refuses it: a
-    // float column accepts an integer JSON token (lossless widening); a timestamp column accepts an
-    // epoch number (`epochToIso`); every other type requires its exact JSON kind, as a
-    // `TypeMismatch` naming the kind found.
-    //
-    // A decimal column (`0.33.0`) reads a STRING of decimal text and canonicalises it, so `12.50`
-    // decodes to `Decimal "12.5"`; it reads an integer token, which is exact — whichever
-    // constructor the parser chose for it (Phase 299): a token past int32 arrives as a whole-valued
-    // `JFloat`, and within the int53 guard its value IS its digits, so `3000000000` decodes as `12`
-    // always did. It REFUSES a fractional number token, and a whole-valued one past 2^53, as a
-    // `TypeMismatch`: that value has been through a float by the time it arrives here, and a type
-    // whose purpose is exactness cannot accept a value it cannot vouch for. An emitter writes a
-    // decimal as a string.
-    //
-    // A date or timestamp column (Phase 299) reads only its canonical ISO-8601 text
-    // (`TemporalText`), and an epoch number only where the instant it names falls in the years the
-    // canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`. Since Phase 422 it
-    // reads them into integers: a date's day count, an instant's epoch second and its fraction at the
-    // column's unit. An instant whose fraction is finer than the unit is a `MalformedShape` naming the
-    // coarsest unit that holds it — text the column cannot read, as the corpus has pinned since Phase
-    // 299 (`timestamp-fractional-second`). An epoch number is exact in every unit: the parser refuses
-    // an integer token past 2^53 before any column reads it, and one at or past 9e15 is a `TypeMismatch`.
-
-    let private readInt (colName: string) (v: JVal) : Result<int, ColumnError> =
-        let mismatch, _ = valueFaults colName IntType
-
-        match v with
-        | JInt i -> Ok i
-        | _ -> mismatch v
-
-    let private readFloat (colName: string) (v: JVal) : Result<float, ColumnError> =
-        let mismatch, _ = valueFaults colName FloatType
-
-        match v with
-        | JFloat f -> Ok f
-        | JInt i -> Ok(float i)
-        | _ -> mismatch v
-
-    let private readBool (colName: string) (v: JVal) : Result<bool, ColumnError> =
-        let mismatch, _ = valueFaults colName BoolType
-
-        match v with
-        | JBool b -> Ok b
-        | _ -> mismatch v
-
-    let private readStr (colName: string) (v: JVal) : Result<string, ColumnError> =
-        let mismatch, _ = valueFaults colName StringType
-
-        match v with
-        | JStr s -> Ok s
-        | _ -> mismatch v
-
-    let private readDate (colName: string) (v: JVal) : Result<int, ColumnError> =
-        let mismatch, notCanonical = valueFaults colName DateType
-
-        match v with
-        | JStr s ->
-            match TemporalText.tryDays s with
-            | Some d -> Ok d
-            | None -> notCanonicalText notCanonical DateType "YYYY-MM-DD"
-        | _ -> mismatch v
-
-    let private readTimestamp (colName: string) (unit: TimeUnit) (v: JVal) : Result<float * int, ColumnError> =
-        let ty = TimestampType unit
-        let mismatch, notCanonical = valueFaults colName ty
-
-        match v with
-        | JStr s ->
-            match TemporalText.tryInstant unit s with
-            | Some pair -> Ok pair
-            | None when TemporalText.isCanonicalTimestamp s ->
-                notCanonical (
-                    "a "
-                    + ColumnType.tag ty
-                    + " value's fraction is finer than the column's unit holds: "
-                    + ColumnType.tag (TimestampType(TemporalText.unitOf s))
-                    + " or finer is needed"
-                )
-            | None -> notCanonicalText notCanonical ty "YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ"
-        // Epoch-seconds fit Int32 (so arrive as JInt); epoch-milliseconds overflow the
-        // parser's Int32 path and arrive as a whole-valued JFloat.
-        | JInt i -> epochInstant notCanonical unit (int64 i)
-        | JFloat f when f = floor f && abs f < 9e15 -> epochInstant notCanonical unit (int64 f)
-        | _ -> mismatch v
-
-    let private readDecimal (colName: string) (v: JVal) : Result<string, ColumnError> =
-        let mismatch, notCanonical = valueFaults colName DecimalType
-
-        match v with
-        | JInt i -> Ok(string i)
-        | JFloat f when f = floor f && abs f <= int53Max -> Ok(string (int64 f))
-        | JStr s ->
-            match DecimalText.tryCanonical s with
-            | Some canonical -> Ok canonical
-            | None ->
-                notCanonical
-                    "a decimal value must be decimal text — an optional '-', digits, and an optional '.' followed by digits, with no exponent, sign '+', separator or white space"
-        | _ -> mismatch v
-
 
     /// The sentence a unit refusal is reported in, naming the token (or the shape fault) and its
     /// zero-based position in the text, as `Unit.parse` classifies it.
@@ -466,11 +279,12 @@ module ColumnCodec =
 
     /// Decode a single named column against its declared type from the `columns` object, straight
     /// into its typed storage (Phase 417): the `values` and `validity` arrays are walked once in
-    /// lockstep, a present value read by the type's reader into the vector and an absent one left
-    /// as the type's zero with its mask bit clear; a column with no absent row is `AllValid` and keeps
-    /// no mask (Phase 420). The refusals and their order are the `Cell list`
-    /// decoder's: the two lengths first (`LengthMismatch`), then row by row a validity entry that is
-    /// not a bool (`MalformedShape`) before the value beside it.
+    /// lockstep — `TypeOps.fill` over the type's row, the walk `Column.ofCells` runs too (Phase 514)
+    /// — a present value read by the row's reader into the vector and an absent one left as the
+    /// type's zero with its mask bit clear; a column with no absent row is `AllValid` and keeps no
+    /// mask (Phase 420). The refusals and their order are the `Cell list` decoder's: the two lengths
+    /// first (`LengthMismatch`), then row by row a validity entry that is not a bool
+    /// (`MalformedShape`) before the value beside it.
     let private decodeColumn (columnsObj: JVal) (name: string) (ty: ColumnType) : Result<Column, ColumnError> =
         match Decode.tryProp name columnsObj with
         | None -> Error(MissingField("columns." + name))
@@ -480,76 +294,21 @@ module ColumnCodec =
                 if List.length values <> List.length validity then
                     Error(LengthMismatch(name, List.length values, List.length validity))
                 else
-                    let n = List.length values
-                    let mask = Array.zeroCreate<bool> n
+                    let present = List.toArray validity
 
-                    // Fill `out` through `read`, in row order, stopping at the first refusal.
-                    let fill
-                        (out: 'T[])
-                        (read: JVal -> Result<'T, ColumnError>)
-                        : Result<Vector<'T> * Validity, ColumnError> =
-                        let mutable fault = None
-                        let mutable i = 0
-                        let mutable vs = values
-                        let mutable ps = validity
-
-                        while fault.IsNone && not vs.IsEmpty do
-                            match ps.Head with
-                            | JBool present ->
-                                if present then
-                                    match read vs.Head with
-                                    | Ok x ->
-                                        out[i] <- x
-                                        mask[i] <- true
-                                    | Error e -> fault <- Some e
-                            | p ->
-                                fault <-
-                                    Some(MalformedShape(name + ".validity: expected bool, got " + JVal.kindName p))
-
-                            i <- i + 1
-                            vs <- vs.Tail
-                            ps <- ps.Tail
-
-                        match fault with
-                        | Some e -> Error e
-                        | None -> Ok(Vector.adopt out, Validity.ofVector (Vector.adopt mask))
-
-                    match ty with
-                    | IntType ->
-                        fill (Array.zeroCreate n) (readInt name)
-                        |> Result.map (fun (v, m) -> Column.ofInts name v m)
-                    | FloatType ->
-                        fill (Array.zeroCreate n) (readFloat name)
-                        |> Result.map (fun (v, m) -> Column.ofFloats name v m)
-                    | BoolType ->
-                        fill (Array.zeroCreate n) (readBool name)
-                        |> Result.map (fun (v, m) -> Column.ofBools name v m)
-                    | StringType ->
-                        fill (Array.create n "") (readStr name)
-                        |> Result.map (fun (v, m) -> Column.ofStrs name v m)
-                    | DateType ->
-                        fill (Array.zeroCreate n) (readDate name)
-                        |> Result.map (fun (v, m) -> Column.ofDates name v m)
-                    | TimestampType unit ->
-                        fill (Array.create n (0.0, 0)) (readTimestamp name unit)
-                        |> Result.map (fun (pairs, m) ->
-                            let seconds = Array.zeroCreate<float> n
-                            let fraction = Array.zeroCreate<int> n
-
-                            for i in 0 .. n - 1 do
-                                let (second, f) = pairs[i]
-                                seconds[i] <- second
-                                fraction[i] <- f
-
-                            Column.ofTimestamps
-                                name
-                                unit
-                                (Vector.adopt seconds)
-                                (Column.normalFraction unit fraction m)
-                                m)
-                    | DecimalType ->
-                        fill (Array.create n DecimalText.zero) (readDecimal name)
-                        |> Result.map (fun (v, m) -> Column.ofDecimals name v m))
+                    TypeOps.ofType
+                        ty
+                        { new TypeOpsUser<Result<ColumnData, ColumnError>> with
+                            member _.Use ops =
+                                TypeOps.fill ops values (fun i v ->
+                                    match present[i] with
+                                    | JBool true -> ops.ReadJson name v |> Result.map ValueSome
+                                    | JBool false -> Ok ValueNone
+                                    | p ->
+                                        Error(
+                                            MalformedShape(name + ".validity: expected bool, got " + JVal.kindName p)
+                                        )) }
+                    |> Result.map (fun data -> { Name = name; Data = data }))
 
     /// Phase 88 (lenient-ingest) — infer one column's `ColumnType` from its
     /// present cells. PINNED deterministic rules: all-int numerics ⇒ int, any
@@ -696,6 +455,46 @@ module ColumnCodec =
         match Json.parseDetailed s with
         | Error e -> Error(NotJson e)
         | Ok el -> decodeJson el
+
+    // ---- one cell (Phase 514) ----
+    // A value a document carries OUTSIDE a table — a predicate's literal, a model's argument to a
+    // query — is still a value of a column type, and it is written and read exactly as the codec
+    // writes and reads it inside a column, through the same row (`TypeOps`). Until this phase each
+    // such reader built a one-row table document and ran the whole codec over it.
+
+    /// THE ONE-CELL WRITER: the JSON value the codec writes for `cell` in the `values` array of a
+    /// column `column` of type `ty` — the cell widened as `Column.ofCells` widens it (an `Int` in a
+    /// float column is written as a float), and the absent slot for `Null` — or the refusal
+    /// `Column.ofCells` names for a cell the type cannot hold. Like `encode`, it writes what it is
+    /// handed: a non-finite float or a non-canonical decimal is `tryEncode`'s to refuse, through
+    /// `Table.validate`.
+    let writeCell (column: string) (ty: ColumnType) (cell: Cell) : Result<JVal, ColumnError> =
+        TypeOps.ofType
+            ty
+            { new TypeOpsUser<Result<JVal, ColumnError>> with
+                member _.Use ops =
+                    ops.OfCell column cell
+                    |> Result.map (fun v ->
+                        match v with
+                        | ValueSome x -> ops.WriteJson x
+                        | ValueNone -> ops.AbsentSlot) }
+
+    /// THE ONE-CELL READER: one PRESENT value of a column `column` of type `ty`, read as decode reads
+    /// it at a present row and answered as the cell `Column.cell` reads back — so a decimal is read
+    /// from decimal text and canonicalised, a date or timestamp only in its canonical form, and an
+    /// integer token in a float column as a `Float` — or the refusal decode names for it, including
+    /// the one `Table.validate` ends decode with (a non-finite float). A JSON value read here is the
+    /// value the same JSON would decode to in a column.
+    let readCell (column: string) (ty: ColumnType) (value: JVal) : Result<Cell, ColumnError> =
+        TypeOps.ofType
+            ty
+            { new TypeOpsUser<Result<Cell, ColumnError>> with
+                member _.Use ops =
+                    ops.ReadJson column value
+                    |> Result.bind (fun v ->
+                        match ops.Uncarriable with
+                        | Some(carriable, refusal) when not (carriable v) -> Error(refusal column 0 v)
+                        | _ -> Ok(ops.ToCell v)) }
 
     /// Render a `ColumnError` as a stable human string — the adapter for `Corpus.Codec`'s
     /// `string`-error decode slot and for diagnostics.

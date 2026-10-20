@@ -3289,3 +3289,164 @@ let timestampBuilderTests =
                                   (Some(seconds[i], fraction[i]))
                                   (sprintf "%s row %d reads back as its own instant" text i)
                           | other -> failtestf "expected a timestamp, got %A" other ]
+
+// ---- Phase 514: the one-cell reader and writer ----
+
+/// The JSON values the one-cell differential reads at every column type: every JSON kind, the
+/// epoch numbers, canonical and non-canonical temporal and decimal text, and a non-finite float a
+/// caller can hand over as a `JVal` though no parser makes one.
+let private oneCellValues: JVal list =
+    [ JInt 0
+      JInt -3
+      JInt 1700000000
+      JFloat 1.5
+      JFloat 3.0
+      JFloat 3e9
+      JFloat 1.7e12
+      JFloat 9e15
+      JFloat 1e300
+      JFloat nan
+      JFloat infinity
+      JBool true
+      JStr ""
+      JStr "abc"
+      JStr "12.50"
+      JStr "-0"
+      JStr "1e3"
+      JStr "2026-01-01"
+      JStr "2026-13-01"
+      JStr "2026-01-01T00:00:00Z"
+      JStr "2026-01-01T00:00:00.5Z"
+      JStr "2026-01-01T00:00:00.123456Z"
+      JStr "2026-01-01T00:00:00.1234567Z"
+      JStr "2026-01-01T00:00:00.50Z"
+      JArr []
+      JObj [] ]
+
+/// The cells the one-cell differential writes at every column type: every case, widening
+/// candidates, and text a column cannot hold.
+let private oneCellCells: Cell list =
+    [ Int 0
+      Int -5
+      Float 1.5
+      Float -0.0
+      Float nan
+      Bool true
+      Str ""
+      Str "x"
+      Date "2026-01-01"
+      Date "bad"
+      Timestamp "2026-01-01T00:00:00Z"
+      Timestamp "2026-01-01T00:00:00.5Z"
+      Timestamp "2026-01-01T00:00:00.123456789Z"
+      Timestamp "bad"
+      Decimal "1.5"
+      Decimal "1.50"
+      Decimal "abc"
+      Null ]
+
+/// The REFERENCE one-cell reader: the one-row table document every one-cell reader built and ran
+/// the whole codec over before Phase 514.
+let private oneCellDocumentRead (ty: ColumnType) (v: JVal) : Result<Cell, ColumnError> =
+    let doc =
+        JObj
+            [ "schema", JArr [ JObj [ "name", JStr "c"; "type", JStr(ColumnType.tag ty) ] ]
+              "columns", JObj [ "c", JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
+
+    match ColumnCodec.decodeJson doc with
+    | Ok(Embedded { Columns = [ c ] }) -> Ok(Column.cell 0 c)
+    | Ok other -> failtestf "a one-column document decoded to %A" other
+    | Error e -> Error e
+
+/// The REFERENCE one-cell writer: the one-row column the cell builds, encoded, and its one slot.
+let private oneCellDocumentWrite (ty: ColumnType) (c: Cell) : Result<JVal, ColumnError> =
+    Column.ofCells "c" ty [ c ]
+    |> Result.map (fun col ->
+        match
+            ColumnCodec.encodeJson (
+                Embedded
+                    { Schema = [ Field.create "c" ty ]
+                      Columns = [ col ] }
+            )
+        with
+        | JObj [ _; "columns", JObj [ _, JObj [ "values", JArr [ v ]; _ ] ] ] -> v
+        | other -> failtestf "a one-column table encoded to %A" other)
+
+[<Tests>]
+let oneCellTests =
+    testList
+        "ColumnCodec.readCell / writeCell (Phase 514)"
+        [ testCase "the one-cell reader answers what the one-row table document decodes to, at every type"
+          <| fun _ ->
+              let mutable refusals = 0
+
+              for ty in ColumnType.all do
+                  for v in oneCellValues do
+                      let expected = oneCellDocumentRead ty v
+
+                      if Result.isError expected then
+                          refusals <- refusals + 1
+
+                      Expect.equal
+                          (ColumnCodec.readCell "c" ty v)
+                          expected
+                          (sprintf "%s %s" (ColumnType.tag ty) (JVal.kindName v))
+
+              // The pool reaches refusals as well as cells: a probe that only met one side would say so.
+              Expect.isGreaterThan refusals 50 "refusals are compared, not only cells"
+
+              Expect.isLessThan
+                  refusals
+                  (List.length ColumnType.all * List.length oneCellValues - 50)
+                  "cells are compared, not only refusals"
+
+          testCase "the one-cell writer writes the slot the one-row column encodes, at every type"
+          <| fun _ ->
+              for ty in ColumnType.all do
+                  for c in oneCellCells do
+                      // Compared as rendered, so a NaN slot (which `Table.validate` would refuse
+                      // before any encode) compares as the one value its token says it is.
+                      Expect.equal
+                          (ColumnCodec.writeCell "c" ty c |> Result.map Canon.render)
+                          (oneCellDocumentWrite ty c |> Result.map Canon.render)
+                          (sprintf "%s %A" (ColumnType.tag ty) c)
+
+          testCase "a cell the writer writes and the validator accepts reads back as its normal form"
+          <| fun _ ->
+              for ty in ColumnType.all do
+                  for c in oneCellCells |> List.filter ((<>) Null) do
+                      match Column.ofCells "c" ty [ c ] with
+                      | Ok col when
+                          Result.isOk (
+                              Table.validate
+                                  { Schema = [ Field.create "c" ty ]
+                                    Columns = [ col ] }
+                          )
+                          ->
+                          let written =
+                              match ColumnCodec.writeCell "c" ty c with
+                              | Ok v -> v
+                              | Error e -> failtestf "%A written at %s: %A" c (ColumnType.tag ty) e
+
+                          Expect.equal
+                              (ColumnCodec.readCell "c" ty written)
+                              (Ok(Column.cell 0 col))
+                              (sprintf "%s %A" (ColumnType.tag ty) c)
+                      | _ -> ()
+
+          testCase "an absent cell is written as the absent slot of its column's JSON kind"
+          <| fun _ ->
+              Expect.equal
+                  (ColumnType.all
+                   |> List.map (fun ty -> ColumnCodec.writeCell "c" ty Null |> Result.map Canon.render))
+                  [ Ok "0"
+                    Ok "0"
+                    Ok "false"
+                    Ok "\"\""
+                    Ok "\"\""
+                    Ok "\"\""
+                    Ok "\"0\""
+                    Ok "\"\""
+                    Ok "\"\""
+                    Ok "\"\"" ]
+                  "the slots, in ColumnType.all's order" ]

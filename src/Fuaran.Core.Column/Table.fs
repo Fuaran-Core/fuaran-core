@@ -60,103 +60,53 @@ module Table =
     /// naming it (Phase 299), in row order: a non-finite `Float` (`NonFiniteFloat` — the wire has
     /// none), a `Decimal` whose text is not canonical, and (Phase 422) a date whose day count, or an
     /// instant whose second or fraction, the canonical form cannot spell (`MalformedShape`). Read off
-    /// the typed storage (Phase 417): a float column is scanned for a non-finite value, a decimal
-    /// column for a non-canonical text and a temporal column for an integer out of range, at the
-    /// present rows only, read off the validity with no match per row (Phase 421); a timestamp
+    /// the typed storage (Phase 417): the column's type row (`TypeOps`, Phase 514) names the
+    /// element it cannot carry — a non-finite float, a non-canonical decimal text, a temporal integer
+    /// out of range — and the scan asks it at the present rows only, read off the validity with no
+    /// match per row (Phase 421); an int, bool or string column has none and is not scanned; a timestamp
     /// column whose fraction vector is not its seconds' length is named before any row. A cell of
     /// another type is not a case any more — the storage cannot hold one — and a mask that is not
     /// the values' length is named first (`LengthMismatch`), because a column that disagrees about
     /// its own row count has no rows to read. An `AllValid` column (Phase 420) holds no mask and so
     /// cannot disagree.
     let private firstUncarriableCell (c: Column) : ColumnError option =
-        let validity = Column.validity c
-        let rows = ColumnStorage.presentRows (Column.length c) validity
+        let n = Column.length c
 
-        let firstPresent (xs: Vector<'T>) (bad: 'T -> bool) : 'T option =
-            let items = xs.Items
-            let offset = xs.Offset
-            let mutable found = None
-            let mutable i = 0
+        match Column.validity c, c.Data with
+        | Mask m, _ when m.Length <> n -> Some(LengthMismatch(c.Name, n, m.Length))
+        | _, Timestamps(_, xs, Some fs, _) when fs.Length <> xs.Length ->
+            Some(
+                MalformedShape(
+                    c.Name
+                    + ": a timestamp column's fraction vector has "
+                    + string fs.Length
+                    + " rows where its seconds have "
+                    + string xs.Length
+                )
+            )
+        | validity, data ->
+            let rows = ColumnStorage.presentRows n validity
 
-            while found.IsNone && i < rows.Count do
-                if ColumnStorage.isSet rows i && bad items[offset + i] then
-                    found <- Some items[offset + i]
+            TypeOps.ofData
+                data
+                { new ColumnDataUser<ColumnError option> with
+                    member _.Use(ops, get) =
+                        match ops.Uncarriable with
+                        | None -> None
+                        | Some(carriable, refusal) ->
+                            let mutable found = -1
+                            let mutable i = 0
 
-                i <- i + 1
+                            while found < 0 && i < rows.Count do
+                                if ColumnStorage.isSet rows i && not (carriable (get i)) then
+                                    found <- i
 
-            found
+                                i <- i + 1
 
-        let notCanonical (xs: Vector<string>) (isCanonical: string -> bool) (message: string) =
-            firstPresent xs (fun s -> not (isCanonical s))
-            |> Option.map (fun _ -> MalformedShape(c.Name + ": " + message))
-
-        match validity with
-        | Mask m when m.Length <> Column.length c -> Some(LengthMismatch(c.Name, Column.length c, m.Length))
-        | _ ->
-            match c.Data with
-            | Ints _
-            | Bools _
-            | Strs _ -> None
-            | Floats(xs, _) ->
-                firstPresent xs (fun f -> System.Double.IsNaN f || System.Double.IsInfinity f)
-                |> Option.bind JVal.nonFiniteToken
-                |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
-            | Decimals(xs, _) ->
-                notCanonical
-                    xs
-                    DecimalText.isCanonical
-                    "a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
-            | Dates(xs, _) ->
-                firstPresent xs (fun d -> not (TemporalText.isDayInRange d))
-                |> Option.map (fun d ->
-                    MalformedShape(
-                        c.Name
-                        + ": a date column holds days since 1970-01-01 from "
-                        + string TemporalText.MinDay
-                        + " (0000-01-01) to "
-                        + string TemporalText.MaxDay
-                        + " (9999-12-31); "
-                        + string d
-                        + " names no day the canonical form spells"
-                    ))
-            | Timestamps(u, xs, f, _) ->
-                match f with
-                | Some fs when fs.Length <> xs.Length ->
-                    Some(
-                        MalformedShape(
-                            c.Name
-                            + ": a timestamp column's fraction vector has "
-                            + string fs.Length
-                            + " rows where its seconds have "
-                            + string xs.Length
-                        )
-                    )
-                | _ ->
-                    let mutable found = None
-                    let mutable i = 0
-
-                    while found.IsNone && i < rows.Count do
-                        if
-                            ColumnStorage.isSet rows i
-                            && not (TemporalText.isInstantInRange u xs[i] (ColumnStorage.fractionAt f i))
-                        then
-                            found <-
-                                Some(
-                                    MalformedShape(
-                                        c.Name
-                                        + ": a "
-                                        + ColumnType.tag c.Type
-                                        + " column holds whole epoch seconds from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z and a fraction in [0, "
-                                        + string (TimeUnit.scale u)
-                                        + "); row "
-                                        + string i
-                                        + " holds an instant the canonical form cannot spell"
-                                    )
-                                )
-
-                        i <- i + 1
-
-                    found
+                            if found < 0 then
+                                None
+                            else
+                                Some(refusal c.Name found (get found)) }
 
     /// Well-formedness — THE TABLE THE CODEC CAN CARRY (Phase 43; widened to the cells by Phase 299).
     /// The typed builders do no validation, and `encodeJson` silently papers over a malformed table

@@ -113,11 +113,30 @@ module QueryCodec =
     // `CapabilityCodec` does. They answered `ExecutionFailed("decode: …")` before, a refusal of a
     // fetch that never ran.
 
-    /// A refusal from the column codec, carried as a decode refusal at the member it was reading.
-    let private columnRefused (memberName: string) (what: string) : DecodeError =
+    /// A refusal from the column codec, carried as a decode refusal at the member it was reading,
+    /// with the codec's own sentence for what it refused (`ColumnCodec.errorString`; Phase 514 —
+    /// the sentence named only the member until then, and the `ColumnError` was dropped).
+    let private columnRefused (memberName: string) (what: string) (e: ColumnError) : DecodeError =
         DecodeError.under
             (PathSegment.Key memberName)
-            (DecodeError.make DecodeCode.OutOfRange what (memberName + ": not " + what + " the column codec reads"))
+            (DecodeError.make
+                DecodeCode.OutOfRange
+                what
+                (memberName
+                 + ": not "
+                 + what
+                 + " the column codec reads: "
+                 + ColumnCodec.errorString e))
+
+    /// The refusal of a result whose `rows` the column codec read as a `ref` source: a result
+    /// carries its rows, so the query codec refuses what the column codec accepted.
+    let private refRows: DecodeError =
+        DecodeError.under
+            (PathSegment.Key "rows")
+            (DecodeError.make
+                DecodeCode.OutOfRange
+                "an embedded table (a ref is not a result)"
+                "rows: not an embedded table (a ref is not a result) the column codec reads")
 
     /// A refusal from the registry's admission gate, carried as a decode refusal at `memberName`
     /// with the registry's own sentence (Phase 385).
@@ -152,7 +171,7 @@ module QueryCodec =
                                         Decoder.field "source" Decoder.json el
                                         |> Result.bind (fun srcEl ->
                                             match ColumnCodec.decodeJson srcEl with
-                                            | Error _ -> Error(columnRefused "source" "a data source")
+                                            | Error e -> Error(columnRefused "source" "a data source" e)
                                             | Ok src ->
                                                 let q =
                                                     { Id = id
@@ -194,8 +213,8 @@ module QueryCodec =
         |> Result.bind (fun () -> Decoder.field "rows" Decoder.json el)
         |> Result.bind (fun rowsEl ->
             match ColumnCodec.decodeJson rowsEl with
-            | Error _ -> Error(columnRefused "rows" "a table")
-            | Ok(Ref _) -> Error(columnRefused "rows" "an embedded table (a ref is not a result)")
+            | Error e -> Error(columnRefused "rows" "a table" e)
+            | Ok(Ref _) -> Error refRows
             | Ok(Embedded t) ->
                 Decoder.field "pageNum" Decoder.int el
                 |> Result.bind (fun pn ->
@@ -261,8 +280,9 @@ module QueryCodec =
     // ---- a model's arguments (Phase 251) ----
     // `Query.toJsonSchema` tells a model to emit one object keyed by parameter name; this reads that
     // object back into the typed argument list `validateParams` takes. Each value is read by the
-    // ONE cell decoder the column codec owns — as the single cell of a one-row column of the
-    // parameter's type — so an argument decodes exactly as the same value would in a result table:
+    // ONE cell reader the column codec owns (`ColumnCodec.readCell`, Phase 514; a one-row table
+    // document run through the whole codec until then) — so an argument decodes exactly as the same
+    // value would in a result table:
     // a decimal is read from decimal text and canonicalised, a date or timestamp only in its
     // canonical form, and a fractional number token for a decimal is refused.
 
@@ -277,11 +297,6 @@ module QueryCodec =
         | JObj _ -> None
 
     let private argCell (name: string) (ty: ColumnType) (v: JVal) : Result<string * Cell, QueryError> =
-        let oneCell =
-            JObj
-                [ "schema", JArr [ JObj [ "name", JStr name; "type", JStr(colTypeStr ty) ] ]
-                  "columns", JObj [ name, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
-
         let refused () =
             match sentType v with
             | Some got -> Error(ParamTypeMismatch(name, ty, got))
@@ -304,9 +319,9 @@ module QueryCodec =
                     )
                 )
 
-        match ColumnCodec.decodeJson oneCell with
-        | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Ok(name, Column.cell 0 c)
-        | _ -> refused ()
+        match ColumnCodec.readCell name ty v with
+        | Ok c -> Ok(name, c)
+        | Error _ -> refused ()
 
     /// Read a model's argument object — the shape `Query.toJsonSchema` describes — into the typed
     /// argument list, answering with EVERY refusal: an unknown member is `UnknownParam` naming the
