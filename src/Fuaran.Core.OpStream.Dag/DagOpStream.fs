@@ -1166,59 +1166,29 @@ module Dag =
     /// The first such node is the `Error`, by its 1-based line and member; on `Ok` the text is
     /// `toJsonl`'s, byte for byte.
     let tryToJsonl (encode: 'Op -> string) (dag: T<'Op>) : Result<string, JsonlWriteFault> =
-        let rec go (i: int) (acc: string list) =
-            function
-            | [] -> Ok(acc |> List.rev |> String.concat "\n")
-            | (n: DagNode<'Op>) :: rest ->
-                let opJson = encode n.Op
+        // The linear writers' checked writer (Phase 530; until then a loop of this module's own):
+        // every member the line carries, in line order — the strings the writer quotes itself as
+        // well as the op it embeds (Phase 473).
+        dag.Nodes
+        |> Map.toList
+        |> List.map snd
+        |> Jsonl.checkedLines
+            "op"
+            (fun (n: DagNode<'Op>) ->
+                [ "id", OpStream.Jsonl.quote n.Id
+                  "parents", "[" + (n.Parents |> List.map OpStream.Jsonl.quote |> String.concat ",") + "]"
+                  "actor", Actor.encode n.Actor
+                  "op", encode n.Op ])
+            nodeLine
 
-                // Phase 473: every member the line carries, in line order — the strings the writer
-                // quotes itself as well as the op it embeds.
-                let members =
-                    [ "id", OpStream.Jsonl.quote n.Id
-                      "parents", "[" + (n.Parents |> List.map OpStream.Jsonl.quote |> String.concat ",") + "]"
-                      "actor", Actor.encode n.Actor
-                      "op", opJson ]
-
-                let refused =
-                    members
-                    |> List.tryPick (fun (m, text) ->
-                        match OpStream.Jsonl.checkRaw text with
-                        | Error reason -> Some(m, reason)
-                        | Ok() -> None)
-
-                match refused with
-                | Some(m, reason) ->
-                    Error
-                        { Line = i + 1
-                          Member = m
-                          Reason = reason }
-                | None -> go (i + 1) (nodeLine n opJson :: acc) rest
-
-        go 0 [] (dag.Nodes |> Map.toList |> List.map snd)
-
-    /// The witness a load reads through (Phase 416) — the linear reader's, which that package keeps
-    /// internal: it never refuses, carrying each op's stored text beside the real witness's answer, so
-    /// a decode failure stops neither the read nor the verification. A decoded op encodes by the real
-    /// witness, as every check always has; an undecoded one encodes as its stored text, the bytes the
-    /// writer embedded verbatim, so its content id still recomputes over exactly what was hashed.
-    let private carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
-        { Apply = fun _ s -> Ok s
-          Encode =
-            fun (raw, decoded) ->
-                match decoded with
-                | Ok op -> w.Encode op
-                | Error _ -> raw
-          Decode = fun raw -> Ok(raw, w.Decode raw) }
-
-    /// One text's nodes, read through `carry` (Phase 296's reader, Phase 416's witness): the DAG and,
+    /// One text's nodes, read through `Jsonl.carry` (Phase 296's reader, Phase 416's witness): the DAG and,
     /// for each node, the 1-based line first holding it. A repeated id with the same content is one
     /// node; with different content it is refused at its line as a content-id collision.
     let private readCarried
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
         : Result<T<string * Result<'Op, string>> * Map<string, int>, JsonlFault> =
-        let cw = carry w
+        let cw = Jsonl.carry w
         let bind f r = Result.bind f r
 
         let nodeOf (line: JsonlLine) =
@@ -1259,40 +1229,35 @@ module Dag =
             go Map.empty Map.empty lines)
 
     /// A carried DAG decoded — or EVERY node the witness refused, in lane and then line order, each by
-    /// the lane `laneOf` names (`None` for a load of one text) and the line `lineOf` names.
+    /// the lane `laneOf` names (`None` for a load of one text) and the line `lineOf` names: the linear
+    /// load's `Jsonl.settle` over the nodes in id order (Phase 530; until then a copy of it).
     let private settle
         (laneOf: string -> string option)
         (lineOf: Map<string, int>)
         (dag: T<string * Result<'Op, string>>)
         : Result<T<'Op>, StreamLoadFault<'Break>> =
-        // One pass: every decoded node into the map, every refused one into the sites, so the
-        // answer is built from what was decoded and never re-reads a carried `Error` (Phase 496).
-        let decoded, sites =
-            ((Map.empty, []), dag.Nodes)
-            ||> Map.fold (fun (decoded: Map<string, DagNode<'Op>>, sites) id n ->
-                match snd n.Op with
-                | Ok op ->
-                    Map.add
-                        id
+        match
+            dag.Nodes
+            |> Map.toList
+            |> Jsonl.settle
+                (fun (id, n) ->
+                    snd n.Op
+                    |> Result.map (fun op ->
+                        id,
                         { Id = n.Id
                           Parents = n.Parents
                           Actor = n.Actor
-                          Op = op }
-                        decoded,
-                    sites
-                | Error why ->
-                    decoded,
+                          Op = op }))
+                (fun (id, _) why ->
                     { Lane = laneOf id
                       Line = Map.tryFind id lineOf |> Option.defaultValue 0
                       NodeId = id
-                      Reason = why }
-                    :: sites)
-
-        match sites with
-        | [] -> Ok { NodeMap = decoded }
-        | _ ->
-            // back to id order before the (stable) sort, so ties keep the order they always had
-            List.rev sites
+                      Reason = why })
+        with
+        | Ok nodes -> Ok { NodeMap = Map.ofList nodes }
+        | Error sites ->
+            // in id order before the (stable) sort, so ties keep the order they always had
+            sites
             |> List.sortWith (fun a b ->
                 match System.String.CompareOrdinal(Option.defaultValue "" a.Lane, Option.defaultValue "" b.Lane) with
                 | 0 -> compare a.Line b.Line
@@ -1342,7 +1307,7 @@ module Dag =
         match readCarried w text with
         | Error f -> Error(StreamLoadFault.Unreadable(None, f))
         | Ok(carried, lineOf) ->
-            match firstBreak hashFn (carry w) carried with
+            match firstBreak hashFn (Jsonl.carry w) carried with
             | Some b -> Error(StreamLoadFault.Broken b)
             | None -> settle (fun _ -> None) lineOf carried
 
@@ -2446,36 +2411,22 @@ module Dag =
         /// checkpoint does not cover (a second root, a branch from before the checkpoint).
         | Uncovered of nodeId: string
 
-    /// The seal of `state` at `node`, computed by `OpStream.Snapshots`' own verifier: handed the strict
-    /// snapshot at sequence zero whose boundary hash is `node` and whose hash is still empty, it names the
-    /// hash that snapshot should carry. An empty tail has no chain to break, so the snapshot's own hash is
-    /// the only break it can report, and `None` means that hash IS the empty string.
-    let private sealOf
-        (hashFn: HashFn)
-        (stateEncode: 'State -> string)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (node: string)
-        (state: 'State)
-        : string =
-        let unsealed: Snapshot<'State> =
-            { Seq = 0
-              State = state
-              PrevHash = node
-              Hash = ""
-              Mode = SnapshotMode.Strict }
+    /// The checkpoint as the state it seals (Phase 530): strict, at the anchor `{ Seq = 0; PrevHash =
+    /// Node }` — the linear snapshot at sequence zero of the history that begins at the node.
+    let private sealedOf (cp: Checkpoint<'State>) : Sealed<'State> =
+        { Anchor = { Seq = 0; PrevHash = cp.Node }
+          State = cp.State
+          Mode = SnapshotMode.Strict
+          Seal = cp.Hash }
 
-        match OpStream.Snapshots.firstBreak OpStream.canonicalConfig hashFn stateEncode w unsealed [] with
-        | Some(SnapshotBreak.SnapshotHash(expected, _)) -> expected
-        | Some(SnapshotBreak.Tail _)
-        | None -> ""
+    /// The seal of `state` at `node`: `Sealed.seal`, strict, at the checkpoint's anchor (Phase 530;
+    /// until then reached by asking the linear snapshot verifier what hash an unsealed snapshot should
+    /// have carried).
+    let private sealOf (hashFn: HashFn) (stateEncode: 'State -> string) (node: string) (state: 'State) : string =
+        (Sealed.seal SnapshotMode.Strict hashFn stateEncode { Seq = 0; PrevHash = node } state).Seal
 
     /// The checkpoint as the linear snapshot it is sealed as — its sidecar line is that snapshot's line.
-    let private asSnapshot (cp: Checkpoint<'State>) : Snapshot<'State> =
-        { Seq = 0
-          State = cp.State
-          PrevHash = cp.Node
-          Hash = cp.Hash
-          Mode = SnapshotMode.Strict }
+    let private asSnapshot (cp: Checkpoint<'State>) : Snapshot<'State> = Sealed.toSnapshot (sealedOf cp)
 
     /// Seal `state` at `nodeId` WITHOUT replaying anything (Phase 288) — the genesis-import shape, where a
     /// converted history begins at a node whose state was translated from elsewhere rather than folded
@@ -2490,7 +2441,7 @@ module Dag =
         : Checkpoint<'State> =
         { Node = nodeId
           State = state
-          Hash = sealOf hashFn stateEncode w nodeId state }
+          Hash = sealOf hashFn stateEncode nodeId state }
 
     /// Take a checkpoint at `nodeId` (Phase 288): fold the node's ancestor closure from `state0` exactly
     /// as `tryReplayTo` does, and seal the state it reaches. Refused by name: a node the DAG does not hold
@@ -2527,12 +2478,19 @@ module Dag =
         if not (dag.Nodes.ContainsKey cp.Node) then
             Error(CheckpointBreak.UnknownNode cp.Node)
         else
-            let expected = sealOf hashFn stateEncode w cp.Node cp.State
-
-            if expected <> cp.Hash then
-                Error(CheckpointBreak.Seal(expected, cp.Hash))
-            else
-                Ok()
+            // The seal check every sealed state shares (`Sealed.firstBreak`, Phase 530); with no tail
+            // above the checkpoint, the seal is all it checks.
+            match
+                Sealed.firstBreak
+                    hashFn
+                    stateEncode
+                    (ChainShape.records OpStream.canonicalConfig w.Encode)
+                    (sealedOf cp)
+                    []
+            with
+            | Some(SnapshotBreak.SnapshotHash(expected, got)) -> Error(CheckpointBreak.Seal(expected, got))
+            | Some(SnapshotBreak.Tail _)
+            | None -> Ok()
 
     /// The ids in `order` outside `behind` — the history above a checkpoint, in replay order — or the
     /// first of them that does not descend from `node`. `order` is topological, so a node's parents are
@@ -2928,7 +2886,7 @@ module Dag =
         |> List.map (fun (lane, ns) -> lane, { NodeMap = Map.ofList ns })
         |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
 
-    /// The union of a lane store, read through `carry` (Phase 416): every lane text structurally, in
+    /// The union of a lane store, read through `Jsonl.carry` (Phase 416): every lane text structurally, in
     /// ordinal lane order, with each node's lane and the line of that lane's text holding it. The faults
     /// a lane SET has — a lane id given twice, a lane text that does not parse (the first in lane
     /// order), a node two lanes hold with different content — are refused here; an op the witness
@@ -2937,7 +2895,7 @@ module Dag =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (lanes: (string * string) list)
         : Result<Loaded<string * Result<'Op, string>> * Map<string, int>, StreamLoadFault<LaneBreak>> =
-        let cw = carry w
+        let cw = Jsonl.carry w
 
         let sorted =
             lanes |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
@@ -3009,7 +2967,7 @@ module Dag =
         : Result<Loaded<'Op>, StreamLoadFault<LaneBreak>> =
         loadCarried w lanes
         |> Result.bind (fun (loaded, lineOf) ->
-            match firstBreak hashFn (carry w) loaded.Dag with
+            match firstBreak hashFn (Jsonl.carry w) loaded.Dag with
             | Some b ->
                 Error(
                     StreamLoadFault.Broken

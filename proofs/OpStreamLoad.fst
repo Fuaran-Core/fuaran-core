@@ -10,11 +10,13 @@
        `decodeString` as ONE pass (`string_tail`: the decode is total on what the skip accepted, so
        the pass that does both answers the same fault at the same position), `isLiteral`,
        `skipValue` with its structural walk (Phase 466: every depth read by the strict grammar),
-       `checkRaw`, `membersOf` refusing a repeated key, `parseLine`, `topFields`, `rawSpan`, `unquote`, `lineNumber`, `lineText`, `refuse`,
+       `checkRaw`, `membersOf` (the walk's depth-0 frame over the line's own object, Phase 530)
+       refusing a repeated key, `parseLine`, `topFields`, `rawSpan`, `unquote`, `lineNumber`, `lineText`, `refuse`,
        `tryRawField`, `rawField`, `stringField`, `intField`, `stringsField`, `actorField`,
        `scanRecords` with the `\r\n` normalisation and the blank-line skip.
      - the loads over it: `recordLine` / `toJsonl` / `tryToJsonl` (`checkedLines`), `recordOf`,
-       `isSnapshotLine`, `scanJsonlWithSnapshots`, the carrying witness `carry`, `settle`,
+       `isSnapshotLine`, `scanJsonlWithSnapshots`, the carrying witness `carry`, `settle` (the
+       public `Jsonl.settle` over the op record, Phase 530),
        `readCarried`, `fromJsonlWithSnapshots`, `fromJsonl`, `fromJsonlLegacyActor` and
        `fromJsonlVerified` (Phase 416's typed `StreamLoadFault`, `Unreadable` / `Broken` /
        `Undecodable`, the three a load of one text answers).
@@ -50,7 +52,11 @@
        `UnreadableCheckpoint`).
      - Production's `ResizeArray` accumulators, its `Replace("\r\n", "\n").Split('\n')`, the explicit
        stack of open containers its walk keeps (Phase 466) and its `HashSet`s of keys are written as
-       the direct recursions and lists they equal.
+       the direct recursions and lists they equal. Production runs ONE state machine whose depth-0
+       frame records its members' spans (Phase 530) — `membersOf`, `stringsField` and `actorField`
+       read the spans it recorded; the model writes that frame as its own function beside
+       `obj_members` / `arr_items` (`members_loop`, `items_loop`), with the same clauses, because what
+       it answers (the spans) differs in type from a nested frame's `unit`.
      - Which keys are the SAME (Phase 466). Production compares keys after unescaping; the model,
        which carries no code units, compares their spellings, so a key spelled `a` and one spelled
        with the escape of `a` are one key there and two here. The two agree wherever keys are spelled
@@ -460,14 +466,20 @@ let rec key_in (k: list och) (ms: list member) : Tot bool (decreases ms) =
   | [] -> false
   | m :: t -> m.mkey = k || key_in k t
 
-(* F#: the `while go` loop of `membersOf`, at `off` within the line, over the suffix `s` of
-   `whole`. A fault's position is `off + pos_in whole at`. A key read twice is refused at its
-   opening quote once its value is read (Phase 466; until then the first won, Phase 45). *)
-let rec members_loop (off: nat) (whole: list ch) (acc: list member) (s: list ch)
+(* F#: the walk's depth-0 frame over the line's own object (Phase 530; `membersOf` was a loop of its
+   own beside the walk until then), at `off` within the line, over the suffix `s` of `whole`: the
+   clauses of `obj_members`, from just past the `{` (`first`) or a `,`, with each member's span
+   recorded and the line ending inside the frame refused as `Truncated` (at the end of the line)
+   rather than at the opening; a member's value is `skip_value`'s, so a line ending inside it is
+   refused at the value's own opening. A fault's position is `off + pos_in whole at`. A key read
+   twice is refused at its opening quote once its value is read (Phase 466; until then the first
+   won, Phase 45). *)
+let rec members_loop (off: nat) (whole: list ch) (acc: list member) (first: bool) (s: list ch)
   : Tot (sres (list member)) (decreases (llen s)) =
   let w = skip_ws s in
   match w with
   | [] -> SErr Truncated []
+  | CRBrace :: t -> if first then SOk (rev acc) t else SErr ExpectedKey w
   | CQuote :: t ->
     (match string_tail [] w [] t with
      | SErr why at -> SErr why at
@@ -488,7 +500,7 @@ let rec members_loop (off: nat) (whole: list ch) (acc: list member) (s: list ch)
                 let w3 = skip_ws r2 in
                 (match w3 with
                  | [] -> SErr Truncated []
-                 | CComma :: t3 -> members_loop off whole (m :: acc) t3
+                 | CComma :: t3 -> members_loop off whole (m :: acc) false t3
                  | CRBrace :: t3 -> SOk (rev (m :: acc)) t3
                  | _ -> SErr ExpectedCommaOrBrace w3)))
         | _ -> SErr ExpectedColon w1))
@@ -501,19 +513,14 @@ let members_end (off: nat) (whole: list ch) (ms: list member) (r: list ch)
   | [] -> Ok ms
   | w -> Error (off + pos_in whole w, TrailingContent)
 
-(* F#: `membersOf offset s`. *)
+(* F#: `membersOf offset s` — the walk run from the line's `{` in its line mode (Phase 530). *)
 let members_of (off: nat) (s: list ch) : Tot (res (list member) (nat & reason)) =
   let w = skip_ws s in
   match w with
   | CLBrace :: t ->
-    let w1 = skip_ws t in
-    (match w1 with
-     | [] -> Error (off + pos_in s [], Truncated)
-     | CRBrace :: t1 -> members_end off s [] t1
-     | _ ->
-       (match members_loop off s [] w1 with
-        | SErr why at -> Error (off + pos_in s at, why)
-        | SOk ms r -> members_end off s ms r))
+    (match members_loop off s [] true t with
+     | SErr why at -> Error (off + pos_in s at, why)
+     | SOk ms r -> members_end off s ms r)
   | _ -> Error (off + pos_in s w, NotAnObject)
 
 (* F#: `parseLine number text`. *)
@@ -621,41 +628,39 @@ let int_field (key: list ch) (l: jline) : Tot (res int fault) =
      | Some i -> Ok i
      | None -> Error (fault_at l.lnum p (ExpectedInteger key)))
 
-(* F#: `stringsField`'s `skipWs ()`, bounded at `n - 1` — the final `]` is never skipped. *)
-let rec skip_ws1 (s: list ch) : Tot (r: list ch { llen r <= llen s }) (decreases s) =
-  match s with
-  | c :: t -> (match t with [] -> s | _ -> if is_ws c then skip_ws1 t else s)
-  | [] -> s
+(* F#: the walk's depth-0 frame over an array (Phase 530; `stringsField` scanned the array with a
+   loop of its own until then), from just past its `[` (`first`) or a `,`: the clauses of
+   `arr_items` with each item's span recorded. `start` is the array's opening, where a line ending
+   inside it is refused; `i` is the next item's index. *)
+let rec items_loop (start: list ch) (i: nat) (first: bool) (acc: list (list ch)) (s: list ch)
+  : Tot (sres (list (list ch))) (decreases (llen s)) =
+  let w = skip_ws s in
+  match w with
+  | [] -> SErr UnterminatedContainer start
+  | CRBrack :: t -> if first then SOk (rev acc) t else SErr MissingValue w
+  | _ ->
+    (match skip_val [SIdx i] start w with
+     | SErr why at -> SErr why at
+     | SOk _ r ->
+       let item = take_n (sub (len w) (len r)) w in
+       let w3 = skip_ws r in
+       (match w3 with
+        | [] -> SErr UnterminatedContainer start
+        | CComma :: t3 -> items_loop start (i + 1) false (item :: acc) t3
+        | CRBrack :: t3 -> SOk (rev (item :: acc)) t3
+        | _ -> SErr ExpectedCommaOrBracket w3))
 
-type sitems =
-  | Items : xs:list (list och) -> sitems
-  | Bad : sitems
-  | ScanFault : at:nat -> why:reason -> sitems
+(* Every recorded item a string, decoded — or `None` at the first that is not one. *)
+let rec item_strings (items: list (list ch)) : Tot (option (list (list och))) (decreases items) =
+  match items with
+  | [] -> Some []
+  | (CQuote :: t) :: rest ->
+    (match string_tail [] (CQuote :: t) [] t, item_strings rest with
+     | SOk x [], Some xs -> Some (x :: xs)
+     | _ -> None)
+  | _ -> None
 
-let rec ends_with_rbrack (s: list ch) : Tot bool (decreases s) =
-  match s with
-  | [] -> false
-  | [c] -> c = CRBrack
-  | _ :: t -> ends_with_rbrack t
-
-(* F#: the `while ok && i < n - 1` loop of `stringsField`, from just past the `[` at `p`, over
-   the suffix `s` of the span `v` (whose last character is `]`). *)
-let rec items_loop (p: nat) (v: list ch) (expect_item: bool) (acc: list (list och)) (s: list ch)
-  : Tot sitems (decreases (llen s)) =
-  match s with
-  | _ :: _ :: _ ->
-    let w = skip_ws1 s in
-    (match w with
-     | CQuote :: t ->
-       if expect_item then
-         (match string_tail [] w [] t with
-          | SErr why at -> ScanFault (p + pos_in v at) why
-          | SOk item r -> items_loop p v false (item :: acc) (skip_ws1 r))
-       else Bad
-     | CComma :: t -> if expect_item then Bad else items_loop p v true acc (skip_ws1 t)
-     | _ -> Bad)
-  | _ -> if expect_item then Bad else Items (rev acc)
-
+(* F#: `stringsField` — the array's items read from the spans the walk recorded. *)
 let strings_field (key: list ch) (l: jline) : Tot (res (list (list och)) fault) =
   match member_of key l.lfields with
   | None -> Error (fault_at l.lnum 0 (MissingField key))
@@ -663,15 +668,13 @@ let strings_field (key: list ch) (l: jline) : Tot (res (list (list och)) fault) 
     let bad: res (list (list och)) fault = Error (fault_at l.lnum p (ExpectedStringArray key)) in
     (match v with
      | CLBrack :: t ->
-       if ends_with_rbrack t then
-         (match skip_ws1 t with
-          | [CRBrack] -> Ok []
-          | w ->
-            (match items_loop p v true [] w with
-             | Items xs -> Ok xs
-             | Bad -> bad
-             | ScanFault at why -> Error (fault_at l.lnum at why)))
-       else bad
+       (match items_loop v 0 true [] t with
+        | SErr why at -> Error (fault_at l.lnum (p + pos_in v at) why)
+        | SOk items [] ->
+          (match item_strings items with
+           | Some xs -> Ok xs
+           | None -> bad)
+        | SOk _ _ -> bad)
      | _ -> bad)
 
 (* ---- the actor (F#: `Actor`, `Actor.encode`, `Actor.validate`, `Jsonl.actorField`) ---- *)
@@ -1757,11 +1760,11 @@ let key_in_cons (k: list och) (m: member) (t: list member)
   : Lemma (requires m.mkey <> k /\ not (key_in k t)) (ensures not (key_in k (m :: t))) = ()
 
 [@@ noextract_to "FSharp"]
-let members_step (off: nat) (whole: list ch) (acc: list member) (k v: list ch) (c: ch) (more: list ch)
+let members_step (off: nat) (whole: list ch) (acc: list member) (first: bool) (k v: list ch) (c: ch) (more: list ch)
   : Lemma (requires plain_key k /\ member_value_ok v /\ not (key_in (olit k) acc) /\ (c == CComma \/ c == CRBrace))
           (ensures (let m = member_read off whole k v c more in
-                    members_loop off whole acc (app (member_text k v) (c :: more)) ==
-                    (if c = CComma then members_loop off whole (m :: acc) more else SOk (rev (m :: acc)) more))) =
+                    members_loop off whole acc first (app (member_text k v) (c :: more)) ==
+                    (if c = CComma then members_loop off whole (m :: acc) false more else SOk (rev (m :: acc)) more))) =
   member_text_app k v (c :: more);
   string_tail_plain [] (app (member_text k v) (c :: more)) [] k (CColon :: app v (c :: more));
   skip_value_ext [] [SKey (olit k)] v c more;
@@ -1998,12 +2001,12 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     skip_value_quoted [] (olit lit_human) [];
     skip_value_quoted [] id [];
     key_in_nil (olit k_kind);
-    members_step p v [] k_kind (quote_str (olit lit_human)) CComma (app t2 [CRBrace]);
+    members_step p v [] true k_kind (quote_str (olit lit_human)) CComma (app t2 [CRBrace]);
     let m1 = member_read p v k_kind (quote_str (olit lit_human)) CComma (app t2 [CRBrace]) in
     key_in_nil (olit k_id); key_in_cons (olit k_id) m1 [];
-    members_step p v [m1] k_id (quote_str id) CRBrace [];
+    members_step p v [m1] false k_id (quote_str id) CRBrace [];
     let m2 = member_read p v k_id (quote_str id) CRBrace [] in
-    assert (members_loop p v [] (app t1 (CComma :: app t2 [CRBrace])) == SOk [m1; m2] []);
+    assert (members_loop p v [] true (app t1 (CComma :: app t2 [CRBrace])) == SOk [m1; m2] []);
     assert (members_of p v == Ok [m1; m2]);
     unquote_quote (olit lit_human);
     unquote_quote id
@@ -2025,19 +2028,19 @@ let actor_field_reads (a: actor) (l: jline) (p: nat)
     let r3 = app t3 (CComma :: app t4 [CRBrace]) in
     let r4 = app t4 [CRBrace] in
     key_in_nil (olit k_kind);
-    members_step p v [] k_kind (quote_str (olit lit_agent)) CComma r2;
+    members_step p v [] true k_kind (quote_str (olit lit_agent)) CComma r2;
     let m1 = member_read p v k_kind (quote_str (olit lit_agent)) CComma r2 in
     key_in_nil (olit k_model); key_in_cons (olit k_model) m1 [];
-    members_step p v [m1] k_model (quote_str model) CComma r3;
+    members_step p v [m1] false k_model (quote_str model) CComma r3;
     let m2 = member_read p v k_model (quote_str model) CComma r3 in
     key_in_nil (olit k_version); key_in_cons (olit k_version) m1 []; key_in_cons (olit k_version) m2 [m1];
-    members_step p v [m2; m1] k_version (quote_str version) CComma r4;
+    members_step p v [m2; m1] false k_version (quote_str version) CComma r4;
     let m3 = member_read p v k_version (quote_str version) CComma r4 in
     key_in_nil (olit k_id); key_in_cons (olit k_id) m1 []; key_in_cons (olit k_id) m2 [m1];
     key_in_cons (olit k_id) m3 [m2; m1];
-    members_step p v [m3; m2; m1] k_id (quote_str id) CRBrace [];
+    members_step p v [m3; m2; m1] false k_id (quote_str id) CRBrace [];
     let m4 = member_read p v k_id (quote_str id) CRBrace [] in
-    assert (members_loop p v [] (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4] []);
+    assert (members_loop p v [] true (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4] []);
     assert (members_of p v == Ok [m1; m2; m3; m4]);
     let ms = [m1; m2; m3; m4] in
     let inner = { lnum = l.lnum; ltext = v; lfields = ms } in
@@ -2085,23 +2088,23 @@ let line_members (seq: int) (a: actor) (raw: list ch) (prev hash: list och)
   let r4 = app t4 (CComma :: app t5 [CRBrace]) in
   let r5 = app t5 [CRBrace] in
   key_in_nil (olit k_seq);
-  members_step 0 whole [] k_seq (show_int seq) CComma r2;
+  members_step 0 whole [] true k_seq (show_int seq) CComma r2;
   let m1 = member_read 0 whole k_seq (show_int seq) CComma r2 in
   key_in_nil (olit k_actor); key_in_cons (olit k_actor) m1 [];
-  members_step 0 whole [m1] k_actor (encode_actor a) CComma r3;
+  members_step 0 whole [m1] false k_actor (encode_actor a) CComma r3;
   let m2 = member_read 0 whole k_actor (encode_actor a) CComma r3 in
   key_in_nil (olit k_op); key_in_cons (olit k_op) m1 []; key_in_cons (olit k_op) m2 [m1];
-  members_step 0 whole [m2; m1] k_op raw CComma r4;
+  members_step 0 whole [m2; m1] false k_op raw CComma r4;
   let m3 = member_read 0 whole k_op raw CComma r4 in
   key_in_nil (olit k_prev_hash); key_in_cons (olit k_prev_hash) m1 [];
   key_in_cons (olit k_prev_hash) m2 [m1]; key_in_cons (olit k_prev_hash) m3 [m2; m1];
-  members_step 0 whole [m3; m2; m1] k_prev_hash (quote_str prev) CComma r5;
+  members_step 0 whole [m3; m2; m1] false k_prev_hash (quote_str prev) CComma r5;
   let m4 = member_read 0 whole k_prev_hash (quote_str prev) CComma r5 in
   key_in_nil (olit k_hash); key_in_cons (olit k_hash) m1 []; key_in_cons (olit k_hash) m2 [m1];
   key_in_cons (olit k_hash) m3 [m2; m1]; key_in_cons (olit k_hash) m4 [m3; m2; m1];
-  members_step 0 whole [m4; m3; m2; m1] k_hash (quote_str hash) CRBrace [];
+  members_step 0 whole [m4; m3; m2; m1] false k_hash (quote_str hash) CRBrace [];
   let m5 = member_read 0 whole k_hash (quote_str hash) CRBrace [] in
-  assert (members_loop 0 whole [] (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4; m5] []);
+  assert (members_loop 0 whole [] true (app t1 (CComma :: r2)) == SOk [m1; m2; m3; m4; m5] []);
   assert (members_of 0 whole == Ok [m1; m2; m3; m4; m5])
 #pop-options
 
