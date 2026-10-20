@@ -969,13 +969,16 @@ let declarationRefusals =
         "Phase 303 — an object-capable transparent case and an envelope-named field are refused at ofJson"
         [ testCase "a transparent case over json is refused when the artifact is loaded" (fun _ ->
               let lit: IdlUnion =
-                  { Name = "Lit"
+                  { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Lit"
                     Params = []
                     Cases =
-                      [ { Tag = "Lit"
+                      [ { Hosted = None
+                          Tag = "Lit"
                           Fields = [ reqField "value" TJson ]
                           Annotations = Annotations.Empty }
-                        { Tag = "Ref"
+                        { Hosted = None
+                          Tag = "Ref"
                           Fields = [ reqField "name" TStr ]
                           Annotations = Annotations.Empty } ]
                     Annotations = Annotations.Empty }
@@ -1441,3 +1444,601 @@ let oneLowering =
                   Expect.isTrue
                       (control |> List.exists (fun f -> f.Contains "sentinel"))
                       "control: the sweep finds the sentinel spellings in WireForm.fs") ]
+
+// ---------------------------------------------------------------------------
+// Phase 550 — what a derived seam codec needs, shown on one test vocabulary across the three
+// hosts: the tag-naming rule, the codec-only module over host-declared types, the typed hosted
+// decoder (at a slot and at a CASE, the query predicate's three-member literal over a two-field
+// host case), the generic payload, and the strict-members reading.
+// ---------------------------------------------------------------------------
+
+module private Seam550 =
+    let private ann = Annotations.Empty
+
+    let private fld name t opt : IdlField =
+        { Name = name
+          Type = t
+          Opt = opt
+          Aliases = []
+          Presence = None
+          Annotations = ann }
+
+    let private req name t = fld name t Required
+
+    let private case tag fields : IdlUnionCase =
+        { Tag = tag
+          Fields = fields
+          Annotations = ann
+          Hosted = None }
+
+    let private union name ps cases : IdlUnion =
+        { Name = name
+          Params = ps
+          Cases = cases
+          Annotations = ann
+          TagRule = UnionTagRule.LowerFirst }
+
+    let typed (fs: string) (enc: string) (dec: string) : HostedCodec =
+        { FSharp = fs
+          Encode = enc
+          Decode = dec
+          Wire = None
+          Format = None
+          Refusal = HostedRefusal.Typed }
+
+    let placement =
+        union
+            "Placement"
+            []
+            [ case "BuildTime" []
+              case "Server" []
+              case "ClientIsland" [ req "island" (TEnum "IslandKind") ] ]
+
+    let deferred =
+        union
+            "Deferred"
+            [ "T" ]
+            [ case "Pending" []
+              case "Ready" [ req "value" (TVar "T") ]
+              case "Failed" [ req "message" TStr ] ]
+
+    let fault =
+        union
+            "Fault"
+            []
+            [ case
+                  "EmptySpace"
+                  [ req "addr" TStr
+                    req "space" (THosted(typed "Host.Space" "Host.encSpace" "Host.decSpace")) ]
+              case "NonFiniteBound" [ req "addr" TStr ] ]
+
+    /// Query's `ColumnPredicate` shape: `equalTo` writes `column`, `type` and `value`, three members
+    /// over a host case of two fields, the value read at the type its sibling states.
+    let predicate =
+        union
+            "Predicate"
+            []
+            [ { case "EqualTo" [ req "column" TStr; req "type" (TEnum "ColType"); req "value" TJson ] with
+                  Hosted = Some(typed "string * Host.Cell" "Host.encCompared" "Host.decEqualTo") }
+              case "IsNull" [ req "column" TStr ] ]
+
+    let window: IdlRecord =
+        { Name = "Window"
+          Fields = [ req "start" TInt; fld "label" TStr Optional ]
+          Annotations = ann }
+
+    let idl: Idl =
+        { Kinds =
+            [ { Tag = "Holder"
+                Category = ""
+                Fields =
+                  [ req "placement" (TUnion("Placement", []))
+                    req "deferred" (TUnion("Deferred", [ TInt ]))
+                    req "window" (TRecord "Window") ]
+                Annotations = ann }
+              { Tag = "Seams"
+                Category = ""
+                Fields = [ req "fault" (TUnion("Fault", [])); req "predicate" (TUnion("Predicate", [])) ]
+                Annotations = ann } ]
+          Unions = [ placement; deferred; fault; predicate ]
+          Enums =
+            [ Declare.enumWith "IslandKind" [ "Pyodide", "pyodide"; "Fable", "fable"; "Js", "js" ]
+              Declare.enumWith "ColType" [ "Int", "int"; "Str", "string" ] ]
+          Records = [ window ]
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared }
+
+    /// The host declarations the codec-only module is generated against: one with qualified access,
+    /// one without, a generic, a record, and the two host codecs.
+    let hostSource =
+        """module Host =
+    type IslandKind =
+        | Pyodide
+        | Fable
+        | Js
+
+    type ColType =
+        | Int
+        | Str
+
+    [<RequireQualifiedAccess>]
+    type Placement =
+        | BuildTime
+        | Server
+        | ClientIsland of island: IslandKind
+
+    type Deferred<'T> =
+        | Pending
+        | Ready of value: 'T
+        | Failed of message: string
+
+    type Window = { Start: int; Label: string option }
+    type Space = { Lo: int }
+
+    [<RequireQualifiedAccess>]
+    type Fault =
+        | EmptySpace of addr: string * space: Space
+        | NonFiniteBound of addr: string
+
+    type Cell =
+        | I of int
+        | S of string
+
+    [<RequireQualifiedAccess>]
+    type Predicate =
+        | EqualTo of column: string * literal: Cell
+        | IsNull of column: string
+
+    let encSpace (s: Space) : JVal = JObj [ "lo", JInt s.Lo ]
+
+    let decSpace (j: JVal) : Result<Space, DecodeError> =
+        Decoder.field "lo" Decoder.int j |> Result.map (fun lo -> { Lo = lo })
+
+    let encCompared (column: string, cell: Cell) : (string * JVal) list =
+        [ "column", JStr column
+          "type", JStr(match cell with I _ -> "int" | S _ -> "string")
+          "value", (match cell with I i -> JInt i | S s -> JStr s) ]
+
+    let decEqualTo (j: JVal) : Result<string * Cell, DecodeError> =
+        Decoder.field "column" Decoder.str j
+        |> Result.bind (fun column ->
+            Decoder.field "type" Decoder.str j
+            |> Result.bind (fun ty ->
+                Decoder.field
+                    "value"
+                    (fun v ->
+                        match ty, v with
+                        | "int", JInt i -> Ok(I i)
+                        | "string", JStr s -> Ok(S s)
+                        | _ -> Error(DecodeError.make DecodeCode.OutOfRange ("a " + ty + " value") "a literal of another type"))
+                    j
+                |> Result.map (fun cell -> column, cell)))
+"""
+
+    let request: CodecOnly =
+        { Roots = [ "Placement"; "Deferred"; "Window"; "Fault"; "Predicate" ]
+          HostTypes =
+            Map.ofList
+                [ "IslandKind", "Host.IslandKind"
+                  "ColType", "Host.ColType"
+                  "Placement", "Host.Placement"
+                  "Deferred", "Host.Deferred"
+                  "Window", "Host.Window"
+                  "Fault", "Host.Fault"
+                  "Predicate", "Host.Predicate" ] }
+
+    let rootType (root: string) : IdlType =
+        match root with
+        | "Deferred" -> TUnion("Deferred", [ TInt ])
+        | "Window" -> TRecord "Window"
+        | r -> TUnion(r, [])
+
+    /// The generated module's reader and writer of `root`, as script source.
+    let private fsReader (root: string) (strict: bool) =
+        let suffix = if strict then "Strict" else ""
+
+        match root with
+        | "Deferred" -> sprintf "decodeDeferred%s (Decoder.int)" suffix
+        | r -> sprintf "decode%s%s" r suffix
+
+    let private fsWriter (root: string) =
+        match root with
+        | "Deferred" -> "encodeDeferred JInt"
+        | r -> "encode" + r
+
+    /// Run the codec-only module under `dotnet fsi` over `(root, document)` rows: per row, the bytes
+    /// the module re-encodes the lenient read to (or its refusal, rendered), then the strict read's
+    /// verdict. `None` without `dotnet`.
+    let fsharpLeg (rows: (string * string) list) : (string * string) list option =
+        let moduleText =
+            match Gen.fsharpCodecModule GenSupport.Empty request "Seam550Codec" idl with
+            | Ok m -> m
+            | Error e -> failtestf "the codec-only module was refused: %s" (CodegenError.describe e)
+
+        let probe =
+            rows
+            |> List.map (fun (root, doc) ->
+                sprintf
+                    "probe (fun j -> %s j |> Result.map (%s)) (%s) %s"
+                    (fsReader root false)
+                    (fsWriter root)
+                    (fsReader root true)
+                    (Canonical.write Rendering.CrossHost (JStr doc)))
+            |> String.concat "\n"
+
+        let dll (name: string) =
+            "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
+
+        let script =
+            dll "Fuaran.Core.Text.dll"
+            + dll "Fuaran.Core.Wire.dll"
+            + "open Fuaran.Core\n"
+            + hostSource
+            + "\n"
+            + moduleText.Replace("module Seam550Codec\n", "")
+            + "\n\nlet probe (lenient: JVal -> Result<JVal, DecodeError>) (strict: JVal -> Result<'a, DecodeError>) (doc: string) =\n"
+            + "    let j = match Json.parse doc with Ok j -> j | Error m -> failwith m\n"
+            + "    let show r = match r with Ok _ -> \"ok\" | Error e -> DecodeError.render e\n"
+            + "    let first = match lenient j with Ok v -> Canonical.write Rendering.CrossHost v | Error e -> DecodeError.render e\n"
+            + "    printfn \"%s\\t%s\" first (show (strict j))\n\n"
+            + probe
+            + "\n"
+
+        let path =
+            Path.Combine(Path.GetTempPath(), sprintf "fuaran-550-%s.fsx" (Guid.NewGuid().ToString "N"))
+
+        File.WriteAllText(path, script)
+
+        try
+            match ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\"")) with
+            | Error _ -> None
+            | Ok p when p.Exit <> 0 -> failtestf "the codec-only module did not run: %s\n%s" p.Stderr p.Stdout
+            | Ok p ->
+                p.Stdout.Replace("\r\n", "\n").Split('\n')
+                |> Array.filter (fun l -> l <> "")
+                |> Array.map (fun l ->
+                    match l.Split('\t') with
+                    | [| a; b |] -> a, b
+                    | _ -> failtestf "unexpected probe line: %s" l)
+                |> List.ofArray
+                |> Some
+        finally
+            try
+                File.Delete path
+            with _ ->
+                ()
+
+    /// The interpreter's readings of one row: the lenient read (as the bytes `written` — the document
+    /// with any member the reading drops left out — or its refusal) and the strict verdict, in the F#
+    /// leg's spelling.
+    let interpreterLeg (root: string, doc: string) (written: string) : string * string =
+        let t = rootType root
+
+        let j =
+            match Json.parse doc with
+            | Ok j -> j
+            | Error m -> failtestf "%s" m
+
+        let first =
+            match Decode.valueDetailed idl t j with
+            | Error e -> DecodeError.render e
+            | Ok _ -> Canonical.write Rendering.CrossHost (Result.defaultWith failwith (Json.parse written))
+
+        let strict =
+            match Decode.valueStrictDetailed idl t j with
+            | Ok _ -> "ok"
+            | Error e -> DecodeError.render e
+
+        first, strict
+
+    /// Documents every host must read and write back byte-for-byte: each case of each root, with the
+    /// predicate literal in query's pinned shape.
+    let accepted: (string * string) list =
+        [ "Placement", "{\"$type\":\"buildTime\"}"
+          "Placement", "{\"$type\":\"server\"}"
+          "Placement", "{\"$type\":\"clientIsland\",\"island\":\"pyodide\"}"
+          "Deferred", "{\"$type\":\"pending\"}"
+          "Deferred", "{\"$type\":\"ready\",\"value\":7}"
+          "Deferred", "{\"$type\":\"failed\",\"message\":\"boom\"}"
+          "Window", "{\"label\":\"w\",\"start\":3}"
+          "Window", "{\"start\":-1}"
+          "Fault", "{\"$type\":\"emptySpace\",\"addr\":\"a\",\"space\":{\"lo\":2}}"
+          "Fault", "{\"$type\":\"nonFiniteBound\",\"addr\":\"b\"}"
+          "Predicate", "{\"$type\":\"equalTo\",\"column\":\"c\",\"type\":\"int\",\"value\":1}"
+          "Predicate", "{\"$type\":\"equalTo\",\"column\":\"c\",\"type\":\"string\",\"value\":\"x\"}"
+          "Predicate", "{\"$type\":\"isNull\",\"column\":\"c\"}" ]
+
+    /// One undeclared member per object shape, nested ones included: both readings agree that the
+    /// lenient one reads past it and the strict one refuses it at that member.
+    let undeclared: (string * string * string) list =
+        [ "Placement",
+          "{\"$type\":\"clientIsland\",\"island\":\"js\",\"actor\":\"m\"}",
+          "{\"$type\":\"clientIsland\",\"island\":\"js\"}"
+          "Deferred", "{\"$type\":\"failed\",\"message\":\"m\",\"code\":1}", "{\"$type\":\"failed\",\"message\":\"m\"}"
+          "Window", "{\"start\":1,\"extra\":true}", "{\"start\":1}"
+          "Fault",
+          "{\"$type\":\"nonFiniteBound\",\"addr\":\"b\",\"space\":{}}",
+          "{\"$type\":\"nonFiniteBound\",\"addr\":\"b\"}"
+          "Predicate",
+          "{\"$type\":\"isNull\",\"column\":\"c\",\"text\":\"x\"}",
+          "{\"$type\":\"isNull\",\"column\":\"c\"}" ]
+
+[<Tests>]
+let seamCodecs550 =
+    testList
+        "Phase 550 - a derived seam codec, across the three hosts"
+        [ testCase "the test vocabulary is well-formed and its artifact keeps every new declaration" (fun _ ->
+              Expect.isEmpty (Declare.errors Seam550.idl) "the vocabulary is admitted"
+
+              match Artifact.parse (Artifact.render Seam550.idl) with
+              | Error m -> failtestf "the artifact did not read back: %s" m
+              | Ok back ->
+                  Expect.equal
+                      back
+                      (Artifact.canonicalise Seam550.idl)
+                      "the tag rule, the typed refusals and the case codec round-trip")
+
+          testCase "the interpreter and the TypeScript host agree on every drawn node, under the tag rule" (fun _ ->
+              let tags = [ "Holder" ]
+
+              let vectors =
+                  match Sample.trySampleNodes Seam550.idl tags 550 120 with
+                  | Ok vs -> vs
+                  | Error f -> failtestf "the sampler refused: %A" f
+
+              let rows =
+                  vectors
+                  |> List.map (fun v ->
+                      match Encode.encode Seam550.idl v with
+                      | Error m -> failtestf "the interpreter refused %A: %s" v m
+                      | Ok bytes ->
+                          match Decode.decode Seam550.idl bytes with
+                          | Error m -> failtestf "the interpreter refused its own %s: %s" bytes m
+                          | Ok d ->
+                              Expect.equal (Encode.encode Seam550.idl d) (Ok bytes) "the interpreter round-trips"
+
+                              Expect.equal
+                                  (Decode.decodeStrictDetailed Seam550.idl bytes)
+                                  (Decode.decodeDetailed Seam550.idl bytes)
+                                  "a declared document reads alike under both readings"
+
+                              v, d, bytes)
+
+              // Every derived tag is on the wire, and no case name is.
+              let all = rows |> List.map (fun (_, _, b) -> b) |> String.concat "\n"
+
+              for tag in [ "buildTime"; "server"; "clientIsland"; "pending"; "ready"; "failed" ] do
+                  Expect.stringContains all ("\"" + tag + "\"") (sprintf "the draws reach the wire tag %s" tag)
+
+              Expect.isFalse (all.Contains "\"ClientIsland\"") "a case name never reaches the wire"
+
+              match tsLeg Seam550.idl rows with
+              | None -> ()
+              | Some results ->
+                  rows
+                  |> List.iteri (fun i (_, _, bytes) ->
+                      match results.TryFind i with
+                      | None -> failtestf "#%d: the TypeScript host answered nothing" i
+                      | Some r ->
+                          Expect.equal r.Authored bytes (sprintf "#%d TypeScript writes the interpreter's bytes" i)
+
+                          match r.Decoded with
+                          | Error m -> failtestf "#%d TypeScript refused %s: %s" i bytes m
+                          | Ok(again, eq) ->
+                              Expect.equal again bytes (sprintf "#%d TypeScript re-encodes the bytes" i)
+                              Expect.isTrue eq (sprintf "#%d TypeScript decodes the interpreter's value%s" i r.Shown)))
+
+          testCase
+              "the codec-only module reads and writes every case as the interpreter does, over host types"
+              (fun _ ->
+                  let rows =
+                      (Seam550.accepted |> List.map (fun (r, d) -> r, d, d)) @ Seam550.undeclared
+
+                  match Seam550.fsharpLeg (rows |> List.map (fun (r, d, _) -> r, d)) with
+                  | None -> ()
+                  | Some answers ->
+                      List.zip rows answers
+                      |> List.iter (fun ((root, doc, written), (fsFirst, fsStrict)) ->
+                          let interpFirst, interpStrict = Seam550.interpreterLeg (root, doc) written
+                          Expect.equal fsFirst interpFirst (sprintf "%s %s: the F# host's lenient read" root doc)
+                          Expect.equal fsStrict interpStrict (sprintf "%s %s: the F# host's strict read" root doc))
+
+                      for (root, doc), (first, strict) in
+                          List.zip Seam550.accepted (List.truncate Seam550.accepted.Length answers) do
+                          Expect.equal
+                              first
+                              (Canonical.write Rendering.CrossHost (Result.defaultWith failwith (Json.parse doc)))
+                              (sprintf "%s: byte-identical" doc)
+
+                          Expect.equal
+                              strict
+                              "ok"
+                              (sprintf "%s %s: the strict reading accepts a declared document" root doc)
+
+                      for (_, doc, _), (first, strict) in
+                          List.zip Seam550.undeclared (List.skip Seam550.accepted.Length answers) do
+                          Expect.isFalse
+                              (first.StartsWith "UndeclaredMember")
+                              (sprintf "%s: the lenient reading reads past it" doc)
+
+                          Expect.stringStarts
+                              strict
+                              "UndeclaredMember at $["
+                              (sprintf "%s: the strict reading refuses it at the member" doc))
+
+          testCase "a typed host codec keeps its code and its path, under the slot and under the case" (fun _ ->
+              let refused =
+                  [ "Fault", "{\"$type\":\"emptySpace\",\"addr\":\"a\",\"space\":{\"lo\":\"x\"}}"
+                    "Predicate", "{\"$type\":\"equalTo\",\"column\":\"c\",\"type\":\"int\",\"value\":\"x\"}" ]
+
+              match Seam550.fsharpLeg refused with
+              | None -> ()
+              | Some answers ->
+                  let first = answers |> List.map fst
+                  // At the slot: the host decoder's WrongKind at `lo`, under `space` — not OutOfRange at the slot.
+                  Expect.stringStarts
+                      first[0]
+                      "WrongKind at $[\"space\"][\"lo\"]"
+                      "the slot codec's refusal, under the slot"
+                  // At the case: the dependent read's OutOfRange at `value`, where query pins it.
+                  Expect.stringStarts first[1] "OutOfRange at $[\"value\"]" "the case codec's refusal, under the case")
+
+          testCase "each new declaration refusal is red on a planted violation" (fun _ ->
+              let refusedWith (fragment: string) (idl: Idl) =
+                  let faults = Declare.errors idl |> List.map VocabularyFault.describe
+
+                  Expect.exists faults (fun f -> f.Contains fragment) (sprintf "refused: %s (got %A)" fragment faults)
+
+              let collide =
+                  { Seam550.placement with
+                      Cases =
+                          Seam550.placement.Cases
+                          @ [ { Seam550.placement.Cases[0] with
+                                  Tag = "buildTime" } ] }
+
+              refusedWith
+                  "derives the wire tag 'buildTime'"
+                  { Seam550.idl with
+                      Unions = collide :: Seam550.idl.Unions.Tail }
+
+              // The control: the same two names under the case-name rule carry two tags.
+              Expect.isEmpty
+                  (Declare.errors
+                      { Seam550.idl with
+                          Unions =
+                              { collide with
+                                  TagRule = UnionTagRule.CaseName }
+                              :: Seam550.idl.Unions.Tail })
+                  "under the case-name rule the two cases are told apart"
+
+              let withCase (h: HostedCodec) =
+                  let p = Seam550.predicate
+
+                  { Seam550.idl with
+                      Unions =
+                          Seam550.idl.Unions
+                          |> List.map (fun u ->
+                              if u.Name = p.Name then
+                                  { p with
+                                      Cases = { p.Cases[0] with Hosted = Some h } :: p.Cases.Tail }
+                              else
+                                  u) }
+
+              let h = Seam550.typed "string * Host.Cell" "Host.encCompared" "Host.decEqualTo"
+              refusedWith "declares no wire form" (withCase { h with Wire = Some TStr })
+
+              let transparent =
+                  { Seam550.idl with
+                      Harden =
+                          { HardenPolicy.Undeclared with
+                              TransparentUnions = [ "Predicate", "EqualTo" ] } }
+
+              refusedWith "has no members for a case-level host codec" transparent)
+
+          testCase
+              "the structural module declares the host payload of a case codec and agrees with the interpreter"
+              (fun _ ->
+                  let moduleText =
+                      match Gen.fsharpModule "Seam550Structural" Seam550.idl [ "Holder"; "Seams" ] with
+                      | Ok m -> m
+                      | Error e -> failtestf "the structural module was refused: %s" (CodegenError.describe e)
+
+                  Expect.stringContains
+                      moduleText
+                      "| EqualTo of string * Host.Cell"
+                      "the case declares the codec's payload"
+
+                  let docs =
+                      [ for f in Seam550.accepted |> List.filter (fun (r, _) -> r = "Fault") |> List.map snd do
+                            for p in Seam550.accepted |> List.filter (fun (r, _) -> r = "Predicate") |> List.map snd do
+                                sprintf
+                                    "{\"id\":\"n\",\"kind\":{\"$type\":\"Seams\",\"fault\":%s,\"predicate\":%s}}"
+                                    f
+                                    p ]
+
+                  let dll (name: string) =
+                      "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
+
+                  let script =
+                      dll "Fuaran.Core.Text.dll"
+                      + dll "Fuaran.Core.Wire.dll"
+                      + dll "Fuaran.Core.Tree.dll"
+                      + dll "Fuaran.Core.Validator.dll"
+                      + "open Fuaran.Core\n"
+                      + Seam550.hostSource
+                      + "\n"
+                      + moduleText.Replace("module Seam550Structural\n", "")
+                      + "\n\n"
+                      + (docs
+                         |> List.map (fun d ->
+                             sprintf
+                                 "printfn \"%%s\" (match decodeNode %s with Ok n -> encodeNode n | Error e -> DecodeError.render e)"
+                                 (Canonical.write Rendering.CrossHost (JStr d)))
+                         |> String.concat "\n")
+                      + "\n"
+
+                  let path =
+                      Path.Combine(Path.GetTempPath(), sprintf "fuaran-550s-%s.fsx" (Guid.NewGuid().ToString "N"))
+
+                  File.WriteAllText(path, script)
+
+                  try
+                      match ChildProcess.run (ChildProcess.command "dotnet" ("fsi \"" + path + "\"")) with
+                      | Error _ -> ()
+                      | Ok p ->
+                          Expect.equal p.Exit 0 (sprintf "the structural module runs: %s" p.Stderr)
+
+                          let lines =
+                              p.Stdout.Replace("\r\n", "\n").Split('\n') |> Array.filter (fun l -> l <> "")
+
+                          for d, line in List.zip docs (List.ofArray lines) do
+                              let interpreter =
+                                  Decode.decode Seam550.idl d |> Result.bind (Encode.encode Seam550.idl)
+
+                              Expect.equal
+                                  (Ok line)
+                                  interpreter
+                                  (sprintf "%s: the F# host's bytes are the interpreter's" d)
+                  finally
+                      try
+                          File.Delete path
+                      with _ ->
+                          ())
+
+          testCase "a tag-rule change is a wire break, a case-codec change undecided" (fun _ ->
+              let before = Seam550.idl
+
+              let after =
+                  { before with
+                      Unions =
+                          before.Unions
+                          |> List.map (fun u ->
+                              if u.Name = "Placement" then
+                                  { u with
+                                      TagRule = UnionTagRule.CaseName }
+                              elif u.Name = "Predicate" then
+                                  { u with
+                                      Cases = u.Cases |> List.map (fun c -> { c with Hosted = None }) }
+                              else
+                                  u) }
+
+              match Diff.ofValues (before, None) (after, None) with
+              | Error m -> failtestf "%s" m
+              | Ok v ->
+                  let rows = v.Changes |> List.map (fun c -> c.Change, c.Severity)
+
+                  Expect.contains
+                      rows
+                      (UnionTagRuleChanged("Placement", "lowerFirst", "caseName"), Severity.BreakingWire)
+                      "a rule change re-tags every case"
+
+                  Expect.exists
+                      rows
+                      (fun (c, s) ->
+                          match c with
+                          | UnionCaseHostedChanged("Predicate", "EqualTo", _, "") -> s = Severity.Unclassifiable
+                          | _ -> false)
+                      "a case codec retired is undecided") ]

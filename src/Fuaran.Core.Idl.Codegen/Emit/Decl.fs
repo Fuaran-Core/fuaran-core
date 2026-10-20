@@ -660,9 +660,11 @@ module internal Decl =
             match CodegenLookup.tryUnion idl n with
             | Some u when
                 List.length u.Params = List.length args
-                && TransparentUnion.tag idl.Harden u <> Some tag
+                && TransparentUnion.tag idl.Harden u <> (u.CaseByWireTag tag |> Option.map _.Tag)
                 ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                match u.CaseByWireTag tag with
+                // Phase 550 — a case-level host codec's case holds a host payload a literal cannot spell.
+                | Some c when c.Hosted.IsSome -> refuse ()
                 | Some c -> Ok(Literal.Union(u, args, c, authored))
                 | None -> refuse ()
             | _ -> refuse ()

@@ -418,7 +418,8 @@ module Proposal =
                                 |> Result.map (fun ann ->
                                     AddUnionCase(
                                         u,
-                                        { Tag = t
+                                        { Hosted = None
+                                          Tag = t
                                           Fields = fs
                                           Annotations = ann }
                                     )))))

@@ -34,7 +34,8 @@ let private kind (tag: string) (fields: IdlField list) : IdlKind =
       Annotations = Annotations.Empty }
 
 let private case (tag: string) (fields: IdlField list) : IdlUnionCase =
-    { Tag = tag
+    { Hosted = None
+      Tag = tag
       Fields = fields
       Annotations = Annotations.Empty }
 
@@ -52,7 +53,8 @@ let private small: Idl =
           kind "Marker" []
           kind "Shaped" [ f "shape" (TRecord "Shape") Required; f "extra" TJson Optional ] ]
       Unions =
-        [ { Name = "Pair"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Pair"
             Params = [ "A"; "B" ]
             Cases = [ case "Of" [ f "a" (TVar "A") Required; f "b" (TVar "B") Required ] ]
             Annotations = Annotations.Empty } ]
@@ -101,7 +103,8 @@ let private adversarial: (string * string * Idl) list =
       "case 'Of' is declared more than once",
       { small with
           Unions =
-              [ { Name = "Pair"
+              [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                  Name = "Pair"
                   Params = [ "A"; "B" ]
                   Cases = [ case "Of" []; case "Of" [] ]
                   Annotations = Annotations.Empty } ] }
@@ -149,7 +152,8 @@ let private adversarial: (string * string * Idl) list =
       { small with
           Unions =
               small.Unions
-              @ [ { Name = "Loose"
+              @ [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Loose"
                     Params = [ "A" ]
                     Cases = [ case "One" [ f "v" (TVar "Z") Required ] ]
                     Annotations = Annotations.Empty } ] }
@@ -158,7 +162,8 @@ let private adversarial: (string * string * Idl) list =
       { small with
           Unions =
               small.Unions
-              @ [ { Name = "Lit"
+              @ [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Lit"
                     Params = []
                     Cases = [ case "Raw" [ f "v" TJson Required ] ]
                     Annotations = Annotations.Empty } ]
@@ -170,7 +175,8 @@ let private adversarial: (string * string * Idl) list =
       { small with
           Unions =
               small.Unions
-              @ [ { Name = "Wrap"
+              @ [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Wrap"
                     Params = [ "T" ]
                     Cases = [ case "Bare" [ f "v" (TVar "T") Required ] ]
                     Annotations = Annotations.Empty } ]
@@ -201,7 +207,8 @@ let private adversarial: (string * string * Idl) list =
       { small with
           Unions =
               small.Unions
-              @ [ { Name = "Shown"
+              @ [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Shown"
                     Params = []
                     Cases = [ case "One" [ f "toString" TStr Required ] ]
                     Annotations = Annotations.Empty } ] }

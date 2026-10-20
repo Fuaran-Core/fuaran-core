@@ -56,12 +56,13 @@ module Encode =
         | WireForm.Float, VInt i -> Ok(JFloat(float i))
         // `VEnum` carries the WIRE string, exactly as `VUnion` carries the wire `$type` tag — so an
         // enum that declares a case↔wire mapping is checked against its wire strings here, and only
-        // the F# emitter maps back.
+        // the F# emitter maps back. A union whose tag-naming rule derives its tags (Phase 550) is
+        // the same: its value names the case by the derived tag, and only the F# emitter maps back.
         | WireForm.Enum e, VEnum case when List.contains case e.WireCases -> Ok(JStr case)
         | WireForm.Enum e, VEnum case -> Error(sprintf "enum '%s' has no case '%s'" e.Name case)
         | WireForm.Undeclared(Undeclared.Enum name), VEnum _ -> Error(sprintf "unknown enum '%s'" name)
         | WireForm.Union u, VUnion(tag, fields) ->
-            match u.Binding, u.Decl.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+            match u.Binding, u.Decl.CaseByWireTag tag with
             | None, _ ->
                 Error(
                     sprintf
@@ -75,7 +76,7 @@ module Encode =
                 let caseFields = WireForm.caseFields binding c
 
                 match u.Transparent with
-                | Some ttag when ttag = tag ->
+                | Some ttag when ttag = c.Tag ->
                     // Transparent case (the declared one): emit the single field's value bare.
                     match caseFields with
                     | [ single ] ->

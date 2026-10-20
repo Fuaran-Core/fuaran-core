@@ -340,7 +340,7 @@
       "module": "Utf8",
       "kind": "proofOnly",
       "opens": [ "ListAlgebra" ],
-      "packages": [ "Fuaran.Core.Tree" ],
+      "packages": [ "Fuaran.Core.Text" ],
       "budgetSeconds": 70,
       "measuredSeconds": 35,
       "fastestSeconds": 10,

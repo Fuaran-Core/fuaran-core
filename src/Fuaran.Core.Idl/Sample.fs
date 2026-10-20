@@ -92,7 +92,7 @@ module Sample =
     /// `ConfRng.ofSeed`: the kernel's seed (`Xorshift32`, Phase 388 — the one body both read).
     ///
     /// The three functions here that name `Xorshift32` are `NoInlining` (DECISIONS.md D129): since
-    /// Phase 495 the kernel is internal to `Fuaran.Core.Wire`, read through its `InternalsVisibleTo`,
+    /// Phase 531 the kernel is internal to `Fuaran.Core.Text`, read through its `InternalsVisibleTo`,
     /// and a body naming it that the F# optimiser copied into a Release-built caller of this package
     /// would fail there with `MethodAccessException`.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
@@ -251,7 +251,7 @@ module Sample =
                         (List.length u.Decl.Params))
             | Some binding ->
                 let c = pickAt r ("union '" + u.Name + "'") candidates
-                VUnion(c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))
+                VUnion(u.Decl.WireTagOf c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))
         | WireForm.Undeclared(Undeclared.Union(name, _)) ->
             refuse ("union '" + name + "'") "the vocabulary does not declare it"
         | WireForm.Node ->

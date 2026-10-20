@@ -28,7 +28,7 @@ open Expecto
 let private srcDir () = Snapshots.repoFile "src"
 
 let private hashFile () =
-    Path.Combine(srcDir (), "Fuaran.Core.Tree", "Hash.fs")
+    Path.Combine(srcDir (), "Fuaran.Core.Text", "Hash.fs")
 
 /// Every `.fs` under `src/`, build residue excluded, repository-relative with `/` separators.
 let private sourceFiles () : (string * string[]) list =
@@ -206,9 +206,9 @@ let private adversarialFixtures =
 
 /// The bare joins the scan knowingly carries, by file and count, so a second one in the same file
 /// still fails. EMPTY since Phase 299: the one entry it held — `Schema.fingerprint`, which joined
-/// `name:type` cells on the raw `U+0001` byte — now builds its pre-image through a value-identical
-/// copy of the canonical field encoding (`Column` references only `Wire`, so it cannot call
-/// `Hash.canonicalFields` itself), and `HashTests` holds the copy to the canonical function.
+/// `name:type` cells on the raw `U+0001` byte — built its pre-image through a value-identical copy of
+/// the canonical field encoding from then, and through `Hash.canonicalFields` itself since Phase 531
+/// (the text kernel sits below `Wire`, so `Column` reaches it), which put it on the roster.
 let private knownBareJoins: (string * int) list = []
 
 let private bareJoins () : string list =

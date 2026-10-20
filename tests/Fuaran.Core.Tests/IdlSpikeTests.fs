@@ -731,7 +731,8 @@ let tests =
                   // The generated module references Wire (Canon/JVal) + Tree (NodeWitness)
                   // + Validator (the runValidator scaffold).
                   let fsx =
-                      dllRef "Fuaran.Core.Wire.dll"
+                      dllRef "Fuaran.Core.Text.dll"
+                      + dllRef "Fuaran.Core.Wire.dll"
                       + dllRef "Fuaran.Core.Tree.dll"
                       + dllRef "Fuaran.Core.Validator.dll"
                       + decls
@@ -854,7 +855,8 @@ module private SecondVocabulary =
 
     /// A date carried by the host as `System.DateOnly` and on the wire as `yyyy-MM-dd`.
     let date: HostedCodec =
-        { FSharp = "System.DateOnly"
+        { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+          FSharp = "System.DateOnly"
           Encode =
             "(fun (d: System.DateOnly) -> JStr(d.ToString(\"yyyy-MM-dd\", System.Globalization.CultureInfo.InvariantCulture)))"
           Decode =
@@ -891,16 +893,20 @@ module private SecondVocabulary =
                               Placeholder = "ignore" })
                         HostOnly ] ]
           Unions =
-            [ { Name = "Status"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Status"
                 Params = []
                 Cases =
-                  [ { Tag = "Unpacked"
+                  [ { Hosted = None
+                      Tag = "Unpacked"
                       Fields = []
                       Annotations = Annotations.Empty }
-                    { Tag = "Packed"
+                    { Hosted = None
+                      Tag = "Packed"
                       Fields = []
                       Annotations = Annotations.Empty }
-                    { Tag = "Borrowed"
+                    { Hosted = None
+                      Tag = "Borrowed"
                       Fields = [ field "lender" TStr Required ]
                       Annotations = Annotations.Empty } ]
                 Annotations = Annotations.Empty } ]
@@ -1137,7 +1143,8 @@ let secondVocabularyTests =
                       "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
 
                   let fsx =
-                      dllRef "Fuaran.Core.Wire.dll"
+                      dllRef "Fuaran.Core.Text.dll"
+                      + dllRef "Fuaran.Core.Wire.dll"
                       + dllRef "Fuaran.Core.Tree.dll"
                       + dllRef "Fuaran.Core.Validator.dll"
                       + decls

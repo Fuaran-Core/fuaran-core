@@ -14,7 +14,7 @@
       "package": "Fuaran.Core.ContentAddress",
       "reason": "facade",
       "phase": "fuaran-core#382",
-      "note": "The profile-pinned `Digest` constructor (DECISIONS.md D122, route B): `ofValue` is `Canonical.tryWrite` under the named profile, hashed by `Fuaran.Core.Tree`'s SHA-256, and `ofCanonicalText` admits stored text only where `Canonical.isCanonical` holds. It adds no semantics of its own — the rendering is `Wire`'s (the `WireCanon` model and the profile vectors), the digest `Tree`'s (the known-answer and platform-parity pins) — so a theorem here would restate its two callees'. What it owns, that the digest is of exactly the canonical bytes under both profiles and that every stored result hash in the apply corpus reproduces through it, is pinned by `CodecTests`."
+      "note": "The profile-pinned `Digest` constructor (DECISIONS.md D122, route B): `ofValue` is `Canonical.tryWrite` under the named profile, hashed by the text kernel's (`Fuaran.Core.Text`) SHA-256, and `ofCanonicalText` admits stored text only where `Canonical.isCanonical` holds. It adds no semantics of its own — the rendering is `Wire`'s (the `WireCanon` model and the profile vectors), the digest `Tree`'s (the known-answer and platform-parity pins) — so a theorem here would restate its two callees'. What it owns, that the digest is of exactly the canonical bytes under both profiles and that every stored result hash in the apply corpus reproduces through it, is pinned by `CodecTests`."
     },
     {
       "package": "Fuaran.Core.Idl.Cli",
@@ -88,6 +88,27 @@
       "class": "measured-elsewhere",
       "reason": "The published seam dispatch prologue (Phase 509, D172): the capability and query registries are each a Seam, so the policy and keyed-capture law families reach these through them; the toy seam in the stand-in calls each by name.",
       "standIn": "tests/Fuaran.Core.Tests/RegistryLifecycleTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Gen.fsharpCodecModule",
+        "Idl.Decode.valueStrictDetailed",
+        "Idl.Decode.decodeStrictDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 550 (D198): the codec-only module and the strict-members reading; the stand-in runs the generated module against host types and holds every case and every undeclared member to the interpreter's code and path.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlUnion.WireTagOf",
+        "Idl.IdlUnion.CaseByWireTag",
+        "Idl.UnionTagRule.Apply"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 550 (D198): the tag-naming rule, read by every encoder and decoder; the stand-in holds the derived tags on the wire across the interpreter, the TypeScript host and the codec-only module.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs",
+      "through": "Encode.encode"
     },
     {
       "members": [
@@ -1402,9 +1423,9 @@
       "members": [
         "Jsonl.quote"
       ],
-      "class": "measured-elsewhere",
-      "reason": "The package's one JSON string escaper, public since Phase 388 so the DAG package spells its node lines through it instead of carrying a third copy. Its bytes are pinned character by character against `Wire.Json.escape` by the `StringEscapeVectors` family, through `Actor.encode` and `Dag.toJsonl`.",
-      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+      "class": "forward",
+      "reason": "The op stream's spelling of the kernel's quote (Phase 531): public since Phase 388 so the DAG package spells its node lines through it, and the one line over `JsonString.quote` since the package's copy of the escape was deleted.",
+      "forwardsTo": "JsonString.quote"
     },
     {
       "members": [
@@ -2085,17 +2106,17 @@
       "members": [
         "Json.escape"
       ],
-      "class": "measured-elsewhere",
-      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireDecodeTests.fs"
+      "class": "forward",
+      "reason": "The wire's spelling of the kernel's escape (Phase 531): one line over `JsonString.escape`, where the body lived until the text kernel took it.",
+      "forwardsTo": "JsonString.escape"
     },
     {
       "members": [
         "Json.escapeInto"
       ],
-      "class": "measured-elsewhere",
-      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+      "class": "forward",
+      "reason": "The wire's spelling of the kernel's builder escape (Phase 531): one line over `JsonString.escapeInto`.",
+      "forwardsTo": "JsonString.escapeInto"
     },
     {
       "members": [
@@ -2270,6 +2291,29 @@
       "class": "measured-elsewhere",
       "reason": "The chain verbs written once over a record kind's shape, and the JSONL load's public building blocks (Phase 530): every op-stream, capture and snapshot verb is one of these over its instance, so the chain law families and the op-stream-load model reach them through those verbs; the stand-in calls each by name against the verb it generalises (walk = firstChainBreak at every anchor, rehash id = tryRehash, append = appendChainOnly) and round-trips the keyed journal.",
       "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "JsonString.escape",
+        "JsonString.escapeInto",
+        "JsonString.escapeLegacyInto",
+        "JsonString.quote",
+        "JsonString.quoteLegacy"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The spine's one string escape, live and the frozen V1 spelling (Phase 531, the text kernel): the StringEscapeVectors family pins every character the rule escapes against one table through the kernel and every emitter built on it, EncodingProfileVectors pins the frozen column against the published 0.30.0 bytes, and the stand-in holds the escape's faces to each other and to the one-character oracle.",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+    },
+    {
+      "members": [
+        "Hash.utf8ByteCount",
+        "JsonSyntax.isWhitespace",
+        "JsonSyntax.readString",
+        "JsonSyntax.skipString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The string-token reader both JSON readers read by and the UTF-8 count the document-bytes bound reads (Phase 531, the text kernel): the refusal corpus and the line reader's position tests pin every refusal each reader places from the reader's facts, at its own position and in its own vocabulary; the stand-in holds the value, the end and each fact of a refusal directly, and the count to the encoder's length.",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
     },
     {
       "members": [

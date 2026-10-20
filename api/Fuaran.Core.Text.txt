@@ -1,0 +1,129 @@
+# Fuaran.Core.Text — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.DigestAlgorithm RequireQualifiedAccess
+attribute Fuaran.Core.DigestModule RequireQualifiedAccess
+attribute Fuaran.Core.EncodingProfile RequireQualifiedAccess
+attribute Fuaran.Core.EncodingProfileModule RequireQualifiedAccess
+attribute Fuaran.Core.FloatRule RequireQualifiedAccess
+attribute Fuaran.Core.JsonString RequireQualifiedAccess
+attribute Fuaran.Core.JsonStringFault RequireQualifiedAccess
+attribute Fuaran.Core.JsonSyntax RequireQualifiedAccess
+attribute Fuaran.Core.MemberOrder RequireQualifiedAccess
+attribute Fuaran.Core.RenderingModule RequireQualifiedAccess
+attribute Fuaran.Core.StringEscape RequireQualifiedAccess
+ctor Fuaran.Core.IllFormedUtf16..ctor(System.Int32, System.Int32)
+ctor Fuaran.Core.JsonStringRefusal..ctor(Fuaran.Core.JsonStringFault, System.Int32, System.Int32, System.Int32, System.Boolean)
+ctor Fuaran.Core.Rendering..ctor(Fuaran.Core.StringEscape, Fuaran.Core.MemberOrder, Fuaran.Core.FloatRule)
+field Fuaran.Core.EncodingProfile+Tags.V1 : System.Int32 (literal)
+field Fuaran.Core.EncodingProfile+Tags.V2 : System.Int32 (literal)
+field Fuaran.Core.FloatRule+Tags.Canonical : System.Int32 (literal)
+field Fuaran.Core.FloatRule+Tags.RoundTrip : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.BadHexDigit : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.HighWithoutLow : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.LowWithoutHigh : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.RawControl : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.TooLong : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.TruncatedUnicodeEscape : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.UnknownEscape : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.Unterminated : System.Int32 (literal)
+field Fuaran.Core.JsonStringFault+Tags.UnterminatedEscape : System.Int32 (literal)
+field Fuaran.Core.MemberOrder+Tags.Authored : System.Int32 (literal)
+field Fuaran.Core.MemberOrder+Tags.Sorted : System.Int32 (literal)
+field Fuaran.Core.StringEscape+Tags.AllControlsHex : System.Int32 (literal)
+field Fuaran.Core.StringEscape+Tags.ShortControls : System.Int32 (literal)
+method Fuaran.Core.Digest.ToString() : System.String
+method Fuaran.Core.DigestModule.print(Fuaran.Core.Digest) : System.String
+method Fuaran.Core.DigestModule.tryOfFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Digest, Fuaran.Core.IllFormedUtf16>
+method Fuaran.Core.DigestModule.tryOfHex(Fuaran.Core.DigestAlgorithm, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Digest, System.String>
+method Fuaran.Core.DigestModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Digest, System.String>
+method Fuaran.Core.EncodingProfileModule.name(Fuaran.Core.EncodingProfile) : System.String
+method Fuaran.Core.EncodingProfileModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EncodingProfile>
+method Fuaran.Core.Hash.canonicalField(System.String) : System.String
+method Fuaran.Core.Hash.canonicalFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
+method Fuaran.Core.Hash.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.IllFormedUtf16>
+method Fuaran.Core.Hash.fnv1a(System.String) : System.String
+method Fuaran.Core.Hash.fnv1a32(System.String) : System.UInt32
+method Fuaran.Core.Hash.keyedBy(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
+method Fuaran.Core.Hash.sha256Bytes(System.Byte[]) : System.Byte[]
+method Fuaran.Core.Hash.sha256Hex(System.String) : System.String
+method Fuaran.Core.Hash.sha256HexOfBytes(System.Byte[]) : System.String
+method Fuaran.Core.Hash.trySha256Hex(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.IllFormedUtf16>
+method Fuaran.Core.Hash.tryUtf8Bytes(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Byte[], Fuaran.Core.IllFormedUtf16>
+method Fuaran.Core.Hash.utf8ByteCount(System.String) : System.Int64
+method Fuaran.Core.Hash.utf8Bytes(System.String) : System.Byte[]
+method Fuaran.Core.JsonString.escape(System.String) : System.String
+method Fuaran.Core.JsonString.escapeInto(System.Text.StringBuilder, System.String) : System.Void
+method Fuaran.Core.JsonString.escapeLegacyInto(System.Text.StringBuilder, System.String) : System.Void
+method Fuaran.Core.JsonString.quote(System.String) : System.String
+method Fuaran.Core.JsonString.quoteLegacy(System.String) : System.String
+method Fuaran.Core.JsonSyntax.isNumber(System.String) : System.Boolean
+method Fuaran.Core.JsonSyntax.isWhitespace(System.Char) : System.Boolean
+method Fuaran.Core.JsonSyntax.readString(System.String, System.Int32, System.Int32, System.Text.StringBuilder) : Microsoft.FSharp.Core.FSharpResult`2<System.ValueTuple`2<System.String, System.Int32>, Fuaran.Core.JsonStringRefusal>
+method Fuaran.Core.JsonSyntax.skipString(System.String, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<System.Int32, Fuaran.Core.JsonStringRefusal>
+method Fuaran.Core.RenderingModule.ofProfile(Fuaran.Core.EncodingProfile) : Fuaran.Core.Rendering
+property Fuaran.Core.Digest.Algorithm : Fuaran.Core.DigestAlgorithm { get }
+property Fuaran.Core.Digest.Hex : System.String { get }
+property Fuaran.Core.EncodingProfileModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfile> { get }
+property Fuaran.Core.EncodingProfileModule.current : Fuaran.Core.EncodingProfile { get }
+property Fuaran.Core.Hash.fieldEsc : System.String { get }
+property Fuaran.Core.Hash.foldSep : System.String { get }
+property Fuaran.Core.RenderingModule.CrossHost : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.Declared : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.V1 : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.V2 : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Rendering> { get }
+record-field Fuaran.Core.IllFormedUtf16.Index #0 : System.Int32
+record-field Fuaran.Core.IllFormedUtf16.Unit #1 : System.Int32
+record-field Fuaran.Core.JsonStringRefusal.Cursor #1 : System.Int32
+record-field Fuaran.Core.JsonStringRefusal.Fault #0 : Fuaran.Core.JsonStringFault
+record-field Fuaran.Core.JsonStringRefusal.PendingHigh #3 : System.Int32
+record-field Fuaran.Core.JsonStringRefusal.PendingHighEscaped #4 : System.Boolean
+record-field Fuaran.Core.JsonStringRefusal.UnitAt #2 : System.Int32
+record-field Fuaran.Core.Rendering.Escape #0 : Fuaran.Core.StringEscape
+record-field Fuaran.Core.Rendering.Floats #2 : Fuaran.Core.FloatRule
+record-field Fuaran.Core.Rendering.Order #1 : Fuaran.Core.MemberOrder
+type Fuaran.Core.Digest (record)
+type Fuaran.Core.DigestAlgorithm (union)
+type Fuaran.Core.DigestModule (module)
+type Fuaran.Core.EncodingProfile (union)
+type Fuaran.Core.EncodingProfile+Tags (type)
+type Fuaran.Core.EncodingProfileModule (module)
+type Fuaran.Core.FloatRule (union)
+type Fuaran.Core.FloatRule+Tags (type)
+type Fuaran.Core.Hash (module)
+type Fuaran.Core.IllFormedUtf16 (record)
+type Fuaran.Core.JsonString (module)
+type Fuaran.Core.JsonStringFault (union)
+type Fuaran.Core.JsonStringFault+RawControl (type)
+type Fuaran.Core.JsonStringFault+Tags (type)
+type Fuaran.Core.JsonStringFault+UnknownEscape (type)
+type Fuaran.Core.JsonStringRefusal (record)
+type Fuaran.Core.JsonSyntax (module)
+type Fuaran.Core.MemberOrder (union)
+type Fuaran.Core.MemberOrder+Tags (type)
+type Fuaran.Core.Rendering (record)
+type Fuaran.Core.RenderingModule (module)
+type Fuaran.Core.StringEscape (union)
+type Fuaran.Core.StringEscape+Tags (type)
+union-case Fuaran.Core.DigestAlgorithm.Sha256 #0()
+union-case Fuaran.Core.EncodingProfile.V1 #0()
+union-case Fuaran.Core.EncodingProfile.V2 #1()
+union-case Fuaran.Core.FloatRule.Canonical #1()
+union-case Fuaran.Core.FloatRule.RoundTrip #0()
+union-case Fuaran.Core.JsonStringFault.BadHexDigit #3()
+union-case Fuaran.Core.JsonStringFault.HighWithoutLow #6()
+union-case Fuaran.Core.JsonStringFault.LowWithoutHigh #7()
+union-case Fuaran.Core.JsonStringFault.NewRawControl #5(control: System.Char)
+union-case Fuaran.Core.JsonStringFault.NewUnknownEscape #4(escape: System.Char)
+union-case Fuaran.Core.JsonStringFault.TooLong #8()
+union-case Fuaran.Core.JsonStringFault.TruncatedUnicodeEscape #2()
+union-case Fuaran.Core.JsonStringFault.Unterminated #0()
+union-case Fuaran.Core.JsonStringFault.UnterminatedEscape #1()
+union-case Fuaran.Core.MemberOrder.Authored #0()
+union-case Fuaran.Core.MemberOrder.Sorted #1()
+union-case Fuaran.Core.StringEscape.AllControlsHex #1()
+union-case Fuaran.Core.StringEscape.ShortControls #0()

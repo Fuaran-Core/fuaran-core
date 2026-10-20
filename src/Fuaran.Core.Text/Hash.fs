@@ -150,6 +150,10 @@ module Hash =
     ///     the block, then each introduced defect's code, location and severity)
     ///   - `ColumnValidator.ruleId` (Phase 298: a stock column rule's id over its parameters)
     ///   - `ColumnValidator.keyText` (Phase 298: one composite key of the `unique` rule)
+    ///   - `Schema.metadataPreimage` (Phase 427: a column field's stated metadata, one element of the
+    ///     schema fingerprint's pre-image; through the kernel since Phase 531, a copy of it before)
+    ///   - `Schema.fingerprint` (Phase 299: a column schema's `name:type` list and its metadata
+    ///     elements, under FNV-1a; through the kernel since Phase 531, a copy of it before)
     let canonicalFields (fields: string list) : string =
         fields |> List.map canonicalField |> String.concat ""
 
@@ -341,9 +345,11 @@ module Hash =
 
         out.ToArray()
 
-    /// The first unpaired surrogate of `s`, or `None` where `s` is well-formed UTF-16 (Phase 306).
-    /// The same rule the wire parser and the guarded canonical renderer refuse on, kept here as
-    /// its own few lines because this package references nothing.
+    /// The first unpaired surrogate of `s`, or `None` where `s` is well-formed UTF-16 (Phase 306): a
+    /// high surrogate (`D800`–`DBFF`) not followed at once by a low one, or a low surrogate
+    /// (`DC00`–`DFFF`) with no high one before it. THE well-formedness rule of the spine (Phase 531):
+    /// the guarded canonical renderer refuses on it (`Json.firstIllFormedUnit` is its index), and the
+    /// string token reader (`JsonSyntax.readString`) holds every string it reads to the same pairing.
     let firstIllFormedUnit (s: string) : IllFormedUtf16 option =
         let mutable i = 0
         let mutable found = None
@@ -362,6 +368,39 @@ module Hash =
                 i <- i + 1
 
         found
+
+    /// The number of bytes `utf8Bytes s` encodes `s` into, counted off its UTF-16 units without
+    /// encoding it (Phase 531; the document-bytes bound's count since Phase 465): one, two or three a
+    /// unit, four a surrogate pair, and three for a lone surrogate — the replacement character's, as
+    /// `utf8Bytes` writes it. The count a host handed a decoded string must make: a native length
+    /// under-counts a CJK document threefold.
+    let utf8ByteCount (s: string) : int64 =
+        let mutable total = 0L
+        let mutable k = 0
+
+        while k < s.Length do
+            let c = int s[k]
+
+            if c < 0x80 then
+                total <- total + 1L
+                k <- k + 1
+            elif c < 0x800 then
+                total <- total + 2L
+                k <- k + 1
+            elif
+                c >= 0xD800
+                && c <= 0xDBFF
+                && k + 1 < s.Length
+                && int s[k + 1] >= 0xDC00
+                && int s[k + 1] <= 0xDFFF
+            then
+                total <- total + 4L
+                k <- k + 2
+            else
+                total <- total + 3L
+                k <- k + 1
+
+        total
 
     /// `utf8Bytes`, GUARDED (Phase 306): the UTF-8 bytes of a well-formed string, or the first
     /// unpaired surrogate as a typed refusal. Over a well-formed string it is exactly

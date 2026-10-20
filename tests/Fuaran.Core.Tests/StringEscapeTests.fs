@@ -670,3 +670,140 @@ let emittedEncStrTests =
                   Expect.isFalse
                       (red |> List.exists (fun m -> m.StartsWith "escape-only: one quote:"))
                       "a quote still takes the escaping branch, so it is not reported" ]
+
+// Phase 531 — the text kernel's own cases. `JsonString` is the one escape the emitters above spell
+// through, and `JsonSyntax` the one string-token and number grammar both JSON readers read by; the
+// readers' refusals, at their own positions and in their own vocabularies, are pinned by the refusal
+// corpus and `JsonlDecodeRunTests`. What is held here is the kernel's contract as such: the escape's
+// two faces agree with each other and with the one-character oracle, the frozen legacy spelling is
+// its own table, the reader answers the value and the end, a refusal carries the facts a reader
+// places it by, and the UTF-8 count is the encoder's length.
+[<Tests>]
+let kernelTests =
+    let u (code: int) = string (char code)
+
+    let refusalOf (input: string) =
+        match JsonSyntax.skipString input 0 System.Int32.MaxValue with
+        | Ok stop -> failwithf "%A was read to %d, not refused" input stop
+        | Error r -> r
+
+    testList
+        "Text kernel (Phase 531)"
+        [ testCase "JsonString: escape, escapeInto and quote are the one rule, and agree with the oracle"
+          <| fun _ ->
+              for name, s in RunBoundaries.inputs do
+                  let into = System.Text.StringBuilder("<")
+                  JsonString.escapeInto into s
+                  Expect.equal (JsonString.escape s) (RunBoundaries.oracle s) (name + ": escape is the rule")
+                  Expect.equal (into.ToString()) ("<" + JsonString.escape s) (name + ": escapeInto appends it")
+                  Expect.equal (JsonString.quote s) ("\"" + JsonString.escape s + "\"") (name + ": quote quotes it")
+
+              Expect.isTrue
+                  (obj.ReferenceEquals(JsonString.escape "clean", "clean"))
+                  "a string with nothing to escape is returned as it is"
+
+          testCase "JsonString: the frozen legacy spelling keeps its three short forms and nothing else"
+          <| fun _ ->
+              let legacy (s: string) =
+                  let sb = System.Text.StringBuilder()
+                  JsonString.escapeLegacyInto sb s
+                  sb.ToString()
+
+              Expect.equal (legacy "\n\r\t") "\\n\\r\\t" "line feed, carriage return and tab are short"
+              Expect.equal (legacy (u 0x01 + u 0x1F)) "\\u0001\\u001f" "every other control is lower-case \\u00xx"
+              Expect.equal (legacy "a\"b\\c/é") "a\\\"b\\\\c/é" "the quote and the backslash, nothing else"
+              Expect.equal (JsonString.quoteLegacy "\n") "\"\\n\"" "quoteLegacy quotes it"
+              Expect.notEqual (legacy "\n") (JsonString.escape "\n") "the two rules differ exactly on the short forms"
+
+          testCase "JsonSyntax.readString answers the value and the index past the token, escaped or not"
+          <| fun _ ->
+              let scratch = System.Text.StringBuilder()
+
+              let read (input: string) (start: int) =
+                  match JsonSyntax.readString input start System.Int32.MaxValue scratch with
+                  | Ok(struct (value, stop)) -> Some(value, stop)
+                  | Error _ -> None
+
+              Expect.equal (read "x\"abc\"y" 1) (Some("abc", 6)) "an escape-free token is its body"
+              Expect.equal (read "\"a\\nb\\u00e9\"" 0) (Some("a\nbé", 12)) "the escapes decode"
+              Expect.equal (read "\"\\uD83D\\uDE00\"" 0) (Some(u 0xD83D + u 0xDE00, 14)) "a pair split over two escapes"
+
+              Expect.equal
+                  (read ("\"" + u 0xD83D + "\\uDE00\"") 0)
+                  (Some(u 0xD83D + u 0xDE00, 9))
+                  "a raw half and an escaped one"
+
+              Expect.equal (read "\"\"" 0) (Some("", 2)) "the empty token"
+
+              for input in [ "\"plain\""; "\"a\\tb\""; "\"\\\"q\\\"\"" ] do
+                  Expect.equal
+                      (JsonSyntax.skipString input 0 System.Int32.MaxValue)
+                      (read input 0 |> Option.map snd |> Option.get |> Ok)
+                      (input + ": skipString ends where readString does")
+
+          testCase "JsonSyntax: a refusal carries the rule, the cursor, the unit and the pending high half"
+          <| fun _ ->
+              let r = refusalOf "\"ab"
+              Expect.equal (r.Fault, r.Cursor, r.UnitAt) (JsonStringFault.Unterminated, 3, 3) "the end of the input"
+              let r = refusalOf "\"a\\q\""
+
+              Expect.equal
+                  (r.Fault, r.Cursor, r.UnitAt)
+                  (JsonStringFault.UnknownEscape 'q', 4, 2)
+                  "past the letter, at its backslash"
+
+              let r = refusalOf ("\"a" + u 0x01 + "\"")
+              Expect.equal (r.Fault, r.Cursor, r.UnitAt) (JsonStringFault.RawControl(char 1), 2, 2) "AT the raw control"
+              let r = refusalOf "\"\\uD800x\""
+
+              Expect.equal
+                  (r.Fault, r.Cursor, r.UnitAt)
+                  (JsonStringFault.HighWithoutLow, 8, 7)
+                  "after the unit that breaks it"
+
+              Expect.equal (r.PendingHigh, r.PendingHighEscaped) (1, true) "the escaped high half it was waiting on"
+              let r = refusalOf ("\"x" + u 0xD800 + "\"")
+              Expect.equal (r.PendingHigh, r.PendingHighEscaped) (2, false) "a raw high half"
+              let r = refusalOf "\"\\uDC00\""
+
+              Expect.equal
+                  (r.Fault, r.Cursor, r.UnitAt, r.PendingHigh)
+                  (JsonStringFault.LowWithoutHigh, 7, 1, -1)
+                  "a lone low escape"
+
+              let r = refusalOf "\"\\u12G4\""
+
+              Expect.equal
+                  (r.Fault, r.Cursor, r.UnitAt)
+                  (JsonStringFault.BadHexDigit, 3, 1)
+                  "a non-hex digit, before the digits"
+
+              match JsonSyntax.readString "\"abcd\"" 0 3 (System.Text.StringBuilder()) with
+              | Error r ->
+                  Expect.equal (r.Fault, r.Cursor) (JsonStringFault.TooLong, 5) "the bound, after its max+1-th unit"
+              | Ok _ -> failtest "a four-code-point token is over a bound of three"
+
+          testCase "JsonSyntax.isNumber is the RFC 8259 number grammar, exactly"
+          <| fun _ ->
+              for tok in [ "0"; "-0"; "12"; "1.5"; "-0.25"; "1e5"; "1E+5"; "2.5e-3" ] do
+                  Expect.isTrue (JsonSyntax.isNumber tok) (tok + " is a number")
+
+              for tok in [ ""; "-"; "01"; "1."; "-.5"; ".5"; "1e"; "1e+"; "+1"; "0x10"; "1 "; "NaN" ] do
+                  Expect.isFalse (JsonSyntax.isNumber tok) (sprintf "%A is not" tok)
+
+              Expect.isTrue (JsonSyntax.isWhitespace '\t') "tab is JSON whitespace"
+              Expect.isFalse (JsonSyntax.isWhitespace (char 0xA0)) "a no-break space is not"
+
+          testCase "Hash.utf8ByteCount is the length of Hash.utf8Bytes, lone surrogates included"
+          <| fun _ ->
+              for s in
+                  [ ""
+                    "a"
+                    "é"
+                    "中"
+                    u 0xD83D + u 0xDE00
+                    u 0xD800
+                    u 0xDC00 + "x"
+                    u 0xDBFF + u 0xD800
+                    "mixed é 中 " + u 0xD83D + u 0xDE00 ] do
+                  Expect.equal (Hash.utf8ByteCount s) (int64 (Hash.utf8Bytes s).Length) (sprintf "%A" s) ]

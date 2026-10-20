@@ -32,10 +32,12 @@ let private field name t opt : IdlField =
 /// `Binding<'T>` — a case whose placeholder reaches the type-parameter decoder by its documented
 /// name, `decT`, beside a member of the parameter's own type.
 let private binding: IdlUnion =
-    { Name = "Binding"
+    { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+      Name = "Binding"
       Params = [ "T" ]
       Cases =
-        [ { Tag = "Local"
+        [ { Hosted = None
+            Tag = "Local"
             Fields =
               [ field
                     "parse"
@@ -46,7 +48,8 @@ let private binding: IdlUnion =
                     Required
                 field "value" (TVar "T") Required ]
             Annotations = Annotations.Empty }
-          { Tag = "Ref"
+          { Hosted = None
+            Tag = "Ref"
             Fields = [ field "name" TStr Required ]
             Annotations = Annotations.Empty } ]
       Annotations = Annotations.Empty }

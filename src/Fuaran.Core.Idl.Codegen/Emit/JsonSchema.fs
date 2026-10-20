@@ -154,7 +154,7 @@ module internal JsonSchema =
 
             let tagged =
                 u.Cases
-                |> List.map (fun c -> objectSchema idl.Wire.Discriminator c.Tag (fieldsOf c))
+                |> List.map (fun c -> objectSchema idl.Wire.Discriminator (u.WireTagOf c.Tag) (fieldsOf c))
 
             // A transparent case is on the wire BARE — its single field's value with
             // no `$type` envelope (`TextSource.Literal`: `"x"`, not

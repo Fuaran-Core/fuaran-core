@@ -98,9 +98,15 @@
       "undocumented": []
     },
     {
+      "package": "Fuaran.Core.Text",
+      "documented": 85,
+      "total": 85,
+      "undocumented": []
+    },
+    {
       "package": "Fuaran.Core.Tree",
-      "documented": 112,
-      "total": 112,
+      "documented": 83,
+      "total": 83,
       "undocumented": []
     },
     {
@@ -117,8 +123,8 @@
     },
     {
       "package": "Fuaran.Core.Wire",
-      "documented": 335,
-      "total": 335,
+      "documented": 312,
+      "total": 312,
       "undocumented": []
     }
   ]

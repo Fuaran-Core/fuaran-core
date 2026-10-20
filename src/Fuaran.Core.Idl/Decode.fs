@@ -63,7 +63,12 @@ module Decode =
         | WireForm.Union u, JObj _ ->
             match u.Binding with
             | None -> arity u
-            | Some binding -> tagged idl (u.Decl.Cases |> List.map (fun c -> c.Tag, WireForm.caseFields binding c)) j
+            | Some binding ->
+                tagged
+                    idl
+                    (u.Decl.Cases
+                     |> List.map (fun c -> u.Decl.WireTagOf c.Tag, WireForm.caseFields binding c))
+                    j
         // A transparent union decoded from a BARE (non-object) wire value — the
         // Fuaran-UI 0.2.0 bare-string `TextSource.Literal` (`"x"` → `Literal{text="x"}`).
         | WireForm.Union u, j ->
@@ -81,7 +86,7 @@ module Decode =
                     match WireForm.caseFields binding c with
                     | [ single ] ->
                         decodeValue idl single.Type j
-                        |> Result.map (fun v -> VUnion(ttag, [ single.Name, v ]))
+                        |> Result.map (fun v -> VUnion(u.Decl.WireTagOf ttag, [ single.Name, v ]))
                     | fields ->
                         err
                             DecodeCode.SchemaFault
@@ -220,6 +225,119 @@ module Decode =
         | _, _ -> Error(Decoder.wrongKind "object" j)
 
     let private parsed (json: string) : Result<JVal, DecodeError> = Decoder.parse ReadOptions.strict json
+
+    // -----------------------------------------------------------------------
+    // Phase 550 (DECISIONS.md D198) — the STRICT-MEMBERS reading. A members check over the document
+    // BEFORE the ordinary walk, as the seams' strict readers run theirs: every object the vocabulary
+    // declares may carry only the members [[WireForm.roster]] derives for it. It walks the value's
+    // declared shape and checks each object's members first, then its fields in declared order — so
+    // the first undeclared member it meets is the refusal, `UndeclaredMember` at that member. A shape
+    // fault is left to the walk that follows: the check only ever ADDS the undeclared-member refusal,
+    // so a document both readings accept decodes to one value. A verbatim, hosted or unbound slot is
+    // its reader's to police, and is not entered.
+    // -----------------------------------------------------------------------
+
+    let rec private strictValue (idl: Idl) (t: IdlType) (j: JVal) : Result<unit, DecodeError> =
+        let disc = idl.Wire.Discriminator
+
+        match WireForm.ofType idl t, j with
+        | WireForm.Record r, JObj fs -> strictObject idl [] r.Fields j fs
+        | WireForm.Union u, JObj fs ->
+            match u.Binding, Decoder.tryMember disc j with
+            | Some binding, Some(JStr tag) ->
+                match u.Decl.CaseByWireTag tag with
+                | Some c -> strictObject idl [ disc ] (WireForm.caseFields binding c) j fs
+                | None -> Ok()
+            | _ -> Ok()
+        | WireForm.Union u, bare ->
+            match
+                u.Binding,
+                u.Transparent
+                |> Option.bind (fun t -> u.Decl.Cases |> List.tryFind (fun c -> c.Tag = t))
+            with
+            | Some binding, Some c ->
+                match WireForm.caseFields binding c with
+                | [ single ] -> strictValue idl single.Type bare
+                | _ -> Ok()
+            | _ -> Ok()
+        | WireForm.Kind, JObj fs -> strictTagged idl (idl.Kinds |> List.map (fun k -> k.Tag, k.Fields)) [] j fs
+        | WireForm.Op, JObj fs -> strictTagged idl (idl.Ops |> List.map (fun o -> o.Tag, o.Fields)) [] j fs
+        | WireForm.Node, JObj fs ->
+            let kinds = idl.Kinds |> List.map (fun k -> k.Tag, k.Fields)
+
+            match idl.Wire.NodeEnvelope with
+            | NodeEnvelopeShape.NestedKind ->
+                strictObject idl [ "id"; "kind" ] idl.NodeFields j fs
+                |> Result.bind (fun () ->
+                    match Decoder.tryMember "kind" j with
+                    | Some(JObj kfs as kj) -> strictTagged idl kinds [] kj kfs |> under (PathSegment.Key "kind")
+                    | _ -> Ok())
+            // The flat object holds the tag, the id, the kind's fields and the envelope's at once.
+            | NodeEnvelopeShape.FlatKind -> strictTagged idl kinds ("id" :: WireForm.roster [] idl.NodeFields) j fs
+        | WireForm.List inner, JArr xs ->
+            xs
+            |> List.indexed
+            |> List.fold
+                (fun acc (i, x) ->
+                    acc
+                    |> Result.bind (fun () -> strictValue idl inner x |> under (PathSegment.Index i)))
+                (Ok())
+        | WireForm.Map vt, JObj fs ->
+            fs
+            |> List.fold
+                (fun acc (k, v) -> acc |> Result.bind (fun () -> strictValue idl vt v |> under (PathSegment.Key k)))
+                (Ok())
+        | _ -> Ok()
+
+    /// A tagged object's members, against the case its discriminator names; an unknown tag is the
+    /// walk's to refuse.
+    and private strictTagged
+        (idl: Idl)
+        (cases: (string * IdlField list) list)
+        (extra: string list)
+        (j: JVal)
+        (fs: (string * JVal) list)
+        : Result<unit, DecodeError> =
+        match Decoder.tryMember idl.Wire.Discriminator j with
+        | Some(JStr tag) ->
+            match cases |> List.tryFind (fun (t, _) -> t = tag) with
+            | Some(_, fields) -> strictObject idl (idl.Wire.Discriminator :: extra) fields j fs
+            | None -> Ok()
+        | _ -> Ok()
+
+    /// One object: its members against the roster, then each meaningful field's value, in declared
+    /// order.
+    and private strictObject
+        (idl: Idl)
+        (extra: string list)
+        (fields: IdlField list)
+        (j: JVal)
+        (fs: (string * JVal) list)
+        : Result<unit, DecodeError> =
+        Decoder.members (WireForm.roster extra fields) j
+        |> Result.bind (fun () ->
+            fields
+            |> List.filter (fun f -> f.Opt <> HostOnly)
+            |> List.fold
+                (fun acc f ->
+                    acc
+                    |> Result.bind (fun () ->
+                        // At the CANONICAL spelling, as every refusal inside a member is (Phase 539).
+                        match WireForm.readMember idl fields f fs with
+                        | Some v -> strictValue idl f.Type v |> under (PathSegment.Key f.Name)
+                        | None -> Ok()))
+                (Ok()))
+
+    /// [[valueDetailed]] under the STRICT-MEMBERS reading (Phase 550): an object the vocabulary
+    /// declares that carries a member its declaration does not name is refused `UndeclaredMember` at
+    /// that member, before anything else is read; a document without one decodes exactly as
+    /// [[valueDetailed]] decodes it.
+    let valueStrictDetailed (idl: Idl) (t: IdlType) (j: JVal) : Result<IdlValue, DecodeError> =
+        strictValue idl t j |> Result.bind (fun () -> decodeValue idl t j)
+
+    /// [[decodeDetailed]] under the STRICT-MEMBERS reading (Phase 550) — see [[valueStrictDetailed]].
+    let decodeStrictDetailed (idl: Idl) (json: string) : Result<IdlValue, DecodeError> =
+        parsed json |> Result.bind (valueStrictDetailed idl TNode)
 
 
     /// Decode one parsed JSON value at a declared type, answering a typed refusal (Phase 310): its

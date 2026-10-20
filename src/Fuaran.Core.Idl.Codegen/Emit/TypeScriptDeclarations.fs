@@ -96,7 +96,7 @@ module internal TypeScriptDeclarations =
                     | MemberValue.IdentityDefault v -> walk v |> Result.map Some
                     | _ -> Ok None
               Record = fun _ members -> objectOf (keyed members)
-              Union = fun _ c members -> objectOf ((disc, SourceLit.tsString c.Tag) :: keyed members)
+              Union = fun u c members -> objectOf ((disc, SourceLit.tsString (u.WireTagOf c.Tag)) :: keyed members)
               Node =
                 fun id k kindMembers envMembers ->
                     let tagged = (disc, SourceLit.tsString k.Tag)
@@ -286,7 +286,7 @@ module internal TypeScriptDeclarations =
             unions
             |> List.map (fun u ->
                 u.Cases
-                |> List.map (fun c -> objectType [ disc + ": " + SourceLit.tsString c.Tag ] c.Fields)
+                |> List.map (fun c -> objectType [ disc + ": " + SourceLit.tsString (u.WireTagOf c.Tag) ] c.Fields)
                 |> sequenceR
                 |> Result.map (fun cases ->
                     tsTypeDocBlock u.Annotations

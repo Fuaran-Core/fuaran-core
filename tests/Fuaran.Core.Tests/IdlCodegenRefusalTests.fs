@@ -210,10 +210,12 @@ let tests =
                               Annotations = Annotations.Empty
                               Fields = [ f "src" (TUnion("Src", [])) Required ] } ]
                       Unions =
-                          [ { Name = "Src"
+                          [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "Src"
                               Params = []
                               Cases =
-                                [ { Tag = "Pair"
+                                [ { Hosted = None
+                                    Tag = "Pair"
                                     Fields = [ f "a" TStr Required; f "b" TStr Required ]
                                     Annotations = Annotations.Empty } ]
                               Annotations = Annotations.Empty } ]
@@ -270,10 +272,12 @@ let private unionIdl: Idl =
                 Annotations = Annotations.Empty
                 Fields = [ f "label" TStr Required; f "source" (TUnion("Source", [])) Required ] } ]
         Unions =
-            [ { Name = "Source"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Source"
                 Params = []
                 Cases =
-                  [ { Tag = "Inline"
+                  [ { Hosted = None
+                      Tag = "Inline"
                       Fields = [ f "text" TStr Required ]
                       Annotations = Annotations.Empty } ]
                 Annotations = Annotations.Empty } ] }
@@ -355,7 +359,8 @@ let supportTests =
 
 /// A hosted stamp: an `int` on the host and the wire, whose codec admits only a non-negative one.
 let private stamp: HostedCodec =
-    { FSharp = "int"
+    { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+      FSharp = "int"
       Encode = "(fun (n: int) -> JInt n)"
       Decode = "(fun (j: JVal) -> match j with JInt n when n >= 0 -> Ok n | _ -> Error \"a negative stamp\")"
       Wire = Some TInt
@@ -420,7 +425,8 @@ let scaffoldRefusalTests =
                   + "\"\n"
 
               let fsx =
-                  dllRef "Fuaran.Core.Wire.dll"
+                  dllRef "Fuaran.Core.Text.dll"
+                  + dllRef "Fuaran.Core.Wire.dll"
                   + dllRef "Fuaran.Core.Tree.dll"
                   + dllRef "Fuaran.Core.Validator.dll"
                   + decls

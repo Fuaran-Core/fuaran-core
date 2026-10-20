@@ -63,7 +63,8 @@ let private kind tag category fields : IdlKind =
       Fields = fields }
 
 let private case tag fields : IdlUnionCase =
-    { Tag = tag
+    { Hosted = None
+      Tag = tag
       Fields = fields
       Annotations = Annotations.Empty }
 
@@ -80,7 +81,8 @@ let private handler (fsharp: string) (ts: string) : IdlType =
 /// declaration takes.
 let private series: IdlType =
     THosted
-        { FSharp = "float list"
+        { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+          FSharp = "float list"
           Encode = "encSeries"
           Decode = "decSeries"
           Wire = None
@@ -134,11 +136,13 @@ let refIdl: Idl =
                 omit "value" (TUnion("Slot", [ TFloat ])) (VUnion("Fixed", [ "value", VFloat 0.0 ])) ]
           kind "Note" "content" [ req "body" (TUnion("Text", [])) ] ]
       Unions =
-        [ { Name = "Slot"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Slot"
             Params = [ "T" ]
             Cases =
               [ case "Fixed" [ req "value" (TVar "T") ]
-                { Tag = "Ref"
+                { Hosted = None
+                  Tag = "Ref"
                   Fields = [ req "name" TStr ]
                   // The retirement half of the annotation set (Phase 113) — nothing on
                   // the wire changes, every other surface renders it.
@@ -151,7 +155,8 @@ let refIdl: Idl =
                       Since = Some "0.1.0"
                       Doc = None } } ]
             Annotations = Annotations.Empty }
-          { Name = "Text"
+          { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Text"
             Params = []
             Cases =
               [ case "Inline" [ req "text" TStr ]

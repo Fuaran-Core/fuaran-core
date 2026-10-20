@@ -419,7 +419,8 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                   sField
                       "when"
                       (Fuaran.Core.Idl.THosted
-                          { FSharp = "System.DateOnly"
+                          { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                            FSharp = "System.DateOnly"
                             Encode = "encDate"
                             Decode = "decDate"
                             Wire = Some Fuaran.Core.Idl.TStr
@@ -433,13 +434,16 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                     sField "label" Fuaran.Core.Idl.TStr opt ]
                 Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
         Unions =
-            [ { Name = "Box"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Box"
                 Params = [ "T" ]
                 Cases =
-                  [ { Tag = "Empty"
+                  [ { Hosted = None
+                      Tag = "Empty"
                       Fields = []
                       Annotations = Fuaran.Core.Idl.Annotations.Empty }
-                    { Tag = "Full"
+                    { Hosted = None
+                      Tag = "Full"
                       Fields = [ sField "value" (Fuaran.Core.Idl.TVar "T") req ]
                       Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
                 Annotations = Fuaran.Core.Idl.Annotations.Empty } ]
@@ -707,8 +711,9 @@ let vectors: (string * string) list =
 
       // ---- Phase 315 — the light set's named exports. Appended, so every earlier row keeps its
       // place in the comparison. ----
-      // `OpStream.sha256Hash` is OpStream's own copy of the digest (D2): held to `Hash.sha256Hex`
-      // over the export corpus, and pinned at two values of its own.
+      // `OpStream.sha256Hash` is the chain-hash spelling of the kernel's digest (OpStream's own copy
+      // of it until Phase 531, D2 as amended): held to `Hash.sha256Hex` over the export corpus, and
+      // pinned at two values of its own.
       "sha256Hash/genesis", OpStream.sha256Hash "" "{\"seq\":0}"
       "sha256Hash/two-block", OpStream.sha256Hash "deadbeef" twoBlock
       "sha256Hash/agrees-with-sha256Hex",
@@ -982,18 +987,19 @@ let private sweepInputs: string list =
     @ [ for n in 0..80 -> String.replicate n "a" ]
     @ [ for n in [ 1; 2; 3; 55; 56; 57; 63; 64; 65; 119; 120; 127; 128; 129; 256; 1000 ] -> String.replicate n "xy" ]
 
-/// A `Schema` built from a sweep input, so `Column`'s private FNV-1a copy is exercised over the same
-/// inputs as the other two — including the non-ASCII ones, where a code-unit-vs-byte fold would show.
+/// A `Schema` built from a sweep input, so the schema fingerprint is exercised over the same inputs as
+/// the other columns — including the non-ASCII ones, where a code-unit-vs-byte fold would show.
 let private schemaOf (s: string) : Schema =
     [ Field.create (if s = "" then "c" else s) IntType
       Field.create ("n" + s) FloatType ]
 
 /// The hash sweep: one row per input, `hashSweep/NNN` (the input's index) to FOUR values joined by
-/// `/`, one per FNV-1a implementation the spine actually ships plus the digest beside them — the
-/// canonical `Hash.fnv1a`, `Hash.sha256Hex`, `OpStream`'s copy (through `defaultHash`, the op-stream
-/// CHAIN hash) and `Column`'s copy (through `Schema.fingerprint`). INDEXED rather than echoed, so the
-/// comparison never turns on console encoding. Probing only the canonical implementation is what let
-/// the chain hash stay divergent after the canonical one was fixed, which is why all three are here.
+/// `/` — `Hash.fnv1a`, `Hash.sha256Hex`, the op-stream CHAIN hash (`defaultHash`) and the column
+/// schema fingerprint (`Schema.fingerprint`). INDEXED rather than echoed, so the comparison never turns
+/// on console encoding. Until Phase 531 the last two were COPIES of `Hash.fnv1a` (D2), and probing only
+/// the canonical one is what let the chain hash stay divergent after the canonical one was fixed;
+/// since then all four are the text kernel's, and the row pins the hashes every consumer persists
+/// through their own surfaces, byte for byte as before.
 let hashSweep: (string * string) list =
     sweepInputs
     |> List.mapi (fun i s ->

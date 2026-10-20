@@ -348,252 +348,66 @@ module Jsonl =
         |> String.concat "\n"
 
 
-    let inline private isWs (c: char) =
-        c = ' ' || c = '\t' || c = '\n' || c = '\r'
-
     let private fail (pos: int) (reason: JsonlFaultReason) : 'a = raise (JsonlScanFault(pos, reason))
-
-    let inline private isHex (c: char) =
-        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-
-    let inline private hexVal (c: char) =
-        if c <= '9' then int c - int '0'
-        elif c >= 'a' then int c - int 'a' + 10
-        else int c - int 'A' + 10
-
-    /// The code unit of the `\uXXXX` escape whose backslash is at `i`, or `-1` when fewer than
-    /// four hex digits follow the `u`.
-    let private unicodeAt (s: string) (i: int) : int =
-        if
-            i + 5 < s.Length
-            && s[i + 1] = 'u'
-            && isHex s[i + 2]
-            && isHex s[i + 3]
-            && isHex s[i + 4]
-            && isHex s[i + 5]
-        then
-            (hexVal s[i + 2] <<< 12)
-            + (hexVal s[i + 3] <<< 8)
-            + (hexVal s[i + 4] <<< 4)
-            + hexVal s[i + 5]
-        else
-            -1
 
     let private escapeText (s: string) (i: int) (len: int) = s.Substring(i, min len (s.Length - i))
 
-    let inline private isHigh (u: int) = u >= 0xD800 && u <= 0xDBFF
-
-    let inline private isLow (u: int) = u >= 0xDC00 && u <= 0xDFFF
-
-    let inline private isShortEscape (c: char) =
-        c = '"'
-        || c = '\\'
-        || c = '/'
-        || c = 'b'
-        || c = 'f'
-        || c = 'n'
-        || c = 'r'
-        || c = 't'
-
-    /// Index just past the string token whose opening quote is at `start`, every escape held to
-    /// the JSON grammar (the eight single-letter escapes, and `\uXXXX` with four hex digits) and
-    /// the string held to well-formed UTF-16 with no raw control (Phase 466, the strict grammar's
-    /// rule, D157). A high surrogate is followed at once by a low one, whichever spelling each half
-    /// arrived in; a pair split between a raw unit and an escape is read. An unpaired ESCAPE is
-    /// `InvalidEscape` at its backslash (its six characters, or twelve for a high one), as it always
-    /// was. An unpaired RAW unit is `LoneSurrogate` at the unit, once what follows a raw high one is
+    /// The line reader's placement of the text kernel's string refusal (Phase 531). The grammar is the
+    /// kernel's (`JsonSyntax.readString`, the one string reader of the spine); the vocabulary and the
+    /// positions are this reader's, unchanged since Phase 466 (D157), and `proofs/OpStreamLoad.fst`'s
+    /// `string_tail` states them clause for clause. An escape the grammar does not have is
+    /// `InvalidEscape` at its backslash — the escape as read, six characters for a `\u` one. A `\u`
+    /// HIGH surrogate not followed at once by its low half is `InvalidEscape` at that escape's
+    /// backslash, its twelve characters, whatever followed it (the end of the line included). An
+    /// unpaired RAW surrogate is `LoneSurrogate` at the unit, once what follows a raw high one is
     /// known — the end of the line is `UnterminatedString`, a raw control its own refusal, an escape
     /// the grammar does not have that escape's. A raw U+0000 to U+001F is `RawControl` at the
-    /// character. `path` names the member or item the string is in; it is rendered only for a
-    /// refusal. `proofs/OpStreamLoad.fst`'s `string_tail` is this function clause for clause.
-    let internal skipString (s: string) (start: int) (path: unit -> string) : int =
-        let n = s.Length
-        let mutable i = start + 1
-        let mutable fin = false
-
-        while not fin do
-            if i >= n then
-                fail start JsonlFaultReason.UnterminatedString
-
-            let c = s[i]
-            let u = int c
-
-            if c = '"' then
-                i <- i + 1
-                fin <- true
-            elif c = '\\' then
-                if i + 1 >= n then
-                    fail start JsonlFaultReason.UnterminatedString
-
-                let e = s[i + 1]
-
-                if isShortEscape e then
-                    i <- i + 2
-                elif e = 'u' then
-                    let code = unicodeAt s i
-
-                    if code < 0 then
-                        fail i (JsonlFaultReason.InvalidEscape(escapeText s i 6))
-                    elif isHigh code then
-                        if i + 6 < n && s[i + 6] = '\\' then
-                            if isLow (unicodeAt s (i + 6)) then
-                                i <- i + 12
-                            else
-                                fail i (JsonlFaultReason.InvalidEscape(escapeText s i 12))
-                        elif i + 6 < n && isLow (int s[i + 6]) then
-                            i <- i + 7
-                        else
-                            fail i (JsonlFaultReason.InvalidEscape(escapeText s i 12))
-                    elif isLow code then
-                        fail i (JsonlFaultReason.InvalidEscape(escapeText s i 6))
-                    else
-                        i <- i + 6
-                else
-                    fail i (JsonlFaultReason.InvalidEscape("\\" + string e))
-            elif u < 0x20 then
-                fail i (JsonlFaultReason.RawControl(path ()))
-            elif isHigh u then
-                if i + 1 >= n then
-                    fail start JsonlFaultReason.UnterminatedString
-
-                let d = s[i + 1]
-
-                if isLow (int d) then
-                    i <- i + 2
-                elif d = '\\' then
-                    if i + 2 >= n then
-                        fail start JsonlFaultReason.UnterminatedString
-
-                    let e = s[i + 2]
-
-                    if e = 'u' then
-                        let code = unicodeAt s (i + 1)
-
-                        if code < 0 then
-                            fail (i + 1) (JsonlFaultReason.InvalidEscape(escapeText s (i + 1) 6))
-                        elif isLow code then
-                            i <- i + 7
-                        else
-                            fail i (JsonlFaultReason.LoneSurrogate(path ()))
-                    elif isShortEscape e then
-                        fail i (JsonlFaultReason.LoneSurrogate(path ()))
-                    else
-                        fail (i + 1) (JsonlFaultReason.InvalidEscape("\\" + string e))
-                elif int d < 0x20 then
-                    fail (i + 1) (JsonlFaultReason.RawControl(path ()))
-                else
-                    fail i (JsonlFaultReason.LoneSurrogate(path ()))
-            elif isLow u then
-                fail i (JsonlFaultReason.LoneSurrogate(path ()))
-            else
-                i <- i + 1
-
-        i
-
-    /// Decode the string token `skipString` has already accepted in `s`, from its opening quote at
-    /// `start` to just past its closing quote at `stop` (Phase 369: by runs, not characters). The
-    /// token is valid, so nothing here refuses — every fault and its position is `skipString`'s.
-    /// A body with no backslash is returned whole, by one `Substring`; otherwise each escape-free
-    /// run is copied by one ranged `Append` and only the escapes are decoded one by one, exactly as
-    /// before: a `\uXXXX` appends its code unit, so a surrogate pair spelled as two escapes (or a
-    /// raw half beside an escaped one) is carried through unit for unit, across runs and escapes.
-    let private decodeString (s: string) (start: int) (stop: int) : string =
-        let first = start + 1
-        // The closing quote: the body is `s[first .. last - 1]`.
-        let last = stop - 1
-
-        // The index of the first backslash in `s[from .. last - 1]`, or `last` when there is none.
-        // A loop, not `IndexOf(char, int, int)`: Fable maps no count argument.
-        let runEnd (from: int) =
-            let mutable j = from
-
-            while j < last && s[j] <> '\\' do
-                j <- j + 1
-
-            j
-
-        let firstEscape = runEnd first
-
-        if firstEscape >= last then
-            s.Substring(first, last - first)
+    /// character. The end of the line inside the token is `UnterminatedString` at its opening quote.
+    /// `path` names the member or item the string is in; it is rendered only for a refusal.
+    let private stringFault (s: string) (start: int) (path: unit -> string) (r: JsonStringRefusal) : 'a =
+        if r.PendingHigh >= 0 && r.PendingHighEscaped then
+            fail r.PendingHigh (JsonlFaultReason.InvalidEscape(escapeText s r.PendingHigh 12))
         else
-            let sb = System.Text.StringBuilder(last - first)
-            sb.Append(s, first, firstEscape - first) |> ignore
-            // `i` is always at a backslash, or at `last`.
-            let mutable i = firstEscape
+            match r.Fault with
+            | JsonStringFault.Unterminated
+            | JsonStringFault.UnterminatedEscape -> fail start JsonlFaultReason.UnterminatedString
+            | JsonStringFault.TruncatedUnicodeEscape
+            | JsonStringFault.BadHexDigit -> fail r.UnitAt (JsonlFaultReason.InvalidEscape(escapeText s r.UnitAt 6))
+            | JsonStringFault.UnknownEscape e -> fail r.UnitAt (JsonlFaultReason.InvalidEscape("\\" + string e))
+            | JsonStringFault.RawControl _ -> fail r.UnitAt (JsonlFaultReason.RawControl(path ()))
+            | JsonStringFault.HighWithoutLow -> fail r.PendingHigh (JsonlFaultReason.LoneSurrogate(path ()))
+            | JsonStringFault.LowWithoutHigh when s[r.UnitAt] = '\\' ->
+                fail r.UnitAt (JsonlFaultReason.InvalidEscape(escapeText s r.UnitAt 6))
+            | JsonStringFault.LowWithoutHigh -> fail r.UnitAt (JsonlFaultReason.LoneSurrogate(path ()))
+            // Not reachable: the line reader declares no bound, and no string holds Int32.MaxValue code
+            // points. Placed as the reader's own refusal rather than an exception, so the map is total.
+            | JsonStringFault.TooLong ->
+                fail r.UnitAt (JsonlFaultReason.Refused "a string past the line reader's bound")
 
-            while i < last do
-                match s[i + 1] with
-                | 'u' ->
-                    sb.Append(char (unicodeAt s i)) |> ignore
-                    i <- i + 6
-                | e ->
-                    (match e with
-                     | 'b' -> sb.Append('\b')
-                     | 'f' -> sb.Append('\f')
-                     | 'n' -> sb.Append('\n')
-                     | 'r' -> sb.Append('\r')
-                     | 't' -> sb.Append('\t')
-                     | other -> sb.Append(other))
-                    |> ignore
+    /// Index just past the string token whose opening quote is at `start`, held to the strict grammar
+    /// (`JsonSyntax.skipString`; refusals placed by `stringFault`).
+    let internal skipString (s: string) (start: int) (path: unit -> string) : int =
+        match JsonSyntax.skipString s start System.Int32.MaxValue with
+        | Ok stop -> stop
+        | Error r -> stringFault s start path r
 
-                    i <- i + 2
-
-                let e = runEnd i
-
-                if e > i then
-                    sb.Append(s, i, e - i) |> ignore
-
-                i <- e
-
-            sb.ToString()
+    /// The value of the string token whose opening quote is at `start`, and the index just past it
+    /// (`JsonSyntax.readString`, one pass: an escape-free token is one `Substring`, and one with an
+    /// escape is decoded into `scratch`); refused exactly as `skipString` refuses.
+    let private readString
+        (scratch: System.Text.StringBuilder)
+        (s: string)
+        (start: int)
+        (path: unit -> string)
+        : struct (string * int) =
+        match JsonSyntax.readString s start System.Int32.MaxValue scratch with
+        | Ok r -> r
+        | Error r -> stringFault s start path r
 
     /// A bare value's token held to the literal grammar: `true`, `false`, `null`, or a JSON number
-    /// (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`).
+    /// (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`, the text kernel's `JsonSyntax.isNumber`).
     let private isLiteral (t: string) : bool =
-        if t = "true" || t = "false" || t = "null" then
-            true
-        else
-            let n = t.Length
-            let mutable i = 0
-            let digit k = k < n && t[k] >= '0' && t[k] <= '9'
-
-            if i < n && t[i] = '-' then
-                i <- i + 1
-
-            let intStart = i
-
-            if i < n && t[i] = '0' then
-                i <- i + 1
-            else
-                while digit i do
-                    i <- i + 1
-
-            let mutable ok = i > intStart
-
-            if ok && i < n && t[i] = '.' then
-                i <- i + 1
-                let fracStart = i
-
-                while digit i do
-                    i <- i + 1
-
-                ok <- i > fracStart
-
-            if ok && i < n && (t[i] = 'e' || t[i] = 'E') then
-                i <- i + 1
-
-                if i < n && (t[i] = '+' || t[i] = '-') then
-                    i <- i + 1
-
-                let expStart = i
-
-                while digit i do
-                    i <- i + 1
-
-                ok <- i > expStart
-
-            ok && i = n
+        t = "true" || t = "false" || t = "null" || JsonSyntax.isNumber t
 
     /// Index just past the bare value at `start`: the token up to `,`, `}`, `]` or whitespace,
     /// held to the literal grammar.
@@ -601,7 +415,8 @@ module Jsonl =
         let n = s.Length
         let mutable i = start
 
-        while i < n && not (let c = s[i] in c = ',' || c = '}' || c = ']' || isWs c) do
+        while i < n
+              && not (let c = s[i] in c = ',' || c = '}' || c = ']' || JsonSyntax.isWhitespace c) do
             i <- i + 1
 
         let token = s.Substring(start, i - start)
@@ -668,6 +483,8 @@ module Jsonl =
         : int =
         let n = s.Length
         let frames = ResizeArray<JsonlFrame>()
+        // The one buffer the walk decodes an escaped key into.
+        let scratch = System.Text.StringBuilder()
         // The path of a value in the innermost container, and of a key (the container's own).
         let valuePath () = renderPath prefix frames frames.Count
 
@@ -687,7 +504,7 @@ module Jsonl =
         let mutable openAt = start
 
         let skipWs () =
-            while i < n && isWs s[i] do
+            while i < n && JsonSyntax.isWhitespace s[i] do
                 i <- i + 1
 
         let ended () =
@@ -730,8 +547,8 @@ module Jsonl =
                     state <- 5
                 | '"' ->
                     let top = frames[frames.Count - 1]
-                    let e = skipString s i keyPath
-                    top.Key <- decodeString s i e
+                    let struct (key, e) = readString scratch s i keyPath
+                    top.Key <- key
                     top.KeyAt <- i
                     i <- e
                     skipWs ()
@@ -864,7 +681,7 @@ module Jsonl =
 
         if brk >= 0 then
             Error(JsonlWriteFaultReason.MultiLine brk)
-        elif n > 0 && isWs raw[0] then
+        elif n > 0 && JsonSyntax.isWhitespace raw[0] then
             Error JsonlWriteFaultReason.NotTrimStable
         else
             try
@@ -876,7 +693,7 @@ module Jsonl =
                     let mutable allWs = true
 
                     for j in e .. n - 1 do
-                        if not (isWs raw[j]) then
+                        if not (JsonSyntax.isWhitespace raw[j]) then
                             allWs <- false
 
                     if allWs then
@@ -895,7 +712,7 @@ module Jsonl =
         let n = s.Length
         let mutable i = 0
 
-        while i < n && isWs s[i] do
+        while i < n && JsonSyntax.isWhitespace s[i] do
             i <- i + 1
 
         try
@@ -905,7 +722,7 @@ module Jsonl =
             let spans = ResizeArray<string * string * int>()
             let mutable e = walk s i [] true spans
 
-            while e < n && isWs s[e] do
+            while e < n && JsonSyntax.isWhitespace s[e] do
                 e <- e + 1
 
             if e < n then
@@ -952,10 +769,9 @@ module Jsonl =
             Error(JsonlFaultReason.ExpectedString "")
         else
             try
-                if skipString raw 0 rootPath = raw.Length then
-                    Ok(decodeString raw 0 raw.Length)
-                else
-                    Error(JsonlFaultReason.ExpectedString "")
+                match readString (System.Text.StringBuilder()) raw 0 rootPath with
+                | struct (value, stop) when stop = raw.Length -> Ok value
+                | _ -> Error(JsonlFaultReason.ExpectedString "")
             with JsonlScanFault(_, r) ->
                 Error r
 
@@ -1059,7 +875,12 @@ module Jsonl =
                 | Error f -> Error f
                 | Ok e when e <> v.Length -> bad ()
                 | Ok _ when items |> Seq.forall (fun (_, raw: string, _) -> raw[0] = '"') ->
-                    Ok [ for (_, raw, _) in items -> decodeString raw 0 raw.Length ]
+                    let scratch = System.Text.StringBuilder()
+
+                    Ok
+                        [ for (_, raw, _) in items ->
+                              let struct (value, _) = readString scratch raw 0 rootPath
+                              value ]
                 | Ok _ -> bad ()
 
     /// A required member holding the typed `Actor` object (Phase 320) —

@@ -65,6 +65,75 @@ module internal FSharpCodec =
     let encApplied (var: string) (t: IdlType) : Result<string, CodegenError> =
         SlotTraversal.encApplied encPrinter var t
 
+    // -----------------------------------------------------------------------
+    // Phase 550 (DECISIONS.md D198) — the host codecs' refusal, and the CASE-LEVEL host codec.
+    // -----------------------------------------------------------------------
+
+    /// A host decode expression applied to `arg`, answering a typed refusal: a typed codec's
+    /// refusal as it is (its code and its path, which the caller's position then prefixes), a
+    /// sentence codec's lifted by `dHosted` to `OutOfRange` where it was applied.
+    let hostedRead (h: HostedCodec) (arg: string) : string =
+        match h.Refusal with
+        | HostedRefusal.Typed -> sprintf "((%s) %s)" h.Decode arg
+        | HostedRefusal.Sentence -> sprintf "dHosted ((%s) %s)" h.Decode arg
+
+    /// The host arity of a case-level codec's payload type: its top-level `*` components
+    /// (`string * Cell` is two, `Cell` one), `unit` none. A `*` inside brackets is not top-level.
+    let hostArity (fsType: string) : int =
+        if fsType.Trim() = "unit" then
+            0
+        else
+            let mutable depth = 0
+            let mutable stars = 0
+
+            for ch in fsType do
+                match ch with
+                | '('
+                | '<'
+                | '[' -> depth <- depth + 1
+                | ')'
+                | '>'
+                | ']' -> depth <- depth - 1
+                | '*' when depth = 0 -> stars <- stars + 1
+                | _ -> ()
+
+            stars + 1
+
+    /// The binders of a host case's payload, `__p0 …`, as its pattern suffix and as one tuple value.
+    let private payloadBinders (h: HostedCodec) : string * string =
+        match hostArity h.FSharp with
+        | 0 -> "", "()"
+        | 1 -> " __p0", "__p0"
+        | n ->
+            let ps = List.init n (sprintf "__p%d") |> String.concat ", "
+            " (" + ps + ")", "(" + ps + ")"
+
+    /// Whether any union the resolution reaches declares a case-level host codec.
+    let declaresHostedCase (decl: Decl) : bool =
+        decl.Unions
+        |> List.exists (fun u -> u.Cases |> List.exists (fun c -> c.Hosted.IsSome))
+
+    /// A derivation walks a case's members as its fields, and a case-level host codec's case holds a
+    /// host payload instead: refused by name rather than derived wrongly.
+    let hostedCaseDerivations (decl: Decl) (requests: Derivation list) : Result<unit, CodegenError> =
+        match
+            requests,
+            decl.Unions
+            |> List.tryPick (fun u -> u.Cases |> List.tryFind (fun c -> c.Hosted.IsSome) |> Option.map (fun c -> u, c))
+        with
+        | _ :: _, Some(u, c) ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    sprintf
+                        "a structural derivation over case '%s.%s', which declares a case-level host codec"
+                        u.Name
+                        c.Tag,
+                    "a derivation walks a case's members as its fields, and this case's host payload is not its members",
+                    "request no derivation over a vocabulary reaching the case, or drop its case codec"
+                )
+            )
+        | _ -> Ok()
+
     /// The encode-side helper prelude, emitted once per module — the mirror of
     /// [[decodeHelpers]]. Only the float slot needs one: every other primitive is
     /// its `JVal` constructor.
@@ -232,25 +301,47 @@ let private encFloat (f: float) : JVal =
               Bare = fun _ c e -> arm c e
               Tagged =
                 fun _ c pieces ->
-                    let always =
-                        pieces
-                        |> List.choose (function
-                            | MemberPiece.Always(key, e) -> Some(key + ", " + e)
-                            | MemberPiece.Conditional _ -> None)
+                    match c.Hosted with
+                    // Phase 550 — a case-level host codec writes the members beside the tag.
+                    | Some h ->
+                        let pattern, payload = payloadBinders h
 
-                    // All-required cases keep the simple literal list (byte-identical to the
-                    // pre-optional emission); any other member switches to the `List.choose id`
-                    // omit-on-absence form.
-                    if List.length always = List.length pieces then
-                        arm c (sprintf "%s %s [ %s ]" typedName (SourceLit.fsString c.Tag) (String.concat "; " always))
-                    else
-                        arm
-                            c
-                            (sprintf
-                                "%s %s ([ %s ] |> List.choose id)"
-                                typedName
-                                (SourceLit.fsString c.Tag)
-                                (pieces |> List.map (MemberEncTraversal.print member') |> String.concat "; "))
+                        docFn ("encarm:" + u.Name + "." + c.Tag) "    "
+                        + sprintf
+                            "    | %s.%s%s -> %s %s ((%s) %s)"
+                            u.Name
+                            c.Tag
+                            pattern
+                            typedName
+                            (SourceLit.fsString (u.WireTagOf c.Tag))
+                            h.Encode
+                            payload
+                    | None ->
+                        let always =
+                            pieces
+                            |> List.choose (function
+                                | MemberPiece.Always(key, e) -> Some(key + ", " + e)
+                                | MemberPiece.Conditional _ -> None)
+
+                        // All-required cases keep the simple literal list (byte-identical to the
+                        // pre-optional emission); any other member switches to the `List.choose id`
+                        // omit-on-absence form.
+                        if List.length always = List.length pieces then
+                            arm
+                                c
+                                (sprintf
+                                    "%s %s [ %s ]"
+                                    typedName
+                                    (SourceLit.fsString (u.WireTagOf c.Tag))
+                                    (String.concat "; " always))
+                        else
+                            arm
+                                c
+                                (sprintf
+                                    "%s %s ([ %s ] |> List.choose id)"
+                                    typedName
+                                    (SourceLit.fsString (u.WireTagOf c.Tag))
+                                    (pieces |> List.map (MemberEncTraversal.print member') |> String.concat "; "))
               // The explicit `<'T>` type-parameter list (not just `'T` free in the signature) is
               // load-bearing for a generic union: `Binding.Format.source` is a fixed
               // `Binding<float>` *inside* `Binding<'T>`, so the generated `encBinding` recurses at a
@@ -385,7 +476,7 @@ let private encFloat (f: float) : JVal =
                 | Some e -> HostedSlot.Refused e
                 | None ->
                     match h.Wire with
-                    | None -> HostedSlot.Verbatim(sprintf "(fun (__j: JVal) -> dHosted ((%s) __j))" h.Decode)
+                    | None -> HostedSlot.Verbatim(sprintf "(fun (__j: JVal) -> %s)" (hostedRead h "__j"))
                     | Some w ->
                         let format =
                             match h.Format with
@@ -399,10 +490,10 @@ let private encFloat (f: float) : JVal =
                             w,
                             fun wd ->
                                 sprintf
-                                    "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> dHosted ((%s) __j)))"
+                                    "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> %s))"
                                     wd
                                     format
-                                    h.Decode
+                                    (hostedRead h "__j")
                         ) }
 
     /// Phase 524 — the F# printer of a member READ back out ([[MemberTraversal.decMember]]): a
@@ -525,13 +616,28 @@ let private encFloat (f: float) : JVal =
                 | Some r -> r
                 | None -> sprintf "Ok(%s)" (ctor c)
 
+            let wire = SourceLit.fsString (u.WireTagOf c.Tag)
+
             let body =
-                if List.isEmpty c.Fields then
-                    sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c)
-                else
+                match c.Hosted with
+                // Phase 550 — a case-level host codec reads the case object; a typed refusal keeps its
+                // code and its path, which are the case's.
+                | Some h ->
+                    let pattern, payload = payloadBinders h
+
+                    sprintf
+                        "        | %s ->\n            %s |> Result.map (fun %s -> %s.%s%s)"
+                        wire
+                        (hostedRead h "j")
+                        (if pattern = "" then "()" else payload)
+                        u.Name
+                        c.Tag
+                        (if pattern = "" then "" else payload)
+                | None when List.isEmpty c.Fields -> sprintf "        | %s -> Ok %s" wire (ctor c)
+                | None ->
                     sprintf
                         "        | %s ->\n%s"
-                        (SourceLit.fsString c.Tag)
+                        wire
                         (match refine with
                          | Some _ -> bindChainRefined "            " binders final
                          | None -> bindChain "            " binders final 0)
@@ -561,7 +667,7 @@ let private encFloat (f: float) : JVal =
                         sprintf
                             "    | JObj __fs ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> dUnknown %s (%s + __other + \"'\"))"
                             (String.concat "\n" arms)
-                            (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
+                            (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> u.WireTagOf c.Tag))))
                             (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
                     sprintf
@@ -722,9 +828,23 @@ let private encFloat (f: float) : JVal =
             | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
 
         let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
-            if List.isEmpty c.Fields then
-                sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c)
-            else
+            let wire = SourceLit.fsString (u.WireTagOf c.Tag)
+
+            match c.Hosted with
+            // Phase 550 — a case-level host codec: one read, lifted.
+            | Some h ->
+                let pattern, payload = payloadBinders h
+
+                sprintf
+                    "        | %s ->\n            cOne (%s) |> Result.map (fun %s -> %s.%s%s)"
+                    wire
+                    (hostedRead h "j")
+                    (if pattern = "" then "()" else payload)
+                    u.Name
+                    c.Tag
+                    (if pattern = "" then "" else payload)
+            | None when List.isEmpty c.Fields -> sprintf "        | %s -> Ok %s" wire (ctor c)
+            | None ->
                 let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
                 let body =
@@ -732,7 +852,7 @@ let private encFloat (f: float) : JVal =
                     | Some r -> collectRefined "            " binders r
                     | None -> collectAll "            " binders (sprintf "Ok(%s)" (ctor c))
 
-                sprintf "        | %s ->\n%s" (SourceLit.fsString c.Tag) body
+                sprintf "        | %s ->\n%s" wire body
 
         UnionTraversal.decoder
             { Read = read
@@ -752,7 +872,7 @@ let private encFloat (f: float) : JVal =
                         sprintf
                             "    | JObj __fs ->\n        dTag __fs |> cOne |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> cOne (dUnknown %s (%s + __other + \"'\")))"
                             (String.concat "\n" arms)
-                            (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
+                            (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> u.WireTagOf c.Tag))))
                             (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
                     sprintf
@@ -1445,6 +1565,7 @@ let private encFloat (f: float) : JVal =
 
         let witnessAndDerived =
             Decl.projectionsDeclared decl
+            |> Result.bind (fun () -> hostedCaseDerivations decl requests)
             |> Result.bind (fun () -> witnessDecl publicAccess decl.Projections msg kinds)
             |> Result.bind (fun w -> FSharpDerive.derivedDecl decl requests |> Result.map (fun ds -> w, ds))
             // Phase 377 — the collecting decoders and the public per-spec entries, on request, after
@@ -1486,7 +1607,10 @@ let private encFloat (f: float) : JVal =
                     nodeArgs
                 sprintf "let encodeNodeKindJson (k: NodeKind%s) : JVal = encNodeKind k" nodeArgs ]
               (sup.AccessorSplice |> Option.toList)
-              decodeHelpers idl.Wire.Discriminator decl.Hosted (not sup.CaseRefines.IsEmpty)
+              decodeHelpers
+                  idl.Wire.Discriminator
+                  (decl.Hosted || declaresHostedCase decl)
+                  (not sup.CaseRefines.IsEmpty)
               :: (if decl.HostedFormat then [ fsFormatHelper ] else [])
               @ (if declaresCanonicalFormAnywhere idl then
                      [ canonicalFormHelpers ]
@@ -1610,6 +1734,7 @@ let private encFloat (f: float) : JVal =
             |> List.exists (fun r -> r = Derivation.StructuralAccess || r = Derivation.KeyedPositions)
 
         Decl.projectionsDeclared decl
+        |> Result.bind (fun () -> hostedCaseDerivations decl requests)
         |> Result.bind (fun () ->
             if publicAccess then
                 witnessDecl true decl.Projections decl.Msg decl.Kinds |> Result.map ignore
