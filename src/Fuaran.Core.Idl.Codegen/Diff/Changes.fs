@@ -146,6 +146,9 @@ module internal DiffChanges =
                             if b.TransparentCase <> a.TransparentCase then
                                 UnionTransparencyChanged(name, b.TransparentCase, a.TransparentCase)
 
+                            if b.TagRule <> a.TagRule then
+                                UnionTagRuleChanged(name, b.TagRule, a.TagRule)
+
                             yield!
                                 diffNamed
                                     (fun c -> UnionCaseAdded(name, c))
@@ -153,6 +156,9 @@ module internal DiffChanges =
                                     (fun c bf af ->
                                         [ if bf.Annotations <> af.Annotations then
                                               UnionCaseAnnotationsChanged(name, c, bf.Annotations, af.Annotations)
+
+                                          if bf.Hosted <> af.Hosted then
+                                              UnionCaseHostedChanged(name, c, bf.Hosted, af.Hosted)
 
                                           yield! diffFields (OUnionCase(name, c)) bf.Fields af.Fields ])
                                     b.Cases

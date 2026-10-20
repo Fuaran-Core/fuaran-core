@@ -42,7 +42,8 @@ let private opt name ty = field name ty Optional
 let private case tag fields =
     { Tag = tag
       Fields = fields
-      Annotations = Annotations.Empty }
+      Annotations = Annotations.Empty
+      Hosted = None }
 
 let private kind tag category fields =
     { Tag = tag
@@ -62,7 +63,8 @@ let private rule = TUnion("Rule", [])
 let deriveIdl: Idl =
     { Enums = [ Declare.enumOf "Priority" [ "Low"; "Normal"; "High" ] ]
       Unions =
-        [ { Name = "Rule"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Rule"
             Params = []
             Cases =
               [ case "Always" []
@@ -73,7 +75,8 @@ let deriveIdl: Idl =
                 case "Guarded" [ req "guard" (TRecord "Guard") ]
                 case "Named" [ req "rules" (TMap rule) ] ]
             Annotations = Annotations.Empty }
-          { Name = "Trigger"
+          { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Trigger"
             Params = []
             Cases =
               [ case "Timer" [ req "owner" (TRecord "Owner"); req "every" TInt; req "fire" (handler "int") ]
@@ -84,7 +87,8 @@ let deriveIdl: Idl =
                       req "fire" (handler "string") ]
                 case "Manual" [ req "label" TStr ] ]
             Annotations = Annotations.Empty }
-          { Name = "Measure"
+          { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Measure"
             Params = []
             Cases = [ case "Hours" [ req "amount" TFloat ]; case "Days" [ req "amount" TFloat ] ]
             Annotations = Annotations.Empty } ]

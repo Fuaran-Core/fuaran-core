@@ -91,6 +91,27 @@
     },
     {
       "members": [
+        "Idl.Gen.fsharpCodecModule",
+        "Idl.Decode.valueStrictDetailed",
+        "Idl.Decode.decodeStrictDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 550 (D198): the codec-only module and the strict-members reading; the stand-in runs the generated module against host types and holds every case and every undeclared member to the interpreter's code and path.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlUnion.WireTagOf",
+        "Idl.IdlUnion.CaseByWireTag",
+        "Idl.UnionTagRule.Apply"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 550 (D198): the tag-naming rule, read by every encoder and decoder; the stand-in holds the derived tags on the wire across the interpreter, the TypeScript host and the codec-only module.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs",
+      "through": "Encode.encode"
+    },
+    {
+      "members": [
         "Decoder.pair"
       ],
       "class": "measured-elsewhere",

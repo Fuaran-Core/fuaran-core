@@ -50,6 +50,19 @@ module Gen =
     let fsharpModule (moduleName: string) (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         fsharpModuleWith GenSupport.Empty moduleName idl kindTags
 
+    /// Phase 550 — a CODEC-ONLY F# module over host-declared types (see [[CodecOnly]]): an abbreviation
+    /// of each reached declaration's host type, the encoder and decoder groups the structural module
+    /// prints, a strict-members walker beside each decoder, and per root the public `encode<Name>`,
+    /// `decode<Name>` and `decode<Name>Strict`. Refused by name for a root the vocabulary does not
+    /// declare, a reached declaration with no host type, a reached node, and type-declaring support.
+    let fsharpCodecModule
+        (sup: GenSupport)
+        (request: CodecOnly)
+        (moduleName: string)
+        (idl: Idl)
+        : Result<string, CodegenError> =
+        FSharpCodecOnly.fsharpCodecModule sup request moduleName idl
+
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
         JsonSchema.jsonSchema (Decl.declared idl)

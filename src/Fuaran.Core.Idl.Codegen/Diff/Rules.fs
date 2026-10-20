@@ -619,6 +619,42 @@ module internal DiffRules =
                 (sprintf "union %s transparent case changed" n)
                 [ row "a union's transparent case" "`breaking-wire`" "`no-generated-shape-change`" ]
 
+        | UnionTagRuleChanged(n, b, a) ->
+            rule
+                "UnionTagRuleChanged"
+                "36"
+                DiscriminatorFamily
+                n
+                (BreakingWire,
+                 sprintf
+                     "`%s` tag-naming rule %s → %s — every case's `$type` is derived from its name by the rule, so this re-tags every document carrying the union."
+                     n
+                     b
+                     a,
+                 "Idl.UnionTagRule (Phase 550); DECISIONS.md D163")
+                (always noShape)
+                (sprintf "union %s tag rule changed" n)
+                [ row "a union's tag-naming rule" "`breaking-wire`" "`no-generated-shape-change`" ]
+
+        | UnionCaseHostedChanged(u, c, b, a) ->
+            rule
+                "UnionCaseHostedChanged"
+                "37"
+                DiscriminatorFamily
+                (u + "." + c)
+                (Unclassifiable,
+                 sprintf
+                     "case `%s` of `%s` changed its case-level host codec. The case's fields still state its wire members, but the F# host reads and writes them through the codec, which the artifact does not show. CHECK: does every document the old codec wrote decode under the new one and come back byte-identical? If so, this is host-surface only; if not, it is BREAKING (wire)."
+                     c
+                     u,
+                 "Idl.IdlUnionCase.Hosted (Phase 550); docs/idl-stability-classes.md (anything crossing an erased slot)")
+                (always construction)
+                (sprintf "union case host codec changed: %s.%s" u c)
+                [ row
+                      "a union case's case-level host codec"
+                      "`undecided`"
+                      "`full-literal-construction` — the host case's payload is the codec's" ]
+
         | EnumAdded n ->
             rule
                 "EnumAdded"
@@ -1189,6 +1225,8 @@ module internal DiffRules =
           UnionCaseRemoved("", "")
           UnionParamsChanged("", [], [])
           UnionTransparencyChanged("", None, None)
+          UnionTagRuleChanged("", "", "")
+          UnionCaseHostedChanged("", "", "", "")
           EnumAdded ""
           EnumRemoved ""
           EnumCaseAdded("", "")

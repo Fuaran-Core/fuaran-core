@@ -53,6 +53,7 @@
     <Compile Include="Emit/FSharpDerive.fs" />
     <Compile Include="Emit/FSharpCanonicalForm.fs" />
     <Compile Include="Emit/FSharpCodec.fs" />
+    <Compile Include="Emit/FSharpCodecOnly.fs" />
     <Compile Include="Emit/JsonSchema.fs" />
     <Compile Include="Emit/TypeScriptCodec.fs" />
     <Compile Include="Emit/TypeScriptDeclarations.fs" />

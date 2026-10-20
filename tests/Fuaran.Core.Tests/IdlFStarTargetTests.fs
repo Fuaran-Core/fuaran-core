@@ -198,7 +198,8 @@ let private refusalOf (t: IdlType) =
 /// Phase 525 — a hosted slot with the given declared wire form and format (Phase 252).
 let private hostedAt (wire: IdlType option) (format: HostedFormat option) : IdlType =
     THosted
-        { FSharp = "System.DateOnly"
+        { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+          FSharp = "System.DateOnly"
           Encode = "encDate"
           Decode = "decDate"
           Wire = wire
@@ -465,10 +466,12 @@ let private defaultedFamilyIdl: Idl =
                 Fields = [ field "x" TStr Required ]
                 Annotations = Annotations.Empty } ]
         Unions =
-            [ { Name = "Src"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Src"
                 Params = []
                 Cases =
-                  [ { Tag = "Lit"
+                  [ { Hosted = None
+                      Tag = "Lit"
                       Fields = [ field "text" TStr Required ]
                       Annotations = Annotations.Empty } ]
                 Annotations = Annotations.Empty } ]
@@ -591,7 +594,8 @@ let idlFStarTargetTests =
                     fun () ->
                         refusalOf (
                             THosted
-                                { FSharp = ""
+                                { Refusal = Fuaran.Core.Idl.HostedRefusal.Sentence
+                                  FSharp = ""
                                   Encode = "enc"
                                   Decode = "dec"
                                   Wire = None
@@ -614,10 +618,12 @@ let idlFStarTargetTests =
                     fun () ->
                         tinyIdl (TUnion("Slot", [ TStr; TStr ])) Required
                         |> withUnion
-                            { Name = "Slot"
+                            { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "Slot"
                               Params = [ "T" ]
                               Cases =
-                                [ { Tag = "Fixed"
+                                [ { Hosted = None
+                                    Tag = "Fixed"
                                     Fields =
                                       [ { Name = "value"
                                           Type = TVar "T"
@@ -635,10 +641,12 @@ let idlFStarTargetTests =
                         let idl =
                             tinyIdl (TUnion("Text", [])) (OmitDefault(VUnion("Inline", [])))
                             |> withUnion
-                                { Name = "Text"
+                                { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                                  Name = "Text"
                                   Params = []
                                   Cases =
-                                    [ { Tag = "Inline"
+                                    [ { Hosted = None
+                                        Tag = "Inline"
                                         Fields =
                                           [ { Name = "text"
                                               Type = TStr
@@ -656,10 +664,12 @@ let idlFStarTargetTests =
                         let idl =
                             tinyIdl (TUnion("Text", [])) Required
                             |> withUnion
-                                { Name = "Text"
+                                { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                                  Name = "Text"
                                   Params = []
                                   Cases =
-                                    [ { Tag = "Inline"
+                                    [ { Hosted = None
+                                        Tag = "Inline"
                                         Fields =
                                           [ { Name = "text"
                                               Type = TStr
@@ -746,10 +756,12 @@ let idlFStarTargetTests =
               let level = Declare.enumWith "Level" [ "Low", "low"; "High", "high" ]
 
               let text =
-                  { Name = "Text"
+                  { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Text"
                     Params = []
                     Cases =
-                      [ { Tag = "Inline"
+                      [ { Hosted = None
+                          Tag = "Inline"
                           Fields =
                             [ { Name = "text"
                                 Type = TStr
@@ -758,7 +770,8 @@ let idlFStarTargetTests =
                                 Presence = None
                                 Annotations = Annotations.Empty } ]
                           Annotations = Annotations.Empty }
-                        { Tag = "Empty"
+                        { Hosted = None
+                          Tag = "Empty"
                           Fields = []
                           Annotations = Annotations.Empty } ]
                     Annotations = Annotations.Empty }

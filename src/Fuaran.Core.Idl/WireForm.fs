@@ -318,6 +318,21 @@ module internal WireForm =
         | WhenAbsent s -> (held s).IsNone
         | WhenEquals(s, v) -> held s = Some v
 
+    // -----------------------------------------------------------------------
+    // Phase 550 (DECISIONS.md D198) — the STRICT-MEMBERS policy's data: the members an object of a
+    // declared shape may carry, derived from the declaration and nowhere else. A strict reading
+    // refuses any other member `UndeclaredMember` at it (`Decoder.members`); a lenient reading (every
+    // reader without the word strict in its name) reads past it.
+    // -----------------------------------------------------------------------
+
+    /// The members an object holding `fields` may carry under a strict reading: `extra` (the
+    /// discriminator, a node's `id` and kind key — what the layout itself puts there), then every
+    /// spelling of every field that is on the wire. A host-only field is never on the wire, so its
+    /// name is undeclared there; a member whose presence condition fails is still declared.
+    let roster (extra: string list) (fields: IdlField list) : string list =
+        extra
+        @ (fields |> List.filter (fun f -> f.Opt <> HostOnly) |> List.collect spellings)
+
     /// The member `f` as the DECODER reads it from a wire object: under its [[spellings]], and absent when its presence condition fails — so a
     /// meaningless member decodes as its optionality's absence, exactly as if the document had not
     /// carried it.

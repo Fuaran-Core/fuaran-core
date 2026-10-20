@@ -233,8 +233,8 @@ module internal TypeScriptCodec =
                 + SourceLit.tsString (Canonical.write Rendering.CrossHost j)
           Record = fun _ _ members -> members |> List.map snd |> String.concat " && "
           Union =
-            fun src _ c members ->
-                (tsDiscProp disc src + " === " + SourceLit.tsString c.Tag)
+            fun src u c members ->
+                (tsDiscProp disc src + " === " + SourceLit.tsString (u.WireTagOf c.Tag))
                 :: (members |> List.map snd)
                 |> String.concat " && "
           Some = id
@@ -386,7 +386,12 @@ module internal TypeScriptCodec =
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            ann + "    case " + SourceLit.tsString c.Tag + ": return " + body + ";"
+            ann
+            + "    case "
+            + SourceLit.tsString (u.WireTagOf c.Tag)
+            + ": return "
+            + body
+            + ";"
 
         UnionEncTraversal.encoder
             { Member = member'
@@ -398,7 +403,7 @@ module internal TypeScriptCodec =
                     arm
                         c
                         ("typed("
-                         + SourceLit.tsString c.Tag
+                         + SourceLit.tsString (u.WireTagOf c.Tag)
                          + ", ["
                          + (pieces |> List.map (MemberEncTraversal.print member') |> String.concat ", ")
                          + "])")
@@ -605,9 +610,9 @@ module internal TypeScriptCodec =
 
             ann
             + "    case "
-            + SourceLit.tsString c.Tag
+            + SourceLit.tsString (u.WireTagOf c.Tag)
             + ": return "
-            + tsObjectLit [ tsDiscKey disc, SourceLit.tsString c.Tag ] members
+            + tsObjectLit [ tsDiscKey disc, SourceLit.tsString (u.WireTagOf c.Tag) ] members
             + ";"
 
         UnionTraversal.decoder
@@ -621,7 +626,7 @@ module internal TypeScriptCodec =
                     "  return { "
                     + tsDiscKey disc
                     + ": "
-                    + SourceLit.tsString c.Tag
+                    + SourceLit.tsString (u.WireTagOf c.Tag)
                     + ", "
                     + SourceLit.tsString f.Name
                     + ": "
@@ -641,7 +646,7 @@ module internal TypeScriptCodec =
                         "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
                         + String.concat "\n" arms
                         + "\n      default: return dUnknown("
-                        + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
+                        + SourceLit.tsString (oneOf (u.Cases |> List.map (fun c -> u.WireTagOf c.Tag)))
                         + ", "
                         + SourceLit.tsString ("unknown " + u.Name + " case: ")
                         + " + "

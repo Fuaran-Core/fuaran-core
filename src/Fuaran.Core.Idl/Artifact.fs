@@ -329,6 +329,21 @@ module Artifact =
               Default = []
               Omits = List.isEmpty }
 
+        /// Phase 550 — a union whose wire tags are its case names writes no `tagRule`.
+        let tagRule: Omission<UnionTagRule> =
+            { Owner = "a union"
+              Key = "tagRule"
+              Default = UnionTagRule.CaseName
+              Omits = (=) UnionTagRule.CaseName }
+
+        /// Phase 550 — a host surface (a hosted slot's, a case codec's) whose decode answers a
+        /// sentence writes no `refusal`.
+        let hostedRefusal: Omission<HostedRefusal> =
+            { Owner = "a hosted slot's host surface"
+              Key = "refusal"
+              Default = HostedRefusal.Sentence
+              Omits = (=) HostedRefusal.Sentence }
+
         /// Phase 707 — an enum whose wire strings are its case names writes no `hostCases`.
         let hostCases: Omission<string list option> =
             { Owner = "an enum"
@@ -348,7 +363,9 @@ module Artifact =
           Omit.caseAnnotations.Owner, Omit.caseAnnotations.Key
           Omit.hostCases.Owner, Omit.hostCases.Key
           Omit.fieldAliases.Owner, Omit.fieldAliases.Key
-          Omit.enumAliases.Owner, Omit.enumAliases.Key ]
+          Omit.enumAliases.Owner, Omit.enumAliases.Key
+          Omit.tagRule.Owner, Omit.tagRule.Key
+          Omit.hostedRefusal.Owner, Omit.hostedRefusal.Key ]
 
     /// The member `o` declares, written away from its default and read as it when absent.
     let private omitting
@@ -428,15 +445,42 @@ module Artifact =
                   Placeholder = p })
             (fun s -> s.FSharp, s.TypeScript, s.Placeholder)
 
-    /// A hosted slot's `hostSurface`: its F# type and its two codec names.
-    let private hostedSurface: Codec<string * string * string> =
-        stringRecord3 "fsharp" "encode" "decode" (fun f e d -> f, e, d) id
 
     /// Phase 391 — a hosted slot's `format` is the closed [[HostedFormat]]; an unknown name is
     /// `UnknownTag` at it.
     let private hostedFormat: Codec<HostedFormat> =
         Codec.enum (HostedFormat.all |> List.map (fun f -> HostedFormat.name f, f))
         |> declared "format"
+
+    /// Phase 550 — what a hosted slot's decode answers on a refusal.
+    let private hostedRefusal: Codec<HostedRefusal> =
+        Codec.enum [ "sentence", HostedRefusal.Sentence; "typed", HostedRefusal.Typed ]
+        |> declared "hosted refusal"
+
+    /// A hosted slot's `hostSurface`: its F# type, its two codec expressions and (Phase 550) what its
+    /// decode answers on a refusal, written only when it is the typed `DecodeError`. The refusal is a
+    /// fact about the host codec, never the wire, so it sits inside the host surface the stability
+    /// classifier reads as host-surface.
+    let private hostedSurface: Codec<HostedCodec> =
+        (Codec.record (fun f e d refusal ->
+            { FSharp = f
+              Encode = e
+              Decode = d
+              Wire = None
+              Format = None
+              Refusal = refusal })
+        : CodecFields<HostedCodec, _>)
+        |> Codec.field "fsharp" _.FSharp Codec.string
+        |> Codec.field "encode" _.Encode Codec.string
+        |> Codec.field "decode" _.Decode Codec.string
+        |> omitting Omit.hostedRefusal _.Refusal hostedRefusal
+        |> Codec.build
+        |> declared "hostSurface (fsharp, encode, decode)"
+
+    /// Phase 550 — a union's tag-naming rule.
+    let private tagRule: Codec<UnionTagRule> =
+        Codec.enum [ "caseName", UnionTagRule.CaseName; "lowerFirst", UnionTagRule.LowerFirst ]
+        |> declared "tag rule"
 
     /// Phase 252 — a hosted slot's DECLARED wire form, as a type object, or the string `"json"`
     /// when it declares none (carried verbatim, byte-for-byte what every earlier artifact wrote).
@@ -560,13 +604,8 @@ module Artifact =
                       | THosted h -> Some h
                       | _ -> None)
                       THosted
-                      (Codec.record (fun (f, e, d) w fmt ->
-                          { FSharp = f
-                            Encode = e
-                            Decode = d
-                            Wire = w
-                            Format = fmt })
-                       |> Codec.field "hostSurface" (fun h -> h.FSharp, h.Encode, h.Decode) hostedSurface
+                      (Codec.record (fun (surface: HostedCodec) w fmt -> { surface with Wire = w; Format = fmt })
+                       |> Codec.field "hostSurface" id hostedSurface
                        |> lenient "wire" None _.Wire (hostedWire self)
                        |> Codec.optField "format" _.Format hostedFormat) ]
             |> declared "type")
@@ -839,16 +878,28 @@ module Artifact =
         |> Codec.build
         |> declared "kind"
 
+    /// Phase 550 — a case-level host codec: the host surface and the refusal. It declares no wire
+    /// form of its own (the case's fields do), so a case codec is read with `Wire` and `Format` unset.
+    let private caseHosted: Codec<HostedCodec> =
+        Codec.record id
+        |> Codec.field "hostSurface" id hostedSurface
+        |> Codec.build
+        |> declared "case host codec"
+
     let private unionCase: Codec<IdlUnionCase> =
-        (Codec.record (fun tag fs ann ->
+        (Codec.record (fun tag fs ann hosted ->
             ({ Tag = tag
                Fields = fs
-               Annotations = ann }
+               Annotations = ann
+               Hosted = hosted }
             : IdlUnionCase))
         : CodecFields<IdlUnionCase, _>)
         |> Codec.field "tag" _.Tag Codec.string
         |> Codec.field "fields" _.Fields fields
         |> annotated _.Annotations
+        // Phase 550 — a case-level host codec: its host surface and its refusal, written only when
+        // declared.
+        |> Codec.optField "hosted" _.Hosted caseHosted
         |> Codec.build
         |> declared "union case"
 
@@ -860,11 +911,12 @@ module Artifact =
     /// read back, so an artifact cannot claim a per-union transparency the declared policy does
     /// not state.
     let private union: Codec<IdlUnion * string option> =
-        (Codec.record (fun name ps cases transparent ann ->
+        (Codec.record (fun name ps cases transparent ann rule ->
             ({ Name = name
                Params = ps
                Cases = cases
-               Annotations = ann }
+               Annotations = ann
+               TagRule = rule }
             : IdlUnion),
             transparent)
         : CodecFields<IdlUnion * string option, _>)
@@ -875,6 +927,8 @@ module Artifact =
         |> Codec.optField "transparentCase" snd Codec.string
         // Phase 542 — the union's OWN annotations.
         |> annotated (fun (u, _) -> u.Annotations)
+        // Phase 550 — the tag-naming rule, omitted at `caseName`.
+        |> omitting Omit.tagRule (fun (u, _) -> u.TagRule) tagRule
         |> Codec.build
         |> declared "union"
 

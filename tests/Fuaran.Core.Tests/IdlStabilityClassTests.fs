@@ -56,7 +56,8 @@ module private Fixtures =
           Annotations = ann }
 
     let case tag fields : IdlUnionCase =
-        { Tag = tag
+        { Hosted = None
+          Tag = tag
           Fields = fields
           Annotations = ann }
 
@@ -67,7 +68,8 @@ module private Fixtures =
     let baseIdl: Idl =
         { Kinds = [ kindOf "Note" [ fld "body" TStr Required; fld "loudness" (TEnum "Loudness") Optional ] ]
           Unions =
-            [ { Name = "Source"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Source"
                 Params = []
                 Cases =
                   [ case "Inline" [ fld "text" TStr Required ]

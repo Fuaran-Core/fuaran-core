@@ -89,10 +89,12 @@ let private envelopeIdl: Idl =
                 req "trim" (TRecord "Trim")
                 req "source" (TUnion("Source", [])) ] } ]
       Unions =
-        [ { Name = "Source"
+        [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+            Name = "Source"
             Params = []
             Cases =
-              [ { Tag = "Literal"
+              [ { Hosted = None
+                  Tag = "Literal"
                   // the union-case leg
                   Fields = [ req "text" TStr; omit "scale" TInt (VInt 1) ]
                   Annotations = Annotations.Empty } ]

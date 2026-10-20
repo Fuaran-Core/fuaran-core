@@ -48,6 +48,12 @@ type Change =
     /// The union's bare-encoded case moved, appeared or vanished: every document using
     /// it changes bytes — a wire break.
     | UnionTransparencyChanged of name: string * before: string option * after: string option
+    /// The union's tag-naming rule moved (Phase 550): every case's wire tag is re-derived — a
+    /// wire break.
+    | UnionTagRuleChanged of name: string * before: string * after: string
+    /// A union case's case-level host codec was declared, retired or moved (Phase 550): the F#
+    /// host reads and writes the case through other code, which the artifact cannot see.
+    | UnionCaseHostedChanged of union: string * case: string * before: string * after: string
     /// A new closed string set: additive.
     | EnumAdded of name: string
     /// A closed string set retired: a wire break.

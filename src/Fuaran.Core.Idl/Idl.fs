@@ -186,7 +186,20 @@ and HostedCodec =
         Wire: IdlType option
         /// A closed string format on top of a `Some TStr` wire ([[HostedFormat]]).
         Format: HostedFormat option
+        /// What [[Decode]] answers on a refusal (Phase 550): a SENTENCE, which the generated
+        /// decoder lifts to `OutOfRange` at the slot, or a typed `DecodeError`, whose code and
+        /// path it keeps, under the slot's path. [[HostedRefusal.Sentence]] is every slot
+        /// declared before the choice existed.
+        Refusal: HostedRefusal
     }
+
+/// What a hosted slot's decode expression answers on a refusal (Phase 550, DECISIONS.md D198).
+and [<RequireQualifiedAccess>] HostedRefusal =
+    /// `JVal -> Result<'host, string>`: the sentence becomes `OutOfRange` at the slot.
+    | Sentence
+    /// `JVal -> Result<'host, DecodeError>`: the refusal keeps its own code and its path, placed
+    /// under the slot's path.
+    | Typed
 
 /// Where a node's KIND BODY sits relative to its `id` on the wire (Phase 109).
 /// Both readiness spikes (`SecondDomainSpike.fs`, `ScoreDomainSpike.fs`) measured
@@ -526,14 +539,43 @@ and IdlKind =
 /// One case of an [[IdlUnion]]: its discriminator tag and the fields beside it.
 and IdlUnionCase =
     {
-        /// The discriminator value; unique within its union.
+        /// The case name, unique within its union. It is the discriminator value too unless the
+        /// union declares another [[UnionTagRule]] (Phase 550): the wire then carries
+        /// [[IdlUnion.WireTagOf]] of it.
         Tag: string
         /// The case's fields, which may mention the union's type parameters as [[TVar]]. A
         /// declared transparent case has exactly one, and it is encoded bare.
         Fields: IdlField list
         /// What is true ABOUT this case (Phase 113) — see [[IdlField.Annotations]].
         Annotations: Annotations
+        /// A CASE-LEVEL host codec (Phase 550, DECISIONS.md D198), or `None` — every case declared
+        /// before the slot existed. When declared, the generated F# reads and writes the members
+        /// beside the tag through it rather than field by field: [[HostedCodec.FSharp]] is the host
+        /// case's payload, its fields in order as a tuple type (`string * Cell`, one component per
+        /// host field); `Encode` is `'payload -> (string * JVal) list`, the members beside the tag;
+        /// `Decode` reads the case OBJECT, answering per [[HostedCodec.Refusal]], a typed refusal
+        /// kept under the case's path. [[Fields]] still declare the members' wire forms, which every
+        /// other leg reads — so the host case may have fewer fields than the wire has members, and
+        /// a member may be read at a type its sibling states (a query predicate's `type` + `value`).
+        Hosted: HostedCodec option
     }
+
+/// How a union case's WIRE tag derives from its host case name (Phase 550, DECISIONS.md D198) —
+/// the tag-naming rule, declared on the union so that no tag is spelled by hand.
+and [<RequireQualifiedAccess>] UnionTagRule =
+    /// The wire tag IS the case name — every union declared before the rule existed.
+    | CaseName
+    /// The case name with its first letter lowered (D163's seam rule): `NoSuchCapability` is
+    /// written `noSuchCapability`.
+    | LowerFirst
+
+    /// The wire tag of the case named `caseName` under this rule.
+    member this.Apply(caseName: string) : string =
+        match this with
+        | CaseName -> caseName
+        | LowerFirst when caseName.Length > 0 ->
+            string (System.Char.ToLowerInvariant caseName[0]) + caseName.Substring 1
+        | LowerFirst -> caseName
 
 /// A `$type`-discriminated value union (e.g. `Binding` has cases `Static` / `State`).
 and IdlUnion =
@@ -549,7 +591,19 @@ and IdlUnion =
         /// [[Annotations.Empty]] for a union that says nothing, which is every union
         /// declared before the slot existed; the artifact then omits it.
         Annotations: Annotations
+        /// How each case's wire tag derives from its case name (Phase 550). [[IdlUnionCase.Tag]]
+        /// is the HOST case name; the wire carries [[WireTagOf]] of it.
+        /// [[UnionTagRule.CaseName]] — every union declared before the rule existed — writes the
+        /// case name itself, and the artifact omits it.
+        TagRule: UnionTagRule
     }
+
+    /// The wire tag of the case named `caseName` — [[TagRule]] applied.
+    member this.WireTagOf(caseName: string) : string = this.TagRule.Apply caseName
+
+    /// The case whose WIRE tag is `wireTag`, if any.
+    member this.CaseByWireTag(wireTag: string) : IdlUnionCase option =
+        this.Cases |> List.tryFind (fun c -> this.WireTagOf c.Tag = wireTag)
 
 /// A closed set of bare strings on the wire.
 ///
@@ -695,8 +749,9 @@ and IdlValue =
     /// checks it against [[IdlEnum.WireCases]].
     | VEnum of string
     /// A tagged value: a union case (matches [[TUnion]]), and also a bare kind ([[TKind]]) or a
-    /// tree op ([[TOp]]). `fields` are by name; one the owner does not declare is refused, and
-    /// order does not matter.
+    /// tree op ([[TOp]]). `tag` is the WIRE tag, as [[VEnum]] carries the wire string: a union
+    /// case's [[IdlUnion.WireTagOf]] its case name (Phase 550). `fields` are by name; one the owner
+    /// does not declare is refused, and order does not matter.
     | VUnion of tag: string * fields: (string * IdlValue) list
     /// A list value (matches [[TList]]), every element at the list's item type.
     | VList of IdlValue list

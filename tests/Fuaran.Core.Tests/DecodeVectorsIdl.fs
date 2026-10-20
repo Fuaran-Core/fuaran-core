@@ -184,12 +184,14 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                 let cases =
                     items "cases" shape
                     |> List.map (fun c ->
-                        { Tag = Option.defaultValue "" (str "tag" c)
+                        { Hosted = None
+                          Tag = Option.defaultValue "" (str "tag" c)
                           Fields = Decoder.tryMember "shape" c |> Option.map fields |> Option.defaultValue []
                           Annotations = Annotations.Empty })
 
                 unions.Add
-                    { Name = name
+                    { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                      Name = name
                       Params = []
                       Cases = cases
                       Annotations = Annotations.Empty }

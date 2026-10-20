@@ -656,8 +656,11 @@ module internal ValueTraversal =
                 | Some u when List.length u.Params <> List.length args ->
                     mismatch (sprintf "union '%s' applied to %d type arguments" name (List.length args))
                 | Some u ->
-                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    match u.CaseByWireTag tag with
                     | None -> mismatch (sprintf "the case '%s', which union '%s' does not declare" tag name)
+                    // Phase 550 — a case-level host codec's case holds a HOST payload, which no
+                    // backend can spell from the case's wire members.
+                    | Some c when c.Hosted.IsSome -> Error(p.Unmatched t v)
                     | Some c ->
                         let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
 

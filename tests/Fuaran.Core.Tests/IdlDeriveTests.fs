@@ -144,7 +144,8 @@ let private contravariantIdl =
                     { u with
                         Cases =
                             u.Cases
-                            @ [ { Tag = "Echo"
+                            @ [ { Hosted = None
+                                  Tag = "Echo"
                                   Fields =
                                     [ { Name = "back"
                                         Type =
@@ -1119,7 +1120,8 @@ module internal Projected =
     let case tag fields =
         { Tag = tag
           Fields = fields
-          Annotations = Annotations.Empty }
+          Annotations = Annotations.Empty
+          Hosted = None }
 
     let rule = TUnion("Rule", [])
     let trigger = TUnion("Trigger", [])
@@ -1135,11 +1137,13 @@ module internal Projected =
     let idlWith (gateFields: IdlField list) : Idl =
         { Enums = []
           Unions =
-            [ { Name = "Rule"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Rule"
                 Params = []
                 Cases = [ case "Always" []; case "Equals" [ req "key" TStr; req "value" TStr ] ]
                 Annotations = Annotations.Empty }
-              { Name = "Trigger"
+              { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Trigger"
                 Params = []
                 Cases =
                   [ case
@@ -1484,7 +1488,8 @@ module private DeclLaws =
     let case tag fields =
         { Tag = tag
           Fields = fields
-          Annotations = Annotations.Empty }
+          Annotations = Annotations.Empty
+          Hosted = None }
 
     /// A vocabulary whose node ENVELOPE is the only root of a record and an enum — reached from
     /// no kind — so a resolution that forgot the envelope as a root would drop them.
@@ -1587,7 +1592,8 @@ module private DeclLaws =
     let growing: Idl =
         { MiniIdl.miniIdl with
             Unions =
-                [ { Name = "Grow"
+                [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Grow"
                     Params = [ "T" ]
                     Cases =
                       [ case "Leaf" [ field "value" (TVar "T") Required ]
@@ -1871,7 +1877,8 @@ module private NullChecked =
     let case tag fields =
         { Tag = tag
           Fields = fields
-          Annotations = Annotations.Empty }
+          Annotations = Annotations.Empty
+          Hosted = None }
 
     let kind tag fields =
         { Tag = tag
@@ -1885,7 +1892,8 @@ module private NullChecked =
     let idl: Idl =
         { Enums = []
           Unions =
-            [ { Name = "Binding"
+            [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                Name = "Binding"
                 Params = [ "T" ]
                 Cases =
                   [ case "Lit" [ field "value" (TVar "T") Required ]

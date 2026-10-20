@@ -215,7 +215,7 @@ module internal TypeScriptDerived =
                 holding
                 |> List.map (fun (c, fs) ->
                     listed (tsProp "v" << _.Name) (List.map snd fs)
-                    |> Result.map (sprintf "    case %s: return %s;" (SourceLit.tsString c.Tag)))
+                    |> Result.map (sprintf "    case %s: return %s;" (SourceLit.tsString (u.WireTagOf c.Tag))))
                 |> sequenceR
 
             let mapperArms =
@@ -225,7 +225,7 @@ module internal TypeScriptDerived =
                     |> Result.map (fun (lets, assigns) ->
                         sprintf
                             "    case %s: {\n%s      return { ...v, %s };\n    }"
-                            (SourceLit.tsString c.Tag)
+                            (SourceLit.tsString (u.WireTagOf c.Tag))
                             lets
                             assigns))
                 |> sequenceR
@@ -436,7 +436,7 @@ module internal TypeScriptDerived =
                 recursive
                 |> List.map (fun (c, fs) ->
                     Derive.foldMembers folder ctx u (List.map snd fs) (tsProp "v" << _.Name) "state" 0
-                    |> Result.map (sprintf "      case %s: return %s;" (SourceLit.tsString c.Tag)))
+                    |> Result.map (sprintf "      case %s: return %s;" (SourceLit.tsString (u.WireTagOf c.Tag))))
                 |> sequenceR)
             |> Result.map (fun arms ->
                 [ sprintf "  // Fold `folder` over this value and every nested `%s` it holds, in preorder." u.Name
@@ -461,7 +461,11 @@ module internal TypeScriptDerived =
                   yield "  " + SourceLit.tsKey field + "(v) {"
                   yield "    switch (" + tsDiscProp disc "v" + ") {"
                   for c, _, _ in carriers do
-                      yield sprintf "      case %s: return %s;" (SourceLit.tsString c.Tag) (tsProp "v" field)
+                      yield
+                          sprintf
+                              "      case %s: return %s;"
+                              (SourceLit.tsString (u.WireTagOf c.Tag))
+                              (tsProp "v" field)
                   yield "      default: return undefined;"
                   yield "    }"
                   yield "  }," ]
@@ -648,9 +652,9 @@ module internal TypeScriptDerived =
               Arm =
                 fun _ c members ->
                     "      case "
-                    + SourceLit.tsString c.Tag
+                    + SourceLit.tsString (u.WireTagOf c.Tag)
                     + ": {\n"
-                    + tsColObject "        " [ tsDiscKey disc, SourceLit.tsString c.Tag ] members
+                    + tsColObject "        " [ tsDiscKey disc, SourceLit.tsString (u.WireTagOf c.Tag) ] members
                     + "\n      }"
               // A transparent union reads its single-field case bare, collecting through it.
               Bare =
@@ -658,7 +662,7 @@ module internal TypeScriptDerived =
                     "  return { "
                     + tsDiscKey disc
                     + ": "
-                    + SourceLit.tsString c.Tag
+                    + SourceLit.tsString (u.WireTagOf c.Tag)
                     + ", "
                     + SourceLit.tsString f.Name
                     + ": "
@@ -679,7 +683,7 @@ module internal TypeScriptDerived =
                     + "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
                     + String.concat "\n" arms
                     + "\n      default: return dUnknown("
-                    + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
+                    + SourceLit.tsString (oneOf (u.Cases |> List.map (fun c -> u.WireTagOf c.Tag)))
                     + ", "
                     + SourceLit.tsString ("unknown " + u.Name + " case: ")
                     + " + "

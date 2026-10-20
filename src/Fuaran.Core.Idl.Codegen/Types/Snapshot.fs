@@ -153,6 +153,9 @@ type CaseSnap =
         /// The case's own canonical annotation set — `""` when it declares none or the
         /// revision predates the key.
         Annotations: string
+        /// The case's canonical case-level host codec block (Phase 550) — `""` when it declares
+        /// none or the revision predates the key.
+        Hosted: string
     }
 
 /// One value-union of a revision: its type parameters, its cases and the case it
@@ -170,6 +173,9 @@ type UnionSnap =
         /// The case that encodes as a bare value instead of a `$type`-tagged object, or
         /// `None`. Any move is a wire break.
         TransparentCase: string option
+        /// The tag-naming rule (Phase 550), `"caseName"` when the revision states none. Any move
+        /// re-tags every case on the wire — a wire break.
+        TagRule: string
     }
 
 /// One closed string set of a revision.
