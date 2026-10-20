@@ -183,63 +183,68 @@ let tests =
                   "drift flagged with delta"
           } ]
 
-// ---- Phase 383 — observeTree is total over a hand-built state ----
+// ---- Phase 523 — the state is opaque; its order is read, never set ----
+//
+// Until `0.39.0` both fields of `ObserverState` were public, so a caller could hand in a state whose
+// `Order` disagreed with its `Entries`, and `tryObserveTree` named the breach (Phase 383). The
+// representation is private now: the verbs are the only constructors, and these read what they built.
 
 [<Tests>]
-let totalityTests =
-    let w = Fuaran.Core.ObserverWitness.create deriveBox
+let readerTests =
+    let w = ObserverWitness.create deriveBox
+    let i = box 10.0 10.0 5.0
 
-    let box =
-        { Width = 10.0
-          Height = 10.0
-          ContentWidth = 5.0 }
-
-    let built =
-        Fuaran.Core.ObserverWitness.empty<BoxInput, BoxFlag>
-        |> Fuaran.Core.ObserverWitness.register w "root" box None
-        |> fst
-        |> Fuaran.Core.ObserverWitness.register w "kid" box (Some "root")
-        |> fst
-
-    let walk (st: Fuaran.Core.ObserverState<BoxInput, BoxFlag>) =
-        Fuaran.Core.ObserverWitness.observeTree st "root" |> List.map _.NodeId
+    let under parent id st =
+        fst (ObserverWitness.register w id i parent st)
 
     testList
-        "ObserverWitness.observeTree is total (Phase 383)"
-        [ testCase "an Order id with no entry is read as unregistered, never a KeyNotFoundException"
-          <| fun _ ->
-              // Both fields are public, so this state is one a caller can hand in.
-              let dangling =
-                  { built with
-                      Order = built.Order @ [ "ghost" ] }
+        "ObserverWitness readers over the opaque state (Phase 523)"
+        [ test "registered is registration order; a re-registration keeps its place" {
+              let st =
+                  ObserverWitness.empty
+                  |> under None "root"
+                  |> under (Some "root") "a"
+                  |> under (Some "root") "b"
+                  |> under (Some "b") "a"
 
-              Expect.equal (walk dangling) [ "root"; "kid" ] "the dangling id is skipped, as snapshot reads it"
+              Expect.equal (ObserverWitness.registered st) [ "root"; "a"; "b" ] "a keeps its first place"
+          }
+
+          test "unregister drops the id from the order; registering it again joins the end" {
+              let st =
+                  ObserverWitness.empty
+                  |> under None "root"
+                  |> under (Some "root") "a"
+                  |> under (Some "root") "b"
+                  |> ObserverWitness.unregister "a"
+
+              Expect.equal (ObserverWitness.registered st) [ "root"; "b" ] "a left the order"
+              Expect.isFalse (ObserverWitness.isRegistered st "a") "and is not registered"
+
+              let back = under (Some "root") "a" st
+              Expect.equal (ObserverWitness.registered back) [ "root"; "b"; "a" ] "a re-registered id joins the end"
+              Expect.isTrue (ObserverWitness.isRegistered back "a") "and is registered"
 
               Expect.equal
-                  (Fuaran.Core.ObserverWitness.tryObserveTree dangling "root")
-                  (Error(Fuaran.Core.ObserverDefect.UnregisteredInOrder "ghost"))
-                  "the checked walk names it"
+                  (ObserverWitness.observeTree back "root" |> List.map _.NodeId)
+                  [ "root"; "b"; "a" ]
+                  "the walk reads the same order"
+          }
 
-          testCase "a repeated id and an entry Order omits are each named by the checked walk"
-          <| fun _ ->
-              Expect.equal
-                  (Fuaran.Core.ObserverWitness.tryObserveTree
-                      { built with
-                          Order = built.Order @ [ "kid" ] }
-                      "root")
-                  (Error(Fuaran.Core.ObserverDefect.RepeatedInOrder "kid"))
-                  "a repeat"
+          test "isRegistered agrees with snapshot, and update never registers" {
+              let st, _ = ObserverWitness.update w "ghost" i ObserverWitness.empty
+              Expect.isFalse (ObserverWitness.isRegistered st "ghost") "an update of an unknown id registers nothing"
+              Expect.isEmpty (ObserverWitness.registered st) "and orders nothing"
 
-              Expect.equal
-                  (Fuaran.Core.ObserverWitness.tryObserveTree { built with Order = [ "root" ] } "root")
-                  (Error(Fuaran.Core.ObserverDefect.UnorderedEntry "kid"))
-                  "an omission"
+              let st = under None "n" st
+              Expect.isTrue (ObserverWitness.isRegistered st "n") "registered"
+              Expect.isSome (ObserverWitness.snapshot st "n") "and snapshot agrees"
+          }
 
-          testCase "a state the functions built is Ok, and the checked walk is the walk"
-          <| fun _ ->
-              Expect.equal
-                  (Fuaran.Core.ObserverWitness.tryObserveTree built "root")
-                  (Ok(Fuaran.Core.ObserverWitness.observeTree built "root"))
-                  "the checked walk agrees"
+          test "the empty state holds nothing" {
+              Expect.isEmpty (ObserverWitness.registered ObserverWitness.empty<BoxInput, BoxFlag>) "no ids"
 
-              Expect.equal (walk built) [ "root"; "kid" ] "and walks both" ]
+              Expect.isFalse
+                  (ObserverWitness.isRegistered ObserverWitness.empty<BoxInput, BoxFlag> "x")
+                  "nothing registered"
+          } ]
