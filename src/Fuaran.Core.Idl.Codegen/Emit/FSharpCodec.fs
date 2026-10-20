@@ -1292,16 +1292,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     // structural layer plugs straight into `Fuaran.Core.Tree` / `.Validator` /
     // `.Observer` — the "serves every domain via the Core witness, not just UI"
     // promise. `Children` / `ReplaceChildren` are derived from the IDL: a field
-    // is node-bearing iff its type is `TNode` or `TList TNode`.
+    // is a child position iff `FSharpDerive.structuralField` says so — a node or
+    // node list the kind always carries (Phase 545: an optional node is a keyed
+    // position, on both the private and the public emission).
     // -----------------------------------------------------------------------
-
-    /// `Some (pascalName, isList)` when a field holds a `Node` (single) or a
-    /// `Node list`; `None` otherwise.
-    let nodeBearing (f: IdlField) : (string * bool) option =
-        match f.Type with
-        | TNode -> Some(pascal f.Name, false)
-        | TList TNode -> Some(pascal f.Name, true)
-        | _ -> None
 
     /// Emit the `NodeWitness<Node, string>` + its three helper projections. Top-level
     /// `match` functions (not record-literal lambdas) to dodge offside pitfalls in
@@ -1317,6 +1311,11 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// a structural edit may rebuild). `false` is the emission every module had before, byte for
     /// byte.
     ///
+    /// Phase 545 — both emissions read child positions through the one classifier,
+    /// `FSharpDerive.structuralField`. The private witness used to read them by type alone, so an
+    /// optional node field became `[ s.Hint ]` — a `Node option` where a `Node` is expected — and
+    /// a module requesting no StructuralAccess failed to compile (FS0001).
+    ///
     /// Phase 403 — a projected kind's children are read from its declared record fields
     /// (`Projection.RecordFields`); one that declares none and whose wire holds a node directly is
     /// refused by name, because nothing says which member of the host record holds it.
@@ -1327,12 +1326,6 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         (kinds: IdlKind list)
         : Result<string, CodegenError> =
         let nodeArgs = declParams msg "Node" []
-
-        let nodeBearing =
-            if publicAccess then
-                FSharpDerive.structuralField
-            else
-                nodeBearing
 
         let construct, request =
             if publicAccess then
@@ -1362,7 +1355,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
 
         let childBearing =
             kinds
-            |> List.filter (fun k -> fieldsOf k |> List.exists (nodeBearing >> Option.isSome))
+            |> List.filter (fun k -> fieldsOf k |> List.exists (FSharpDerive.structuralField >> Option.isSome))
 
         let allBearing = List.length childBearing = List.length kinds
 
@@ -1374,14 +1367,14 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         let childArm (k: IdlKind) =
             let exprs =
                 fieldsOf k
-                |> List.choose nodeBearing
+                |> List.choose FSharpDerive.structuralField
                 |> List.map (fun (name, isList) -> if isList then "s." + name else "[ s." + name + " ]")
                 |> String.concat " @ "
 
             sprintf "    | NodeKind.%s s -> %s" k.Tag exprs
 
         let replaceArm (k: IdlKind) : Result<string, CodegenError> =
-            match fieldsOf k |> List.choose nodeBearing with
+            match fieldsOf k |> List.choose FSharpDerive.structuralField with
             | [ (name, true) ] ->
                 Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }" k.Tag k.Tag name)
             | [ (name, false) ] ->
