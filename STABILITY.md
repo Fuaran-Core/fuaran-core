@@ -71,8 +71,8 @@ so a release gesture without the heading and the record is refused there; `Direc
 declares the ledger's index as the version's stability record (`<FuaranStabilityRecord>`) so a
 downstream version check reads the same DRAFT marker.
 
-**The release sequence the gate makes mandatory.** In this order, because each step reads the one
-before it:
+**The release sequence the gate makes mandatory — the contract, however the act is performed.** In
+this order, because each step reads the one before it:
 
 1. If `<Version>` moved since the conformance corpus was last emitted, re-stamp it
    (`dotnet run --project tools/Fuaran.Core.Tools -- render laws`, then `render apply`; `docs/conformance-corpus.md`) and commit.

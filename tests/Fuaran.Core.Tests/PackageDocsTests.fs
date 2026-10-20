@@ -174,7 +174,7 @@ let tests =
           } ]
 
 // ---------------------------------------------------------------------------
-// Phase 339 — every public member carries a doc comment, held by a ratchet that only moves up.
+// Phase 339 — every public member carries a doc comment; Phase 537 — held as an invariant.
 //
 // The documentation-file property above says a package ships ITS doc comments; it says nothing
 // about whether a given member has one. A consumer hovering an undocumented union case sees its
@@ -183,20 +183,15 @@ let tests =
 // `api/*.txt` — the ONE spelling of "what is public" (PublicSurfaceTests holds it to the built
 // assembly).
 //
-// The ratchet is `docs/doc-coverage.json`: per package, the members ALLOWED to be undocumented,
-// by documentation id. It is held exactly, in both directions:
-//
-//   - a public member that is undocumented and not on its package's list is red, BY NAME — a new
-//     member without a doc comment, or a doc comment deleted, fails at its own commit;
-//   - a listed member that is now documented (or no longer public) is red too, so the list only
-//     ever shrinks to what is true: the floor moves up when the work is done, not later.
-//
-// `CORE_APPROVE_DOCS=1` rewrites the file from the live measurement and REFUSES to add an entry:
-// the switch can only tighten the ratchet. A member that genuinely cannot carry a comment is added
-// to its list by hand, where a reviewer sees it.
+// The invariant is ZERO, held directly: a public member that is undocumented is red, BY NAME, at
+// the commit that adds it or deletes its comment. Phase 339 reached zero through a per-package
+// ratchet file of allowed exceptions; once every list was empty the file stated this one sentence
+// as nineteen rows of data with a switch and a reader of its own, so Phase 537 deleted it (the
+// record is DECISIONS.md). A member that genuinely cannot carry a comment is a token class the
+// compiler writes: `docId` skips it, and it is listed below with its reason, where a reviewer sees it.
 //
 // What is not counted, and why (each is a token the compiler writes, not one a source line can
-// document) — `excludedClasses` below is the list:
+// document) — `docId` below skips each:
 //
 //   - `ctor` — a record's constructor is generated from its fields, and a class's primary
 //     constructor is documented by the type that declares it;
@@ -205,14 +200,6 @@ let tests =
 //     `union-case` token;
 //   - `interface-marker` — it names no member.
 // ---------------------------------------------------------------------------
-
-/// The token classes the count leaves out, each with the reason a source comment cannot reach it.
-let internal excludedClasses: (string * string) list =
-    [ "ctor",
-      "a record's constructor is generated from its fields; a class's primary constructor is documented by its type"
-      "Tags", "a union's tag class and tag literals are generated constants"
-      "case class", "a union case's nested class is counted once, as its union-case token"
-      "interface-marker", "it names no member" ]
 
 let private genericArityBeforeArgs = Regex(@"`\d+<")
 
@@ -258,8 +245,8 @@ let private memberNameRe = Regex(@"^(?:record-field|property|field) (\S+) ")
 let private methodTokenRe = Regex(@"^method (.+?)\((.*)\) : .*$")
 
 /// The XML documentation id of the member a baseline token names — `None` for a token of an
-/// excluded class (`excludedClasses`). `unions` is the package's union types, as the baseline
-/// spells them, so a union case's nested class can be told from an ordinary nested type.
+/// excluded class (listed in the block comment above). `unions` is the package's union types, as
+/// the baseline spells them, so a union case's nested class can be told from an ordinary nested type.
 let internal docId (unions: Set<string>) (token: string) : string option =
     let dotted (s: string) = s.Replace("+", ".")
 
@@ -391,84 +378,17 @@ let internal measure (package: string) (baseline: string list) (documented: Set<
       Total = ids.Length
       Undocumented = ids |> List.filter (fun i -> not (documented.Contains i)) |> List.sort }
 
-/// What the ratchet finds for one package: members undocumented and not allowed (the first
-/// list), and allowed entries that are no longer undocumented members (the second).
-let internal ratchet (allowed: string list) (live: string list) : string list * string list =
-    let allowedSet = Set.ofList allowed
-    let liveSet = Set.ofList live
-
-    (live |> List.filter (fun i -> not (allowedSet.Contains i))),
-    (allowed |> List.filter (fun i -> not (liveSet.Contains i)))
-
-let internal coveragePath () : string =
-    Path.Combine(repoRoot (), "docs", "doc-coverage.json")
-
-/// The committed ratchet: package -> the documentation ids allowed to be undocumented.
-let internal readRatchet (jsonText: string) : Map<string, string list> =
-    use doc = Text.Json.JsonDocument.Parse jsonText
-
-    doc.RootElement.GetProperty("packages").EnumerateArray()
-    |> Seq.map (fun e ->
-        e.GetProperty("package").GetString(),
-        e.GetProperty("undocumented").EnumerateArray()
-        |> Seq.map _.GetString()
-        |> List.ofSeq)
-    |> Map.ofSeq
-
-/// The ratchet file's text for a set of measurements. The figures beside each list are the
-/// measurement the file was written from, so a reader sees the coverage without running the suite.
-let internal renderRatchet (measured: DocCoverage list) : string =
-    let q (s: string) =
-        Text.Json.JsonSerializer.Serialize(
-            s,
-            Text.Json.JsonSerializerOptions(Encoder = Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
-        )
-
-    let sb = Text.StringBuilder()
-    let line (s: string) = sb.Append(s).Append('\n') |> ignore
-    let sorted = measured |> List.sortBy _.Package
-
-    line "{"
-
-    line (
-        "  \"about\": "
-        + q
-            "Phase 339 - the doc-comment ratchet. Per package, the public members (by XML documentation id) ALLOWED to carry no doc comment. PackageDocsTests holds each list exactly: a new undocumented member is red by name, and a listed member that gains a comment must leave the list. documented/total are the measurement this file was written from. Regenerate with CORE_APPROVE_DOCS=1 dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter PackageDocs; the switch only removes entries, and an entry is added by hand."
-        + ","
-    )
-
-    line "  \"excluded\": {"
-
-    excludedClasses
-    |> List.iteri (fun i (cls, why) ->
-        let sep = if i = excludedClasses.Length - 1 then "" else ","
-        line (sprintf "    %s: %s%s" (q cls) (q why) sep))
-
-    line "  },"
-    line "  \"packages\": ["
-
-    sorted
-    |> List.iteri (fun i m ->
-        let sep = if i = sorted.Length - 1 then "" else ","
-
-        let entries =
-            if m.Undocumented.IsEmpty then
-                "[]"
-            else
-                "[\n"
-                + (m.Undocumented |> List.map (fun u -> "        " + q u) |> String.concat ",\n")
-                + "\n      ]"
-
-        line "    {"
-        line (sprintf "      \"package\": %s," (q m.Package))
-        line (sprintf "      \"documented\": %d," (m.Total - m.Undocumented.Length))
-        line (sprintf "      \"total\": %d," m.Total)
-        line (sprintf "      \"undocumented\": %s" entries)
-        line ("    }" + sep))
-
-    line "  ]"
-    line "}"
-    sb.ToString()
+/// The invariant's findings: one per package that carries an undocumented public member, naming
+/// each member. Empty is green.
+let internal undocumentedFindings (measured: DocCoverage list) : string list =
+    [ for m in measured do
+          if not m.Undocumented.IsEmpty then
+              yield
+                  sprintf
+                      "%s: %d public member(s) carry no doc comment — write one (what it is for, what it refuses, the unit or invariant it holds):\n      %s"
+                      m.Package
+                      m.Undocumented.Length
+                      (String.concat "\n      " m.Undocumented) ]
 
 /// Every packable package measured from its committed baseline and its built documentation file.
 let private measureAll () : Result<DocCoverage list, string list> =
@@ -508,7 +428,7 @@ let private measureAll () : Result<DocCoverage list, string list> =
 let coverageTests =
     testList
         "PackageDocs coverage"
-        [ test "every public member carries a doc comment, or the committed ratchet allows it by name" {
+        [ test "every public member carries a doc comment" {
               let measured =
                   match measureAll () with
                   | Ok ms -> ms
@@ -516,13 +436,10 @@ let coverageTests =
 
               Expect.isNonEmpty measured "no package was measured — the roster derivation found nothing"
 
-              let path = coveragePath ()
-
-              let recorded =
-                  if File.Exists path then
-                      readRatchet (File.ReadAllText path)
-                  else
-                      Map.empty
+              Expect.isGreaterThan
+                  (measured |> List.sumBy _.Total)
+                  0
+                  "no member was counted — a reader that counted nothing would pass vacuously"
 
               for m in measured do
                   printfn
@@ -532,54 +449,9 @@ let coverageTests =
                       m.Total
                       m.Undocumented.Length
 
-              let findings =
-                  [ for m in measured do
-                        match recorded.TryFind m.Package with
-                        | None ->
-                            yield
-                                sprintf
-                                    "%s is not in docs/doc-coverage.json — a package enters the ratchet with an entry (an empty list when it is fully documented)"
-                                    m.Package
-                        | Some allowed ->
-                            let fresh, stale = ratchet allowed m.Undocumented
-
-                            if not fresh.IsEmpty then
-                                yield
-                                    sprintf
-                                        "%s: %d public member(s) carry no doc comment — write one (what it is for, what it refuses, the unit or invariant it holds) rather than listing it:\n      %s"
-                                        m.Package
-                                        fresh.Length
-                                        (String.concat "\n      " fresh)
-
-                            if not stale.IsEmpty then
-                                yield
-                                    sprintf
-                                        "%s: %d allowed entr(y/ies) are documented or no longer public — the ratchet moves up: remove them, or regenerate with CORE_APPROVE_DOCS=1:\n      %s"
-                                        m.Package
-                                        stale.Length
-                                        (String.concat "\n      " stale)
-                    for KeyValue(p, _) in recorded do
-                        if not (measured |> List.exists (fun m -> m.Package = p)) then
-                            yield sprintf "%s is in docs/doc-coverage.json but is not a packable package" p ]
-
-              if Approval.admits Approval.Docs Approval.Files.DocCoverage then
-                  // The switch only tightens: an entry it would ADD is refused, so it can never
-                  // silence the property it maintains.
-                  let added =
-                      measured
-                      |> List.collect (fun m ->
-                          let allowed = recorded.TryFind m.Package |> Option.defaultValue []
-                          fst (ratchet allowed m.Undocumented) |> List.map (fun i -> m.Package + ": " + i))
-
-                  if not added.IsEmpty then
-                      failtestf
-                          "CORE_APPROVE_DOCS only removes entries; these undocumented members are not on the list — document them:\n  %s"
-                          (String.concat "\n  " added)
-
-                  Approval.write Approval.Docs Approval.Files.DocCoverage path (renderRatchet measured)
-                  |> ignore
-              elif not findings.IsEmpty then
-                  failtestf "the doc-comment ratchet moved:\n  %s" (String.concat "\n  " findings)
+              match undocumentedFindings measured with
+              | [] -> ()
+              | findings -> failtestf "undocumented public members:\n  %s" (String.concat "\n  " findings)
           }
 
           test
@@ -613,11 +485,26 @@ let coverageTests =
                   Expect.equal (docId unions token) expected token
           }
 
-          test "the ratchet names a fresh undocumented member and a stale allowance, and is silent when they agree" {
-              let fresh, stale = ratchet [ "P:A.x"; "P:A.y" ] [ "P:A.y"; "M:A.z" ]
-              Expect.equal fresh [ "M:A.z" ] "a member undocumented and not allowed is named"
-              Expect.equal stale [ "P:A.x" ] "an allowance whose member is documented is named"
-              Expect.equal (ratchet [ "P:A.y" ] [ "P:A.y" ]) ([], []) "agreement is silent"
+          test "the invariant names each undocumented member by package, and is silent at zero" {
+              let clean =
+                  [ { Package = "A"
+                      Total = 2
+                      Undocumented = [] } ]
+
+              Expect.isEmpty (undocumentedFindings clean) "zero undocumented members is green"
+
+              let planted =
+                  clean
+                  @ [ { Package = "B"
+                        Total = 3
+                        Undocumented = [ "M:B.z"; "P:B.y" ] } ]
+
+              match undocumentedFindings planted with
+              | [ one ] ->
+                  Expect.stringContains one "B: 2 public member(s)" "the package and the count are named"
+                  Expect.stringContains one "M:B.z" "each member is named"
+                  Expect.stringContains one "P:B.y" "each member is named"
+              | other -> failtestf "expected one finding for B, got %A" other
           }
 
           test "a member counts as documented only when its comment carries text" {
@@ -634,17 +521,4 @@ let coverageTests =
               let m = measure "A" [ "type A.X (type)"; "type A.Y (type)"; "type A.Z (type)" ] ids
               Expect.equal m.Total 3 "every counted token is measured"
               Expect.equal m.Undocumented [ "T:A.Y"; "T:A.Z" ] "the blank and the absent are both undocumented"
-          }
-
-          test "the ratchet file round-trips through its reader" {
-              let measured =
-                  [ { Package = "B"
-                      Total = 2
-                      Undocumented = [ "P:B.y" ] }
-                    { Package = "A"
-                      Total = 1
-                      Undocumented = [] } ]
-
-              let read = readRatchet (renderRatchet measured)
-              Expect.equal read (Map.ofList [ "A", []; "B", [ "P:B.y" ] ]) "the lists survive a render and a read"
           } ]

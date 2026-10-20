@@ -39,9 +39,9 @@ is tag, then gate.
 A change is ready to propose when `./verify.ps1` is green.
 
 Both launchers take `-Configuration Debug|Release` (default `Debug`, so the commands above are unchanged).
-A release is verified in `Release` and the packages are packed from that same output --
-`./verify.ps1 -Configuration Release`, then `dotnet pack Fuaran.Core.slnx -c Release --no-build` -- so the
-surface and documentation checks read the assemblies that ship. CI runs both configurations; run
+The publish workflow verifies in `Release` and packs from that same output, so the surface and
+documentation checks read the assemblies that ship; the release sequence is stated once, as the contract,
+in [`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy). CI runs both configurations; run
 `./verify.ps1 -Configuration Release` locally when a change could behave differently under the optimiser.
 
 Two of the suites certify against a conformance corpus that lives in a separate repository, at the
@@ -68,7 +68,7 @@ rendered from the registry (`CORE_APPROVE_DOCS=CONTRIBUTING` rewrites it):
 | `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
 | `CORE_APPROVE_LADDER` | `proofs/README.md` | `ladder` or `operations` |
 | `CORE_APPROVE_README` | `README.md` | `README` |
-| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json`, `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md`, `conformance/idl/idl.schema.json` | `doc-coverage`, `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies`, `CONTRIBUTING` or `idl-schema` |
+| `CORE_APPROVE_DOCS` | `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md`, `conformance/idl/idl.schema.json` | `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies`, `CONTRIBUTING` or `idl-schema` |
 | `FUARAN_REGEN` | `tests/Fuaran.Core.Tests/MiniGenerated.fs`, `tests/Fuaran.Core.Tests/DocGenerated.fs`, `tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs`, `tests/Fuaran.Core.Tests/DeriveGenerated.fs`, `tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs`, `src/Fuaran.Core.Function/CapabilitySeamCodec.fs`, `src/Fuaran.Core.Function/PipelineSeamCodec.fs`, `src/Fuaran.Core.Query/QuerySeamCodec.fs`, `src/Fuaran.Core.Column/FieldChangeSeamCodec.fs`, `src/Fuaran.Core.AiSurface/RejectionSeamCodec.fs`, `tests/Fuaran.Core.Tests/snapshots/spike.json` | `MiniGenerated`, `DocGenerated`, `DocAnnotatedGenerated`, `DeriveGenerated`, `SpecDecodersGenerated`, `CapabilitySeamCodec`, `PipelineSeamCodec`, `QuerySeamCodec`, `FieldChangeSeamCodec`, `RejectionSeamCodec` or `spike` |
 
 Absent, empty, `0` or `false` is no. `1` or `true` rewrites every file the switch governs. Any other
