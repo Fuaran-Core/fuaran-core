@@ -1,6 +1,7 @@
 namespace Fuaran.Core.Idl
 
 open Fuaran.Core
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 114 — the DECLARATION TRIPLE, carried as data.
@@ -54,14 +55,14 @@ type HostPreludeRef =
 /// The declared-support record plus the host-prelude declaration — members 2 and 3
 /// of the triple, as one document beside the vocabulary.
 ///
-/// Two members and not one: `Gen.GenSupport` is the generator's INPUT and the
+/// Two members and not one: `GenSupport` is the generator's INPUT and the
 /// generator has no use for a prelude reference, so bolting the reference onto it
 /// would put a field on a contract that never reads it. The document is the thing
 /// that carries both.
 type SupportDocument =
     {
         /// The generator's input, passed to `Gen.fsharpModuleWith` unchanged.
-        Support: Gen.GenSupport
+        Support: GenSupport
         /// The prelude compiled ahead of the generated module, or `None` when none is
         /// declared — the rendered document then carries no `hostPrelude` key at all.
         HostPrelude: HostPreludeRef option
@@ -70,7 +71,7 @@ type SupportDocument =
     /// A vocabulary that declares no support at all — the shape every domain starts
     /// from, and what `Gen.fsharpModule` (the pre-945 entry) means.
     static member Empty =
-        { Support = Gen.GenSupport.Empty
+        { Support = GenSupport.Empty
           HostPrelude = None }
 
 /// The declared-support record rendered as a canonical data document —
@@ -270,7 +271,7 @@ module SupportArtifact =
             |> Result.map Some
         | Some _ -> Error("projection '" + kindTag + "' has a non-array 'recordFields'")
 
-    let private readProjection (v: JVal) : Result<string * Gen.KindProjection, string> =
+    let private readProjection (v: JVal) : Result<string * KindProjection, string> =
         strAt "kind" v
         |> Result.bind (fun kindTag ->
             strAt "specDecl" v

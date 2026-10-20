@@ -5,6 +5,7 @@ open System.Text.RegularExpressions
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 150 — the F* PROOF-MODEL target, and the GENERATION DIFF that holds each committed
@@ -44,7 +45,7 @@ let private lf (s: string) = s.Replace("\r\n", "\n")
 type private Generated =
     { Module: string
       Idl: Idl
-      Provenance: FStarTarget.Provenance }
+      Provenance: Provenance }
 
 /// What every header says about the remedy, once — the command and the family that holds
 /// the committed file to it. The origin paragraph of each provenance ends with this.

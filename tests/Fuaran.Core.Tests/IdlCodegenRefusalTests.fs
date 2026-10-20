@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.IdlCodegenRefusalTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 195 — the codegen's refusals are DATA.
@@ -256,7 +257,7 @@ let tests =
 // used to be dropped without a word; each is a typed refusal now.
 // ---------------------------------------------------------------------------
 
-let private withSupport (sup: Gen.GenSupport) (idl: Idl) =
+let private withSupport (sup: GenSupport) (idl: Idl) =
     Gen.fsharpModuleWith sup "Refusal.Probe" idl kinds
 
 let private unionIdl: Idl =
@@ -286,7 +287,7 @@ let supportTests =
         "Phase 293 — declared support is validated against the vocabulary"
         [ testCase "a doc path the emitter consults is rendered, and the control emits" (fun _ ->
               let sup =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       Docs = Map.ofList [ "type:NoteSpec", [ "/// A note." ] ] }
 
               let src = expectEmits "a well-spelled doc path" (withSupport sup baseIdl)
@@ -294,7 +295,7 @@ let supportTests =
 
           testCase "a doc path the emission never consults is a refusal naming the path, not a silent drop" (fun _ ->
               let sup =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       Docs = Map.ofList [ "type:Nte", [ "/// A note." ] ] }
 
               Expect.equal
@@ -304,13 +305,13 @@ let supportTests =
 
           testCase "a case refine on no referenced union case is a refusal" (fun _ ->
               let good =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       CaseRefines = Map.ofList [ "Source.Inline", "Ok(Source.Inline(text))" ] }
 
               expectEmits "a refine on a declared case" (withSupport good unionIdl) |> ignore
 
               let bad =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       CaseRefines = Map.ofList [ "Source.Inlne", "Ok(Source.Inline(text))" ] }
 
               Expect.equal
@@ -319,7 +320,7 @@ let supportTests =
                   "the refusal names the key")
 
           testCase "a kind projection on no selected kind is a refusal" (fun _ ->
-              let projection: Gen.KindProjection =
+              let projection: KindProjection =
                   { SpecDecl = "NoteSpec = { Label: string }"
                     Encoder = "and private encNoteSpec (s: NoteSpec) : JVal = JObj [ \"label\", JStr s.Label ]"
                     Decoder =
@@ -329,7 +330,7 @@ let supportTests =
                     RecordFields = None }
 
               let bad =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       KindProjections = Map.ofList [ "Notes", projection ] }
 
               Expect.equal

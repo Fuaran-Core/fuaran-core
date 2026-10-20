@@ -28,6 +28,12 @@
     <!-- Phase 402 - the one boundary this package reads Fuaran.Core.Idl's internals through, each
          lookup NoInlining (DECISIONS.md D129); first, so every emitter can call it. -->
     <Compile Include="Lookup.fs" />
+    <!-- Phase 524 - the published types (DECISIONS.md D125, amended), in the namespace
+         `Fuaran.Core.Idl.Codegen.Types`, ahead of every emitter: the emitters read them directly,
+         and the modules that use them split one concern per file. -->
+    <Compile Include="Types/Support.fs" />
+    <Compile Include="Types/Derivation.fs" />
+    <Compile Include="Types/FStar.fs" />
     <Compile Include="Emit/Core.fs" />
     <Compile Include="Emit/Annotations.fs" />
     <!-- Phase 511 - the ONE resolution every emitter reads (`Decl.resolve`): reach, the msg,
@@ -59,6 +65,10 @@
          checks, together with the round-trip theorems over exactly those definitions.
          Reads the shared CodegenError channel declared in Codegen.fs, so after it;
          appended last (append-only registration). It emits nothing any host builds. -->
+    <Compile Include="FStar/Model.fs" />
+    <Compile Include="FStar/Vocabulary.fs" />
+    <Compile Include="FStar/Proofs.fs" />
+    <Compile Include="FStar/Vectors.fs" />
     <Compile Include="FStar.fs" />
   </ItemGroup>
   <ItemGroup>

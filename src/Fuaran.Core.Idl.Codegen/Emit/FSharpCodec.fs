@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpTypes
@@ -370,7 +371,7 @@ let private encFloat (f: float) : JVal =
         //
         // Phase 460 — WHAT A PLACEHOLDER MAY NAME (contract). The placeholder is spliced
         // verbatim into the short-circuiting `dec*` decoder AND, under
-        // `Gen.Derivation.SpecDecoders`, into its collecting `col*` twin (as a lifted leaf),
+        // `Derivation.SpecDecoders`, into its collecting `col*` twin (as a lifted leaf),
         // so it may reference only what both scopes bind:
         //   * the module's prelude and its generated `dec*` decoders (`decNode`, `dec<Union>`,
         //     `dec<Record>`, `dec<Enum>`);
@@ -659,7 +660,7 @@ let private encFloat (f: float) : JVal =
 
     // -----------------------------------------------------------------------
     // Phase 377 — the COLLECTING decoders and the public per-spec entries, emitted on request
-    // (`Gen.Derivation.SpecDecoders`). Each `dec*` decoder above is a `Result.bind` chain and
+    // (`Derivation.SpecDecoders`). Each `dec*` decoder above is a `Result.bind` chain and
     // reports ONE defect; its `col*` twin walks the same positions in the same order and answers
     // every defect as a `DecodeError list`. Mirroring the walk is what makes the twin a
     // conservative extension: its first defect is the short-circuiting decoder's defect, and on a
@@ -889,7 +890,7 @@ let private encFloat (f: float) : JVal =
     /// no reflection, Fable-clean). `collectingDecoders` is the record of the generated decoders;
     /// the `decode*All` entries read through it, unchanged, and their `decode*AllWith` twins take
     /// a host's record, so a host decoder at a type is applied at every depth that type occurs.
-    let collectingDecl (sup: Support) (decl: Decl) : Result<string, CodegenError> =
+    let collectingDecl (sup: GenSupport) (decl: Decl) : Result<string, CodegenError> =
         let idl, msg, kinds, unions, records =
             decl.Idl, decl.Msg, decl.Kinds, decl.Unions, decl.Records
 
@@ -1296,7 +1297,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// refused by name, because nothing says which member of the host record holds it.
     let witnessDecl
         (publicAccess: bool)
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (msg: Set<string>)
         (kinds: IdlKind list)
         : Result<string, CodegenError> =
@@ -1476,12 +1477,12 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
     /// entry point, which is this composed with it.
     let fsharpModuleUnnormalised
-        (sup: Support)
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
+        (sup: GenSupport)
+        (requests: Derivation list)
         (moduleName: string)
         (decl: Decl)
         : Result<string, CodegenError> =
+        let decoders = List.contains Derivation.SpecDecoders requests
         // Phase 945 — declared-doc lookup: a block of comment lines (markers included,
         // "///" or "//" alike) attached to the named declaration path, indented to the
         // emission site. Absent path ⇒ empty string, so an IDL with no docs emits
@@ -1697,9 +1698,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         // An empty request list leaves the witness private and appends nothing.
         let publicAccess =
             requests
-            |> List.exists (fun r ->
-                r = FSharpDerive.Request.StructuralAccess
-                || r = FSharpDerive.Request.KeyedPositions)
+            |> List.exists (fun r -> r = Derivation.StructuralAccess || r = Derivation.KeyedPositions)
 
         let witnessAndDerived =
             Decl.projectionsDeclared decl
@@ -1840,21 +1839,20 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     ///
     /// The emitted text is LF-terminated whatever the generator was built from and whatever the
     /// declared support carries — see [[normalizeEol]].
-    let fsharpModuleWith (sup: Support) (moduleName: string) (decl: Decl) : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup [] false moduleName decl
+    let fsharpModuleWith (sup: GenSupport) (moduleName: string) (decl: Decl) : Result<string, CodegenError> =
+        fsharpModuleUnnormalised sup [] moduleName decl
         |> Result.map (normalizeEol >> fsharpStamp decl.Idl)
 
     /// Phase 374 — `fsharpModuleWith` plus the requested structural derivations
     /// ([[FSharpDerive]]), and (Phase 377) the collecting decoders and public per-spec entries
-    /// when `decoders` is set. No request and no decoders IS `fsharpModuleWith`, byte for byte.
+    /// under `Derivation.SpecDecoders`. No request IS `fsharpModuleWith`, byte for byte.
     let fsharpModuleDerived
-        (sup: Support)
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
+        (sup: GenSupport)
+        (requests: Derivation list)
         (moduleName: string)
         (decl: Decl)
         : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup requests decoders moduleName decl
+        fsharpModuleUnnormalised sup requests moduleName decl
         |> Result.map (normalizeEol >> fsharpStamp decl.Idl)
 
     /// Phase 511 (S12) — THE admission of a derivation request, for every backend that derives:
@@ -1865,12 +1863,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// texts; the TypeScript backend calls this, over a resolution with no host projections
     /// (a projection is F# source, so the TypeScript host declares none), and so admits exactly
     /// what the F# path admits for the vocabulary's wire surface.
-    let admitDerivations (decl: Decl) (requests: FSharpDerive.Request list) : Result<unit, CodegenError> =
+    let admitDerivations (decl: Decl) (requests: Derivation list) : Result<unit, CodegenError> =
         let publicAccess =
             requests
-            |> List.exists (fun r ->
-                r = FSharpDerive.Request.StructuralAccess
-                || r = FSharpDerive.Request.KeyedPositions)
+            |> List.exists (fun r -> r = Derivation.StructuralAccess || r = Derivation.KeyedPositions)
 
         Decl.projectionsDeclared decl
         |> Result.bind (fun () ->

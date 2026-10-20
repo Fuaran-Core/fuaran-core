@@ -2,7 +2,7 @@ module Fuaran.Core.Tests.IdlSpecDecoderTests
 
 // ---------------------------------------------------------------------------
 // Phase 377 — the collecting decoders and the public per-spec entries the F# generator emits on
-// request (`Gen.Derivation.SpecDecoders`).
+// request (`Derivation.SpecDecoders`).
 //
 // Four kinds of evidence:
 //   1. OPT-IN and REACH. Every in-repository vocabulary emits the decoders; the emission without
@@ -25,6 +25,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.DeriveGenerated
+open Fuaran.Core.Idl.Codegen.Types
 
 module Ref = Fuaran.Core.Tests.SpecDecodersGenerated
 
@@ -132,16 +133,16 @@ let private agrees (doc: JVal) : string option =
             | None -> None
 
 /// The in-repository vocabularies, under the support each is emitted with.
-let private vocabularies () : (string * Gen.GenSupport * Idl) list =
+let private vocabularies () : (string * GenSupport * Idl) list =
     let decodeIdl, _, _ = DecodeVectorsIdl.current ()
 
-    [ "mini", Gen.GenSupport.Empty, MiniIdl.miniIdl
-      "doc", Gen.GenSupport.Empty, SecondDomainSpike.docIdl
-      "score", Gen.GenSupport.Empty, ScoreDomainSpike.scoreIdl
+    [ "mini", GenSupport.Empty, MiniIdl.miniIdl
+      "doc", GenSupport.Empty, SecondDomainSpike.docIdl
+      "score", GenSupport.Empty, ScoreDomainSpike.scoreIdl
       "reference", ReferenceIdl.support.Support, ReferenceIdl.refIdl
-      "decode-vectors", Gen.GenSupport.Empty, decodeIdl
-      "refusal-corners", Gen.GenSupport.Empty, RefusalCornersIdl.idl
-      "derive", Gen.GenSupport.Empty, DeriveIdl.deriveIdl ]
+      "decode-vectors", GenSupport.Empty, decodeIdl
+      "refusal-corners", GenSupport.Empty, RefusalCornersIdl.idl
+      "derive", GenSupport.Empty, DeriveIdl.deriveIdl ]
 
 let private tags (idl: Idl) = idl.Kinds |> List.map _.Tag
 
@@ -160,12 +161,7 @@ let tests =
                     for name, sup, idl in vocabularies () do
                         let text =
                             emitted (
-                                Gen.fsharpModuleDerived
-                                    sup
-                                    [ Gen.Derivation.SpecDecoders ]
-                                    ("M." + name)
-                                    idl
-                                    (tags idl)
+                                Gen.fsharpModuleDerived sup [ Derivation.SpecDecoders ] ("M." + name) idl (tags idl)
                             )
 
                         for k in idl.Kinds do
@@ -192,7 +188,7 @@ let tests =
                                 emitted (
                                     Gen.fsharpModuleDerived
                                         sup
-                                        [ Gen.Derivation.SpecDecoders ]
+                                        [ Derivation.SpecDecoders ]
                                         ("M." + name)
                                         idl
                                         (tags idl)
@@ -503,7 +499,7 @@ let tests =
 
 // ---------------------------------------------------------------------------
 // Phase 380 — the collecting decoders in the TypeScript host (`Gen.typescriptModuleDerived` under
-// `Gen.Derivation.SpecDecoders`), held to the compiled F# module above, under node: every
+// `Derivation.SpecDecoders`), held to the compiled F# module above, under node: every
 // multi-defect input above, the valid sample, and every single and paired mutation of it answer
 // the SAME defect list — codes, paths and what each position expected — in the SAME order, and the
 // same tree on success. Each TypeScript answer also carries the host's own law: its first defect is
@@ -603,7 +599,7 @@ let typescriptTests =
               let text =
                   match
                       Gen.typescriptModuleDerived
-                          [ Gen.Derivation.SpecDecoders ]
+                          [ Derivation.SpecDecoders ]
                           DeriveIdl.deriveIdl
                           (DeriveIdl.deriveIdl.Kinds |> List.map _.Tag)
                   with
@@ -707,7 +703,7 @@ let declarationTests =
           testCase "the collecting decoders are declared with DecodeRefusal[] results" (fun _ ->
               match
                   Gen.typescriptDeclarationsDerived
-                      [ Gen.Derivation.SpecDecoders ]
+                      [ Derivation.SpecDecoders ]
                       SpecDecodersIdl.idl
                       (tags SpecDecodersIdl.idl)
               with

@@ -24,8 +24,6 @@ let limit = 2000
 let exceptions: (string * string) list =
     [ "src/Fuaran.Core.Idl.Codegen/Diff.fs",
       "the public module `Diff` holds its public types nested (`Diff+Snapshot`, `Diff+Change`, `Diff+Verdict`), and F# compiles one module from one file; dividing it renames them in api/ (D125)"
-      "src/Fuaran.Core.Idl.Codegen/FStar.fs",
-      "the public module `FStarTarget` holds its public types nested (`FStarTarget+Slot`, `FStarTarget+VectorModel`), and every section is written over them; dividing it renames them in api/ (D125)"
       "src/Fuaran.Core.OpStream.Dag/DagOpStream.fs",
       "the public module `Dag` holds its public types nested, and F# compiles one module from one file; dividing it renames them in api/ (D125)" ]
 

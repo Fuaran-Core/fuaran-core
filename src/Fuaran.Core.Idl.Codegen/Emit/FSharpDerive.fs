@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.FSharpDefaults
 
@@ -22,18 +23,6 @@ open Fuaran.Core.Idl.Emit.FSharpDefaults
 /// takes the message as an argument. Each refusal is a typed `UnsupportedConstruct` naming the
 /// construct and the alternative.
 module internal FSharpDerive =
-
-    /// The emitters' view of `Gen.Derivation`, case for case.
-    [<RequireQualifiedAccess>]
-    type Request =
-        | StructuralAccess
-        | KeyedPositions
-        | SlotsOf of typeName: string
-        | MapMsg
-        | Fold of unionName: string
-        | Projections of unionName: string * fieldNames: string list
-        | DefaultRecords
-        | VocabularyConstants
 
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
@@ -57,7 +46,7 @@ module internal FSharpDerive =
     /// declared record fields, or — for a projected kind that declares none — `undeclared ()`,
     /// which says whether that derivation can proceed without them.
     let recordFields
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (k: IdlKind)
         (undeclared: unit -> Result<IdlField list, CodegenError>)
         : Result<IdlField list, CodegenError> =
@@ -72,7 +61,7 @@ module internal FSharpDerive =
     /// none and the kind has no position to walk. A wire that does hold one says nothing about
     /// which member of the record holds it, and is refused by name.
     let nodeFieldsOf
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (holds: IdlField -> bool)
         (construct: string)
         (orElse: string)
@@ -992,13 +981,13 @@ module internal FSharpDerive =
                     ))
 
     /// One module per union named in a Fold or Projections request, holding all of them.
-    let unionModulesDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
+    let unionModulesDecl (ctx: Decl) (requests: Derivation list) : Result<string list, CodegenError> =
         let named =
             requests
             |> List.choose (fun r ->
                 match r with
-                | Request.Fold n -> Some n
-                | Request.Projections(n, _) -> Some n
+                | Derivation.Fold n -> Some n
+                | Derivation.Projections(n, _) -> Some n
                 | _ -> None)
             |> List.distinct
 
@@ -1011,13 +1000,13 @@ module internal FSharpDerive =
                     "a union derivation is generated over a union this module emits"
                     "name a union the selected kinds reach"
             | Some u ->
-                let folds = requests |> List.exists (fun r -> r = Request.Fold name)
+                let folds = requests |> List.exists (fun r -> r = Derivation.Fold name)
 
                 let fields =
                     requests
                     |> List.collect (fun r ->
                         match r with
-                        | Request.Projections(n, fs) when n = name -> fs
+                        | Derivation.Projections(n, fs) when n = name -> fs
                         | _ -> [])
                     |> List.distinct
 
@@ -1136,26 +1125,29 @@ module internal FSharpDerive =
 
     /// Every requested derivation after the module's existing members, in a fixed order: keyed
     /// walk, slot enumerators, message map, default records, constants, then the union modules.
-    let derivedDecl (ctx: Decl) (requests: Request list) : Result<string list, CodegenError> =
+    let derivedDecl (ctx: Decl) (requests: Derivation list) : Result<string list, CodegenError> =
         let has r = List.contains r requests
 
         let slots =
             requests
             |> List.choose (fun r ->
                 match r with
-                | Request.SlotsOf t -> Some t
+                | Derivation.SlotsOf t -> Some t
                 | _ -> None)
             |> List.distinct
 
         let parts =
-            [ (if has Request.KeyedPositions then [ keyedDecl ctx ] else [])
+            [ (if has Derivation.KeyedPositions then
+                   [ keyedDecl ctx ]
+               else
+                   [])
               slots |> List.map (slotsDecl ctx)
-              (if has Request.MapMsg then [ mapMsgDecl ctx ] else [])
-              (if has Request.DefaultRecords then
+              (if has Derivation.MapMsg then [ mapMsgDecl ctx ] else [])
+              (if has Derivation.DefaultRecords then
                    [ defaultRecordsDecl ctx ]
                else
                    [])
-              (if has Request.VocabularyConstants then
+              (if has Derivation.VocabularyConstants then
                    [ Ok(constantsDecl ctx) ]
                else
                    []) ]

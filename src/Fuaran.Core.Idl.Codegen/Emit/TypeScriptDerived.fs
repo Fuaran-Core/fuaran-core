@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.Annotations
 open Fuaran.Core.Idl.Emit.FSharpDefaults
@@ -399,15 +400,15 @@ module internal TypeScriptDerived =
     /// exported under the union's name (`Rule.fold`, `Trigger.owner`), as the F# host's `module`
     /// is. The object is declared as `<Union>$` and exported `as <Union>`, so a union named like a
     /// global the module reads (`Map`, `Object`, `Error`) shadows nothing inside the module.
-    let private tsUnionModulesDecl (ctx: Decl) (requests: FSharpDerive.Request list) : (string * string list) list =
+    let private tsUnionModulesDecl (ctx: Decl) (requests: Derivation list) : (string * string list) list =
         let disc = ctx.Idl.Wire.Discriminator
 
         let named =
             requests
             |> List.choose (fun r ->
                 match r with
-                | FSharpDerive.Request.Fold n -> Some n
-                | FSharpDerive.Request.Projections(n, _) -> Some n
+                | Derivation.Fold n -> Some n
+                | Derivation.Projections(n, _) -> Some n
                 | _ -> None)
             |> List.distinct
 
@@ -509,13 +510,13 @@ module internal TypeScriptDerived =
         named
         |> List.choose (fun name -> Decl.tryUnion ctx name)
         |> List.map (fun u ->
-            let folds = requests |> List.contains (FSharpDerive.Request.Fold u.Name)
+            let folds = requests |> List.contains (Derivation.Fold u.Name)
 
             let fields =
                 requests
                 |> List.collect (fun r ->
                     match r with
-                    | FSharpDerive.Request.Projections(n, fs) when n = u.Name -> fs
+                    | Derivation.Projections(n, fs) when n = u.Name -> fs
                     | _ -> [])
                 |> List.distinct
 
@@ -1119,12 +1120,10 @@ const cEveryOf = (read) => {
 
     /// Phase 380/381 — the requested derivations as parts, admitted exactly when the F# path
     /// admits them. `None` when nothing is requested: the plain module and the plain declarations.
-    let private tsDerivedParts
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (ctx: Decl)
-        : Result<DerivedPart list option, CodegenError> =
-        if List.isEmpty requests && not decoders then
+    let private tsDerivedParts (requests: Derivation list) (ctx: Decl) : Result<DerivedPart list option, CodegenError> =
+        let decoders = List.contains Derivation.SpecDecoders requests
+
+        if List.isEmpty requests then
             Ok None
         else
             let idl, kinds = ctx.Idl, ctx.Kinds
@@ -1133,9 +1132,7 @@ const cEveryOf = (read) => {
 
             let has r = List.contains r requests
 
-            let publicAccess =
-                has FSharpDerive.Request.StructuralAccess
-                || has FSharpDerive.Request.KeyedPositions
+            let publicAccess = has Derivation.StructuralAccess || has Derivation.KeyedPositions
 
             // Phase 511 (S12) — admission is the one derivation admission, over this host's
             // resolution: no host projections, because a projection is F# source.
@@ -1145,7 +1142,7 @@ const cEveryOf = (read) => {
                 requests
                 |> List.choose (fun r ->
                     match r with
-                    | FSharpDerive.Request.SlotsOf t -> Some t
+                    | Derivation.SlotsOf t -> Some t
                     | _ -> None)
                 |> List.distinct
 
@@ -1160,8 +1157,8 @@ const cEveryOf = (read) => {
                     requests
                     |> List.choose (fun r ->
                         match r with
-                        | FSharpDerive.Request.Fold n -> Some n
-                        | FSharpDerive.Request.Projections(n, _) -> Some n
+                        | Derivation.Fold n -> Some n
+                        | Derivation.Projections(n, _) -> Some n
                         | _ -> None)
                     |> List.distinct
                     |> List.choose (fun name -> Decl.tryUnion ctx name)
@@ -1170,13 +1167,13 @@ const cEveryOf = (read) => {
                     requests
                     |> List.collect (fun r ->
                         match r with
-                        | FSharpDerive.Request.Projections(n, fs) when n = u.Name -> fs
+                        | Derivation.Projections(n, fs) when n = u.Name -> fs
                         | _ -> [])
                     |> List.distinct
 
                 List.zip named (tsUnionModulesDecl ctx requests)
                 |> List.map (fun (u, emitted) ->
-                    unionModuleDecls u (has (FSharpDerive.Request.Fold u.Name)) (fieldsOf u)
+                    unionModuleDecls u (has (Derivation.Fold u.Name)) (fieldsOf u)
                     |> Result.map (part emitted))
 
             // `default<N>` is a value of the declared type `N`: a `<Tag>Spec` or a record.
@@ -1190,18 +1187,18 @@ const cEveryOf = (read) => {
                        [ Ok(part (tsStructuralDecl disc flat kinds) (structuralDecls kinds)) ]
                    else
                        [])
-                  (if has FSharpDerive.Request.KeyedPositions then
+                  (if has Derivation.KeyedPositions then
                        [ Ok(part (tsKeyedDecl disc flat ctx) keyedDecls) ]
                    else
                        [])
                   slots
                   |> List.map (fun t -> Ok(part (tsSlotsDecl disc flat ctx t) (slotsDecls ctx t)))
-                  (if has FSharpDerive.Request.DefaultRecords then
+                  (if has Derivation.DefaultRecords then
                        [ tsDefaultRecordsDecl idl disc ctx
                          |> Result.map (fun (text, names) -> part (text, names) (defaultDecls names)) ]
                    else
                        [])
-                  (if has FSharpDerive.Request.VocabularyConstants then
+                  (if has Derivation.VocabularyConstants then
                        [ Ok(part (tsConstantsDecl ctx) (constantsDecls kinds)) ]
                    else
                        [])
@@ -1216,18 +1213,14 @@ const cEveryOf = (read) => {
                 |> Result.map Some)
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, appended after its members
-    /// with one further `export` naming them; no request and no decoders IS `typescriptModule`,
+    /// with one further `export` naming them; no request IS `typescriptModule`,
     /// byte for byte. A request the F# path refuses is refused here with the F# path's error.
-    let typescriptModuleDerived
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (decl: Decl)
-        : Result<string, CodegenError> =
+    let typescriptModuleDerived (requests: Derivation list) (decl: Decl) : Result<string, CodegenError> =
         let idl = decl.Idl
 
         typescriptModuleBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders decl
+            tsDerivedParts requests decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsModuleStamp idl baseText
@@ -1244,23 +1237,19 @@ const cEveryOf = (read) => {
                     |> tsModuleStamp idl))
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member the derived module
-    /// exports, appended after the file's own; no request and no decoders IS
+    /// exports, appended after the file's own; no request IS
     /// `typescriptDeclarations`, byte for byte, and a request is refused exactly as
     /// [[typescriptModuleDerived]] refuses it. The parts are the module's own, so the members the
     /// module exports and the members this file declares are chosen by one request list.
     ///
     /// A requested `MapMsg` is not declared, because the module exports nothing for it; the file's
     /// header comment says why.
-    let typescriptDeclarationsDerived
-        (requests: FSharpDerive.Request list)
-        (decoders: bool)
-        (decl: Decl)
-        : Result<string, CodegenError> =
+    let typescriptDeclarationsDerived (requests: Derivation list) (decl: Decl) : Result<string, CodegenError> =
         let idl = decl.Idl
 
         typescriptDeclarationsBody decl
         |> Result.bind (fun baseText ->
-            tsDerivedParts requests decoders decl
+            tsDerivedParts requests decl
             |> Result.map (fun parts ->
                 match parts with
                 | None -> tsDeclarationsStamp idl baseText
@@ -1268,7 +1257,7 @@ const cEveryOf = (read) => {
                     let header =
                         [ yield
                               "// Phase 381 — the derived members the module was generated with are declared after its own, one declaration per exported name."
-                          if List.contains FSharpDerive.Request.MapMsg requests then
+                          if List.contains Derivation.MapMsg requests then
                               yield
                                   "// `mapMsg` is not declared: the module emits no `mapMsg`, because this host holds a handler slot as its sentinel's `null` and carries no message type, so a message map has nothing to rewrite." ]
                         |> String.concat "\n"

@@ -128,6 +128,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 /// Phase 293 — the emitter CORE every backend compiles after: the error channel's helpers, the
 /// one `Result` sequencer, the naming and mangling rules (`pascal`, `ident`, the keyword set),
@@ -506,28 +507,3 @@ module internal Core =
         | THosted h -> Ok h.FSharp
         | TRecord n -> Ok(applied n [])
         | TMap vt -> fsType vt |> Result.map (fun s -> "Map<string, " + s + ">")
-
-    // -----------------------------------------------------------------------
-    // Phase 293 — the declared-support records as the EMITTERS see them. `Gen.GenSupport` and
-    // `Gen.KindProjection` are the published shapes and stay declared in the facade, which
-    // compiles after every emitter; the facade converts, field for field.
-    // -----------------------------------------------------------------------
-
-    /// The emitters' view of `Gen.KindProjection`.
-    type Projection =
-        { SpecDecl: string
-          Encoder: string
-          Decoder: string
-          Mk: string option
-          MapMsg: string option
-          RecordFields: IdlField list option }
-
-    /// The emitters' view of `Gen.GenSupport`.
-    type Support =
-        { Docs: Map<string, string list>
-          TypeSplice: string option
-          EncodeSplice: string option
-          DecodeSplice: string option
-          AccessorSplice: string option
-          CaseRefines: Map<string, string>
-          KindProjections: Map<string, Projection> }

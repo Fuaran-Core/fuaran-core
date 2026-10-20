@@ -1,6 +1,7 @@
 module Fuaran.Core.Tests.DeriveIdl
 
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 374 — the derivations vocabulary. A small WORK-PLAN domain (sections, choices, tasks,
@@ -23,7 +24,7 @@ open Fuaran.Core.Idl
 //
 // `DeriveGenerated.fs` is the F# emitted from it with every derivation requested, committed and
 // checked for drift by `IdlDeriveTests`. Since Phase 377 that includes the collecting decoders and
-// the public per-spec entries (`Gen.Derivation.SpecDecoders`), whose field-shape laws
+// the public per-spec entries (`Derivation.SpecDecoders`), whose field-shape laws
 // `IdlSpecDecoderTests` holds over this module.
 // ---------------------------------------------------------------------------
 
@@ -143,19 +144,19 @@ let moduleName = "Fuaran.Core.Tests.DeriveGenerated"
 let generatedFile = "tests/Fuaran.Core.Tests/DeriveGenerated.fs"
 
 /// Every derivation, each stated over this vocabulary.
-let derivations: Gen.Derivation list =
-    [ Gen.Derivation.StructuralAccess
-      Gen.Derivation.KeyedPositions
-      Gen.Derivation.SlotsOf "Rule"
-      Gen.Derivation.SlotsOf "Owner"
-      Gen.Derivation.MapMsg
-      Gen.Derivation.Fold "Rule"
-      Gen.Derivation.Projections("Trigger", [ "owner" ])
-      Gen.Derivation.Projections("Measure", [ "amount" ])
-      Gen.Derivation.DefaultRecords
-      Gen.Derivation.VocabularyConstants
-      Gen.Derivation.SpecDecoders ]
+let derivations: Derivation list =
+    [ Derivation.StructuralAccess
+      Derivation.KeyedPositions
+      Derivation.SlotsOf "Rule"
+      Derivation.SlotsOf "Owner"
+      Derivation.MapMsg
+      Derivation.Fold "Rule"
+      Derivation.Projections("Trigger", [ "owner" ])
+      Derivation.Projections("Measure", [ "amount" ])
+      Derivation.DefaultRecords
+      Derivation.VocabularyConstants
+      Derivation.SpecDecoders ]
 
 /// The module text the generator emits for this vocabulary with every derivation requested.
 let generate () : Result<string, CodegenError> =
-    Gen.fsharpModuleDerived Gen.GenSupport.Empty derivations moduleName deriveIdl (deriveIdl.Kinds |> List.map _.Tag)
+    Gen.fsharpModuleDerived GenSupport.Empty derivations moduleName deriveIdl (deriveIdl.Kinds |> List.map _.Tag)

@@ -7,6 +7,7 @@ open System.Text
 open System.Text.RegularExpressions
 open Expecto
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 505 — ONE stamp heads every generated artefact, and its policy is a CONTENT HASH.
@@ -133,15 +134,15 @@ let private emissions (v: Idl) (moduleName: string) : (string * string) list =
 
     [ "F# module", Gen.fsharpModule moduleName v ts |> ok "F# module"
       "F# derived module",
-      Gen.fsharpModuleDerived Gen.GenSupport.Empty DeriveIdl.derivations moduleName v ts
+      Gen.fsharpModuleDerived GenSupport.Empty DeriveIdl.derivations moduleName v ts
       |> ok "F# derived module"
       "TypeScript module", Gen.typescriptModule v ts |> ok "TypeScript module"
       "TypeScript derived module",
-      Gen.typescriptModuleDerived [ Gen.Derivation.StructuralAccess ] v ts
+      Gen.typescriptModuleDerived [ Derivation.StructuralAccess ] v ts
       |> ok "TypeScript derived module"
       "TypeScript declarations", Gen.typescriptDeclarations v ts |> ok "TypeScript declarations"
       "TypeScript derived declarations",
-      Gen.typescriptDeclarationsDerived [ Gen.Derivation.StructuralAccess ] v ts
+      Gen.typescriptDeclarationsDerived [ Derivation.StructuralAccess ] v ts
       |> ok "TypeScript derived declarations"
       "F* model", FStarTarget.vocabularyModule moduleName v (modelled v) |> ok "F* model"
       "F* proofs",

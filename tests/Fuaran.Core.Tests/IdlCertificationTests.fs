@@ -5,6 +5,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.ReferenceIdl
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 114 — the engine's certification, WITHOUT a domain vocabulary.
@@ -464,7 +465,7 @@ let valueCarryingDefaults =
                   { probeIdl with
                       Kinds = [ oneKind [ badMapField ] ] }
 
-              let projection: Gen.KindProjection =
+              let projection: KindProjection =
                   { SpecDecl = "ProbeSpec = { Bag: Map<string, string> }"
                     Encoder = "and private encProbeSpec (s: ProbeSpec) : JVal = JObj []"
                     Decoder = "and private decProbeSpec (j: JVal) : Result<ProbeSpec, string> = Ok { Bag = Map.empty }"
@@ -473,7 +474,7 @@ let valueCarryingDefaults =
                     RecordFields = None }
 
               let support =
-                  { Gen.GenSupport.Empty with
+                  { GenSupport.Empty with
                       KindProjections = Map.ofList [ "Probe", projection ] }
 
               Gen.fsharpModuleWith support "Phase124.Projected" idl (probeTags idl)
@@ -762,7 +763,7 @@ let declarationTriple =
           // scale is that domain's own gate, in that domain's repository — which is
           // the point of the claim, not an omission from it (DECISIONS.md D14).
           testCase "a vocabulary + support document loaded FROM BYTES regenerates the same module" (fun _ ->
-              let emit (idl: Idl) (s: Gen.GenSupport) =
+              let emit (idl: Idl) (s: GenSupport) =
                   Gen.fsharpModuleWith s "Fuaran.Core.Tests.ReferenceGenerated" idl (idl.Kinds |> List.map _.Tag)
 
               let fromMemory = emit refIdl support.Support

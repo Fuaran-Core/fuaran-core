@@ -1,6 +1,7 @@
 namespace Fuaran.Core.Idl
 
 open Fuaran.Core
+open Fuaran.Core.Idl.Codegen.Types
 
 // ---------------------------------------------------------------------------
 // Phase 700 — the IDL diff classifier + host-strand report.
@@ -380,7 +381,7 @@ module Diff =
     let private supportEntries (doc: SupportDocument) : Map<string, string> =
         let sup = doc.Support
 
-        let projection (p: Gen.KindProjection) =
+        let projection (p: KindProjection) =
             String.concat
                 "\n--\n"
                 ([ p.SpecDecl

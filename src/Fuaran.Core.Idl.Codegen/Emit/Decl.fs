@@ -2,6 +2,7 @@ namespace Fuaran.Core.Idl.Emit
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 
 /// Phase 511 — where a kind's object sits in the node envelope: under one key of the envelope
@@ -105,7 +106,7 @@ type internal Decl =
         Records: IdlRecord list
         /// Kind tag → declared host projection (empty for a backend with no host projections:
         /// a projection is host source, so only the F# module declares one).
-        Projections: Map<string, Projection>
+        Projections: Map<string, KindProjection>
         /// The type names emitted generic in `'Msg` (vocabulary-wide).
         Msg: Set<string>
         /// The declaration keys (`Node`, `R:<record>`, `S:<kind>`) that take wire equality.
@@ -584,7 +585,7 @@ module internal Decl =
 
     let private build
         (idl: Idl)
-        (projections: Map<string, Projection>)
+        (projections: Map<string, KindProjection>)
         (kinds: IdlKind list)
         (enums: IdlEnum list, unions: IdlUnion list, records: IdlRecord list)
         : Decl =
@@ -613,7 +614,7 @@ module internal Decl =
     /// Resolve `idl` for the kinds named by `kindTags` (a tag the vocabulary does not declare
     /// selects nothing), with the host projections `projections` (empty where the target has
     /// none): the selected kinds and what they REACH. The module targets read this.
-    let resolve (idl: Idl) (projections: Map<string, Projection>) (kindTags: string list) : Decl =
+    let resolve (idl: Idl) (projections: Map<string, KindProjection>) (kindTags: string list) : Decl =
         let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
         build idl projections kinds (referenced idl kinds)
 

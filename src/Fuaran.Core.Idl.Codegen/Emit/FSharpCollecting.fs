@@ -3,7 +3,7 @@ namespace Fuaran.Core.Idl.Emit
 // ---------------------------------------------------------------------------
 // The F# collecting decoders' runtime prelude (Phase 377), as the text the generator emits. It is
 // data with no dependency on the emitters, so it sits before `FSharpCodec`, which splices it into
-// every module that requests `Gen.Derivation.SpecDecoders` (Phase 541 moved it out of that file,
+// every module that requests `Derivation.SpecDecoders` (Phase 541 moved it out of that file,
 // which the 2,000-line rule of D141 holds).
 // ---------------------------------------------------------------------------
 

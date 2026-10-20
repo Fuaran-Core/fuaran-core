@@ -591,6 +591,11 @@ let sourceLitTests =
                           "src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptDeclarations.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptDerived.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/Scaffold.fs"
+                          // Phase 524 — the F* target is four internal modules behind its facade.
+                          "src/Fuaran.Core.Idl.Codegen/FStar/Model.fs"
+                          "src/Fuaran.Core.Idl.Codegen/FStar/Vocabulary.fs"
+                          "src/Fuaran.Core.Idl.Codegen/FStar/Proofs.fs"
+                          "src/Fuaran.Core.Idl.Codegen/FStar/Vectors.fs"
                           "src/Fuaran.Core.Idl.Codegen/FStar.fs" ] do
                         let lines = File.ReadAllLines(Snapshots.repoFile rel)
 
