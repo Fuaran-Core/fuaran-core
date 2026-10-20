@@ -1139,7 +1139,7 @@ let renderDiffs (diffs: string list) =
     diffs |> List.truncate 5 |> String.concat "\n"
 
 //  Phase 149 — the CANONICAL ENCODER. `proofs/WireCanon.fst`'s extracted `render`
-//  beside `Fuaran.Core.Canon.render`, byte for byte.
+//  beside `Fuaran.Core.Canonical.write Fuaran.Core.Rendering.CrossHost`, byte for byte.
 //
 //  The model is named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is
 //  not called `Ops` and `TreeDiff.fst` is not called `Diff`: the extracted oracle is
@@ -1271,7 +1271,7 @@ let rec canonOfModel (v: WireCanon.jval<int, float>) : JVal =
 /// The `wire` the model is parametric over, instantiated at production's own layouts. Two of the
 /// seven fields are worth naming.
 ///
-/// `float_str` is `Double.ToString("R", InvariantCulture)` DIRECTLY and not `Canon.canonicalFloat`,
+/// `float_str` is `Double.ToString("R", InvariantCulture)` DIRECTLY and not `FloatLayout.canonical`,
 /// so the `-0` collapse and the three non-finite tokens stay the MODEL's clauses to get right
 /// rather than being handed to it — that is the difference between a comparison and a tautology.
 /// The digits themselves are .NET's, per the opaque-numeral boundary theorems 1 and 4 also draw.
@@ -1857,7 +1857,7 @@ module ColumnDiff =
         | Embedded t ->
             let cell (c: Cell) =
                 match c with
-                | Float f -> "Float " + Canon.canonicalFloat f
+                | Float f -> "Float " + FloatLayout.canonical f
                 | other -> sprintf "%A" other
 
             let column (c: Column) =

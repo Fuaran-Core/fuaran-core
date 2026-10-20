@@ -569,13 +569,13 @@ let tests =
           testCase "the roster is read from the manifest when it carries one"
           <| fun _ ->
               let manifest =
-                  Canon.render (
-                      JObj
+                  Canonical.write
+                      Rendering.CrossHost
+                      (JObj
                           [ "hosts",
                             JArr
                                 [ JObj [ "id", JStr "fuaran"; "language", JStr "F#"; "role", JStr "codec" ]
-                                  JObj [ "id", JStr "fuaran-zig"; "language", JStr "Zig"; "role", JStr "codec" ] ] ]
-                  )
+                                  JObj [ "id", JStr "fuaran-zig"; "language", JStr "Zig"; "role", JStr "codec" ] ] ])
 
               let after =
                   { oneKind with
@@ -617,7 +617,12 @@ let tests =
                   { oneKind with
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
 
-              match Diff.run (Some(Canon.render (JObj [ "kinds", JArr [] ]))) (art oneKind) (art after) with
+              match
+                  Diff.run
+                      (Some(Canonical.write Rendering.CrossHost (JObj [ "kinds", JArr [] ])))
+                      (art oneKind)
+                      (art after)
+              with
               | Ok text ->
                   Expect.stringContains text "none declared (the manifest carries no `hosts` key)" "names the cause"
                   Expect.isFalse (text.Contains "codec: fuaran") "no default roster"
@@ -633,15 +638,15 @@ let tests =
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
 
               let withHosts =
-                  Canon.render (
-                      JObj
+                  Canonical.write
+                      Rendering.CrossHost
+                      (JObj
                           [ "hosts",
-                            JArr [ JObj [ "id", JStr "fuaran-zig"; "language", JStr "Zig"; "role", JStr "codec" ] ] ]
-                  )
+                            JArr [ JObj [ "id", JStr "fuaran-zig"; "language", JStr "Zig"; "role", JStr "codec" ] ] ])
 
               let manifests =
                   [ None
-                    Some(Canon.render (JObj [ "kinds", JArr [] ]))
+                    Some(Canonical.write Rendering.CrossHost (JObj [ "kinds", JArr [] ]))
                     Some withHosts
                     Some "not json" ]
 

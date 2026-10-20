@@ -155,7 +155,7 @@ module internal VectorFamily =
 /// How one value is laid out in a committed conformance file (Phase 508).
 [<RequireQualifiedAccess>]
 type internal CorpusCell =
-    /// The value as `Canon.render` writes it: a scalar, or a compact canonical object or array.
+    /// The value as `Canonical.write Rendering.CrossHost` writes it: a scalar, or a compact canonical object or array.
     | Value of JVal
     /// An object in AUTHOR order, spaced — `{ "k": v, "k2": v2 }` — and `{}` with no member.
     | Row of (string * CorpusCell) list
@@ -215,7 +215,7 @@ type internal CorpusDifference =
     }
 
 /// The one writer of the conformance files a repository emits (Phase 508). Every key, string, number
-/// and compact value goes through `Canon.render`, so a file escapes by the spine's one rule; the layout
+/// and compact value goes through `Canonical.write Rendering.CrossHost`, so a file escapes by the spine's one rule; the layout
 /// is the one every host reads line by line — a header member per line, an item per line, LF endings,
 /// a trailing newline. An exporter builds a `CorpusDocument` and calls `render`; it writes no JSON of
 /// its own.
@@ -224,12 +224,12 @@ module internal CorpusFile =
 
     let rec private cell (c: CorpusCell) : string =
         match c with
-        | CorpusCell.Value v -> Canon.render v
+        | CorpusCell.Value v -> Canonical.write Rendering.CrossHost v
         | CorpusCell.Row [] -> "{}"
         | CorpusCell.Row members ->
             "{ "
             + (members
-               |> List.map (fun (k, v) -> Canon.render (JStr k) + ": " + cell v)
+               |> List.map (fun (k, v) -> Canonical.write Rendering.CrossHost (JStr k) + ": " + cell v)
                |> String.concat ", ")
             + " }"
         | CorpusCell.List items -> "[" + (items |> List.map cell |> String.concat ", ") + "]"
@@ -247,7 +247,7 @@ module internal CorpusFile =
     let render (doc: CorpusDocument) : string =
         let head =
             doc.Head
-            |> List.map (fun (k, v) -> "  " + Canon.render (JStr k) + ": " + cell v + ",\n")
+            |> List.map (fun (k, v) -> "  " + Canonical.write Rendering.CrossHost (JStr k) + ": " + cell v + ",\n")
             |> String.concat ""
 
         let rows =
@@ -258,7 +258,7 @@ module internal CorpusFile =
         "{\n"
         + head
         + "  "
-        + Canon.render (JStr doc.Items)
+        + Canonical.write Rendering.CrossHost (JStr doc.Items)
         + ": [\n"
         + rows
         + "  ]\n}\n"

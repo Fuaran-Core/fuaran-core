@@ -39,7 +39,7 @@ module internal RegistrySeamLaws =
     let internal candidates (sp: ValueSpace) : string list =
         match sp with
         | IntRange(lo, hi) -> [ string lo; string hi; string (hi + 1); "0"; "11" ]
-        | FloatRange(lo, hi) -> [ Canon.canonicalFloat lo; Canon.canonicalFloat hi; "0"; "2.5"; "12" ]
+        | FloatRange(lo, hi) -> [ FloatLayout.canonical lo; FloatLayout.canonical hi; "0"; "2.5"; "12" ]
         | StringLen(lo, hi) ->
             [ String.replicate lo "x"
               String.replicate hi "y"

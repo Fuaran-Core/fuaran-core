@@ -69,7 +69,7 @@ type JsonError =
 /// The **read-side** policy for the JSON `null` token — the position rules as data.
 ///
 /// The Fuaran wire model itself is unchanged by this type: `JVal` gains no constructor,
-/// `Json.render` / `Canon.render` never emit `null` whichever policy a read ran under, and the
+/// `Json.render` / `Canonical.write` never emit `null` whichever policy a read ran under, and the
 /// strict policy is the pinned default (`ReadOptions.strict`, what `parse` reads under). The policy governs
 /// exactly one thing: what the parser does when a **foreign** document spells an absent member
 /// `null`, as a great many JSON producers do.
@@ -220,6 +220,51 @@ module ReadOptions =
     /// reaches for. A bare or array-element `null` is still refused by name.
     let tolerantOfNull: ReadOptions = { strict with Null = EraseMemberNull }
 
+/// The three reasons a value has no canonical rendering of its own (Phases 12, 306, 462; one
+/// classification since Phase 520). Each is a value whose bytes would be another value's, or text
+/// `parse` refuses, so every guarded writer refuses it rather than writing it.
+[<RequireQualifiedAccess>]
+type RenderFaultClass =
+    /// A non-finite `JFloat`: under the round-trip rule its bare token is not JSON, and under the
+    /// canonical rule its quoted token is the bytes of the STRING of those characters.
+    | NonFiniteFloat
+    /// A string or member key that is not well-formed UTF-16: a lone surrogate has no UTF-8
+    /// encoding, so its bytes would be some other string's.
+    | IllFormedString
+    /// An object carrying one member name twice: `parse` refuses the text (`DuplicateMember`).
+    | RepeatedMember
+
+/// The FIRST value of a document that has no canonical rendering of its own (Phase 520), found by
+/// the one guard every guarded writer refuses through (`Json.firstRenderFault`): its class, its path
+/// (`$` for the root, `[i]` for an array item, `["key"]` for a member, the key under the canonical
+/// escape) and what is at fault there.
+type RenderFault =
+    {
+        /// Which of the three classes it is — the field to branch on.
+        Class: RenderFaultClass
+        /// Where it is, as text: `$`, then `[i]` and `["key"]` steps.
+        Path: string
+        /// What is at fault: the non-finite token, the unpaired surrogate and its unit, or the
+        /// repeated member's name.
+        Detail: string
+    }
+
+/// The `RenderFault` companions (Phase 520).
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RenderFault =
+
+    /// The ONE sentence of a render refusal — what every guarded writer's `Error` carries:
+    /// `<class> has no canonical rendering of its own: <detail> at <path>`.
+    let describe (f: RenderFault) : string =
+        let what =
+            match f.Class with
+            | RenderFaultClass.NonFiniteFloat -> "non-finite float"
+            | RenderFaultClass.IllFormedString -> "ill-formed string"
+            | RenderFaultClass.RepeatedMember -> "repeated member"
+
+        what + " has no canonical rendering of its own: " + f.Detail + " at " + f.Path
+
 /// Fable-clean encode helpers + the wire-envelope discipline + a portable
 /// (FSharp.Core-only) parser. Per-kind cases stay domain-side; the core owns the
 /// envelope shape, the combinators, and the parser. `render` and `parse` are inverses
@@ -294,7 +339,7 @@ module Json =
     /// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex — including `\n`,
     /// `\r` and `\t`, which have NO short form here. It is byte-for-byte the UI host's
     /// `CanonicalJson.appendRawString` and the TypeScript twin's escaper, so a hash pre-image that
-    /// carries a string means one thing on every host. `Canon.render` escapes through this function
+    /// carries a string means one thing on every host. `Rendering.CrossHost` escapes through this function
     /// too; the one copy the standalone layers keep (`JsonString.quote` in `Fuaran.Core.OpStream`,
     /// public as `OpStream.Jsonl.quote` — D2 forbids it a reference here; `Actor.encode` spells
     /// through it, and `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` has spelled through it rather than
@@ -329,8 +374,8 @@ module Json =
             appendEscapedFrom sb s first
 
     // ---- THE WRITER (Phase 306) ----
-    // One iterative writer stands behind `Json.render`, `Canon.render`, `Canon.renderOrdered` and
-    // both `tryRender`s. Each used to be a recursive function mapping itself over a list, so its
+    // One iterative writer stands behind every named `Rendering` (Phase 520: `Json.render` and
+    // `Canonical.write`, guarded or not). Each used to be a recursive function mapping itself over a list, so its
     // stack depth was the VALUE's nesting depth: a constructed value some 1,400 deep killed the
     // process on a 1 MB thread (a stack overflow is uncatchable on .NET), the guarded renderers
     // included, while the parse cap protected only the read side. The pending work is held on an
@@ -343,9 +388,9 @@ module Json =
         | Items of rest: JVal list * first: bool
         | Members of rest: (string * JVal) list * first: bool
 
-    /// The writer, generic over how a string's body is appended (Phase 360): `writeWith` appends
-    /// through the live `escape`, and `EncodingProfile.V1` through its own frozen copy, so a later
-    /// rewrite of the live escape cannot move a `V1` byte.
+    /// The writer, generic over how a string's body is appended (Phase 360): the live renderings
+    /// append through the live `escape`, and `StringEscape.ShortControls` through its own frozen
+    /// copy, so a later rewrite of the live escape cannot move a `V1` byte.
     let private writeCore
         (appendEscaped: System.Text.StringBuilder -> string -> unit)
         (sortKeys: bool)
@@ -410,13 +455,6 @@ module Json =
 
         sb.ToString()
 
-    /// Write `v` with `floatText` as the float layout and object members in Ordinal key order
-    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote. Each string
-    /// is escaped straight into the writer's builder (`escapeInto`, Phase 365), never through an
-    /// intermediate string.
-    let internal writeWith (sortKeys: bool) (floatText: float -> string) (v: JVal) : string =
-        writeCore escapeInto sortKeys floatText v
-
     /// `EncodingProfile.V1`'s string escape, FROZEN (Phase 360): the body `Json.escape` had in
     /// `0.30.0`, kept as its own copy rather than written in terms of the live `escape`, so no later
     /// change to the live path — a rewrite for speed, a further byte change — can move a `V1` byte.
@@ -433,17 +471,35 @@ module Json =
             | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
             | c -> sb.Append(c) |> ignore
 
+    /// THE writer of every named `Rendering` (Phase 520): `v` under `r`'s escape, member order and
+    /// float rule, with no whitespace. Each string is escaped straight into the writer's builder
+    /// (`escapeInto`, Phase 365), never through an intermediate string; `StringEscape.ShortControls`
+    /// through the frozen `V1` copy. `Canonical.write` is this function; `render` is it at `V2`.
+    let internal writeRendering (r: Rendering) (v: JVal) : string =
+        let appendEscaped =
+            match r.Escape with
+            | StringEscape.ShortControls -> appendEscapedV1
+            | StringEscape.AllControlsHex -> escapeInto
+
+        let floatText =
+            match r.Floats with
+            | FloatRule.RoundTrip -> FloatLayout.roundTrip
+            | FloatRule.Canonical -> FloatLayout.canonical
+
+        writeCore appendEscaped (r.Order = MemberOrder.Sorted) floatText v
+
     /// Render a `JVal` in author order with the round-trip float layout. TOTAL AGAINST THE MACHINE
     /// (Phase 306): iterative, so a value of any nesting depth renders — the text of one nested past
     /// `defaultMaxDepth` is text `parse` then refuses by name, which is the read side's cap doing
     /// its job, not a crash.
     ///
-    /// ONE DIVERGENCE FROM `Canon.render` THAT A PARSE COLLAPSES: `JFloat -0.0` renders `-0` here
-    /// (the layout keeps the sign; `Canon.canonicalFloat` collapses it to `0`), and `-0` is an
+    /// ONE DIVERGENCE FROM `Rendering.CrossHost` THAT A PARSE COLLAPSES: `JFloat -0.0` renders `-0`
+    /// here (the layout keeps the sign; `FloatLayout.canonical` collapses it to `0`), and `-0` is an
     /// integer token, so it parses back as `JInt 0` and renders `0` from then on. The first
     /// `render` of a negative zero is therefore not a fixed point of `parse >> render`; every later
     /// one is. The bytes are left as they are because chain pre-images are built from this renderer.
-    let render (v: JVal) : string = writeWith false FloatLayout.roundTrip v
+    /// It is `Canonical.write Rendering.V2`, the spine's current rendering (`EncodingProfile.current`).
+    let render (v: JVal) : string = writeRendering Rendering.V2 v
 
     /// `escape` under a named profile (Phase 360): the body of the JSON string literal `s` renders
     /// as, quotes excluded, under `profile`. `escapeWith EncodingProfile.V2` is `escape`;
@@ -457,21 +513,16 @@ module Json =
             sb.ToString()
         | EncodingProfile.V2 -> escape s
 
-    /// `render` under a named profile (Phase 360) — the renderer a content-addressed store hashes
-    /// through, so its stored ids recompute on every later release. Author member order and the
-    /// round-trip float layout under every profile, exactly as `render`; the profiles differ only in
-    /// the string escape (`escapeWith`).
-    ///
-    /// - `V1` reproduces `0.30.0`'s `Json.render` byte for byte, through a FROZEN copy of that
-    ///   release's escape; `EncodingProfileVectors` pins it against bytes the published `0.30.0`
-    ///   binary produced, for every escaping case and for numbers, order and nesting.
-    /// - `V2` IS `render` — the live path. Its committed vector column is what holds a later rewrite
-    ///   of that path to these bytes; a deliberate byte change to `render` is a new profile, never a
-    ///   change to `V2`.
+    /// `render` under a store's declared profile (Phase 360) — `Canonical.write (Rendering.ofProfile
+    /// profile)`, spelled by the profile a content-addressed store declares, so its stored ids
+    /// recompute on every later release. Author member order and the round-trip float layout under
+    /// both profiles; they differ only in the string escape (`escapeWith`). `V1` reproduces `0.30.0`'s
+    /// `Json.render` byte for byte through a FROZEN copy of that release's escape, and `V2` IS
+    /// `render`; `EncodingProfileVectors` pins both columns.
     let renderWith (profile: EncodingProfile) (v: JVal) : string =
-        match profile with
-        | EncodingProfile.V1 -> writeCore appendEscapedV1 false FloatLayout.roundTrip v
-        | EncodingProfile.V2 -> render v
+        writeRendering (Rendering.ofProfile profile) v
+
+
 
     /// One step of a path into a value, innermost first while a scan holds it.
     type private Step =
@@ -535,8 +586,8 @@ module Json =
     /// AUTHORED order — as `(path, token)`: the path is `$` for the root, `[i]` for an array item and
     /// `["key"]` for a member (the key under `escape`, so the path is unambiguous for any key), and
     /// the token is `JVal.nonFiniteToken`'s. `None` where every float is finite. Public once
-    /// (Phase 299): it is the scan the three guarded renderers (`Json.tryRender`, `Canon.tryRender`,
-    /// `Canonical.tryWrite`) refuse on, which each used to carry as a private copy. Iterative since Phase 306.
+    /// (Phase 299): it is the first class of THE guard (`firstRenderFault`, Phase 520) every guarded
+    /// writer refuses through, which each used to carry as a private copy. Iterative since Phase 306.
     let firstNonFinite (v: JVal) : (string * string) option =
         firstInDocumentOrder
             (fun _ -> None)
@@ -576,7 +627,7 @@ module Json =
     /// The FIRST string in `v` that is not well-formed UTF-16, in document order — a member's key
     /// before its value — as `(path, description)`; the description names the unit and its index
     /// and says whether the string is a member key. `None` where every string has code points.
-    /// The three guarded renderers refuse on it (Phase 306).
+    /// The second class of THE guard (`firstRenderFault`; Phase 306).
     let firstIllFormedString (v: JVal) : (string * string) option =
         let describe (what: string) (s: string) : string option =
             firstIllFormedUnit s
@@ -597,8 +648,7 @@ module Json =
 
     /// The FIRST object in `v` that carries a member name twice, in document order, as
     /// `(path, description)`; the description names the member. `None` where every object's
-    /// names are distinct. The three guarded renderers refuse on it (Phase 462; `Canonical.tryWrite`
-    /// since Phase 495): `render` writes such
+    /// names are distinct. The third class of THE guard (`firstRenderFault`; Phase 462): `render` writes such
     /// an object as it stands, and `parse` refuses the text (`DuplicateMember`), so a value with a
     /// repeated member is un-parseable wire from a guarded entry point, as an ill-formed string is.
     /// Iterative, for the reason the writer and the scan above are: a value of any depth is answered.
@@ -632,6 +682,29 @@ module Json =
 
         found
 
+    /// THE GUARD (Phase 520): the first value of `v` with no canonical rendering of its own, as a
+    /// typed `RenderFault`, or `None`. One function over the three classes, which every guarded
+    /// writer — `tryRender`, `Canonical.tryWrite`, the IDL encoder's `render` — refuses through, in
+    /// one priority: a non-finite float first ([[firstNonFinite]]), then an ill-formed string
+    /// ([[firstIllFormedString]]), then a repeated member ([[firstRepeatedMember]]), each the first
+    /// of its class in document order. `admitNonFinite` skips the first class, for a writer whose
+    /// float slots spell a non-finite value as WIRE_FORMAT §7's quoted token and read it back by
+    /// their type (the IDL encoder, whose verbatim slots refuse it themselves).
+    let firstRenderFault (admitNonFinite: bool) (v: JVal) : RenderFault option =
+        let fault (cls: RenderFaultClass) (hit: (string * string) option) =
+            hit
+            |> Option.map (fun (path, detail) ->
+                { Class = cls
+                  Path = path
+                  Detail = detail })
+
+        (if admitNonFinite then
+             None
+         else
+             fault RenderFaultClass.NonFiniteFloat (firstNonFinite v))
+        |> Option.orElseWith (fun () -> fault RenderFaultClass.IllFormedString (firstIllFormedString v))
+        |> Option.orElseWith (fun () -> fault RenderFaultClass.RepeatedMember (firstRepeatedMember v))
+
     /// A `"kind"`-tagged object — the wire envelope every domain node/op serialises as.
     /// `tag` leads; `fields` follow in author order (camelCase keys by discipline).
     let kindObj (tag: string) (fields: (string * JVal) list) : JVal = JObj(("kind", JStr tag) :: fields)
@@ -645,37 +718,16 @@ module Json =
     /// non-finite float (`NaN` / `Infinity` / `-Infinity`) emits a token that is not valid JSON
     /// and that `parse` then rejects — `render` succeeds but produces un-parseable wire, breaking
     /// `render ∘ parse = id`. The Fuaran wire model has no non-finite float (the same posture as
-    /// "no null"). `tryRender` names the first non-finite `JFloat` as a typed `Error` instead.
-    ///
-    /// Since Phase 306 it refuses a second class for the same reason: a string (or member key)
-    /// that is not well-formed UTF-16. `render` writes a lone surrogate through as it found it, and
-    /// `parse` refuses the text — so that, too, was un-parseable wire from a guarded entry point.
-    /// A non-finite float is looked for first, so every refusal this function already made keeps its
-    /// message. Since Phase 462 it refuses a third class, after the other two: an object carrying a
-    /// member name twice, which `parse` refuses as `DuplicateMember`. Over a value with none of the
-    /// three it is exactly `Ok (render v)`, at any nesting depth.
+    /// "no null"). Since Phase 306 it refuses an ill-formed string too, and since Phase 462 a
+    /// repeated member name, which `parse` refuses as `DuplicateMember`. Since Phase 520 it refuses
+    /// through THE guard (`firstRenderFault`), in the guard's one sentence (`RenderFault.describe`),
+    /// exactly as `Canonical.tryWrite Rendering.V2` does. Over a value with none of the three it is
+    /// exactly `Ok (render v)`, at any nesting depth.
     let tryRender (v: JVal) : Result<string, string> =
-        match firstNonFinite v with
-        | Some(_, tok) -> Error("non-finite float is not representable on the Fuaran wire: " + tok)
-        | None ->
-            match firstIllFormedString v with
-            | Some(path, what) ->
-                Error(
-                    "ill-formed string is not representable on the Fuaran wire: "
-                    + what
-                    + " at "
-                    + path
-                )
-            | None ->
-                match firstRepeatedMember v with
-                | Some(path, what) ->
-                    Error(
-                        "repeated member is not representable on the Fuaran wire: "
-                        + what
-                        + " at "
-                        + path
-                    )
-                | None -> Ok(render v)
+        match firstRenderFault false v with
+        | Some f -> Error(RenderFault.describe f)
+        | None -> Ok(render v)
+
 
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
@@ -695,7 +747,7 @@ module Json =
     /// fell to the float path and parsed as `JFloat -5.0`: one document decoded differently by
     /// server locale while its bytes and digests agreed. `NumberStyles.None` would refuse the sign
     /// itself, sending every negative integer to the float path on every host. `parseNumber` and
-    /// `Versioning.Profile.tryParse` both read through this one function.
+    /// `Versioning.Capability.tryParse` both read through this one function.
     ///
     /// THE TOKEN IS HELD TO `[+-]?[0-9]+` FIRST (Phase 306). The host reader is not that strict
     /// on its own: it has always tolerated trailing NUL characters, so `"7\u0000"` read as `7`.

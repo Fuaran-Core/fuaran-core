@@ -17,7 +17,7 @@ ctor Fuaran.Core.ConfRng+T..ctor(System.UInt32)
 ctor Fuaran.Core.ConformanceReport..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>, System.Boolean)
 ctor Fuaran.Core.ConstructWitness`1..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
 ctor Fuaran.Core.EncodingProfileVectors+ActorVector..ctor(System.String, Fuaran.Core.Actor, System.String, System.String)
-ctor Fuaran.Core.EncodingProfileVectors+Vector..ctor(System.String, Fuaran.Core.JVal, System.String, System.String)
+ctor Fuaran.Core.EncodingProfileVectors+Vector..ctor(System.String, Fuaran.Core.JVal, System.String, System.String, System.String, System.String)
 ctor Fuaran.Core.EvaluatorWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<System.Tuple`2<!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Fuaran.Core.ConfRng+T>>>)
 ctor Fuaran.Core.Families+LawFamily..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Takes>, Fuaran.Core.Families+Election, Fuaran.Core.AdequacyClass, Fuaran.Core.Families+RefusalVerdict, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Families+RefusalAudit..ctor(System.String, Fuaran.Core.Families+RefusalPopulation, System.String)
@@ -311,6 +311,8 @@ record-field Fuaran.Core.EncodingProfileVectors+ActorVector.Actor #1 : Fuaran.Co
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.Name #0 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.V1 #2 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.V2 #3 : System.String
+record-field Fuaran.Core.EncodingProfileVectors+Vector.CrossHost #4 : System.String
+record-field Fuaran.Core.EncodingProfileVectors+Vector.Declared #5 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+Vector.Name #0 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+Vector.V1 #2 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+Vector.V2 #3 : System.String

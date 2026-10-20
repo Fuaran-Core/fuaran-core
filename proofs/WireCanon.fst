@@ -3,8 +3,8 @@
    and its converse as machine-checked theorems (fuaran-core Phase 149).
 
    WHAT IS MODELLED. `Fuaran.Core.Canon` (src/Fuaran.Core.Wire/Canon.fs), clause for clause:
-   `Canon.escape` (WIRE_FORMAT §2 rule 6), `Canon.canonicalFloat` (rule 5, including the `-0`
-   collapse and the three non-finite tokens), and `Canon.render` (rules 2, 3, 5, 6, 7 and the
+   `Json.escape` (WIRE_FORMAT §2 rule 6), `FloatLayout.canonical` (rule 5, including the `-0`
+   collapse and the three non-finite tokens), and `Canonical.write Rendering.CrossHost` (rules 2, 3, 5, 6, 7 and the
    omitted-key corollary of rule 4). Beside it, a READER for exactly the grammar `render` emits —
    not `Json.parse`, which theorem 4 already models, but the left inverse whose existence IS the
    canonical form's converse.
@@ -14,7 +14,7 @@
    nobody states — that equal BYTES imply equal VALUES. The op-stream chain id, the DAG content id,
    the teleport digest (§17.3) and cross-host attestation all hash the canonical rendering and read
    hash equality as value equality, and Phase 145 leaves `op_codec_injective` a parameter precisely
-   because a codec built on `Canon.render` inherits injectivity only if `Canon.render` has it.
+   because a codec built on `Canonical.write Rendering.CrossHost` inherits injectivity only if `Canonical.write Rendering.CrossHost` has it.
 
    WHAT IS PROVED, AND THE FINDING THAT SHAPES IT.
 
@@ -24,7 +24,7 @@
 
      1. `render_aliases_nan` / `_pos_inf` / `_neg_inf` — a non-finite float renders as the QUOTED
         STRING `"NaN"` / `"Infinity"` / `"-Infinity"` (rule 5, Canon.fs `canonicalFloat`), which is
-        byte-for-byte what the STRING of those characters renders as. At Phase 149 `Canon.render`
+        byte-for-byte what the STRING of those characters renders as. At Phase 149 `Canonical.write Rendering.CrossHost`
         had no guarded counterpart, where `Json.render` has `Json.tryRender` beside it — see the
         finding at the foot of this header, and section 13 for the guard Phase 165 added.
      2. `render_aliases_integral_float` — a finite float whose layout carries no `.` and no `E`
@@ -58,7 +58,7 @@
        for ANY value (not only the canonical subset). Stated lexically, because the string "null"
        legitimately renders those four characters inside a literal.
      - `tryrender_is_render_on_finite` / `tryrender_refuses_exactly_aliasing` — Phase 165, section
-       13: the guarded `Canon.tryRender` IS the renderer wherever every float is finite, and
+       13: the guarded `Canonical.tryWrite Rendering.CrossHost` IS the renderer wherever every float is finite, and
        refuses exactly where one is not — naming a float whose rendering refutation 1 says is a
        string's. The integer-shaped float of refutation 2 is proved NOT refused.
      - `every_finite_float_reads_back` — Phase 253, section 7: every finite float `render` emits,
@@ -103,7 +103,7 @@
        written down as `bridged` and proved to be what makes the spelling injective
        (`denot_injective_on_bridged`), rather than left in prose.
 
-     - `Canon.renderOrdered` WAS NOT MODELLED UNTIL PHASE 306, and is now: section 15. It is the
+     - `Canonical.write Rendering.Declared` WAS NOT MODELLED UNTIL PHASE 306, and is now: section 15. It is the
        declared-key-order leg, where the ENCODER is the order authority and no sort runs. The
        theorems of sections 5-13 are about `render` specifically and do NOT carry to it — asserting
        that would be exactly the over-reading this header exists to prevent — which is why it has
@@ -120,14 +120,14 @@
    A FINDING ABOUT THE SHIPPED CODE, recorded because refutation 1 is the only one of the four that
    is not a documented design choice: `Json.render` has a guarded companion, `Json.tryRender`, which
    names a non-finite float as a typed `Error` "instead of producing un-parseable wire". `Canon` has
-   no such companion. A non-finite float reaching `Canon.render` is not un-parseable — it is worse
+   no such companion. A non-finite float reaching `Canonical.write Rendering.CrossHost` is not un-parseable — it is worse
    than that, because it silently becomes a STRING, and a digest over it collides with the digest
    over the string a reader would decode it back to. Nothing in `Canon` refuses it. That is an
    observation about an unguarded path and not a counterexample to any shipped claim, so it is
    recorded here and in the README's ladder rather than repaired in this phase: a repair is a
    refusal-class change to a shipped encoder and belongs to a phase chartered for it.
 
-   THAT PHASE WAS 165, and the repair is section 13: `Canon.tryRender`, a guarded entry point
+   THAT PHASE WAS 165, and the repair is section 13: `Canonical.tryWrite Rendering.CrossHost`, a guarded entry point
    BESIDE `render`, whose bytes did not move. Everything above stays true of `render` itself — a
    value that aliases under it still aliases under it — which is why the four refutations stand
    unedited.
@@ -395,10 +395,10 @@ let key_order_ok (#num #flt: eqtype) (w: wire num flt) : prop =
   key_order_reflexive w /\ key_order_total w /\ key_order_transitive w /\ key_order_antisymmetric w
 
 (* ======================================================================================
-   4. The encoder (F#: `Canon.escape`, `Canon.canonicalFloat`, `Canon.render`).
+   4. The encoder (F#: `Json.escape`, `FloatLayout.canonical`, `Canonical.write Rendering.CrossHost`).
    ====================================================================================== *)
 
-(* F#: `Canon.escape`'s per-character match. Rule 6, and ONLY rule 6: `"` and `\` and the controls,
+(* F#: `Json.escape`'s per-character match. Rule 6, and ONLY rule 6: `"` and `\` and the controls,
    lower-case four-digit hex, no `\n`/`\r`/`\t` shortcuts, `/` untouched. Note this is NOT
    `Json.escape`, which carries the short escapes and is a different function. *)
 let esc_ch (c: ch) : Tot (list ch) =
@@ -427,7 +427,7 @@ let neg_inf_chars : list ch = CMinus :: inf_chars
 let true_chars : list ch = [CPlain "t"; CPlain "r"; CLu; CHexCh HDe]
 let false_chars : list ch = [CHexCh HDf; CHexCh HDa; CPlain "l"; CPlain "s"; CHexCh HDe]
 
-(* F#: `Canon.canonicalFloat`, clause for clause — the three quoted tokens, then the `-0` collapse
+(* F#: `FloatLayout.canonical`, clause for clause — the three quoted tokens, then the `-0` collapse
    (the WIRE rule, applied BEFORE the layout, exactly as the source comment says), then the layout. *)
 let canonical_float (#num #flt: eqtype) (w: wire num flt) (f: flt) : Tot (list ch) =
   match w.fclass f with
@@ -455,7 +455,7 @@ let rec sort_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval
   | [] -> []
   | kv :: t -> insert_kv w kv (sort_kvs w t)
 
-(* F#: `Canon.render`. Rules 2 (the sort), 3 (arrays keep source order), 5 (the two numeric
+(* F#: `Canonical.write Rendering.CrossHost`. Rules 2 (the sort), 3 (arrays keep source order), 5 (the two numeric
    layouts), 6 (the escape) and 7 (`true` / `false`); rule 4 is structural — a key that is not in
    the list is simply not emitted, and there is no clause for it, which is the point. *)
 let rec render (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
@@ -780,7 +780,7 @@ let int_and_float_layouts_disjoint (#num #flt: eqtype) (w: wire num flt) (i: num
         of the canonical subset only, and refutation 2 (section 11) says what the floats outside it
         alias. Neither said they could be READ: a finite float whose layout carries neither marker
         renders as an integer-shaped token, and past 2^53 production's parser refused that token,
-        so `Canon.render (JFloat 1e16)` was text `Json.parse` would not take back. The premise below
+        so `Canonical.write Rendering.CrossHost (JFloat 1e16)` was text `Json.parse` would not take back. The premise below
         is the read-back production gives those floats since Phase 253 — the token reads as a number
         that renders as the same token (an Int32 token as `JInt`, any other as `JFloat`). It is a
         SECOND numeral premise, carried by this theorem alone: nothing in sections 8-16 assumes it,
@@ -1169,7 +1169,7 @@ let render_deterministic (#num #flt: eqtype) (w: wire num flt) (a b: jval num fl
   render_ignores_key_order w a;
   render_ignores_key_order w b
 
-(* THE CANONICAL FORM, in one statement. This is what the phase is for: `Canon.render` is not
+(* THE CANONICAL FORM, in one statement. This is what the phase is for: `Canonical.write Rendering.CrossHost` is not
    merely deterministic, it is a canonical form — the bytes determine the value, and the value
    determines the bytes, over the subset rule 5's own slot rule describes. *)
 [@@ noextract_to "FSharp"]
@@ -1234,7 +1234,7 @@ let read_render_roundtrip_within_limits (#num #flt: eqtype) (w: wire num flt) (v
 
 (* 1. A NON-FINITE FLOAT IS A STRING ON THE WIRE. `canonicalFloat` emits the QUOTED token `"NaN"`,
       and so does the string of those three characters. Two different values, one digest. `render`
-      does not refuse the float; since Phase 165 `Canon.tryRender` does (section 13), and its
+      does not refuse the float; since Phase 165 `Canonical.tryWrite Rendering.CrossHost` does (section 13), and its
       predicate is this lemma's hypothesis and its two siblings', taken together. *)
 [@@ noextract_to "FSharp"]
 let render_aliases_nan (#num #flt: eqtype) (w: wire num flt) (f: flt)
@@ -1308,7 +1308,7 @@ let render_aliases_member_order (#num #flt: eqtype) (w: wire num flt)
        `tok_read_ok` says nothing. The numerals themselves stay .NET's to compute, as everywhere
        in this model.
 
-       WHAT IS NOT CLAIMED. `Canon.renderOrdered` is not modelled (header). And this is a theorem
+       WHAT IS NOT CLAIMED. `Canonical.write Rendering.Declared` is not modelled (header). And this is a theorem
        about the ENCODER: a host that writes JSON by some other route is not described by it.
 
        Every definition below is PROOF-ONLY and erased at extraction, so the oracle is unchanged.
@@ -1495,15 +1495,15 @@ let reader_refuses_null (#num #flt: eqtype) (w: wire num flt) (rest: list ch)
   assert_norm (app null_chars rest == CPlain "n" :: app [CLu; CPlain "l"; CPlain "l"] rest)
 
 (* ======================================================================================
-   13. THE GUARD (Phase 165) — `Canon.tryRender`, the refusal beside the renderer.
+   13. THE GUARD (Phase 165) — `Canonical.tryWrite Rendering.CrossHost`, the refusal beside the renderer.
 
        Section 11's first refutation is the only one of the four that is not a documented design
        choice of the format: a non-finite float becomes a STRING on the wire, and nothing in
-       `Canon` refused it. `Canon.tryRender` is the entry point that does, in the shape
+       `Canon` refused it. `Canonical.tryWrite Rendering.CrossHost` is the entry point that does, in the shape
        `Json.tryRender` gives `Json.render` — a typed refusal naming the first non-finite float
        by path, and otherwise exactly the renderer.
 
-       WHAT IS MODELLED. `first_nonfinite` is `Canon.tryRender`'s `firstNonFinite`, clause for
+       WHAT IS MODELLED. `first_nonfinite` is `Canonical.tryWrite Rendering.CrossHost`'s `firstNonFinite`, clause for
        clause: document order, an array by index (`List.indexed`'s counter is the `i` here), an
        object's members in AUTHORED order — the scan runs before any sort, as production's does.
        `try_render` is the two-armed match on its result. The path is carried as DATA (`pstep`)
@@ -1537,7 +1537,7 @@ let reader_refuses_null (#num #flt: eqtype) (w: wire num flt) (rest: list ch)
        identically to the document with the named float replaced by its string — is not proved
        here; it is a congruence through `sort_kvs` and is not needed by the guard, whose job is
        to refuse. What IS proved is that the float the refusal names aliases a string on its own.
-       (c) `Canon.renderOrdered` is not modelled (header), and has no guarded companion.
+       (c) `Canonical.write Rendering.Declared` is not modelled (header), and has no guarded companion.
 
        The scan, the guard and the three result types EXTRACT — the differential runs them
        beside production. Everything else below is PROOF-ONLY.
@@ -1567,7 +1567,7 @@ type rscan =
   | NoRepeat : rscan
   | Repeated : path:list pstep -> k:list ch -> rscan
 
-(* F#: `Canon.tryRender`'s `Result` — the rendering, or one of its three refusals: the path and the
+(* F#: `Canonical.tryWrite Rendering.CrossHost`'s `Result` — the rendering, or one of its three refusals: the path and the
    non-finite float it names, (Phase 306) the path and the ill-formed string it names, or (Phase
    462) the path of the object and the member name it carries twice. *)
 type guarded (flt: eqtype) =
@@ -1675,7 +1675,7 @@ and first_repeated_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch 
        | Repeated p k' -> Repeated (PMember k :: p) k'
        | NoRepeat -> first_repeated_kvs w t)
 
-(* F#: `Canon.tryRender`. `render` is called, never re-implemented: the guard adds its refusals
+(* F#: `Canonical.tryWrite Rendering.CrossHost`. `render` is called, never re-implemented: the guard adds its refusals
    and changes no byte. The non-finite float is looked for FIRST, as in production, then the
    ill-formed string, then (Phase 462) the repeated member, so every refusal an earlier guard
    made is the refusal this one makes. *)
@@ -2224,7 +2224,7 @@ let rec pcs_app (x y: list ch)
 (* The `och` each character of a string BECOMES once rule 6 has escaped it and `parseString` has
    read it back. Rule 6's escape set is a strict subset of the parser's: the two punctuation
    escapes land on `OEsc`, a control lands on the `\u00XX` arm as its four hex digits — never on
-   a short escape, because `Canon.escape` does not emit one — and every other character is copied
+   a short escape, because `Json.escape` does not emit one — and every other character is copied
    through. *)
 [@@ noextract_to "FSharp"]
 let po (c: ch) : Tot JP.och =
@@ -2819,10 +2819,10 @@ let numerals_bridge_is_satisfiable (_: unit)
   with (introduce _ ==> _ with witness_float_parses rest)
 
 (* ======================================================================================
-   15. THE DECLARED-KEY-ORDER RENDERER (Phase 306) — `Canon.renderOrdered`, which is `render`
+   15. THE DECLARED-KEY-ORDER RENDERER (Phase 306) — `Canonical.write Rendering.Declared`, which is `render`
        minus rule 2, and is INJECTIVE outright on the canonical subset.
 
-       The header said of Phase 149 that `Canon.renderOrdered` was not modelled, and that
+       The header said of Phase 149 that `Canonical.write Rendering.Declared` was not modelled, and that
        asserting `render`'s theorems carry to it would be an over-reading. This section models
        it and states what is true of it — which is MORE than is true of `render`, not less.
 
@@ -2846,10 +2846,10 @@ let numerals_bridge_is_satisfiable (_: unit)
        included.
 
        The three renderer functions EXTRACT — the differential runs them beside production's
-       `Canon.renderOrdered`. The lemmas are PROOF-ONLY.
+       `Canonical.write Rendering.Declared`. The lemmas are PROOF-ONLY.
    ====================================================================================== *)
 
-(* F#: `Canon.renderOrdered` — `Json.writeWith false canonicalFloat`. `render`'s clauses, with the
+(* F#: `Canonical.write Rendering.Declared` — `Json.writeWith false canonicalFloat`. `render`'s clauses, with the
    members in AUTHORED order. *)
 let rec render_ordered (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
   : Tot (list ch) (decreases %[(jsize v <: nat); 0]) =
@@ -3018,7 +3018,7 @@ and render_kvs_is_ordered_of_normal (#num #flt: eqtype) (w: wire num flt)
        THE THEOREM. `canonical_digest_preimage_injective`: for two canonical values whose strings
        and member keys are all well-formed UTF-16, equal UTF-8 bytes of the two renderings imply
        equal normal forms. `tryrender_digest_injective` is the same sentence in the shape a caller
-       holds — two values `Canon.tryRender` ACCEPTED — since the guard of section 13 refuses
+       holds — two values `Canonical.tryWrite Rendering.CrossHost` ACCEPTED — since the guard of section 13 refuses
        exactly the strings this theorem excludes.
 
        HOW. `render_good` shows the rendering of such a value is itself well-formed: it is a
@@ -3329,7 +3329,7 @@ let canonical_digest_preimage_injective (#num #flt: eqtype) (w: wire num flt) (s
   units_injective sp (render w a) (render w b);
   render_injective_up_to_key_order w a b
 
-(* ---- the same sentence, about what `Canon.tryRender` accepted ---- *)
+(* ---- the same sentence, about what `Canonical.tryWrite Rendering.CrossHost` accepted ---- *)
 
 (* The bridge between the guard's test and this section's predicate: a string the host's
    well-formedness test accepts is bridged and well-formed. F#: `Json.isWellFormedUtf16`, at the
@@ -3366,7 +3366,7 @@ and strings_ok_kvs_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spellin
   | [] -> ()
   | (_, v) :: t -> strings_ok_digestible w sp v; strings_ok_kvs_digestible w sp t
 
-(* WHAT THE GUARD BUYS. Two canonical values `Canon.tryRender` accepted, whose renderings have
+(* WHAT THE GUARD BUYS. Two canonical values `Canonical.tryWrite Rendering.CrossHost` accepted, whose renderings have
    the same UTF-8 bytes, have the same normal form. The guard's two refusals are exactly the two
    ways a canonical rendering's bytes could have named a second value: a non-finite float
    (section 11's first refutation) and a string with no code points (`Utf8.fst`'s). *)

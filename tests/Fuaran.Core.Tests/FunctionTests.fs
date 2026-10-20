@@ -1518,8 +1518,15 @@ let convergenceTests =
               let odd = text.Replace("\"kind\":\"value\"", "\"kind\":\"int\"")
               Expect.notEqual odd text "the probe document carries the tag"
 
-              match CapabilityCodec.decode odd with
-              | Error m -> Expect.stringContains m "unknown hole kind: int" "names the kind"
+              match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient odd with
+              | Error e ->
+                  Expect.equal (e.Code, List.last e.Path) (DecodeCode.UnknownTag, PathSegment.Key "kind") "at the kind"
+                  Expect.equal e.Expected "one of 'value', 'slot', 'repeat', 'action'" "naming the known kinds"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence e.Code e.Expected "value 'int'")
+                      "naming the kind, projected"
               | Ok _ -> failtest "an unknown kind decoded"
 
               // Phase 405 — ONE reader spelling. The descriptor spelling `toSchema` writes (`"kind"`;
@@ -1775,7 +1782,7 @@ let validatedDeclarationTests =
                   sig307 [ entry307 "x" (ValueHole finite); entry307 "n" (ValueHole(IntRange(-5, 5))) ]
 
               Expect.isOk (register307 sg.Holes) "it registers"
-              Expect.isOk (Canon.tryRender (Function.toJsonSchema sg)) "and its schema renders"
+              Expect.isOk (Canonical.tryWrite Rendering.CrossHost (Function.toJsonSchema sg)) "and its schema renders"
 
               let cap = Capability.create "c" sg Server
               Expect.equal (CapabilityCodec.tryEncode cap) (Ok(CapabilityCodec.encode cap)) "tryEncode is encode"
@@ -2059,10 +2066,24 @@ let readerAdmissionTests =
                         | Ok text ->
                             Expect.equal (register307 holes) (Error expected) (name + ": the registry's refusal")
 
-                            Expect.equal
-                                (CapabilityCodec.decode text)
-                                (Error(InvokeError.describe expected))
-                                (name + ": the reader's refusal is the registry's")
+                            match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient text with
+                            | Error e ->
+                                Expect.equal e.Code DecodeCode.OutOfRange (name + ": out of the admitted range")
+
+                                Expect.isTrue
+                                    (DecodeError.resolvesIn (Json.parse text |> Result.toOption |> Option.get) e)
+                                    (name + ": the path resolves")
+
+                                Expect.equal
+                                    e.Message
+                                    (DecodeError.sentence e.Code e.Expected (InvokeError.describe expected))
+                                    (name + ": the reader's refusal is the registry's, projected")
+
+                                Expect.equal
+                                    (CapabilityCodec.decode text)
+                                    (Error e.Message)
+                                    (name + ": the string form is it")
+                            | Ok c -> failtestf "%s: the reader admitted %A" name c
 
                             yield name ]
 
@@ -2085,7 +2106,11 @@ let readerAdmissionTests =
                       (Json.parse text |> Result.toOption |> Option.get)
               with
               | Error e ->
-                  Expect.equal e.Message (InvokeError.describe (NonTotalCapability("c", [ "r" ]))) "the totality half"
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence e.Code e.Expected (InvokeError.describe (NonTotalCapability("c", [ "r" ]))))
+                      "the totality half, projected"
+
                   Expect.equal e.Path [ PathSegment.Key "signature"; PathSegment.Key "holes" ] "at the holes"
                   Expect.equal e.Code DecodeCode.OutOfRange "out of the admitted range"
               | Ok c -> failtestf "a non-total declaration was read: %A" c

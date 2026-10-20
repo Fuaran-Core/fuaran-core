@@ -30,11 +30,6 @@ module internal FunctionInternals =
         [<MethodImpl(MethodImplOptions.NoInlining)>]
         let tagOf (el: JVal) : string option = SeamCodec.tagOf el
 
-        /// `SeamCodec.members`: the first member of `el` outside `known`, as a refusal.
-        [<MethodImpl(MethodImplOptions.NoInlining)>]
-        let members (where: string) (known: string list) (el: JVal) : Result<unit, DecodeError> =
-            SeamCodec.members where known el
-
         /// `SeamCodec.within`: check the member `name` of `el`, where it is present.
         [<MethodImpl(MethodImplOptions.NoInlining)>]
         let within (name: string) (check: Decoder<unit>) (el: JVal) : Result<unit, DecodeError> =

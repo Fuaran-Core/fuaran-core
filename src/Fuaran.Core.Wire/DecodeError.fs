@@ -61,9 +61,10 @@ type RootDecodeCode =
     | SchemaFault
 
 /// A decode refusal (Phase 310): its code, the path to the value at fault (see `DecodeCode` for
-/// what a `MissingField` path names), what the position expected, and a sentence. `Message` is the
-/// sentence the string-error forms return, so the typed and the legacy reading of one refusal are
-/// the same refusal.
+/// what a `MissingField` path names), what the position expected, and a sentence. Since Phase 520
+/// the sentence is a PROJECTION (DECISIONS.md D99, amended): `DecodeError.sentence` writes it from
+/// the code, the expectation and the detail, one form per code, and nothing re-spells it. A host
+/// certifies on `Code` and `Path`; the sentence is for a reader and may be reworded between drafts.
 type DecodeError =
     {
         /// What kind of fault it is — the field to branch on, closed across hosts.
@@ -74,8 +75,9 @@ type DecodeError =
         /// What the position admits, as a phrase (`object`, `one of 'a', 'b'`, `an int in [0, 9]`) —
         /// for a reader or a repairing model, not for matching on.
         Expected: string
-        /// The sentence the string-error forms return for this refusal, byte for byte. It carries no
-        /// path; `DecodeError.render` adds one.
+        /// The sentence — `DecodeError.sentence` of the code, the expectation and the detail the
+        /// refusal was built with, and what the string-error forms return. It carries no path;
+        /// `DecodeError.render` adds one. Never matched on: the code and the path are the contract.
         Message: string
     }
 
@@ -112,13 +114,44 @@ module DecodeError =
     let tryCodeOfName (name: string) : DecodeCode option =
         codes |> List.tryFind (fun c -> codeName c = name)
 
+    /// The ONE sentence of a refusal (Phase 520; D99 as amended): a projection of its code, what
+    /// its position expected, and `detail` — what was found there (a kind name, a member name, the
+    /// offending value), never a sentence of the caller's own. One form per code:
+    ///
+    /// - `InvalidJson`: `not valid JSON: <detail>` (the parser's account and its position);
+    /// - `MissingField`: `missing property: <detail>` (the member's name);
+    /// - `WrongKind`: `expected <expected>, got <detail>` (the kind found);
+    /// - `UnknownTag`: `unknown <detail>; expected <expected>`;
+    /// - every other code: `<code phrase>: <detail>; expected <expected>`, the detail and its colon
+    ///   left out where it is empty.
+    ///
+    /// The path is not in it — `render` adds the path — so a refusal carried one step outward keeps
+    /// its sentence.
+    let sentence (code: DecodeCode) (expected: string) (detail: string) : string =
+        let led (phrase: string) =
+            (if detail = "" then phrase else phrase + ": " + detail)
+            + "; expected "
+            + expected
+
+        match code with
+        | DecodeCode.InvalidJson -> "not valid JSON: " + detail
+        | DecodeCode.MissingField -> "missing property: " + detail
+        | DecodeCode.WrongKind -> "expected " + expected + ", got " + detail
+        | DecodeCode.UnknownTag -> "unknown " + detail + "; expected " + expected
+        | DecodeCode.OutOfRange -> led "out of range"
+        | DecodeCode.UndeclaredMember -> led "undeclared member"
+        | DecodeCode.LimitExceeded -> led "limit exceeded"
+        | DecodeCode.NotAdmitted -> led "not admitted"
+        | DecodeCode.SchemaFault -> led "schema fault"
+
     /// A refusal at the value being decoded (an empty path — a combinator that hands the refusal
-    /// out prefixes its own step).
-    let make (code: DecodeCode) (expected: string) (message: string) : DecodeError =
+    /// out prefixes its own step): its code, what the position expected, and the detail its
+    /// sentence is projected from (`sentence`).
+    let make (code: DecodeCode) (expected: string) (detail: string) : DecodeError =
         { Code = code
           Path = []
           Expected = expected
-          Message = message }
+          Message = sentence code expected detail }
 
     /// The same refusal one step further from the root — what a combinator does to a refusal
     /// leaving a member or an item.
@@ -126,9 +159,6 @@ module DecodeError =
 
     /// The same refusal under a whole path prefix.
     let within (prefix: PathSegment list) (e: DecodeError) : DecodeError = { e with Path = prefix @ e.Path }
-
-    /// The same refusal with its sentence rewritten — a codec prefixing its own context.
-    let reword (f: string -> string) (e: DecodeError) : DecodeError = { e with Message = f e.Message }
 
     /// The sentence alone — what the string-error forms return.
     let describe (e: DecodeError) : string = e.Message
@@ -169,11 +199,14 @@ module DecodeError =
     /// code to its own envelope and never reports a breach as `InvalidJson`.
     let ofJsonRefusal (r: JsonRefusal) : DecodeError =
         match r with
-        | JsonRefusal.Malformed e -> make DecodeCode.InvalidJson "JSON text" (Json.formatJsonError e)
+        | JsonRefusal.Malformed e ->
+            make DecodeCode.InvalidJson "JSON text" (e.Message + " at position " + string e.Position)
         | JsonRefusal.LimitExceeded b ->
             let name = JsonLimit.name b.Limit
 
-            { Code = DecodeCode.LimitExceeded
-              Path = b.Path
-              Expected = "within the " + name + " bound of " + string b.Declared
-              Message = "limit " + name + " of " + string b.Declared + " exceeded" }
+            within
+                b.Path
+                (make
+                    DecodeCode.LimitExceeded
+                    ("within the " + name + " bound of " + string b.Declared)
+                    ("the " + name + " bound"))

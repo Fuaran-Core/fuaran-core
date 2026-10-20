@@ -1355,7 +1355,7 @@ let private readDagShapes (root: string) : Result<DagShape list, string> =
                             | JStr s -> Some s
                             | _ -> None)
                       Actor = a
-                      OpJson = Canon.render op }
+                      OpJson = Canonical.write Rendering.CrossHost op }
             | _ -> Error(sprintf "%s: expected hash / parents / actor / op" name)
         | Ok _ -> Error(sprintf "%s: not a JSON object" name))
     |> List.fold

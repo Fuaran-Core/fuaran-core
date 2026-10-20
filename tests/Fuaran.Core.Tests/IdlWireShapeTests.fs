@@ -111,7 +111,7 @@ let tests =
                   "the default-shape declaration refuses the flat wire"
           }
 
-          test "the default shape is the default — an unshaped declaration is byte-identical to Canon.typed" {
+          test "the default shape is the default — an unshaped declaration is byte-identical to Canonical.typed" {
               let bytes = roundTrip baseIdl
               Expect.isTrue (bytes.Contains "\"kind\":{\"$type\":\"Note\"") "nested $type, exactly as before"
           }
@@ -285,7 +285,7 @@ let tests =
               | Error e -> failtestf "fsharp emitter: %A" e
               | Ok src ->
                   Expect.isTrue (src.Contains "typedTag") "the F# module carries the declared-key helper"
-                  Expect.isFalse (src.Contains "Canon.typed \"") "no default-keyed emission remains"
+                  Expect.isFalse (src.Contains "Canonical.typed \"") "no default-keyed emission remains"
 
               let ts = emitTsModule idl [ "Note" ]
               // Phase 337 — the discriminator is read by `dTag`, over the declared key.

@@ -22,6 +22,12 @@ namespace Fuaran.Core
 //  nesting. A lone surrogate is deliberately absent: both profiles write it through raw, and a raw
 //  lone surrogate cannot be carried in the committed UTF-8 file this table is rendered into.
 //
+//  Since Phase 520 every value vector pins the two CROSS-HOST renderings too (`Rendering.CrossHost`,
+//  `Canon.render` until then, and `Rendering.Declared`, `Canon.renderOrdered`): a column per named
+//  rendering, measured from the `0.38.1` binaries' `Canon.render` / `Canon.renderOrdered` before the
+//  fold into `Canonical`, so the rendering contract is held to the bytes every host hashes. The
+//  committed `lines` table stays the two store profiles' (`name<TAB>V1<TAB>V2`).
+//
 //  It sits beside the law kit as `StringEscapeVectors` does — a fixed vector corpus, so the one run
 //  is the whole sample. FSharp.Core only, Fable-clean.
 // ============================================================================
@@ -31,7 +37,7 @@ module EncodingProfileVectors =
 
     open VectorKit
 
-    /// One value with the exact bytes each profile renders it as.
+    /// One value with the exact bytes each named rendering writes it as.
     type Vector =
         {
             /// The case label, prefixed to every outcome the runner reports for this vector.
@@ -42,6 +48,11 @@ module EncodingProfileVectors =
             V1: string
             /// `Json.renderWith EncodingProfile.V2` of `Value` — `Json.render` since `0.33.0`.
             V2: string
+            /// `Canonical.write Rendering.CrossHost` of `Value` — `Canon.render`'s bytes, unmoved since
+            /// `0.30.0` (Phase 520).
+            CrossHost: string
+            /// `Canonical.write Rendering.Declared` of `Value` — `Canon.renderOrdered`'s bytes (Phase 520).
+            Declared: string
         }
 
     /// One actor with the exact pre-image each profile folds it into the chain and the DAG as.
@@ -64,35 +75,51 @@ module EncodingProfileVectors =
               { Name = sprintf "U+%04X in a string" c
                 Value = JStr(string (char c))
                 V1 = quoted v1
-                V2 = quoted v2 }
+                V2 = quoted v2
+                CrossHost = quoted v2
+                Declared = quoted v2 }
           { Name = "quote"
             Value = JStr "\""
             V1 = "\"\\\"\""
-            V2 = "\"\\\"\"" }
+            V2 = "\"\\\"\""
+            CrossHost = "\"\\\"\""
+            Declared = "\"\\\"\"" }
           { Name = "backslash"
             Value = JStr "\\"
             V1 = "\"\\\\\""
-            V2 = "\"\\\\\"" }
+            V2 = "\"\\\\\""
+            CrossHost = "\"\\\\\""
+            Declared = "\"\\\\\"" }
           { Name = "plain text passes through"
             Value = JStr "a /bé\U0001F642"
             V1 = "\"a /bé\U0001F642\""
-            V2 = "\"a /bé\U0001F642\"" }
+            V2 = "\"a /bé\U0001F642\""
+            CrossHost = "\"a /bé\U0001F642\""
+            Declared = "\"a /bé\U0001F642\"" }
           { Name = "control characters in a member key"
             Value = JObj [ "k\n\r\t", JStr "v" ]
             V1 = """{"k\n\r\t":"v"}"""
-            V2 = """{"k\u000a\u000d\u0009":"v"}""" }
+            V2 = """{"k\u000a\u000d\u0009":"v"}"""
+            CrossHost = """{"k\u000a\u000d\u0009":"v"}"""
+            Declared = """{"k\u000a\u000d\u0009":"v"}""" }
           { Name = "a multi-line text field"
             Value = JObj [ "kind", JStr "note"; "text", JStr "line one\nline two\r\n\tindented" ]
             V1 = """{"kind":"note","text":"line one\nline two\r\n\tindented"}"""
-            V2 = """{"kind":"note","text":"line one\u000aline two\u000d\u000a\u0009indented"}""" }
+            V2 = """{"kind":"note","text":"line one\u000aline two\u000d\u000a\u0009indented"}"""
+            CrossHost = """{"kind":"note","text":"line one\u000aline two\u000d\u000a\u0009indented"}"""
+            Declared = """{"kind":"note","text":"line one\u000aline two\u000d\u000a\u0009indented"}""" }
           { Name = "authored member order"
             Value = JObj [ "b", JInt 1; "a", JInt 2 ]
             V1 = """{"b":1,"a":2}"""
-            V2 = """{"b":1,"a":2}""" }
+            V2 = """{"b":1,"a":2}"""
+            CrossHost = """{"a":2,"b":1}"""
+            Declared = """{"b":1,"a":2}""" }
           { Name = "integers"
             Value = JArr [ JInt 0; JInt -7; JInt 2147483647; JInt -2147483648 ]
             V1 = "[0,-7,2147483647,-2147483648]"
-            V2 = "[0,-7,2147483647,-2147483648]" }
+            V2 = "[0,-7,2147483647,-2147483648]"
+            CrossHost = "[0,-7,2147483647,-2147483648]"
+            Declared = "[0,-7,2147483647,-2147483648]" }
           { Name = "floats"
             Value =
               JArr
@@ -104,15 +131,21 @@ module EncodingProfileVectors =
                     JFloat 9007199254740993.0
                     JFloat 2.0 ]
             V1 = "[0.1,-0,1E+21,5E-324,123.456,9007199254740992,2]"
-            V2 = "[0.1,-0,1E+21,5E-324,123.456,9007199254740992,2]" }
+            V2 = "[0.1,-0,1E+21,5E-324,123.456,9007199254740992,2]"
+            CrossHost = "[0.1,0,1E+21,5E-324,123.456,9007199254740992,2]"
+            Declared = "[0.1,0,1E+21,5E-324,123.456,9007199254740992,2]" }
           { Name = "booleans and empty containers"
             Value = JArr [ JBool true; JBool false; JArr []; JObj [] ]
             V1 = "[true,false,[],{}]"
-            V2 = "[true,false,[],{}]" }
+            V2 = "[true,false,[],{}]"
+            CrossHost = "[true,false,[],{}]"
+            Declared = "[true,false,[],{}]" }
           { Name = "nesting"
             Value = JObj [ "a", JArr [ JObj [ "b", JArr [ JStr "c\n" ] ] ] ]
             V1 = """{"a":[{"b":["c\n"]}]}"""
-            V2 = """{"a":[{"b":["c\u000a"]}]}""" } ]
+            V2 = """{"a":[{"b":["c\u000a"]}]}"""
+            CrossHost = """{"a":[{"b":["c\u000a"]}]}"""
+            Declared = """{"a":[{"b":["c\u000a"]}]}""" } ]
 
     /// The actors the table folds into the pre-images: one with no control character, a human with a
     /// line feed, an agent with a line feed, a tab and a carriage return across its three fields, and
@@ -184,13 +217,17 @@ module EncodingProfileVectors =
               let tag = v.Name + " / " + EncodingProfile.name p
               expect (tag + " / Json.renderWith") "Json.renderWith" (column p v.V1 v.V2) (Json.renderWith p v.Value)
               // Phase 379: the canonical writer IS the profile's renderer, guarded or not
-              expect (tag + " / Canonical.write") "Canonical.write" (column p v.V1 v.V2) (Canonical.write p v.Value)
+              expect
+                  (tag + " / Canonical.write")
+                  "Canonical.write"
+                  (column p v.V1 v.V2)
+                  (Canonical.write (Rendering.ofProfile p) v.Value)
 
               expect
                   (tag + " / Canonical.tryWrite")
                   "Canonical.tryWrite"
                   (column p v.V1 v.V2)
-                  (match Canonical.tryWrite p v.Value with
+                  (match Canonical.tryWrite (Rendering.ofProfile p) v.Value with
                    | Ok t -> t
                    | Error e -> "refused: " + e)
 
@@ -211,9 +248,9 @@ module EncodingProfileVectors =
                   let mine = column p v.V1 v.V2
 
                   if
-                      Canonical.write other v.Value <> mine
-                      && Canonical.isCanonical p mine
-                      && not (Canonical.isCanonical other mine)
+                      Canonical.write (Rendering.ofProfile other) v.Value <> mine
+                      && Canonical.isCanonical (Rendering.ofProfile p) mine
+                      && not (Canonical.isCanonical (Rendering.ofProfile other) mine)
                   then
                       pass name
                   else
@@ -222,7 +259,7 @@ module EncodingProfileVectors =
                           (sprintf
                               "%s rendered %s over %s"
                               (EncodingProfile.name other)
-                              (Canonical.write other v.Value)
+                              (Canonical.write (Rendering.ofProfile other) v.Value)
                               mine)
 
               match v.Value with
@@ -235,6 +272,39 @@ module EncodingProfileVectors =
                       (body.Substring(1, body.Length - 2))
                       (Json.escapeWith p s)
               | _ -> ()
+          // Phase 520 — the cross-host renderings, each held to its own pinned column: written, guarded
+          // and recognised as canonical by the one contract the store profiles are.
+          for label, r, col in
+              [ "CrossHost", Rendering.CrossHost, v.CrossHost
+                "Declared", Rendering.Declared, v.Declared ] do
+              let tag = v.Name + " / " + label
+              expect (tag + " / Canonical.write") "Canonical.write" col (Canonical.write r v.Value)
+
+              expect
+                  (tag + " / Canonical.tryWrite")
+                  "Canonical.tryWrite"
+                  col
+                  (match Canonical.tryWrite r v.Value with
+                   | Ok t -> t
+                   | Error e -> "refused: " + e)
+
+              (let name = tag + " / Canonical.isCanonical accepts its own column"
+
+               if Canonical.isCanonical r col then
+                   pass name
+               else
+                   fail name (sprintf "%s is not canonical under %s" col label))
+          // the positive control: the cross-host rendering refuses the V2 text as canonical exactly
+          // where the two columns differ — a member out of Ordinal order, or a float the canonical
+          // rule spells differently — so the column is a different rendering, not a copy of V2's
+          (let name =
+              v.Name
+              + " / positive control: CrossHost refuses the V2 text exactly where the columns differ"
+
+           if (v.CrossHost <> v.V2) = not (Canonical.isCanonical Rendering.CrossHost v.V2) then
+               pass name
+           else
+               fail name (sprintf "CrossHost %s; V2 %s" v.CrossHost v.V2))
           // V2 IS the live renderer
           expect (v.Name + " / Json.render is V2") "Json.render" v.V2 (Json.render v.Value)
           // both spellings read back as one value
@@ -353,9 +423,13 @@ module EncodingProfileVectors =
                       + label
                       + " is refused by every guarded writer"
 
-                  match Canonical.tryWrite p value, Json.tryRender value, Canon.tryRender value with
-                  | Error _, Error _, Error _ when not (Canonical.isCanonical p (Canonical.write p value)) -> pass name
-                  | w, j, c -> fail name (sprintf "Canonical.tryWrite %A; Json.tryRender %A; Canon.tryRender %A" w j c) ]
+                  let r = Rendering.ofProfile p
+
+                  match
+                      Canonical.tryWrite r value, Json.tryRender value, Canonical.tryWrite Rendering.CrossHost value
+                  with
+                  | Error _, Error _, Error _ when not (Canonical.isCanonical r (Canonical.write r value)) -> pass name
+                  | w, j, c -> fail name (sprintf "Canonical.tryWrite %A; Json.tryRender %A; CrossHost %A" w j c) ]
 
     /// One row of the family (Phase 508): a value the profiles render, or an actor they fold.
     type internal Entry =
@@ -524,7 +598,7 @@ module EncodingProfileVectors =
                     match
                         codec.Write v
                         |> Result.mapError CodecDeclarationFault.describe
-                        |> Result.bind (Canonical.tryWrite p)
+                        |> Result.bind (Canonical.tryWrite (Rendering.ofProfile p))
                     with
                     | Ok w when w = t -> None
                     | Ok w -> Some(sprintf "stored text %d is %s; its value's canonical text is %s" i t w)
@@ -538,7 +612,9 @@ module EncodingProfileVectors =
                       for j in Option.toList (Result.toOption (codec.Write v)) do
                           for o in EncodingProfile.all do
                               if o <> p then
-                                  let moved = Canonical.write o j <> Canonical.write p j
+                                  let moved =
+                                      Canonical.write (Rendering.ofProfile o) j
+                                      <> Canonical.write (Rendering.ofProfile p) j
 
                                   if moved <> carriesShortForm j then
                                       sprintf

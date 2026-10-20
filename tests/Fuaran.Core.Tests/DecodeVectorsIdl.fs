@@ -251,7 +251,7 @@ let current () = build (load ())
 /// The node document a covered vector's input is decoded as.
 let document (index: int) (v: DecodeVector) : string =
     "{\"id\":\"n\",\"kind\":"
-    + Canon.render (JStr(tagOf index))
+    + Canonical.write Rendering.CrossHost (JStr(tagOf index))
     + ",\"v\":"
     + v.Input
     + "}"

@@ -74,7 +74,8 @@ let withMember (name: string) (value: string option) : string =
                 else
                     value |> Option.map (fun _ -> k, Fuaran.Core.JStr marker))
 
-        let text = Fuaran.Core.Canon.render (Fuaran.Core.JObj fields)
+        let text =
+            Fuaran.Core.Canonical.write Fuaran.Core.Rendering.CrossHost (Fuaran.Core.JObj fields)
 
         match value with
         | Some raw -> text.Replace("\"" + marker + "\"", raw)

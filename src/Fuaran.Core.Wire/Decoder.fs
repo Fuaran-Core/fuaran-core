@@ -32,9 +32,10 @@ module Decoder =
     /// A decoder that refuses whatever it is handed, at the value itself. Its code is a
     /// `RootDecodeCode` (Phase 443): a refusal at the value cannot be a `MissingField` (raise one
     /// through `field`, which names the member) or an `InvalidJson` (the parse entry points' code), so
-    /// every refusal `fail` answers resolves in the value it was handed.
-    let fail (code: RootDecodeCode) (expected: string) (message: string) : Decoder<'T> =
-        fun _ -> Error(DecodeError.make (rootCode code) expected message)
+    /// every refusal `fail` answers resolves in the value it was handed. `detail` is what was found
+    /// there; the sentence is `DecodeError.sentence`'s (Phase 520).
+    let fail (code: RootDecodeCode) (expected: string) (detail: string) : Decoder<'T> =
+        fun _ -> Error(DecodeError.make (rootCode code) expected detail)
 
     /// Convert the answer; a refusal passes through untouched, its path included.
     let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.map f
@@ -52,7 +53,7 @@ module Decoder =
     let pair (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> 'C) : Decoder<'C> = a |> bind (fun x -> b |> map (f x))
 
     /// Decode, then check or convert the answer. `f` refuses with the triple `fail` takes — a
-    /// `RootDecodeCode`, what the position expected, and a sentence — and `andThen` raises it AT the
+    /// `RootDecodeCode`, what the position expected, and the detail — and `andThen` raises it AT the
     /// value (Phase 453), so every refusal it answers resolves in the value it was handed. A check
     /// that must point INSIDE the value (an item, a member) is `bind` to `at <path> (fail ...)`,
     /// which walks the path in the document rather than trusting it.
@@ -62,7 +63,7 @@ module Decoder =
             | Ok v ->
                 match f v with
                 | Ok u -> Ok u
-                | Error(code, expected, message) -> fail code expected message el
+                | Error(code, expected, detail) -> fail code expected detail el
             | Error e -> Error e
 
     /// The string-error reading of a decoder — its refusal's sentence. The bridge a codec whose
@@ -72,14 +73,12 @@ module Decoder =
 
     /// The refusal of a value of the wrong kind: `expected <kind>, got <kind>`.
     let wrongKind (expected: string) (found: JVal) : DecodeError =
-        DecodeError.make DecodeCode.WrongKind expected ("expected " + expected + ", got " + JVal.kindName found)
+        DecodeError.make DecodeCode.WrongKind expected (JVal.kindName found)
 
     /// The refusal of an absent required member, its path naming the member: `missing property: <name>`.
     let missing (name: string) : DecodeError =
-        { Code = DecodeCode.MissingField
-          Path = [ PathSegment.Key name ]
-          Expected = "a member '" + name + "'"
-          Message = "missing property: " + name }
+        DecodeError.make DecodeCode.MissingField ("a member '" + name + "'") name
+        |> DecodeError.under (PathSegment.Key name)
 
     /// The member `name` of an object — the FIRST, where a foreign document repeats a key — or
     /// `None` where it has none or `el` is not an object.
@@ -194,7 +193,7 @@ module Decoder =
                                     (DecodeError.make
                                         DecodeCode.OutOfRange
                                         ("an index below " + string n)
-                                        ("no item " + string i + " in an array of " + string n))
+                                        ("item " + string i))
                             )
                     | other -> Error(DecodeError.within (here ()) (wrongKind "array" other))
 
@@ -236,10 +235,7 @@ module Decoder =
                     DecodeError.make
                         DecodeCode.LimitExceeded
                         ("at most " + string maxItems + " items")
-                        ("an array of "
-                         + string (List.length xs)
-                         + " items passes the bound of "
-                         + string maxItems)
+                        ("an array of " + string (List.length xs) + " items")
                 )
             | _ -> list d el
 
@@ -314,24 +310,8 @@ module Decoder =
                 | None ->
                     let known = cases |> List.map fst
 
-                    Error(
-                        DecodeError.make
-                            DecodeCode.UnknownTag
-                            ("one of " + quoteAll known)
-                            ("unknown value '" + s + "'; the known values are " + quoteAll known)
-                    )
+                    Error(DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) ("value '" + s + "'"))
             | other -> Error(wrongKind "string" other)
-
-    /// `oneOf`, with a miss refused in the caller's own sentence (Phase 509; the seam codecs each
-    /// wrote it as `tagged` before): the refusal is the same `UnknownTag` at the value, its
-    /// expectation still naming every known spelling, and its message `what + <the value>` — as
-    /// `tagDispatchWith` is to `tagDispatch`. A value that is not a string is `str`'s `WrongKind`.
-    let oneOfWith (what: string) (cases: (string * 'T) list) : Decoder<'T> =
-        str
-        |> andThen (fun s ->
-            match cases |> List.tryFind (fun (k, _) -> k = s) with
-            | Some(_, v) -> Ok v
-            | None -> Error(RootDecodeCode.UnknownTag, "one of " + quoteAll (cases |> List.map fst), what + s))
 
     /// Dispatch on the string under the discriminator `key`: the case's decoder reads the SAME
     /// object. An absent or non-string discriminator is refused as such; an unknown tag is
@@ -349,24 +329,8 @@ module Decoder =
                     Error(
                         DecodeError.under
                             (PathSegment.Key key)
-                            (DecodeError.make
-                                DecodeCode.UnknownTag
-                                ("one of " + quoteAll known)
-                                ("unknown " + key + " '" + t + "'; the known tags are " + quoteAll known))
+                            (DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) (key + " '" + t + "'"))
                     )
-
-    /// `tagDispatch`, with an unknown tag refused in the caller's own sentence (Phase 388): the
-    /// refusal is the same `UnknownTag` at the discriminator, its expectation still naming every known
-    /// tag, and its message `what + <the tag>` — so a codec whose refusals predate this module keeps
-    /// spelling them as it always has. Every other refusal is `tagDispatch`'s, unchanged.
-    let tagDispatchWith (what: string) (key: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
-        fun el ->
-            tagDispatch key cases el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, tryMember key el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key k ], Some(JStr other) when k = key ->
-                    { e with Message = what + other }
-                | _ -> e)
 
     /// `tagDispatch` under the `"kind"` discriminator.
     let kindDispatch (cases: (string * Decoder<'T>) list) : Decoder<'T> = tagDispatch "kind" cases
@@ -383,7 +347,7 @@ module Decoder =
                     DecodeError.make
                         DecodeCode.OutOfRange
                         ("an int in [" + string lo + ", " + string hi + "]")
-                        (string i + " is outside [" + string lo + ", " + string hi + "]")
+                        (string i)
                 )
             | Error e -> Error e
 
@@ -400,13 +364,7 @@ module Decoder =
                      "no members"
                  else
                      "one of the members " + quoteAll sorted)
-                ("unknown member '"
-                 + k
-                 + "'; "
-                 + (if List.isEmpty sorted then
-                        "it takes no members"
-                    else
-                        "its members are " + quoteAll sorted)))
+                ("'" + k + "'"))
 
     /// Every member of an object outside `known`, in authored order — one `UndeclaredMember` each.
     /// A non-object has no members to refuse.
@@ -617,8 +575,8 @@ module Reader =
                 match Json.read options input with
                 | Error refusal -> Error(DecodeError.ofJsonRefusal refusal)
                 | Ok _ ->
-                    let sentence = "expected " + expected + " at position " + string at
-                    Error(DecodeError.within path (DecodeError.make DecodeCode.WrongKind expected sentence))
+                    let found = "the value at position " + string at
+                    Error(DecodeError.within path (DecodeError.make DecodeCode.WrongKind expected found))
             | e ->
                 match s.Refusal e with
                 | Some refusal -> Error(DecodeError.ofJsonRefusal refusal)

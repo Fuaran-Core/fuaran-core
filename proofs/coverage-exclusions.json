@@ -91,7 +91,6 @@
     },
     {
       "members": [
-        "Decoder.oneOfWith",
         "Decoder.pair"
       ],
       "class": "measured-elsewhere",
@@ -700,8 +699,8 @@
         "CapabilityPipeline.tryEncode"
       ],
       "class": "measured-elsewhere",
-      "reason": "The guarded encodes (Phase 307): `Canon.tryRender` over the document `encode` renders, so `Ok` is exactly `encode`'s string and a non-finite bound is refused; the function tests assert both halves.",
-      "through": "Canon.tryRender",
+      "reason": "The guarded encodes (Phase 307): `Canonical.tryWrite Rendering.CrossHost` over the document `encode` renders, so `Ok` is exactly `encode`'s string and a non-finite bound is refused; the function tests assert both halves.",
+      "through": "Canonical.tryWrite",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
@@ -1960,10 +1959,10 @@
     },
     {
       "members": [
-        "Canon.typed"
+        "Canonical.typed"
       ],
       "class": "measured-elsewhere",
-      "reason": "Typed canonical rendering; example-tested beside the modelled `render`.",
+      "reason": "The `$type`-discriminated object of the cross-host form (`Canon.typed` until Phase 520); example-tested beside the modelled rendering.",
       "standIn": "tests/Fuaran.Core.Tests/ApplyVectorExport.fs"
     },
     {
@@ -2016,20 +2015,46 @@
     },
     {
       "members": [
+        "DecodeError.sentence"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one sentence of a decode refusal (Phase 520; D99 as amended): a projection of its code, its expectation and its detail, one form per code. The decode-layer tests pin that every refusal `make` builds carries it, that a step outward keeps it, and that no two codes share a form; a host certifies on the code and the path, never on it.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Json.firstRenderFault",
+        "RenderFault.describe",
+        "Rendering.ofProfile"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one rendering contract (Phase 520; D120 as amended): THE guard every guarded writer refuses through, its one sentence, and the rendering a store's declared profile names. What the guard buys is on the ladder under the canonical-form rows (`Canonical.tryWrite`); the totality and codec tests pin the guard's class, path and sentence and the profile mapping.",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.EnvelopeRefusal.describe",
+        "Versioning.EnvelopeRefusal.path"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed envelope refusal (Phase 520): a `$profile` that names no capability is Foreign at `$.$profile` (WIRE_FORMAT 15.2), every other refusal the decode's own; the versioning oracle's declared-reject arm asserts the code and the path against the corpus.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracle.WireVersioningTests.fs"
+    },
+    {
+      "members": [
+        "Idl.VocabularyFault.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A vocabulary fault's one line (Phase 520): the owner's path and the rule it breaks; `Declare.errors` answers the faults, and the validation tests pin their paths.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlValidationTests.fs"
+    },
+    {
+      "members": [
         "DecodeError.render"
       ],
       "class": "measured-elsewhere",
       "reason": "The typed decode error and its path (Phase 310): construction, rendering, codes and path resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
       "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
-    },
-    {
-      "members": [
-        "DecodeError.reword"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Rewrites a decode error's sentence; the artifact reader uses it for its field-level messages.",
-      "through": "Artifact.parse",
-      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [
@@ -2154,8 +2179,8 @@
         "Versioning.parse",
         "Versioning.reencode",
         "Versioning.render",
-        "Versioning.Profile.render",
-        "Versioning.Profile.tryParse"
+        "Versioning.Capability.render",
+        "Versioning.Capability.tryParse"
       ],
       "class": "measured-elsewhere",
       "reason": "Versioning envelope codec, negotiation and profile spelling beside the modelled bump / classify; example-tested.",
@@ -2164,8 +2189,8 @@
     {
       "members": [
         "Versioning.tryRender",
-        "Versioning.Profile.isValid",
-        "Versioning.Profile.tryRender"
+        "Versioning.Capability.isValid",
+        "Versioning.Capability.tryRender"
       ],
       "class": "measured-elsewhere",
       "reason": "Versioning envelope codec, negotiation and profile spelling beside the modelled bump / classify; example-tested.",
@@ -2191,11 +2216,11 @@
     },
     {
       "members": [
-        "Versioning.Profile.isValidName"
+        "Versioning.Capability.isValidName"
       ],
       "class": "measured-elsewhere",
       "reason": "Profile-name validity; `isValid` is it over the parsed name.",
-      "through": "Profile.isValid",
+      "through": "Capability.isValid",
       "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
     },
     {

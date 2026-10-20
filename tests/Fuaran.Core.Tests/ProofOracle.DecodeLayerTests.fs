@@ -253,9 +253,6 @@ let private decoderProbes
       mA strs (M.all_d [ M.field "a" M.str; M.field "b" M.str ] m)
       "oneOf", pRes i (Decoder.oneOf [ "x", 1; "a", 2 ] el), mR i (M.one_of [ "x", 1; "a", 2 ] m)
       "tagDispatch", pRes s (Decoder.tagDispatch "t" tagCases el), mR s (M.tag_dispatch "t" mTagCases m)
-      "tagDispatchWith",
-      pRes s (Decoder.tagDispatchWith "unknown: " "t" tagCases el),
-      mR s (M.tag_dispatch_with "unknown: " "t" mTagCases m)
       "kindDispatch", pRes s (Decoder.kindDispatch tagCases el), mR s (M.kind_dispatch mTagCases m)
       "intRange", pRes i (Decoder.intRange 0 9 el), mR i (M.int_range (fun v -> v >= 0 && v <= 9) m)
       "undeclared",

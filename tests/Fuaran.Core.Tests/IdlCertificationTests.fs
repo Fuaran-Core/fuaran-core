@@ -695,11 +695,17 @@ let artifactRoundTrip =
           testCase "an artifact from another encoding version is refused by name" (fun _ ->
               let text = (Artifact.render refIdl).Replace("\"version\": 1", "\"version\": 2")
 
-              match Artifact.parse text with
+              match Artifact.parseDetailed text with
               | Ok _ -> failtest "a future encoding version was accepted — a dropped family would be silent"
-              | Error m ->
-                  Expect.stringContains m "encoding version 2" "the refusal names the version it read"
-                  Expect.stringContains m "reads version 1" "and the version it can read")
+              | Error [ e ] ->
+                  Expect.equal (e.Code, e.Path) (DecodeCode.OutOfRange, [ PathSegment.Key "version" ]) "at the version"
+                  Expect.equal e.Expected "encoding version 1" "naming the version it can read"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence DecodeCode.OutOfRange "encoding version 1" "encoding version 2")
+                      "and, projected, the version it read"
+              | Error es -> failtestf "one refusal, at the version: %A" es)
 
           testCase "a truncated artifact is refused rather than silently thinned" (fun _ ->
               match Artifact.parse "{\"version\": 1}" with

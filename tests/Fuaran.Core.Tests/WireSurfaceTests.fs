@@ -38,7 +38,7 @@ module Fuaran.Core.Tests.WireSurfaceTests
 //     bytes the package emitted — which is what a byte-pinning consumer compares — and the
 //     document re-rendered canonically, which is what the classifier reads. Two of the emitters
 //     (the IDL artifact's indented form, and the hand-assembled stream envelopes) are not
-//     `Canon.render`, so the hash is the only thing that sees their layout.
+//     `Canonical.write Rendering.CrossHost`, so the hash is the only thing that sees their layout.
 //   * NOT a domain's vocabulary. `Idl.Encode` renders a DOMAIN's values under the domain's own
 //     vocabulary, and an op stream embeds the domain's own op encoding verbatim: those member
 //     names are the domain's, and so is pinning them. What is pinned here is what THIS
@@ -49,7 +49,7 @@ module Fuaran.Core.Tests.WireSurfaceTests
 // On the pattern the managed baseline uses, and as the phase states them: a new member or a new
 // case is ADDITIVE; a renamed or removed member, a changed discriminator, or the same structure
 // rendered to different bytes is BREAKING. A reordered member cannot occur in canonical output
-// (`Canon.render` sorts keys), so it is not a class of its own — in the two non-canonical
+// (`Canonical.write Rendering.CrossHost` sorts keys), so it is not a class of its own — in the two non-canonical
 // emitters it surfaces as a byte move, which is breaking.
 //
 // ---- regenerating ----------------------------------------------------------------------
@@ -348,7 +348,7 @@ let internal packageOf (r: WireRoot) =
 /// A witness whose op encoding is a JSON string, so the stream envelopes embed a known payload.
 let private stringStream: StreamWitness<string, unit, string> =
     { Apply = fun _ s -> Ok s
-      Encode = fun s -> Canon.render (JStr s)
+      Encode = fun s -> Canonical.write Rendering.CrossHost (JStr s)
       Decode = fun _ -> Error "not decoded here" }
 
 let private derived<'T> (package: string) (label: string) (encode: 'T -> string) =
@@ -376,7 +376,7 @@ let internal roots: WireRoot list =
           "attributed"
           (OpStream.Attributed.encodeEnvelope stringStream.Encode)
       derived<Dag.T<string>> "Fuaran.Core.OpStream.Dag" "dag" (Dag.toJsonl stringStream.Encode)
-      derived<JVal> "Fuaran.Core.Wire" "jval" Canon.render
+      derived<JVal> "Fuaran.Core.Wire" "jval" (Canonical.write Rendering.CrossHost)
       derived<Versioning.Envelope> "Fuaran.Core.Wire" "envelope" Versioning.render
       derived<Fuaran.Core.Idl.Idl> "Fuaran.Core.Idl" "artifact" Fuaran.Core.Idl.Artifact.render
       derived<Fuaran.Core.Idl.SupportDocument>
@@ -472,7 +472,7 @@ let internal toDoc (name: string, emitted: string) : WireDoc =
       Hash = sha256 emitted
       Canonical =
         match Json.parse emitted with
-        | Ok v -> Canon.render v
+        | Ok v -> Canonical.write Rendering.CrossHost v
         | Error _ -> "!unparsed" }
 
 /// Render one package's documents, in the ordinal order of their names.
@@ -575,7 +575,9 @@ let internal tokensOf (canonical: string) : Set<string> =
         | JArr items ->
             for x in items do
                 walk (path + "[]") x
-        | scalar -> acc.Add(sprintf "value %s %s" path (Canon.render scalar)) |> ignore
+        | scalar ->
+            acc.Add(sprintf "value %s %s" path (Canonical.write Rendering.CrossHost scalar))
+            |> ignore
 
     match Json.parse canonical with
     | Ok v -> walk "$" v
@@ -1095,11 +1097,11 @@ let grammarTests =
                   Expect.equal (underCulture c (fun () -> Json.parse "-5")) (Ok(JInt -5)) (sprintf "-5 under %s" c)
 
                   Expect.equal
-                      (underCulture c (fun () -> Versioning.Profile.tryParse "core@1.2"))
+                      (underCulture c (fun () -> Versioning.Capability.tryParse "core@1.2"))
                       (Ok { Name = "core"; Major = 1; Minor = 2 })
                       (sprintf "a profile under %s" c)
 
-              Expect.isError (Versioning.Profile.tryParse "core@ 1.2") "no white space in a profile's integers"
+              Expect.isError (Versioning.Capability.tryParse "core@ 1.2") "no white space in a profile's integers"
               Expect.equal (Json.readInt32 "-5") (Some -5) "the reader takes a sign"
               Expect.equal (Json.readInt32 "+5") (Some 5) "AllowLeadingSign, as the phase states it"
               Expect.equal (Json.readInt32 " 5") None "and nothing else"
@@ -1128,7 +1130,7 @@ let grammarTests =
                   (Some("$[\"a\"][1]", "-Infinity"))
                   "the first, in document order, with its path"
 
-              Expect.equal (Canon.canonicalFloat nan) "\"NaN\"" "the canonical layout quotes the same token"
+              Expect.equal (FloatLayout.canonical nan) "\"NaN\"" "the canonical layout quotes the same token"
 
           // Phase 519 deleted the string-error twin (`Decode`) and its `Fault`; the typed layer's
           // string form spells the two structural faults in the words the twin's did.

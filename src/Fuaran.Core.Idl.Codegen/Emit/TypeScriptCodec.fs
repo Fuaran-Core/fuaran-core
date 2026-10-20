@@ -146,7 +146,7 @@ module internal TypeScriptCodec =
         | VClosure
         | VOpaque -> "(() => undefined)"
         // Phase 676 — a JSON value emits as its canonical literal.
-        | VJson j -> Canon.render j
+        | VJson j -> Canonical.write Rendering.CrossHost j
 
     /// The point-free TS encoder reference for a type (used where a codec must be
     /// passed — a generic union's type-parameter codec).
@@ -1147,9 +1147,9 @@ const dFormat = (format, v) => {
         let idl, kinds, enums, unions, records =
             decl.Idl, decl.Kinds, decl.Enums, decl.Unions, decl.Records
 
-        // Runtime prelude — escaping mirrors Fuaran.Core.Canon.escape (WIRE_FORMAT §2
+        // Runtime prelude — escaping mirrors Fuaran.Core.Json.escape (WIRE_FORMAT §2
         // rule 6: only " and \ and control chars as \u00xx — NO \n/\r/\t shortcuts),
-        // and object-field order is author order (Canon.render does not sort keys),
+        // and object-field order is author order (Canonical.write Rendering.CrossHost does not sort keys),
         // so the bytes match the F# host across ALL strings (incl. control chars).
         // Phase 370 — `encStr` mirrors Phase 365's fast path: one regex test for an escapable
         // character (`"`, `\`, U+0000–U+001F, matched per UTF-16 code unit, so a lone surrogate
@@ -1251,7 +1251,7 @@ const encJson = (v) => {
   return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';
 };
 // Phase 698 — the Ordinal key sort is done HERE, at emission, not left to the
-// caller's declaration order. `Canon.render` sorts every object's keys Ordinal on
+// caller's declaration order. `Canonical.write Rendering.CrossHost` sorts every object's keys Ordinal on
 // the F# side unconditionally, and JS `<` on strings compares UTF-16 code units,
 // which is the same order — so sorting here is what makes the two hosts agree by
 // construction. It previously relied on "pairs arrive Ordinal by convention", and
@@ -1265,18 +1265,20 @@ const ordinal = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);"""
             // (0x24) sorts before every data key, so the default's disc-first
             // build IS canonical order and interpolates to exactly the
             // pre-declarable bytes; any other key must be SORTED into place
-            // among the pairs, or the emission diverges from `Canon.render`.
+            // among the pairs, or the emission diverges from `Canonical.write Rendering.CrossHost`.
             //
             // Phase 111 — under DECLARED key order there is no sort at all: the
             // pairs arrive in declaration order and the discriminator leads, so
             // `typed` / `plain` preserve construction order, exactly as the F#
-            // side's `Canon.renderOrdered` does.
+            // side's `Canonical.write Rendering.Declared` does.
             + (match idl.Wire.KeyOrder with
                | KeyOrder.Declared ->
                    // The canonical key text is computed HERE and spliced as one escaped
                    // literal, so the emitted prefix for a plain key is the bytes it always was.
                    "\nconst typed = (tag, pairs) =>\n  "
-                   + SourceLit.tsStringSingle ("{" + Canon.render (JStr idl.Wire.Discriminator) + ":")
+                   + SourceLit.tsStringSingle (
+                       "{" + Canonical.write Rendering.CrossHost (JStr idl.Wire.Discriminator) + ":"
+                   )
                    + " + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';\n"
                | KeyOrder.Sorted when idl.Wire.Discriminator = "$type" ->
                    "\nconst typed = (tag, pairs) =>\n  '{\"$type\":' + encStr(tag) + pairs.filter((p) => p !== null).sort(ordinal).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';\n"

@@ -9,7 +9,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
-// A reference codec over RNode in the canonical discipline (sorted keys via Canon.render), so
+// A reference codec over RNode in the canonical discipline (sorted keys via Canonical.write Rendering.CrossHost), so
 // the Known branch and the preserved-Unknown branch share one byte convention.
 let rec private encodeNode (n: RNode) : JVal =
     Json.kindObj
@@ -54,7 +54,7 @@ let private isKnown (t: string) = knownTags.Contains t
 /// A tolerant codec over `Decoded<RNode>`: encode re-renders canonically (the Unknown branch
 /// returns its preserved payload verbatim); decode parses then routes by discriminator.
 let private tolerantCodec: Corpus.Codec<Versioning.Decoded<RNode>> =
-    { Encode = fun d -> Canon.render (Versioning.reencode encodeNode d)
+    { Encode = fun d -> Canonical.write Rendering.CrossHost (Versioning.reencode encodeNode d)
       Decode =
         fun s ->
             Json.parse s
@@ -70,10 +70,10 @@ let tests =
           // ---- Profile id ----
           testCase "Profile renders and parses round-trip"
           <| fun _ ->
-              let p = Versioning.Profile.coreV1
-              Expect.equal (Versioning.Profile.render p) "core@1.0" "canonical form"
+              let p = Versioning.Capability.coreV1
+              Expect.equal (Versioning.Capability.render p) "core@1.0" "canonical form"
 
-              match Versioning.Profile.tryParse "core@2.7" with
+              match Versioning.Capability.tryParse "core@2.7" with
               | Ok q ->
                   Expect.equal q.Name "core" "name"
                   Expect.equal q.Major 2 "major"
@@ -82,10 +82,10 @@ let tests =
 
           testCase "Profile.tryParse rejects malformed ids"
           <| fun _ ->
-              Expect.isError (Versioning.Profile.tryParse "core") "missing @"
-              Expect.isError (Versioning.Profile.tryParse "core@1") "missing minor"
-              Expect.isError (Versioning.Profile.tryParse "core@1.x") "non-numeric"
-              Expect.isError (Versioning.Profile.tryParse "@1.0") "missing name"
+              Expect.isError (Versioning.Capability.tryParse "core") "missing @"
+              Expect.isError (Versioning.Capability.tryParse "core@1") "missing minor"
+              Expect.isError (Versioning.Capability.tryParse "core@1.x") "non-numeric"
+              Expect.isError (Versioning.Capability.tryParse "@1.0") "missing name"
 
           // ---- Capability negotiation ----
           testCase "negotiate classifies current / behind / foreign"
@@ -123,7 +123,7 @@ let tests =
           testCase "Envelope round-trips through render/parse carrying the profile"
           <| fun _ ->
               let env: Versioning.Envelope =
-                  { Profile = Versioning.Profile.coreV1
+                  { Profile = Versioning.Capability.coreV1
                     Payload = encodeNode (sample ()) }
 
               let wire = Versioning.render env
@@ -133,15 +133,20 @@ let tests =
               | Ok back ->
                   Expect.equal back.Profile env.Profile "profile preserved"
                   // The canonical invariant is byte-stable round-trip, not in-memory JObj key
-                  // order — `Canon.render` sorts keys, so compare the canonical wire forms.
-                  Expect.equal (Canon.render back.Payload) (Canon.render env.Payload) "payload preserved"
+                  // order — `Canonical.write Rendering.CrossHost` sorts keys, so compare the canonical wire forms.
+                  Expect.equal
+                      (Canonical.write Rendering.CrossHost back.Payload)
+                      (Canonical.write Rendering.CrossHost env.Payload)
+                      "payload preserved"
+
                   Expect.equal (Versioning.render back) wire "envelope re-renders byte-identically"
-              | Error m -> failtest m
+              | Error m -> failtest (Versioning.EnvelopeRefusal.describe m)
 
           // ---- Transport-only Unknown: detect ----
           testCase "decodeTolerant: a known kind decodes to Known"
           <| fun _ ->
-              let wire = Canon.render (encodeNode (RNode.leaf "a1" "para" "x"))
+              let wire =
+                  Canonical.write Rendering.CrossHost (encodeNode (RNode.leaf "a1" "para" "x"))
 
               match tolerantCodec.Decode wire with
               | Ok(Versioning.Known n) -> Expect.equal n.Kind "para" "known kind"
@@ -160,7 +165,7 @@ let tests =
 
                   Expect.equal
                       u.RequiredProfile
-                      (Some(Versioning.Profile.coreV1 |> fun p -> { p with Minor = 4 }))
+                      (Some(Versioning.Capability.coreV1 |> fun p -> { p with Minor = 4 }))
                       "reads requiredProfile"
               | Ok(Versioning.Known _) -> failtest "hologram is unknown to this consumer"
               | Error m -> failtest m
@@ -193,7 +198,10 @@ let tests =
                   )
               with
               | Ok(Versioning.Unknown u) ->
-                  Expect.equal (Canon.render u.Payload) childWire "child payload preserved byte-for-byte"
+                  Expect.equal
+                      (Canonical.write Rendering.CrossHost u.Payload)
+                      childWire
+                      "child payload preserved byte-for-byte"
               | Ok(Versioning.Known _) -> failtest "widget is unknown"
               | Error m -> failtest m
 
@@ -205,7 +213,7 @@ let tests =
           <| fun _ ->
               let n = RNode.leaf "a1" "para" "x"
               let viaTolerant = tolerantCodec.Encode(Versioning.Known n)
-              let direct = Canon.render (encodeNode n)
+              let direct = Canonical.write Rendering.CrossHost (encodeNode n)
               Expect.equal viaTolerant direct "Known re-encode == direct canonical encode"
 
           // ---- Evolution policy: minor vs major ----
@@ -259,7 +267,7 @@ let tests =
               let cases =
                   [ { Corpus.Name = "known-para"
                       Corpus.Kind = Corpus.RoundTrip
-                      Corpus.Json = Canon.render (encodeNode (RNode.leaf "a1" "para" "x"))
+                      Corpus.Json = Canonical.write Rendering.CrossHost (encodeNode (RNode.leaf "a1" "para" "x"))
                       Corpus.Tag = "known" }
                     { Corpus.Name = "unknown-hologram"
                       Corpus.Kind = Corpus.RoundTrip

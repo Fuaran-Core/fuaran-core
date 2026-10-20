@@ -52,7 +52,7 @@ let rec private isCanonicalValue (v: JVal) : bool =
     match v with
     | JFloat f ->
         System.Double.IsFinite f
-        && (let t = Canon.canonicalFloat f in t.Contains "." || t.Contains "E")
+        && (let t = FloatLayout.canonical f in t.Contains "." || t.Contains "E")
     | JArr xs -> xs |> List.forall isCanonicalValue
     | JObj fs -> fs |> List.forall (snd >> isCanonicalValue)
     | _ -> true
@@ -98,7 +98,7 @@ let rec private canonShape (v: JVal) (t: CanonTally) : CanonTally =
                 ControlStrings = t.ControlStrings + 1 }
         else
             t
-    | JFloat f when System.Double.IsFinite f && (Canon.canonicalFloat f).Contains "E" ->
+    | JFloat f when System.Double.IsFinite f && (FloatLayout.canonical f).Contains "E" ->
         { t with
             ScientificFloats = t.ScientificFloats + 1 }
     | JArr xs -> xs |> List.fold (fun acc x -> canonShape x acc) t
@@ -116,7 +116,7 @@ let rec private canonShape (v: JVal) (t: CanonTally) : CanonTally =
 /// One document, asked of production and of the model. The comparison is the BYTES — which is the
 /// only comparison that means anything for an encoder whose whole job is to produce a digest input.
 let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: CanonTally) : CanonTally =
-    let expected = Canon.render v
+    let expected = Canonical.write Rendering.CrossHost v
     let got = canonFromChs (WireCanon.render w (canonToModel v))
 
     let t = canonShape v { t with Docs = t.Docs + 1 }
@@ -141,7 +141,7 @@ let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTall
         // repeated member. Section 6's reader reads exactly what `render` emits, repeated keys
         // included; production's parser refuses the text. The bridge theorem carries the
         // distinct-keys hypothesis, and here the refusal itself is what is held.
-        match Json.read ReadOptions.strict (Canon.render v) with
+        match Json.read ReadOptions.strict (Canonical.write Rendering.CrossHost v) with
         | Result.Error(JsonRefusal.Malformed e) when e.Kind = DuplicateMember -> t
         | other ->
             { t with
@@ -158,7 +158,7 @@ let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTall
             | WireCanon.Error m -> Result.Error m
 
         let productionSide =
-            match Json.parse (Canon.render v) with
+            match Json.parse (Canonical.write Rendering.CrossHost v) with
             | Result.Ok pv -> Result.Ok pv
             | Result.Error m -> Result.Error m
 
@@ -270,7 +270,7 @@ let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundT
 
     t
 
-// ---- the guard (Phase 165): `WireCanon.try_render` beside `Canon.tryRender` ----
+// ---- the guard (Phase 165): `WireCanon.try_render` beside `Canonical.tryWrite Rendering.CrossHost` ----
 
 /// The model names a refusal as DATA — a path of steps and the float it found — where production
 /// emits one string. This renders the model's refusal in production's spelling so the two can be
@@ -412,10 +412,10 @@ let private emptyGuardTally =
 
 /// One document, asked of production's guard and of the model's. Three comparisons, each of which
 /// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
-/// `Canon.render`'s bytes; and the verdict is `Error` precisely when the independent predicate
+/// `Canonical.write Rendering.CrossHost`'s bytes; and the verdict is `Error` precisely when the independent predicate
 /// says a non-finite float is present.
 let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: GuardTally) : GuardTally =
-    let production = Canon.tryRender v
+    let production = Canonical.tryWrite Rendering.CrossHost v
     let model = guardModelSide w v
     let t = { t with Docs = t.Docs + 1 }
 
@@ -434,10 +434,10 @@ let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal)
     match production with
     | Result.Ok bytes ->
         let t =
-            if bytes = Canon.render v then
+            if bytes = Canonical.write Rendering.CrossHost v then
                 t
             else
-                diff "an accepted value did not render to Canon.render's bytes" t
+                diff "an accepted value did not render to Canonical.write Rendering.CrossHost's bytes" t
 
         let t =
             if holdsNonFinite v then
@@ -608,13 +608,13 @@ let private guardWireStringBlind: WireCanon.wire<int, float> =
         str_ok = fun _ -> true }
 
 // ---- the declared-key-order renderer (Phase 306): `WireCanon.render_ordered` beside
-//      `Canon.renderOrdered` ----
+//      `Canonical.write Rendering.Declared` ----
 
 type private OrderedTally =
     {
         Docs: int
         Diffs: string list
-        /// Documents whose ordered rendering is NOT `Canon.render`'s — an object authored out of
+        /// Documents whose ordered rendering is NOT `Canonical.write Rendering.CrossHost`'s — an object authored out of
         /// key order somewhere — without which this would be the Phase 149 differential again.
         Unsorted: int
         /// Canonical documents the model's reader returned EXACTLY, members in authored order.
@@ -627,14 +627,19 @@ let private orderedProbe
     (v: JVal)
     (t: OrderedTally)
     : OrderedTally =
-    let production = Canon.renderOrdered v
+    let production = Canonical.write Rendering.Declared v
     let m = canonToModel v
     let model = canonFromChs (render m)
 
     let t =
         { t with
             Docs = t.Docs + 1
-            Unsorted = t.Unsorted + (if production <> Canon.render v then 1 else 0) }
+            Unsorted =
+                t.Unsorted
+                + (if production <> Canonical.write Rendering.CrossHost v then
+                       1
+                   else
+                       0) }
 
     let t =
         if production = model then
@@ -683,7 +688,7 @@ let tests =
         [
           // ---- the canonical encoder, over the corpus and a generated pool (Phase 149) ----
 
-          testCase "the canon oracle agrees with Canon.render over every nodes/ fixture"
+          testCase "the canon oracle agrees with Canonical.write Rendering.CrossHost over every nodes/ fixture"
           <| fun _ ->
               let t = onBigStack (fun () -> canonCorpus canonWire "nodes" true)
 
@@ -705,7 +710,7 @@ let tests =
                   100
                   (sprintf "fixtures inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
 
-          testCase "the canon oracle agrees with Canon.render over every ops/ fixture"
+          testCase "the canon oracle agrees with Canonical.write Rendering.CrossHost over every ops/ fixture"
           <| fun _ ->
               let t = onBigStack (fun () -> canonCorpus canonWire "ops" true)
 
@@ -715,7 +720,7 @@ let tests =
 
               Expect.isGreaterThan t.Docs 10 (sprintf "the ops/ family was read at all (%d fixtures)" t.Docs)
 
-          testCase "the canon oracle agrees with Canon.render over a generated JVal pool"
+          testCase "the canon oracle agrees with Canonical.write Rendering.CrossHost over a generated JVal pool"
           <| fun _ ->
               // The pool is where the corpus is thin: rule 6's three escape classes (a quote, a
               // backslash, a control character), rule 2's comparator above the BMP (an astral key
@@ -771,7 +776,9 @@ let tests =
                       "the go-red run reached objects with two distinct keys at all (%d) — otherwise it proves nothing"
                       t.SortableObjects)
 
-              Expect.isNonEmpty t.Diffs "a model that sorts object keys the other way MUST disagree with Canon.render"
+              Expect.isNonEmpty
+                  t.Diffs
+                  "a model that sorts object keys the other way MUST disagree with Canonical.write Rendering.CrossHost"
 
               // and it must NOT disagree on everything: a document with no sortable object is
               // outside rule 2 entirely, and an instrument that reddened those too would be
@@ -875,30 +882,42 @@ let tests =
               // future session must not "fix" by accident, and the first is the one worth knowing.
 
               // 1. a non-finite float is a STRING on the wire, so a digest over `JFloat nan`
-              //    collides with the digest over `JStr "NaN"`. `Canon.render` refuses nothing and
-              //    its bytes are pinned, so this stays asserted; the guarded `Canon.tryRender`
+              //    collides with the digest over `JStr "NaN"`. `Canonical.write Rendering.CrossHost` refuses nothing and
+              //    its bytes are pinned, so this stays asserted; the guarded `Canonical.tryWrite Rendering.CrossHost`
               //    beside it (Phase 165) is the entry point that does refuse — see its own cases.
               Expect.equal
-                  (Canon.render (JFloat nan))
-                  (Canon.render (JStr "NaN"))
+                  (Canonical.write Rendering.CrossHost (JFloat nan))
+                  (Canonical.write Rendering.CrossHost (JStr "NaN"))
                   "rule 5 renders NaN as the quoted string \"NaN\", which is what that STRING renders as"
 
-              Expect.equal (Canon.render (JFloat infinity)) (Canon.render (JStr "Infinity")) "the same, for +infinity"
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat infinity))
+                  (Canonical.write Rendering.CrossHost (JStr "Infinity"))
+                  "the same, for +infinity"
 
-              Expect.equal (Canon.render (JFloat -infinity)) (Canon.render (JStr "-Infinity")) "the same, for -infinity"
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat -infinity))
+                  (Canonical.write Rendering.CrossHost (JStr "-Infinity"))
+                  "the same, for -infinity"
 
               // 2. an integral float is an INTEGER on the wire — the documented normalisation
               //    `JVal`'s own type doc names.
-              Expect.equal (Canon.render (JFloat 2.0)) (Canon.render (JInt 2)) "rule 5: `render (JFloat 2.0)` emits `2`"
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat 2.0))
+                  (Canonical.write Rendering.CrossHost (JInt 2))
+                  "rule 5: `render (JFloat 2.0)` emits `2`"
 
               // 3. the two zeroes are one token — rule 5's `-0` collapse.
-              Expect.equal (Canon.render (JFloat -0.0)) (Canon.render (JFloat 0.0)) "rule 5 collapses -0 to 0"
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat -0.0))
+                  (Canonical.write Rendering.CrossHost (JFloat 0.0))
+                  "rule 5 collapses -0 to 0"
 
               // 4. member order is not observable — rule 2's sort. Not a loss: it is the purpose of
               //    a canonical form, and the reason the theorem is stated up to member order.
               Expect.equal
-                  (Canon.render (JObj [ "a", JInt 1; "b", JInt 2 ]))
-                  (Canon.render (JObj [ "b", JInt 2; "a", JInt 1 ]))
+                  (Canonical.write Rendering.CrossHost (JObj [ "a", JInt 1; "b", JInt 2 ]))
+                  (Canonical.write Rendering.CrossHost (JObj [ "b", JInt 2; "a", JInt 1 ]))
                   "rule 2 sorts, so the authored member order does not reach the bytes"
 
               // and the model agrees with production on all four, which is what makes the lemmas
@@ -949,22 +968,23 @@ let tests =
 
           // ---- the guard beside the canonical encoder (Phase 165) ----
 
-          testCase "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path"
+          testCase
+              "Canonical.tryWrite Rendering.CrossHost refuses exactly the non-finite alias witnesses, and names them by path"
           <| fun _ ->
               // Refutation 1 of the four above is the one that is not a documented design choice,
               // and it has THREE witnesses, one per non-finite class. Each is refused, at the root.
               Expect.equal
-                  (Canon.tryRender (JFloat nan))
+                  (Canonical.tryWrite Rendering.CrossHost (JFloat nan))
                   (Result.Error "non-finite float has no canonical rendering of its own: NaN at $")
                   "a NaN is refused, by token and by path"
 
               Expect.equal
-                  (Canon.tryRender (JFloat infinity))
+                  (Canonical.tryWrite Rendering.CrossHost (JFloat infinity))
                   (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $")
                   "+infinity is refused"
 
               Expect.equal
-                  (Canon.tryRender (JFloat -infinity))
+                  (Canonical.tryWrite Rendering.CrossHost (JFloat -infinity))
                   (Result.Error "non-finite float has no canonical rendering of its own: -Infinity at $")
                   "-infinity is refused"
 
@@ -983,33 +1003,39 @@ let tests =
                     JObj [ "a", JInt 1; "b", JInt 2 ]
                     JObj [ "b", JInt 2; "a", JInt 1 ] ] do
                   Expect.equal
-                      (Canon.tryRender v)
-                      (Result.Ok(Canon.render v))
+                      (Canonical.tryWrite Rendering.CrossHost v)
+                      (Result.Ok(Canonical.write Rendering.CrossHost v))
                       (sprintf "a value holding no non-finite float is exactly `Ok (render v)`: %A" v)
 
               // The path: an array by index, a member by its canonically escaped key, the FIRST
               // offender in document order — and document order is AUTHORED order, not the sorted
               // order `render` would emit, because the scan runs before any sort.
               Expect.equal
-                  (Canon.tryRender (JObj [ "$type", JStr "X"; "a", JArr [ JInt 1; JFloat infinity ] ]))
+                  (Canonical.tryWrite
+                      Rendering.CrossHost
+                      (JObj [ "$type", JStr "X"; "a", JArr [ JInt 1; JFloat infinity ] ]))
                   (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $[\"a\"][1]")
                   "a nested offender is named through the member and the index"
 
               Expect.equal
-                  (Canon.tryRender (JObj [ "b", JFloat nan; "a", JFloat infinity ]))
+                  (Canonical.tryWrite Rendering.CrossHost (JObj [ "b", JFloat nan; "a", JFloat infinity ]))
                   (Result.Error "non-finite float has no canonical rendering of its own: NaN at $[\"b\"]")
                   "the first offender in AUTHORED order is the one named, though `a` sorts first"
 
               Expect.equal
-                  (Canon.tryRender (JArr [ JArr []; JObj [ "k\"\u0001", JFloat -infinity ] ]))
+                  (Canonical.tryWrite Rendering.CrossHost (JArr [ JArr []; JObj [ "k\"\u0001", JFloat -infinity ] ]))
                   (Result.Error
                       "non-finite float has no canonical rendering of its own: -Infinity at $[1][\"k\\\"\\u0001\"]")
                   "a key carrying a quote and a control character is escaped as rule 6 escapes it"
 
               // `render` is untouched: every value refused above still renders, to the aliasing bytes.
-              Expect.equal (Canon.render (JFloat nan)) "\"NaN\"" "the unguarded renderer's bytes did not move"
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat nan))
+                  "\"NaN\""
+                  "the unguarded renderer's bytes did not move"
 
-          testCase "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it"
+          testCase
+              "the guard oracle agrees with Canonical.tryWrite Rendering.CrossHost over the corpus — and refuses none of it"
           <| fun _ ->
               for family, floor in [ "nodes", 100; "ops", 10 ] do
                   let t = onBigStack (fun () -> guardCorpus canonWire family)
@@ -1031,7 +1057,8 @@ let tests =
                   // "agrees with render on the corpus" measured rather than assumed.
                   Expect.equal t.Refused 0 (sprintf "no %s/ fixture is refused" family)
 
-          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats"
+          testCase
+              "the guard oracle agrees with Canonical.tryWrite Rendering.CrossHost over a generated pool carrying non-finite floats"
           <| fun _ ->
               let t = onBigStack (fun () -> guardGenerated canonWire 1650 2400)
 
@@ -1089,7 +1116,8 @@ let tests =
 
           // ---- the guard's second refusal: ill-formed strings (Phase 306) ----
 
-          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying ill-formed strings"
+          testCase
+              "the guard oracle agrees with Canonical.tryWrite Rendering.CrossHost over a generated pool carrying ill-formed strings"
           <| fun _ ->
               let t = onBigStack (fun () -> guardGeneratedIllFormed canonWire 3060 2400)
 
@@ -1133,7 +1161,8 @@ let tests =
 
           // ---- the declared-key-order renderer (Phase 306) ----
 
-          testCase "the ordered-render oracle agrees with Canon.renderOrdered, and its reader returns the value"
+          testCase
+              "the ordered-render oracle agrees with Canonical.write Rendering.Declared, and its reader returns the value"
           <| fun _ ->
               let t =
                   onBigStack (fun () -> orderedGenerated (WireCanon.render_ordered canonWire) 3061 2400)
@@ -1153,7 +1182,7 @@ let tests =
                   (sprintf "canonical documents the reader returned exactly, members in authored order (%d)" t.ReadBack)
 
           testCase
-              "a model that SORTS loses against Canon.renderOrdered — on exactly the documents authored out of order"
+              "a model that SORTS loses against Canonical.write Rendering.Declared — on exactly the documents authored out of order"
           <| fun _ ->
               // The go-red: `WireCanon.render` — rule 2 included — standing in for the ordered
               // renderer. It must lose wherever production's two renderers differ, and nowhere else.
@@ -1163,10 +1192,10 @@ let tests =
 
               for _ in 1..2400 do
                   let v = genCanonValue r 3
-                  let production = Canon.renderOrdered v
+                  let production = Canonical.write Rendering.Declared v
                   let sorting = canonFromChs (WireCanon.render canonWire (canonToModel v))
 
-                  if production <> Canon.render v then
+                  if production <> Canonical.write Rendering.CrossHost v then
                       unsorted <- unsorted + 1
 
                   if production <> sorting then

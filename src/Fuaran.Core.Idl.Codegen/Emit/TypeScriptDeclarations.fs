@@ -75,7 +75,7 @@ module internal TypeScriptDeclarations =
                 match Decode.value idl w j with
                 | Ok wv -> go subst w wv
                 | Error m -> mismatch (sprintf "a hosted value outside its declared wire form (%s)" m)
-            | (TJson | THosted _), VJson j -> Ok(Canon.render j)
+            | (TJson | THosted _), VJson j -> Ok(Canonical.write Rendering.CrossHost j)
             // The encoder never reads a sentinel slot; a PRESENT stand-in keeps an optional
             // one's presence test honest (see [[typescriptValueWith]]).
             | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Ok "(() => undefined)"

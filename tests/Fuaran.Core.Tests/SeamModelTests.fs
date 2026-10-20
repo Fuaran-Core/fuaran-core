@@ -244,7 +244,7 @@ let private queryErrors: QueryError list =
 /// A document with one more member, `name: value`, on its top-level object.
 let private withMember (name: string) (value: JVal) (doc: string) : string =
     match Json.parse doc with
-    | Ok(JObj fields) -> Canon.render (JObj(fields @ [ name, value ]))
+    | Ok(JObj fields) -> Canonical.write Rendering.CrossHost (JObj(fields @ [ name, value ]))
     | other -> failwithf "not an object: %A" other
 
 /// Rewrite the first object reached at `path` (member names, array index as a string) to carry
@@ -266,7 +266,7 @@ let rec private injectAt (path: string list) (name: string) (value: JVal) (el: J
 
 let private injectInto (path: string list) (doc: string) : string =
     match Json.parse doc with
-    | Ok el -> Canon.render (injectAt path "actor" (JStr "operator") el)
+    | Ok el -> Canonical.write Rendering.CrossHost (injectAt path "actor" (JStr "operator") el)
     | Error e -> failwithf "unparseable: %s" e
 
 let private propOf (name: string) (el: JVal) : JVal =
@@ -495,16 +495,22 @@ let tests =
                         "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}"
                         "the capability seam's approval refusal is unchanged"
 
-                    // The query reader refuses the capability seam's tags by name. The sentence is
-                    // `tagDispatchWith`'s, which it writes only for an `UnknownTag` at `$type`, so the
-                    // code and the path are pinned with it.
+                    // The query reader refuses the capability seam's tags by name: `UnknownTag` at
+                    // `$type`, naming every tag it knows. The error codecs answer the string form, so
+                    // the code is pinned through its projected sentence (Phase 520).
+                    let queryTags =
+                        "one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+
+                    let invokeTags =
+                        "one of 'noSuchCapability', 'duplicateCapability', 'unknownArg', 'argOutOfSpace', 'requiredArgsUnbound', 'uninvocableArg', 'bodyFailed', 'nonTotalCapability', 'illFormedCapability', 'duplicateArg', 'policyRefused', 'approvalRequired'"
+
                     for tag, doc in
                         [ "policyRefused",
                           "{\"$type\":\"policyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}"
                           "approvalRequired", "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}" ] do
                         Expect.equal
                             (QueryCodec.decodeQueryError doc)
-                            (Error("unknown query error: " + tag))
+                            (Error(DecodeError.sentence DecodeCode.UnknownTag queryTags ("$type '" + tag + "'")))
                             (tag + " is the capability seam's tag")
 
                     // And the capability reader refuses the query seam's.
@@ -513,7 +519,7 @@ let tests =
                           "queryApprovalRequired", QueryApprovalRequired "p" ] do
                         Expect.equal
                             (CapabilityCodec.decodeInvokeError (QueryCodec.encodeQueryError e))
-                            (Error("unknown invoke error: " + tag))
+                            (Error(DecodeError.sentence DecodeCode.UnknownTag invokeTags ("$type '" + tag + "'")))
                             (tag + " is the query seam's tag") ]
 
           testList
@@ -900,7 +906,7 @@ let tests =
                         "one effect spelling"
 
                     Expect.equal
-                        (Canon.render schema)
+                        (Canonical.write Rendering.CrossHost schema)
                         "{\"properties\":{\"limit\":{\"maximum\":2147483647,\"minimum\":-2147483648,\"type\":\"integer\"},\"station\":{\"type\":\"string\"}},\"required\":[\"station\"],\"title\":\"readings\",\"type\":\"object\",\"x-effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"x-result\":{\"properties\":{\"celsius\":{\"type\":\"number\"},\"station\":{\"type\":\"string\"}},\"type\":\"object\"}}"
                         "bytes"
 

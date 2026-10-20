@@ -14,16 +14,24 @@ attribute Fuaran.Core.DecodePath RequireQualifiedAccess
 attribute Fuaran.Core.Decoder RequireQualifiedAccess
 attribute Fuaran.Core.EncodingProfile RequireQualifiedAccess
 attribute Fuaran.Core.EncodingProfileModule RequireQualifiedAccess
+attribute Fuaran.Core.FloatRule RequireQualifiedAccess
 attribute Fuaran.Core.JValModule RequireQualifiedAccess
 attribute Fuaran.Core.JsonLimit RequireQualifiedAccess
 attribute Fuaran.Core.JsonLimitModule RequireQualifiedAccess
 attribute Fuaran.Core.JsonLimitsModule RequireQualifiedAccess
 attribute Fuaran.Core.JsonRefusal RequireQualifiedAccess
+attribute Fuaran.Core.MemberOrder RequireQualifiedAccess
 attribute Fuaran.Core.PathSegment RequireQualifiedAccess
 attribute Fuaran.Core.ReadOptionsModule RequireQualifiedAccess
 attribute Fuaran.Core.Reader Sealed
 attribute Fuaran.Core.ReaderModule RequireQualifiedAccess
+attribute Fuaran.Core.RenderFaultClass RequireQualifiedAccess
+attribute Fuaran.Core.RenderFaultModule RequireQualifiedAccess
+attribute Fuaran.Core.RenderingModule RequireQualifiedAccess
 attribute Fuaran.Core.RootDecodeCode RequireQualifiedAccess
+attribute Fuaran.Core.StringEscape RequireQualifiedAccess
+attribute Fuaran.Core.Versioning+EnvelopeRefusal RequireQualifiedAccess
+attribute Fuaran.Core.Versioning+EnvelopeRefusalModule RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+Evolution RequireQualifiedAccess
 ctor Fuaran.Core.Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.CodecDeclarationFault>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal)
 ctor Fuaran.Core.Corpus+Case..ctor(System.String, Fuaran.Core.Corpus+CaseKind, System.String, System.String)
@@ -35,9 +43,11 @@ ctor Fuaran.Core.JsonError..ctor(System.Int32, System.String, Fuaran.Core.JsonEr
 ctor Fuaran.Core.JsonLimitBreach..ctor(Fuaran.Core.JsonLimit, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, System.Int32)
 ctor Fuaran.Core.JsonLimits..ctor(System.Int32, System.Int32, System.Int32, System.Int32, System.Int32)
 ctor Fuaran.Core.ReadOptions..ctor(Fuaran.Core.NullPolicy, Fuaran.Core.JsonLimits)
-ctor Fuaran.Core.Versioning+Envelope..ctor(Fuaran.Core.Versioning+Profile, Fuaran.Core.JVal)
-ctor Fuaran.Core.Versioning+Profile..ctor(System.String, System.Int32, System.Int32)
-ctor Fuaran.Core.Versioning+UnknownKind..ctor(System.String, Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Profile>)
+ctor Fuaran.Core.RenderFault..ctor(Fuaran.Core.RenderFaultClass, System.String, System.String)
+ctor Fuaran.Core.Rendering..ctor(Fuaran.Core.StringEscape, Fuaran.Core.MemberOrder, Fuaran.Core.FloatRule)
+ctor Fuaran.Core.Versioning+Capability..ctor(System.String, System.Int32, System.Int32)
+ctor Fuaran.Core.Versioning+Envelope..ctor(Fuaran.Core.Versioning+Capability, Fuaran.Core.JVal)
+ctor Fuaran.Core.Versioning+UnknownKind..ctor(System.String, Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Capability>)
 field Fuaran.Core.CodecDeclarationFault+Tags.DiscriminatorAsMember : System.Int32 (literal)
 field Fuaran.Core.CodecDeclarationFault+Tags.RepeatedMember : System.Int32 (literal)
 field Fuaran.Core.CodecDeclarationFault+Tags.RepeatedSpelling : System.Int32 (literal)
@@ -56,6 +66,8 @@ field Fuaran.Core.DecodeCode+Tags.UnknownTag : System.Int32 (literal)
 field Fuaran.Core.DecodeCode+Tags.WrongKind : System.Int32 (literal)
 field Fuaran.Core.EncodingProfile+Tags.V1 : System.Int32 (literal)
 field Fuaran.Core.EncodingProfile+Tags.V2 : System.Int32 (literal)
+field Fuaran.Core.FloatRule+Tags.Canonical : System.Int32 (literal)
+field Fuaran.Core.FloatRule+Tags.RoundTrip : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JArr : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JBool : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JFloat : System.Int32 (literal)
@@ -83,10 +95,15 @@ field Fuaran.Core.JsonLimit+Tags.ObjectMembers : System.Int32 (literal)
 field Fuaran.Core.JsonLimit+Tags.StringLength : System.Int32 (literal)
 field Fuaran.Core.JsonRefusal+Tags.LimitExceeded : System.Int32 (literal)
 field Fuaran.Core.JsonRefusal+Tags.Malformed : System.Int32 (literal)
+field Fuaran.Core.MemberOrder+Tags.Authored : System.Int32 (literal)
+field Fuaran.Core.MemberOrder+Tags.Sorted : System.Int32 (literal)
 field Fuaran.Core.NullPolicy+Tags.EraseMemberNull : System.Int32 (literal)
 field Fuaran.Core.NullPolicy+Tags.RejectNull : System.Int32 (literal)
 field Fuaran.Core.PathSegment+Tags.Index : System.Int32 (literal)
 field Fuaran.Core.PathSegment+Tags.Key : System.Int32 (literal)
+field Fuaran.Core.RenderFaultClass+Tags.IllFormedString : System.Int32 (literal)
+field Fuaran.Core.RenderFaultClass+Tags.NonFiniteFloat : System.Int32 (literal)
+field Fuaran.Core.RenderFaultClass+Tags.RepeatedMember : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.LimitExceeded : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.NotAdmitted : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.OutOfRange : System.Int32 (literal)
@@ -94,23 +111,23 @@ field Fuaran.Core.RootDecodeCode+Tags.SchemaFault : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.UndeclaredMember : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.UnknownTag : System.Int32 (literal)
 field Fuaran.Core.RootDecodeCode+Tags.WrongKind : System.Int32 (literal)
+field Fuaran.Core.StringEscape+Tags.AllControlsHex : System.Int32 (literal)
+field Fuaran.Core.StringEscape+Tags.ShortControls : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Behind : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Current : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Foreign : System.Int32 (literal)
 field Fuaran.Core.Versioning+Decoded`1+Tags.Known : System.Int32 (literal)
 field Fuaran.Core.Versioning+Decoded`1+Tags.Unknown : System.Int32 (literal)
+field Fuaran.Core.Versioning+EnvelopeRefusal+Tags.ForeignProfile : System.Int32 (literal)
+field Fuaran.Core.Versioning+EnvelopeRefusal+Tags.Malformed : System.Int32 (literal)
 field Fuaran.Core.Versioning+Evolution+Tags.Additive : System.Int32 (literal)
 field Fuaran.Core.Versioning+Evolution+Tags.Breaking : System.Int32 (literal)
 field Fuaran.Core.Versioning.payloadKey : System.String (literal)
-method Fuaran.Core.Canon.canonicalFloat(System.Double) : System.String
-method Fuaran.Core.Canon.render(Fuaran.Core.JVal) : System.String
-method Fuaran.Core.Canon.renderOrdered(Fuaran.Core.JVal) : System.String
-method Fuaran.Core.Canon.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
-method Fuaran.Core.Canon.typed(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
-method Fuaran.Core.Canonical.isCanonical(Fuaran.Core.EncodingProfile, System.String) : System.Boolean
+method Fuaran.Core.Canonical.isCanonical(Fuaran.Core.Rendering, System.String) : System.Boolean
 method Fuaran.Core.Canonical.read(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
-method Fuaran.Core.Canonical.tryWrite(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
-method Fuaran.Core.Canonical.write(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : System.String
+method Fuaran.Core.Canonical.tryWrite(Fuaran.Core.Rendering, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Canonical.typed(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
+method Fuaran.Core.Canonical.write(Fuaran.Core.Rendering, Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Codec.build`1(Fuaran.Core.CodecFields`2<!!0, !!0>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Codec`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.CodecDeclarationFault>>
 method Fuaran.Core.Codec.case`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpOption`1<!!1>>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!0>, Fuaran.Core.CodecFields`2<!!1, !!1>) : Fuaran.Core.CodecCase`1<!!0>
 method Fuaran.Core.Codec.corpus`1(Fuaran.Core.EncodingProfile, Fuaran.Core.Codec`1<!!0>) : Fuaran.Core.Corpus+Codec`1<!!0>
@@ -143,7 +160,7 @@ method Fuaran.Core.DecodeErrorModule.make(Fuaran.Core.DecodeCode, System.String,
 method Fuaran.Core.DecodeErrorModule.ofJsonRefusal(Fuaran.Core.JsonRefusal) : Fuaran.Core.DecodeError
 method Fuaran.Core.DecodeErrorModule.render(Fuaran.Core.DecodeError) : System.String
 method Fuaran.Core.DecodeErrorModule.resolvesIn(Fuaran.Core.JVal, Fuaran.Core.DecodeError) : System.Boolean
-method Fuaran.Core.DecodeErrorModule.reword(Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>, Fuaran.Core.DecodeError) : Fuaran.Core.DecodeError
+method Fuaran.Core.DecodeErrorModule.sentence(Fuaran.Core.DecodeCode, System.String, System.String) : System.String
 method Fuaran.Core.DecodeErrorModule.toJson(Fuaran.Core.DecodeError) : Fuaran.Core.JVal
 method Fuaran.Core.DecodeErrorModule.tryCodeOfName(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.DecodeCode>
 method Fuaran.Core.DecodeErrorModule.under(Fuaran.Core.PathSegment, Fuaran.Core.DecodeError) : Fuaran.Core.DecodeError
@@ -176,7 +193,6 @@ method Fuaran.Core.Decoder.map`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, M
 method Fuaran.Core.Decoder.members(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.missing(System.String) : Fuaran.Core.DecodeError
 method Fuaran.Core.Decoder.obj(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>, Fuaran.Core.DecodeError>
-method Fuaran.Core.Decoder.oneOfWith`1(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, !!0>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>
 method Fuaran.Core.Decoder.oneOf`1(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, !!0>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.optField`1(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.FSharpOption`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.pair`3(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.DecodeError>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!2>>) : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!2, Fuaran.Core.DecodeError>>
@@ -184,13 +200,13 @@ method Fuaran.Core.Decoder.parse(Fuaran.Core.ReadOptions, System.String) : Micro
 method Fuaran.Core.Decoder.sequence`1(Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.str(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.succeed`1(!!0, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
-method Fuaran.Core.Decoder.tagDispatchWith`1(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.tagDispatch`1(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.tryMember(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.JVal>
 method Fuaran.Core.Decoder.undeclared(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.JVal) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>
 method Fuaran.Core.Decoder.wrongKind(System.String, Fuaran.Core.JVal) : Fuaran.Core.DecodeError
 method Fuaran.Core.EncodingProfileModule.name(Fuaran.Core.EncodingProfile) : System.String
 method Fuaran.Core.EncodingProfileModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EncodingProfile>
+method Fuaran.Core.FloatLayout.canonical(System.Double) : System.String
 method Fuaran.Core.FloatLayout.finite(System.Double) : System.String
 method Fuaran.Core.FloatLayout.roundTrip(System.Double) : System.String
 method Fuaran.Core.JValModule.asFloat(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
@@ -203,6 +219,7 @@ method Fuaran.Core.Json.escapeWith(Fuaran.Core.EncodingProfile, System.String) :
 method Fuaran.Core.Json.firstIllFormedString(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Json.firstNonFinite(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
+method Fuaran.Core.Json.firstRenderFault(System.Boolean, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.RenderFault>
 method Fuaran.Core.Json.firstRepeatedMember(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.isJsonNumber(System.String) : System.Boolean
 method Fuaran.Core.Json.isWellFormedUtf16(System.String) : System.Boolean
@@ -224,21 +241,25 @@ method Fuaran.Core.ReaderModule.members(Microsoft.FSharp.Core.FSharpFunc`2<Syste
 method Fuaran.Core.ReaderModule.read`1(Fuaran.Core.ReadOptions, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Reader, !!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
 method Fuaran.Core.ReaderModule.strings(Fuaran.Core.Reader) : System.String[]
 method Fuaran.Core.ReaderModule.value(Fuaran.Core.Reader) : Fuaran.Core.JVal
-method Fuaran.Core.Versioning+ProfileModule.isValid(Fuaran.Core.Versioning+Profile) : System.Boolean
-method Fuaran.Core.Versioning+ProfileModule.isValidName(System.String) : System.Boolean
-method Fuaran.Core.Versioning+ProfileModule.render(Fuaran.Core.Versioning+Profile) : System.String
-method Fuaran.Core.Versioning+ProfileModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Profile, System.String>
-method Fuaran.Core.Versioning+ProfileModule.tryRender(Fuaran.Core.Versioning+Profile) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
-method Fuaran.Core.Versioning.bump(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Evolution) : Fuaran.Core.Versioning+Profile
+method Fuaran.Core.RenderFaultModule.describe(Fuaran.Core.RenderFault) : System.String
+method Fuaran.Core.RenderingModule.ofProfile(Fuaran.Core.EncodingProfile) : Fuaran.Core.Rendering
+method Fuaran.Core.Versioning+CapabilityModule.isValid(Fuaran.Core.Versioning+Capability) : System.Boolean
+method Fuaran.Core.Versioning+CapabilityModule.isValidName(System.String) : System.Boolean
+method Fuaran.Core.Versioning+CapabilityModule.render(Fuaran.Core.Versioning+Capability) : System.String
+method Fuaran.Core.Versioning+CapabilityModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Capability, System.String>
+method Fuaran.Core.Versioning+CapabilityModule.tryRender(Fuaran.Core.Versioning+Capability) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Versioning+EnvelopeRefusalModule.describe(Fuaran.Core.Versioning+EnvelopeRefusal) : System.String
+method Fuaran.Core.Versioning+EnvelopeRefusalModule.path(Fuaran.Core.Versioning+EnvelopeRefusal) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>
+method Fuaran.Core.Versioning.bump(Fuaran.Core.Versioning+Capability, Fuaran.Core.Versioning+Evolution) : Fuaran.Core.Versioning+Capability
 method Fuaran.Core.Versioning.classify(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>) : Fuaran.Core.Versioning+Evolution
-method Fuaran.Core.Versioning.decode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, System.String>
+method Fuaran.Core.Versioning.decode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, Fuaran.Core.Versioning+EnvelopeRefusal>
 method Fuaran.Core.Versioning.decodeTolerant`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.Boolean>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Decoded`1<!!0>, System.String>
 method Fuaran.Core.Versioning.encode(Fuaran.Core.Versioning+Envelope) : Fuaran.Core.JVal
-method Fuaran.Core.Versioning.negotiate(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Profile) : Fuaran.Core.Versioning+Compatibility
-method Fuaran.Core.Versioning.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, System.String>
+method Fuaran.Core.Versioning.negotiate(Fuaran.Core.Versioning+Capability, Fuaran.Core.Versioning+Capability) : Fuaran.Core.Versioning+Compatibility
+method Fuaran.Core.Versioning.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, Fuaran.Core.Versioning+EnvelopeRefusal>
 method Fuaran.Core.Versioning.reencode`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Versioning+Decoded`1<!!0>) : Fuaran.Core.JVal
 method Fuaran.Core.Versioning.render(Fuaran.Core.Versioning+Envelope) : System.String
-method Fuaran.Core.Versioning.tryBump(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Evolution) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Profile, System.String>
+method Fuaran.Core.Versioning.tryBump(Fuaran.Core.Versioning+Capability, Fuaran.Core.Versioning+Evolution) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Capability, System.String>
 method Fuaran.Core.Versioning.tryRender(Fuaran.Core.Versioning+Envelope) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 property Fuaran.Core.Codec.bool : Fuaran.Core.Codec`1<System.Boolean> { get }
 property Fuaran.Core.Codec.float : Fuaran.Core.Codec`1<System.Double> { get }
@@ -251,7 +272,12 @@ property Fuaran.Core.EncodingProfileModule.all : Microsoft.FSharp.Collections.FS
 property Fuaran.Core.EncodingProfileModule.current : Fuaran.Core.EncodingProfile { get }
 property Fuaran.Core.ReadOptionsModule.strict : Fuaran.Core.ReadOptions { get }
 property Fuaran.Core.ReadOptionsModule.tolerantOfNull : Fuaran.Core.ReadOptions { get }
-property Fuaran.Core.Versioning+ProfileModule.coreV1 : Fuaran.Core.Versioning+Profile { get }
+property Fuaran.Core.RenderingModule.CrossHost : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.Declared : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.V1 : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.V2 : Fuaran.Core.Rendering { get }
+property Fuaran.Core.RenderingModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Rendering> { get }
+property Fuaran.Core.Versioning+CapabilityModule.coreV1 : Fuaran.Core.Versioning+Capability { get }
 record-field Fuaran.Core.Codec`1.ReadAll #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>
 record-field Fuaran.Core.Codec`1.Schema #2 : Fuaran.Core.JVal
 record-field Fuaran.Core.Codec`1.Write #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.CodecDeclarationFault>>
@@ -286,15 +312,20 @@ record-field Fuaran.Core.JsonLimits.MaxObjectMembers #3 : System.Int32
 record-field Fuaran.Core.JsonLimits.MaxStringLength #1 : System.Int32
 record-field Fuaran.Core.ReadOptions.Limits #1 : Fuaran.Core.JsonLimits
 record-field Fuaran.Core.ReadOptions.Null #0 : Fuaran.Core.NullPolicy
+record-field Fuaran.Core.RenderFault.Class #0 : Fuaran.Core.RenderFaultClass
+record-field Fuaran.Core.RenderFault.Detail #2 : System.String
+record-field Fuaran.Core.RenderFault.Path #1 : System.String
+record-field Fuaran.Core.Rendering.Escape #0 : Fuaran.Core.StringEscape
+record-field Fuaran.Core.Rendering.Floats #2 : Fuaran.Core.FloatRule
+record-field Fuaran.Core.Rendering.Order #1 : Fuaran.Core.MemberOrder
+record-field Fuaran.Core.Versioning+Capability.Major #1 : System.Int32
+record-field Fuaran.Core.Versioning+Capability.Minor #2 : System.Int32
+record-field Fuaran.Core.Versioning+Capability.Name #0 : System.String
 record-field Fuaran.Core.Versioning+Envelope.Payload #1 : Fuaran.Core.JVal
-record-field Fuaran.Core.Versioning+Envelope.Profile #0 : Fuaran.Core.Versioning+Profile
-record-field Fuaran.Core.Versioning+Profile.Major #1 : System.Int32
-record-field Fuaran.Core.Versioning+Profile.Minor #2 : System.Int32
-record-field Fuaran.Core.Versioning+Profile.Name #0 : System.String
+record-field Fuaran.Core.Versioning+Envelope.Profile #0 : Fuaran.Core.Versioning+Capability
 record-field Fuaran.Core.Versioning+UnknownKind.Kind #0 : System.String
 record-field Fuaran.Core.Versioning+UnknownKind.Payload #1 : Fuaran.Core.JVal
-record-field Fuaran.Core.Versioning+UnknownKind.RequiredProfile #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Profile>
-type Fuaran.Core.Canon (module)
+record-field Fuaran.Core.Versioning+UnknownKind.RequiredProfile #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Capability>
 type Fuaran.Core.Canonical (module)
 type Fuaran.Core.Codec (module)
 type Fuaran.Core.CodecCase`1 (record)
@@ -325,6 +356,8 @@ type Fuaran.Core.EncodingProfile (union)
 type Fuaran.Core.EncodingProfile+Tags (type)
 type Fuaran.Core.EncodingProfileModule (module)
 type Fuaran.Core.FloatLayout (module)
+type Fuaran.Core.FloatRule (union)
+type Fuaran.Core.FloatRule+Tags (type)
 type Fuaran.Core.JVal (union)
 type Fuaran.Core.JVal+JArr (type)
 type Fuaran.Core.JVal+JBool (type)
@@ -348,6 +381,8 @@ type Fuaran.Core.JsonRefusal (union)
 type Fuaran.Core.JsonRefusal+LimitExceeded (type)
 type Fuaran.Core.JsonRefusal+Malformed (type)
 type Fuaran.Core.JsonRefusal+Tags (type)
+type Fuaran.Core.MemberOrder (union)
+type Fuaran.Core.MemberOrder+Tags (type)
 type Fuaran.Core.NullPolicy (union)
 type Fuaran.Core.NullPolicy+Tags (type)
 type Fuaran.Core.PathSegment (union)
@@ -358,9 +393,19 @@ type Fuaran.Core.ReadOptions (record)
 type Fuaran.Core.ReadOptionsModule (module)
 type Fuaran.Core.Reader (type)
 type Fuaran.Core.ReaderModule (module)
+type Fuaran.Core.RenderFault (record)
+type Fuaran.Core.RenderFaultClass (union)
+type Fuaran.Core.RenderFaultClass+Tags (type)
+type Fuaran.Core.RenderFaultModule (module)
+type Fuaran.Core.Rendering (record)
+type Fuaran.Core.RenderingModule (module)
 type Fuaran.Core.RootDecodeCode (union)
 type Fuaran.Core.RootDecodeCode+Tags (type)
+type Fuaran.Core.StringEscape (union)
+type Fuaran.Core.StringEscape+Tags (type)
 type Fuaran.Core.Versioning (module)
+type Fuaran.Core.Versioning+Capability (record)
+type Fuaran.Core.Versioning+CapabilityModule (module)
 type Fuaran.Core.Versioning+Compatibility (union)
 type Fuaran.Core.Versioning+Compatibility+Behind (type)
 type Fuaran.Core.Versioning+Compatibility+Foreign (type)
@@ -370,12 +415,15 @@ type Fuaran.Core.Versioning+Decoded`1+Known (type)
 type Fuaran.Core.Versioning+Decoded`1+Tags (type)
 type Fuaran.Core.Versioning+Decoded`1+Unknown (type)
 type Fuaran.Core.Versioning+Envelope (record)
+type Fuaran.Core.Versioning+EnvelopeRefusal (union)
+type Fuaran.Core.Versioning+EnvelopeRefusal+ForeignProfile (type)
+type Fuaran.Core.Versioning+EnvelopeRefusal+Malformed (type)
+type Fuaran.Core.Versioning+EnvelopeRefusal+Tags (type)
+type Fuaran.Core.Versioning+EnvelopeRefusalModule (module)
 type Fuaran.Core.Versioning+Evolution (union)
 type Fuaran.Core.Versioning+Evolution+Additive (type)
 type Fuaran.Core.Versioning+Evolution+Breaking (type)
 type Fuaran.Core.Versioning+Evolution+Tags (type)
-type Fuaran.Core.Versioning+Profile (record)
-type Fuaran.Core.Versioning+ProfileModule (module)
 type Fuaran.Core.Versioning+UnknownKind (record)
 union-case Fuaran.Core.CodecDeclarationFault.NewDiscriminatorAsMember #3(tag: System.String, key: System.String)
 union-case Fuaran.Core.CodecDeclarationFault.NewRepeatedMember #1(name: System.String, case: Microsoft.FSharp.Core.FSharpOption`1<System.String>)
@@ -395,6 +443,8 @@ union-case Fuaran.Core.DecodeCode.UnknownTag #3()
 union-case Fuaran.Core.DecodeCode.WrongKind #2()
 union-case Fuaran.Core.EncodingProfile.V1 #0()
 union-case Fuaran.Core.EncodingProfile.V2 #1()
+union-case Fuaran.Core.FloatRule.Canonical #1()
+union-case Fuaran.Core.FloatRule.RoundTrip #0()
 union-case Fuaran.Core.JVal.NewJArr #4(Item: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.JVal>)
 union-case Fuaran.Core.JVal.NewJBool #2(Item: System.Boolean)
 union-case Fuaran.Core.JVal.NewJFloat #3(Item: System.Double)
@@ -421,10 +471,15 @@ union-case Fuaran.Core.JsonLimit.ObjectMembers #3()
 union-case Fuaran.Core.JsonLimit.StringLength #1()
 union-case Fuaran.Core.JsonRefusal.NewLimitExceeded #1(Item: Fuaran.Core.JsonLimitBreach)
 union-case Fuaran.Core.JsonRefusal.NewMalformed #0(Item: Fuaran.Core.JsonError)
+union-case Fuaran.Core.MemberOrder.Authored #0()
+union-case Fuaran.Core.MemberOrder.Sorted #1()
 union-case Fuaran.Core.NullPolicy.EraseMemberNull #1()
 union-case Fuaran.Core.NullPolicy.RejectNull #0()
 union-case Fuaran.Core.PathSegment.NewIndex #1(Item: System.Int32)
 union-case Fuaran.Core.PathSegment.NewKey #0(Item: System.String)
+union-case Fuaran.Core.RenderFaultClass.IllFormedString #1()
+union-case Fuaran.Core.RenderFaultClass.NonFiniteFloat #0()
+union-case Fuaran.Core.RenderFaultClass.RepeatedMember #2()
 union-case Fuaran.Core.RootDecodeCode.LimitExceeded #4()
 union-case Fuaran.Core.RootDecodeCode.NotAdmitted #5()
 union-case Fuaran.Core.RootDecodeCode.OutOfRange #2()
@@ -432,10 +487,14 @@ union-case Fuaran.Core.RootDecodeCode.SchemaFault #6()
 union-case Fuaran.Core.RootDecodeCode.UndeclaredMember #3()
 union-case Fuaran.Core.RootDecodeCode.UnknownTag #1()
 union-case Fuaran.Core.RootDecodeCode.WrongKind #0()
+union-case Fuaran.Core.StringEscape.AllControlsHex #1()
+union-case Fuaran.Core.StringEscape.ShortControls #0()
 union-case Fuaran.Core.Versioning+Compatibility.Current #0()
-union-case Fuaran.Core.Versioning+Compatibility.NewBehind #1(authored: Fuaran.Core.Versioning+Profile)
-union-case Fuaran.Core.Versioning+Compatibility.NewForeign #2(authored: Fuaran.Core.Versioning+Profile)
+union-case Fuaran.Core.Versioning+Compatibility.NewBehind #1(authored: Fuaran.Core.Versioning+Capability)
+union-case Fuaran.Core.Versioning+Compatibility.NewForeign #2(authored: Fuaran.Core.Versioning+Capability)
 union-case Fuaran.Core.Versioning+Decoded`1.NewKnown #0(Item: !0)
 union-case Fuaran.Core.Versioning+Decoded`1.NewUnknown #1(Item: Fuaran.Core.Versioning+UnknownKind)
+union-case Fuaran.Core.Versioning+EnvelopeRefusal.NewForeignProfile #1(text: System.String, reason: System.String)
+union-case Fuaran.Core.Versioning+EnvelopeRefusal.NewMalformed #0(Item: Fuaran.Core.DecodeError)
 union-case Fuaran.Core.Versioning+Evolution.NewAdditive #0(added: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Versioning+Evolution.NewBreaking #1(removed: Microsoft.FSharp.Collections.FSharpList`1<System.String>, added: Microsoft.FSharp.Collections.FSharpList`1<System.String>)

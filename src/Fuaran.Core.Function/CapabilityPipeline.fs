@@ -341,7 +341,7 @@ module CapabilityPipeline =
 
     let private spaceFromJ: Decoder<ValueSpace> =
         fun el ->
-            SpaceCodec.decoderSaying "unknown value-space: " el
+            SpaceCodec.decoder el
             // Phase 307: an output space the admission check refuses is refused on read.
             |> Result.bind (fun sp ->
                 match Space.wellFormed sp with
@@ -358,12 +358,12 @@ module CapabilityPipeline =
 
     let private argSrcToJ (s: ArgSource) : JVal =
         match s with
-        | Literal v -> Canon.typed "literal" [ "value", JStr v ]
-        | FromNode n -> Canon.typed "fromNode" [ "node", JStr n ]
+        | Literal v -> Canonical.typed "literal" [ "value", JStr v ]
+        | FromNode n -> Canonical.typed "fromNode" [ "node", JStr n ]
 
     let private argSrcFromJ: Decoder<ArgSource> =
-        SeamCodec.dispatch
-            "unknown arg source: "
+        Decoder.tagDispatch
+            "$type"
             [ "literal", Decoder.field "value" Decoder.str |> Decoder.map Literal
               "fromNode", Decoder.field "node" Decoder.str |> Decoder.map FromNode ]
 
@@ -377,9 +377,9 @@ module CapabilityPipeline =
     let private nodeToJ (n: PipelineNode) : JVal =
         match n with
         | Source(id, dref, ty) ->
-            Canon.typed "source" [ "id", JStr id; "dataRef", JStr dref; "outputType", spaceToJ ty ]
+            Canonical.typed "source" [ "id", JStr id; "dataRef", JStr dref; "outputType", spaceToJ ty ]
         | Invoke(id, capId, ty, args) ->
-            Canon.typed
+            Canonical.typed
                 "invoke"
                 [ "id", JStr id
                   "capabilityId", JStr capId
@@ -407,17 +407,17 @@ module CapabilityPipeline =
                         Decoder.field "args" (Decoder.list argFromJ) el
                         |> Result.map (fun args -> Invoke(id, capId, ty, args)))))
 
-        SeamCodec.dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
+        Decoder.tagDispatch "$type" [ "source", source; "invoke", invoke ]
 
     /// Encode a pipeline to its canonical wire string. Total; a pipeline whose output spaces carry
     /// a non-finite bound writes bytes `decode` refuses — `tryEncode` refuses it instead.
     let encode (p: CapabilityPipeline) : string =
-        Canon.render (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
+        Canonical.write Rendering.CrossHost (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
-    /// The GUARDED encode (Phase 307): `Canon.tryRender`, so a non-finite bound or an ill-formed
+    /// The GUARDED encode (Phase 307): `Canonical.tryWrite Rendering.CrossHost`, so a non-finite bound or an ill-formed
     /// string is refused, naming it. `Ok` is exactly `encode`'s string.
     let tryEncode (p: CapabilityPipeline) : Result<string, string> =
-        Canon.tryRender (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
+        Canonical.tryWrite Rendering.CrossHost (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
     /// Decode a pipeline from a wire string, answering a typed refusal (Phase 310): its code, the
     /// path to the value at fault, and [[decode]]'s sentence. A parse failure is refused at the root.

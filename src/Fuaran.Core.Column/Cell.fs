@@ -133,7 +133,7 @@ module Cell =
     /// layer's `Distinct` / `GroupBy` partition on since Phase 41). Type-tagged, so `Int 1` and
     /// `Float 1.0` are two values: `i:<digits>`, `f:<float>`, `b:1` / `b:0`, `s:` / `d:` / `t:` +
     /// the text, `m:` + the CANONICAL decimal text (so `1.50` and `1.5` are one token), and `n:`.
-    /// A float is `NaN`, `Inf` or `-Inf` when non-finite and `Canon.canonicalFloat` otherwise, so
+    /// A float is `NaN`, `Inf` or `-Inf` when non-finite and `FloatLayout.canonical` otherwise, so
     /// NaN is one token and `-0.0` shares `0`'s — two floats share a token exactly when `compare`
     /// says they are equal. A `Decimal` whose text is not decimal text keeps that text, so it never
     /// shares a token with a decimal.
@@ -145,7 +145,7 @@ module Cell =
             + (if System.Double.IsNaN f then "NaN"
                elif System.Double.IsPositiveInfinity f then "Inf"
                elif System.Double.IsNegativeInfinity f then "-Inf"
-               else Canon.canonicalFloat f)
+               else FloatLayout.canonical f)
         | Bool b -> "b:" + (if b then "1" else "0")
         | Str s -> "s:" + s
         | Date s -> "d:" + s

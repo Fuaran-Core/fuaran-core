@@ -279,7 +279,8 @@ let tests =
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"
-              Expect.stringContains errs[0] "does not declare" "naming the class")
+              Expect.stringContains errs[0].Detail "does not declare" "naming the class"
+              Expect.equal (List.last errs[0].At) (PathSegment.Key "caseAnnotations") "at the enum's annotations")
 
           // ---- 3. the F# backend --------------------------------------------
 

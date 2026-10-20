@@ -209,7 +209,7 @@ type NodeEnvelopeShape =
 /// adopt-before-calcification lesson", now declarable instead of priced.
 [<RequireQualifiedAccess>]
 type KeyOrder =
-    /// Ordinal-sorted at render (`Canon.render`) — the default, and the
+    /// Ordinal-sorted at render (`Canonical.write Rendering.CrossHost`) — the default, and the
     /// cross-host discipline every shipped corpus uses.
     | Sorted
     /// DECLARATION order: the discriminator, then `id`, then fields exactly as

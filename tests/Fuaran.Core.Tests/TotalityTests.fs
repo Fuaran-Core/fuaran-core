@@ -54,7 +54,7 @@ module private Before =
     let private floatToken (f: float) : string =
         match JVal.nonFiniteToken f with
         | Some tok -> tok
-        | None -> Canon.canonicalFloat f
+        | None -> FloatLayout.canonical f
 
     let private aggCompare (a: Cell) (b: Cell) : int option =
         match a, b with
@@ -1034,15 +1034,27 @@ let tests =
                           let objects = nestedObjects depth (JInt 1)
 
                           [ "Json.render arrays", Ok(Json.render arrays), arraysText depth "1"
-                            "Canon.render arrays", Ok(Canon.render arrays), arraysText depth "1"
-                            "Canon.renderOrdered arrays", Ok(Canon.renderOrdered arrays), arraysText depth "1"
+                            "Canonical.write Rendering.CrossHost arrays",
+                            Ok(Canonical.write Rendering.CrossHost arrays),
+                            arraysText depth "1"
+                            "Canonical.write Rendering.Declared arrays",
+                            Ok(Canonical.write Rendering.Declared arrays),
+                            arraysText depth "1"
                             "Json.tryRender arrays", Json.tryRender arrays, arraysText depth "1"
-                            "Canon.tryRender arrays", Canon.tryRender arrays, arraysText depth "1"
+                            "Canonical.tryWrite Rendering.CrossHost arrays",
+                            Canonical.tryWrite Rendering.CrossHost arrays,
+                            arraysText depth "1"
                             "Json.render objects", Ok(Json.render objects), objectsText depth "1"
-                            "Canon.render objects", Ok(Canon.render objects), objectsText depth "1"
-                            "Canon.renderOrdered objects", Ok(Canon.renderOrdered objects), objectsText depth "1"
+                            "Canonical.write Rendering.CrossHost objects",
+                            Ok(Canonical.write Rendering.CrossHost objects),
+                            objectsText depth "1"
+                            "Canonical.write Rendering.Declared objects",
+                            Ok(Canonical.write Rendering.Declared objects),
+                            objectsText depth "1"
                             "Json.tryRender objects", Json.tryRender objects, objectsText depth "1"
-                            "Canon.tryRender objects", Canon.tryRender objects, objectsText depth "1" ])
+                            "Canonical.tryWrite Rendering.CrossHost objects",
+                            Canonical.tryWrite Rendering.CrossHost objects,
+                            objectsText depth "1" ])
 
                   for (name, got, expected) in rendered do
                       Expect.isTrue (got = Ok expected) (sprintf "%s at depth %d" name depth)
@@ -1051,8 +1063,8 @@ let tests =
           <| fun _ ->
               let nonFinite, illFormed, jsonNonFinite =
                   onOneMegabyteStack (fun () ->
-                      Canon.tryRender (nestedArrays 10000 (JFloat nan)),
-                      Canon.tryRender (nestedObjects 10000 (JStr(units [ 0xD800 ]))),
+                      Canonical.tryWrite Rendering.CrossHost (nestedArrays 10000 (JFloat nan)),
+                      Canonical.tryWrite Rendering.CrossHost (nestedObjects 10000 (JStr(units [ 0xD800 ]))),
                       Json.tryRender (nestedArrays 10000 (JFloat infinity)))
 
               match nonFinite with
@@ -1071,10 +1083,16 @@ let tests =
                   Expect.stringContains m "a string holds the unpaired surrogate U+D800 at unit 0 at $[\"k\"]" "named"
               | Ok _ -> failtest "a lone surrogate 10,000 deep was rendered"
 
-              Expect.equal
-                  jsonNonFinite
-                  (Error "non-finite float is not representable on the Fuaran wire: Infinity")
-                  "Json.tryRender keeps its message"
+              // Phase 520: Json.tryRender refuses through THE guard, in its one sentence — the class and
+              // the whole path, where it used to name the token alone
+              match jsonNonFinite with
+              | Error m ->
+                  Expect.equal
+                      m
+                      ("non-finite float has no canonical rendering of its own: Infinity at $"
+                       + String.replicate 10000 "[0]")
+                      "the guard's sentence: its class, its token and its whole path"
+              | Ok _ -> failtest "an Infinity 10,000 deep was rendered"
 
           testCase "the text of a value nested past the parse cap is refused by name, not by the stack"
           <| fun _ ->
@@ -1103,7 +1121,7 @@ let tests =
                   (Ok(JObj [ "k", JStr astral ]))
                   "and reads the other"
 
-              match Canon.tryRender (JObj [ "k", JStr illFormed ]) with
+              match Canonical.tryWrite Rendering.CrossHost (JObj [ "k", JStr illFormed ]) with
               | Error m ->
                   Expect.equal
                       m
@@ -1112,7 +1130,11 @@ let tests =
               | Ok s -> failtestf "rendered %s" s
 
               let good = JObj [ "k", JStr astral ]
-              Expect.equal (Canon.tryRender good) (Ok(Canon.render good)) "a well-formed value is exactly render"
+
+              Expect.equal
+                  (Canonical.tryWrite Rendering.CrossHost good)
+                  (Ok(Canonical.write Rendering.CrossHost good))
+                  "a well-formed value is exactly render"
 
               Expect.equal
                   (Hash.trySha256Hex illFormed)
@@ -1136,7 +1158,7 @@ let tests =
           testCase
               "a member key is held to the rule, a non-finite float is named first, and the scan is in document order"
           <| fun _ ->
-              match Canon.tryRender (JObj [ units [ 0xDC00 ], JStr(units [ 0xD800 ]) ]) with
+              match Canonical.tryWrite Rendering.CrossHost (JObj [ units [ 0xDC00 ], JStr(units [ 0xD800 ]) ]) with
               | Error m ->
                   Expect.stringContains
                       m
@@ -1144,15 +1166,35 @@ let tests =
                       "the key, before its value"
               | Ok s -> failtestf "rendered %s" s
 
-              match Json.tryRender (JArr [ JStr "ok"; JStr("a" + units [ 0xD83D ]) ]) with
+              let lone = JArr [ JStr "ok"; JStr("a" + units [ 0xD83D ]) ]
+
+              Expect.equal
+                  (Json.firstRenderFault false lone)
+                  (Some
+                      { Class = RenderFaultClass.IllFormedString
+                        Path = "$[1]"
+                        Detail = "a string holds the unpaired surrogate U+D83D at unit 1" })
+                  "the guard names the class, the path and the unit"
+
+              Expect.equal
+                  (Json.tryRender lone)
+                  (Error(RenderFault.describe (Option.get (Json.firstRenderFault false lone))))
+                  "the refusal is the guard's fault, in its one sentence"
+
+              Expect.equal
+                  (Canonical.tryWrite (Rendering.ofProfile EncodingProfile.current) lone)
+                  (Json.tryRender lone)
+                  "and the current profile's rendering refuses it alike"
+
+              match Json.tryRender lone with
               | Error m ->
                   Expect.equal
                       m
-                      "ill-formed string is not representable on the Fuaran wire: a string holds the unpaired surrogate U+D83D at unit 1 at $[1]"
-                      "Json.tryRender refuses it too"
+                      "ill-formed string has no canonical rendering of its own: a string holds the unpaired surrogate U+D83D at unit 1 at $[1]"
+                      "Json.tryRender refuses it too, in the guard's one sentence"
               | Ok s -> failtestf "rendered %s" s
 
-              match Canon.tryRender (JArr [ JStr(units [ 0xD800 ]); JFloat nan ]) with
+              match Canonical.tryWrite Rendering.CrossHost (JArr [ JStr(units [ 0xD800 ]); JFloat nan ]) with
               | Error m -> Expect.stringContains m "NaN at $[1]" "a non-finite float keeps the refusal it always had"
               | Ok s -> failtestf "rendered %s" s
 
@@ -1480,12 +1522,12 @@ let tests =
                   let s =
                       slot () + "@" + slot () + "." + slot () + (if pick 6 = 0 then slot () else "")
 
-                  match Versioning.Profile.tryParse s with
+                  match Versioning.Capability.tryParse s with
                   | Ok p ->
                       accepted <- accepted + 1
-                      Expect.equal (Versioning.Profile.render p) s (sprintf "render (tryParse %A)" s)
-                      Expect.isTrue (Versioning.Profile.isValid p) (sprintf "%A parsed to a valid profile" s)
-                      Expect.equal (Versioning.Profile.tryRender p) (Ok s) "and the guarded render agrees"
+                      Expect.equal (Versioning.Capability.render p) s (sprintf "render (tryParse %A)" s)
+                      Expect.isTrue (Versioning.Capability.isValid p) (sprintf "%A parsed to a valid profile" s)
+                      Expect.equal (Versioning.Capability.tryRender p) (Ok s) "and the guarded render agrees"
                   | Error _ -> ()
 
               Expect.isGreaterThan accepted 50 "the fuzz reached the accepting side"
@@ -1493,13 +1535,13 @@ let tests =
               for name in [ "core"; "a"; "Fuaran-UI.v2_x"; "z9" ] do
                   for major in [ 0; 1; 10; Int32.MaxValue ] do
                       for minor in [ 0; 7; Int32.MaxValue ] do
-                          let p: Versioning.Profile =
+                          let p: Versioning.Capability =
                               { Name = name
                                 Major = major
                                 Minor = minor }
 
                           Expect.equal
-                              (Versioning.Profile.tryParse (Versioning.Profile.render p))
+                              (Versioning.Capability.tryParse (Versioning.Capability.render p))
                               (Ok p)
                               (sprintf "%A" p)
 
@@ -1528,14 +1570,14 @@ let tests =
                     "core@.0"
                     "core@2147483648.0"
                     "core@1.٣" ] do
-                  Expect.isError (Versioning.Profile.tryParse s) (sprintf "%A" s)
+                  Expect.isError (Versioning.Capability.tryParse s) (sprintf "%A" s)
 
               for s in [ "core@0.0"; "core@2147483647.2147483647"; "Fuaran-UI.v2_x@10.20" ] do
-                  Expect.isOk (Versioning.Profile.tryParse s) s
+                  Expect.isOk (Versioning.Capability.tryParse s) s
 
           testCase "tryRender refuses a profile tryParse could not read back, and the envelope is guarded by it"
           <| fun _ ->
-              let profile (name: string) (major: int) (minor: int) : Versioning.Profile =
+              let profile (name: string) (major: int) (minor: int) : Versioning.Capability =
                   { Name = name
                     Major = major
                     Minor = minor }
@@ -1547,15 +1589,15 @@ let tests =
                     profile "core" -1 0
                     profile "core" 1 -1
                     profile null 1 0 ] do
-                  Expect.isFalse (Versioning.Profile.isValid p) (sprintf "%A is not valid" p)
-                  Expect.isError (Versioning.Profile.tryRender p) (sprintf "%A is refused" p)
+                  Expect.isFalse (Versioning.Capability.isValid p) (sprintf "%A is not valid" p)
+                  Expect.isError (Versioning.Capability.tryRender p) (sprintf "%A is refused" p)
 
                   Expect.isError
                       (Versioning.tryRender { Profile = p; Payload = JObj [] })
                       "and so is an envelope carrying it"
 
               let env: Versioning.Envelope =
-                  { Profile = Versioning.Profile.coreV1
+                  { Profile = Versioning.Capability.coreV1
                     Payload = JObj [ "a", JInt 1 ] }
 
               Expect.equal (Versioning.tryRender env) (Ok(Versioning.render env)) "a valid envelope is exactly render"
@@ -1568,7 +1610,7 @@ let tests =
 
           testCase "bump saturates at Int32.MaxValue, and tryBump refuses there"
           <| fun _ ->
-              let top: Versioning.Profile =
+              let top: Versioning.Capability =
                   { Name = "core"
                     Major = Int32.MaxValue
                     Minor = Int32.MaxValue }
@@ -1602,7 +1644,7 @@ let tests =
                   "a breaking bump resets a minor at the edge"
 
               Expect.isTrue
-                  (Versioning.Profile.isValid (Versioning.bump top additive))
+                  (Versioning.Capability.isValid (Versioning.bump top additive))
                   "what bump returns is a profile the wire can carry"
 
           // ---- the small print ----
@@ -1660,7 +1702,7 @@ let tests =
           testCase "Json.render of negative zero is the one divergence from Canon that a parse collapses"
           <| fun _ ->
               Expect.equal (Json.render (JFloat -0.0)) "-0" "the author-ordered layout keeps the sign"
-              Expect.equal (Canon.render (JFloat -0.0)) "0" "the canonical one collapses it"
+              Expect.equal (Canonical.write Rendering.CrossHost (JFloat -0.0)) "0" "the canonical one collapses it"
               Expect.equal (Json.parse "-0") (Ok(JInt 0)) "-0 is an integer token"
               Expect.equal (Json.render (JInt 0)) "0" "so the second render is 0 …"
 
