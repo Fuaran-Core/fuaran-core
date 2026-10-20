@@ -1252,7 +1252,8 @@ module internal Projected =
 
     /// A script compiling the emitted module `name` ahead of `body`.
     let scriptOf (name: string) (moduleText: string) (body: string) =
-        dllRef "Fuaran.Core.Wire.dll"
+        dllRef "Fuaran.Core.Text.dll"
+        + dllRef "Fuaran.Core.Wire.dll"
         + dllRef "Fuaran.Core.Tree.dll"
         + dllRef "Fuaran.Core.Validator.dll"
         + moduleText.Replace("module " + name + "\n", "")

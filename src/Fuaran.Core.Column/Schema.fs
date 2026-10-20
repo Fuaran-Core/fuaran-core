@@ -356,51 +356,11 @@ module Schema =
         | [], unknown -> SchemaCompat.Unknown unknown
         | reasons, _ -> SchemaCompat.Breaking reasons
 
-    // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `Column` references only
-    // `Wire` and taking a `Tree` dependency to reach one 8-line function would add a package edge
-    // for every consumer. It must stay VALUE-IDENTICAL to the canonical one, which
-    // the `hashSweep/*` rows of `ParityVectors` (Fuaran.Core.Conformance) compare over a shared corpus.
-    //
-    // The multiply is split into 16-bit halves — see `Hash.mul32` for why a plain `h * 16777619u`
-    // is not portable (the product passes 2^53 under Fable's doubles, losing precision inside the
-    // operation). .NET values are unchanged by the split. Do not "simplify" it back.
-    let private fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            // 16777619 = 0x01000193 = 256 * 65536 + 403, so the prime's halves are 256 and 403.
-            let lo = h &&& 0xFFFFu
-            let hi = h >>> 16
-            let cross = ((lo * 256u) + (hi * 403u)) &&& 0xFFFFu
-            h <- ((lo * 403u) + (cross * 65536u)) &&& 0xFFFFFFFFu
-
-        h.ToString("x8")
-
-    // A DELIBERATE COPY of `Hash.canonicalFields` (`Fuaran.Core.Tree`), for the reason `fnv1a` above
-    // is one: `Column` references only `Wire`. Each field has every `fieldEsc` (U+0010) and every
-    // `foldSep` (U+0001) it carries escaped by a preceding `fieldEsc`, and is then terminated by
-    // `foldSep` — so the pre-image is INJECTIVE, where the bare U+0001 join it replaces (Phase 299)
-    // was not: a column NAME can spell the separator, and then two different schemas shared a
-    // pre-image. Both symbols are written as `\u` escapes, never as the raw control byte. It must
-    // stay VALUE-IDENTICAL to the canonical encoding: the suite compares `fingerprint` against
-    // `Hash.fnv1a (Hash.canonicalFields …)` over names carrying the separator and the escape, and the
-    // `hashSweep/*` parity rows carry it through both pipelines.
-    let private foldSep = "\u0001"
-    let private fieldEsc = "\u0010"
-
-    let private canonicalPreimage (fields: string list) : string =
-        fields
-        |> List.map (fun s ->
-            s.Replace(fieldEsc, fieldEsc + fieldEsc).Replace(foldSep, fieldEsc + foldSep)
-            + foldSep)
-        |> String.concat ""
-
     /// The pre-image element a field's METADATA contributes (Phase 427): the canonical encoding of
     /// its members in order — the unit's canonical text, the label, the description, each prefixed by
     /// a letter that says the member is stated (so an absent member and an empty one differ), then
     /// each extension key and its value in ordinal key order. Every member passes through
-    /// `canonicalPreimage`, so the element ENDS WITH `foldSep` — and a column element ends with a type
+    /// `Hash.canonicalFields`, so the element ENDS WITH `foldSep` — and a column element ends with a type
     /// tag's last character, never that — which is what keeps the two kinds of element apart in the
     /// outer list and the whole pre-image injective.
     let private metadataPreimage (f: Field) : string =
@@ -416,7 +376,7 @@ module Schema =
            |> Map.toList
            |> List.sortWith (fun (a, _) (b, _) -> ordinal a b)
            |> List.collect (fun (k, v) -> [ k; v ]))
-        |> canonicalPreimage
+        |> Hash.canonicalFields
 
     /// A stable, cross-host content `fingerprint` of a `Schema` (Phase 33): FNV-1a over the canonical
     /// field encoding of the `name:type` list — the pre-image `Hash.canonicalFields` builds, so a
@@ -427,11 +387,12 @@ module Schema =
     /// schemas differing only in a unit have different fingerprints, and a schema with no metadata
     /// has the fingerprint it had before this phase. Byte-identical across hosts (no host hashing
     /// primitive); the schema-version stamp a consumer's provenance records to detect "same shape"
-    /// cheaply.
+    /// cheaply. Since Phase 531 the hash and the pre-image are the text kernel's own
+    /// (`Hash.fnv1a`, `Hash.canonicalFields`), where this package carried value-identical copies.
     let fingerprint (s: Schema) : string =
         s
         |> List.collect (fun f ->
             (f.Name + ":" + ColumnType.tag f.Type)
             :: (if Field.hasMetadata f then [ metadataPreimage f ] else []))
-        |> canonicalPreimage
-        |> fnv1a
+        |> Hash.canonicalFields
+        |> Hash.fnv1a

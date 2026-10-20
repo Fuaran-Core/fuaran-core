@@ -9,27 +9,25 @@
   <ItemGroup>
     <Compile Include="JVal.fs" />
     <Compile Include="FloatLayout.fs" />
-    <Compile Include="EncodingProfile.fs" />
     <Compile Include="Json.fs" />
     <Compile Include="DecodePath.fs" />
     <Compile Include="DecodeError.fs" />
     <Compile Include="Decoder.fs" />
     <Compile Include="Canonical.fs" />
     <Compile Include="Versioning.fs" />
-    <Compile Include="Xorshift32.fs" />
     <Compile Include="Corpus.fs" />
     <Compile Include="CodecDeclarationFault.fs" />
     <Compile Include="Codec.fs" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Phase 495: the xorshift32 kernel (`Xorshift32`) lives here, the lowest package that draws
-         from it — `Corpus.genJVal` here, the IDL sampler (`Fuaran.Core.Idl.Sample`) and the
-         conformance kit's `ConfRng` above — one body, read by the packages above this one rather
-         than copied into them (DECISIONS.md D125's shape). Each friend reads it only from
-         NoInlining functions (D129), because the F# optimiser would otherwise copy a body naming it
-         into a Release-built caller that cannot see it; CrossAssemblyInliningTests holds it, and
-         fails on a grant here that nothing reads. -->
-    <InternalsVisibleTo Include="Fuaran.Core.Idl" />
+    <!-- Phase 531: the escape, the UTF-8 and UTF-16 rules, the string-token and number grammar the
+         scanner reads by, the encoding profiles and the xorshift32 kernel `Corpus.genJVal` draws from
+         live in the text kernel below this package (DECISIONS.md D2 as amended). -->
+    <ProjectReference Include="..\Fuaran.Core.Text\Fuaran.Core.Text.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The wire fuzz generator's sample (`Corpus.genJVal`) is internal, and the conformance kit's
+         `fuzz/*` parity rows read it (Phase 495), from a `NoInlining` function (D129). -->
     <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
   </ItemGroup>
   <ItemGroup>

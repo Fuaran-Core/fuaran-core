@@ -594,10 +594,10 @@ columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse
 
 ### Public because a sibling Core package calls it (`0.19.0`)
 
-`Fuaran.Core.*` is nineteen packable assemblies. Between them it grants `InternalsVisibleTo` in
-exactly five declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
-`Fuaran.Core.ContentAddress`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to
-`Fuaran.Core.Idl` and `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the three
+`Fuaran.Core.*` is twenty packable assemblies. Between them it grants `InternalsVisibleTo` in exactly eight
+declarations — `Fuaran.Core.Text` to `Fuaran.Core.Tree`, `Fuaran.Core.ContentAddress`, `Fuaran.Core.Wire`, `Fuaran.Core.Idl`
+and `Fuaran.Core.Conformance` (the digest's constructor and the xorshift32 kernel, Phase 531), `Fuaran.Core.Function` to
+`Fuaran.Core.Query`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the three
 further declarations, `Fuaran.Core.Idl.Cli`, `Fuaran.Core.Conformance` and (Phase 511) `Fuaran.Core.Idl.Codegen`
 to the test project, grant nothing a consumer reaches.
 Everywhere else a function one Core package needs from another has to be public — `internal` cannot
@@ -721,10 +721,9 @@ but a domain that *persists* a digest as a content-address should note one-time 
   hash — still divergent**, which is the exact harm the fix existed to prevent: two hosts replaying
   one log computing two different chains. All six are fixed in `0.6.0`. Three are now gone
   entirely (`Capability.invocationKey`, the pipeline node key, and `Query.invocationKey` call
-  `Hash.fnv1a` directly — their packages already depended on `Tree`). Three remain by necessity —
-  `Hash.fnv1a`, `OpStream`'s copy (standalone by DECISIONS D2) and `Column`'s (references only
-  `Wire`) — and the two copies are now **checked against the canonical one by test and by probe**
-  rather than kept in step by discipline. Affected values: `Tree.contentHash`, `Tree.encodeHash`,
+  `Hash.fnv1a` directly — their packages already depended on `Tree`). Three remained by necessity —
+  `Hash.fnv1a`, `OpStream`'s copy (standalone by DECISIONS D2) and `Column`'s (references only `Wire`), the copies checked against the canonical one by test and by probe. **Since `0.40.0`** (Phase 531, DECISIONS.md D198, breaking: one more package, and `Hash`, `Digest`, `IllFormedUtf16`, `EncodingProfile`, `Rendering` and their companions move assembly, namespace unchanged) both copies are gone, with the SHA-256, escape and string-grammar copies beside them: the new `Fuaran.Core.Text` kernel below `Tree`, `Wire` and `OpStream` carries the hash, the digest, the UTF-8 and UTF-16 rules, `JsonString` (the escape), `JsonSyntax` (the string-token and number grammar both JSON readers read by) and the profiles, and `Tree`, `Wire` and `OpStream` each reference it. No hash, escape, digest or JSONL position moves (the parity, escape and JSONL-grammar vectors are byte-identical); a consumer pinning one package restores the kernel beside it, and an op-stream-only consumer still restores no `Wire` and no `Tree`.
+  Affected values: `Tree.contentHash`, `Tree.encodeHash`,
   `Tree.Index.fingerprintOf`, `Projection.digestOf`, `ContentPack.signatureFingerprint`,
   `Function.Memo` keys, `OpStream.defaultHash`, `Schema.fingerprint`, and both `invocationKey`s.
 

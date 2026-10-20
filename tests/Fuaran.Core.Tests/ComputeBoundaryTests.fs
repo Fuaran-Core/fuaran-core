@@ -38,7 +38,8 @@ open Expecto
 /// project under `src/` is on it, which the tree test below holds, so a new project is classified
 /// by the commit that adds it.
 let spine: string list =
-    [ "Fuaran.Core.Tree"
+    [ "Fuaran.Core.Text"
+      "Fuaran.Core.Tree"
       "Fuaran.Core.Ops"
       "Fuaran.Core.OpStream"
       "Fuaran.Core.OpStream.Dag"

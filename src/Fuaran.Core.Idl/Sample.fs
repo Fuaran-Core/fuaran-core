@@ -92,7 +92,7 @@ module Sample =
     /// `ConfRng.ofSeed`: the kernel's seed (`Xorshift32`, Phase 388 — the one body both read).
     ///
     /// The three functions here that name `Xorshift32` are `NoInlining` (DECISIONS.md D129): since
-    /// Phase 495 the kernel is internal to `Fuaran.Core.Wire`, read through its `InternalsVisibleTo`,
+    /// Phase 531 the kernel is internal to `Fuaran.Core.Text`, read through its `InternalsVisibleTo`,
     /// and a body naming it that the F# optimiser copied into a Release-built caller of this package
     /// would fail there with `MethodAccessException`.
     [<MethodImpl(MethodImplOptions.NoInlining)>]

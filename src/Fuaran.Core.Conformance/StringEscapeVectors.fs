@@ -4,15 +4,15 @@ namespace Fuaran.Core
 //  The string-escape conformance vectors (Phase 287).
 //
 //  The spine has ONE rule for spelling a string inside canonical JSON — `"` as `\"`, `\` as
-//  `\\`, every control character `U+0000`–`U+001F` as lower-case `\u00xx`, nothing else — and
-//  TWO bodies that carry it: `Wire.Json.escape` (the original; `Canonical.write Rendering.CrossHost` escapes through
-//  it) and the copy in `Fuaran.Core.OpStream` (`Jsonl.quote`), which DECISIONS.md D2
-//  demands because that package takes no `Wire` reference. `Actor.encode` spells through the
-//  copy, and so does `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — which references
-//  `OpStream` and so carries no copy of its own since Phase 388. A copy is safe only while it
-//  is held to the original, and this family is what holds it: for every character the rule
-//  escapes, and for the actors a chain pre-image carries, it pins the exact bytes each emitter
-//  writes against one table.
+//  `\\`, every control character `U+0000`–`U+001F` as lower-case `\u00xx`, nothing else — and,
+//  since Phase 531, ONE body that carries it: `JsonString` in the text kernel (`Fuaran.Core.Text`,
+//  DECISIONS.md D2 as amended). Until then `Fuaran.Core.OpStream` carried a value-identical copy,
+//  which D2 demanded while that package could take no reference, and this family held the copy to
+//  the original. It is now the kernel's own test: for every character the rule escapes, and for the
+//  actors a chain pre-image carries, it pins the exact bytes the kernel writes and the bytes every
+//  emitter built on it writes — `Json.escape`, `Canonical.write`, `Json.render`, `Actor.encode`, the
+//  chain pre-image and `Dag.toJsonl` — against one table, so an emitter that stopped spelling
+//  through the kernel would be caught here.
 //
 //  Why the bytes matter: the actor is folded into the chain hash, so an escaper that spells
 //  `\n` where another host spells `\u000a` gives the same record two chain hashes — which is
@@ -116,7 +116,15 @@ module StringEscapeVectors =
             | Ok d -> d
             | Error m -> invalidOp (sprintf "a node filed under %s carries id %s" m.Key m.NodeId)
 
-        [ // the rule at its home
+        [ // the rule at its home, the text kernel, live and frozen
+          expect (v.Name + " / JsonString.escape") "JsonString.escape" v.Escaped (JsonString.escape v.Input)
+          expect (v.Name + " / JsonString.quote") "JsonString.quote" (quoted v.Escaped) (JsonString.quote v.Input)
+          expect
+              (v.Name + " / JsonString.quoteLegacy")
+              "JsonString.quoteLegacy"
+              (quoted v.Legacy)
+              (JsonString.quoteLegacy v.Input)
+          // the emitters built on it
           expect (v.Name + " / Wire.Json.escape") "Json.escape" v.Escaped (Json.escape v.Input)
           expect
               (v.Name + " / Wire.Canonical.write Rendering.CrossHost")
@@ -131,7 +139,7 @@ module StringEscapeVectors =
           (match Json.parse (quoted v.Legacy) with
            | Ok(JStr s) when s = v.Input -> pass (v.Name + " / Wire.Json.parse reads the legacy spelling")
            | other -> fail (v.Name + " / Wire.Json.parse reads the legacy spelling") (sprintf "%A" other))
-          // the OpStream copy, through the only surface it has: the actor pre-image
+          // the actor pre-image the op stream builds on the kernel
           expect (v.Name + " / Actor.encode Human") "Actor.encode" human (Actor.encode (Human v.Input))
           expect
               (v.Name + " / Actor.encode Agent")
@@ -164,7 +172,7 @@ module StringEscapeVectors =
                    (v.Name
                     + " / legacy and canonical payloads differ exactly where the spellings do")
                    (sprintf "payloads equal: %b; spellings equal: %b" same (v.Escaped = v.Legacy)))
-          // the DAG copy, through its node line
+          // the DAG's node line
           expect (v.Name + " / Dag.toJsonl") "Dag.toJsonl" (nodeLine v.Escaped) (Dag.toJsonl (fun () -> "{}") dag) ]
 
     /// The named-actor checks: `Actor.encode` bytes, and the linear chain pre-image built on them.

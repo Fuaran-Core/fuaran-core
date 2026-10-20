@@ -731,7 +731,8 @@ let tests =
                   // The generated module references Wire (Canon/JVal) + Tree (NodeWitness)
                   // + Validator (the runValidator scaffold).
                   let fsx =
-                      dllRef "Fuaran.Core.Wire.dll"
+                      dllRef "Fuaran.Core.Text.dll"
+                      + dllRef "Fuaran.Core.Wire.dll"
                       + dllRef "Fuaran.Core.Tree.dll"
                       + dllRef "Fuaran.Core.Validator.dll"
                       + decls
@@ -1137,7 +1138,8 @@ let secondVocabularyTests =
                       "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
 
                   let fsx =
-                      dllRef "Fuaran.Core.Wire.dll"
+                      dllRef "Fuaran.Core.Text.dll"
+                      + dllRef "Fuaran.Core.Wire.dll"
                       + dllRef "Fuaran.Core.Tree.dll"
                       + dllRef "Fuaran.Core.Validator.dll"
                       + decls
