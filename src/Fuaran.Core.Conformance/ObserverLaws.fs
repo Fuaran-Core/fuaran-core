@@ -9,7 +9,9 @@ module internal ObserverLaws =
     ///    parents, inputs, then updates and an unregistration) driven through the witness functions
     ///    emits, and leaves as each node's snapshot, exactly `ObserverWitness.derive` of that node's
     ///    input, recomputed fresh — the determinism contract that lets a host's observer be checked
-    ///    against a recomputation; and an unregistered node has no snapshot;
+    ///    against a recomputation; an unregistered node has no snapshot; and the state's
+    ///    `registered` order is the surviving registrations, oldest first (Phase 523: the state is
+    ///    opaque, so the order is read through its reader and cannot be set);
     ///  - **a cyclic parent declaration terminates** — nodes declared under each other in a ring
     ///    are walked once each from every member, and the walk ends.
     ///
@@ -26,7 +28,7 @@ module internal ObserverLaws =
         : LawResult list =
         let derived =
             LawKit.LawCell
-                "every emission is the derivation of its input (each emitted observation and each snapshot is derive of its node's input; an unregistered node has none)"
+                "every emission is the derivation of its input (each emitted observation and each snapshot is derive of its node's input; an unregistered node has none; the registered order is the surviving registrations, oldest first)"
 
         let cyclic =
             LawKit.LawCell "a cyclic parent declaration terminates (each ring member walked once)"
@@ -78,7 +80,9 @@ module internal ObserverLaws =
                 match ObserverWitness.snapshot st id with
                 | Some o ->
                     derived.Check(
-                        (id <> dropped && o = ObserverWitness.derive w id o.Input),
+                        (id <> dropped
+                         && ObserverWitness.isRegistered st id
+                         && o = ObserverWitness.derive w id o.Input),
                         fun () ->
                             at (
                                 sprintf
@@ -87,7 +91,22 @@ module internal ObserverLaws =
                             )
                     )
                 | None ->
-                    derived.Check((id = dropped), fun () -> at (sprintf "the registered node %s has no snapshot" id))
+                    derived.Check(
+                        (id = dropped && not (ObserverWitness.isRegistered st id)),
+                        fun () -> at (sprintf "the registered node %s has no snapshot" id)
+                    )
+
+            // the state's order is the registrations it holds, oldest first — read, never set (Phase 523)
+            derived.Check(
+                (ObserverWitness.registered st = List.filter (fun id -> id <> dropped) ids),
+                fun () ->
+                    at (
+                        sprintf
+                            "the registered order %A is not the script's, less %s"
+                            (ObserverWitness.registered st)
+                            dropped
+                    )
+            )
 
             // ---- a cyclic parent declaration terminates ----
             let ring = 1 + rng.IntBelow 4

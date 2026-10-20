@@ -298,7 +298,7 @@ suffix says which question it answers:
 - **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would otherwise have run.
 - **`…Refusal`** — a parser refused the text it was handed, naming the token and its position (`UnitRefusal`; DECISIONS.md D136).
 - **`Defect`** (and `…Defect`) — a finding reported in a list beside an answer, never a refusal: the
-  validator's `Defect`, `VerifyDefect`, `ObserverDefect`, `ReferenceDefect`.
+  validator's `Defect`, `VerifyDefect`, `ReferenceDefect` (`ObserverDefect` left at `0.39.0`, Phase 523: the state it named cannot be built).
 
 `ResolveFault` was reviewed against this rule on the `0.37.0` slot (Phase 389, DECISIONS.md D136) and
 keeps its name: it is the host's report that its fetch could not complete, which is a fault, and the

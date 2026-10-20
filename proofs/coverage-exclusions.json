@@ -1260,10 +1260,11 @@
     },
     {
       "members": [
-        "ObserverWitness.tryObserveTree"
+        "ObserverWitness.isRegistered",
+        "ObserverWitness.registered"
       ],
       "class": "measured-elsewhere",
-      "reason": "Checks a hand-built state's invariant (Order is exactly the keys of Entries, each once) and then walks it with the rostered `observeTree` (Phase 383); each defect it names, and its agreement with the walk on a built state, are example-tested.",
+      "reason": "The opaque state's two readers (Phase 523): membership and the registration order, each example-tested over register, re-register, unregister and update; the observer family also holds both against snapshot and its drawn script.",
       "standIn": "tests/Fuaran.Core.Tests/ObserverTests.fs"
     },
     {
