@@ -130,7 +130,7 @@
    as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
    HASH apart (a claim about FNV-1a). The `FunctionRegistry` and `ContentPack` surfaces, and
    `applyMemo`. Of the surfaces Phase 354 modelled: a handler's MESSAGE typing, which lives in the
-   host language; the pipeline's capture key `nodeInvocationKey`; the BYTES of any codec — `Canon.render` and `Json.parse` are
+   host language; the pipeline's capture key `nodeInvocationKey`; the BYTES of any codec — `Canonical.write Rendering.CrossHost` and `Json.parse` are
    `WireCanon.fst`'s and `JsonParse.fst`'s — the `Strict` read policy, the invocation, `Deferred`
    and `InvokeError` codecs, and a refusal's sentence. And NOT that a reader refuses whatever its
    writer never produces: the readers are lenient — an extra member and another member order are
@@ -3797,7 +3797,7 @@ let pipeline_evalfrom_agrees (#v:Type) (fr:feed_readers) (rd:readers) (lk:capabi
        well-formed ones, a named refusal or a normal form on the others — and every document a
        reader accepts read as a well-formed value.
 
-       The bytes are not here. `Canon.render` and `Json.parse` are `WireCanon.fst`'s and
+       The bytes are not here. `Canonical.write Rendering.CrossHost` and `Json.parse` are `WireCanon.fst`'s and
        `JsonParse.fst`'s; what crosses is the `JVal` between them. A refusal's SENTENCE and its
        `Expected` phrase are not modelled: a refusal is its `DecodeCode` and its path.
    ====================================================================================== *)
