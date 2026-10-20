@@ -104,20 +104,19 @@ module Declare =
     /// `idl.json` reader refuses its name).
     let hostedWireErrors (idl: Idl) : string list =
         let rec readable (t: IdlType) : string option =
-            match t with
-            | TStr
-            | TInt
-            | TBool
-            | TFloat -> None
-            | TEnum n when idl.Enums |> List.exists (fun e -> e.Name = n) -> None
-            | TRecord n when idl.Records |> List.exists (fun r -> r.Name = n) -> None
-            | TUnion(n, args) when idl.Unions |> List.exists (fun u -> u.Name = n) -> args |> List.tryPick readable
-            | TEnum n
-            | TRecord n
-            | TUnion(n, _) -> Some(sprintf "names '%s', which the vocabulary does not declare" n)
-            | TList inner
-            | TMap inner -> readable inner
-            | other -> Some(sprintf "is %A, which no leg but the host codec can read" other)
+            match WireForm.ofType idl t with
+            | WireForm.Str
+            | WireForm.Int
+            | WireForm.Bool
+            | WireForm.Float
+            | WireForm.Enum _
+            | WireForm.Record _ -> None
+            | WireForm.Union u -> u.Args |> List.tryPick readable
+            | WireForm.Undeclared(Undeclared.Enum n | Undeclared.Record n | Undeclared.Union(n, _)) ->
+                Some(sprintf "names '%s', which the vocabulary does not declare" n)
+            | WireForm.List inner
+            | WireForm.Map inner -> readable inner
+            | _ -> Some(sprintf "is %A, which no leg but the host codec can read" t)
 
         let rec hostedIn (t: IdlType) : HostedCodec list =
             match t with
@@ -267,24 +266,6 @@ module Declare =
         s
         |> Seq.exists (fun c -> System.Char.IsControl c || c = '\u2028' || c = '\u2029')
 
-    /// Whether a value of `t` can encode to a JSON OBJECT — the shape a transparent case
-    /// must not have (Phase 292 amendment): the case goes out BARE, and a bare object is
-    /// what every other case looks like, so the hosts disagree on which case it is.
-    let rec private objectCapable (t: IdlType) : bool =
-        match t with
-        | TJson
-        | TRecord _
-        | TMap _
-        | TUnion _
-        | TNode
-        | TKind
-        | TOp -> true
-        | THosted h ->
-            match h.Wire with
-            | None -> true
-            | Some w -> objectCapable w
-        | _ -> false
-
     /// **Every well-formedness rule a vocabulary is held to, in one call (Phase 292)** —
     /// the union of [[wireShapeErrors]], [[enumWireErrors]] and [[hostedWireErrors]] with
     /// the referential and lexical checks nothing used to make. Empty list ⇒ well-formed.
@@ -318,15 +299,12 @@ module Declare =
     ///
     /// A field-less kind or record is well-formed: a marker carries its meaning in its tag.
     let errors (idl: Idl) : string list =
-        let enumNames = idl.Enums |> List.map _.Name |> Set.ofList
-        let recordNames = idl.Records |> List.map _.Name |> Set.ofList
-
         let unionOf (n: string) = IdlLookup.tryUnion idl n
 
-        let transparentField (u: IdlUnion) : IdlField option =
-            match TransparentUnion.tag idl.Harden u with
+        let transparentField (u: UnionForm) : IdlField option =
+            match u.Transparent with
             | Some tag ->
-                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                match u.Decl.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                 | Some { Fields = [ single ] } -> Some single
                 | _ -> None
             | None -> None
@@ -340,42 +318,43 @@ module Declare =
             | _ -> false
 
         let rec typeErrors (at: string) (pars: string list) (t: IdlType) : string list =
-            match t with
-            | TEnum n when not (enumNames.Contains n) ->
+            match WireForm.ofType idl t with
+            | WireForm.Undeclared(Undeclared.Enum n) ->
                 [ sprintf "%s: names enum '%s', which the vocabulary does not declare" at n ]
-            | TRecord n when not (recordNames.Contains n) ->
+            | WireForm.Undeclared(Undeclared.Record n) ->
                 [ sprintf "%s: names record '%s', which the vocabulary does not declare" at n ]
-            | TUnion(n, args) ->
-                let inner = args |> List.collect (typeErrors at pars)
+            | WireForm.Undeclared(Undeclared.Union(n, args)) ->
+                sprintf "%s: names union '%s', which the vocabulary does not declare" at n
+                :: (args |> List.collect (typeErrors at pars))
+            | WireForm.Union u ->
+                let inner = u.Args |> List.collect (typeErrors at pars)
 
-                match unionOf n with
+                match u.Binding with
                 | None ->
-                    sprintf "%s: names union '%s', which the vocabulary does not declare" at n
+                    sprintf
+                        "%s: applies union '%s' to %d type argument(s); it declares %d"
+                        at
+                        u.Name
+                        (List.length u.Args)
+                        (List.length u.Decl.Params)
                     :: inner
-                | Some u ->
-                    match TypeParams.bind u args with
-                    | None ->
+                | Some binding ->
+                    match transparentField u with
+                    | Some f when
+                        mentionsVar f.Type
+                        && WireForm.objectCapable idl (TypeParams.substitute binding f.Type)
+                        ->
                         sprintf
-                            "%s: applies union '%s' to %d type argument(s); it declares %d"
+                            "%s: instantiates union '%s' so that its transparent case's field '%s' can encode to an object — a bare object is indistinguishable from a tagged case"
                             at
-                            n
-                            (List.length args)
-                            (List.length u.Params)
+                            u.Name
+                            f.Name
                         :: inner
-                    | Some subst ->
-                        match transparentField u with
-                        | Some f when mentionsVar f.Type && objectCapable (TypeParams.substitute subst f.Type) ->
-                            sprintf
-                                "%s: instantiates union '%s' so that its transparent case's field '%s' can encode to an object — a bare object is indistinguishable from a tagged case"
-                                at
-                                n
-                                f.Name
-                            :: inner
-                        | _ -> inner
-            | TVar v when not (List.contains v pars) ->
+                    | _ -> inner
+            | WireForm.Unbound v when not (List.contains v pars) ->
                 [ sprintf "%s: type variable '%s' is not a parameter of the union declaring it" at v ]
-            | TList inner
-            | TMap inner -> typeErrors at pars inner
+            | WireForm.List inner
+            | WireForm.Map inner -> typeErrors at pars inner
             | _ -> []
 
         let annotationErrors (at: string) (a: Annotations) : string list =
@@ -552,7 +531,7 @@ module Declare =
               | Some c ->
                   match c with
                   | { Fields = [ single ] } ->
-                      if not (mentionsVar single.Type) && objectCapable single.Type then
+                      if not (mentionsVar single.Type) && WireForm.objectCapable idl single.Type then
                           sprintf
                               "%s: its field '%s' can encode to an object — a bare object is indistinguishable from a tagged case, and the hosts disagree on it"
                               at

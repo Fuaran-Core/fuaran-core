@@ -3,7 +3,8 @@ namespace Fuaran.Core.Idl
 open Fuaran.Core
 
 /// Type-parameter substitution (Phase 292) — the ONE definition the encoder, the decoder,
-/// the sampler and the generator share.
+/// the sampler and the generator share; the first three read it through the lowering
+/// ([[WireForm]]'s union binding) since Phase 513.
 ///
 /// It was written four times, and the copies had drifted: the sampler's mapped EVERY type
 /// variable to the union's FIRST argument, so a two-parameter union sampled its second

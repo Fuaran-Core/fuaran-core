@@ -55,41 +55,21 @@ module Decode =
 
     /// The arity refusal both union arms share (Phase 292 — the bare arm used to zip the
     /// two lists unchecked and throw where the object arm refused).
-    let private arity (name: string) (u: IdlUnion) (args: IdlType list) =
+    let private arity (u: UnionForm) =
         err
             DecodeCode.SchemaFault
-            (sprintf "%d type args for union '%s'" (List.length u.Params) name)
-            (sprintf "union '%s' given %d type args, expects %d" name (List.length args) (List.length u.Params))
-
-    /// The JSON kind a type's wire form takes, for a `WrongKind` refusal's `Expected`.
-    let private wireKind (t: IdlType) : string =
-        match t with
-        | TStr
-        | TEnum _
-        | TClosure
-        | TFn _
-        | TOpaque -> "string"
-        | TInt -> "int"
-        | TBool -> "bool"
-        | TFloat -> "number"
-        | TList _ -> "array"
-        | TRecord _
-        | TMap _
-        | TNode
-        | TKind
-        | TOp
-        | TUnion _ -> "object"
-        | TJson
-        | THosted _
-        | TVar _ -> "any value"
+            (sprintf "%d type args for union '%s'" (List.length u.Decl.Params) u.Name)
+            (sprintf "union '%s' given %d type args, expects %d" u.Name (List.length u.Args) (List.length u.Decl.Params))
 
     let rec private decodeValue (idl: Idl) (t: IdlType) (j: JVal) : Result<IdlValue, DecodeError> =
-        match t, j with
-        | TStr, JStr s -> Ok(VStr s)
-        | TInt, JInt i -> Ok(VInt i)
-        | TBool, JBool b -> Ok(VBool b)
-        | TFloat, JFloat f -> Ok(VFloat f)
-        | TFloat, JInt i -> Ok(VFloat(float i))
+        // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
+        // reads it.
+        match WireForm.ofType idl t, j with
+        | WireForm.Str, JStr s -> Ok(VStr s)
+        | WireForm.Int, JInt i -> Ok(VInt i)
+        | WireForm.Bool, JBool b -> Ok(VBool b)
+        | WireForm.Float, JFloat f -> Ok(VFloat f)
+        | WireForm.Float, JInt i -> Ok(VFloat(float i))
         // Phase 303 — WIRE_FORMAT §7: at a FLOAT slot the quoted tokens `"NaN"`, `"Infinity"` and
         // `"-Infinity"` are the spelling of a non-finite value, and the encoder writes exactly them
         // (`Canon` renders a non-finite `JFloat` as the quoted token). The generated F# `dFloat`, the
@@ -97,104 +77,83 @@ module Decode =
         // reference interpreter was the one host refusing its own output. Only these three strings,
         // and only at a float slot — §7 stops there, so an `int` slot and a verbatim `json` slot are
         // untouched (the encoder refuses a non-finite float inside a verbatim value, Phase 292).
-        | TFloat, JStr(FloatToken.NonFinite f) -> Ok(VFloat f)
-        | TEnum name, JStr s ->
-            match IdlLookup.tryEnum idl name with
-            | Some e when List.contains s e.WireCases -> Ok(VEnum s)
-            | Some e ->
-                err
-                    DecodeCode.UnknownTag
-                    ("one of "
-                     + (e.WireCases |> List.map (fun c -> "'" + c + "'") |> String.concat ", "))
-                    (sprintf "enum '%s' has no case '%s'" name s)
-            | None -> err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "unknown enum '%s'" name)
-        | TUnion(name, args), JObj fs ->
-            match IdlLookup.tryUnion idl name with
-            | None -> err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
-            | Some u ->
-                match TypeParams.bind u args with
-                | None -> arity name u args
-                | Some subst ->
-                    dollarType idl fs
-                    |> Result.bind (fun tag ->
-                        match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                        | None ->
-                            unknownTag idl (u.Cases |> List.map _.Tag) (sprintf "union '%s' has no case '%s'" name tag)
-                        | Some c ->
-                            let caseFields =
-                                c.Fields
-                                |> List.map (fun f ->
-                                    { f with
-                                        Type = TypeParams.substitute subst f.Type })
-
-                            decodeFields idl caseFields fs |> Result.map (fun fields -> VUnion(tag, fields)))
+        | WireForm.Float, JStr(FloatToken.NonFinite f) -> Ok(VFloat f)
+        | WireForm.Enum e, JStr s when List.contains s e.WireCases -> Ok(VEnum s)
+        | WireForm.Enum e, JStr s ->
+            err
+                DecodeCode.UnknownTag
+                ("one of "
+                 + (e.WireCases |> List.map (fun c -> "'" + c + "'") |> String.concat ", "))
+                (sprintf "enum '%s' has no case '%s'" e.Name s)
+        | WireForm.Undeclared(Undeclared.Enum name), JStr _ ->
+            err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "unknown enum '%s'" name)
+        | WireForm.Undeclared(Undeclared.Union(name, _)), _ ->
+            err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
+        | WireForm.Union u, JObj fs ->
+            match u.Binding with
+            | None -> arity u
+            | Some binding ->
+                dollarType idl fs
+                |> Result.bind (fun tag ->
+                    match u.Decl.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    | None ->
+                        unknownTag
+                            idl
+                            (u.Decl.Cases |> List.map _.Tag)
+                            (sprintf "union '%s' has no case '%s'" u.Name tag)
+                    | Some c ->
+                        decodeFields idl (WireForm.caseFields binding c) fs
+                        |> Result.map (fun fields -> VUnion(tag, fields)))
         // A transparent union decoded from a BARE (non-object) wire value — the
         // Fuaran-UI 0.2.0 bare-string `TextSource.Literal` (`"x"` → `Literal{text="x"}`).
-        | TUnion(name, args), j when
-            (match j with
-             | JObj _ -> false
-             | _ -> true)
-            ->
-            match IdlLookup.tryUnion idl name with
-            | None -> err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
-            | Some u ->
-                match TransparentUnion.tag idl.Harden u with
-                | None -> err DecodeCode.WrongKind "object" (sprintf "union '%s' expects an object" name)
-                | Some ttag ->
-                    match TypeParams.bind u args, u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
-                    | None, _ -> arity name u args
-                    | Some _, None ->
+        | WireForm.Union u, j ->
+            match u.Transparent with
+            | None -> err DecodeCode.WrongKind "object" (sprintf "union '%s' expects an object" u.Name)
+            | Some ttag ->
+                match u.Binding, u.Decl.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
+                | None, _ -> arity u
+                | Some _, None ->
+                    err
+                        DecodeCode.SchemaFault
+                        ("a declared transparent case '" + ttag + "'")
+                        (sprintf "union '%s' has no transparent case '%s'" u.Name ttag)
+                | Some binding, Some c ->
+                    match WireForm.caseFields binding c with
+                    | [ single ] ->
+                        decodeValue idl single.Type j
+                        |> Result.map (fun v -> VUnion(ttag, [ single.Name, v ]))
+                    | _ ->
                         err
                             DecodeCode.SchemaFault
-                            ("a declared transparent case '" + ttag + "'")
-                            (sprintf "union '%s' has no transparent case '%s'" name ttag)
-                    | Some subst, Some c ->
-                        match
-                            c.Fields
-                            |> List.map (fun f ->
-                                { f with
-                                    Type = TypeParams.substitute subst f.Type })
-                        with
-                        | [ single ] ->
-                            decodeValue idl single.Type j
-                            |> Result.map (fun v -> VUnion(ttag, [ single.Name, v ]))
-                        | _ ->
-                            err
-                                DecodeCode.SchemaFault
-                                "a transparent case of exactly one field"
-                                (sprintf "transparent union case '%s' must have exactly one field" ttag)
-        | TVar v, _ -> err DecodeCode.SchemaFault "a substituted type" (sprintf "unsubstituted type variable '%s'" v)
-        | TClosure, JStr "<closure>"
-        | TFn _, JStr "<closure>" -> Ok VClosure
-        | TOpaque, JStr "<opaque>" -> Ok VOpaque
+                            "a transparent case of exactly one field"
+                            (sprintf "transparent union case '%s' must have exactly one field" ttag)
+        | WireForm.Unbound v, _ ->
+            err DecodeCode.SchemaFault "a substituted type" (sprintf "unsubstituted type variable '%s'" v)
+        | WireForm.Sentinel(value, wire), JStr s when s = wire -> Ok value
         // Phase 676 — accept any JSON at this position, verbatim and unvalidated.
         // A shape check here would be wrong by definition: the field's whole
-        // contract is that its content is not the schema's business.
-        | TJson, j -> Ok(VJson j)
-        // A hosted slot decodes verbatim in the interpreter — only the generated
-        // F# runs the real host codec (see [[HostedCodec]]). Since Phase 252 a slot
-        // that declares its wire form is checked against it first, so the interpreter
-        // refuses what the host codec and the TypeScript host refuse.
-        | THosted h, j ->
-            match h.Wire with
-            | None -> Ok(VJson j)
-            | Some w ->
-                decodeValue idl w j
-                |> Result.bind (fun _ ->
-                    match h.Format, j with
-                    | None, _ -> Ok(VJson j)
-                    | Some fmt, JStr s when HostedFormat.admits fmt s -> Ok(VJson j)
-                    | Some fmt, _ ->
-                        err
-                            DecodeCode.OutOfRange
-                            ("a '" + HostedFormat.name fmt + "' string")
-                            (sprintf "hosted value is not a '%s' string" (HostedFormat.name fmt)))
-        | TRecord name, JObj fs ->
-            match IdlLookup.tryRecord idl name with
-            | None ->
-                err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "unknown record '%s'" name)
-            | Some r -> decodeFields idl r.Fields fs |> Result.map VRecord
-        | TMap vt, JObj fs ->
+        // contract is that its content is not the schema's business. A hosted slot that declares
+        // no wire form decodes the same way — only the generated F# runs the real host codec (see
+        // [[HostedCodec]]).
+        | WireForm.Verbatim, j
+        | WireForm.Hosted(None, _), j -> Ok(VJson j)
+        // Since Phase 252 a hosted slot that declares its wire form is checked against it first,
+        // so the interpreter refuses what the host codec and the TypeScript host refuse.
+        | WireForm.Hosted(Some w, format), j ->
+            decodeValue idl w j
+            |> Result.bind (fun _ ->
+                match format, j with
+                | None, _ -> Ok(VJson j)
+                | Some fmt, JStr s when HostedFormat.admits fmt s -> Ok(VJson j)
+                | Some fmt, _ ->
+                    err
+                        DecodeCode.OutOfRange
+                        ("a '" + HostedFormat.name fmt + "' string")
+                        (sprintf "hosted value is not a '%s' string" (HostedFormat.name fmt)))
+        | WireForm.Record r, JObj fs -> decodeFields idl r.Fields fs |> Result.map VRecord
+        | WireForm.Undeclared(Undeclared.Record name), JObj _ ->
+            err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "unknown record '%s'" name)
+        | WireForm.Map vt, JObj fs ->
             let rec go acc =
                 function
                 | [] -> Ok(VMap(List.rev acc))
@@ -204,20 +163,20 @@ module Decode =
                     | Error e -> Error e
 
             go [] fs
-        | TNode, JObj _ -> decodeNode idl j
-        | TKind, JObj fs ->
+        | WireForm.Node, JObj _ -> decodeNode idl j
+        | WireForm.Kind, JObj fs ->
             dollarType idl fs
             |> Result.bind (fun tag ->
                 match IdlLookup.tryKind idl tag with
                 | None -> unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" tag)
                 | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
-        | TOp, JObj fs ->
+        | WireForm.Op, JObj fs ->
             dollarType idl fs
             |> Result.bind (fun tag ->
                 match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
                 | None -> unknownTag idl (idl.Ops |> List.map _.Tag) (sprintf "unknown op '%s'" tag)
                 | Some o -> decodeFields idl o.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
-        | TList inner, JArr xs ->
+        | WireForm.List inner, JArr xs ->
             let rec go i acc =
                 function
                 | [] -> Ok(VList(List.rev acc))
@@ -227,16 +186,15 @@ module Decode =
                     | Error e -> Error e
 
             go 0 [] xs
-        | _ ->
-            let expected = wireKind t
+        | form, _ ->
             // A sentinel position given a string that is not its sentinel holds the right KIND and
             // the wrong value; every other fall-through is a kind the type does not take.
             let code =
-                match t, j with
-                | (TClosure | TFn _ | TOpaque), JStr _ -> DecodeCode.OutOfRange
+                match form, j with
+                | WireForm.Sentinel _, JStr _ -> DecodeCode.OutOfRange
                 | _ -> DecodeCode.WrongKind
 
-            err code expected (sprintf "wire value does not match IDL type %A" t)
+            err code (WireForm.jsonKind form) (sprintf "wire value does not match IDL type %A" t)
 
     and private decodeFields
         (idl: Idl)

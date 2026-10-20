@@ -161,119 +161,46 @@ module Sample =
               "123e4567-e89b-12d3-a456-426614174000"
               "f81d4fae-7dec-11d0-a765-00a0c91e6bf6" ]
 
-    /// Whether sampling a value of `t` **at the depth floor** can still reach a
-    /// `TNode` — the sampler's termination predicate (Phase 698).
-    ///
-    /// It mirrors [[sampleType]]'s own floor behaviour exactly rather than being a
-    /// conservative over-approximation: a list/map is EMPTY at the floor and so
-    /// reaches nothing, a union prefers its nullary cases, and an optional field is
-    /// forced absent there — which leaves bare nodes and required record fields as
-    /// the only surviving paths. Mirroring is what keeps the guard from changing a
-    /// single draw on a vocabulary that never needed it: `miniIdl`'s only
-    /// node-bearing field is `Box.children`, a LIST, so it is floor-safe and its
-    /// seeded stream is untouched.
-    ///
-    /// **Why this is needed at all.** A bare `TNode` was the one recursion site with
-    /// no floor arm — `TList` and `TUnion` both have one — so a vocabulary that
-    /// reaches a node from a node by any non-list path recursed until the stack went.
-    /// The real vocabulary has exactly that: `ErrorBoundary.child`/`.fallback` and
-    /// `Switch.default` on the kind side, and `StateBehaviour.onEmpty`/`.onLoading`
-    /// reached through the node ENVELOPE. The envelope path is why this surfaced
-    /// only when the sampler learned to draw envelopes — with `state` present 2 in 3
-    /// and two node slots behind it, the branching factor crosses 1 and the sampled
-    /// tree does not terminate.
-    let rec private reachesNodeAtFloor (idl: Idl) (seen: Set<string>) (t: IdlType) : bool =
-        match t with
-        // A kind / op carries whatever its fields carry, and neither has a floor arm
-        // of its own; treat both as reaching, which is also true in practice.
-        | TNode
-        | TKind
-        | TOp -> true
-        // Empty at the floor, so nothing inside them is ever sampled there.
-        | TList _
-        | TMap _ -> false
-        | TRecord n when not (Set.contains ("r:" + n) seen) ->
-            match idl.Records |> List.tryFind (fun rc -> rc.Name = n) with
-            | Some rc ->
-                rc.Fields
-                |> List.exists (fun f -> f.Opt = Required && reachesNodeAtFloor idl (Set.add ("r:" + n) seen) f.Type)
-            | None -> false
-        | TUnion(n, args) when not (Set.contains ("u:" + n) seen) ->
-            let seen' = Set.add ("u:" + n) seen
-
-            args |> List.exists (reachesNodeAtFloor idl seen')
-            || (match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
-                | Some u ->
-                    // The floor prefers a nullary case when the union has one, and a
-                    // nullary case has no fields — so only a union WITHOUT one can
-                    // still reach a node here.
-                    let candidates =
-                        match u.Cases |> List.filter (fun c -> List.isEmpty c.Fields) with
-                        | [] -> u.Cases
-                        | nullary -> nullary
-
-                    candidates
-                    |> List.exists (fun c ->
-                        c.Fields
-                        |> List.exists (fun f -> f.Opt = Required && reachesNodeAtFloor idl seen' f.Type))
-                | None -> false)
-        | _ -> false
-
-    /// The kind tags a node may take AT THE DEPTH FLOOR: those whose required fields
-    /// reach no further node, so the recursion stops there. Falls back to the whole
-    /// vocabulary when a domain declares no such kind — the sampler must still
-    /// produce a node for a required slot, and a domain with no leaf kind has no
-    /// finite node at all, which is its own defect rather than one to hide here.
-    let private floorKindTags (idl: Idl) : string list =
-        let leaves =
-            idl.Kinds
-            |> List.filter (fun k ->
-                k.Fields
-                |> List.forall (fun f -> f.Opt <> Required || not (reachesNodeAtFloor idl Set.empty f.Type)))
-
-        match leaves with
-        | [] -> idl.Kinds |> List.map _.Tag
-        | ks -> ks |> List.map _.Tag
-
-    /// The op tags an op may take AT THE DEPTH FLOOR — [[floorKindTags]]' rule over the op
-    /// vocabulary, with the same fallback.
-    let private floorOps (idl: Idl) : IdlKind list =
+    /// The kinds (or ops) a node (or op) may take AT THE DEPTH FLOOR: those whose required fields
+    /// reach no further node ([[WireForm.requiredReachesNode]]), so the recursion stops there. Falls
+    /// back to all of them when none qualifies — the sampler must still produce a node for a
+    /// required slot, and a domain with no leaf kind has no finite node at all, which is its own
+    /// defect rather than one to hide here.
+    let private atFloor (idl: Idl) (owners: IdlKind list) : IdlKind list =
         match
-            idl.Ops
-            |> List.filter (fun o ->
-                o.Fields
-                |> List.forall (fun f -> f.Opt <> Required || not (reachesNodeAtFloor idl Set.empty f.Type)))
+            owners
+            |> List.filter (fun o -> not (WireForm.requiredReachesNode idl Set.empty o.Fields))
         with
-        | [] -> idl.Ops
-        | os -> os
+        | [] -> owners
+        | leaves -> leaves
 
     let rec private sampleType (idl: Idl) (r: Rng) (depth: int) (t: IdlType) : IdlValue =
         if depth < bottom then
             refuse (sprintf "%A" t) "it has no finite value — every draw at the depth floor recurses"
 
-        match t with
-        | TStr -> VStr(pick r stringPool)
-        | TInt -> VInt(pick r intPool)
-        | TBool -> VBool(intBelow r 2 = 0)
-        | TFloat -> VFloat(pick r floatPool)
-        | TClosure
-        | TFn _ -> VClosure
-        | TOpaque -> VOpaque
-        // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
-        // passthrough is stressed on escaping and float layout like every other leg.
-        // A hosted slot samples the same way: both the interpreter and the TS backend
-        // carry it verbatim, so arbitrary JSON stresses exactly what they share.
+        // Phase 513 — the draw switches on the type's wire form ([[WireForm.ofType]]), the same
+        // lowering the encoder writes and the decoder reads, so what is drawn is what they agree on.
+        match WireForm.ofType idl t with
+        | WireForm.Str -> VStr(pick r stringPool)
+        | WireForm.Int -> VInt(pick r intPool)
+        | WireForm.Bool -> VBool(intBelow r 2 = 0)
+        | WireForm.Float -> VFloat(pick r floatPool)
+        | WireForm.Sentinel(value, _) -> value
         // Phase 252 — a hosted slot that DECLARES its wire form is drawn from it: from the
         // format's pool when it names one, else from the wire type itself, rendered through
-        // the interpreter's own encoder. Every other hosted slot draws as before, so a
-        // vocabulary that declares nothing keeps its seeded stream.
-        | THosted { Format = Some fmt } -> VJson(JStr(pick r (formatPool fmt)))
-        | THosted { Wire = Some w } ->
+        // the interpreter's own encoder.
+        | WireForm.Hosted(_, Some fmt) -> VJson(JStr(pick r (formatPool fmt)))
+        | WireForm.Hosted(Some w, None) ->
             match Encode.valueJson idl w (sampleType idl r depth w) with
             | Ok j -> VJson j
             | Error m -> refuse (sprintf "the hosted wire form %A" w) m
-        | TJson
-        | THosted _ ->
+        // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
+        // passthrough is stressed on escaping and float layout like every other leg. A hosted slot
+        // that declares no wire form samples the same way: both the interpreter and the TS backend
+        // carry it verbatim, so arbitrary JSON stresses exactly what they share, and a vocabulary
+        // that declares nothing keeps its seeded stream.
+        | WireForm.Verbatim
+        | WireForm.Hosted(None, None) ->
             VJson(
                 match intBelow r 4 with
                 | 0 -> JStr(pick r stringPool)
@@ -282,72 +209,58 @@ module Sample =
                 | _ -> JObj [ "z", JInt(pick r intPool); "a", JStr(pick r stringPool) ]
             )
         // An unbound variable has no type to draw from; the encoder refuses it by name.
-        | TVar v -> refuse ("type variable '" + v + "'") "it is not bound by an enclosing union instantiation"
-        | TEnum name ->
-            match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
-            | Some e -> VEnum(pickAt r ("enum '" + name + "'") e.WireCases)
-            | None -> refuse ("enum '" + name + "'") "the vocabulary does not declare it"
-        | TList inner ->
+        | WireForm.Unbound v ->
+            refuse ("type variable '" + v + "'") "it is not bound by an enclosing union instantiation"
+        | WireForm.Enum e -> VEnum(pickAt r ("enum '" + e.Name + "'") e.WireCases)
+        | WireForm.Undeclared(Undeclared.Enum name) ->
+            refuse ("enum '" + name + "'") "the vocabulary does not declare it"
+        | WireForm.List inner ->
             // Bounded, and empty is a legitimate sample — an empty collection is
             // NOT absence, and the two must stay distinguishable on the wire.
             let n = if depth <= 0 then 0 else intBelow r 3
             VList [ for _ in 1..n -> sampleType idl r (depth - 1) inner ]
-        | TMap vt ->
+        | WireForm.Map vt ->
             let n = if depth <= 0 then 0 else intBelow r 3
             VMap [ for i in 1..n -> (sprintf "k%d" i), sampleType idl r (depth - 1) vt ]
-        | TRecord name ->
-            match idl.Records |> List.tryFind (fun rc -> rc.Name = name) with
-            | Some rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
-            | None -> refuse ("record '" + name + "'") "the vocabulary does not declare it"
-        | TUnion(name, args) ->
-            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
-            | Some u ->
-                // At the depth floor prefer a nullary case when one exists, so a
-                // recursive union terminates rather than being truncated.
-                let candidates =
-                    if depth <= 0 then
-                        match u.Cases |> List.filter (fun c -> List.isEmpty c.Fields) with
-                        | [] -> u.Cases
-                        | nullary -> nullary
-                    else
-                        u.Cases
+        | WireForm.Record rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
+        | WireForm.Undeclared(Undeclared.Record name) ->
+            refuse ("record '" + name + "'") "the vocabulary does not declare it"
+        | WireForm.Union u ->
+            // At the depth floor prefer a nullary case when one exists, so a
+            // recursive union terminates rather than being truncated.
+            let candidates =
+                if depth <= 0 then
+                    match u.Decl.Cases |> List.filter (fun c -> List.isEmpty c.Fields) with
+                    | [] -> u.Decl.Cases
+                    | nullary -> nullary
+                else
+                    u.Decl.Cases
 
-                // Substitute the type parameters RECURSIVELY and BY NAME (Phase 292 —
-                // [[TypeParams]], shared with the codec and the generator). A shallow swap
-                // leaves `TList (TVar "T")` alone, so the sampler would generate a string
-                // where the slot's codec expects a float; the copy this replaced mapped
-                // every variable to the FIRST argument, which drew a two-parameter union's
-                // second parameter at the first's type.
-                match TypeParams.bind u args with
-                | None ->
-                    refuse
-                        ("union '" + name + "'")
-                        (sprintf
-                            "it is applied to %d type argument(s) and declares %d"
-                            (List.length args)
-                            (List.length u.Params))
-                | Some subst ->
-                    let c = pickAt r ("union '" + name + "'") candidates
-
-                    VUnion(
-                        c.Tag,
-                        sampleFields
-                            idl
-                            r
-                            (depth - 1)
-                            (c.Fields
-                             |> List.map (fun f ->
-                                 { f with
-                                     Type = TypeParams.substitute subst f.Type }))
-                    )
-            | None -> refuse ("union '" + name + "'") "the vocabulary does not declare it"
-        | TNode ->
+            // The parameters are substituted RECURSIVELY and BY NAME (Phase 292 — [[TypeParams]],
+            // through the lowering's binding, shared with the codec and the generator). A shallow
+            // swap left `TList (TVar "T")` alone, so the sampler generated a string where the slot's
+            // codec expects a float; the copy that replaced mapped every variable to the FIRST
+            // argument, which drew a two-parameter union's second parameter at the first's type.
+            match u.Binding with
+            | None ->
+                refuse
+                    ("union '" + u.Name + "'")
+                    (sprintf
+                        "it is applied to %d type argument(s) and declares %d"
+                        (List.length u.Args)
+                        (List.length u.Decl.Params))
+            | Some binding ->
+                let c = pickAt r ("union '" + u.Name + "'") candidates
+                VUnion(c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))
+        | WireForm.Undeclared(Undeclared.Union(name, _)) ->
+            refuse ("union '" + name + "'") "the vocabulary does not declare it"
+        | WireForm.Node ->
             // At the floor a REQUIRED node cannot be omitted, so the shallowest legal
             // one is produced instead: a kind whose required fields reach no further
-            // node. See [[reachesNodeAtFloor]] for why the guard exists.
+            // node. See [[WireForm.reachesNodeAtFloor]] for why the guard exists.
             let tags =
                 if depth <= 0 then
-                    floorKindTags idl
+                    atFloor idl idl.Kinds |> List.map _.Tag
                 else
                     idl.Kinds |> List.map _.Tag
 
@@ -356,23 +269,19 @@ module Sample =
         // an `Optional` field is sometimes absent, an `OmitDefault` one sometimes at its
         // default and a `HostOnly` one never drawn — the presence rules every other owner's
         // fields are drawn under, which these two arms used to ignore.
-        | TKind ->
+        | WireForm.Kind ->
             let k =
                 if depth <= 0 then
-                    pickAt
-                        r
-                        "a bare-kind slot"
-                        (floorKindTags idl
-                         |> List.choose (fun tag -> idl.Kinds |> List.tryFind (fun k -> k.Tag = tag)))
+                    pickAt r "a bare-kind slot" (atFloor idl idl.Kinds)
                 else
                     pickAt r "a bare-kind slot (the vocabulary's kinds)" idl.Kinds
 
             VUnion(k.Tag, sampleFields idl r (depth - 1) k.Fields)
         // At the floor an op is still drawn — the old `VStr "?"` there was a value the
         // encoder refused — from the ops whose required fields recurse no further.
-        | TOp ->
+        | WireForm.Op ->
             let o =
-                pickAt r "an op slot (the vocabulary's ops)" (if depth <= 0 then floorOps idl else idl.Ops)
+                pickAt r "an op slot (the vocabulary's ops)" (if depth <= 0 then atFloor idl idl.Ops else idl.Ops)
 
             VUnion(o.Tag, sampleFields idl r (depth - 1) o.Fields)
 
@@ -389,8 +298,8 @@ module Sample =
                 // stops the node ENVELOPE recursing (`state` → `StateBehaviour` →
                 // `onEmpty`/`onLoading`). No RNG is drawn, which is what keeps a
                 // floor-safe vocabulary's seeded stream byte-identical.
-                | Optional when depth <= 0 && reachesNodeAtFloor idl Set.empty f.Type -> VAbsent
-                | OmitDefault d when depth <= 0 && reachesNodeAtFloor idl Set.empty f.Type -> d
+                | Optional when depth <= 0 && WireForm.reachesNodeAtFloor idl Set.empty f.Type -> VAbsent
+                | OmitDefault d when depth <= 0 && WireForm.reachesNodeAtFloor idl Set.empty f.Type -> d
                 // Sample BOTH sides of every presence rule: an optional that is
                 // sometimes absent, and an omit-when-default that sits at its
                 // default often enough to exercise the omission path.

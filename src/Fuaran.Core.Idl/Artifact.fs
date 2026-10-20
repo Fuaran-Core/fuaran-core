@@ -92,6 +92,12 @@ module Artifact =
     /// own key because they are **host-surface spec, not wire spec**: nothing in
     /// them is observable on the wire, and a non-F# consumer reading this artifact
     /// to build a codec must ignore them entirely.
+    ///
+    /// The object spells the DECLARED type, not its lowered wire form (Phase 513): a closure and a
+    /// host-signature function stay two cases, a union stays named and applied rather than
+    /// substituted, and a type variable stays a variable, because the artifact is read back into the
+    /// declaration ([[readType]]). What it states about the wire — the sentinel spellings — it reads
+    /// from [[WireForm]], the one lowering the codec and the sampler switch on.
     let rec private typeJson (t: IdlType) : JVal =
         match t with
         | TStr -> Canon.typed "str" []
@@ -107,20 +113,20 @@ module Artifact =
         | TList inner -> Canon.typed "list" [ "of", typeJson inner ]
         | TMap valueType -> Canon.typed "map" [ "values", typeJson valueType ]
         | TRecord name -> Canon.typed "record" [ "name", JStr name ]
-        | TClosure -> Canon.typed "closure" [ "wire", JStr "<closure>" ]
-        | TOpaque -> Canon.typed "opaque" [ "wire", JStr "<opaque>" ]
+        | TClosure -> Canon.typed "closure" [ "wire", JStr WireForm.closure ]
+        | TOpaque -> Canon.typed "opaque" [ "wire", JStr WireForm.opaque ]
         | TJson -> Canon.typed "json" []
         | TFn sg ->
             Canon.typed
                 "fn"
-                [ "wire", JStr "<closure>"
+                [ "wire", JStr WireForm.closure
                   "hostSurface",
                   JObj
                       [ "fsharp", JStr sg.FSharp
                         "typescript", JStr sg.TypeScript
                         "placeholder", JStr sg.Placeholder ] ]
         // Phase 252 — wire states the slot's DECLARED wire form as a type object, and
-        // ormat the string format on top of it; a slot that declares none says "json"
+        // `format` the string format on top of it; a slot that declares none says "json"
         // (carried verbatim), byte-for-byte what every earlier artifact wrote. Both sit
         // OUTSIDE hostSurface: they are wire spec a third-party codec reads.
         | THosted h ->

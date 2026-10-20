@@ -1366,3 +1366,63 @@ let intRange =
                   skiptest "node not on PATH — the TypeScript leg of the int-range block cannot run"
 
               report "int range (TypeScript)" tsFindings ]
+
+// ---------------------------------------------------------------------------
+// Phase 513 — the interpreter's readers switch on one lowering.
+// ---------------------------------------------------------------------------
+
+/// The lines of `src/Fuaran.Core.Idl/<file>` that are code, not comment.
+let private codeLines (file: string) : (int * string) list =
+    File.ReadAllLines(Snapshots.repoFile ("src/Fuaran.Core.Idl/" + file))
+    |> Array.toList
+    |> List.mapi (fun i l -> i + 1, l)
+    |> List.filter (fun (_, l) -> not (l.TrimStart().StartsWith "//"))
+
+/// A match arm on a declared `IdlType` case: what the lowering exists to decide once.
+let private idlTypeArm =
+    Text.RegularExpressions.Regex
+        @"^\s*\|\s*\(?T(Str|Int|Bool|Float|Enum|Union|Var|Node|List|Closure|Fn|Opaque|Json|Hosted|Record|Map|Kind|Op)\b"
+
+/// The findings the guard reports over `files`: an `IdlType` arm in a reader, and a sentinel
+/// spelled outside the lowering.
+let private loweringFindings (files: string list) (sentinelOwners: string list) : string list =
+    [ for file in files do
+          for n, l in codeLines file do
+              if idlTypeArm.IsMatch l then
+                  sprintf "%s:%d matches on a declared IdlType case: %s" file n (l.Trim())
+
+      for file in sentinelOwners do
+          for n, l in codeLines file do
+              if l.Contains "\"<closure>\"" || l.Contains "\"<opaque>\"" then
+                  sprintf "%s:%d spells a sentinel the lowering owns: %s" file n (l.Trim()) ]
+
+[<Tests>]
+let oneLowering =
+    testList
+        "Phase 513 — the encoder, the decoder and the sampler switch on the one lowered wire form"
+        [ testCase
+              "no reader re-derives a wire form from the declared type, and the sentinels are spelled once"
+              (fun _ ->
+                  let readers = [ "Encode.fs"; "Decode.fs"; "Sample.fs" ]
+
+                  let sentinelOwners =
+                      [ "Encode.fs"; "Decode.fs"; "Sample.fs"; "Declare.fs"; "Artifact.fs" ]
+
+                  let findings = loweringFindings readers sentinelOwners
+
+                  Expect.isEmpty
+                      findings
+                      "a reader switches on WireForm.ofType (WireForm.fs), never on the declared IdlType: \
+                   a second derivation is how the hosts came to disagree about one slot"
+
+                  // The guard sees what it guards: the lowering itself is full of declared-type arms and
+                  // spells both sentinels, so the same sweep over it must report both kinds of finding.
+                  let control = loweringFindings [ "WireForm.fs" ] [ "WireForm.fs" ]
+
+                  Expect.isTrue
+                      (control |> List.exists (fun f -> f.Contains "IdlType case"))
+                      "control: the sweep finds the declared-type arms in WireForm.fs"
+
+                  Expect.isTrue
+                      (control |> List.exists (fun f -> f.Contains "sentinel"))
+                      "control: the sweep finds the sentinel spellings in WireForm.fs") ]

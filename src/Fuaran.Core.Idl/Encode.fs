@@ -39,74 +39,60 @@ module Encode =
         | KeyOrder.Declared -> Canon.renderOrdered a = Canon.renderOrdered b
 
     let rec private encodeValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> =
-        match t, v with
-        | TStr, VStr s -> Ok(JStr s)
-        | TInt, VInt i -> Ok(JInt i)
-        | TBool, VBool b -> Ok(JBool b)
-        | TFloat, VFloat f -> Ok(JFloat f)
-        | TFloat, VInt i -> Ok(JFloat(float i))
-        | TEnum name, VEnum case ->
-            match IdlLookup.tryEnum idl name with
-            | None -> Error(sprintf "unknown enum '%s'" name)
-            // `VEnum` carries the WIRE string, exactly as `VUnion` carries the wire
-            // `$type` tag — so an enum that declares a case↔wire mapping is checked
-            // against its wire strings here, and only the F# emitter maps back.
-            | Some e when List.contains case e.WireCases -> Ok(JStr case)
-            | Some _ -> Error(sprintf "enum '%s' has no case '%s'" name case)
-        | TUnion(name, args), VUnion(tag, fields) ->
-            match IdlLookup.tryUnion idl name with
-            | None -> Error(sprintf "unknown union '%s'" name)
-            | Some u ->
-                match TypeParams.bind u args, u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None, _ ->
-                    Error(
-                        sprintf
-                            "union '%s' given %d type args, expects %d"
-                            name
-                            (List.length args)
-                            (List.length u.Params)
-                    )
-                | Some _, None -> Error(sprintf "union '%s' has no case '%s'" name tag)
-                | Some subst, Some c ->
-                    let caseFields =
-                        c.Fields
-                        |> List.map (fun f ->
-                            { f with
-                                Type = TypeParams.substitute subst f.Type })
+        // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
+        // writes it.
+        match WireForm.ofType idl t, v with
+        | WireForm.Str, VStr s -> Ok(JStr s)
+        | WireForm.Int, VInt i -> Ok(JInt i)
+        | WireForm.Bool, VBool b -> Ok(JBool b)
+        | WireForm.Float, VFloat f -> Ok(JFloat f)
+        | WireForm.Float, VInt i -> Ok(JFloat(float i))
+        // `VEnum` carries the WIRE string, exactly as `VUnion` carries the wire `$type` tag — so an
+        // enum that declares a case↔wire mapping is checked against its wire strings here, and only
+        // the F# emitter maps back.
+        | WireForm.Enum e, VEnum case when List.contains case e.WireCases -> Ok(JStr case)
+        | WireForm.Enum e, VEnum case -> Error(sprintf "enum '%s' has no case '%s'" e.Name case)
+        | WireForm.Undeclared(Undeclared.Enum name), VEnum _ -> Error(sprintf "unknown enum '%s'" name)
+        | WireForm.Union u, VUnion(tag, fields) ->
+            match u.Binding, u.Decl.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+            | None, _ ->
+                Error(
+                    sprintf
+                        "union '%s' given %d type args, expects %d"
+                        u.Name
+                        (List.length u.Args)
+                        (List.length u.Decl.Params)
+                )
+            | Some _, None -> Error(sprintf "union '%s' has no case '%s'" u.Name tag)
+            | Some binding, Some c ->
+                let caseFields = WireForm.caseFields binding c
 
-                    match TransparentUnion.tag idl.Harden u with
-                    | Some ttag when ttag = tag ->
-                        // Transparent case (the declared one): emit the single field's value bare.
-                        match caseFields with
-                        | [ single ] ->
-                            match provided single.Name fields with
-                            | Some v -> encodeValue idl single.Type v
-                            | (None | Some VAbsent) ->
-                                Error(
-                                    sprintf "transparent union '%s' case '%s' missing field '%s'" name tag single.Name
-                                )
-                        | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" tag)
-                    | _ ->
-                        encodeFields idl caseFields fields
-                        |> Result.map (typedWith idl.Wire.Discriminator tag)
-        | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
-        | TClosure, VClosure
-        | TFn _, VClosure -> Ok(JStr "<closure>")
-        | TOpaque, VOpaque -> Ok(JStr "<opaque>")
-        // Phase 676 — verbatim passthrough. Emitting the `JVal` unchanged is what
-        // keeps the bytes canonical: `Canon.render` already sorts keys Ordinal,
-        // escapes per rule 6 and lays floats out per rule 5, so a passthrough
-        // inherits all three instead of re-implementing them.
-        | TJson, VJson j -> verbatim j
-        // A hosted slot's content is the host codec's business — the interpreter
-        // carries it verbatim, exactly as TJson (see [[HostedCodec]]). A declared wire
-        // form (Phase 252) is checked on DECODE, the direction a document arrives from.
-        | THosted _, VJson j -> verbatim j
-        | TRecord name, VRecord fields ->
-            match IdlLookup.tryRecord idl name with
-            | None -> Error(sprintf "unknown record '%s'" name)
-            | Some r -> encodeFields idl r.Fields fields |> Result.map JObj
-        | TMap vt, VMap entries ->
+                match u.Transparent with
+                | Some ttag when ttag = tag ->
+                    // Transparent case (the declared one): emit the single field's value bare.
+                    match caseFields with
+                    | [ single ] ->
+                        match provided single.Name fields with
+                        | Some v -> encodeValue idl single.Type v
+                        | (None | Some VAbsent) ->
+                            Error(sprintf "transparent union '%s' case '%s' missing field '%s'" u.Name tag single.Name)
+                    | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" tag)
+                | _ ->
+                    encodeFields idl caseFields fields
+                    |> Result.map (typedWith idl.Wire.Discriminator tag)
+        | WireForm.Undeclared(Undeclared.Union(name, _)), VUnion _ -> Error(sprintf "unknown union '%s'" name)
+        | WireForm.Unbound v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
+        | WireForm.Sentinel(value, wire), v when v = value -> Ok(JStr wire)
+        // Phase 676 — verbatim passthrough. Emitting the `JVal` unchanged is what keeps the bytes
+        // canonical: `Canon.render` already sorts keys Ordinal, escapes per rule 6 and lays floats
+        // out per rule 5, so a passthrough inherits all three instead of re-implementing them. A
+        // hosted slot's content is the host codec's business, carried the same way (see
+        // [[HostedCodec]]); a declared wire form (Phase 252) is checked on DECODE, the direction a
+        // document arrives from.
+        | (WireForm.Verbatim | WireForm.Hosted _), VJson j -> verbatim j
+        | WireForm.Record r, VRecord fields -> encodeFields idl r.Fields fields |> Result.map JObj
+        | WireForm.Undeclared(Undeclared.Record name), VRecord _ -> Error(sprintf "unknown record '%s'" name)
+        | WireForm.Map vt, VMap entries ->
             let rec go acc =
                 function
                 | [] -> Ok(JObj(List.rev acc))
@@ -123,26 +109,26 @@ module Encode =
                 []
                 (entries
                  |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b)))
-        | TNode, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
+        | WireForm.Node, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
         // Phase 698 — the enveloped form, at ANY depth: a nested child carries its
         // envelope through exactly this arm, so the sweep is not root-only.
-        | TNode, VNodeEnv(id, envelope, kindTag, fields) -> encodeNodeEnv idl id envelope kindTag fields
+        | WireForm.Node, VNodeEnv(id, envelope, kindTag, fields) -> encodeNodeEnv idl id envelope kindTag fields
         // A bare kind and an op are both `$type`-tagged objects with named fields —
         // structurally what a union case is — so `VUnion` carries them, and the wire
         // difference is only which vocabulary the tag resolves against.
-        | TKind, VUnion(tag, fields) ->
+        | WireForm.Kind, VUnion(tag, fields) ->
             match IdlLookup.tryKind idl tag with
             | None -> Error(sprintf "unknown kind '%s'" tag)
             | Some k ->
                 encodeFields idl k.Fields fields
                 |> Result.map (typedWith idl.Wire.Discriminator tag)
-        | TOp, VUnion(tag, fields) ->
+        | WireForm.Op, VUnion(tag, fields) ->
             match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
             | None -> Error(sprintf "unknown op '%s'" tag)
             | Some o ->
                 encodeFields idl o.Fields fields
                 |> Result.map (typedWith idl.Wire.Discriminator tag)
-        | TList inner, VList xs ->
+        | WireForm.List inner, VList xs ->
             let rec go acc =
                 function
                 | [] -> Ok(JArr(List.rev acc))
