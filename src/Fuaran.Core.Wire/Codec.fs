@@ -386,12 +386,12 @@ module Codec =
 
     // ---- text ----
 
-    /// The canonical text of `v` under `profile` — `c.Write v |> Result.map (Canonical.write profile)` —
+    /// The canonical text of `v` under `profile` — `c.Write v |> Result.map (Canonical.write (Rendering.ofProfile profile))` —
     /// or the declaration's refusal of a value it does not cover (Phase 384: it answered a string
     /// and raised there). Unguarded as `Canonical.write` is: a non-finite float or an ill-formed
     /// string renders; `Canonical.tryWrite` over `c.Write v` is the form whose output may be hashed.
     let write (profile: EncodingProfile) (c: Codec<'T>) (v: 'T) : Result<string, CodecDeclarationFault> =
-        c.Write v |> Result.map (Canonical.write profile)
+        c.Write v |> Result.map (Canonical.write (Rendering.ofProfile profile))
 
     /// The value JSON `text` reads as, or every defect: a parse refusal is the one defect, at the
     /// root. Either escaping spelling reads.

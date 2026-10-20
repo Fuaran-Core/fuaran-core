@@ -6,25 +6,32 @@
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 attribute Fuaran.Core.ActorInvalid RequireQualifiedAccess
 attribute Fuaran.Core.ActorModule RequireQualifiedAccess
+attribute Fuaran.Core.AnchorModule RequireQualifiedAccess
 attribute Fuaran.Core.AppendOutcome`2 RequireQualifiedAccess
 attribute Fuaran.Core.AppendRejection`1 RequireQualifiedAccess
 attribute Fuaran.Core.CapturePhase RequireQualifiedAccess
 attribute Fuaran.Core.CaptureReplayFault RequireQualifiedAccess
 attribute Fuaran.Core.ChainBreakReason RequireQualifiedAccess
+attribute Fuaran.Core.ChainShapeModule RequireQualifiedAccess
 attribute Fuaran.Core.CompactedOutcome`2 RequireQualifiedAccess
+attribute Fuaran.Core.Jsonl RequireQualifiedAccess
 attribute Fuaran.Core.JsonlFaultReason RequireQualifiedAccess
 attribute Fuaran.Core.JsonlWriteFaultReason RequireQualifiedAccess
 attribute Fuaran.Core.KeyIndexModule RequireQualifiedAccess
 attribute Fuaran.Core.KeyedCaptureFault RequireQualifiedAccess
+attribute Fuaran.Core.KeyedCaptureModule RequireQualifiedAccess
 attribute Fuaran.Core.OpStream+EncodingProfile RequireQualifiedAccess
+attribute Fuaran.Core.SealedModule RequireQualifiedAccess
 attribute Fuaran.Core.SnapshotBreak RequireQualifiedAccess
 attribute Fuaran.Core.SnapshotFault`1 RequireQualifiedAccess
 attribute Fuaran.Core.SnapshotMode RequireQualifiedAccess
 attribute Fuaran.Core.StreamLoadFault`1 RequireQualifiedAccess
+ctor Fuaran.Core.Anchor..ctor(System.Int32, System.String)
 ctor Fuaran.Core.Attestation..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Attributed`1..ctor(System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, System.String, !0)
 ctor Fuaran.Core.CapturedEffect`1..ctor(Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>)
 ctor Fuaran.Core.ChainBreak..ctor(System.Int32, Fuaran.Core.ChainBreakReason, System.String, System.String)
+ctor Fuaran.Core.ChainShape`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Int32>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !0>>>)
 ctor Fuaran.Core.Compacted`2..ctor(Fuaran.Core.Snapshot`1<!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!0>>, Fuaran.Core.KeyIndex)
 ctor Fuaran.Core.EffectCapture..ctor(System.Int32, System.String, System.String, System.String, System.String, System.String)
 ctor Fuaran.Core.EntryRef..ctor(System.Int32, System.String)
@@ -33,6 +40,7 @@ ctor Fuaran.Core.JsonlWriteFault..ctor(System.Int32, System.String, Fuaran.Core.
 ctor Fuaran.Core.KeyIndex..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.EntryRef>)
 ctor Fuaran.Core.KeyedCapture..ctor(System.Int32, System.String, System.Int32, System.String, Fuaran.Core.CapturePhase, System.String, System.String, System.String)
 ctor Fuaran.Core.OpRecord`1..ctor(System.Int32, Fuaran.Core.Actor, !0, System.String, System.String)
+ctor Fuaran.Core.Sealed`1..ctor(Fuaran.Core.Anchor, !0, Fuaran.Core.SnapshotMode, System.String)
 ctor Fuaran.Core.Snapshot`1..ctor(System.Int32, !0, System.String, System.String, Fuaran.Core.SnapshotMode)
 ctor Fuaran.Core.StreamConfig..ctor(Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Actor, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>>, System.String)
 ctor Fuaran.Core.StreamWitness`3..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpResult`2<!1, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
@@ -113,10 +121,20 @@ method Fuaran.Core.ActorModule.human(System.String) : Microsoft.FSharp.Core.FSha
 method Fuaran.Core.ActorModule.id(Fuaran.Core.Actor) : System.String
 method Fuaran.Core.ActorModule.ofLegacyString(System.String) : Fuaran.Core.Actor
 method Fuaran.Core.ActorModule.validate(Fuaran.Core.Actor) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Actor, Fuaran.Core.ActorInvalid>
+method Fuaran.Core.AnchorModule.genesis(Fuaran.Core.StreamConfig) : Fuaran.Core.Anchor
 method Fuaran.Core.ChainBreakReasonModule.ofString(System.String) : Fuaran.Core.ChainBreakReason
 method Fuaran.Core.ChainBreakReasonModule.toString(Fuaran.Core.ChainBreakReason) : System.String
+method Fuaran.Core.ChainShapeModule.append`1(Fuaran.Core.ChainShape`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Anchor, Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, !!0>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
+method Fuaran.Core.ChainShapeModule.linkAt`1(Fuaran.Core.ChainShape`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Anchor, !!0) : !!0
+method Fuaran.Core.ChainShapeModule.records`1(Fuaran.Core.StreamConfig, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>) : Fuaran.Core.ChainShape`1<Fuaran.Core.OpRecord`1<!!0>>
+method Fuaran.Core.ChainShapeModule.rehash`2(Fuaran.Core.ChainShape`1<!!0>, Fuaran.Core.ChainShape`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Anchor, System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.ChainBreak>
+method Fuaran.Core.ChainShapeModule.tip`1(Fuaran.Core.ChainShape`1<!!0>, Fuaran.Core.Anchor, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Fuaran.Core.Anchor
+method Fuaran.Core.ChainShapeModule.walk`1(Fuaran.Core.ChainShape`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Anchor, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ChainBreak>
 method Fuaran.Core.IAttestationSink.Sign(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Attestation>
 method Fuaran.Core.IAttestationSink.Verify(Fuaran.Core.Attestation, System.String) : System.Boolean
+method Fuaran.Core.Jsonl.carry`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>) : Fuaran.Core.StreamWitness`3<System.Tuple`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Core.Unit>
+method Fuaran.Core.Jsonl.checkedLines`1(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.JsonlWriteFault>
+method Fuaran.Core.Jsonl.settle`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpResult`2<!!1, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Fuaran.Core.UndecodableOp>>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.UndecodableOp>>
 method Fuaran.Core.JsonlFaultModule.reasonText(Fuaran.Core.JsonlFaultReason) : System.String
 method Fuaran.Core.JsonlFaultModule.toString(Fuaran.Core.JsonlFault) : System.String
 method Fuaran.Core.JsonlWriteFaultModule.reasonText(Fuaran.Core.JsonlWriteFaultReason) : System.String
@@ -124,6 +142,9 @@ method Fuaran.Core.JsonlWriteFaultModule.toString(Fuaran.Core.JsonlWriteFault) :
 method Fuaran.Core.KeyIndexModule.add(System.String, Fuaran.Core.EntryRef, Fuaran.Core.KeyIndex) : Fuaran.Core.KeyIndex
 method Fuaran.Core.KeyIndexModule.ofStream`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Fuaran.Core.KeyIndex
 method Fuaran.Core.KeyIndexModule.tryFind(System.String, Fuaran.Core.KeyIndex) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EntryRef>
+method Fuaran.Core.KeyedCaptureModule.ofJsonl(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>, Fuaran.Core.JsonlFault>
+method Fuaran.Core.KeyedCaptureModule.toJsonl(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : System.String
+method Fuaran.Core.KeyedCaptureModule.tryToJsonl(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.JsonlWriteFault>
 method Fuaran.Core.OpStream+Attributed.byActor`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>>
 method Fuaran.Core.OpStream+Attributed.bySession`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>>
 method Fuaran.Core.OpStream+Attributed.decodeEnvelope`1(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Attributed`1<!!0>, System.String>
@@ -230,6 +251,11 @@ method Fuaran.Core.OpStream.verifyChainWith`3(Fuaran.Core.StreamConfig, Microsof
 method Fuaran.Core.OpStream.verifyChain`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : System.Boolean
 method Fuaran.Core.OpStream.verifyKeyedCaptures(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : System.Boolean
 method Fuaran.Core.OpStream.verifyKeyedCapturesWith(Fuaran.Core.StreamConfig, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>) : System.Boolean
+method Fuaran.Core.SealedModule.firstBreak`2(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.ChainShape`1<!!1>, Fuaran.Core.Sealed`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<!!1>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.SnapshotBreak>
+method Fuaran.Core.SealedModule.ofSnapshot`1(Fuaran.Core.Snapshot`1<!!0>) : Fuaran.Core.Sealed`1<!!0>
+method Fuaran.Core.SealedModule.replayFrom`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Sealed`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.SnapshotFault`1<!!2>>
+method Fuaran.Core.SealedModule.seal`1(Fuaran.Core.SnapshotMode, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.Anchor, !!0) : Fuaran.Core.Sealed`1<!!0>
+method Fuaran.Core.SealedModule.toSnapshot`1(Fuaran.Core.Sealed`1<!!0>) : Fuaran.Core.Snapshot`1<!!0>
 method Fuaran.Core.StreamLoadFaultModule.siteText(Fuaran.Core.UndecodableOp) : System.String
 method Fuaran.Core.StreamLoadFaultModule.toString(Fuaran.Core.StreamLoadFault`1<Fuaran.Core.ChainBreak>) : System.String
 method Fuaran.Core.StreamLoadFaultModule.toStringWith`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamLoadFault`1<!!0>) : System.String
@@ -240,6 +266,8 @@ property Fuaran.Core.OpStream.legacyActorConfig : Fuaran.Core.StreamConfig { get
 property Fuaran.Core.OpStream.legacyEscapeConfig : Fuaran.Core.StreamConfig { get }
 property Fuaran.Core.OpStream.noAttestation : Fuaran.Core.IAttestationSink { get }
 property Fuaran.Core.OpStream.profiles : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpStream+EncodingProfile> { get }
+record-field Fuaran.Core.Anchor.PrevHash #1 : System.String
+record-field Fuaran.Core.Anchor.Seq #0 : System.Int32
 record-field Fuaran.Core.Attestation.Head #0 : System.String
 record-field Fuaran.Core.Attestation.KeyId #1 : System.String
 record-field Fuaran.Core.Attestation.Signature #2 : System.String
@@ -255,6 +283,11 @@ record-field Fuaran.Core.ChainBreak.Expected #2 : System.String
 record-field Fuaran.Core.ChainBreak.Got #3 : System.String
 record-field Fuaran.Core.ChainBreak.Index #0 : System.Int32
 record-field Fuaran.Core.ChainBreak.Reason #1 : Fuaran.Core.ChainBreakReason
+record-field Fuaran.Core.ChainShape`1.HashOf #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.ChainShape`1.Link #4 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !0>>>
+record-field Fuaran.Core.ChainShape`1.PayloadOf #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.ChainShape`1.PrevOf #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.ChainShape`1.SeqOf #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Int32>
 record-field Fuaran.Core.Compacted`2.Keys #2 : Fuaran.Core.KeyIndex
 record-field Fuaran.Core.Compacted`2.Snapshot #0 : Fuaran.Core.Snapshot`1<!1>
 record-field Fuaran.Core.Compacted`2.Tail #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!0>>
@@ -286,6 +319,10 @@ record-field Fuaran.Core.OpRecord`1.Hash #4 : System.String
 record-field Fuaran.Core.OpRecord`1.Op #2 : !0
 record-field Fuaran.Core.OpRecord`1.PrevHash #3 : System.String
 record-field Fuaran.Core.OpRecord`1.Seq #0 : System.Int32
+record-field Fuaran.Core.Sealed`1.Anchor #0 : Fuaran.Core.Anchor
+record-field Fuaran.Core.Sealed`1.Mode #2 : Fuaran.Core.SnapshotMode
+record-field Fuaran.Core.Sealed`1.Seal #3 : System.String
+record-field Fuaran.Core.Sealed`1.State #1 : !0
 record-field Fuaran.Core.Snapshot`1.Hash #3 : System.String
 record-field Fuaran.Core.Snapshot`1.Mode #4 : Fuaran.Core.SnapshotMode
 record-field Fuaran.Core.Snapshot`1.PrevHash #2 : System.String
@@ -306,6 +343,8 @@ type Fuaran.Core.Actor+Human (type)
 type Fuaran.Core.Actor+Tags (type)
 type Fuaran.Core.ActorInvalid (union)
 type Fuaran.Core.ActorModule (module)
+type Fuaran.Core.Anchor (record)
+type Fuaran.Core.AnchorModule (module)
 type Fuaran.Core.AppendOutcome`2 (union)
 type Fuaran.Core.AppendOutcome`2+Appended (type)
 type Fuaran.Core.AppendOutcome`2+Duplicate (type)
@@ -331,6 +370,8 @@ type Fuaran.Core.ChainBreakReason (union)
 type Fuaran.Core.ChainBreakReason+Tags (type)
 type Fuaran.Core.ChainBreakReason+Unrecognised (type)
 type Fuaran.Core.ChainBreakReasonModule (module)
+type Fuaran.Core.ChainShapeModule (module)
+type Fuaran.Core.ChainShape`1 (record)
 type Fuaran.Core.CompactedOutcome`2 (union)
 type Fuaran.Core.CompactedOutcome`2+Appended (type)
 type Fuaran.Core.CompactedOutcome`2+Duplicate (type)
@@ -339,6 +380,7 @@ type Fuaran.Core.Compacted`2 (record)
 type Fuaran.Core.EffectCapture (record)
 type Fuaran.Core.EntryRef (record)
 type Fuaran.Core.IAttestationSink (interface)
+type Fuaran.Core.Jsonl (module)
 type Fuaran.Core.JsonlFault (record)
 type Fuaran.Core.JsonlFaultModule (module)
 type Fuaran.Core.JsonlFaultReason (union)
@@ -373,6 +415,7 @@ type Fuaran.Core.KeyedCaptureFault+NoCapture (type)
 type Fuaran.Core.KeyedCaptureFault+NotAttempted (type)
 type Fuaran.Core.KeyedCaptureFault+Tags (type)
 type Fuaran.Core.KeyedCaptureFault+Undecodable (type)
+type Fuaran.Core.KeyedCaptureModule (module)
 type Fuaran.Core.OpRecord`1 (record)
 type Fuaran.Core.OpStream (module)
 type Fuaran.Core.OpStream+Attributed (module)
@@ -381,6 +424,8 @@ type Fuaran.Core.OpStream+EncodingProfile (union)
 type Fuaran.Core.OpStream+EncodingProfile+Tags (type)
 type Fuaran.Core.OpStream+Jsonl (module)
 type Fuaran.Core.OpStream+Snapshots (module)
+type Fuaran.Core.SealedModule (module)
+type Fuaran.Core.Sealed`1 (record)
 type Fuaran.Core.SnapshotBreak (union)
 type Fuaran.Core.SnapshotBreak+SnapshotHash (type)
 type Fuaran.Core.SnapshotBreak+Tags (type)

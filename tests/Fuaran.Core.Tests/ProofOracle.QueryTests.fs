@@ -45,7 +45,7 @@ let private spaceOfModel (s: ModelCap.value_space) : ValueSpace =
 //
 // The model's result payload is abstract, so it is instantiated at production's own
 // `QueryResult` and a settled page crosses untranslated. The four renderers are production's own
-// calls: `string` on an int, `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal order F#'s
+// calls: `string` on an int, `FloatLayout.canonical`, `Hash.fnv1a`, and the ordinal order F#'s
 // `List.sortBy fst` compares strings by. A float cell crosses as its round-trip `R` text.
 // ------------------------------------------------------------------------------------------
 
@@ -212,12 +212,12 @@ let private shapeCarrier: Query =
 
 /// The canonical text production's codec writes for one member of a declaration — the member the
 /// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
-/// `Canon.render`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
+/// `Canonical.write Rendering.CrossHost`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
 let private memberText (name: string) (q: Query) : string =
     match Json.parse (QueryCodec.encode q) with
     | Ok(JObj ms) ->
         match ms |> List.tryFind (fun (k, _) -> k = name) with
-        | Some(_, v) -> Canon.render v
+        | Some(_, v) -> Canonical.write Rendering.CrossHost v
         | None -> ""
     | _ -> ""
 
@@ -228,7 +228,7 @@ let private queryRenderers: ModelQuery.renderers =
     { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
       ModelQuery.renderers.render_float =
         fun (s: string) ->
-            Canon.canonicalFloat (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
+            FloatLayout.canonical (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
       ModelQuery.renderers.hash = Hash.fnv1a
       ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
       ModelQuery.renderers.field = Hash.canonicalField
@@ -1112,7 +1112,7 @@ let private codecQueryToModel (q: Query) : ModelQuery.query =
             | other -> sprintf "%A" other }
 
 let private rowsText (t: Table) =
-    Canon.render (ColumnCodec.encodeJson (Embedded t))
+    Canonical.write Rendering.CrossHost (ColumnCodec.encodeJson (Embedded t))
 
 let private resultToModel (qr: QueryResult) : ModelQuery.query_result<Table> =
     { ModelQuery.query_result.qr_rows = qr.Rows
@@ -1245,7 +1245,7 @@ let private queryCodecDifferential
         // The document production reads is the text the mutation renders to.
         out
         |> List.map (fun m ->
-            match Json.parse (Canon.render m) with
+            match Json.parse (Canonical.write Rendering.CrossHost m) with
             | Ok v -> m = j, v
             | Error _ -> m = j, m)
 
@@ -1271,9 +1271,23 @@ let private queryCodecDifferential
 
             if not (DecodeError.resolvesIn j pe) then
                 diffs.Add(
-                    sprintf "seed %d: a %s refusal does not resolve: %s in %s" i what (pErrRender pe) (Canon.render j)
+                    sprintf
+                        "seed %d: a %s refusal does not resolve: %s in %s"
+                        i
+                        what
+                        (pErrRender pe)
+                        (Canonical.write Rendering.CrossHost j)
                 )
-        | _ -> diffs.Add(sprintf "seed %d: the %s readers disagree on %s: %A vs %A" i what (Canon.render j) p m)
+        | _ ->
+            diffs.Add(
+                sprintf
+                    "seed %d: the %s readers disagree on %s: %A vs %A"
+                    i
+                    what
+                    (Canonical.write Rendering.CrossHost j)
+                    p
+                    m
+            )
 
     for i in 1..trials do
         // ---- the declaration, drawn by the seam differential's own generator ----
@@ -1285,7 +1299,10 @@ let private queryCodecDifferential
         | Error e -> diffs.Add(sprintf "seed %d: the declaration did not parse: %A" i e)
         | Ok j0 ->
             // The encoding is compared as the canonical TEXT both write.
-            if Canon.render (jvalOfModel (queryJson (codecQueryToModel q))) <> text then
+            if
+                Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q)))
+                <> text
+            then
                 diffs.Add(sprintf "seed %d: the declaration encodes differently: %s" i text)
 
             for unmutated, j in mutations j0 do
@@ -1293,7 +1310,7 @@ let private queryCodecDifferential
                     "declaration"
                     i
                     j
-                    (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
                     (ModelQuery.query_of_j columnCodec (jvalToModel j))
                     (fun a b -> codecQueryToModel a = b)
                     unmutated
@@ -1313,7 +1330,9 @@ let private queryCodecDifferential
         | Error e -> diffs.Add(sprintf "seed %d: the result did not parse: %A" i e)
         | Ok rj ->
             if
-                Canon.render (jvalOfModel (ModelQuery.result_json columnCodec (resultToModel qr)))
+                Canonical.write
+                    Rendering.CrossHost
+                    (jvalOfModel (ModelQuery.result_json columnCodec (resultToModel qr)))
                 <> rtext
             then
                 diffs.Add(sprintf "seed %d: the result encodes differently" i)
@@ -1323,7 +1342,7 @@ let private queryCodecDifferential
                     "result"
                     i
                     j
-                    (QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
                     (ModelQuery.result_of_j columnCodec (jvalToModel j))
                     sameResult
                     false
@@ -1346,7 +1365,7 @@ let private queryCodecDifferential
         | Error e -> diffs.Add(sprintf "seed %d: the envelope did not parse: %A" i e)
         | Ok dj ->
             if
-                Canon.render (jvalOfModel (ModelQuery.deferred_result_json columnCodec md))
+                Canonical.write Rendering.CrossHost (jvalOfModel (ModelQuery.deferred_result_json columnCodec md))
                 <> dtext
             then
                 diffs.Add(sprintf "seed %d: the async result encodes differently" i)
@@ -1356,7 +1375,9 @@ let private queryCodecDifferential
                     "async result"
                     i
                     j
-                    (QueryCodec.decodeDeferredResultDetailedWith ReadPolicy.Lenient (Canon.render j))
+                    (QueryCodec.decodeDeferredResultDetailedWith
+                        ReadPolicy.Lenient
+                        (Canonical.write Rendering.CrossHost j))
                     (ModelQuery.deferred_result_of_j columnCodec (jvalToModel j))
                     (fun a b ->
                         match a, b with
@@ -1383,7 +1404,14 @@ let private queryCodecDifferential
                 refused.Value <- refused.Value + 1
                 codes.Value <- codes.Value.Add(sprintf "%A" me.d_code)
             | p, m ->
-                diffs.Add(sprintf "seed %d: the query-error readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+                diffs.Add(
+                    sprintf
+                        "seed %d: the query-error readers disagree on %s: %A vs %A"
+                        i
+                        (Canonical.write Rendering.CrossHost j)
+                        p
+                        m
+                )
 
     { QcDiffs = List.ofSeq diffs
       QcDocuments = documents.Value
@@ -1857,7 +1885,7 @@ let tests =
                   "and the model's key is still production's"
 
               // The one place the float renderer's injectivity premise fails, pinned so it cannot
-              // be forgotten: `Canon.canonicalFloat` renders -0.0 and 0.0 alike, so the two share a
+              // be forgotten: `FloatLayout.canonical` renders -0.0 and 0.0 alike, so the two share a
               // key — and production's own `Cell` equality calls them EQUAL (IEEE -0.0 = 0.0), so the
               // sharing is between argument sets production does not tell apart
               // (`query-renderers-abstract`).

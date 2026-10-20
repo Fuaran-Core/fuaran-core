@@ -35,7 +35,7 @@ module LawVectorExport =
     // -----------------------------------------------------------------------
     //  These files are ORACLES, so their bytes are the interface five hosts read. Since Phase 508 they
     //  are written by the one writer every conformance file goes through, `CorpusFile.render`, which
-    //  escapes through `Canon.render` — the spine's one string rule — and lays a file out a header
+    //  escapes through `Canonical.write Rendering.CrossHost` — the spine's one string rule — and lays a file out a header
     //  member and an item per line, LF endings whatever the platform. The hand-rolled renderer these
     //  files were written with before it spelled the short escapes (`\n`, `\t`, …) where the spine
     //  spells `\u000a`; no committed vector carries a control character, so the move changed no byte,
@@ -496,7 +496,7 @@ module LawVectorExport =
                     Input = [ "text", jstr text ]
                     Expected =
                       match DecimalText.tryToFloat text, DecimalText.tryCanonical text with
-                      | Some f, _ -> accept [ "float", jstr (Canon.canonicalFloat f) ]
+                      | Some f, _ -> accept [ "float", jstr (FloatLayout.canonical f) ]
                       | None, Some _ -> reject "pastFloatRange"
                       | None, None -> reject "notDecimal" }
               for name, values in decodeInputs ->
@@ -596,7 +596,7 @@ module LawVectorExport =
         /// A schema as the wire spells it — the entry objects, under `Canon` — the shape a host
         /// reads a schema in, so a vector's input needs no second schema notation.
         let schemaText (s: Schema) : string =
-            Canon.render (JArr(s |> List.map ColumnCodec.fieldJson))
+            Canonical.write Rendering.CrossHost (JArr(s |> List.map ColumnCodec.fieldJson))
 
         /// `schemaText`'s value as a cell: the schema as a compact canonical array.
         let private schemaCell (s: Schema) : CorpusCell =
@@ -736,7 +736,8 @@ module LawVectorExport =
                   { Id = "encode-" + name
                     Case = "fieldEncode"
                     Input = members
-                    Expected = accept [ "canonical", jstr (Canon.render (ColumnCodec.fieldJson f)) ] }
+                    Expected =
+                      accept [ "canonical", jstr (Canonical.write Rendering.CrossHost (ColumnCodec.fieldJson f)) ] }
               for name, doc in decodeInputs ->
                   { Id = "decode-" + name
                     Case = "codecDecode"
@@ -887,7 +888,8 @@ module LawVectorExport =
             | _ -> Error "the law file declares no string `kitVersion` and `vectors` array"
         | Ok _ -> Error "the law file is not a JSON object"
 
-    let private renderMember (value: JVal) : string = Canon.render value
+    let private renderMember (value: JVal) : string =
+        Canonical.write Rendering.CrossHost value
 
     let private rowLine (id: string) =
         System.Text.RegularExpressions.Regex(

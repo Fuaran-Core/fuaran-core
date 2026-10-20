@@ -111,7 +111,7 @@ entry that records such a change therefore lists, by name, every path that hashe
 each, the route a store takes across it; and the change ships as a NEW `EncodingProfile` case with
 `EncodingProfile.current` moved to it, never as an edit to what an existing case renders. "No known
 store holds one" is not a bound this document accepts: Phase 287 wrote it, and a downstream store
-whose payload strings carried a newline could not verify its ids on the next release.
+whose payload strings carried a newline could not verify its ids on the next release. **Since `0.39.0` every byte rule is a named `Rendering` (Phase 520, D188, breaking):** `V1`, `V2`, `CrossHost` (`Canon.render`'s bytes) and `Declared` (`Canon.renderOrdered`'s), written, guarded and recognised by `Canonical.write` / `tryWrite` / `isCanonical`, one guard (`Json.firstRenderFault`) under every guarded writer; `Canon` is removed and no rendered byte moved (`EncodingProfileVectors`' column per rendering).
 
 ## Public-surface baselines — the class of a move is a gate output, not an argument (Phase 183)
 
@@ -244,8 +244,8 @@ The classes:
 | `breaking` | a member renamed or removed; a discriminator changed; a document removed; the same structure emitted as different bytes | **advance `<Version>`** |
 
 An F# case renamed with its wire bytes untouched is not a wire move; that one is the managed gate's.
-A member reordering cannot occur in `Canon.render` output, which sorts keys. The two emitters that are
-not `Canon.render` (the IDL artifact's indented form, and the hand-assembled stream envelopes) are
+A member reordering cannot occur in `Rendering.CrossHost` output, which sorts keys. The two emitters that are
+not `Rendering.CrossHost` (the IDL artifact's indented form, and the hand-assembled stream envelopes) are
 pinned by the hash, and a layout move there is `breaking`.
 
 **What it does not pin, named rather than assumed:**
@@ -292,7 +292,7 @@ suffix says which question it answers:
 - **`…Error`** — the call itself is refused: its input does not parse or decode (`JsonError`,
   `DecodeError`), or it names what the seam does not hold or binds it wrongly — the seam unions a caller receives (`InvokeError`, `QueryError`, `PipelineError`, `ColumnError`, `SchemaError`, `RegistrationError`, …).
   **Since `0.39.0` there is ONE read surface (Phase 519, breaking):** `ReadOptions` (`Null`, `Limits`; `ReadOptions.strict` / `tolerantOfNull`) and four readers — `Json.read` (the parser's `JsonRefusal`), `Json.parse` (its one string form), `Reader.read` (out of `Json`, its refusal a `DecodeError`: a shape mismatch is `WrongKind` at the value's path) and `Decoder.parse`; `Decode` (the string-error twin), `Json.ReadError`, `DecodeError.ofJsonError`, `Decoder.parseWith` / `parseWithLimits` / `ofString` and the other `Json.parse*` entry points are removed (the 0.39.0 notes map each).
-  A passed bound is `LimitExceeded` at the breach's path on every reader — the depth cap included, which the strict readers reported at the root before — and `Json.parse`'s sentences and every `ColumnError` are unmoved; moving a reader's refusal code or path is breaking (`conformance/decode/`, the generated hosts' differential).
+  A passed bound is `LimitExceeded` at the breach's path on every reader — the depth cap included, which the strict readers reported at the root before — and `Json.parse`'s sentences and every `ColumnError` are unmoved; moving a reader's refusal code or path is breaking (`conformance/decode/`, the generated hosts' differential). **Since Phase 520 (D99 amended, D188) a refusal's `Message` is a PROJECTION** — `DecodeError.sentence` of its code, expectation and detail, one form per code — and hosts certify on the code and the path: a sentence may be reworded between drafts (additive), its code or path may not. `reword`, `tagDispatchWith` and `oneOfWith` are removed; `Declare.errors` answers `VocabularyFault`s at their owners' paths; `Versioning.parse` answers a typed `EnvelopeRefusal`.
 - **`…Failure`** — the outcome of a composite flow, whose cases wrap the other families
   (`GatedApplyFailure` is a denial or a rejection; `ProposeFailure`, `ApprovalFailure`).
 - **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would otherwise have run.
@@ -417,7 +417,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   existing wire changes. Changing the envelope keys, an `Unknown` carrier field, a `negotiate` outcome,
   or dropping preservation is a **major** bump; an additive kind/case is a **minor** bump an older
   consumer tolerates via `decodeTolerant`.
-- **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; every bump is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number). **Phase 518 (`0.39.0`) removes the `Conformance.changeLaws` row and adds `Conformance.keyedDiffLawsAt`** — that reader sees one id leave and one arrive, and every consumer census that enumerates the kit moves with it; the schema and every other row's `cases` are unchanged. **`schema: 6` (Phase 506):** every value is written by `Canon.render`, so members are in ordinal order (top level `families`, `kind`, `packages`, `schema`; each family `adequacy` … `witness`) where `schema: 5` wrote them in declaration order, each family is one line, and each family gains `spellings` (an array; since Phase 507 six `…With` families list their pinned-default twins there, and those six ids leave the family list). That reader parses by member name and was checked against the new bytes: it reads the same ids and `cases` and is unaffected. **Since `0.39.0` (Phase 515, DECISIONS.md D180) a `LawResult` carries its `Kind`, `Family`, `Evidence` and `Reached`, and the export's `cases` cell is still the subject and corpus laws a run reported times its iterations; making that cell count `Evidence` instead would change the number that reader reads, so it is a contract move entered here, never a consequence of a field the record gains.** A consumer builds a `LawResult` through the `LawResult` constructors; a field added to the record is a `record-widening` (breaking) for every consumer still writing a literal.
+- **`docs/conformance-families.json` has a reader outside this repository (Phase 498).** A downstream law registry finds the file by name, keys on `kind` (`fuaran.core.conformance.families`; it never reads `schema`) and reads `families[].id` and `families[].cases`, falling back to a source parse when `kind` does not match. Changing any of those four breaks it; every bump is a contract move entered here, naming that reader, in the commit that makes it (`ConformanceFamiliesTests` holds this entry to the export's current number). **Phase 518 (`0.39.0`) removes the `Conformance.changeLaws` row and adds `Conformance.keyedDiffLawsAt`** — that reader sees one id leave and one arrive, and every consumer census that enumerates the kit moves with it; the schema and every other row's `cases` are unchanged. **`schema: 6` (Phase 506):** every value is written by `Rendering.CrossHost`, so members are in ordinal order (top level `families`, `kind`, `packages`, `schema`; each family `adequacy` … `witness`) where `schema: 5` wrote them in declaration order, each family is one line, and each family gains `spellings` (an array; since Phase 507 six `…With` families list their pinned-default twins there, and those six ids leave the family list). That reader parses by member name and was checked against the new bytes: it reads the same ids and `cases` and is unaffected. **Since `0.39.0` (Phase 515, DECISIONS.md D180) a `LawResult` carries its `Kind`, `Family`, `Evidence` and `Reached`, and the export's `cases` cell is still the subject and corpus laws a run reported times its iterations; making that cell count `Evidence` instead would change the number that reader reads, so it is a contract move entered here, never a consequence of a field the record gains.** A consumer builds a `LawResult` through the `LawResult` constructors; a field added to the record is a `record-widening` (breaking) for every consumer still writing a literal.
 - **`Seam<'Decl,'Args,'E>`** + `SeamVocabulary` / `SeamCapture` (Phase 509, `0.39.0`, DECISIONS.md D172) — the invocable seams' one dispatch prologue, which `CapabilityRegistry` and `QueryRegistry` are and a host's own registry builds on: every dispatch verb resolves, validates and admits through the policy before the body runs, and no public verb runs a declaration without admitting it. Adding a public verb that skips the admission, or a field to either record (a full-literal vocabulary is how an adopter builds one), is breaking. **Its registration-ordered twin is `Validator.Rules<'Subject,'Id>` (Phase 521, `0.39.0`, removal-class)** — the one rule registry, of `PackCheck`s with the lattice's four lifecycle verbs and the one walker (`Rules.run`, which `runAllTagged`, `runPack` and `ColumnValidator.validateTagged` are). `ColumnRule` is `PackCheck<Table, string>` (its `Id` reads `RuleId`; `ColumnValidator.asCheck` is gone), `ColumnValidator.Registry` is `Rules<Table, string>` with `unregister` / `replace` / `restrict` / `union`, the fifth registry on the lattice, and every stock column code is a literal. Registration order is run order; reordering a registry's findings, a stock code's spelling or `RuleFamily`'s fields (its retype waits for `1.0`) is breaking. `Conformance.registryLaws` certifies the fifth registry in five cells of its own (the eleven before it unchanged), so its `cases` cell in `docs/conformance-families.json` moves 2200 → 3200 for the downstream law registry and every census that reads it.
 - **The generated layer is printed from ONE resolution** (Phase 511, `0.39.0`, DECISIONS.md D174) — every emitter reads the internal `Decl` (`Decl.resolve`): what a kind selection reaches, the message, wire-equality and node-holder sets, the generic instantiations and the node envelope's layout. Reached declarations print in declaration order and selected kinds in the caller's order; a change to either order, or to what the walk reaches, moves every committed generated artefact and is breaking for a consumer's drift guard. The drift guards and `IdlDeriveTests`' `Decl` laws hold it. Since Phase 525 the F* target prints from it too (`Decl`'s wire reach, in first-reach order), models a hosted slot at its declared wire form, and admits a default only through `Decl.literal`, the admissibility the F# backend shares, so a vocabulary with such a slot or an F*-only default emits a different model (breaking for its drift guard). The interpreter answers from one lowering the same way (Phase 513, `0.39.0`, DECISIONS.md D179, internal): `Encode`, `Decode` and `Sample` switch on `WireForm.ofType`, never on a declared `IdlType` case, and the sampler's depth floor is a fold over it; a change to the lowering moves every reader at once, and a change that moves a drawn choice is breaking for every seeded stream (`ParityVectors` `sample/*`).
 
@@ -438,7 +438,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
 - **The columnar model + wire codec** — the fixed Arrow scalar set (`int` / `float` / `bool` / `string`
   / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s six-code decode envelope
   are the cross-host contract: two hosts encode a column to byte-identical wire (same null / coercion /
-  ordering / **canonical-float** semantics — floats route through `Wire.Canon.canonicalFloat`, certified
+  ordering / **canonical-float** semantics — floats route through `Wire.FloatLayout.canonical`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
   a coercion/widening rule is a **major** bump. Since `0.39.0` (Phase 514, DECISIONS.md D178) `ColumnCodec.readCell` / `writeCell` read and write ONE value exactly as decode and encode do at a present row of a column of its type (a predicate's literal and a query argument are carried by them), and what each scalar type does with a value is one internal row per type (`TypeOps`) every per-column walk reads; a one-cell reader or writer that answers other than the codec is breaking.
 - **The typed column storage (Phase 417, `0.37.0`)** — a `Column` is `{ Name; Data }`, its `Data` one
@@ -568,8 +568,8 @@ the actual re-evaluation stays domain-side. The dependency relation is a per-cal
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
 / `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias left at `0.37.0`)
 is FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the rest of the
-substrate. Since `0.39.0` `Fuaran.Core.Function` depends on it (Phase 510, D173; additive, a package edge and no moved
-signature): the pipeline's dirty set IS `dirtyFromChangedIds`, so this package is in every `Function` consumer's graph.
+substrate. Since `0.39.0` `Fuaran.Core.Function` depends on it (Phase 510, D173; a package edge, so this package is in every
+`Function` consumer's graph): the pipeline's dirty set IS `dirtyFromChangedIds (CapabilityPipeline.dependencyMap p)` — the `dirtySet` forward left on the same cut (Phase 544, breaking).
 
 ### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `0.37.0`)
 
@@ -900,7 +900,7 @@ is the genesis every chain walker starts from. `OpStream.Snapshots.take` and `co
 snapshot byte is unchanged. A stream appended under a config with any other genesis must be
 compacted under that config; a snapshot at zero taken under the canonical config does not verify
 across such a stream. (The pre-Phase-296 entry points this paragraph named — `snapshotAt`,
-`compactWith` and the rest — left at `0.37.0`.)
+`compactWith` and the rest — left at `0.37.0`.) **Since `0.39.0` one chain over every record kind (Phase 530, DECISIONS.md D187, additive):** `ChainShape` (`walk` / `tip` / `append` / `rehash`, each at an `Anchor`) is the op record's, both capture journals' and a sealed state's verbs, and `Sealed` (`seal` / `firstBreak` / `replayFrom`) is a snapshot, a compacted stream's snapshot and a DAG checkpoint (strict, anchored at `{ Seq = 0; PrevHash = node }`); no seal, hash, line or refusal position moved. Every chained line is its hash payload with `prevHash` and `hash` spliced in last, and the keyed journal gains that JSONL (`KeyedCapture.toJsonl` / `tryToJsonl` / `ofJsonl`); `Jsonl.checkedLines` / `carry` / `settle` are public and the DAG's load reads through them. A keyed refusal's reason is read by `Jsonl.unquote`, one JSON string to its last character, so a hand-built value with anything after the string (which read as the string) is now `Undecodable`. Changing a shape's payload, the line rule or the seal pre-image is breaking.
 
 ### Chain pre-image portability
 
@@ -1175,7 +1175,7 @@ tool manifest does not carry the compiler, and the only authored `Fable.Core` re
 distribution), which are the two entries of `fable-exclusions.json`; the suite holds every name
 this paragraph and that file give to a project in the tree. (`Double.ToString`
 with the round-trip specifier is *not* Fable-supported — float→string must route through
-`Wire.Canon.canonicalFloat`; `Double.TryParse`'s style/provider arguments are ignored under Fable but
+`Wire.FloatLayout.canonical`; `Double.TryParse`'s style/provider arguments are ignored under Fable but
 parse invariantly, which is a benign warning, not a gate failure.)
 
 **A compile gate is not a VALUE gate, and the difference has cost real defects here.** It proves a
@@ -1188,7 +1188,7 @@ cross-pipeline value claim adds its vector to `ParityVectors` — see "The value
 ### The value leg (Phase 118, `0.18.0`)
 
 **The compile gate has a VALUE leg beside it.** A committed vector table — `Hash.fnv1a`,
-`Hash.sha256Hex` / `sha256HexOfBytes` / `utf8Bytes`, `Wire.Canon.canonicalFloat`,
+`Hash.sha256Hex` / `sha256HexOfBytes` / `utf8Bytes`, `Wire.FloatLayout.canonical`,
 `Wire.Json.render`'s own float layout, encode + decode of a reference witness document through both
 renderers, `OpStream.defaultHash` over a two-op chain, `ConfRng`'s draw stream, and (since Phase 217)
 the 124-row `hashSweep/*` corpus — runs on **both** pipelines and the output is byte-compared.
@@ -1253,15 +1253,15 @@ promise names the smoke line it needs in its own record.
 
 ## Canonical float layout (Phase 55)
 
-`Fuaran.Core.Wire.Canon.canonicalFloat : float -> string` is the **single cross-host float → string
+`Fuaran.Core.Wire.FloatLayout.canonical : float -> string` (`Canon.canonicalFloat` until `0.39.0`) is the **single cross-host float → string
 encoder**, and every float→wire / float→key path in the substrate routes through it (the tree/columnar
-wire codecs via `Canon.render`, `DataFrame`'s cell-string + group-key, `Query`'s invocation key). The
+wire codecs via `Rendering.CrossHost`, `DataFrame`'s cell-string + group-key, `Query`'s invocation key). The
 pinned layout: non-finite floats → the fixed JSON-string tokens `"NaN"` / `"Infinity"` / `"-Infinity"`;
 `-0.0` collapses to `0`; a finite float uses `Double.ToString("R", InvariantCulture)` on .NET and the
 byte-identical JS shortest-round-trip re-layout under Fable (WIRE_FORMAT §2 rule 5). A conformant TS /
 Python host MUST replicate exactly this. `Conformance.canonicalFloatLaws` certifies determinism, finite
 round-trip, and the stable non-finite tokens. `Fuaran.Core.Validator` references `Fuaran.Core.Wire` and
-routes its uniqueness tokens through `Canon.canonicalFloat` directly — one canonical float layout,
+routes its uniqueness tokens through `FloatLayout.canonical` directly — one canonical float layout,
 one implementation, no inlined copy to drift (a host comparing Validator tokens cross-host uses the
 same canonical form).
 

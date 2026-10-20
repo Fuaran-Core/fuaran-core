@@ -341,7 +341,7 @@ module CapabilityPipeline =
 
     let private spaceFromJ: Decoder<ValueSpace> =
         fun el ->
-            SpaceCodec.decoderSaying "unknown value-space: " el
+            SpaceCodec.decoder el
             // Phase 307: an output space the admission check refuses is refused on read.
             |> Result.bind (fun sp ->
                 match Space.wellFormed sp with
@@ -358,12 +358,12 @@ module CapabilityPipeline =
 
     let private argSrcToJ (s: ArgSource) : JVal =
         match s with
-        | Literal v -> Canon.typed "literal" [ "value", JStr v ]
-        | FromNode n -> Canon.typed "fromNode" [ "node", JStr n ]
+        | Literal v -> Canonical.typed "literal" [ "value", JStr v ]
+        | FromNode n -> Canonical.typed "fromNode" [ "node", JStr n ]
 
     let private argSrcFromJ: Decoder<ArgSource> =
-        SeamCodec.dispatch
-            "unknown arg source: "
+        Decoder.tagDispatch
+            "$type"
             [ "literal", Decoder.field "value" Decoder.str |> Decoder.map Literal
               "fromNode", Decoder.field "node" Decoder.str |> Decoder.map FromNode ]
 
@@ -377,9 +377,9 @@ module CapabilityPipeline =
     let private nodeToJ (n: PipelineNode) : JVal =
         match n with
         | Source(id, dref, ty) ->
-            Canon.typed "source" [ "id", JStr id; "dataRef", JStr dref; "outputType", spaceToJ ty ]
+            Canonical.typed "source" [ "id", JStr id; "dataRef", JStr dref; "outputType", spaceToJ ty ]
         | Invoke(id, capId, ty, args) ->
-            Canon.typed
+            Canonical.typed
                 "invoke"
                 [ "id", JStr id
                   "capabilityId", JStr capId
@@ -407,17 +407,17 @@ module CapabilityPipeline =
                         Decoder.field "args" (Decoder.list argFromJ) el
                         |> Result.map (fun args -> Invoke(id, capId, ty, args)))))
 
-        SeamCodec.dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
+        Decoder.tagDispatch "$type" [ "source", source; "invoke", invoke ]
 
     /// Encode a pipeline to its canonical wire string. Total; a pipeline whose output spaces carry
     /// a non-finite bound writes bytes `decode` refuses — `tryEncode` refuses it instead.
     let encode (p: CapabilityPipeline) : string =
-        Canon.render (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
+        Canonical.write Rendering.CrossHost (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
-    /// The GUARDED encode (Phase 307): `Canon.tryRender`, so a non-finite bound or an ill-formed
+    /// The GUARDED encode (Phase 307): `Canonical.tryWrite Rendering.CrossHost`, so a non-finite bound or an ill-formed
     /// string is refused, naming it. `Ok` is exactly `encode`'s string.
     let tryEncode (p: CapabilityPipeline) : Result<string, string> =
-        Canon.tryRender (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
+        Canonical.tryWrite Rendering.CrossHost (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
     /// Decode a pipeline from a wire string, answering a typed refusal (Phase 310): its code, the
     /// path to the value at fault, and [[decode]]'s sentence. A parse failure is refused at the root.
@@ -564,25 +564,23 @@ module CapabilityPipeline =
 
             go Map.empty p.Nodes
 
-    /// The dirty set for a changed-input set: `changed` ∪ every node transitively downstream of it via
-    /// `FromNode` edges (the reverse-reachability closure). Minimal — a node not reachable from any change
-    /// is never included. Pure over the DAG's edge structure.
-    ///
-    /// **It is `Propagation.dirtyFromChangedIds` over the pipeline's dependency map (Phase 510, D173)**
-    /// — each node id to the upstream ids its `FromNode` edges name (a repeated id to the union of its
-    /// nodes' edges) — so the closure is the one `proofs/Propagation.fst` models, not a copy of it.
-    let dirtySet (changed: Set<string>) (p: CapabilityPipeline) : Set<string> =
-        let deps =
-            p.Nodes
-            |> List.groupBy nodeId
-            |> List.map (fun (id, ns) -> id, ns |> List.collect upstreams |> Set.ofList)
-            |> Map.ofList
-
-        Propagation.dirtyFromChangedIds deps changed
+    /// The pipeline's dependency map — each node id to the upstream ids its `FromNode` edges name (a
+    /// repeated id to the union of its nodes' edges) — in the shape `Propagation` reads. The pipeline's
+    /// dirty set for a changed-input set is `Propagation.dirtyFromChangedIds (dependencyMap p) changed`:
+    /// `changed` and every node transitively downstream of it, and nothing else — the closure
+    /// `proofs/Propagation.fst` proves sound and least, which `proofs/Capability.fst` instantiates at
+    /// exactly these edges (Phase 510, D173; Phase 544, which removed the `dirtySet` forward so the
+    /// closure has one name). Pure over the DAG's edge structure.
+    let dependencyMap (p: CapabilityPipeline) : Map<string, Set<string>> =
+        p.Nodes
+        |> List.groupBy nodeId
+        |> List.map (fun (id, ns) -> id, ns |> List.collect upstreams |> Set.ofList)
+        |> Map.ofList
 
     /// Incrementally re-evaluate a pipeline (Phase 62) given the PRIOR evaluation and the set of
-    /// changed-input node ids: re-invoke only the nodes downstream-of-change (`dirtySet`), reusing each
-    /// clean node's prior result. **Byte-identical to a full `eval` over the same inputs** (the Phase-34
+    /// changed-input node ids: re-invoke only the nodes downstream-of-change (the dirty set,
+    /// `Propagation.dirtyFromChangedIds` over `dependencyMap`), reusing each clean node's prior result.
+    /// **Byte-identical to a full `eval` over the same inputs** (the Phase-34
     /// discipline, `Conformance.capabilityPipelineIncrementalLaws`) — a clean node's inputs are unchanged,
     /// so its `eval` result is exactly its prior result; a dirty node re-invokes the body against the new
     /// upstream values. Effect-honesty on the dirty path: a clean node reuses its recorded value (the
@@ -602,7 +600,7 @@ module CapabilityPipeline =
         match typeCheck lookup p with
         | Error e -> Error(PipelineEvalError.EvalIllTyped e)
         | Ok() ->
-            let dirty = dirtySet changed p
+            let dirty = Propagation.dirtyFromChangedIds (dependencyMap p) changed
 
             let rec go (results: Map<string, 'v>) =
                 function

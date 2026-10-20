@@ -935,7 +935,7 @@ module private SecondVocabulary =
     let tripWith (departs: string) =
         sprintf
             "{\"id\":\"t\",\"kind\":{\"$type\":\"Trip\",\"bags\":[],\"departs\":%s,\"nights\":1,\"title\":\"x\"}}"
-            (Canon.render (JStr departs))
+            (Canonical.write Rendering.CrossHost (JStr departs))
 
     let authoredItem =
         VNode(
@@ -1000,7 +1000,7 @@ module private SecondVocabulary =
             "err\t"
             + DecodeError.codeName e.Code
             + "\t"
-            + Canon.render (DecodePath.toJson e.Path)
+            + Canonical.write Rendering.CrossHost (DecodePath.toJson e.Path)
 
     /// The refusal lines for the three refused departures.
     let refusedLines () =
@@ -1027,9 +1027,10 @@ let secondVocabularyTests =
               Expect.stringContains rendered "\"format\": \"date\"" "the vocabulary renders its format by name"
 
               match Artifact.parseDetailed (rendered.Replace("\"format\": \"date\"", "\"format\": \"postcode\"")) with
-              | Error e ->
+              | Error [ e ] ->
                   Expect.equal e.Code DecodeCode.UnknownTag "an unknown format name is an unknown tag"
-                  Expect.stringContains e.Message "postcode" "naming the format"
+                  Expect.equal (List.last e.Path) (PathSegment.Key "format") "at the format"
+              | Error es -> failtestf "one refusal, at the format: %A" es
               | Ok _ -> failtest "the reader admitted an unknown format"
 
               Expect.hasLength
@@ -1076,7 +1077,7 @@ let secondVocabularyTests =
               let harness =
                   tsModule
                   + "\n\nconst __docs = "
-                  + Canon.render (JArr(docs |> List.map JStr))
+                  + Canonical.write Rendering.CrossHost (JArr(docs |> List.map JStr))
                   + ";\nfor (const d of __docs) { const r = decodeNode(d); console.log(r.ok ? 'ok\\t' + encodeNode(r.value) : 'err\\t' + r.error.code + '\\t' + JSON.stringify(r.error.path)); }\n"
 
               SecondVocabulary.withTemp ".mjs" harness (fun path ->
@@ -1147,7 +1148,7 @@ let secondVocabularyTests =
                       + "for d in __docs do\n"
                       + "    match decodeNode d with\n"
                       + "    | Ok n -> printfn \"ok\\t%s\" (encodeNode n)\n"
-                      + "    | Error e -> printfn \"err\\t%s\\t%s\" (DecodeError.codeName e.Code) (Canon.render (DecodePath.toJson e.Path))\n"
+                      + "    | Error e -> printfn \"err\\t%s\\t%s\" (DecodeError.codeName e.Code) (Canonical.write Rendering.CrossHost (DecodePath.toJson e.Path))\n"
                       // Phase 384 — the scaffold is a `Result`; the trip's hosted `departs` is
                       // decoded by the slot's own codec ahead of the construction.
                       + "let __trip : Node = match "

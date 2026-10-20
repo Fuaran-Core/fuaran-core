@@ -295,19 +295,23 @@ module internal OpStreamJsonl =
     /// every control character as `\u00xx` since Phase 287). Fable-clean.
     let jstr (s: string) : string = JsonString.quote s
 
-    /// One record line around the op's embedded encoding — the one line format both writers emit.
-    let recordLine (r: OpRecord<'Op>) (opJson: string) : string =
-        "{\"seq\":"
-        + string r.Seq
-        + ",\"actor\":"
-        + Actor.encode r.Actor
-        + ",\"op\":"
-        + opJson
+    /// THE chained line (Phase 530): a record's canonical hash payload — one JSON object — with its
+    /// link, `prevHash` and `hash`, spliced in as its last two members. Every chained kind writes this
+    /// way — an op record, a positional or keyed capture, a strict snapshot — so the bytes a line
+    /// carries are the bytes its hash was computed over, by construction rather than by two writers
+    /// spelling one envelope twice.
+    let linked (payload: string) (prev: string) (hash: string) : string =
+        payload.Substring(0, payload.Length - 1)
         + ",\"prevHash\":"
-        + jstr r.PrevHash
+        + jstr prev
         + ",\"hash\":"
-        + jstr r.Hash
+        + jstr hash
         + "}"
+
+    /// One record line around the op's embedded encoding — the one line format both writers emit: the
+    /// canonical `{seq, actor, op}` payload, linked.
+    let recordLine (r: OpRecord<'Op>) (opJson: string) : string =
+        linked (canonicalConfig.Payload r.Seq r.Actor opJson) r.PrevHash r.Hash
 
     let toJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : string =
         records
@@ -607,17 +611,33 @@ module internal OpStreamJsonl =
 
         let private rootPath () = "$"
 
-        /// Index just past the object or array value at `start`, read by the grammar at every depth
-        /// (Phase 466; until then a container value was balanced and its strings checked, and the
-        /// rest of its grammar was the decoder's): each object's members and each array's items,
-        /// their separators, every string and bare literal, and each object's keys pairwise distinct
-        /// after unescaping — a repeated key is refused at its opening quote once its value is read,
-        /// so a refusal inside the value wins (`Wire.Json`'s order, D157.2). A line ending inside the
-        /// value is `UnterminatedContainer` at `start`, the outermost opening, as the balanced walk
-        /// answered. The walk keeps an explicit stack of open containers, so no nesting depth
-        /// exhausts the call stack. `proofs/OpStreamLoad.fst`'s `skip_val` / `obj_members` /
-        /// `arr_items` are this walk, the stack as their recursion.
-        let private skipContainer (s: string) (start: int) (prefix: JsonlSeg list) : int =
+        /// THE structural walk: the index just past the object or array value at `start`, read by
+        /// the grammar at every depth (Phase 466; until then a container value was balanced and its
+        /// strings checked, and the rest of its grammar was the decoder's): each object's members and
+        /// each array's items, their separators, every string and bare literal, and each object's keys
+        /// pairwise distinct after unescaping — a repeated key is refused at its opening quote once its
+        /// value is read, so a refusal inside the value wins (`Wire.Json`'s order, D157.2). The walk
+        /// keeps an explicit stack of open containers, so no nesting depth exhausts the call stack.
+        /// `proofs/OpStreamLoad.fst`'s `skip_val` / `obj_members` / `arr_items` are this walk, the stack
+        /// as their recursion, and its `members_loop` is the depth-0 frame below.
+        ///
+        /// **The depth-0 frame (Phase 530).** The container at `start` is the walk's depth 0. Given
+        /// `spans`, each of its members (or items) is recorded as `(key, raw span, position)` as its
+        /// value ends — an item's key is its decimal index — so the readers of a line, of an actor
+        /// object and of a string array read the spans this one walk recorded, where each used to scan
+        /// its container with a loop of its own. With `line` set, the container at `start` is a line's
+        /// OWN object (`membersOf`): the line ending inside that frame is `Truncated` at the end of the
+        /// line, and ending inside one of its members' values is `UnterminatedContainer` at that value's
+        /// opening — the two answers the line's own loop and `skipValue` gave before. Otherwise a line
+        /// ending anywhere inside is `UnterminatedContainer` at `start`, the outermost opening, as the
+        /// balanced walk answered.
+        let private walk
+            (s: string)
+            (start: int)
+            (prefix: JsonlSeg list)
+            (line: bool)
+            (spans: ResizeArray<string * string * int>)
+            : int =
             let n = s.Length
             let frames = ResizeArray<JsonlFrame>()
             // The path of a value in the innermost container, and of a key (the container's own).
@@ -633,15 +653,28 @@ module internal OpStreamJsonl =
             // 3: a value is due at `i` (no whitespace before it); 4: open the container at `i`;
             // 5: the innermost container's close was consumed.
             let mutable state = 4
+            // Where the depth-0 frame's current member value starts, and the opening a line ending
+            // inside a container is refused at.
+            let mutable valueAt = start
+            let mutable openAt = start
 
             let skipWs () =
                 while i < n && isWs s[i] do
                     i <- i + 1
 
+            let ended () =
+                if line && frames.Count = 1 then
+                    fail i JsonlFaultReason.Truncated
+                else
+                    fail openAt JsonlFaultReason.UnterminatedContainer
+
             while result < 0 do
                 match state with
                 | 4 ->
                     let isObject = s[i] = '{'
+
+                    if line && frames.Count = 1 then
+                        openAt <- i
 
                     frames.Add
                         { IsObject = isObject
@@ -661,7 +694,7 @@ module internal OpStreamJsonl =
                     skipWs ()
 
                     if i >= n then
-                        fail start JsonlFaultReason.UnterminatedContainer
+                        ended ()
 
                     match s[i] with
                     | '}' when first ->
@@ -676,7 +709,7 @@ module internal OpStreamJsonl =
                         skipWs ()
 
                         if i >= n then
-                            fail start JsonlFaultReason.UnterminatedContainer
+                            ended ()
 
                         if s[i] <> ':' then
                             fail i JsonlFaultReason.ExpectedColon
@@ -685,7 +718,7 @@ module internal OpStreamJsonl =
                         skipWs ()
 
                         if i >= n then
-                            fail start JsonlFaultReason.UnterminatedContainer
+                            ended ()
 
                         state <- 3
                     | _ -> fail i JsonlFaultReason.ExpectedKey
@@ -693,7 +726,7 @@ module internal OpStreamJsonl =
                     skipWs ()
 
                     if i >= n then
-                        fail start JsonlFaultReason.UnterminatedContainer
+                        ended ()
 
                     if s[i] = ']' then
                         if first then
@@ -704,6 +737,9 @@ module internal OpStreamJsonl =
                     else
                         state <- 3
                 | 3 ->
+                    if frames.Count = 1 then
+                        valueAt <- i
+
                     match s[i] with
                     | '"' ->
                         i <- skipString s i valuePath
@@ -723,13 +759,20 @@ module internal OpStreamJsonl =
                 | _ ->
                     let top = frames[frames.Count - 1]
 
+                    if frames.Count = 1 && not (isNull spans) then
+                        spans.Add(
+                            (if top.IsObject then top.Key else string top.Index),
+                            s.Substring(valueAt, i - valueAt),
+                            valueAt
+                        )
+
                     if top.IsObject && top.Seen.Contains top.Key then
                         fail top.KeyAt (JsonlFaultReason.RepeatedKey(valuePath ()))
 
                     skipWs ()
 
                     if i >= n then
-                        fail start JsonlFaultReason.UnterminatedContainer
+                        ended ()
 
                     match s[i] with
                     | ',' ->
@@ -768,7 +811,7 @@ module internal OpStreamJsonl =
             match s[start] with
             | '"' -> skipString s start (fun () -> renderPath prefix Unchecked.defaultof<_> 0)
             | '{'
-            | '[' -> skipContainer s start prefix
+            | '[' -> walk s start prefix false null
             | ','
             | '}'
             | ']' -> fail start JsonlFaultReason.MissingValue
@@ -814,102 +857,34 @@ module internal OpStreamJsonl =
                 with JsonlScanFault(_, r) ->
                     Error(JsonlWriteFaultReason.Unreadable r)
 
-        /// The members of the flat object `s` holds — `(key, raw value, value position)`, in line
-        /// order. A key read twice is refused (`RepeatedKey`) at its opening quote once its value is
-        /// read (Phase 466: until then the first won, Phase 45, and the Wire grammar now refuses it
-        /// too, D157). Positions are offsets into `s` plus `offset`.
+        /// The members of the object `s` holds — `(key, raw value, value position)`, in line order:
+        /// the walk's depth-0 frame over the line's own object (Phase 530; until then a loop of its own
+        /// beside the walk's object arm). A key read twice is refused (`RepeatedKey`) at its opening
+        /// quote once its value is read (Phase 466: until then the first won, Phase 45, and the Wire
+        /// grammar now refuses it too, D157). Positions are offsets into `s` plus `offset`.
         let private membersOf (offset: int) (s: string) : (string * string * int) list =
             let n = s.Length
             let mutable i = 0
 
-            let skipWs () =
-                while i < n && isWs s[i] do
-                    i <- i + 1
-
-            let at k = offset + k
-            skipWs ()
-
-            if i >= n || s[i] <> '{' then
-                fail (at i) JsonlFaultReason.NotAnObject
-
-            i <- i + 1
-            skipWs ()
-            let fields = ResizeArray<string * string * int>()
-            let seen = System.Collections.Generic.HashSet<string>()
-
-            if i >= n then
-                fail (at i) JsonlFaultReason.Truncated
-
-            if s[i] = '}' then
+            while i < n && isWs s[i] do
                 i <- i + 1
-            else
-                let mutable go = true
 
-                while go do
-                    skipWs ()
+            try
+                if i >= n || s[i] <> '{' then
+                    fail i JsonlFaultReason.NotAnObject
 
-                    if i >= n then
-                        fail (at i) JsonlFaultReason.Truncated
+                let spans = ResizeArray<string * string * int>()
+                let mutable e = walk s i [] true spans
 
-                    if s[i] <> '"' then
-                        fail (at i) JsonlFaultReason.ExpectedKey
+                while e < n && isWs s[e] do
+                    e <- e + 1
 
-                    let keyAt = i
+                if e < n then
+                    fail e JsonlFaultReason.TrailingContent
 
-                    let ks =
-                        try
-                            skipString s i rootPath
-                        with JsonlScanFault(p, r) ->
-                            fail (at p) r
-
-                    let key = decodeString s i ks
-                    i <- ks
-                    skipWs ()
-
-                    if i >= n then
-                        fail (at i) JsonlFaultReason.Truncated
-
-                    if s[i] <> ':' then
-                        fail (at i) JsonlFaultReason.ExpectedColon
-
-                    i <- i + 1
-                    skipWs ()
-
-                    if i >= n then
-                        fail (at i) JsonlFaultReason.Truncated
-
-                    let vs =
-                        try
-                            skipValue s i [ JsonlSeg.Key key ]
-                        with JsonlScanFault(p, r) ->
-                            fail (at p) r
-
-                    if not (seen.Add key) then
-                        fail
-                            (at keyAt)
-                            (JsonlFaultReason.RepeatedKey(renderPath [ JsonlSeg.Key key ] Unchecked.defaultof<_> 0))
-
-                    fields.Add((key, s.Substring(i, vs - i), at i))
-                    i <- vs
-                    skipWs ()
-
-                    if i >= n then
-                        fail (at i) JsonlFaultReason.Truncated
-
-                    if s[i] = ',' then
-                        i <- i + 1
-                    elif s[i] = '}' then
-                        i <- i + 1
-                        go <- false
-                    else
-                        fail (at i) JsonlFaultReason.ExpectedCommaOrBrace
-
-            skipWs ()
-
-            if i < n then
-                fail (at i) JsonlFaultReason.TrailingContent
-
-            List.ofSeq fields
+                spans |> Seq.map (fun (k, v, p) -> k, v, offset + p) |> List.ofSeq
+            with JsonlScanFault(p, r) ->
+                fail (offset + p) r
 
         let private faultAt (line: int) (pos: int) (reason: JsonlFaultReason) : JsonlFault =
             { Line = line
@@ -1016,60 +991,26 @@ module internal OpStreamJsonl =
                 let bad () =
                     Error(faultAt line.Number p (JsonlFaultReason.ExpectedStringArray key))
 
-                let n = v.Length
-
-                if n < 2 || v[0] <> '[' || v[n - 1] <> ']' then
+                if v.Length = 0 || v[0] <> '[' then
                     bad ()
                 else
-                    let items = ResizeArray<string>()
-                    let mutable i = 1
-                    let mutable ok = true
-                    let mutable expectItem = true
-                    // Phase 383 — an item the scanner refuses is the scanner's own fault, at its
-                    // position in the line, the way `unquote` answers; never a decode of the bad span.
-                    let mutable scanFault: JsonlFault option = None
+                    // The walk's depth-0 frame over the array records its items (Phase 530; until then a
+                    // third container reader, by hand). A refusal inside the span is the scanner's own,
+                    // at its position in the line (Phase 383), as `unquote` answers.
+                    let items = ResizeArray<string * string * int>()
 
-                    let skipWs () =
-                        while i < n - 1 && isWs v[i] do
-                            i <- i + 1
+                    let walked =
+                        try
+                            Ok(walk v 0 [] false items)
+                        with JsonlScanFault(at, r) ->
+                            Error(faultAt line.Number (p + at) r)
 
-                    skipWs ()
-
-                    if i = n - 1 then
-                        Ok []
-                    else
-                        while ok && i < n - 1 do
-                            skipWs ()
-
-                            if expectItem then
-                                if i < n - 1 && v[i] = '"' then
-                                    let e =
-                                        try
-                                            skipString v i rootPath
-                                        with JsonlScanFault(at, r) ->
-                                            scanFault <- Some(faultAt line.Number (p + at) r)
-                                            -1
-
-                                    if e < 0 then
-                                        ok <- false
-                                    else
-                                        items.Add(decodeString v i e)
-                                        i <- e
-                                        expectItem <- false
-                                else
-                                    ok <- false
-                            elif v[i] = ',' then
-                                i <- i + 1
-                                expectItem <- true
-                            else
-                                ok <- false
-
-                            skipWs ()
-
-                        match scanFault with
-                        | Some f -> Error f
-                        | None when ok && not expectItem -> Ok(List.ofSeq items)
-                        | None -> bad ()
+                    match walked with
+                    | Error f -> Error f
+                    | Ok e when e <> v.Length -> bad ()
+                    | Ok _ when items |> Seq.forall (fun (_, raw: string, _) -> raw[0] = '"') ->
+                        Ok [ for (_, raw, _) in items -> decodeString raw 0 raw.Length ]
+                    | Ok _ -> bad ()
 
         let actorField (key: string) (line: JsonlLine) : Result<Actor, JsonlFault> =
             match memberOf key line with
@@ -1136,6 +1077,21 @@ module internal OpStreamJsonl =
     let spanFault (f: JsonlFault) : string =
         sprintf "%s (position %d)" (JsonlFault.reasonText f.Reason) f.Position
 
+    /// THE chained line, read (Phase 530): `seq`, then the kind's own members (`body`, handed the
+    /// sequence), then the link, `prevHash` and `hash` — the order every chained reader refuses in, so
+    /// a line missing two members names the same one whichever kind reads it.
+    let linkedOf
+        (line: JsonlLine)
+        (body: int -> Result<'B, JsonlFault>)
+        : Result<int * 'B * string * string, JsonlFault> =
+        Jsonl.intField "seq" line
+        |> bindR (fun seq ->
+            body seq
+            |> bindR (fun b ->
+                Jsonl.stringField "prevHash" line
+                |> bindR (fun prevHash ->
+                    Jsonl.stringField "hash" line |> Result.map (fun hash -> seq, b, prevHash, hash))))
+
     /// The first of `members` — `(member, text)` in line order — that `Jsonl.checkRaw` refuses, with
     /// its reason (Phase 473). A text is the member's value exactly as the line will carry it: an
     /// embedded span, or a string the writer quotes itself.
@@ -1198,22 +1154,18 @@ module internal OpStreamJsonl =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (line: JsonlLine)
         : Result<OpRecord<'Op>, JsonlFault> =
-        Jsonl.intField "seq" line
-        |> bindR (fun seq ->
+        linkedOf line (fun _ ->
             actorOf line
             |> bindR (fun actor ->
                 Jsonl.rawField "op" line
                 |> bindR (fun raw -> w.Decode raw |> Result.mapError (Jsonl.refuse line))
-                |> bindR (fun op ->
-                    Jsonl.stringField "prevHash" line
-                    |> bindR (fun prevHash ->
-                        Jsonl.stringField "hash" line
-                        |> Result.map (fun hash ->
-                            { Seq = seq
-                              Actor = actor
-                              Op = op
-                              PrevHash = prevHash
-                              Hash = hash })))))
+                |> Result.map (fun op -> actor, op)))
+        |> Result.map (fun (seq, (actor, op), prevHash, hash) ->
+            { Seq = seq
+              Actor = actor
+              Op = op
+              PrevHash = prevHash
+              Hash = hash })
 
     /// Is this line a snapshot line? One carrying `"snapshot":true` and NO `op` — a record line that
     /// happens to carry a `snapshot` member is a record (Phase 296), not a snapshot dropped on the
@@ -1258,8 +1210,9 @@ module internal OpStreamJsonl =
     /// beside the real witness's answer, so a decode failure stops neither the scan nor the
     /// verification. It encodes a decoded op by the real witness, as verification always has, and an
     /// undecoded one as its stored text — the bytes the checked writer embedded verbatim, so the
-    /// content id still recomputes over exactly what was hashed.
-    let private carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
+    /// content id still recomputes over exactly what was hashed. The op-DAG's load reads through this
+    /// one (Phase 530).
+    let carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
         { Apply = fun _ s -> Ok s
           Encode =
             fun (raw, decoded) ->
@@ -1268,43 +1221,57 @@ module internal OpStreamJsonl =
                 | Error _ -> raw
           Decode = fun raw -> Ok(raw, w.Decode raw) }
 
-    /// The records of a carried read, decoded — or EVERY record the witness refused, by line and
-    /// stored hash.
-    let private settle
-        (reads: (int * OpRecord<string * Result<'Op, string>>) list)
-        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
+    /// A carried read settled (Phase 416; over any read since Phase 530, so the op-DAG's load is this
+    /// one): every read `decode`d, in read order — or EVERY read whose op the witness refused, as the
+    /// site `site` names for it and the witness's reason, in read order.
+    let settle
+        (decode: 'R -> Result<'T, string>)
+        (site: 'R -> string -> UndecodableOp)
+        (reads: 'R list)
+        : Result<'T list, UndecodableOp list> =
         let decoded =
             reads
-            |> List.map (fun (line, r) ->
-                match snd r.Op with
-                | Ok op ->
-                    Ok
-                        { Seq = r.Seq
-                          Actor = r.Actor
-                          Op = op
-                          PrevHash = r.PrevHash
-                          Hash = r.Hash }
-                | Error why ->
-                    Error
-                        { Lane = None
-                          Line = line
-                          NodeId = r.Hash
-                          Reason = why })
+            |> List.map (fun r ->
+                match decode r with
+                | Ok v -> Ok v
+                | Error why -> Error(site r why))
 
         match
             decoded
             |> List.choose (function
-                | Error site -> Some site
+                | Error s -> Some s
                 | Ok _ -> None)
         with
         | [] ->
             Ok(
                 decoded
                 |> List.choose (function
-                    | Ok r -> Some r
+                    | Ok v -> Some v
                     | Error _ -> None)
             )
-        | sites -> Error(StreamLoadFault.Undecodable sites)
+        | sites -> Error sites
+
+    /// The records of a carried read, decoded — or EVERY record the witness refused, by line and
+    /// stored hash: `settle` over the record's carried op.
+    let private settleRecords
+        (reads: (int * OpRecord<string * Result<'Op, string>>) list)
+        : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
+        reads
+        |> settle
+            (fun (_, r) ->
+                snd r.Op
+                |> Result.map (fun op ->
+                    { Seq = r.Seq
+                      Actor = r.Actor
+                      Op = op
+                      PrevHash = r.PrevHash
+                      Hash = r.Hash }))
+            (fun (line, r) why ->
+                { Lane = None
+                  Line = line
+                  NodeId = r.Hash
+                  Reason = why })
+        |> Result.mapError StreamLoadFault.Undecodable
 
     let private readCarried
         (actorOf: JsonlLine -> Result<Actor, JsonlFault>)
@@ -1319,7 +1286,7 @@ module internal OpStreamJsonl =
         (text: string)
         : Result<OpRecord<'Op> list * string list, StreamLoadFault<ChainBreak>> =
         readCarried (Jsonl.actorField "actor") w text
-        |> bindR (fun (reads, snaps) -> settle reads |> Result.map (fun recs -> recs, snaps))
+        |> bindR (fun (reads, snaps) -> settleRecords reads |> Result.map (fun recs -> recs, snaps))
 
     let fromJsonl
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -1332,7 +1299,7 @@ module internal OpStreamJsonl =
         (text: string)
         : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         readCarried (fun line -> Jsonl.stringField "actor" line |> Result.map Actor.ofLegacyString) w text
-        |> bindR (fst >> settle)
+        |> bindR (fst >> settleRecords)
 
     let fromJsonlVerified
         (hashFn: HashFn)
@@ -1343,4 +1310,41 @@ module internal OpStreamJsonl =
         |> bindR (fun (reads, _) ->
             match firstChainBreak hashFn (carry w) (List.map snd reads) with
             | Some b -> Error(StreamLoadFault.Broken b)
-            | None -> settle reads)
+            | None -> settleRecords reads)
+
+/// The JSONL load's building blocks a store of another shape reads through (Phase 530): the checked
+/// line writer, the carrying witness and the settling step — the linear loads' own, so the op-DAG's
+/// load (`Dag.fromJsonl`, the lane loads) writes and reads through them rather than through copies
+/// (DECISIONS.md D83's "the DAG's are its own because the linear ones are internal", answered).
+[<RequireQualifiedAccess>]
+module Jsonl =
+
+    /// Write one line per item, every member checked before any line is built (Phase 301, Phase
+    /// 473): `members` names each member a line carries with its text as the line will carry it (an
+    /// embedded span, or a string the writer quotes itself), in line order; `lineOf item text` builds
+    /// the line around the text of the member named `embedded`. The first member `OpStream.Jsonl.checkRaw`
+    /// refuses is the `Error`, by its 1-based line and member; on `Ok` the lines joined by `\n`.
+    let checkedLines
+        (embedded: string)
+        (members: 'T -> (string * string) list)
+        (lineOf: 'T -> string -> string)
+        (items: 'T list)
+        : Result<string, JsonlWriteFault> =
+        OpStreamJsonl.checkedLines embedded members lineOf items
+
+    /// The witness a load reads through (Phase 416): it never refuses, carrying each op's stored text
+    /// beside `w`'s answer, so a decode failure stops neither the read nor the verification. A decoded
+    /// op encodes by `w`; an undecoded one as its stored text, the bytes the writer embedded verbatim,
+    /// so a hash still recomputes over exactly what was hashed.
+    let carry (w: StreamWitness<'Op, 'State, 'Rej>) : StreamWitness<string * Result<'Op, string>, unit, unit> =
+        OpStreamJsonl.carry w
+
+    /// A carried read settled: every read `decode`d, in read order — or EVERY read whose op the
+    /// witness refused, each as the site `site read reason` names, in read order. Never stops at the
+    /// first: a store written by a newer host is named whole (`StreamLoadFault.Undecodable`).
+    let settle
+        (decode: 'R -> Result<'T, string>)
+        (site: 'R -> string -> UndecodableOp)
+        (reads: 'R list)
+        : Result<'T list, UndecodableOp list> =
+        OpStreamJsonl.settle decode site reads

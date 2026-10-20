@@ -150,17 +150,24 @@ let tests =
                     let v = JObj [ "t", JStr "a\nb"; "n", JArr [ JInt 1; JFloat 0.5 ] ]
 
                     for p in EncodingProfile.all do
-                        Expect.equal (Canonical.write p v) (Json.renderWith p v) (EncodingProfile.name p)
-                        Expect.equal (Canonical.tryWrite p v) (Ok(Json.renderWith p v)) (EncodingProfile.name p)
+                        Expect.equal
+                            (Canonical.write (Rendering.ofProfile p) v)
+                            (Json.renderWith p v)
+                            (EncodingProfile.name p)
+
+                        Expect.equal
+                            (Canonical.tryWrite (Rendering.ofProfile p) v)
+                            (Ok(Json.renderWith p v))
+                            (EncodingProfile.name p)
 
                 testCase "tryWrite refuses a non-finite float and an ill-formed string, naming the path"
                 <| fun () ->
                     for p in EncodingProfile.all do
-                        match Canonical.tryWrite p (JObj [ "x", JArr [ JFloat nan ] ]) with
+                        match Canonical.tryWrite (Rendering.ofProfile p) (JObj [ "x", JArr [ JFloat nan ] ]) with
                         | Error e -> Expect.stringContains e "$[\"x\"][0]" "the path"
                         | Ok t -> failtestf "a NaN rendered as %s" t
 
-                        match Canonical.tryWrite p (JArr [ JStr(string (char 0xD800)) ]) with
+                        match Canonical.tryWrite (Rendering.ofProfile p) (JArr [ JStr(string (char 0xD800)) ]) with
                         | Error e -> Expect.stringContains e "ill-formed" "the class"
                         | Ok t -> failtestf "a lone surrogate rendered as %s" t
 
@@ -182,23 +189,33 @@ let tests =
 
                     for v, path in [ repeated, "$"; nested, "$[0][\"k\"]" ] do
                         refused "Json.tryRender" (Json.tryRender v) path
-                        refused "Canon.tryRender" (Canon.tryRender v) path
+                        refused "Canonical.tryWrite Rendering.CrossHost" (Canonical.tryWrite Rendering.CrossHost v) path
 
                         for p in EncodingProfile.all do
                             let name = EncodingProfile.name p
-                            refused ("Canonical.tryWrite " + name) (Canonical.tryWrite p v) path
+                            refused ("Canonical.tryWrite " + name) (Canonical.tryWrite (Rendering.ofProfile p) v) path
                             refused ("ContentAddress.ofValue " + name) (ContentAddress.ofValue p v) path
                             // the unguarded writer still renders it, and that text is not canonical
-                            Expect.isError (Json.parse (Canonical.write p v)) (name + ": parse refuses the text")
-                            Expect.isFalse (Canonical.isCanonical p (Canonical.write p v)) (name + ": not canonical")
+                            Expect.isError
+                                (Json.parse (Canonical.write (Rendering.ofProfile p) v))
+                                (name + ": parse refuses the text")
+
+                            Expect.isFalse
+                                (Canonical.isCanonical
+                                    (Rendering.ofProfile p)
+                                    (Canonical.write (Rendering.ofProfile p) v))
+                                (name + ": not canonical")
 
                     // the positive control: the same value with distinct names is written, digested and
                     // read back as canonical under every profile
                     let distinct = JObj [ "a", JInt 1; "b", JInt 2 ]
 
                     for p in EncodingProfile.all do
-                        match Canonical.tryWrite p distinct, ContentAddress.ofValue p distinct with
-                        | Ok t, Ok _ -> Expect.isTrue (Canonical.isCanonical p t) (EncodingProfile.name p)
+                        match
+                            Canonical.tryWrite (Rendering.ofProfile p) distinct, ContentAddress.ofValue p distinct
+                        with
+                        | Ok t, Ok _ ->
+                            Expect.isTrue (Canonical.isCanonical (Rendering.ofProfile p) t) (EncodingProfile.name p)
                         | w, d -> failtestf "a distinct-named object was refused: %A / %A" w d
 
                 testCase "read accepts both escaping spellings as one value"
@@ -210,16 +227,19 @@ let tests =
                 <| fun () ->
                     let v1 = "{\"t\":\"a\\nb\"}"
                     let v2 = "{\"t\":\"a\\u000ab\"}"
-                    Expect.isTrue (Canonical.isCanonical EncodingProfile.V1 v1) "V1 text under V1"
-                    Expect.isTrue (Canonical.isCanonical EncodingProfile.V2 v2) "V2 text under V2"
-                    Expect.isFalse (Canonical.isCanonical EncodingProfile.V2 v1) "V1 text under V2"
-                    Expect.isFalse (Canonical.isCanonical EncodingProfile.V1 v2) "V2 text under V1"
+                    Expect.isTrue (Canonical.isCanonical Rendering.V1 v1) "V1 text under V1"
+                    Expect.isTrue (Canonical.isCanonical Rendering.V2 v2) "V2 text under V2"
+                    Expect.isFalse (Canonical.isCanonical Rendering.V2 v1) "V1 text under V2"
+                    Expect.isFalse (Canonical.isCanonical Rendering.V1 v2) "V2 text under V1"
 
                     for p in EncodingProfile.all do
-                        Expect.isFalse (Canonical.isCanonical p "{ \"a\":1}") "whitespace"
-                        Expect.isFalse (Canonical.isCanonical p "-0") "negative zero reads as 0"
-                        Expect.isFalse (Canonical.isCanonical p "{\"a\":1") "not JSON"
-                        Expect.isTrue (Canonical.isCanonical p "{\"b\":1,\"a\":2}") "built order is kept, never sorted" ]
+                        Expect.isFalse (Canonical.isCanonical (Rendering.ofProfile p) "{ \"a\":1}") "whitespace"
+                        Expect.isFalse (Canonical.isCanonical (Rendering.ofProfile p) "-0") "negative zero reads as 0"
+                        Expect.isFalse (Canonical.isCanonical (Rendering.ofProfile p) "{\"a\":1") "not JSON"
+
+                        Expect.isTrue
+                            (Canonical.isCanonical (Rendering.ofProfile p) "{\"b\":1,\"a\":2}")
+                            "built order is kept, never sorted" ]
 
           testList
               "Codec — the committed vectors"
@@ -231,7 +251,11 @@ let tests =
 
                         for p, text in [ EncodingProfile.V1, v1; EncodingProfile.V2, v2 ] do
                             Expect.equal (Codec.read note text) (Ok value) "reads back"
-                            Expect.isTrue (Canonical.isCanonical p text) "the committed text is canonical"
+
+                            Expect.isTrue
+                                (Canonical.isCanonical (Rendering.ofProfile p) text)
+                                "the committed text is canonical"
+
                             Expect.equal (Codec.decoder note (parsed text)) (Ok value) "strict"
 
                         // both columns read as one value whichever spelling they carry
@@ -475,7 +499,7 @@ let tests =
                         "a build-time fault is unchanged"
 
                     Expect.equal
-                        (note.Write plain |> Result.map (Canonical.write EncodingProfile.V2))
+                        (note.Write plain |> Result.map (Canonical.write Rendering.V2))
                         (Codec.write EncodingProfile.V2 note plain)
                         "over a covered value, Codec.write is Canonical.write of Write" ]
 
@@ -597,10 +621,10 @@ let private digestOk (r: Result<Digest, 'e>) : Digest =
 let private pinned: JVal =
     JObj [ "id", JStr "n1"; "text", JStr "line one\nline two"; "n", JInt 3 ]
 
-/// The Phase 314 digests of a reference tree whose shell encoder is `Canonical.write profile`.
+/// The Phase 314 digests of a reference tree whose shell encoder is `Canonical.write (Rendering.ofProfile profile)`.
 let private profiledDigests (profile: EncodingProfile) =
     let encode (n: Reference.RNode) =
-        Canonical.write profile (JObj [ "kind", JStr n.Kind; "value", JStr n.Value ])
+        Canonical.write (Rendering.ofProfile profile) (JObj [ "kind", JStr n.Kind; "value", JStr n.Value ])
 
     let tree =
         Reference.RNode.node
@@ -621,7 +645,10 @@ let digestOnTheSpine =
               let v2 = digestOk (ContentAddress.ofValue EncodingProfile.V2 pinned)
 
               for p, d in [ EncodingProfile.V1, v1; EncodingProfile.V2, v2 ] do
-                  Expect.equal d.Hex (Hash.sha256Hex (Canonical.write p pinned)) (EncodingProfile.name p)
+                  Expect.equal
+                      d.Hex
+                      (Hash.sha256Hex (Canonical.write (Rendering.ofProfile p) pinned))
+                      (EncodingProfile.name p)
 
               Expect.equal
                   (Digest.print v1)
@@ -639,11 +666,11 @@ let digestOnTheSpine =
           <| fun () ->
               for p in EncodingProfile.all do
                   Expect.equal
-                      (ContentAddress.ofCanonicalText p (Canonical.write p pinned))
+                      (ContentAddress.ofCanonicalText p (Canonical.write (Rendering.ofProfile p) pinned))
                       (ContentAddress.ofValue p pinned)
                       (EncodingProfile.name p)
 
-              let v1Text = Canonical.write EncodingProfile.V1 pinned
+              let v1Text = Canonical.write Rendering.V1 pinned
               Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 v1Text) "V1's short escape is not V2's"
               Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 "{\"id\": 1}") "whitespace"
               Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 "{") "not JSON"

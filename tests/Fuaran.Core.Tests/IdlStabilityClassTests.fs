@@ -421,9 +421,9 @@ let tests =
           testCase "an additive revision bumps the MINOR, through Versioning.bump" (fun _ ->
               let v = verdict Fixtures.baseIdl Fixtures.optionalFieldAdded
 
-              match Diff.bumpProfile Versioning.Profile.coreV1 v with
+              match Diff.bumpProfile Versioning.Capability.coreV1 v with
               | Diff.Bump.Bumped p ->
-                  Expect.equal (Versioning.Profile.render p) "core@1.1" "the minor moved, the major did not"
+                  Expect.equal (Versioning.Capability.render p) "core@1.1" "the minor moved, the major did not"
               | Diff.Bump.Undecided _ -> failtest "an additive revision was reported undecided")
 
           testCase "a breaking-wire revision bumps the MAJOR and resets the minor" (fun _ ->
@@ -434,7 +434,7 @@ let tests =
                   "a removed kind is a wire break"
 
               match Diff.bumpProfile { Name = "core"; Major = 1; Minor = 7 } v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@2.0" "a /vN/ boundary"
+              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
               | Diff.Bump.Undecided _ -> failtest "a wire break was reported undecided")
 
           testCase "a REQUIRED field added bumps the MAJOR: a Behind consumer must not tolerate it" (fun _ ->
@@ -444,7 +444,7 @@ let tests =
               let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
 
               match Diff.bumpProfile { Name = "core"; Major = 1; Minor = 3 } v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@2.0" "a /vN/ boundary"
+              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@2.0" "a /vN/ boundary"
               | Diff.Bump.Undecided _ -> failtest "reported undecided"
 
               Expect.equal (Diff.verdictClass v |> Diff.classLabel) "breaking" "the gate class is breaking")
@@ -458,16 +458,16 @@ let tests =
               // code that relied on it now emits differently — and no longer a required field.
               let v = verdict Fixtures.defaultOnRequired Fixtures.baseIdl
 
-              match Diff.bumpProfile Versioning.Profile.coreV1 v with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@1.1" "minor"
+              match Diff.bumpProfile Versioning.Capability.coreV1 v with
+              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.1" "minor"
               | Diff.Bump.Undecided _ -> failtest "reported undecided"
 
               Expect.isTrue v.BreaksEmitters "and the emitter obligation is carried, not lost"
               Expect.equal (Diff.verdictClass v |> Diff.classLabel) "breaking" "the gate class is breaking")
 
           testCase "an additive revision with no rows leaves the profile where it is" (fun _ ->
-              match Diff.bumpProfile Versioning.Profile.coreV1 (verdict Fixtures.baseIdl Fixtures.baseIdl) with
-              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@1.0" "no movement"
+              match Diff.bumpProfile Versioning.Capability.coreV1 (verdict Fixtures.baseIdl Fixtures.baseIdl) with
+              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Capability.render p) "core@1.0" "no movement"
               | Diff.Bump.Undecided _ -> failtest "an unchanged pair was reported undecided")
 
           testCase "the class vocabulary round-trips, and an unknown label is refused" (fun _ ->
@@ -952,7 +952,7 @@ module private Evolution304 =
             tsModule
             + "\nconst __docs = [\n"
             + (docs
-               |> List.map (fun d -> "  " + Canon.render (JStr d) + ",")
+               |> List.map (fun d -> "  " + Canonical.write Rendering.CrossHost (JStr d) + ",")
                |> String.concat "\n")
             + "\n];\n"
             + "for (const d of __docs) {\n"

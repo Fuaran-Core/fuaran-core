@@ -286,7 +286,7 @@ let private noteProjection: Gen.KindProjection =
       // encoder does: until the reference module was COMPILED and run against the interpreter,
       // nothing noticed that this projection wrote `{"body":…}` where the wire says
       // `{"$type":"Note","body":…}`, so every compiled Note was undecodable by the other hosts.
-      Encoder = """and private encNoteSpec (s: NoteSpec) : JVal = Canon.typed "Note" [ "body", encText s.Body ]"""
+      Encoder = """and private encNoteSpec (s: NoteSpec) : JVal = Canonical.typed "Note" [ "body", encText s.Body ]"""
       // Phase 337 — a projection's decoder composes with the generated decoders, so it answers
       // their typed refusal, and reads its member through the generated helpers: a refusal of
       // the body is then at `["kind", "body", …]`, the path the interpreter reports.

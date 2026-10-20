@@ -117,7 +117,7 @@ module Space =
 
     /// The ONE spelling a value in the space is handed on as (Phase 295), or `None` where the
     /// string is not in the space. An integer is written in its shortest decimal form (`05` and `5`
-    /// are both `5`), a number in the canonical float layout (`Canon.canonicalFloat`: `1.50` is
+    /// are both `5`), a number in the canonical float layout (`FloatLayout.canonical`: `1.50` is
     /// `1.5`); every other space's value is its own spelling. So one value has one spelling, and
     /// `Capability.invocationKey` — which keys an argument by this spelling where it lies in its
     /// hole's space — gives one value one capture key.
@@ -129,7 +129,7 @@ module Space =
             | _ -> None
         | FloatRange(lo, hi) ->
             match readFloat s with
-            | Some v when v >= lo && v <= hi -> Some(Canon.canonicalFloat v)
+            | Some v when v >= lo && v <= hi -> Some(FloatLayout.canonical v)
             | _ -> None
         | StringLen(lo, hi) -> if s.Length >= lo && s.Length <= hi then Some s else None
         | Enum xs -> if List.contains s xs then Some s else None
@@ -217,7 +217,7 @@ module Space =
     let describe (space: ValueSpace) : string =
         match space with
         | IntRange(lo, hi) -> "an integer from " + string lo + " to " + string hi
-        | FloatRange(lo, hi) -> "a number from " + Canon.canonicalFloat lo + " to " + Canon.canonicalFloat hi
+        | FloatRange(lo, hi) -> "a number from " + FloatLayout.canonical lo + " to " + FloatLayout.canonical hi
         | StringLen(lo, hi) -> "a string of " + string lo + " to " + string hi + " characters"
         | Enum [] -> "a member of an empty set, so no value is accepted"
         | Enum xs -> "one of " + SeamCodec.quoteAll xs
@@ -245,13 +245,13 @@ module SpaceCodec =
     /// Write a value space as a wire document (`"$type"`, `min` / `max`).
     let toJson (s: ValueSpace) : JVal =
         match s with
-        | IntRange(lo, hi) -> Canon.typed "intRange" [ "min", JInt lo; "max", JInt hi ]
-        | FloatRange(lo, hi) -> Canon.typed "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
-        | StringLen(lo, hi) -> Canon.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
-        | Enum xs -> Canon.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
-        | AnyString -> Canon.typed "anyString" []
+        | IntRange(lo, hi) -> Canonical.typed "intRange" [ "min", JInt lo; "max", JInt hi ]
+        | FloatRange(lo, hi) -> Canonical.typed "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
+        | StringLen(lo, hi) -> Canonical.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
+        | Enum xs -> Canonical.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
+        | AnyString -> Canonical.typed "anyString" []
         | SlotTree c ->
-            Canon.typed
+            Canonical.typed
                 "slotTree"
                 (match c with
                  | Some k -> [ "slotKind", JStr k ]
@@ -289,15 +289,6 @@ module SpaceCodec =
 
     /// Read a value space as `toJson` writes it, dispatched on `"$type"` — the ONE reader spelling
     /// (Phase 405). A document with no `"$type"`, the descriptor spelling `toSchema` writes among
-    /// them, is refused `MissingField` at `$type`; it is never read.
-    ///
-    /// `typeMiss` is the sentence an unknown `"$type"` is refused in (`<typeMiss><tag>`), so a codec
-    /// that embeds a value space keeps its own (Phase 388: `CapabilityPipelineCodec` reads through
-    /// this rather than re-wording the refusal after it).
-    let internal decoderSaying (typeMiss: string) : Decoder<ValueSpace> =
-        Decoder.tagDispatchWith typeMiss "$type" cases
-
-    /// Read a value space — `decoderSaying`, an unknown `"$type"` refused as
-    /// `unknown value-space kind: <tag>`.
-    let decoder: Decoder<ValueSpace> =
-        fun el -> decoderSaying "unknown value-space kind: " el
+    /// them, is refused `MissingField` at `$type`; it is never read, and an unknown `"$type"` is
+    /// `UnknownTag` there, naming the kinds it knows.
+    let decoder (el: JVal) : Result<ValueSpace, DecodeError> = Decoder.tagDispatch "$type" cases el

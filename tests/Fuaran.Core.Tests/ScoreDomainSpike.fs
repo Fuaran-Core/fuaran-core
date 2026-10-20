@@ -386,7 +386,7 @@ let private allFixtures (corpus: string) =
 /// the second spike's: the foreign root, in its NATIVE shape and with no
 /// adapter, is canonically rendered, decoded, re-encoded, and the bytes compared.
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.renderOrdered root
+    let expected = Canonical.write Rendering.Declared root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)
@@ -491,10 +491,25 @@ let tests =
               with
               | Ok _ -> failtest "the default-shape declaration decoded the flat kind-tagged wire"
               | Error e ->
-                  Expect.stringContains
+                  // Phase 520: re-pinned to the code and the path — the node envelope's own member,
+                  // not a field-level defect — and the projected sentence
+                  Expect.equal
                       e
-                      "node"
-                      (sprintf "the failure names the node envelope rather than a field-level defect (got: %s)" e)
+                      (DecodeError.sentence DecodeCode.WrongKind "object" "string")
+                      "the node envelope's `kind` is a string where the default shape takes an object"
+
+                  match
+                      Decode.decodeDetailed
+                          ({ scoreIdl with
+                              Wire = WireShape.Default })
+                          bytes
+                  with
+                  | Error d ->
+                      Expect.equal
+                          (d.Code, d.Path)
+                          (DecodeCode.WrongKind, [ PathSegment.Key "kind" ])
+                          "at the node envelope's own member"
+                  | Ok _ -> failtest "the typed read decoded it"
           }
 
           // ---- finding (3): the headline negative, pinned so it cannot rot ----

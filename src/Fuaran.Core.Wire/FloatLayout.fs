@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-/// The single float -> string LAYOUT, shared by `Json.render` and `Canon.canonicalFloat`, and
+/// The single float -> string LAYOUT, shared by `Json.render` and [[canonical]], and
 /// value-identical on both pipelines. .NET's round-trip specifier (`"R"`) is what the layout IS,
 /// and it is also the one thing Fable will not do: `String.format` REFUSES `R` at RUNTIME, so a
 /// `"{0:R}"` on a Fable-targeted surface compiles cleanly and throws in the browser. The re-lay
@@ -90,7 +90,7 @@ module FloatLayout =
 #endif
 
     /// A FINITE double in .NET's round-trip (`"R"`) layout, on either pipeline. `-0.0` keeps its
-    /// sign here — collapsing it is `Canon.canonicalFloat`'s wire rule, not the layout's.
+    /// sign here — collapsing it is [[canonical]]'s wire rule, not the layout's.
     ///
     /// Under Fable, a double of magnitude in [1e-4, 1e17) is written by JS's own `toString`, with no
     /// re-lay, because there the two layouts are the same characters (Phase 373). Write the shortest
@@ -135,3 +135,18 @@ module FloatLayout =
         elif System.Double.IsPositiveInfinity f then "Infinity"
         elif System.Double.IsNegativeInfinity f then "-Infinity"
         else finite f
+
+    /// The CANONICAL float spelling (Phase 55; `Canon.canonicalFloat` until Phase 520) — the float
+    /// rule of the cross-host and declared renderings (`FloatRule.Canonical`). Non-finite floats
+    /// render to the fixed JSON-string tokens `"NaN"` / `"Infinity"` / `"-Infinity"` (WIRE_FORMAT
+    /// §7); `-0.0` collapses to `0`; a finite float is [[finite]] (WIRE_FORMAT §2 rule 5). Every
+    /// float→wire / float→key path in the substrate that writes the cross-host form routes through
+    /// this one function, so the bytes match across the .NET / Fable / TS / Python hosts. Pinned in
+    /// `STABILITY.md`.
+    let canonical (f: float) : string =
+        match JVal.nonFiniteToken f with
+        | Some tok -> "\"" + tok + "\""
+        | None ->
+            // -0 collapses to 0 (WIRE_FORMAT §2 rule 5) — the wire rule, applied before the layout.
+            let v = if f = 0.0 then 0.0 else f
+            finite v

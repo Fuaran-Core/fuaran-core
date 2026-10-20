@@ -391,7 +391,7 @@ let familiesTests =
 
           testCase "the JSON export is the canonical rendering, one family per line"
           <| fun _ ->
-              // Phase 506 — every value is written by `Canon.render`, and the document is that
+              // Phase 506 — every value is written by `Canonical.write Rendering.CrossHost`, and the document is that
               // rendering broken at the families array. So the lines, trimmed and joined, are the
               // canonical rendering of what they parse to: member order, escaping and number layout
               // are the wire's own, not this renderer's.
@@ -403,7 +403,11 @@ let familiesTests =
               | Ok parsed ->
                   let lines = json.Split('\n')
                   let joined = lines |> Array.map (fun l -> l.Trim()) |> String.concat ""
-                  Expect.equal joined (Canon.render parsed) "the export is Canon.render of itself, broken into lines"
+
+                  Expect.equal
+                      joined
+                      (Canonical.write Rendering.CrossHost parsed)
+                      "the export is Canonical.write Rendering.CrossHost of itself, broken into lines"
 
                   for f in KitRoster.families do
                       Expect.equal
@@ -418,7 +422,11 @@ let familiesTests =
               let reordered = "{\"kind\":\"k\",\"families\":[]}"
 
               match Json.parse reordered with
-              | Ok v -> Expect.notEqual reordered (Canon.render v) "an out-of-order document is not canonical"
+              | Ok v ->
+                  Expect.notEqual
+                      reordered
+                      (Canonical.write Rendering.CrossHost v)
+                      "an out-of-order document is not canonical"
               | Error e -> failtestf "the go-red document does not parse: %s" e
 
           testCase "a schema bump is a recorded contract move: STABILITY.md names the reader and the current schema"

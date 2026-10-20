@@ -12,6 +12,7 @@ attribute Fuaran.Core.Idl.NodeEnvelopeShape RequireQualifiedAccess
 attribute Fuaran.Core.Idl.ProposalModule RequireQualifiedAccess
 attribute Fuaran.Core.Idl.SourceLit RequireQualifiedAccess
 attribute Fuaran.Core.Idl.TypeParams RequireQualifiedAccess
+attribute Fuaran.Core.Idl.VocabularyFaultModule RequireQualifiedAccess
 ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String)
 ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.String)
@@ -31,6 +32,7 @@ ctor Fuaran.Core.Idl.ProposalAlternative..ctor(System.String, System.String, Sys
 ctor Fuaran.Core.Idl.ProposalEvidence..ctor(System.String, System.String, System.String, System.Int32, System.String)
 ctor Fuaran.Core.Idl.ProposalFixture..ctor(System.String, System.String)
 ctor Fuaran.Core.Idl.Sample+SampleFault..ctor(System.String, System.String)
+ctor Fuaran.Core.Idl.VocabularyFault..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, System.String)
 ctor Fuaran.Core.Idl.WireShape..ctor(System.String, Fuaran.Core.Idl.NodeEnvelopeShape, Fuaran.Core.Idl.KeyOrder)
 field Fuaran.Core.Idl.Artifact.version : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.Date : System.Int32 (literal)
@@ -93,19 +95,19 @@ method Fuaran.Core.Idl.Artifact.identityOfJson(Fuaran.Core.JVal) : Microsoft.FSh
 method Fuaran.Core.Idl.Artifact.json(Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.jsonWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
-method Fuaran.Core.Idl.Artifact.ofJsonDetailed(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Fuaran.Core.DecodeError>
+method Fuaran.Core.Idl.Artifact.ofJsonDetailed(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
 method Fuaran.Core.Idl.Artifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
-method Fuaran.Core.Idl.Artifact.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Fuaran.Core.DecodeError>
+method Fuaran.Core.Idl.Artifact.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
 method Fuaran.Core.Idl.Artifact.render(Fuaran.Core.Idl.Idl) : System.String
 method Fuaran.Core.Idl.Artifact.renderJson(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Idl.Artifact.renderWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : System.String
 method Fuaran.Core.Idl.Declare.enumAnnotate(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Fuaran.Core.Idl.IdlEnum) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlEnum, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 method Fuaran.Core.Idl.Declare.enumOf(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.Idl.IdlEnum
-method Fuaran.Core.Idl.Declare.enumWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.Idl.Declare.enumWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>
 method Fuaran.Core.Idl.Declare.enumWith(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Fuaran.Core.Idl.IdlEnum
-method Fuaran.Core.Idl.Declare.errors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-method Fuaran.Core.Idl.Declare.hostedWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-method Fuaran.Core.Idl.Declare.wireShapeErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.Idl.Declare.errors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>
+method Fuaran.Core.Idl.Declare.hostedWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>
+method Fuaran.Core.Idl.Declare.wireShapeErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>
 method Fuaran.Core.Idl.Decode.decode(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
 method Fuaran.Core.Idl.Decode.decodeDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Decode.decodeOp(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
@@ -149,6 +151,7 @@ method Fuaran.Core.Idl.SourceLit.tsStringSingle(System.String) : System.String
 method Fuaran.Core.Idl.TransparentUnion.tag(Fuaran.Core.Idl.HardenPolicy, Fuaran.Core.Idl.IdlUnion) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.TypeParams.bind(Fuaran.Core.Idl.IdlUnion, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>>
 method Fuaran.Core.Idl.TypeParams.substitute(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.IdlType) : Fuaran.Core.Idl.IdlType
+method Fuaran.Core.Idl.VocabularyFaultModule.describe(Fuaran.Core.Idl.VocabularyFault) : System.String
 property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get } (static)
 property Fuaran.Core.Idl.Annotations.IsEmpty : System.Boolean { get }
 property Fuaran.Core.Idl.Artifact.defaultDescription : System.String { get }
@@ -243,6 +246,8 @@ record-field Fuaran.Core.Idl.ProposalFixture.Name #0 : System.String
 record-field Fuaran.Core.Idl.ProposalFixture.Wire #1 : System.String
 record-field Fuaran.Core.Idl.Sample+SampleFault.At #0 : System.String
 record-field Fuaran.Core.Idl.Sample+SampleFault.Reason #1 : System.String
+record-field Fuaran.Core.Idl.VocabularyFault.At #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>
+record-field Fuaran.Core.Idl.VocabularyFault.Detail #1 : System.String
 record-field Fuaran.Core.Idl.WireShape.Discriminator #0 : System.String
 record-field Fuaran.Core.Idl.WireShape.KeyOrder #2 : Fuaran.Core.Idl.KeyOrder
 record-field Fuaran.Core.Idl.WireShape.NodeEnvelope #1 : Fuaran.Core.Idl.NodeEnvelopeShape
@@ -321,6 +326,8 @@ type Fuaran.Core.Idl.Sanitize (module)
 type Fuaran.Core.Idl.SourceLit (module)
 type Fuaran.Core.Idl.TransparentUnion (module)
 type Fuaran.Core.Idl.TypeParams (module)
+type Fuaran.Core.Idl.VocabularyFault (record)
+type Fuaran.Core.Idl.VocabularyFaultModule (module)
 type Fuaran.Core.Idl.WireShape (record)
 union-case Fuaran.Core.Idl.HostedFormat.Date #0()
 union-case Fuaran.Core.Idl.HostedFormat.DateTime #1()

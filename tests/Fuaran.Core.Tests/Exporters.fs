@@ -5,7 +5,7 @@ module Fuaran.Core.Tests.Exporters
 //
 //  Seven `--emit-*` verbs grew one mechanism each — three JSON writers, a freshness equality per
 //  family, and two manifest shapes. They are rows now. Every row renders through the one writer
-//  (`CorpusFile.render`, which escapes through `Canon.render`); every self-enumerated manifest is the
+//  (`CorpusFile.render`, which escapes through `Canonical.write Rendering.CrossHost`); every self-enumerated manifest is the
 //  one schema (`CorpusManifest`); and every committed file is held to what its row renders by ONE
 //  reading (`CorpusFile.firstDifference`), in the one test below. The test runner dispatches
 //  `--emit <family>` over the table (`Program.fs`), the `--emit-<family>` spellings kept as aliases
@@ -201,7 +201,8 @@ let tests =
                       "a lost trailing newline is a difference, not forgiven"
 
           yield
-              testCase "the one writer lays a document out a member and an item per line, escaping through Canon.render"
+              testCase
+                  "the one writer lays a document out a member and an item per line, escaping through Canonical.write Rendering.CrossHost"
               <| fun _ ->
                   let doc =
                       { Head = [ "family", CorpusFile.str "x\n\"y\""; "count", CorpusFile.num 2 ]
@@ -215,7 +216,7 @@ let tests =
                       (CorpusFile.render doc)
                       ("{\n  \"family\": \"x\\u000a\\\"y\\\"\",\n  \"count\": 2,\n  \"vectors\": [\n"
                        + "    { \"id\": \"a\", \"input\": {} },\n    {\"a\":2,\"b\":1},\n    [\"p\", 3]\n  ]\n}\n")
-                      "author order and spacing in a Row, Canon.render's sorted compact form in a Value"
+                      "author order and spacing in a Row, Canonical.write Rendering.CrossHost's sorted compact form in a Value"
 
                   Expect.equal
                       (CorpusFile.render { doc with Rows = [] })

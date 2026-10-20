@@ -10,6 +10,7 @@ open Expecto
 // Phase 177 — the extracted FUNCTION-SEAM model, bound the same way and for the same reason:
 // production's `Fuaran.Core.Capability` module shares the model's name once `Fuaran.Core` is open.
 module ModelCap = Capability
+module ModelProp = Propagation
 
 open Fuaran.Core
 open Fuaran.Core.Tests
@@ -732,7 +733,7 @@ let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : C
 // ------------------------------------------------------------------------------------------
 // Phase 354 — the three sections of `proofs/Capability.fst` Phase 307 left unmodelled, each beside
 // the production function it names: the HANDLER TABLE (`Function.bindHandlers`), the CAPABILITY
-// PIPELINE (`CapabilityPipeline.typeCheck` / `eval` / `dirtySet` / `evalFrom`) and the CODECS
+// PIPELINE (`CapabilityPipeline.typeCheck` / `eval` / `dependencyMap` / `evalFrom`) and the CODECS
 // (`CapabilityCodec` for a signature and a capability, the pipeline's for its nodes).
 //
 // The draws reach what the sections' theorems are about and the Phase 307 generator did not:
@@ -1408,7 +1409,27 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
          | Ok(), Ok _ -> evaluated <- evaluated + 1
          | Ok(), Error _ -> evalRefused <- evalRefused + 1)
 
-        // ---- dirtySet and evalFrom ----
+        // ---- dependencyMap, the dirty set and evalFrom ----
+        // Phase 544: the model's dirty set is Propagation's closure instantiated at `deps_of`, and
+        // production's is Propagation's closure over `dependencyMap`, so the differential compares
+        // the INSTANTIATION (the edge relation each map names, which is what `pipeline_edge_iff`
+        // and the two closure theorems are stated over) and then the closure over it — model
+        // against production on both, never production against itself.
+        let pDeps = CapabilityPipeline.dependencyMap p
+        let mDeps = ModelCap.deps_of mp.p_nodes
+
+        let pEdges =
+            pDeps
+            |> Map.toSeq
+            |> Seq.collect (fun (n, rs) -> rs |> Seq.map (fun r -> n, r))
+            |> Set.ofSeq
+
+        let mEdges =
+            mDeps |> Seq.collect (fun (n, rs) -> rs |> Seq.map (fun r -> n, r)) |> Set.ofSeq
+
+        if pEdges <> mEdges then
+            diffs.Add(sprintf "seed %d: dependencyMap's edges differ (%A vs %A)" i pEdges mEdges)
+
         let nodeIds = p.Nodes |> List.map CapabilityPipeline.nodeId
         let mutable changed = []
 
@@ -1427,11 +1448,11 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
         let changedSet = Set.ofList changed
         let changedList = Set.toList changedSet
-        let pDirty = CapabilityPipeline.dirtySet changedSet p
-        let mDirty = Set.ofList (ModelCap.dirty_set changedList mp)
+        let pDirty = Propagation.dirtyFromChangedIds pDeps changedSet
+        let mDirty = Set.ofList (ModelProp.dirty_from_changed_ids mDeps changedList)
 
         if pDirty <> mDirty then
-            diffs.Add(sprintf "seed %d: dirtySet differs (%A vs %A)" i pDirty mDirty)
+            diffs.Add(sprintf "seed %d: the dirty set differs (%A vs %A)" i pDirty mDirty)
 
         // The new body: the old one, re-drawn at exactly the changed nodes — `agree_off`.
         let table1 =
@@ -1632,7 +1653,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
              if wf then
                  diffs.Add(sprintf "seed %d: a well-formed capability was refused (%s)" i (prodDecodeErrRender e)))
 
-        // ... and through the BYTES, where the document can be written: `Canon.render` then the
+        // ... and through the BYTES, where the document can be written: `Canonical.write Rendering.CrossHost` then the
         // parser, which is where a whole float comes back as an integer token.
         (match CapabilityCodec.tryEncode cap with
          | Ok s ->
@@ -1765,7 +1786,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
 
         if
             CapabilityPipeline.encode pl
-            <> Canon.render (jvalOfModel (ModelCap.pipeline_json mpl))
+            <> Canonical.write Rendering.CrossHost (jvalOfModel (ModelCap.pipeline_json mpl))
         then
             diffs.Add(sprintf "seed %d: the pipeline encodes differently" i)
 
@@ -1798,7 +1819,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
 
                 for j in pdocs do
                     nodeDocuments <- nodeDocuments + 1
-                    let text = Canon.render j
+                    let text = Canonical.write Rendering.CrossHost j
 
                     match Decoder.parse ReadOptions.strict text with
                     | Error _ -> diffs.Add(sprintf "seed %d: a mutated pipeline document did not parse" i)
@@ -1973,7 +1994,10 @@ let private seamCodecDifferential
         | Error e -> diffs.Add(sprintf "seed %d: the invocation did not parse: %A" i e)
         | Ok j0 ->
             // The encoding is compared as the canonical TEXT both write: `encodeInvocation` renders it.
-            if Canon.render (jvalOfModel (invocationJson cid args)) <> text then
+            if
+                Canonical.write Rendering.CrossHost (jvalOfModel (invocationJson cid args))
+                <> text
+            then
                 diffs.Add(sprintf "seed %d: the invocation encodes differently: %s" i text)
 
             for jm in mutations j0 do
@@ -1981,12 +2005,14 @@ let private seamCodecDifferential
                 // The document production reads is the text the mutation renders to, so the model
                 // reads exactly that document too.
                 let j =
-                    match Json.parse (Canon.render jm) with
+                    match Json.parse (Canonical.write Rendering.CrossHost jm) with
                     | Ok v -> v
                     | Error _ -> jm
 
                 let p =
-                    CapabilityCodec.decodeInvocationDetailedWith ReadPolicy.Lenient (Canon.render j)
+                    CapabilityCodec.decodeInvocationDetailedWith
+                        ReadPolicy.Lenient
+                        (Canonical.write Rendering.CrossHost j)
 
                 let m = ModelCap.invocation_of_j (jvalToModel j)
 
@@ -2005,10 +2031,17 @@ let private seamCodecDifferential
                                 "seed %d: an invocation refusal does not resolve: %s in %s"
                                 i
                                 (prodDecodeErrRender pe)
-                                (Canon.render j)
+                                (Canonical.write Rendering.CrossHost j)
                         )
                 | _ ->
-                    diffs.Add(sprintf "seed %d: the invocation readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+                    diffs.Add(
+                        sprintf
+                            "seed %d: the invocation readers disagree on %s: %A vs %A"
+                            i
+                            (Canonical.write Rendering.CrossHost j)
+                            p
+                            m
+                    )
 
         // ---- the typed refusal: every case, a value space and a declaration fault inside ----
         let e, r3 = genInvokeError rng.Value
@@ -2028,7 +2061,14 @@ let private seamCodecDifferential
                 errorsRefused <- errorsRefused + 1
                 codes <- codes.Add(string (modelCodeOf me.d_code))
             | p, m ->
-                diffs.Add(sprintf "seed %d: the invoke-error readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+                diffs.Add(
+                    sprintf
+                        "seed %d: the invoke-error readers disagree on %s: %A vs %A"
+                        i
+                        (Canonical.write Rendering.CrossHost j)
+                        p
+                        m
+                )
 
         // ---- the async envelope, over a string payload ----
         let k, r4 = ConfRng.intBelow 3 rng.Value
@@ -2074,7 +2114,15 @@ let private seamCodecDifferential
             | Error _, ModelCap.Error me ->
                 deferredRefused <- deferredRefused + 1
                 codes <- codes.Add(string (modelCodeOf me.d_code))
-            | p, m -> diffs.Add(sprintf "seed %d: the envelope readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+            | p, m ->
+                diffs.Add(
+                    sprintf
+                        "seed %d: the envelope readers disagree on %s: %A vs %A"
+                        i
+                        (Canonical.write Rendering.CrossHost j)
+                        p
+                        m
+                )
 
     { ScDiffs = List.ofSeq diffs
       ScDocuments = documents
@@ -2544,7 +2592,7 @@ let tests =
                   "and one disagreement is about WHICH undeclared key is named first"
 
           testCase
-              "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dirtySet and evalFrom over generated registries, pipelines, reorderings and change sets"
+              "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dependencyMap and evalFrom, and its dirty set with Propagation.dirtyFromChangedIds over that map, over generated registries, pipelines, reorderings and change sets"
           <| fun _ ->
               let t = underCulture "he-IL" (fun () -> pipeDifferential readers 3542 500)
 

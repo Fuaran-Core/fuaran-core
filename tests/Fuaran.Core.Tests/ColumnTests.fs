@@ -156,13 +156,17 @@ let tests =
 
           testCase "numeric columns use the Wire canonical-float layout"
           <| fun _ ->
-              // a float column's value tokens must match Canon.render of the same JFloat exactly —
+              // a float column's value tokens must match Canonical.write Rendering.CrossHost of the same JFloat exactly —
               // the codec renders through Canon (Phase 299: this compared against Json.render, the
               // author-ordered renderer the codec does not use)
               let json = ColumnCodec.encode sample
-              let expected = Canon.render (JFloat 0.1)
+              let expected = Canonical.write Rendering.CrossHost (JFloat 0.1)
               Expect.stringContains json expected "0.1 renders via the Wire {0:R} layout"
-              Expect.stringContains json (Canon.render (JFloat(1.0 / 3.0))) "1/3 renders canonically"
+
+              Expect.stringContains
+                  json
+                  (Canonical.write Rendering.CrossHost (JFloat(1.0 / 3.0)))
+                  "1/3 renders canonically"
 
           testCase "embedded float column accepts an integer token (lossless widening)"
           <| fun _ ->
@@ -445,10 +449,19 @@ let tests =
 
           testCase "Canon float layout matches .NET ToString(\"R\") incl. scientific form"
           <| fun _ ->
-              Expect.equal (Canon.render (JFloat 0.1)) "0.1" "fixed-point for small exponents"
-              Expect.equal (Canon.render (JFloat 1e21)) "1E+21" "scientific layout above the threshold"
-              Expect.equal (Canon.render (JFloat 1e-7)) "1E-07" "scientific layout below the threshold"
-              Expect.equal (Canon.render (JFloat -0.0)) "0" "negative zero collapses to 0"
+              Expect.equal (Canonical.write Rendering.CrossHost (JFloat 0.1)) "0.1" "fixed-point for small exponents"
+
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat 1e21))
+                  "1E+21"
+                  "scientific layout above the threshold"
+
+              Expect.equal
+                  (Canonical.write Rendering.CrossHost (JFloat 1e-7))
+                  "1E-07"
+                  "scientific layout below the threshold"
+
+              Expect.equal (Canonical.write Rendering.CrossHost (JFloat -0.0)) "0" "negative zero collapses to 0"
 
           // ---- Phase 38: non-finite-float guard on the columnar encode ----
 
@@ -3447,8 +3460,9 @@ let oneCellTests =
                       // Compared as rendered, so a NaN slot (which `Table.validate` would refuse
                       // before any encode) compares as the one value its token says it is.
                       Expect.equal
-                          (ColumnCodec.writeCell "c" ty c |> Result.map Canon.render)
-                          (oneCellDocumentWrite ty c |> Result.map Canon.render)
+                          (ColumnCodec.writeCell "c" ty c
+                           |> Result.map (Canonical.write Rendering.CrossHost))
+                          (oneCellDocumentWrite ty c |> Result.map (Canonical.write Rendering.CrossHost))
                           (sprintf "%s %A" (ColumnType.tag ty) c)
 
           testCase "a cell the writer writes and the validator accepts reads back as its normal form"
@@ -3478,7 +3492,9 @@ let oneCellTests =
           <| fun _ ->
               Expect.equal
                   (ColumnType.all
-                   |> List.map (fun ty -> ColumnCodec.writeCell "c" ty Null |> Result.map Canon.render))
+                   |> List.map (fun ty ->
+                       ColumnCodec.writeCell "c" ty Null
+                       |> Result.map (Canonical.write Rendering.CrossHost)))
                   [ Ok "0"
                     Ok "0"
                     Ok "false"

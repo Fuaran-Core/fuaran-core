@@ -22,7 +22,7 @@
    Three things are PARAMETERS rather than clauses. The RESOLVER (`Query -> Deferred<QueryResult>`)
    is an argument of `invoke` and `dispatch` and stays outside every claim: nothing here is a
    theorem about any resolver, and the result payload is an abstract type. The RENDERERS the
-   capture key is written through — `string` on an int, `Canon.canonicalFloat`, `Hash.fnv1a`,
+   capture key is written through — `string` on an int, `FloatLayout.canonical`, `Hash.fnv1a`,
    the ordinal string order `List.sortBy fst` sorts by, and (Phase 225) `Hash.canonicalField` —
    are a `renderers` record, as Phase 177 made the three scalar readers one; a float cell
    crosses as an opaque carrier. And a declaration's `Source` is an opaque carrier too: the seam
@@ -107,7 +107,7 @@
    `key_premises` `invocation_key_injective` states (`query-renderers-abstract`) — in particular
    nothing about whether two distinct pre-images hash apart, and nothing about the canonical
    JSON the shape fields carry beyond `key_premises`' injectivity of `render_where` /
-   `render_order` (production's `Canon.render` over the predicate and order-key documents,
+   `render_order` (production's `Canonical.write Rendering.CrossHost` over the predicate and order-key documents,
    measured on the shipped codec by the declaration round trip in `ProofOracleTests`). The
    admission's LITERAL-CARRIABILITY clause — `Table.validate`'s refusal of a non-finite float or
    of decimal, date or timestamp text that is not canonical, answered `IllFormedLiteral` with its
@@ -338,7 +338,7 @@ let determinism_tag_injective (a b:determinism_source)
 let determinism_tag_of (q:query) : Tot string = determinism_tag q.q_effect.determinism
 
 (* The host functions the capture key is written through. F#: `string v` on an `int`,
-   `Canon.canonicalFloat`, `Hash.fnv1a`, the ordinal order `List.sortBy fst` compares names by,
+   `FloatLayout.canonical`, `Hash.fnv1a`, the ordinal order `List.sortBy fst` compares names by,
    and `Hash.canonicalField` — ONE field of the canonical pre-image, escaped and terminated
    (Phase 225). The escaper is a host function here for the reason the hash is: the model's
    `string` is primitive, so what it does to a field's symbols is stated as the premise
@@ -349,7 +349,7 @@ noeq type renderers = {
   hash:         string -> string;
   name_le:      string -> string -> bool;
   field:        string -> string;
-  (* Phase 398 — F#: `Canon.render (JArr (where |> List.map QueryShape.predicateJson))` and the
+  (* Phase 398 — F#: `Canonical.write Rendering.CrossHost (JArr (where |> List.map QueryShape.predicateJson))` and the
      same over `QueryShape.sortKeyJson`: the canonical text of a filter and of an order. *)
   render_where: list predicate -> string;
   render_order: list sort_key -> string

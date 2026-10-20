@@ -775,8 +775,8 @@ module Function =
     //
     //   * A WIRE DOCUMENT — something a codec encodes and decodes back (`CapabilityCodec`,
     //     `QueryCodec`, `CapabilityPipeline.encode`: declarations, invocations, the `Deferred`
-    //     envelope, the typed refusals) — is discriminated by `"$type"` (`Canon.typed`), the
-    //     DU-position convention: `"$type"` sorts first under `Canon.render`, and a reader dispatches
+    //     envelope, the typed refusals) — is discriminated by `"$type"` (`Canonical.typed`), the
+    //     DU-position convention: `"$type"` sorts first under `Canonical.write Rendering.CrossHost`, and a reader dispatches
     //     on it.
     //   * A DESCRIPTOR in the substrate's own vocabulary that is read and never decoded back —
     //     `toSchema` below — is tagged by `"kind"` (`Json.kindObj`), the convention of every

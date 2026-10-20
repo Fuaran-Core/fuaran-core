@@ -196,7 +196,9 @@ let tests =
                   { Name = "probe"
                     Value = JStr "\n"
                     V1 = "\"\\u000a\""
-                    V2 = "\"\\u000a\"" }
+                    V2 = "\"\\u000a\""
+                    CrossHost = "\"\\u000a\""
+                    Declared = "\"\\u000a\"" }
 
               Expect.isTrue
                   (EncodingProfileVectors.runVector row |> List.exists (fun o -> not o.Passed))

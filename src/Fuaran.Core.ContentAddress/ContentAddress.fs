@@ -9,7 +9,7 @@ namespace Fuaran.Core
 /// It lives in its own package because the renderer (`Fuaran.Core.Wire`) and the hash
 /// (`Fuaran.Core.Tree`) live in two packages D2 keeps apart; this package references both, so
 /// neither references the other. SHA-256 over the UTF-8 bytes of the text — `Hash.sha256Hex`'s
-/// digest — so a store that keyed `sha256:` + `Hash.sha256Hex (Canonical.write p v)` reads the same
+/// digest — so a store that keyed `sha256:` + `Hash.sha256Hex (Canonical.write (Rendering.ofProfile p) v)` reads the same
 /// digest here, byte for byte.
 [<RequireQualifiedAccess>]
 module ContentAddress =
@@ -25,12 +25,12 @@ module ContentAddress =
     let private mint (text: string) : Digest =
         Digest.ofSha256Bytes (Hash.utf8Bytes text)
 
-    /// The digest of `v`'s canonical text under `profile`: `Canonical.tryWrite profile v`, hashed.
+    /// The digest of `v`'s canonical text under `profile`: `Canonical.tryWrite (Rendering.ofProfile profile) v`, hashed.
     /// Refused exactly where `tryWrite` refuses (a non-finite float, an ill-formed string or a
     /// repeated member name, named with its path), because there the text would not mean `v`, two
     /// values would share it, or no reader would accept it (the repeated member, since Phase 495).
     let ofValue (profile: EncodingProfile) (v: JVal) : Result<Digest, string> =
-        Canonical.tryWrite profile v |> Result.map mint
+        Canonical.tryWrite (Rendering.ofProfile profile) v |> Result.map mint
 
     /// The digest of stored text, admitted only when the text IS canonical under `profile`
     /// (`Canonical.isCanonical`): then its bytes are `ofValue profile` of the value it reads as, and
@@ -40,7 +40,7 @@ module ContentAddress =
     let ofCanonicalText (profile: EncodingProfile) (text: string) : Result<Digest, string> =
         if isNull text then
             Error "the text is null"
-        elif Canonical.isCanonical profile text then
+        elif Canonical.isCanonical (Rendering.ofProfile profile) text then
             Ok(mint text)
         else
             Error(

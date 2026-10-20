@@ -638,7 +638,7 @@ module internal ColumnarSeamLaws =
             buf.Add(byte ((u >>> 8) &&& 0xFF))
             buf.Add(byte (u &&& 0xFF))
 
-    /// A float by its canonical text (`Canon.canonicalFloat`, the shortest round-trip form), with the
+    /// A float by its canonical text (`FloatLayout.canonical`, the shortest round-trip form), with the
     /// sign of zero kept: a write of `-0.0` over `0.0` is a write, though the two are one cell. Every
     /// NaN is one text, because the payload of a NaN is not portable — a JavaScript engine may
     /// canonicalise it on any store — so a write of one NaN over another is the one write this
@@ -650,7 +650,7 @@ module internal ColumnarSeamLaws =
              elif System.Double.IsPositiveInfinity f then "Inf"
              elif System.Double.IsNegativeInfinity f then "-Inf"
              elif f = 0.0 then (if 1.0 / f < 0.0 then "-0" else "0")
-             else Canon.canonicalFloat f)
+             else FloatLayout.canonical f)
 
     let private putBool (buf: ResizeArray<byte>) (b: bool) = buf.Add(if b then 1uy else 0uy)
 

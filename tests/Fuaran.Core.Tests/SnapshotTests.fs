@@ -464,3 +464,61 @@ let tests =
                       | other -> failtestf "snapshot-aware read: unexpected %A" other
                   | Error e -> failtestf "compactChainOnly failed: %s" e
               | Error e -> failtestf "build failed: %A" e ]
+
+// Phase 530 — a snapshot is the state sealed at its boundary anchor: `Sealed` mints the same seal
+// bytes `Snapshots.take` does, and verifies and replays the same way.
+[<Tests>]
+let sealedTests =
+    testList
+        "Phase 530 - Sealed over Anchor"
+        [ testCase "Sealed.seal mints the snapshot's seal at every boundary, in both modes"
+          <| fun _ ->
+              match build () with
+              | Error e -> failtestf "build failed: %A" e
+              | Ok(_, recs) ->
+                  for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
+                      for atSeq in 0 .. recs.Length do
+                          match OpStream.Snapshots.take mode OpStream.canonicalConfig h stateEnc sw 0 recs atSeq with
+                          | Error e -> failtestf "take failed: %A" e
+                          | Ok snap ->
+                              let anchor =
+                                  { Seq = snap.Seq
+                                    PrevHash = snap.PrevHash }
+
+                              let sv = Sealed.seal mode h stateEnc anchor snap.State
+                              Expect.equal (Sealed.toSnapshot sv) snap "the same snapshot, byte for byte"
+                              Expect.equal (Sealed.ofSnapshot snap) sv "and back"
+                              let tail = List.skip atSeq recs
+                              let shape = ChainShape.records OpStream.canonicalConfig sw.Encode
+
+                              Expect.equal
+                                  (Sealed.firstBreak h stateEnc shape sv tail)
+                                  (OpStream.Snapshots.firstBreak OpStream.canonicalConfig h stateEnc sw snap tail)
+                                  "one verifier"
+
+                              Expect.equal (Sealed.replayFrom sw sv tail) (Ok 10) "replays to the live state"
+
+                              match mode, Sealed.firstBreak h stateEnc shape { sv with State = 99 } tail with
+                              | SnapshotMode.Strict, Some(SnapshotBreak.SnapshotHash(expected, got)) ->
+                                  Expect.equal got sv.Seal "the carried seal"
+                                  Expect.notEqual expected sv.Seal "the recomputed one differs"
+                              | SnapshotMode.Strict, other -> failtestf "a swapped strict state verified: %A" other
+                              | SnapshotMode.ChainOnly, other ->
+                                  Expect.isNone other "a chain-only seal trusts its state"
+
+          testCase "a tampered seal is the seal's break, and the tail is not walked"
+          <| fun _ ->
+              match build () with
+              | Error e -> failtestf "build failed: %A" e
+              | Ok(_, recs) ->
+                  let sv =
+                      Sealed.seal SnapshotMode.Strict h stateEnc (Anchor.genesis OpStream.canonicalConfig) 0
+
+                  let shape = ChainShape.records OpStream.canonicalConfig sw.Encode
+
+                  Expect.equal
+                      (Sealed.firstBreak h stateEnc shape { sv with Seal = "x" } recs)
+                      (Some(SnapshotBreak.SnapshotHash(sv.Seal, "x")))
+                      "the recomputed seal and the carried one"
+
+                  Expect.equal (Sealed.firstBreak h stateEnc shape sv recs) None "an intact seal and tail" ]

@@ -5,7 +5,7 @@ namespace Fuaran.Core
 //
 //  The spine has ONE rule for spelling a string inside canonical JSON — `"` as `\"`, `\` as
 //  `\\`, every control character `U+0000`–`U+001F` as lower-case `\u00xx`, nothing else — and
-//  TWO bodies that carry it: `Wire.Json.escape` (the original; `Canon.render` escapes through
+//  TWO bodies that carry it: `Wire.Json.escape` (the original; `Canonical.write Rendering.CrossHost` escapes through
 //  it) and the copy in `Fuaran.Core.OpStream` (`OpStream.Jsonl.quote`), which DECISIONS.md D2
 //  demands because that package takes no `Wire` reference. `Actor.encode` spells through the
 //  copy, and so does `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — which references
@@ -118,7 +118,11 @@ module StringEscapeVectors =
 
         [ // the rule at its home
           expect (v.Name + " / Wire.Json.escape") "Json.escape" v.Escaped (Json.escape v.Input)
-          expect (v.Name + " / Wire.Canon.render") "Canon.render" (quoted v.Escaped) (Canon.render (JStr v.Input))
+          expect
+              (v.Name + " / Wire.Canonical.write Rendering.CrossHost")
+              "Canonical.write Rendering.CrossHost"
+              (quoted v.Escaped)
+              (Canonical.write Rendering.CrossHost (JStr v.Input))
           expect (v.Name + " / Wire.Json.render") "Json.render" (quoted v.Escaped) (Json.render (JStr v.Input))
           // the read side accepts what the encoder writes, and what it wrote before
           (match Json.parse (quoted v.Escaped) with

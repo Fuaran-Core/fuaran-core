@@ -35,7 +35,7 @@ open Fuaran.Core
 ///   `Gen` emits union-case fields as POSITIONAL bindings and type parameters
 ///   positionally, so a reorder is a real host-surface change a reviewer should see.
 ///
-/// Object keys need no such rule — [[Canon.render]] Ordinal-sorts them recursively.
+/// Object keys need no such rule — `Canonical.write Rendering.CrossHost` Ordinal-sorts them recursively.
 module Artifact =
 
     /// The artifact ENCODING version — bumped when this module's output shape
@@ -46,13 +46,17 @@ module Artifact =
 
     let private ordinal (a: string) (b: string) = System.String.CompareOrdinal(a, b)
 
+    /// The rendering the artifact is the indented form of (Phase 520): its scalars and member keys
+    /// are written by it, and its members ordered as it orders them.
+    let private rendering: Rendering = Rendering.CrossHost
+
     /// Render a `JVal` with two-space indentation.
     ///
-    /// Only WHITESPACE is added here: every scalar and every key string is rendered
-    /// by [[Canon.render]] itself, so canonical escaping (rule 6), the pinned float
-    /// layout (rule 5) and Ordinal key order are all INHERITED rather than
-    /// re-implemented — the drift risk `TJson`'s verbatim passthrough names, in the
-    /// one place a second stringifier would otherwise appear.
+    /// Only WHITESPACE is added here: every scalar and every key string is written by
+    /// [[rendering]] (`Rendering.CrossHost`) itself, and members are ordered by its member order,
+    /// so canonical escaping (rule 6), the pinned float layout (rule 5) and Ordinal key order are
+    /// all INHERITED rather than re-implemented — the drift risk `TJson`'s verbatim passthrough
+    /// names, in the one place a second stringifier would otherwise appear.
     ///
     /// Indented rather than compact because this artifact exists to be read and
     /// DIFFED, and a single-line file diffs as "everything changed". `schema.json`
@@ -63,10 +67,18 @@ module Artifact =
         match v with
         | JObj [] -> "{}"
         | JObj fields ->
+            let ordered =
+                match rendering.Order with
+                | MemberOrder.Sorted -> fields |> List.sortWith (fun (a, _) (b, _) -> ordinal a b)
+                | MemberOrder.Authored -> fields
+
             let body =
-                fields
-                |> List.sortWith (fun (a, _) (b, _) -> ordinal a b)
-                |> List.map (fun (k, fv) -> pad (depth + 1) + Canon.render (JStr k) + ": " + indent (depth + 1) fv)
+                ordered
+                |> List.map (fun (k, fv) ->
+                    pad (depth + 1)
+                    + Canonical.write rendering (JStr k)
+                    + ": "
+                    + indent (depth + 1) fv)
                 |> String.concat ",\n"
 
             "{\n" + body + "\n" + pad depth + "}"
@@ -78,7 +90,7 @@ module Artifact =
                 |> String.concat ",\n"
 
             "[\n" + body + "\n" + pad depth + "]"
-        | scalar -> Canon.render scalar
+        | scalar -> Canonical.write rendering scalar
 
     /// The structural type of a field. `$type` carries the [[IdlType]] case; the
     /// `wire` key, where present, states the FIXED wire form a third party will see
@@ -100,24 +112,24 @@ module Artifact =
     /// from [[WireForm]], the one lowering the codec and the sampler switch on.
     let rec private typeJson (t: IdlType) : JVal =
         match t with
-        | TStr -> Canon.typed "str" []
-        | TInt -> Canon.typed "int" []
-        | TBool -> Canon.typed "bool" []
-        | TFloat -> Canon.typed "float" []
-        | TEnum name -> Canon.typed "enum" [ "name", JStr name ]
-        | TUnion(name, args) -> Canon.typed "union" [ "name", JStr name; "args", JArr(args |> List.map typeJson) ]
-        | TVar name -> Canon.typed "var" [ "name", JStr name ]
-        | TNode -> Canon.typed "node" []
-        | TKind -> Canon.typed "kind" []
-        | TOp -> Canon.typed "op" []
-        | TList inner -> Canon.typed "list" [ "of", typeJson inner ]
-        | TMap valueType -> Canon.typed "map" [ "values", typeJson valueType ]
-        | TRecord name -> Canon.typed "record" [ "name", JStr name ]
-        | TClosure -> Canon.typed "closure" [ "wire", JStr WireForm.closure ]
-        | TOpaque -> Canon.typed "opaque" [ "wire", JStr WireForm.opaque ]
-        | TJson -> Canon.typed "json" []
+        | TStr -> Canonical.typed "str" []
+        | TInt -> Canonical.typed "int" []
+        | TBool -> Canonical.typed "bool" []
+        | TFloat -> Canonical.typed "float" []
+        | TEnum name -> Canonical.typed "enum" [ "name", JStr name ]
+        | TUnion(name, args) -> Canonical.typed "union" [ "name", JStr name; "args", JArr(args |> List.map typeJson) ]
+        | TVar name -> Canonical.typed "var" [ "name", JStr name ]
+        | TNode -> Canonical.typed "node" []
+        | TKind -> Canonical.typed "kind" []
+        | TOp -> Canonical.typed "op" []
+        | TList inner -> Canonical.typed "list" [ "of", typeJson inner ]
+        | TMap valueType -> Canonical.typed "map" [ "values", typeJson valueType ]
+        | TRecord name -> Canonical.typed "record" [ "name", JStr name ]
+        | TClosure -> Canonical.typed "closure" [ "wire", JStr WireForm.closure ]
+        | TOpaque -> Canonical.typed "opaque" [ "wire", JStr WireForm.opaque ]
+        | TJson -> Canonical.typed "json" []
         | TFn sg ->
-            Canon.typed
+            Canonical.typed
                 "fn"
                 [ "wire", JStr WireForm.closure
                   "hostSurface",
@@ -130,7 +142,7 @@ module Artifact =
         // (carried verbatim), byte-for-byte what every earlier artifact wrote. Both sit
         // OUTSIDE hostSurface: they are wire spec a third-party codec reads.
         | THosted h ->
-            Canon.typed
+            Canonical.typed
                 "hosted"
                 ([ "wire",
                    (match h.Wire with
@@ -144,34 +156,34 @@ module Artifact =
     /// An authored value — a field default, or a nested part of one.
     let rec private valueJson (v: IdlValue) : JVal =
         match v with
-        | VStr s -> Canon.typed "str" [ "value", JStr s ]
-        | VInt i -> Canon.typed "int" [ "value", JInt i ]
-        | VBool b -> Canon.typed "bool" [ "value", JBool b ]
-        | VFloat f -> Canon.typed "float" [ "value", JFloat f ]
-        | VEnum case -> Canon.typed "enum" [ "case", JStr case ]
-        | VUnion(tag, fields) -> Canon.typed "union" [ "tag", JStr tag; "fields", namedValues fields ]
-        | VList xs -> Canon.typed "list" [ "items", JArr(xs |> List.map valueJson) ]
+        | VStr s -> Canonical.typed "str" [ "value", JStr s ]
+        | VInt i -> Canonical.typed "int" [ "value", JInt i ]
+        | VBool b -> Canonical.typed "bool" [ "value", JBool b ]
+        | VFloat f -> Canonical.typed "float" [ "value", JFloat f ]
+        | VEnum case -> Canonical.typed "enum" [ "case", JStr case ]
+        | VUnion(tag, fields) -> Canonical.typed "union" [ "tag", JStr tag; "fields", namedValues fields ]
+        | VList xs -> Canonical.typed "list" [ "items", JArr(xs |> List.map valueJson) ]
         | VNode(id, kindTag, fields) ->
-            Canon.typed "node" [ "id", JStr id; "kind", JStr kindTag; "fields", namedValues fields ]
+            Canonical.typed "node" [ "id", JStr id; "kind", JStr kindTag; "fields", namedValues fields ]
         // Phase 698 — the enveloped form records its envelope under its own key
         // rather than merged into `fields`: the two namespaces can collide (an
         // envelope `style` and `Drawing.style` both exist), so merging them would
         // make the artefact ambiguous and the Phase 700 diff classifier wrong.
         | VNodeEnv(id, envelope, kindTag, fields) ->
-            Canon.typed
+            Canonical.typed
                 "node"
                 [ "envelope", namedValues envelope
                   "fields", namedValues fields
                   "id", JStr id
                   "kind", JStr kindTag ]
-        | VAbsent -> Canon.typed "absent" []
-        | VClosure -> Canon.typed "closure" []
-        | VOpaque -> Canon.typed "opaque" []
-        // Verbatim — a `TJson` value is real data, and `Canon.render` already lays it
+        | VAbsent -> Canonical.typed "absent" []
+        | VClosure -> Canonical.typed "closure" []
+        | VOpaque -> Canonical.typed "opaque" []
+        // Verbatim — a `TJson` value is real data, and `Canonical.write Rendering.CrossHost` already lays it
         // out canonically, so passing the `JVal` through inherits every rule.
-        | VJson j -> Canon.typed "json" [ "value", j ]
-        | VRecord fields -> Canon.typed "record" [ "fields", namedValues fields ]
-        | VMap entries -> Canon.typed "map" [ "entries", namedValues entries ]
+        | VJson j -> Canonical.typed "json" [ "value", j ]
+        | VRecord fields -> Canonical.typed "record" [ "fields", namedValues fields ]
+        | VMap entries -> Canonical.typed "map" [ "entries", namedValues entries ]
 
     /// Named sub-values of a composite default (union / record / node / map fields).
     /// Emitted in the order they arrive: these are wire KEYS, which carry no authored
@@ -188,10 +200,10 @@ module Artifact =
     /// projection of the same vocabulary cannot express.
     let private optionalityJson (o: Optionality) : JVal =
         match o with
-        | Required -> Canon.typed "required" []
-        | Optional -> Canon.typed "optional" []
-        | HostOnly -> Canon.typed "hostOnly" []
-        | OmitDefault d -> Canon.typed "omitDefault" [ "default", valueJson d ]
+        | Required -> Canonical.typed "required" []
+        | Optional -> Canonical.typed "optional" []
+        | HostOnly -> Canonical.typed "hostOnly" []
+        | OmitDefault d -> Canonical.typed "omitDefault" [ "default", valueJson d ]
 
     /// The declared annotation set (Phase 113), or `[]` when it says nothing.
     ///
@@ -640,309 +652,216 @@ module Artifact =
     // -----------------------------------------------------------------------
 
     // Phase 310 — every member is read through the typed decode layer, so a refusal carries a
-    // code and the path to the value at fault ([[ofJsonDetailed]], [[parseDetailed]]), and the
-    // string forms answer the sentence this reader has always answered.
+    // code and the path to the value at fault ([[ofJsonDetailed]], [[parseDetailed]]). Since
+    // Phase 520 the readers are `Decoder`'s combinators and nothing else: the private layer that
+    // re-spelled each refusal in this reader's own sentence is gone, so a refusal's sentence is the
+    // projection of its code (`DecodeError.sentence`), and its code and path are unchanged.
 
     let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
         r |> Result.mapError (DecodeError.under step)
 
-    /// A refusal at the value being read, with this reader's own sentence.
-    let private refuse (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
-        Error(DecodeError.make code expected message)
+    /// The required string member `name`.
+    let private str (name: string) (v: JVal) : Result<string, DecodeError> = Decoder.field name Decoder.str v
 
-    /// A read whose OWN refusal (not one from inside it) carries `message`.
-    let private scalar (message: string) (d: Decoder<'T>) : Decoder<'T> =
-        fun x -> d x |> Result.mapError (DecodeError.reword (fun _ -> message))
+    /// An array member that is OMITTED when empty (`params`, `args`, `fields`) reads as
+    /// empty rather than as a refusal — the projection's omit-when-empty rule, read back.
+    let private listOrEmpty (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
+        Decoder.fieldOr name [] (Decoder.list f) v
 
-    /// The required member `name`, read with `d`; absent is `MissingField` with `missing`, and a
-    /// value that is not an object at all carries the same sentence as `WrongKind`.
-    let private need (name: string) (missing: string) (d: Decoder<'T>) (v: JVal) : Result<'T, DecodeError> =
-        match v with
-        | JObj _ ->
-            match Decoder.tryMember name v with
-            | None ->
-                Error(
-                    { Decoder.missing name with
-                        Message = missing }
-                )
-            | Some x -> d x |> under (PathSegment.Key name)
-        | other ->
-            Error(
-                { Decoder.wrongKind "object" other with
-                    Message = missing }
-            )
-
-    let private strAt (name: string) (v: JVal) : Result<string, DecodeError> =
-        need name ("missing '" + name + "'") (scalar ("'" + name + "' is not a string") Decoder.str) v
-
-    /// The items of an array, each read with `f`; a non-array carries `notArray`.
-    let private itemsOf (notArray: string) (f: Decoder<'a>) : Decoder<'a list> =
-        fun x ->
-            match x with
-            | JArr _ -> Decoder.list f x
-            | other ->
-                Error(
-                    { Decoder.wrongKind "array" other with
-                        Message = notArray }
-                )
-
-    let private arrAt (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
-        need name ("missing '" + name + "'") (itemsOf ("'" + name + "' is not an array") f) v
-
-    /// An array key that is OMITTED when empty (`params`, `args`, `fields`) reads as
-    /// empty rather than as an error — the projection's omit-when-empty rule, read back.
-    let private arrOrEmpty (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
-        match Decoder.tryMember name v with
-        | None -> Ok []
-        | Some x -> itemsOf ("'" + name + "' is not an array") f x |> under (PathSegment.Key name)
-
-    let private discriminator (v: JVal) : Result<string, DecodeError> = strAt "$type" v
-
-    /// A discriminator naming no case of the position, at the discriminator.
-    let private unknownTag (known: string list) (message: string) : Result<'T, DecodeError> =
-        refuse
-            DecodeCode.UnknownTag
-            ("one of " + (known |> List.map (fun k -> "'" + k + "'") |> String.concat ", "))
-            message
-        |> under (PathSegment.Key "$type")
+    /// The required array member `name`, each item read with `f`.
+    let private listOf (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
+        Decoder.field name (Decoder.list f) v
 
     /// The host-surface block of a `fn` / `hosted` type — the three verbatim host
     /// strings each carries. Named so the two arms report the same way.
     let private hostSurface (keys: string list) (v: JVal) : Result<string list, DecodeError> =
-        need
-            "hostSurface"
-            ("'" + (defaultArg (List.tryHead keys) "?") + "' type has no 'hostSurface'")
-            (fun block -> Decoder.sequence (keys |> List.map (fun k -> strAt k)) block)
-            v
+        Decoder.field "hostSurface" (Decoder.sequence (keys |> List.map str)) v
 
-    let private typeTags =
-        [ "str"
-          "int"
-          "bool"
-          "float"
-          "node"
-          "kind"
-          "op"
-          "json"
-          "closure"
-          "opaque"
-          "enum"
-          "record"
-          "var"
-          "list"
-          "map"
-          "union"
-          "fn"
-          "hosted" ]
+    let rec private readType: Decoder<IdlType> =
+        fun v ->
+            let named (f: string -> IdlType) : Decoder<IdlType> = str "name" >> Result.map f
 
-    let rec private readType (v: JVal) : Result<IdlType, DecodeError> =
-        match discriminator v with
-        | Error e -> Error(DecodeError.reword (fun m -> "type: " + m) e)
-        | Ok t ->
-            match t with
-            | "str" -> Ok TStr
-            | "int" -> Ok TInt
-            | "bool" -> Ok TBool
-            | "float" -> Ok TFloat
-            | "node" -> Ok TNode
-            | "kind" -> Ok TKind
-            | "op" -> Ok TOp
-            | "json" -> Ok TJson
-            // `wire` is a RESTATEMENT of a fixed sentinel the engine already knows, not
-            // a carried value — reading it back would let a hand-edited artifact
-            // redefine what `<closure>` means.
-            | "closure" -> Ok TClosure
-            | "opaque" -> Ok TOpaque
-            | "enum" -> strAt "name" v |> Result.map TEnum
-            | "record" -> strAt "name" v |> Result.map TRecord
-            | "var" -> strAt "name" v |> Result.map TVar
-            | "list" -> need "of" "list type has no 'of'" readType v |> Result.map TList
-            | "map" -> need "values" "map type has no 'values'" readType v |> Result.map TMap
-            | "union" ->
-                strAt "name" v
-                |> Result.bind (fun n -> arrOrEmpty "args" readType v |> Result.map (fun args -> TUnion(n, args)))
-            | "fn" ->
-                hostSurface [ "fsharp"; "typescript"; "placeholder" ] v
-                |> Result.bind (function
-                    | [ fs; ts; ph ] ->
-                        Ok(
-                            TFn
-                                { FSharp = fs
-                                  TypeScript = ts
-                                  Placeholder = ph }
-                        )
-                    | _ -> refuse DecodeCode.SchemaFault "three host strings" "fn type has an incomplete 'hostSurface'")
-            | "hosted" ->
-                hostSurface [ "fsharp"; "encode"; "decode" ] v
-                |> Result.bind (function
-                    | [ fs; enc; dec ] ->
-                        let wire =
-                            match Decoder.tryMember "wire" v with
-                            | None
-                            | Some(JStr "json") -> Ok None
-                            | Some(JObj _ as w) -> readType w |> Result.map Some |> under (PathSegment.Key "wire")
-                            | Some _ ->
-                                refuse
-                                    DecodeCode.WrongKind
-                                    "\"json\" or a type"
-                                    "hosted type's 'wire' is neither \"json\" nor a type"
-                                |> under (PathSegment.Key "wire")
+            Decoder.tagDispatch
+                "$type"
+                [ "str", Decoder.succeed TStr
+                  "int", Decoder.succeed TInt
+                  "bool", Decoder.succeed TBool
+                  "float", Decoder.succeed TFloat
+                  "node", Decoder.succeed TNode
+                  "kind", Decoder.succeed TKind
+                  "op", Decoder.succeed TOp
+                  "json", Decoder.succeed TJson
+                  // `wire` is a RESTATEMENT of a fixed sentinel the engine already knows, not
+                  // a carried value — reading it back would let a hand-edited artifact
+                  // redefine what `<closure>` means.
+                  "closure", Decoder.succeed TClosure
+                  "opaque", Decoder.succeed TOpaque
+                  "enum", named TEnum
+                  "record", named TRecord
+                  "var", named TVar
+                  "list", Decoder.field "of" readType |> Decoder.map TList
+                  "map", Decoder.field "values" readType |> Decoder.map TMap
+                  "union",
+                  fun u ->
+                      str "name" u
+                      |> Result.bind (fun n ->
+                          listOrEmpty "args" readType u |> Result.map (fun args -> TUnion(n, args)))
+                  "fn",
+                  fun f ->
+                      hostSurface [ "fsharp"; "typescript"; "placeholder" ] f
+                      |> Result.map (fun hs ->
+                          // `hostSurface` reads exactly the three keys it is handed.
+                          let at (i: int) = List.item i hs
 
-                        let format =
-                            match Decoder.tryMember "format" v with
-                            | None -> Ok None
-                            | Some(JStr f) ->
-                                // Phase 391: a format is the closed `HostedFormat`; an unknown name
-                                // is refused here, where `Declare.hostedWireErrors` reported it before.
-                                match HostedFormat.tryParse f with
-                                | Some fmt -> Ok(Some fmt)
-                                | None ->
-                                    refuse
-                                        DecodeCode.UnknownTag
-                                        ("one of " + String.concat ", " HostedFormat.known)
-                                        ("hosted type's format '" + f + "' is not one the engine knows")
-                                    |> under (PathSegment.Key "format")
-                            | Some _ ->
-                                refuse DecodeCode.WrongKind "string" "hosted type's 'format' is not a string"
-                                |> under (PathSegment.Key "format")
+                          TFn
+                              { FSharp = at 0
+                                TypeScript = at 1
+                                Placeholder = at 2 })
+                  "hosted", readHosted ]
+                v
 
-                        match wire, format with
-                        | Error e, _
-                        | _, Error e -> Error e
-                        | Ok w, Ok f ->
-                            Ok(
-                                THosted
-                                    { FSharp = fs
-                                      Encode = enc
-                                      Decode = dec
-                                      Wire = w
-                                      Format = f }
+    and private readHosted: Decoder<IdlType> =
+        fun v ->
+            hostSurface [ "fsharp"; "encode"; "decode" ] v
+            |> Result.bind (fun hs ->
+                let wire =
+                    match Decoder.tryMember "wire" v with
+                    | None
+                    | Some(JStr "json") -> Ok None
+                    | Some(JObj _ as w) -> readType w |> Result.map Some |> under (PathSegment.Key "wire")
+                    | Some other ->
+                        Error(DecodeError.make DecodeCode.WrongKind "\"json\" or a type" (JVal.kindName other))
+                        |> under (PathSegment.Key "wire")
+
+                let format =
+                    match Decoder.tryMember "format" v with
+                    | None -> Ok None
+                    | Some(JStr f) ->
+                        // Phase 391: a format is the closed `HostedFormat`; an unknown name
+                        // is refused here, where `Declare.hostedWireErrors` reported it before.
+                        match HostedFormat.tryParse f with
+                        | Some fmt -> Ok(Some fmt)
+                        | None ->
+                            Error(
+                                DecodeError.make
+                                    DecodeCode.UnknownTag
+                                    ("one of " + String.concat ", " HostedFormat.known)
+                                    ("format '" + f + "'")
                             )
-                    | _ ->
-                        refuse DecodeCode.SchemaFault "three host strings" "hosted type has an incomplete 'hostSurface'")
-            | other -> unknownTag typeTags ("unknown type '" + other + "'")
+                            |> under (PathSegment.Key "format")
+                    | Some other -> Error(Decoder.wrongKind "string" other) |> under (PathSegment.Key "format")
 
-    let rec private readValue (v: JVal) : Result<IdlValue, DecodeError> =
-        match discriminator v with
-        | Error e -> Error(DecodeError.reword (fun m -> "value: " + m) e)
-        | Ok t ->
-            let value (message: string) (d: Decoder<'T>) =
-                need "value" message (scalar message d) v
+                match wire, format with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok w, Ok f ->
+                    let at (i: int) = List.item i hs
 
-            match t with
-            | "absent" -> Ok VAbsent
-            | "closure" -> Ok VClosure
-            | "opaque" -> Ok VOpaque
-            | "str" -> value "str value has no string 'value'" Decoder.str |> Result.map VStr
-            | "int" -> value "int value has no integer 'value'" Decoder.int |> Result.map VInt
-            | "bool" -> value "bool value has no boolean 'value'" Decoder.bool |> Result.map VBool
+                    Ok(
+                        THosted
+                            { FSharp = at 0
+                              Encode = at 1
+                              Decode = at 2
+                              Wire = w
+                              Format = f }
+                    ))
+
+    let rec private readValue: Decoder<IdlValue> =
+        fun v ->
+            let value (d: Decoder<'T>) (f: 'T -> IdlValue) : Decoder<IdlValue> =
+                Decoder.field "value" d |> Decoder.map f
+
             // A whole-valued float renders with no `.` and no exponent, so the parser
             // hands it back as `JInt`. `Decoder.float` reads both, or this would refuse
             // every `VFloat 1.0` the projection itself wrote.
             //
             // Phase 303 — and a NON-FINITE float renders as WIRE_FORMAT §7's quoted token
-            // (`Canon` spells a non-finite `JFloat` as the string `"NaN"`), so the reader takes
-            // the three tokens back at this one value tag, or `render` would write an
+            // (`Rendering.CrossHost` spells a non-finite `JFloat` as the string `"NaN"`), so the
+            // reader takes the three tokens back at this one value tag, or `render` would write an
             // `idl.json` carrying a `VFloat nan` default that its own `parse` refuses.
-            | "float" ->
-                let sentinelOrNumber: Decoder<float> =
-                    function
-                    | JStr(FloatToken.NonFinite f) -> Ok f
-                    | j -> Decoder.float j
+            let sentinelOrNumber: Decoder<float> =
+                function
+                | JStr(FloatToken.NonFinite f) -> Ok f
+                | j -> Decoder.float j
 
-                value "float value has no numeric 'value'" sentinelOrNumber |> Result.map VFloat
-            | "enum" -> strAt "case" v |> Result.map VEnum
-            | "json" -> need "value" "json value has no 'value'" Decoder.json v |> Result.map VJson
-            | "list" -> arrAt "items" readValue v |> Result.map VList
-            | "union" ->
-                strAt "tag" v
-                |> Result.bind (fun tag -> readNamed "fields" v |> Result.map (fun fields -> VUnion(tag, fields)))
-            | "record" -> readNamed "fields" v |> Result.map VRecord
-            | "map" -> readNamed "entries" v |> Result.map VMap
-            // The enveloped form is told from the bare one by the PRESENCE of the
-            // `envelope` key, which is the same thing the projection branches on. An
-            // empty envelope is still an envelope: `VNodeEnv(id, [], …)` renders
-            // `"envelope": []` and must read back as itself.
-            | "node" ->
-                strAt "id" v
-                |> Result.bind (fun id ->
-                    strAt "kind" v
-                    |> Result.bind (fun kindTag ->
-                        readNamed "fields" v
-                        |> Result.bind (fun fields ->
-                            match Decoder.tryMember "envelope" v with
-                            | None -> Ok(VNode(id, kindTag, fields))
-                            | Some _ ->
-                                readNamed "envelope" v
-                                |> Result.map (fun env -> VNodeEnv(id, env, kindTag, fields)))))
-            | other ->
-                unknownTag
-                    [ "absent"
-                      "closure"
-                      "opaque"
-                      "str"
-                      "int"
-                      "bool"
-                      "float"
-                      "enum"
-                      "json"
-                      "list"
-                      "union"
-                      "record"
-                      "map"
-                      "node" ]
-                    ("unknown value kind '" + other + "'")
+            Decoder.tagDispatch
+                "$type"
+                [ "absent", Decoder.succeed VAbsent
+                  "closure", Decoder.succeed VClosure
+                  "opaque", Decoder.succeed VOpaque
+                  "str", value Decoder.str VStr
+                  "int", value Decoder.int VInt
+                  "bool", value Decoder.bool VBool
+                  "float", value sentinelOrNumber VFloat
+                  "enum", str "case" >> Result.map VEnum
+                  "json", value Decoder.json VJson
+                  "list", listOf "items" readValue >> Result.map VList
+                  "union",
+                  fun u ->
+                      str "tag" u
+                      |> Result.bind (fun tag -> readNamed "fields" u |> Result.map (fun fields -> VUnion(tag, fields)))
+                  "record", readNamed "fields" >> Result.map VRecord
+                  "map", readNamed "entries" >> Result.map VMap
+                  // The enveloped form is told from the bare one by the PRESENCE of the
+                  // `envelope` key, which is the same thing the projection branches on. An
+                  // empty envelope is still an envelope: `VNodeEnv(id, [], …)` renders
+                  // `"envelope": []` and must read back as itself.
+                  "node",
+                  fun n ->
+                      str "id" n
+                      |> Result.bind (fun id ->
+                          str "kind" n
+                          |> Result.bind (fun kindTag ->
+                              readNamed "fields" n
+                              |> Result.bind (fun fields ->
+                                  match Decoder.tryMember "envelope" n with
+                                  | None -> Ok(VNode(id, kindTag, fields))
+                                  | Some _ ->
+                                      readNamed "envelope" n
+                                      |> Result.map (fun env -> VNodeEnv(id, env, kindTag, fields))))) ]
+                v
 
     and private readNamed (key: string) (owner: JVal) : Result<(string * IdlValue) list, DecodeError> =
-        arrAt
+        listOf
             key
             (fun entry ->
-                strAt "name" entry
-                |> Result.bind (fun name ->
-                    need "value" ("named value '" + name + "' has no 'value'") readValue entry
-                    |> Result.map (fun v -> name, v)))
+                str "name" entry
+                |> Result.bind (fun name -> Decoder.field "value" readValue entry |> Result.map (fun v -> name, v)))
             owner
 
-    let private readOptionality (v: JVal) : Result<Optionality, DecodeError> =
-        match discriminator v with
-        | Error e -> Error(DecodeError.reword (fun m -> "optionality: " + m) e)
-        | Ok "required" -> Ok Required
-        | Ok "optional" -> Ok Optional
-        | Ok "hostOnly" -> Ok HostOnly
-        | Ok "omitDefault" ->
-            need "default" "omitDefault has no 'default'" readValue v
-            |> Result.map OmitDefault
-        | Ok other ->
-            unknownTag [ "required"; "optional"; "hostOnly"; "omitDefault" ] ("unknown optionality '" + other + "'")
+    let private readOptionality: Decoder<Optionality> =
+        Decoder.tagDispatch
+            "$type"
+            [ "required", Decoder.succeed Required
+              "optional", Decoder.succeed Optional
+              "hostOnly", Decoder.succeed HostOnly
+              "omitDefault", Decoder.field "default" readValue |> Decoder.map OmitDefault ]
 
     /// One annotation-set OBJECT — the value under an `annotations` key, and (Phase 119)
     /// the value under each entry of an enum's `caseAnnotations` map. The inverse of
     /// [[annotationBlock]], and split out for the same reason it was.
     let private readAnnotationBlock (block: JVal) : Result<Annotations, DecodeError> =
-        let optStr (message: string) (name: string) (v: JVal) =
-            Decoder.optField name (scalar message Decoder.str) v
+        let optStr (name: string) (v: JVal) = Decoder.optField name Decoder.str v
 
         let deprecated =
             match Decoder.tryMember "deprecated" block with
             | None -> Ok None
             | Some d ->
-                let slot name =
-                    optStr ("deprecated '" + name + "' is not a string") name d
-
-                slot "replacement"
-                |> Result.bind (fun r -> slot "message" |> Result.map (fun m -> Some { Replacement = r; Message = m }))
+                optStr "replacement" d
+                |> Result.bind (fun r ->
+                    optStr "message" d
+                    |> Result.map (fun m -> Some { Replacement = r; Message = m }))
                 |> under (PathSegment.Key "deprecated")
 
-        let inProcessOnly =
-            Decoder.fieldOr "inProcessOnly" false (scalar "'inProcessOnly' is not a boolean" Decoder.bool) block
+        let inProcessOnly = Decoder.fieldOr "inProcessOnly" false Decoder.bool block
 
         deprecated
         |> Result.bind (fun d ->
             inProcessOnly
             |> Result.bind (fun ipo ->
-                optStr "'since' is not a string" "since" block
+                optStr "since" block
                 |> Result.bind (fun since ->
-                    optStr "'doc' is not a string" "doc" block
+                    optStr "doc" block
                     |> Result.map (fun doc ->
                         { Deprecated = d
                           InProcessOnly = ipo
@@ -956,39 +875,29 @@ module Artifact =
         Decoder.fieldOr "annotations" Annotations.Empty readAnnotationBlock owner
 
     /// One field object — internal since Phase 403, the support document's reader of a projected
-    /// record's declared fields.
+    /// record's declared fields. Its `type` and `optionality` are both looked for BEFORE either is
+    /// read, so a field missing one reports the missing one whatever the other holds.
     let internal readField (v: JVal) : Result<IdlField, DecodeError> =
-        strAt "name" v
+        str "name" v
         |> Result.bind (fun name ->
-            match Decoder.tryMember "type" v, Decoder.tryMember "optionality" v with
-            | None, _ ->
-                Error(
-                    { Decoder.missing "type" with
-                        Message = "field '" + name + "' has no 'type'" }
-                )
-            | _, None ->
-                Error(
-                    { Decoder.missing "optionality" with
-                        Message = "field '" + name + "' has no 'optionality'" }
-                )
-            | Some _, Some _ ->
-                need "type" "" readType v
-                |> Result.bind (fun ty ->
-                    need "optionality" "" readOptionality v
-                    |> Result.bind (fun opt ->
-                        readAnnotations v
-                        |> Result.map (fun ann ->
-                            { Name = name
-                              Type = ty
-                              Opt = opt
-                              Annotations = ann }))))
+            Decoder.sequence [ Decoder.field "type" Decoder.json; Decoder.field "optionality" Decoder.json ] v
+            |> Result.bind (fun _ -> Decoder.field "type" readType v)
+            |> Result.bind (fun ty ->
+                Decoder.field "optionality" readOptionality v
+                |> Result.bind (fun opt ->
+                    readAnnotations v
+                    |> Result.map (fun ann ->
+                        { Name = name
+                          Type = ty
+                          Opt = opt
+                          Annotations = ann }))))
 
-    let private readFields (owner: JVal) : Result<IdlField list, DecodeError> = arrAt "fields" readField owner
+    let private readFields (owner: JVal) : Result<IdlField list, DecodeError> = listOf "fields" readField owner
 
     let private readKind (v: JVal) : Result<IdlKind, DecodeError> =
-        strAt "tag" v
+        str "tag" v
         |> Result.bind (fun tag ->
-            strAt "category" v
+            str "category" v
             |> Result.bind (fun category ->
                 readFields v
                 |> Result.bind (fun fields ->
@@ -1000,14 +909,14 @@ module Artifact =
                           Annotations = ann }))))
 
     let private readUnion (v: JVal) : Result<IdlUnion, DecodeError> =
-        strAt "name" v
+        str "name" v
         |> Result.bind (fun name ->
-            arrOrEmpty "params" (scalar ("union '" + name + "' has a non-string type parameter") Decoder.str) v
+            listOrEmpty "params" Decoder.str v
             |> Result.bind (fun ps ->
-                arrAt
+                listOf
                     "cases"
                     (fun c ->
-                        strAt "tag" c
+                        str "tag" c
                         |> Result.bind (fun tag ->
                             readFields c
                             |> Result.bind (fun fields ->
@@ -1030,9 +939,6 @@ module Artifact =
                       Annotations = Annotations.Empty })))
         |> Result.bind (fun u -> readAnnotations v |> Result.map (fun ann -> { u with Annotations = ann }))
 
-    let private readStrings (name: string) (v: JVal) : Result<string list, DecodeError> =
-        arrAt name (scalar ("'" + name + "' has a non-string entry") Decoder.str) v
-
     /// `cases` is always the WIRE contract; `hostCases` appears only for a wire-mapped
     /// enum. So an entry with no `hostCases` is the identity mapping (`Wires = []`),
     /// which is what keeps a pre-mapping vocabulary's read exactly what it was.
@@ -1049,14 +955,7 @@ module Artifact =
             |> List.map (fun (wire, block) ->
                 match e.CaseOf wire with
                 | None ->
-                    refuse
-                        DecodeCode.UnknownTag
-                        "a case the enum declares"
-                        ("enum '"
-                         + e.Name
-                         + "': 'caseAnnotations' names case '"
-                         + wire
-                         + "', which it does not declare")
+                    Error(DecodeError.make DecodeCode.UnknownTag "a case the enum declares" ("case '" + wire + "'"))
                     |> under (PathSegment.Key wire)
                 | Some case ->
                     readAnnotationBlock block
@@ -1071,27 +970,29 @@ module Artifact =
                 (Ok [])
             |> Result.map List.rev
             |> under (PathSegment.Key "caseAnnotations")
-        | Some _ ->
-            refuse DecodeCode.WrongKind "object" ("enum '" + e.Name + "': 'caseAnnotations' is not an object")
+        | Some other ->
+            Error(Decoder.wrongKind "object" other)
             |> under (PathSegment.Key "caseAnnotations")
 
     let private readEnum (v: JVal) : Result<IdlEnum, DecodeError> =
-        strAt "name" v
+        str "name" v
         |> Result.bind (fun name ->
-            readStrings "cases" v
+            listOf "cases" Decoder.str v
             |> Result.bind (fun wireCases ->
                 match Decoder.tryMember "hostCases" v with
                 | None -> Ok(Declare.enumOf name wireCases)
                 | Some _ ->
-                    readStrings "hostCases" v
+                    listOf "hostCases" Decoder.str v
                     |> Result.bind (fun hostCases ->
                         if List.length hostCases = List.length wireCases then
                             Ok(Declare.enumWith name (List.zip hostCases wireCases))
                         else
-                            refuse
-                                DecodeCode.OutOfRange
-                                (string (List.length wireCases) + " host cases")
-                                ("enum '" + name + "': 'hostCases' and 'cases' differ in length")
+                            Error(
+                                DecodeError.make
+                                    DecodeCode.OutOfRange
+                                    (string (List.length wireCases) + " host cases")
+                                    (string (List.length hostCases) + " host cases")
+                            )
                             |> under (PathSegment.Key "hostCases")))
             // The case↔wire mapping has to be in hand before an entry keyed on a wire
             // string can be resolved, so the annotations are read into the enum rather
@@ -1106,7 +1007,7 @@ module Artifact =
                             Annotations = ann }))))
 
     let private readRecord (v: JVal) : Result<IdlRecord, DecodeError> =
-        strAt "name" v
+        str "name" v
         |> Result.bind (fun name ->
             readFields v
             |> Result.bind (fun fields ->
@@ -1117,11 +1018,11 @@ module Artifact =
                       Annotations = ann })))
 
     let private readDefault (v: JVal) : Result<IdlDefault, DecodeError> =
-        strAt "kind" v
+        str "kind" v
         |> Result.bind (fun kind ->
-            strAt "field" v
+            str "field" v
             |> Result.bind (fun field ->
-                need "value" ("default " + kind + "." + field + " has no 'value'") readValue v
+                Decoder.field "value" readValue v
                 |> Result.map (fun value ->
                     { Kind = kind
                       Field = field
@@ -1129,44 +1030,32 @@ module Artifact =
 
     /// The declared wire shape. Absent means [[WireShape.Default]] — the projection
     /// omits the block when it is the default, so every `$type`-nested vocabulary's
-    /// artifact reads back unchanged.
+    /// artifact reads back unchanged. All three members are read as strings before either
+    /// enumerated one is checked, so a block missing one reports the missing one.
     let private readWire (root: JVal) : Result<WireShape, DecodeError> =
         let shape (block: JVal) =
-            strAt "discriminator" block
+            str "discriminator" block
             |> Result.bind (fun disc ->
-                strAt "nodeEnvelope" block
-                |> Result.bind (fun env ->
-                    strAt "keyOrder" block
-                    |> Result.bind (fun order ->
-                        let envelope =
-                            match env with
-                            | "nestedKind" -> Ok NodeEnvelopeShape.NestedKind
-                            | "flatKind" -> Ok NodeEnvelopeShape.FlatKind
-                            | other ->
-                                refuse
-                                    DecodeCode.UnknownTag
-                                    "one of 'nestedKind', 'flatKind'"
-                                    ("unknown nodeEnvelope '" + other + "'")
-                                |> under (PathSegment.Key "nodeEnvelope")
-
-                        let keyOrder =
-                            match order with
-                            | "sorted" -> Ok KeyOrder.Sorted
-                            | "declared" -> Ok KeyOrder.Declared
-                            | other ->
-                                refuse
-                                    DecodeCode.UnknownTag
-                                    "one of 'sorted', 'declared'"
-                                    ("unknown keyOrder '" + other + "'")
-                                |> under (PathSegment.Key "keyOrder")
-
-                        envelope
-                        |> Result.bind (fun e ->
-                            keyOrder
-                            |> Result.map (fun k ->
-                                { Discriminator = disc
-                                  NodeEnvelope = e
-                                  KeyOrder = k })))))
+                Decoder.sequence
+                    [ Decoder.field "nodeEnvelope" Decoder.str
+                      Decoder.field "keyOrder" Decoder.str ]
+                    block
+                |> Result.bind (fun _ ->
+                    Decoder.field
+                        "nodeEnvelope"
+                        (Decoder.oneOf
+                            [ "nestedKind", NodeEnvelopeShape.NestedKind
+                              "flatKind", NodeEnvelopeShape.FlatKind ])
+                        block)
+                |> Result.bind (fun e ->
+                    Decoder.field
+                        "keyOrder"
+                        (Decoder.oneOf [ "sorted", KeyOrder.Sorted; "declared", KeyOrder.Declared ])
+                        block
+                    |> Result.map (fun k ->
+                        { Discriminator = disc
+                          NodeEnvelope = e
+                          KeyOrder = k })))
 
         Decoder.fieldOr "wire" WireShape.Default shape root
 
@@ -1193,29 +1082,29 @@ module Artifact =
     /// back.
     let private readHarden (root: JVal) : Result<HardenPolicy, DecodeError> =
         let policy (block: JVal) =
-            let str name = strAt name block
+            let s name = str name block
 
             let transparent =
-                arrAt
+                listOf
                     "transparentUnions"
                     (fun e ->
-                        strAt "union" e
-                        |> Result.bind (fun u -> strAt "case" e |> Result.map (fun c -> u, c)))
+                        str "union" e
+                        |> Result.bind (fun u -> str "case" e |> Result.map (fun c -> u, c)))
                     block
 
-            str "gatedKind"
+            s "gatedKind"
             |> Result.bind (fun gated ->
-                str "placeholderKind"
+                s "placeholderKind"
                 |> Result.bind (fun placeholder ->
-                    str "placeholderField"
+                    s "placeholderField"
                     |> Result.bind (fun placeholderField ->
-                        str "textLiteralCase"
+                        s "textLiteralCase"
                         |> Result.bind (fun textCase ->
-                            str "textLiteralField"
+                            s "textLiteralField"
                             |> Result.bind (fun textField ->
-                                str "valueLiteralCase"
+                                s "valueLiteralCase"
                                 |> Result.bind (fun valueCase ->
-                                    str "valueLiteralField"
+                                    s "valueLiteralField"
                                     |> Result.bind (fun valueField ->
                                         transparent
                                         |> Result.map (fun unions ->
@@ -1233,78 +1122,69 @@ module Artifact =
     /// Phase 292 — a read vocabulary is VALIDATED before anyone receives it: `idl.json` is
     /// untrusted input (DECISIONS D95), and a hand-edited one could otherwise carry a quote in
     /// its discriminator, a line break in an annotation or a dangling type name straight to
-    /// an emitter. Every error is named, not just the first, so one edit fixes them all. A
-    /// vocabulary that does not declare well is the document's fault as a whole, so its
-    /// refusal is `SchemaFault` at the root.
-    let private validated (idl: Idl) : Result<Idl, DecodeError> =
+    /// an emitter. Every fault is named, not just the first, so one edit fixes them all — and
+    /// since Phase 520 each is a `SchemaFault` AT ITS OWNER'S PATH (`Declare.errors`), where it
+    /// was one root-level refusal whose sentence numbered them.
+    let private validated (idl: Idl) : Result<Idl, DecodeError list> =
         match Declare.errors idl with
         | [] -> Ok idl
-        | errs ->
-            refuse
-                DecodeCode.SchemaFault
-                "a well-formed vocabulary"
-                (sprintf "idl.json declares a vocabulary that is not well-formed (%d error(s)):\n" (List.length errs)
-                 + (errs |> List.map (fun e -> "  - " + e) |> String.concat "\n"))
+        | faults ->
+            faults
+            |> List.map (fun f ->
+                DecodeError.make DecodeCode.SchemaFault "a well-formed vocabulary" f.Detail
+                |> DecodeError.within f.At)
+            |> Error
 
-    /// Read a vocabulary from the artifact's parsed root, answering a typed refusal (Phase 310):
-    /// its code, the path to the value at fault, and [[ofJson]]'s sentence.
-    ///
-    /// The vocabulary is refused unless [[Declare.errors]] finds nothing (Phase 292).
+    /// Read a vocabulary from the artifact's parsed root, answering typed refusals (Phase 310;
+    /// a LIST since Phase 520): a document that does not read is refused with the one refusal at
+    /// its path — its code, the path to the value at fault, what the position expected — and a
+    /// vocabulary that reads and does not declare well with every `SchemaFault` [[Declare.errors]]
+    /// names, each at its owner's path (Phase 292).
     ///
     /// The encoding version is checked FIRST and refused by name when it is not this
     /// engine's: an artifact written by a newer encoder may spell a member this reader
     /// would silently drop, and a vocabulary that loses a field quietly is worse than
     /// one that will not load at all.
-    let ofJsonDetailed (root: JVal) : Result<Idl, DecodeError> =
-        match Decoder.tryMember "version" root with
-        // A root that is not an object has no `version` either, and is told so in the same
-        // sentence; its refusal is the root's kind, at the root, where the path resolves.
-        | None when
-            (match root with
-             | JObj _ -> false
-             | _ -> true)
-            ->
-            Error(
-                { Decoder.wrongKind "object" root with
-                    Message = "idl.json has no 'version'" }
-            )
-        | None ->
-            Error(
-                { Decoder.missing "version" with
-                    Message = "idl.json has no 'version'" }
-            )
-        | Some(JInt v) when v <> version ->
-            refuse
-                DecodeCode.OutOfRange
-                ("encoding version " + string version)
-                ("idl.json declares encoding version "
-                 + string v
-                 + "; this engine reads version "
-                 + string version)
-            |> under (PathSegment.Key "version")
-        | Some(JInt _) ->
-            arrAt "kinds" readKind root
-            |> Result.bind (fun kinds ->
-                arrAt "unions" readUnion root
-                |> Result.bind (fun unions ->
-                    arrAt "enums" readEnum root
-                    |> Result.bind (fun enums ->
-                        arrAt "records" readRecord root
-                        |> Result.bind (fun records ->
-                            arrAt "defaults" readDefault root
-                            |> Result.bind (fun defaults ->
-                                arrAt "nodeFields" readField root
-                                |> Result.bind (fun nodeFields ->
-                                    // `ops` is omitted for an op-free vocabulary.
-                                    (match Decoder.tryMember "ops" root with
-                                     | None -> Ok []
-                                     | Some _ -> arrAt "ops" readKind root)
-                                    |> Result.bind (fun ops ->
-                                        readWire root
-                                        |> Result.bind (fun wire ->
-                                            readHarden root
-                                            |> Result.bind (fun harden ->
-                                                validated
+    let ofJsonDetailed (root: JVal) : Result<Idl, DecodeError list> =
+        let read: Result<Idl, DecodeError> =
+            match Decoder.tryMember "version" root with
+            // A root that is not an object has no `version` either; its refusal is the root's
+            // kind, at the root, where the path resolves.
+            | None when
+                (match root with
+                 | JObj _ -> false
+                 | _ -> true)
+                ->
+                Error(Decoder.wrongKind "object" root)
+            | None -> Error(Decoder.missing "version")
+            | Some(JInt v) when v <> version ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.OutOfRange
+                        ("encoding version " + string version)
+                        ("encoding version " + string v)
+                )
+                |> under (PathSegment.Key "version")
+            | Some(JInt _) ->
+                listOf "kinds" readKind root
+                |> Result.bind (fun kinds ->
+                    listOf "unions" readUnion root
+                    |> Result.bind (fun unions ->
+                        listOf "enums" readEnum root
+                        |> Result.bind (fun enums ->
+                            listOf "records" readRecord root
+                            |> Result.bind (fun records ->
+                                listOf "defaults" readDefault root
+                                |> Result.bind (fun defaults ->
+                                    listOf "nodeFields" readField root
+                                    |> Result.bind (fun nodeFields ->
+                                        // `ops` is omitted for an op-free vocabulary.
+                                        listOrEmpty "ops" readKind root
+                                        |> Result.bind (fun ops ->
+                                            readWire root
+                                            |> Result.bind (fun wire ->
+                                                readHarden root
+                                                |> Result.map (fun harden ->
                                                     { Kinds = kinds
                                                       Unions = unions
                                                       Enums = enums
@@ -1314,32 +1194,39 @@ module Artifact =
                                                       Ops = ops
                                                       Wire = wire
                                                       Harden = harden })))))))))
-        | Some _ ->
-            refuse DecodeCode.WrongKind "int" "idl.json 'version' is not an integer"
-            |> under (PathSegment.Key "version")
+            | Some other -> Error(Decoder.wrongKind "int" other) |> under (PathSegment.Key "version")
 
-    /// Read a vocabulary from the artifact's parsed root — the sentence of
-    /// [[ofJsonDetailed]]'s refusal.
+        read |> Result.mapError List.singleton |> Result.bind validated
+
+    /// Every refusal of [[ofJsonDetailed]], one per line in `DecodeError.render`'s form (code, path,
+    /// sentence) — the string forms' account.
+    let private describeAll (errors: DecodeError list) : string =
+        errors |> List.map DecodeError.render |> String.concat "\n"
+
+    /// Read a vocabulary from the artifact's parsed root — [[ofJsonDetailed]]'s refusals as text,
+    /// one per line, each with its code and path.
     let ofJson (root: JVal) : Result<Idl, string> =
-        ofJsonDetailed root |> Result.mapError DecodeError.describe
+        ofJsonDetailed root |> Result.mapError describeAll
 
     /// [[ofJsonDetailed]] over `idl.json` bytes; a parse failure is refused at the root.
-    let parseDetailed (text: string) : Result<Idl, DecodeError> =
-        Decoder.parse ReadOptions.strict text |> Result.bind ofJsonDetailed
+    let parseDetailed (text: string) : Result<Idl, DecodeError list> =
+        Decoder.parse ReadOptions.strict text
+        |> Result.mapError List.singleton
+        |> Result.bind ofJsonDetailed
 
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the
     /// ordering [[canonicalise]] states.
     let parse (text: string) : Result<Idl, string> =
-        parseDetailed text |> Result.mapError DecodeError.describe
+        parseDetailed text |> Result.mapError describeAll
 
     /// The [[Identity]] an artifact declares (Phase 252): its `description`, and its
     /// `name` when it carries one. The other half of [[parse]] — what the `Idl` record
     /// does not hold — so `renderWith (identityOf root) (ofJson root)` reproduces the
     /// artifact instead of re-stamping it with [[defaultDescription]].
     let identityOfJson (root: JVal) : Result<Identity, string> =
-        strAt "description" root
+        str "description" root
         |> Result.bind (fun description ->
-            Decoder.optField "name" (scalar "idl.json 'name' is not a string" Decoder.str) root
+            Decoder.optField "name" Decoder.str root
             |> Result.map (fun name ->
                 { Name = name
                   Description = description }))

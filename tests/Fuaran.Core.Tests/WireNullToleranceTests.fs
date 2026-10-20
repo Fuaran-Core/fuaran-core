@@ -114,7 +114,7 @@ let tests =
 
           testCase "a tolerantly-read document is indistinguishable downstream"
           <| fun _ ->
-              // Canon.render sorts keys, so this also pins that erasure leaves nothing
+              // Canonical.write Rendering.CrossHost sorts keys, so this also pins that erasure leaves nothing
               // behind for the canonical encoder to trip on.
               let tolerant =
                   Json.read ReadOptions.tolerantOfNull WireNullTolerance.foreignDocument
@@ -123,6 +123,12 @@ let tests =
 
               match tolerant, strict with
               | Ok a, Ok b ->
-                  Expect.equal (Canon.render a) (Canon.render b) "canonical bytes agree"
-                  Expect.isFalse ((Canon.render a).Contains "null") "no null survives into the emission"
+                  Expect.equal
+                      (Canonical.write Rendering.CrossHost a)
+                      (Canonical.write Rendering.CrossHost b)
+                      "canonical bytes agree"
+
+                  Expect.isFalse
+                      ((Canonical.write Rendering.CrossHost a).Contains "null")
+                      "no null survives into the emission"
               | _ -> failtest "one of the two spellings failed to parse" ]

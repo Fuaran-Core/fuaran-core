@@ -349,7 +349,12 @@ let readerAdmissionTests =
               | Error e ->
                   Expect.equal e.Code DecodeCode.UnknownTag "an unknown tag"
                   Expect.equal e.Path [ PathSegment.Key "$type" ] "at the tag"
-                  Expect.equal e.Message "not a query declaration: queryResult" "naming the tag"
+                  Expect.equal e.Expected "one of 'query'" "naming the one tag it reads"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence DecodeCode.UnknownTag "one of 'query'" "value 'queryResult'")
+                      "naming the tag, projected"
               | Ok q -> failtestf "another document type was read as a query: %A" q
 
               match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (retag "query" None text) with
@@ -361,10 +366,22 @@ let readerAdmissionTests =
               let text = QueryCodec.encodeResult sampleResult
               Expect.equal (QueryCodec.decodeResult text) (Ok sampleResult) "round trip"
 
-              Expect.equal
-                  (QueryCodec.decodeResult (retag "queryResult" (Some "query") text))
-                  (Error "not a query result: query")
-                  "another document type"
+              match
+                  QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (retag "queryResult" (Some "query") text)
+              with
+              | Error e ->
+                  Expect.equal (e.Code, e.Path) (DecodeCode.UnknownTag, [ PathSegment.Key "$type" ]) "at the tag"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence DecodeCode.UnknownTag "one of 'queryResult'" "value 'query'")
+                      "naming the tag, projected"
+
+                  Expect.equal
+                      (QueryCodec.decodeResult (retag "queryResult" (Some "query") text))
+                      (Error e.Message)
+                      "another document type"
+              | Ok r -> failtestf "another document type was read as a result: %A" r
 
               Expect.isError (QueryCodec.decodeResult (retag "queryResult" None text)) "an untagged document"
 
@@ -387,7 +404,13 @@ let readerAdmissionTests =
 
               match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode twice) with
               | Error e ->
-                  Expect.equal e.Message (QueryError.describe registryRefusal) "the reader's refusal is the registry's"
+                  Expect.equal e.Code DecodeCode.OutOfRange "a declaration the registry does not admit"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence e.Code e.Expected (QueryError.describe registryRefusal))
+                      "the reader's refusal is the registry's, projected"
+
                   Expect.equal e.Path [ PathSegment.Key "params" ] "at the parameters"
               | Ok q -> failtestf "the reader admitted what the registry refuses: %A" q
 
@@ -423,8 +446,45 @@ let readerAdmissionTests =
 
               Expect.equal
                   (QueryError.describe e)
-                  "Refused: the arguments could not be read at $: unexpected end. Send one JSON object keyed by parameter name."
-                  "described" ]
+                  ("Refused: the arguments could not be read at $: "
+                   + DecodeError.sentence DecodeCode.InvalidJson "JSON text" "unexpected end"
+                   + ". Send one JSON object keyed by parameter name.")
+                  "described, around the refusal's projected sentence"
+
+              // Phase 520: a refusal journalled before the sentence became a projection carries its
+              // OLD sentence in `message`; it reads back verbatim — the same code, path, expectation
+              // and sentence — so an append-once journal replays across the change.
+              // The line is the bytes the 0.38.1-draft binary journalled for `decodeArgs sampleQuery "{"`;
+              // the second is a sentence no projection writes, standing for any older spelling.
+              for stored in
+                  [ "not valid JSON: expected '\"' at position 1"
+                    "a sentence some earlier release wrote" ] do
+                  let legacy =
+                      """{"$type":"unreadableArgs","error":{"code":"InvalidJson","expected":"JSON text","message":"""
+                      + "\""
+                      + stored.Replace("\"", "\\\"")
+                      + "\""
+                      + ""","path":[]}}"""
+
+                  match QueryCodec.decodeQueryError legacy with
+                  | Ok(UnreadableArgs old) ->
+                      Expect.equal (old.Code, old.Path) (DecodeCode.InvalidJson, []) "the code and the path"
+                      Expect.equal old.Message stored "the stored sentence, verbatim"
+
+                      Expect.equal
+                          (QueryCodec.encodeQueryError (UnreadableArgs old))
+                          legacy
+                          "and it re-encodes to its bytes"
+                  | other -> failtestf "a pre-520 journal line did not read back: %A" other
+
+              // and a parse failure journalled today is the same line the pre-520 binary wrote
+              match QueryCodec.decodeArgs sampleQuery "{" with
+              | Error [ e ] ->
+                  Expect.equal
+                      (QueryCodec.encodeQueryError e)
+                      """{"$type":"unreadableArgs","error":{"code":"InvalidJson","expected":"JSON text","message":"not valid JSON: expected '\"' at position 1","path":[]}}"""
+                      "the journalled bytes did not move"
+              | other -> failtestf "expected one UnreadableArgs, got %A" other ]
 
 /// A resolver answering per page: the first page a result, then a timeout, a recoverable failure and
 /// a missing source.
@@ -910,10 +970,15 @@ let whereOrderByTests =
 
               Expect.equal retyped.Path [ PathSegment.Key "where"; PathSegment.Index 4 ] "at the predicate"
 
+              Expect.equal retyped.Code DecodeCode.OutOfRange "a declaration the registry does not admit"
+
               Expect.equal
                   retyped.Message
-                  (QueryError.describe (PredicateTypeMismatch("n", IntType, FloatType)))
-                  "with the registry's sentence"
+                  (DecodeError.sentence
+                      retyped.Code
+                      retyped.Expected
+                      (QueryError.describe (PredicateTypeMismatch("n", IntType, FloatType))))
+                  "with the registry's sentence, projected"
 
               // A predicate naming an undeclared column.
               let stray =
@@ -922,7 +987,15 @@ let whereOrderByTests =
                   )
 
               Expect.equal stray.Path [ PathSegment.Key "where"; PathSegment.Index 6 ] "at the predicate"
-              Expect.equal stray.Message (QueryError.describe (UnknownColumn("nope", declared))) "named"
+              Expect.equal stray.Code DecodeCode.OutOfRange "a declaration the registry does not admit"
+
+              Expect.equal
+                  stray.Message
+                  (DecodeError.sentence
+                      stray.Code
+                      stray.Expected
+                      (QueryError.describe (UnknownColumn("nope", declared))))
+                  "named, projected"
 
               // An order naming a column twice.
               let twice =
@@ -1143,25 +1216,15 @@ let whereOrderByTests =
 let decoderHelperTests =
     testList
         "Decoder helpers (Phase 509)"
-        [ testCase "oneOfWith answers the codec's sentence over oneOf's code and expectation"
+        [ testCase "oneOf answers UnknownTag at the value, naming the known spellings (Phase 520: oneOfWith is gone)"
           <| fun _ ->
-              let d = Decoder.oneOfWith "unknown column type: " [ "int", 1; "string", 2 ]
+              let d = Decoder.oneOf [ "int", 1; "string", 2 ]
               Expect.equal (d (JStr "string")) (Ok 2) "a known value"
 
               Expect.equal
                   (d (JStr "blob"))
-                  (Error
-                      { Code = DecodeCode.UnknownTag
-                        Path = []
-                        Expected = "one of 'int', 'string'"
-                        Message = "unknown column type: blob" })
-                  "a miss is UnknownTag at the value, in the caller's sentence"
-
-              Expect.equal
-                  (d (JStr "blob") |> Result.mapError _.Expected)
-                  (Decoder.oneOf [ "int", 1; "string", 2 ] (JStr "blob")
-                   |> Result.mapError _.Expected)
-                  "the expectation is oneOf's"
+                  (Error(DecodeError.make DecodeCode.UnknownTag "one of 'int', 'string'" "value 'blob'"))
+                  "a miss is UnknownTag at the value, its sentence the code's projection"
 
               Expect.equal
                   (d (JInt 3) |> Result.mapError _.Code)

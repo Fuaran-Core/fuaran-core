@@ -449,7 +449,11 @@ let scaffoldRefusalTests =
 
                       Expect.equal
                           lines
-                          [ "err\tOutOfRange\ta value the slot's host codec admits\ta negative stamp"
+                          [ "err\tOutOfRange\ta value the slot's host codec admits\t"
+                            + DecodeError.sentence
+                                DecodeCode.OutOfRange
+                                "a value the slot's host codec admits"
+                                "a negative stamp"
                             "ok\t"
                             + (match Encode.encode stampedIdl (stamped 4) with
                                | Ok w -> w

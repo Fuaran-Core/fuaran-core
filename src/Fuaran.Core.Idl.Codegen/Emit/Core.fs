@@ -206,7 +206,7 @@ module internal Core =
 
         /// The vocabulary's identity: the hash of its canonical `idl.json` value.
         let vocabulary (idl: Idl) : string =
-            sha256 (Canon.render (Artifact.json idl))
+            sha256 (Canonical.write Rendering.CrossHost (Artifact.json idl))
 
         /// The ONE renderer. No trailing newline.
         let render (style: CommentStyle) (s: Stamp) : string =

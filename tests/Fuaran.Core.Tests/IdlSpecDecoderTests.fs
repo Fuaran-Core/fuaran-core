@@ -514,7 +514,7 @@ let tests =
 let private defectText (e: DecodeError) =
     DecodeError.codeName e.Code
     + "\u0002"
-    + Canon.render (DecodePath.toJson e.Path)
+    + Canonical.write Rendering.CrossHost (DecodePath.toJson e.Path)
     + "\u0002"
     + e.Expected
 
@@ -622,7 +622,7 @@ let typescriptTests =
                   let doc = parse sampleText
                   let paths = positions doc |> List.toArray
 
-                  let render (j: JVal) = Canon.renderOrdered j
+                  let render (j: JVal) = Canonical.write Rendering.Declared j
 
                   let mutations: (string * (JVal -> JVal option)) list =
                       [ "int", (fun _ -> Some(JInt 7))

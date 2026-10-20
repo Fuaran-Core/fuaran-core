@@ -419,8 +419,9 @@ module internal PipelineSeamLaws =
     ///
     ///  - **byte-identical to full eval** — `evalFrom (eval old) changed p` equals `eval new p` for every
     ///    changed-source set (the reuse is a sound optimisation, never a different answer);
-    ///  - **minimal re-invocation** — `evalFrom` re-invokes exactly `dirtySet changed` (a clean branch is
-    ///    reused, never re-run);
+    ///  - **minimal re-invocation** — `evalFrom` re-invokes exactly the pipeline's dirty set,
+    ///    `Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) changed` (Phase 544; a clean
+    ///    branch is reused, never re-run);
     ///  - **effect-honesty on the dirty path** — a clean node takes its prior value and is not re-invoked;
     ///    a dirty node is re-invoked and takes the fresh value (never a stale prior on the dirty path).
     let capabilityPipelineIncrementalLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
@@ -519,13 +520,16 @@ module internal PipelineSeamLaws =
                     fun () -> at (sprintf "evalFrom ≠ eval (changed=%A)\n  incr=%A\n  full=%A" changed viaIncr viaFull)
                 )
 
-                // minimal re-invocation: evalFrom re-invokes exactly the dirty set
-                let dirty = CapabilityPipeline.dirtySet changed pipeline
+                // minimal re-invocation: evalFrom re-invokes exactly the dirty set — Propagation's closure
+                // over the pipeline's own edges, the one proofs/Capability.fst instantiates
+                let dirty =
+                    Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap pipeline) changed
+
                 let reInvoked = Set.ofSeq incrInvoked
 
                 minimal.Check(
                     (reInvoked = dirty),
-                    fun () -> at (sprintf "re-invoked=%A ≠ dirtySet=%A" reInvoked dirty)
+                    fun () -> at (sprintf "re-invoked=%A ≠ dirtyFromChangedIds=%A" reInvoked dirty)
                 )
 
                 // effect-honesty: clean nodes take their prior value & are not re-invoked; dirty nodes are.

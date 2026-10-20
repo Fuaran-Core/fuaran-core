@@ -1197,9 +1197,9 @@ let memoTests =
                       Expect.equal (Set.ofSeq incrInvoked) (Set.ofList [ "s1"; "a" ]) "only the dirty branch re-invoked"
 
                       Expect.equal
-                          (CapabilityPipeline.dirtySet (Set.ofList [ "s1" ]) p)
+                          (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.ofList [ "s1" ]))
                           (Set.ofList [ "s1"; "a" ])
-                          "dirtySet = changed ∪ dependents"
+                          "the dirty set = changed ∪ dependents"
 
           testCase "capabilityPipelineIncrementalLaws certify evalFrom ≡ eval + minimal reuse (Phase 62)"
           <| fun _ ->
@@ -1518,8 +1518,15 @@ let convergenceTests =
               let odd = text.Replace("\"kind\":\"value\"", "\"kind\":\"int\"")
               Expect.notEqual odd text "the probe document carries the tag"
 
-              match CapabilityCodec.decode odd with
-              | Error m -> Expect.stringContains m "unknown hole kind: int" "names the kind"
+              match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient odd with
+              | Error e ->
+                  Expect.equal (e.Code, List.last e.Path) (DecodeCode.UnknownTag, PathSegment.Key "kind") "at the kind"
+                  Expect.equal e.Expected "one of 'value', 'slot', 'repeat', 'action'" "naming the known kinds"
+
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence e.Code e.Expected "value 'int'")
+                      "naming the kind, projected"
               | Ok _ -> failtest "an unknown kind decoded"
 
               // Phase 405 — ONE reader spelling. The descriptor spelling `toSchema` writes (`"kind"`;
@@ -1775,7 +1782,7 @@ let validatedDeclarationTests =
                   sig307 [ entry307 "x" (ValueHole finite); entry307 "n" (ValueHole(IntRange(-5, 5))) ]
 
               Expect.isOk (register307 sg.Holes) "it registers"
-              Expect.isOk (Canon.tryRender (Function.toJsonSchema sg)) "and its schema renders"
+              Expect.isOk (Canonical.tryWrite Rendering.CrossHost (Function.toJsonSchema sg)) "and its schema renders"
 
               let cap = Capability.create "c" sg Server
               Expect.equal (CapabilityCodec.tryEncode cap) (Ok(CapabilityCodec.encode cap)) "tryEncode is encode"
@@ -1947,7 +1954,8 @@ let validatedDeclarationTests =
                   "c#n2#cb29bce7"
                   "an argument-less invoke"
 
-          testCase "dirtySet is Propagation's closure over the pipeline's FromNode edges (Phase 510)"
+          testCase
+              "dependencyMap is the pipeline's FromNode edges, and its dirty set is Propagation's closure over them (Phases 510, 544)"
           <| fun _ ->
               let p: CapabilityPipeline =
                   { Nodes =
@@ -1967,21 +1975,21 @@ let validatedDeclarationTests =
                         "b", Set.ofList [ "a"; "s2" ]
                         "d", Set.ofList [ "s2"; "b" ] ]
 
-              for changed in
-                  [ Set.empty
-                    Set.singleton "s1"
-                    Set.singleton "s2"
-                    Set.ofList [ "a"; "ghost" ]
-                    Set.singleton "d" ] do
-                  Expect.equal
-                      (CapabilityPipeline.dirtySet changed p)
-                      (Propagation.dirtyFromChangedIds deps changed)
-                      (sprintf "changed %A" changed)
-
               Expect.equal
-                  (CapabilityPipeline.dirtySet (Set.singleton "s1") p)
+                  (CapabilityPipeline.dependencyMap p)
+                  deps
+                  "the map is each id to the upstreams its FromNode edges name, a repeated id to the union"
+
+              // the closure over it is Propagation's — one name, no forward (Phase 544)
+              Expect.equal
+                  (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.singleton "s1"))
                   (Set.ofList [ "s1"; "a"; "b"; "d" ])
                   "s1 reaches a, b and, through b, the second d"
+
+              Expect.equal
+                  (Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) (Set.ofList [ "a"; "ghost" ]))
+                  (Set.ofList [ "a"; "ghost"; "b"; "d" ])
+                  "a changed id the map does not hold is dirty and reaches nothing"
 
           testCase "the node kind leads the pipeline key: a Source and an Invoke never share one"
           <| fun _ ->
@@ -2059,10 +2067,24 @@ let readerAdmissionTests =
                         | Ok text ->
                             Expect.equal (register307 holes) (Error expected) (name + ": the registry's refusal")
 
-                            Expect.equal
-                                (CapabilityCodec.decode text)
-                                (Error(InvokeError.describe expected))
-                                (name + ": the reader's refusal is the registry's")
+                            match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient text with
+                            | Error e ->
+                                Expect.equal e.Code DecodeCode.OutOfRange (name + ": out of the admitted range")
+
+                                Expect.isTrue
+                                    (DecodeError.resolvesIn (Json.parse text |> Result.toOption |> Option.get) e)
+                                    (name + ": the path resolves")
+
+                                Expect.equal
+                                    e.Message
+                                    (DecodeError.sentence e.Code e.Expected (InvokeError.describe expected))
+                                    (name + ": the reader's refusal is the registry's, projected")
+
+                                Expect.equal
+                                    (CapabilityCodec.decode text)
+                                    (Error e.Message)
+                                    (name + ": the string form is it")
+                            | Ok c -> failtestf "%s: the reader admitted %A" name c
 
                             yield name ]
 
@@ -2085,7 +2107,11 @@ let readerAdmissionTests =
                       (Json.parse text |> Result.toOption |> Option.get)
               with
               | Error e ->
-                  Expect.equal e.Message (InvokeError.describe (NonTotalCapability("c", [ "r" ]))) "the totality half"
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence e.Code e.Expected (InvokeError.describe (NonTotalCapability("c", [ "r" ]))))
+                      "the totality half, projected"
+
                   Expect.equal e.Path [ PathSegment.Key "signature"; PathSegment.Key "holes" ] "at the holes"
                   Expect.equal e.Code DecodeCode.OutOfRange "out of the admitted range"
               | Ok c -> failtestf "a non-total declaration was read: %A" c

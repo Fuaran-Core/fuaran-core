@@ -89,13 +89,17 @@ let tests =
                     -9007199254740994.0
                     1.8205257897171752e16
                     9.9999999999999984e16 ] do
-                  let tok = Canon.canonicalFloat f
+                  let tok = FloatLayout.canonical f
                   Expect.isFalse (tok.Contains "." || tok.Contains "E") (sprintf "%s is integer-shaped" tok)
 
                   match Json.parse tok with
                   | Ok(JFloat g) ->
                       Expect.equal g f (sprintf "%s reads as the double it was written from" tok)
-                      Expect.equal (Canon.render (JFloat g)) tok (sprintf "%s re-renders byte for byte" tok)
+
+                      Expect.equal
+                          (Canonical.write Rendering.CrossHost (JFloat g))
+                          tok
+                          (sprintf "%s re-renders byte for byte" tok)
                   | other -> failtestf "expected JFloat for the canonical token %s, got %A" tok other
 
               // Past 2^53 the admission is by SPELLING: 18205257897171752 is the exact value of the

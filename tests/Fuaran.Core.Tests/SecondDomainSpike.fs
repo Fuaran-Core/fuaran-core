@@ -384,7 +384,7 @@ let private inSliceFixtures (corpus: string) =
 /// form is declaration order, and `renderOrdered` of the parsed fixture IS the
 /// fixture's authored byte order, compacted).
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.renderOrdered root
+    let expected = Canonical.write Rendering.Declared root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)
@@ -571,10 +571,20 @@ let tests =
                   failtest
                       "the default-shape declaration decoded the flat kind-tagged wire — nothing is declared any more"
               | Error e ->
-                  Expect.stringContains
+                  // Phase 520: re-pinned to the code and the path — the node envelope's own member,
+                  // not a field-level defect — and the projected sentence
+                  Expect.equal
                       e
-                      "node"
-                      (sprintf "the failure names the node envelope rather than a field-level defect (got: %s)" e)
+                      (DecodeError.sentence DecodeCode.WrongKind "object" "string")
+                      "the node envelope's `kind` is a string where the default shape takes an object"
+
+                  match Decode.decodeDetailed (defaultShaped) native with
+                  | Error d ->
+                      Expect.equal
+                          (d.Code, d.Path)
+                          (DecodeCode.WrongKind, [ PathSegment.Key "kind" ])
+                          "at the node envelope's own member"
+                  | Ok _ -> failtest "the typed read decoded it"
 
               // And the inverse: the declared shape refuses the interpreter's
               // OLD nested `$type` shape — the two wires are disjoint, not lenient.
@@ -598,7 +608,7 @@ let tests =
                   let divergent =
                       inSliceFixtures corpus
                       |> List.filter (fun (_, root) ->
-                          let ordered = Canon.renderOrdered root
+                          let ordered = Canonical.write Rendering.Declared root
 
                           match Decode.decode docIdl ordered with
                           | Error _ -> false
@@ -736,7 +746,7 @@ let tests =
                       "the slice covers enough of the corpus for the certification to mean something"
 
                   for (name, root) in fixtures do
-                      let expected = Canon.renderOrdered root
+                      let expected = Canonical.write Rendering.Declared root
 
                       match DocGenerated.decodeNode expected with
                       | Error e -> failtestf "%s: generated decode: %s" name (DecodeError.render e)
@@ -762,7 +772,7 @@ let tests =
                   let wireJs =
                       fixtures
                       |> List.map (fun (name, root) ->
-                          sprintf "  [%s, %s]," (jsStr name) (jsStr (Canon.renderOrdered root)))
+                          sprintf "  [%s, %s]," (jsStr name) (jsStr (Canonical.write Rendering.Declared root)))
                       |> String.concat "\n"
 
                   let harness =
@@ -799,7 +809,7 @@ let tests =
                               |> Map.ofArray
 
                           for (name, root) in fixtures do
-                              let expectedWire = Canon.renderOrdered root
+                              let expectedWire = Canonical.write Rendering.Declared root
 
                               match Map.tryFind name got with
                               | Some actual ->

@@ -44,7 +44,8 @@ open Fuaran.Core.Idl
 // The value normal form.
 // ---------------------------------------------------------------------------
 
-let private floatKey (f: float) = Canon.render (JFloat f)
+let private floatKey (f: float) =
+    Canonical.write Rendering.CrossHost (JFloat f)
 
 let private fieldValue (name: string) (fields: (string * IdlValue) list) =
     fields
@@ -58,21 +59,21 @@ let private fieldValue (name: string) (fields: (string * IdlValue) list) =
 /// equal. See the header for what the form keeps and what it settles.
 let rec valueKey (idl: Idl) (t: IdlType) (v: IdlValue) : string =
     match t, v with
-    | TStr, VStr s -> "s" + Canon.render (JStr s)
+    | TStr, VStr s -> "s" + Canonical.write Rendering.CrossHost (JStr s)
     | TInt, VInt i -> "i" + string i
     | TBool, VBool b -> if b then "true" else "false"
     | TFloat, VFloat f -> "f" + floatKey f
     | TFloat, VInt i -> "f" + floatKey (float i)
-    | TEnum _, VEnum c -> "e" + Canon.render (JStr c)
+    | TEnum _, VEnum c -> "e" + Canonical.write Rendering.CrossHost (JStr c)
     | (TClosure | TFn _), _ -> "closure"
     | TOpaque, _ -> "opaque"
-    | (TJson | THosted _), VJson j -> "j" + Canon.render j
+    | (TJson | THosted _), VJson j -> "j" + Canonical.write Rendering.CrossHost j
     | TList inner, VList xs -> "[" + (xs |> List.map (valueKey idl inner) |> String.concat ",") + "]"
     | TMap vt, VMap entries ->
         "{"
         + (entries
            |> List.sortWith (fun (a, _) (b, _) -> String.CompareOrdinal(a, b))
-           |> List.map (fun (k, ev) -> Canon.render (JStr k) + ":" + valueKey idl vt ev)
+           |> List.map (fun (k, ev) -> Canonical.write Rendering.CrossHost (JStr k) + ":" + valueKey idl vt ev)
            |> String.concat ",")
         + "}"
     | TRecord n, VRecord fs ->
@@ -118,7 +119,7 @@ and private nodeKey (idl: Idl) (id: string) env (tag: string) fs : string =
     match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
     | Some k ->
         "N"
-        + Canon.render (JStr id)
+        + Canonical.write Rendering.CrossHost (JStr id)
         + ":"
         + tag
         + "("
@@ -464,7 +465,12 @@ let private tsLeg (idl: Idl) (rows: (IdlValue * IdlValue * string) list) : Map<i
     let vectors =
         rows
         |> List.mapi (fun i (authored, decoded, bytes) ->
-            sprintf "  [%d, %s, %s, %s]," i (lit authored) (lit decoded) (Canon.render (JStr bytes)))
+            sprintf
+                "  [%d, %s, %s, %s],"
+                i
+                (lit authored)
+                (lit decoded)
+                (Canonical.write Rendering.CrossHost (JStr bytes)))
         |> String.concat "\n"
 
     let harness =
@@ -825,7 +831,7 @@ let threeWay =
                       runNode (
                           tsModule
                           + "\nconst __r = decodeNode("
-                          + Canon.render (JStr bytes)
+                          + Canonical.write Rendering.CrossHost (JStr bytes)
                           + ");\nconsole.log(JSON.stringify(__r.ok ? 'accepted' : [__r.error.code, __r.error.path]));\n"
                       )
                   with
@@ -1132,7 +1138,7 @@ let vectorsModuleName = "VocabularyVectors"
 /// (stably), so the facts carry them rather than whichever draws happen to come first.
 let private hostileKey (wire: string) =
     [ ""; "a\"b"; "\\"; "\u0000"; "10"; "9"; "0" ]
-    |> List.exists (fun k -> wire.Contains(Canon.render (JStr k) + ":"))
+    |> List.exists (fun k -> wire.Contains(Canonical.write Rendering.CrossHost (JStr k) + ":"))
 
 let private vectorModels () : FStarTarget.VectorModel list =
     let wires = certificationWires ()
@@ -1283,7 +1289,7 @@ let private tsAccepts (idl: Idl) (docs: string list) : bool list option =
         tsModule
         + "\nconst __docs = [\n"
         + (docs
-           |> List.map (fun d -> "  " + Canon.render (JStr d) + ",")
+           |> List.map (fun d -> "  " + Canonical.write Rendering.CrossHost (JStr d) + ",")
            |> String.concat "\n")
         + "\n];\n"
         + "for (const d of __docs) console.log(decodeNode(d).ok ? 'ok' : 'refused');\n"

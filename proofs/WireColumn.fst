@@ -11,7 +11,7 @@
    the cell reader `decodeCell` that `decodeColumn` applied per slot, `decodeSchemaEntry`,
    `decodeSchema`, `columnParts`, `uniqueColumnKeys`), each clause for clause as the source had
    it. The level is the `JVal`: `encodeJson` builds one and `decodeJson` reads one, and everything
-   the codec decides it decides there. The strings either side of it are `Canon.render` and the
+   the codec decides it decides there. The strings either side of it are `Canonical.write Rendering.CrossHost` and the
    parser, which `WireCanon.fst` and `JsonParse.fst` already model; section 9 says exactly how far
    this module's theorems compose with those, and where they stop.
 
@@ -2074,7 +2074,7 @@ let ref_wins_over_columns (#num #flt: eqtype) (h: host num flt) (columns_el: jva
    9. THE JOIN TO THE CANONICAL RENDERER — how far the STRING level follows, and where it
       stops.
 
-      `ColumnCodec.encode` is `Canon.render (encodeJson src)`, and `WireCanon.fst` proves what a
+      `ColumnCodec.encode` is `Canonical.write Rendering.CrossHost (encodeJson src)`, and `WireCanon.fst` proves what a
       reader of those bytes gets back: `read (render v) == Ok (normalise v)` — the value with
       every object's members in canonical key order — on the subset it calls `canonical`. Two
       things are therefore needed to carry theorem 2 to the string, and this section proves the

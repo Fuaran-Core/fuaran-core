@@ -24,7 +24,7 @@
      - the HANDLER TABLE (section 14): `Function.bindHandlers` — the behaviour-axis binding of a
        host's handlers to an artifact's action holes — with the `Map` its table is;
      - the CAPABILITY PIPELINE (section 15): `CapabilityPipeline.typeCheck` with its cycle search,
-       `eval`, `dirtySet` and `evalFrom` over an abstract host body, from
+       `eval`, `dependencyMap` and `evalFrom` over an abstract host body, from
        `src/Fuaran.Core.Function/CapabilityPipeline.fs`;
      - the CODECS (section 16): `CapabilityCodec` for a signature and a capability and the
        pipeline's codec for a node, with `SpaceCodec` and `EffectCodec`, at the `JVal`.
@@ -105,6 +105,10 @@
        `pipeline_illtyped_iff_refused` — an evaluator answers `EvalIllTyped` exactly when the
        check refuses, and then no body runs. `pipeline_evalfrom_agrees` — `evalFrom` over a prior
        evaluation, under a body that agrees with the prior one off the change set, equals `eval`.
+     - `pipeline_edge_iff`, `pipeline_dirty_sound`, `pipeline_dirty_least` (Phase 544) — the pipeline's
+       dirty set is `Propagation.fst`'s closure INSTANTIATED at its `FromNode` edges, not a second
+       model of it: the dependency map `deps_of` has exactly the pipeline's edges, and the closure's
+       soundness and leastness are read at the pipeline — the second was NOT CLAIMED before.
      - `signature_roundtrip`, `capability_roundtrip`, `node_roundtrip` (Phase 354) — decode after
        encode, EXACTLY, for every value: the identity on the well-formed ones
        (`…_roundtrip_identity`), a named refusal or a normal form on the others; and every
@@ -126,9 +130,7 @@
    as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
    HASH apart (a claim about FNV-1a). The `FunctionRegistry` and `ContentPack` surfaces, and
    `applyMemo`. Of the surfaces Phase 354 modelled: a handler's MESSAGE typing, which lives in the
-   host language; that `dirtySet` is the LEAST closed set (its closure is what `evalFrom` needs —
-   leastness is a cost claim, proved of the same-shaped loop in `Propagation.fst`); the pipeline's
-   capture key `nodeInvocationKey`; the BYTES of any codec — `Canon.render` and `Json.parse` are
+   host language; the pipeline's capture key `nodeInvocationKey`; the BYTES of any codec — `Canonical.write Rendering.CrossHost` and `Json.parse` are
    `WireCanon.fst`'s and `JsonParse.fst`'s — the `Strict` read policy, the invocation, `Deferred`
    and `InvokeError` codecs, and a refusal's sentence. And NOT that a reader refuses whatever its
    writer never produces: the readers are lenient — an extra member and another member order are
@@ -137,9 +139,10 @@
    which refuses it: a value space has one reader spelling, `"$type"`.)
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
-   `ColumnOps.fst`. The module is SELF-CONTAINED like `ColumnOps.fst` — it opens no other model,
-   restates `outcome` and the list helpers it needs, and extracts beside the other models into
-   the same oracle assembly sharing only `Prims.fs` and the `option` shim.
+   `ColumnOps.fst`. The module opens ONE other model, `Propagation` (Phase 544): the pipeline's dirty
+   set is that module's closure instantiated at the pipeline's edges, and the set helpers that closure
+   needs are read from it rather than restated. It restates `outcome` and the list helpers its own
+   sections need, and extracts beside the other models into the same oracle assembly.
 
    Apache-2.0, like everything beside it.
 *)
@@ -147,6 +150,7 @@ module Capability
 
 open Twin
 open ListAlgebra
+open Propagation
 
 (* ======================================================================================
    0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
@@ -2402,24 +2406,6 @@ let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:plac
        why, and the whole result a function of the bindings rather than of their arrival order.
    ====================================================================================== *)
 
-(* F#: `Set.isSubset` on lists read as sets — every member of `a` is in `b`. *)
-let rec subset (a b:list string) : Tot bool =
-  match a with
-  | [] -> true
-  | h :: t -> mem h b && subset t b
-
-let rec subset_mem (a b:list string) (x:string)
-  : Lemma (requires subset a b /\ mem x a) (ensures mem x b) =
-  match a with
-  | [] -> ()
-  | h :: t -> if x = h then () else subset_mem t b x
-
-let rec subset_intro (a b:list string)
-  : Lemma (requires (forall (x:string). mem x a ==> mem x b)) (ensures subset a b) =
-  match a with
-  | [] -> ()
-  | _ :: t -> subset_intro t b
-
 (* F#: `HandlerBinding<'Handler>` — the host's handler, opaque, beside the effect it declares. *)
 type handler_binding (h:Type) = { hb_handler: h; hb_effect: effect_class }
 
@@ -2833,54 +2819,6 @@ let bind_handlers_order_independent (#node #h:Type) (le:string -> string -> bool
        evaluator's two "unreachable" arms, and `evalFrom` over a prior evaluation equals `eval`.
    ====================================================================================== *)
 
-(* ---- sets as lists, each naming the F# `Set` function it stands for ---- *)
-
-(* F#: `Set.union a b`, read as membership: `a`, then what `b` adds. *)
-let union (a b:list string) : Tot (list string) = app a (diff b a)
-
-(* A set holds an id once: `Set.ofList`. *)
-let rec dedup (l:list string) : Tot (list string) =
-  match l with
-  | [] -> []
-  | h :: t -> if mem h t then dedup t else h :: dedup t
-
-let rec app_nil (#a:Type) (l:list a) : Lemma (app l [] == l) =
-  match l with
-  | [] -> ()
-  | _ :: t -> app_nil t
-
-let rec mem_app (x:string) (l m:list string) : Lemma (mem x (app l m) == (mem x l || mem x m)) =
-  match l with
-  | [] -> ()
-  | _ :: t -> mem_app x t m
-
-let rec mem_diff (x:string) (a b:list string) : Lemma (mem x (diff a b) == (mem x a && not (mem x b))) =
-  match a with
-  | [] -> ()
-  | _ :: t -> mem_diff x t b
-
-let mem_union (x:string) (a b:list string) : Lemma (mem x (union a b) == (mem x a || mem x b)) =
-  mem_app x a (diff b a);
-  mem_diff x b a
-
-let rec mem_dedup (x:string) (l:list string) : Lemma (mem x (dedup l) == mem x l) =
-  match l with
-  | [] -> ()
-  | _ :: t -> mem_dedup x t
-
-let rec diff_mono (rng a a':list string)
-  : Lemma (requires (forall (y:string). mem y a ==> mem y a')) (ensures len (diff rng a') <= len (diff rng a)) =
-  match rng with
-  | [] -> ()
-  | _ :: t -> diff_mono t a a'
-
-let rec diff_shrink (rng a a':list string) (x:string)
-  : Lemma (requires (forall (y:string). mem y a ==> mem y a') /\ mem x rng /\ not (mem x a) /\ mem x a')
-          (ensures len (diff rng a') < len (diff rng a)) =
-  match rng with
-  | [] -> ()
-  | h :: t -> if h = x then diff_mono t a a' else diff_shrink t a a' x
-
 (* ---- the vocabulary ---- *)
 
 (* F#: `ArgSource`. *)
@@ -3251,245 +3189,88 @@ let eval (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup) (spell:
   | Error e -> Error (EvalIllTyped e)
   | Ok () -> eval_go rd lk spell body [] p.p_nodes
 
-(* ---- the dirty set: `CapabilityPipeline.dirtySet` ---- *)
+(* ---- the dirty set: `Propagation.dirtyFromChangedIds` over the pipeline's edges (Phase 544) ---- *)
 
-(* F#: each node id and the upstream ids it READS — the edges `dirtySet` inverts. *)
-type dmap = list (string & list string)
+(* THE INSTANCE. Until Phase 544 this section restated the propagation closure — the inversion,
+   the frontier loop and its termination measure — a second time, held equal to `Propagation.fst`'s
+   by nothing but the differential. Production computes the pipeline's dirty set as
+   `Propagation.dirtyFromChangedIds (CapabilityPipeline.dependencyMap p) changed` (Phase 510, D173;
+   the `dirtySet` name left at `0.39.0`), and the model now says the same: the pipeline's
+   dependency map is `deps_of p.p_nodes`, and its dirty set is `Propagation.dirty_from_changed_ids`
+   over it — the one closure that module proves sound (`dirty_sound`) and least (`dirty_least`),
+   opened here and instantiated, not copied. What this section states is the INSTANTIATION: that the
+   map's edges are the pipeline's `FromNode` edges and no others (`pipeline_edge_iff`), and the two
+   closure theorems read at the pipeline (`pipeline_dirty_sound`, `pipeline_dirty_least`). *)
 
+(* F#: `CapabilityPipeline.dependencyMap` — each node id and the upstream ids its `FromNode` edges
+   name, as `Propagation`'s dependency map. Production groups a repeated id into ONE entry holding
+   the union of its nodes' edges; the model keeps one entry per node, and `edge` reads every entry,
+   so the two name the same edges (`pipeline_edge_iff`), and `typeCheck` refuses a repeated id
+   before either map is consulted by an evaluator. *)
 let rec deps_of (ns:list pipeline_node) : Tot dmap =
   match ns with
   | [] -> []
   | n :: t -> (node_id n, upstreams n) :: deps_of t
 
-(* `n` READS `r`: some entry of the map is `n`'s and holds `r`. *)
-let rec edge (deps:dmap) (n r:string) : Tot bool =
-  match deps with
-  | [] -> false
-  | (k, reads) :: t -> (k = n && mem r reads) || edge t n r
+(* A node's `FromNode` edge is an edge of the map. *)
+let rec deps_edge (ns:list pipeline_node) (n:pipeline_node) (up:string)
+  : Lemma (requires memp n ns /\ mem up (upstreams n))
+          (ensures edge (deps_of ns) (node_id n) up)
+  = match ns with
+    | [] -> ()
+    | m :: t ->
+      FStar.Classical.or_elim #(n == m) #(memp n t) #(fun _ -> edge (deps_of ns) (node_id n) up)
+        (fun _ -> ())
+        (fun _ -> deps_edge t n up)
 
-(* F#: `for _, src in args do match src with FromNode up -> yield up, id`. *)
-let rec pairs_of (nd:string) (reads:list string) : Tot (list (string & string)) =
-  match reads with
-  | [] -> []
-  | r :: t -> (r, nd) :: pairs_of nd t
+(* An edge of the map is some node's `FromNode` edge. *)
+let rec edge_deps (ns:list pipeline_node) (n r:string)
+  : Lemma (requires edge (deps_of ns) n r)
+          (ensures exists (m:pipeline_node). memp m ns /\ node_id m == n /\ mem r (upstreams m))
+  = match ns with
+    | [] -> ()
+    | m :: t ->
+      if node_id m = n && mem r (upstreams m) then
+        FStar.Classical.exists_intro (fun (m':pipeline_node) -> memp m' ns /\ node_id m' == n /\ mem r (upstreams m')) m
+      else begin
+        edge_deps t n r;
+        let lift (m':pipeline_node)
+          : Lemma ((memp m' t /\ node_id m' == n /\ mem r (upstreams m')) ==>
+                   (memp m' ns /\ node_id m' == n /\ mem r (upstreams m'))) = ()
+        in
+        FStar.Classical.forall_intro lift
+      end
 
-(* F#: `dirtySet`'s list comprehension over the nodes. *)
-let rec pairs (deps:dmap) : Tot (list (string & string)) =
-  match deps with
-  | [] -> []
-  | (nd, reads) :: t -> app (pairs_of nd reads) (pairs t)
+(* THE INSTANTIATION IS EXACT: `n` reads `r` in the map exactly when some node of the pipeline
+   carrying id `n` names `r` by a `FromNode` edge. Everything `Propagation.fst` proves of the
+   closure is therefore stated, here, over the pipeline's own edges. *)
+let pipeline_edge_iff (ns:list pipeline_node) (n r:string)
+  : Lemma (edge (deps_of ns) n r <==>
+           (exists (m:pipeline_node). memp m ns /\ node_id m == n /\ mem r (upstreams m)))
+  = FStar.Classical.move_requires (edge_deps ns n) r;
+    let back (m:pipeline_node)
+      : Lemma ((memp m ns /\ node_id m == n /\ mem r (upstreams m)) ==> edge (deps_of ns) n r)
+      = FStar.Classical.move_requires (deps_edge ns m) r
+    in
+    FStar.Classical.forall_intro back
 
-(* F#: `List.map fst`. *)
-let rec firsts (ps:list (string & string)) : Tot (list string) =
-  match ps with
-  | [] -> []
-  | (r, _) :: t -> r :: firsts t
+(* THEOREM — pipeline_dirty_sound. `Propagation.dirty_sound` at the pipeline: a changed id, and
+   every node at the end of a `FromNode` read path out of one, is dirty. With `dirty_closed`
+   (the set contains the change and is closed under "reads") this is what `evalFrom` needs. *)
+let pipeline_dirty_sound (changed:list string) (p:pipeline) (c:string) (path:list string)
+  : Lemma (requires mem c changed /\ downstream (deps_of p.p_nodes) c path)
+          (ensures mem (path_end c path) (dirty_from_changed_ids (deps_of p.p_nodes) changed))
+  = dirty_sound (deps_of p.p_nodes) changed c path
 
-(* F#: one group of `List.groupBy fst`, mapped through `List.map snd`. *)
-let rec seconds_for (k:string) (ps:list (string & string)) : Tot (list string) =
-  match ps with
-  | [] -> []
-  | (r, n) :: t -> if r = k then n :: seconds_for k t else seconds_for k t
-
-(* F#: `List.map (fun (k, vs) -> k, vs |> List.map snd |> Set.ofList)` over the group keys. *)
-let rec group_from (ks:list string) (ps:list (string & string)) : Tot dmap =
-  match ks with
-  | [] -> []
-  | k :: t -> (k, dedup (seconds_for k ps)) :: group_from t ps
-
-(* F#: `dirtySet`'s `dependents` — `id -> the ids with an edge from it`. *)
-let dependents (deps:dmap) : Tot dmap =
-  let ps = pairs deps in
-  group_from (dedup (firsts ps)) ps
-
-(* `Map.tryFind node dependents`, an absent id having none. *)
-let dependents_of (d:dmap) (nd:string) : Tot (list string) =
-  match assoc nd d with
-  | Some ds -> ds
-  | None -> []
-
-let rec mem_pair (r n:string) (ps:list (string & string)) : Tot bool =
-  match ps with
-  | [] -> false
-  | (r', n') :: t -> (r = r' && n = n') || mem_pair r n t
-
-let rec mem_pair_app (r n:string) (p q:list (string & string))
-  : Lemma (mem_pair r n (app p q) == (mem_pair r n p || mem_pair r n q)) =
-  match p with
-  | [] -> ()
-  | _ :: t -> mem_pair_app r n t q
-
-let rec mem_pairs_of (r n nd:string) (reads:list string)
-  : Lemma (mem_pair r n (pairs_of nd reads) == (n = nd && mem r reads)) =
-  match reads with
-  | [] -> ()
-  | _ :: t -> mem_pairs_of r n nd t
-
-let rec pairs_edge (deps:dmap) (r n:string) : Lemma (mem_pair r n (pairs deps) == edge deps n r) =
-  match deps with
-  | [] -> ()
-  | (nd, reads) :: t ->
-    mem_pair_app r n (pairs_of nd reads) (pairs t);
-    mem_pairs_of r n nd reads;
-    pairs_edge t r n
-
-let rec seconds_pair (k n:string) (ps:list (string & string))
-  : Lemma (mem n (seconds_for k ps) == mem_pair k n ps) =
-  match ps with
-  | [] -> ()
-  | _ :: t -> seconds_pair k n t
-
-let rec pair_first (r n:string) (ps:list (string & string))
-  : Lemma (requires mem_pair r n ps) (ensures mem r (firsts ps)) =
-  match ps with
-  | [] -> ()
-  | (r', n') :: t -> if r = r' && n = n' then () else pair_first r n t
-
-let rec group_lookup (k:string) (ks:list string) (ps:list (string & string))
-  : Lemma (assoc k (group_from ks ps) == (if mem k ks then Some (dedup (seconds_for k ps)) else None)) =
-  match ks with
-  | [] -> ()
-  | _ :: t -> group_lookup k t ps
-
-(* THE INVERSION IS EXACT: `n` is among `r`'s dependents exactly when `n` reads `r`. *)
-let dependents_edge (deps:dmap) (r n:string)
-  : Lemma (mem n (dependents_of (dependents deps) r) == edge deps n r) =
-  let ps = pairs deps in
-  group_lookup r (dedup (firsts ps)) ps;
-  mem_dedup r (firsts ps);
-  mem_dedup n (seconds_for r ps);
-  seconds_pair r n ps;
-  pairs_edge deps r n;
-  if mem_pair r n ps then pair_first r n ps else ()
-
-(* F#: `(Set.empty, frontier) ||> Set.fold (fun s node -> match Map.tryFind node dependents with
-   | Some deps -> Set.union s deps | None -> s)`. *)
-let rec next_of (d:dmap) (frontier:list string) (s:list string) : Tot (list string) (decreases frontier) =
-  match frontier with
-  | [] -> s
-  | nd :: t ->
-    next_of d t (match assoc nd d with
-                 | Some ds -> union s ds
-                 | None -> s)
-
-let rec any_dep (d:dmap) (frontier:list string) (x:string) : Tot bool =
-  match frontier with
-  | [] -> false
-  | nd :: t -> mem x (dependents_of d nd) || any_dep d t x
-
-let rec next_mem (d:dmap) (frontier s:list string) (x:string)
-  : Lemma (ensures mem x (next_of d frontier s) == (mem x s || any_dep d frontier x)) (decreases frontier) =
-  match frontier with
-  | [] -> ()
-  | nd :: t ->
-    (match assoc nd d with
-     | Some ds -> mem_union x s ds; next_mem d t (union s ds) x
-     | None -> next_mem d t s x)
-
-let rec any_dep_intro (d:dmap) (frontier:list string) (r x:string)
-  : Lemma (requires mem r frontier /\ mem x (dependents_of d r)) (ensures any_dep d frontier x) =
-  match frontier with
-  | [] -> ()
-  | nd :: t -> if r = nd then () else any_dep_intro d t r x
-
-(* Every id a dependents map can ever contribute: the measure `grow` terminates by. *)
-let rec range (d:dmap) : Tot (list string) =
-  match d with
-  | [] -> []
-  | (_, vs) :: t -> app vs (range t)
-
-let rec dependents_in_range (d:dmap) (nd x:string)
-  : Lemma (requires mem x (dependents_of d nd)) (ensures mem x (range d)) =
-  match d with
-  | [] -> ()
-  | (k, vs) :: t ->
-    mem_app x vs (range t);
-    if nd = k then () else dependents_in_range t nd x
-
-let rec any_dep_in_range (d:dmap) (frontier:list string) (x:string)
-  : Lemma (requires any_dep d frontier x) (ensures mem x (range d)) =
-  match frontier with
-  | [] -> ()
-  | nd :: t ->
-    if mem x (dependents_of d nd) then dependents_in_range d nd x else any_dep_in_range d t x
-
-(* WHY THE LOOP STOPS: a round that finds nothing fresh hands on an empty frontier, and a round
-   that finds something strictly shrinks the ids of the map not yet accumulated. *)
-let grow_measure (d:dmap) (frontier acc:list string)
-  : Lemma (ensures (let fresh = diff (next_of d frontier []) acc in
-                    (Nil? fresh ==> union acc fresh == acc) /\
-                    (Cons? fresh ==> len (diff (range d) (union acc fresh)) < len (diff (range d) acc)))) =
-  let next = next_of d frontier [] in
-  let fresh = diff next acc in
-  match fresh with
-  | [] -> app_nil acc
-  | x :: _ ->
-    mem_diff x next acc;
-    next_mem d frontier [] x;
-    any_dep_in_range d frontier x;
-    let aux (y:string) : Lemma (mem y acc ==> mem y (union acc fresh)) = mem_union y acc fresh in
-    FStar.Classical.forall_intro aux;
-    mem_union x acc fresh;
-    diff_shrink (range d) acc (union acc fresh) x
-
-(* F#: `dirtySet`'s local `grow`. *)
-let rec grow (d:dmap) (frontier acc:list string)
-  : Tot (list string) (decreases %[len (diff (range d) acc); len frontier]) =
-  match frontier with
-  | [] -> acc
-  | _ :: _ ->
-    let next = next_of d frontier [] in
-    let fresh = diff next acc in
-    grow_measure d frontier acc;
-    grow d fresh (union acc fresh)
-
-(* F#: `CapabilityPipeline.dirtySet` — `changed` and every node downstream of it. *)
-let dirty_set (changed:list string) (p:pipeline) : Tot (list string) =
-  grow (dependents (deps_of p.p_nodes)) changed changed
-
-(* A set closed under "reads": whoever reads a member is a member. *)
-let closed (deps:dmap) (s:list string) : Tot prop =
-  forall (n r:string). mem r s /\ edge deps n r ==> mem n s
-
-let closed_except (deps:dmap) (acc frontier:list string) : Tot prop =
-  forall (n r:string). mem r acc /\ not (mem r frontier) /\ edge deps n r ==> mem n acc
-
-let grow_step_closed (deps:dmap) (frontier acc:list string) (n r:string)
-  : Lemma (requires closed_except deps acc frontier)
-          (ensures (let fresh = diff (next_of (dependents deps) frontier []) acc in
-                    mem r (union acc fresh) /\ not (mem r fresh) /\ edge deps n r ==> mem n (union acc fresh))) =
-  let d = dependents deps in
-  let next = next_of d frontier [] in
-  let fresh = diff next acc in
-  mem_union r acc fresh;
-  mem_union n acc fresh;
-  mem_diff n next acc;
-  next_mem d frontier [] n;
-  dependents_edge deps r n;
-  if mem r frontier && edge deps n r then any_dep_intro d frontier r n else ()
-
-let rec grow_closed (deps:dmap) (frontier acc:list string)
-  : Lemma (requires closed_except deps acc frontier)
-          (ensures closed deps (grow (dependents deps) frontier acc) /\
-                   (forall (x:string). mem x acc ==> mem x (grow (dependents deps) frontier acc)))
-          (decreases %[len (diff (range (dependents deps)) acc); len frontier]) =
-  match frontier with
-  | [] -> ()
-  | _ :: _ ->
-    let d = dependents deps in
-    let fresh = diff (next_of d frontier []) acc in
-    grow_measure d frontier acc;
-    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 (grow_step_closed deps frontier acc));
-    let aux (x:string) : Lemma (mem x acc ==> mem x (union acc fresh)) = mem_union x acc fresh in
-    FStar.Classical.forall_intro aux;
-    grow_closed deps fresh (union acc fresh)
-
-(* The dirty set CONTAINS the change and is CLOSED downstream: a node with an edge from a dirty
-   node is dirty. *)
-let dirty_closed (changed:list string) (p:pipeline)
-  : Lemma (subset changed (dirty_set changed p) /\ closed (deps_of p.p_nodes) (dirty_set changed p)) =
-  grow_closed (deps_of p.p_nodes) changed changed;
-  subset_intro changed (dirty_set changed p)
+(* THEOREM — pipeline_dirty_least. `Propagation.dirty_least` at the pipeline: the dirty set is the
+   LEAST set that holds the change and is closed under the pipeline's edges, so a node no change
+   reaches along `FromNode` edges is never re-invoked. Until Phase 544 this was NOT CLAIMED of the
+   pipeline ("leastness is a cost claim, proved of the same-shaped loop in `Propagation.fst`"); it
+   is now the same theorem, because it is the same loop. *)
+let pipeline_dirty_least (changed s:list string) (p:pipeline)
+  : Lemma (requires subset changed s /\ closed (deps_of p.p_nodes) s)
+          (ensures subset (dirty_from_changed_ids (deps_of p.p_nodes) changed) s)
+  = dirty_least (deps_of p.p_nodes) changed s
 
 (* F#: `evalFrom`'s local `go` — a node that is not dirty and has a prior value reuses it
    (`not (Set.contains nid dirty) && Map.containsKey nid prior`, then `Map.find nid prior`); every
@@ -3515,7 +3296,7 @@ let eval_from (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup) (s
   : Tot (outcome (list (string & v)) pipeline_eval_error) =
   match type_check fr rd lk p with
   | Error e -> Error (EvalIllTyped e)
-  | Ok () -> eval_from_go rd lk spell body prior (dirty_set changed p) [] p.p_nodes
+  | Ok () -> eval_from_go rd lk spell body prior (dirty_from_changed_ids (deps_of p.p_nodes) changed) [] p.p_nodes
 
 (* ---- what `typeCheck` accepts ---- *)
 
@@ -3885,7 +3666,7 @@ let pipeline_illtyped_iff_refused (#v:Type) (fr:feed_readers) (rd:readers) (lk:c
     FStar.Classical.forall_intro
       (FStar.Classical.move_requires
          (go_check_all_none fr rd lk p.p_nodes (node_ids p.p_nodes) p.p_nodes));
-    go_never_ill fr rd lk spell body p.p_nodes prior (dirty_set changed p) [] [] p.p_nodes;
+    go_never_ill fr rd lk spell body p.p_nodes prior (dirty_from_changed_ids (deps_of p.p_nodes) changed) [] [] p.p_nodes;
     go_never_ill fr rd lk spell body p.p_nodes [] [] [] [] p.p_nodes;
     eval_from_empty_prior rd lk spell body [] [] p.p_nodes
 
@@ -3940,16 +3721,6 @@ let run_node_eq (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string
       (match resolve_args rd lk spell r0 nid cap_id a [] with
        | Ok xs -> assert (body0 n (rev xs) == body1 n (rev xs))
        | Error _ -> ())
-
-let rec deps_edge (ns:list pipeline_node) (n:pipeline_node) (up:string)
-  : Lemma (requires memp n ns /\ mem up (upstreams n))
-          (ensures edge (deps_of ns) (node_id n) up)
-  = match ns with
-    | [] -> ()
-    | m :: t ->
-      FStar.Classical.or_elim #(n == m) #(memp n t) #(fun _ -> edge (deps_of ns) (node_id n) up)
-        (fun _ -> ())
-        (fun _ -> deps_edge t n up)
 
 (* THE INDUCTION. `r0` is the prior evaluation's map so far and `r1` the new one's; they agree at
    every CLEAN id, the prior evaluation finishes as `prior` from here, and from here the
@@ -4014,8 +3785,8 @@ let pipeline_evalfrom_agrees (#v:Type) (fr:feed_readers) (rd:readers) (lk:capabi
     | Error _ -> ()
     | Ok () ->
       first_dup_distinct (node_ids p.p_nodes);
-      dirty_closed changed p;
-      go_agree rd lk spell body0 body1 p.p_nodes changed (dirty_set changed p) prior [] [] p.p_nodes
+      dirty_closed (deps_of p.p_nodes) changed;
+      go_agree rd lk spell body0 body1 p.p_nodes changed (dirty_from_changed_ids (deps_of p.p_nodes) changed) prior [] [] p.p_nodes
 
 (* ======================================================================================
    16. THE CODECS (Phase 354) — `CapabilityCodec` for a `Signature` and a `Capability`, and
@@ -4026,7 +3797,7 @@ let pipeline_evalfrom_agrees (#v:Type) (fr:feed_readers) (rd:readers) (lk:capabi
        well-formed ones, a named refusal or a normal form on the others — and every document a
        reader accepts read as a well-formed value.
 
-       The bytes are not here. `Canon.render` and `Json.parse` are `WireCanon.fst`'s and
+       The bytes are not here. `Canonical.write Rendering.CrossHost` and `Json.parse` are `WireCanon.fst`'s and
        `JsonParse.fst`'s; what crosses is the `JVal` between them. A refusal's SENTENCE and its
        `Expected` phrase are not modelled: a refusal is its `DecodeCode` and its path.
    ====================================================================================== *)
@@ -4812,11 +4583,11 @@ let twins : list twin = [
         ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineForwardEdge "a" "x" "b")) };
   { tname = "the-dirty-set-is-the-change-and-everything-downstream";
     tholds = (fun () ->
-      dirty_set ["s"]
-        ({ p_nodes = [ Source "s" "ref" AnyString;
+      dirty_from_changed_ids
+        (deps_of [ Source "s" "ref" AnyString;
                        Invoke "a" "c" AnyString [("x", FromNode "s")];
                        Invoke "b" "c" AnyString [("x", FromNode "a")];
-                       Source "t" "ref" AnyString ] }) = ["s"; "a"; "b"]) };
+                       Source "t" "ref" AnyString ]) ["s"] = ["s"; "a"; "b"]) };
   { tname = "an-entry-kind-outside-the-tags-is-refused-at-kind";
     tholds = (fun () ->
       entry_of_j ({ float_of_int = (fun _ -> "0") })

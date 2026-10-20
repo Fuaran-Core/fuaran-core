@@ -20,7 +20,7 @@ type DataSource =
 /// `Decode`).
 module ColumnCodec =
 
-    // ---- encode (Fable-clean `JVal` construction → `Canon.render`) ----
+    // ---- encode (Fable-clean `JVal` construction → `Canonical.write Rendering.CrossHost`) ----
 
     /// One column's `values` and `validity` arrays, walked off the typed storage (Phase 417): the
     /// element at a present row as its JSON value, the absent slot at an absent one — never what
@@ -94,7 +94,8 @@ module ColumnCodec =
     /// byte-identical across the .NET, Fable, TS and Python hosts. **Assumes a source
     /// `Table.validate` accepts** — use `tryEncode` for the guarded, total entry point on
     /// untrusted/derived data.
-    let encode (src: DataSource) : string = Canon.render (encodeJson src)
+    let encode (src: DataSource) : string =
+        Canonical.write Rendering.CrossHost (encodeJson src)
 
     /// Total, guarded encode (Phases 38 + 43 + 299): `Table.validate`, then `encode`. So over what
     /// `validate` accepts it is EXACTLY `Ok (encode src)` — a law in the suite pins it — and

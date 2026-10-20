@@ -1193,7 +1193,7 @@ module private Projected =
             "GateSpec<'Msg> =\n    { Body: Node<'Msg>\n      Steps: Step<'Msg> list\n      Rule: Rule\n      Trigger: Trigger<'Msg> }"
           Encoder =
             "and private encGateSpec<'Msg> (s: GateSpec<'Msg>) : JVal =\n"
-            + "    Canon.typed \"Gate\" ([ Some(\"body\", encNode s.Body); Some(\"steps\", JArr(List.map encStep s.Steps)); (match s.Rule with Rule.Always -> None | r -> Some(\"rule\", encRule r)); Some(\"trigger\", encTrigger s.Trigger) ] |> List.choose id)"
+            + "    Canonical.typed \"Gate\" ([ Some(\"body\", encNode s.Body); Some(\"steps\", JArr(List.map encStep s.Steps)); (match s.Rule with Rule.Always -> None | r -> Some(\"rule\", encRule r)); Some(\"trigger\", encTrigger s.Trigger) ] |> List.choose id)"
           Decoder =
             "and private decGateSpec (j: JVal) : Result<GateSpec<obj>, DecodeError> =\n"
             + "    dObj j |> Result.bind (fun __fs ->\n"

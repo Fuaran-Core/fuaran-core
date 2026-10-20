@@ -10,48 +10,19 @@ open Fuaran.Core
 module Decode =
 
     // Phase 310 — the walk reports a `DecodeError`: a code, the path through the document the
-    // vocabulary drove it down, and the sentence this module has always returned. The string forms
-    // at the foot (`value`, `decode`, `decodeOp`) answer that sentence, byte for byte; the
-    // `…Detailed` forms answer the whole refusal.
+    // vocabulary drove it down, and what the position expected. Since Phase 520 every refusal is
+    // `Decoder`'s own or built by `DecodeError.make`, so its sentence is the projection of its code
+    // (`DecodeError.sentence`) and nothing here re-spells one: a discriminator is read by
+    // `Decoder.tagDispatch`, a member by `Decoder.field`. The string forms at the foot (`value`,
+    // `decode`, `decodeOp`) answer that sentence; the `…Detailed` forms answer the whole refusal.
 
-    let private err (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
-        Error(DecodeError.make code expected message)
+    let private err (code: DecodeCode) (expected: string) (detail: string) : Result<'T, DecodeError> =
+        Error(DecodeError.make code expected detail)
 
     let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
         r |> Result.mapError (DecodeError.under step)
 
     let private field (name: string) (fields: (string * JVal) list) : JVal option = Decoder.tryMember name (JObj fields)
-
-    /// The tag under the DECLARED discriminator key (Phase 108) — `"$type"` on a
-    /// default-shape vocabulary, so the error text is byte-identical there. An absent tag is
-    /// `MissingField` and a non-string one `WrongKind`, both at the discriminator.
-    let private tagUnder (key: string) (fields: (string * JVal) list) : Result<string, DecodeError> =
-        match field key fields with
-        | Some(JStr t) -> Ok t
-        | Some _ ->
-            Error(
-                DecodeError.under
-                    (PathSegment.Key key)
-                    (DecodeError.make DecodeCode.WrongKind "string" ("missing or non-string " + key))
-            )
-        | None ->
-            Error(
-                { Decoder.missing key with
-                    Message = "missing or non-string " + key }
-            )
-
-    let private dollarType (idl: Idl) (fields: (string * JVal) list) = tagUnder idl.Wire.Discriminator fields
-
-    /// An unknown case under the discriminator: `UnknownTag`, at the discriminator, naming the known cases.
-    let private unknownTag (idl: Idl) (known: string list) (message: string) : Result<'T, DecodeError> =
-        Error(
-            DecodeError.under
-                (PathSegment.Key idl.Wire.Discriminator)
-                (DecodeError.make
-                    DecodeCode.UnknownTag
-                    ("one of " + (known |> List.map (fun k -> "'" + k + "'") |> String.concat ", "))
-                    message)
-        )
 
     /// The arity refusal both union arms share (Phase 292 — the bare arm used to zip the
     /// two lists unchecked and throw where the object arm refused).
@@ -59,7 +30,7 @@ module Decode =
         err
             DecodeCode.SchemaFault
             (sprintf "%d type args for union '%s'" (List.length u.Decl.Params) u.Name)
-            (sprintf "union '%s' given %d type args, expects %d" u.Name (List.length u.Args) (List.length u.Decl.Params))
+            (sprintf "%d type args for union '%s'" (List.length u.Args) u.Name)
 
     let rec private decodeValue (idl: Idl) (t: IdlType) (j: JVal) : Result<IdlValue, DecodeError> =
         // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
@@ -84,31 +55,20 @@ module Decode =
                 DecodeCode.UnknownTag
                 ("one of "
                  + (e.WireCases |> List.map (fun c -> "'" + c + "'") |> String.concat ", "))
-                (sprintf "enum '%s' has no case '%s'" e.Name s)
+                (sprintf "case '%s' of enum '%s'" s e.Name)
         | WireForm.Undeclared(Undeclared.Enum name), JStr _ ->
-            err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "unknown enum '%s'" name)
+            err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "enum '%s'" name)
         | WireForm.Undeclared(Undeclared.Union(name, _)), _ ->
-            err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
-        | WireForm.Union u, JObj fs ->
+            err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "union '%s'" name)
+        | WireForm.Union u, JObj _ ->
             match u.Binding with
             | None -> arity u
-            | Some binding ->
-                dollarType idl fs
-                |> Result.bind (fun tag ->
-                    match u.Decl.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                    | None ->
-                        unknownTag
-                            idl
-                            (u.Decl.Cases |> List.map _.Tag)
-                            (sprintf "union '%s' has no case '%s'" u.Name tag)
-                    | Some c ->
-                        decodeFields idl (WireForm.caseFields binding c) fs
-                        |> Result.map (fun fields -> VUnion(tag, fields)))
+            | Some binding -> tagged idl (u.Decl.Cases |> List.map (fun c -> c.Tag, WireForm.caseFields binding c)) j
         // A transparent union decoded from a BARE (non-object) wire value — the
         // Fuaran-UI 0.2.0 bare-string `TextSource.Literal` (`"x"` → `Literal{text="x"}`).
         | WireForm.Union u, j ->
             match u.Transparent with
-            | None -> err DecodeCode.WrongKind "object" (sprintf "union '%s' expects an object" u.Name)
+            | None -> Error(Decoder.wrongKind "object" j)
             | Some ttag ->
                 match u.Binding, u.Decl.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
                 | None, _ -> arity u
@@ -116,17 +76,17 @@ module Decode =
                     err
                         DecodeCode.SchemaFault
                         ("a declared transparent case '" + ttag + "'")
-                        (sprintf "union '%s' has no transparent case '%s'" u.Name ttag)
+                        (sprintf "union '%s' with no case '%s'" u.Name ttag)
                 | Some binding, Some c ->
                     match WireForm.caseFields binding c with
                     | [ single ] ->
                         decodeValue idl single.Type j
                         |> Result.map (fun v -> VUnion(ttag, [ single.Name, v ]))
-                    | _ ->
+                    | fields ->
                         err
                             DecodeCode.SchemaFault
                             "a transparent case of exactly one field"
-                            (sprintf "transparent union case '%s' must have exactly one field" ttag)
+                            (sprintf "transparent case '%s' of %d fields" ttag (List.length fields))
         | WireForm.Unbound v, _ ->
             err DecodeCode.SchemaFault "a substituted type" (sprintf "unsubstituted type variable '%s'" v)
         | WireForm.Sentinel(value, wire), JStr s when s = wire -> Ok value
@@ -149,10 +109,10 @@ module Decode =
                     err
                         DecodeCode.OutOfRange
                         ("a '" + HostedFormat.name fmt + "' string")
-                        (sprintf "hosted value is not a '%s' string" (HostedFormat.name fmt)))
+                        (Canonical.write Rendering.CrossHost j))
         | WireForm.Record r, JObj fs -> decodeFields idl r.Fields fs |> Result.map VRecord
         | WireForm.Undeclared(Undeclared.Record name), JObj _ ->
-            err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "unknown record '%s'" name)
+            err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "record '%s'" name)
         | WireForm.Map vt, JObj fs ->
             let rec go acc =
                 function
@@ -164,18 +124,8 @@ module Decode =
 
             go [] fs
         | WireForm.Node, JObj _ -> decodeNode idl j
-        | WireForm.Kind, JObj fs ->
-            dollarType idl fs
-            |> Result.bind (fun tag ->
-                match IdlLookup.tryKind idl tag with
-                | None -> unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" tag)
-                | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
-        | WireForm.Op, JObj fs ->
-            dollarType idl fs
-            |> Result.bind (fun tag ->
-                match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
-                | None -> unknownTag idl (idl.Ops |> List.map _.Tag) (sprintf "unknown op '%s'" tag)
-                | Some o -> decodeFields idl o.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
+        | WireForm.Kind, JObj _ -> tagged idl (idl.Kinds |> List.map (fun k -> k.Tag, k.Fields)) j
+        | WireForm.Op, JObj _ -> tagged idl (idl.Ops |> List.map (fun o -> o.Tag, o.Fields)) j
         | WireForm.List inner, JArr xs ->
             let rec go i acc =
                 function
@@ -189,12 +139,24 @@ module Decode =
         | form, _ ->
             // A sentinel position given a string that is not its sentinel holds the right KIND and
             // the wrong value; every other fall-through is a kind the type does not take.
-            let code =
-                match form, j with
-                | WireForm.Sentinel _, JStr _ -> DecodeCode.OutOfRange
-                | _ -> DecodeCode.WrongKind
+            match form, j with
+            | WireForm.Sentinel _, JStr s -> err DecodeCode.OutOfRange (WireForm.jsonKind form) ("'" + s + "'")
+            | _ -> Error(Decoder.wrongKind (WireForm.jsonKind form) j)
 
-            err code (WireForm.jsonKind form) (sprintf "wire value does not match IDL type %A" t)
+    /// A tagged object read by its discriminator (Phase 520: `Decoder.tagDispatch` under the DECLARED
+    /// key, Phase 108): each case reads the SAME object's declared fields, and its value is the tag
+    /// with them. An absent discriminator is `MissingField` there, a non-string one `WrongKind`, and
+    /// an unknown tag `UnknownTag` at it, naming the known cases.
+    and private tagged (idl: Idl) (cases: (string * IdlField list) list) : Decoder<IdlValue> =
+        Decoder.tagDispatch
+            idl.Wire.Discriminator
+            (cases
+             |> List.map (fun (tag, fields) ->
+                 tag,
+                 fun j ->
+                     match j with
+                     | JObj fs -> decodeFields idl fields fs |> Result.map (fun flds -> VUnion(tag, flds))
+                     | other -> Error(Decoder.wrongKind "object" other)))
 
     and private decodeFields
         (idl: Idl)
@@ -210,11 +172,7 @@ module Decode =
                 | None, Optional -> go acc rest
                 // omit-at-default: an absent field restores its identity default
                 | None, OmitDefault d -> go ((f.Name, d) :: acc) rest
-                | None, Required ->
-                    Error(
-                        { Decoder.missing f.Name with
-                            Message = sprintf "required field '%s' is absent" f.Name }
-                    )
+                | None, Required -> Error(Decoder.missing f.Name)
                 | Some j, _ ->
                     match decodeValue idl f.Type j |> under (PathSegment.Key f.Name) with
                     | Ok v -> go ((f.Name, v) :: acc) rest
@@ -222,98 +180,43 @@ module Decode =
 
         go [] fields
 
-    /// The node envelope's own refusal: the member at fault is named by the path, the sentence is
-    /// the one this module has always returned for the whole envelope.
-    and private envelopeFault
-        (message: string)
-        (fs: (string * JVal) list)
-        (members: (string * (JVal -> bool) * string) list)
-        : DecodeError =
-        members
-        |> List.tryPick (fun (name, ok, kind) ->
-            match field name fs with
-            | None ->
-                Some(
-                    { Decoder.missing name with
-                        Message = message }
-                )
-            | Some v when not (ok v) ->
-                Some(DecodeError.under (PathSegment.Key name) (DecodeError.make DecodeCode.WrongKind kind message))
-            | Some _ -> None)
-        |> Option.defaultValue (DecodeError.make DecodeCode.WrongKind "a node object" message)
-
+    /// A node: its `id`, then its kind, then the declared node envelope. Every refusal is `Decoder`'s
+    /// (Phase 520): an absent `id` or kind member is `MissingField` at it and one of the wrong kind
+    /// `WrongKind` there, in that order; an unknown kind is `UnknownTag` at the discriminator.
     and private decodeNode (idl: Idl) (j: JVal) : Result<IdlValue, DecodeError> =
-        let isStr =
-            function
-            | JStr _ -> true
-            | _ -> false
+        // Phase 698 — the envelope decodes through the same `decodeFields` the kind fields do, so it
+        // is the encoder's inverse by construction. An empty result (nothing on the wire, and no
+        // `OmitDefault` to restore) yields the bare `VNode` this returned before the envelope
+        // existed, which is why every pre-existing decode round-trip is byte-unchanged.
+        let withEnvelope (id: string) (fs: (string * JVal) list) (kind: IdlValue) =
+            match kind with
+            | VUnion(kindTag, fields) ->
+                decodeFields idl idl.NodeFields fs
+                |> Result.map (function
+                    | [] -> VNode(id, kindTag, fields)
+                    | envelope -> VNodeEnv(id, envelope, kindTag, fields))
+            | other -> Ok other
 
-        let isObj =
-            function
-            | JObj _ -> true
-            | _ -> false
+        let kinds = idl.Kinds |> List.map (fun k -> k.Tag, k.Fields)
 
         match j, idl.Wire.NodeEnvelope with
         | JObj fs, NodeEnvelopeShape.NestedKind ->
-            match field "id" fs, field "kind" fs with
-            | Some(JStr id), Some(JObj kindFs) ->
-                dollarType idl kindFs
-                |> under (PathSegment.Key "kind")
-                |> Result.bind (fun kindTag ->
-                    match IdlLookup.tryKind idl kindTag with
-                    | None ->
-                        unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" kindTag)
-                        |> under (PathSegment.Key "kind")
-                    | Some k ->
-                        decodeFields idl k.Fields kindFs
-                        |> under (PathSegment.Key "kind")
-                        |> Result.bind (fun fields ->
-                            // Phase 698 — the envelope decodes through the same
-                            // `decodeFields` the kind fields do, so it is the encoder's
-                            // inverse by construction. An empty result (nothing on the
-                            // wire, and no `OmitDefault` to restore) yields the bare
-                            // `VNode` this returned before the envelope existed, which is
-                            // why every pre-existing decode round-trip is byte-unchanged.
-                            decodeFields idl idl.NodeFields fs
-                            |> Result.map (function
-                                | [] -> VNode(id, kindTag, fields)
-                                | envelope -> VNodeEnv(id, envelope, kindTag, fields))))
-            | _ ->
-                Error(
-                    envelopeFault
-                        "node must have a string 'id' and an object 'kind'"
-                        fs
-                        [ "id", isStr, "string"; "kind", isObj, "object" ]
-                )
+            Decoder.field "id" Decoder.str j
+            |> Result.bind (fun id ->
+                Decoder.field "kind" Decoder.obj j
+                |> Result.bind (fun _ -> Decoder.field "kind" (tagged idl kinds) j)
+                |> Result.bind (withEnvelope id fs))
         // Phase 109 — the FLAT envelope: the tag, the id, the kind's fields (and
         // any declared node envelope) share this one object. `decodeFields` reads
         // only declared names, so the discriminator and the id are tolerated as
         // the extra keys they are.
         | JObj fs, NodeEnvelopeShape.FlatKind ->
-            match field "id" fs, dollarType idl fs with
-            | Some(JStr id), Ok kindTag ->
-                match IdlLookup.tryKind idl kindTag with
-                | None -> unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" kindTag)
-                | Some k ->
-                    decodeFields idl k.Fields fs
-                    |> Result.bind (fun fields ->
-                        decodeFields idl idl.NodeFields fs
-                        |> Result.map (function
-                            | [] -> VNode(id, kindTag, fields)
-                            | envelope -> VNodeEnv(id, envelope, kindTag, fields)))
-            | _ ->
-                Error(
-                    envelopeFault
-                        (sprintf "node must have a string 'id' and a string '%s' discriminator" idl.Wire.Discriminator)
-                        fs
-                        [ "id", isStr, "string"; idl.Wire.Discriminator, isStr, "string" ]
-                )
-        | _, _ -> Error(DecodeError.make DecodeCode.WrongKind "object" "node must be an object")
+            Decoder.field "id" Decoder.str j
+            |> Result.bind (fun id -> tagged idl kinds j |> Result.bind (withEnvelope id fs))
+        | _, _ -> Error(Decoder.wrongKind "object" j)
 
-    /// The parser's refusal under this module's own prefix (`parse failed: …`).
-    let private parsed (json: string) : Result<JVal, DecodeError> =
-        Decoder.parse ReadOptions.strict json
-        |> Result.mapError (DecodeError.reword (fun m -> "parse failed: " + m))
+    let private parsed (json: string) : Result<JVal, DecodeError> = Decoder.parse ReadOptions.strict json
+
 
     /// Decode one parsed JSON value at a declared type, answering a typed refusal (Phase 310): its
     /// code, its path from `j`, what the position expected, and [[value]]'s sentence.

@@ -36,7 +36,7 @@ Each corpus is timed under four cases:
 |---|---|
 | `escape` | `Json.escape` on every string and key the value carries |
 | `render` | `Json.render` |
-| `canon` | `Canon.render` |
+| `canon` | `Canonical.write Rendering.CrossHost` |
 | `parse` | `Json.parse` on the `render` text |
 
 **Every agreement is asserted before anything is timed.** Each escaped string must parse back to

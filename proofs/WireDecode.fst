@@ -812,7 +812,7 @@ and null_free_fields (#num #flt: eqtype) (fs: list (string & jvaln num flt))
 
       WHAT IS STILL NOT CLAIMED. The relation is not proved transitive or symmetric; nothing below
       needs either, and neither is asserted anywhere. And the theorem is about the DECODE
-      combinators — `Canon.render`'s key ordering on the way out is certified by the wire-format
+      combinators — `Canonical.write Rendering.CrossHost`'s key ordering on the way out is certified by the wire-format
       corpus, not here.
    ====================================================================================== *)
 
@@ -1338,7 +1338,7 @@ let duplicate_keys_break_order_invariance (#num #flt: eqtype) (x y: num)
                              model here that HAS a null: every `jval`, viewed as a document, is
                              null-free, reads back as itself under either policy, the strict reader
                              accepts EXACTLY the null-free documents, and whatever either reader
-                             returns is null-free. (The encoder's half — `Canon.render` never emits
+                             returns is null-free. (The encoder's half — `Canonical.write Rendering.CrossHost` never emits
                              the token — is `WireCanon.no_null_ever`, over Phase 149's renderer.)
         - `no_invokable`   — every type a combinator or `decode_node` can return has DECIDABLE
                              EQUALITY. F* grants `hasEq` to an inductive only when every

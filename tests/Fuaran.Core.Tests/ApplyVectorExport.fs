@@ -74,7 +74,7 @@ module ApplyVectorExport =
     //  the host-neutral skeleton envelope
     // -----------------------------------------------------------------------
 
-    /// A tree, as the witness surface sees it. `Canon.render` sorts object keys ordinally, so the
+    /// A tree, as the witness surface sees it. `Canonical.write Rendering.CrossHost` sorts object keys ordinally, so the
     /// member order is `children`, `id`, `kind` and is not a choice this module makes.
     let rec encodeTreeJ (n: RNode) : JVal =
         JObj
@@ -82,21 +82,24 @@ module ApplyVectorExport =
               "kind", JStr n.Kind
               "children", JArr(n.Children |> List.map encodeTreeJ) ]
 
-    let encodeTree (n: RNode) : string = Canon.render (encodeTreeJ n)
+    let encodeTree (n: RNode) : string =
+        Canonical.write Rendering.CrossHost (encodeTreeJ n)
 
     /// The skeleton ops, `$type`-discriminated on the corpus's own convention (`$type` sorts before
     /// every lower-case member, so it is always first).
     let rec encodeOpJ (op: SkeletonOp<RNode, string>) : JVal =
         match op with
-        | InsertChild(parent, node) -> Canon.typed "insertChild" [ "parent", JStr parent; "node", encodeTreeJ node ]
-        | RemoveNode target -> Canon.typed "removeNode" [ "target", JStr target ]
-        | MoveNode(target, newParent) -> Canon.typed "moveNode" [ "target", JStr target; "newParent", JStr newParent ]
+        | InsertChild(parent, node) -> Canonical.typed "insertChild" [ "parent", JStr parent; "node", encodeTreeJ node ]
+        | RemoveNode target -> Canonical.typed "removeNode" [ "target", JStr target ]
+        | MoveNode(target, newParent) ->
+            Canonical.typed "moveNode" [ "target", JStr target; "newParent", JStr newParent ]
         | ReorderChildren(parent, order) ->
-            Canon.typed "reorderChildren" [ "parent", JStr parent; "order", JArr(order |> List.map JStr) ]
-        | Batch ops -> Canon.typed "batch" [ "ops", JArr(ops |> List.map encodeOpJ) ]
-        | UpdateNode node -> Canon.typed "updateNode" [ "node", encodeTreeJ node ]
+            Canonical.typed "reorderChildren" [ "parent", JStr parent; "order", JArr(order |> List.map JStr) ]
+        | Batch ops -> Canonical.typed "batch" [ "ops", JArr(ops |> List.map encodeOpJ) ]
+        | UpdateNode node -> Canonical.typed "updateNode" [ "node", encodeTreeJ node ]
 
-    let encodeOp (op: SkeletonOp<RNode, string>) : string = Canon.render (encodeOpJ op)
+    let encodeOp (op: SkeletonOp<RNode, string>) : string =
+        Canonical.write Rendering.CrossHost (encodeOpJ op)
 
     // ---- the decoders, so a vector is read back the way a host reads it ----
 
@@ -210,25 +213,26 @@ module ApplyVectorExport =
     /// family's deliberately-unnamed refusal already records.
     let rejectionJ (r: Rejection<string>) : JVal =
         match r with
-        | DuplicateId d -> Canon.typed "duplicateId" [ "id", JStr d ]
-        | UnknownNode(target, _) -> Canon.typed "unknownNode" [ "target", JStr target ]
-        | CannotRemoveRoot -> Canon.typed "cannotRemoveRoot" []
+        | DuplicateId d -> Canonical.typed "duplicateId" [ "id", JStr d ]
+        | UnknownNode(target, _) -> Canonical.typed "unknownNode" [ "target", JStr target ]
+        | CannotRemoveRoot -> Canonical.typed "cannotRemoveRoot" []
         // Phase 315's `relation` is evidence for the class, like `ReorderMismatch`'s orders: not pinned.
-        | WouldNestUnderSelf(t, _) -> Canon.typed "wouldNestUnderSelf" [ "target", JStr t ]
+        | WouldNestUnderSelf(t, _) -> Canonical.typed "wouldNestUnderSelf" [ "target", JStr t ]
         | NotAContainer(target, kindTag) ->
-            Canon.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
-        | ReorderMismatch(parent, _, _) -> Canon.typed "reorderMismatch" [ "parent", JStr parent ]
-        | Rejected(code, _) -> Canon.typed "rejected" [ "code", JStr code ]
+            Canonical.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
+        | ReorderMismatch(parent, _, _) -> Canonical.typed "reorderMismatch" [ "parent", JStr parent ]
+        | Rejected(code, _) -> Canonical.typed "rejected" [ "code", JStr code ]
         // Phase 286 — raised only under a keyed scope, which no apply vector runs, so no pinned
         // vector carries it; the projection names it so the match stays total.
         | KeyedPosition(target, holder, _) ->
-            Canon.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
+            Canonical.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
         // Phase 313 — raised only by the grammar and reference engines, which no apply vector runs.
         | IllegalChild(child, _, parent, parentKind, _) ->
-            Canon.typed "illegalChild" [ "child", JStr child; "parent", JStr parent; "parentKind", JStr parentKind ]
-        | StillReferenced(target, _) -> Canon.typed "stillReferenced" [ "target", JStr target ]
+            Canonical.typed "illegalChild" [ "child", JStr child; "parent", JStr parent; "parentKind", JStr parentKind ]
+        | StillReferenced(target, _) -> Canonical.typed "stillReferenced" [ "target", JStr target ]
         // Phase 518 — raised only by `Diff`, which no apply vector runs.
-        | RootIdMismatch(before, after) -> Canon.typed "rootIdMismatch" [ "before", JStr before; "after", JStr after ]
+        | RootIdMismatch(before, after) ->
+            Canonical.typed "rootIdMismatch" [ "before", JStr before; "after", JStr after ]
 
     // -----------------------------------------------------------------------
     //  the authored cases
@@ -410,7 +414,7 @@ module ApplyVectorExport =
     //  the rendered artefact
     // -----------------------------------------------------------------------
     //  Written by the one writer every conformance file goes through, `CorpusFile.render` (Phase 508):
-    //  `Canon.render` escapes every string, and the layout is a header member and an item per line
+    //  `Canonical.write Rendering.CrossHost` escapes every string, and the layout is a header member and an item per line
     //  with LF endings whatever the platform. The two helpers build cells and write nothing.
 
     let private jstr (s: string) : CorpusCell = CorpusFile.str s
@@ -437,7 +441,8 @@ module ApplyVectorExport =
                 | NoneWith _ -> []
 
             jobj (
-                [ "verdict", jstr "reject"; "rejection", jstr (Canon.render (rejectionJ r)) ]
+                [ "verdict", jstr "reject"
+                  "rejection", jstr (Canonical.write Rendering.CrossHost (rejectionJ r)) ]
                 @ [ "hosts", jobj hosts ]
                 @ (match c.Hosts with
                    | NoneWith note -> [ "hostsNote", jstr note ]
@@ -546,7 +551,7 @@ module ApplyVectorExport =
     /// This family's one manifest row, as `renderManifest` spells it.
     let private ownRowLine () : string =
         renderManifest().Split('\n')
-        |> Array.find (fun l -> l.StartsWith(rowPrefix + Canon.render (JStr familyId)))
+        |> Array.find (fun l -> l.StartsWith(rowPrefix + Canonical.write Rendering.CrossHost (JStr familyId)))
 
     /// The manifest beside a corpus copy is SHARED: a sibling producer's family (the wire specification's
     /// `limitsApply`, since 2026-10-07) sits beside this one, so the copy's manifest is never
@@ -565,7 +570,7 @@ module ApplyVectorExport =
                 lines
                 |> Array.filter (fun l ->
                     l.StartsWith rowPrefix
-                    && not (l.StartsWith(rowPrefix + Canon.render (JStr familyId))))
+                    && not (l.StartsWith(rowPrefix + Canonical.write Rendering.CrossHost (JStr familyId))))
                 |> Array.map (fun l -> l.TrimEnd().TrimEnd(','))
                 |> Array.toList
 
@@ -682,7 +687,7 @@ module ApplyVectorExport =
             | _ -> Some(sprintf "%s: an `accept` vector carries no expected.tree / expected.hash" v.Id)
         | Ok _, verdict -> Some(sprintf "%s: the reference ACCEPTED the op, but the vector says `%s`" v.Id verdict)
         | Error r, "reject" ->
-            let actual = Canon.render (rejectionJ r)
+            let actual = Canonical.write Rendering.CrossHost (rejectionJ r)
 
             match v.Rejection with
             | Some expected when expected = actual -> None

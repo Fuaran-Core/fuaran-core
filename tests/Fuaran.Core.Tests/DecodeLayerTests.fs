@@ -604,32 +604,42 @@ let tests =
                         (DecodeCode.MissingField, [ key "a"; key "missing" ])
                         "a missing member is named"
 
-                testCase
-                    "tagDispatchWith words an unknown tag in the caller's sentence and changes nothing else (Phase 388)"
+                testCase "a refusal's sentence is the projection of its code, expectation and detail (Phase 520)"
                 <| fun _ ->
                     let cases = [ "a", Decoder.field "n" Decoder.int ]
-                    let d = Decoder.tagDispatchWith "unknown thing: " "$type" cases
-                    let plain = Decoder.tagDispatch "$type" cases
 
-                    Expect.equal (d (parse """{"$type":"a","n":1}""")) (Ok 1) "a known tag dispatches"
-
-                    let miss = parse """{"$type":"b"}"""
-
-                    match d miss, plain miss with
-                    | Error e, Error p ->
-                        Expect.equal e.Message "unknown thing: b" "the miss is in the caller's sentence"
-
+                    match Decoder.tagDispatch "$type" cases (parse """{"$type":"b"}""") with
+                    | Error e ->
                         Expect.equal
                             (e.Code, e.Path, e.Expected)
-                            (p.Code, p.Path, p.Expected)
-                            "and is otherwise tagDispatch's"
-                    | other -> failtestf "an unknown tag must be refused by both: %A" other
+                            (DecodeCode.UnknownTag, [ key "$type" ], "one of 'a'")
+                            "the code, the path and the expectation are the contract"
 
-                    for doc in [ """{"n":1}"""; """{"$type":1}"""; """{"$type":"a","n":"x"}""" ] do
                         Expect.equal
-                            (d (parse doc))
-                            (plain (parse doc))
-                            (doc + ": every other refusal is tagDispatch's")
+                            e.Message
+                            (DecodeError.sentence e.Code e.Expected "$type 'b'")
+                            "the sentence is the projection"
+                    | Ok v -> failtestf "an unknown tag must be refused: %A" v
+
+                    // every refusal built through `make` carries its code's one sentence, and the
+                    // sentence carries no path, so a refusal carried outward keeps it
+                    for code in DecodeError.codes do
+                        let e = DecodeError.make code "an x" "a y"
+                        Expect.equal e.Message (DecodeError.sentence code "an x" "a y") (DecodeError.codeName code)
+
+                        Expect.equal
+                            (DecodeError.under (key "k") e).Message
+                            e.Message
+                            (DecodeError.codeName code + " under a step")
+
+                    // the sentences differ by code: no two codes share a projection of one input
+                    Expect.equal
+                        (DecodeError.codes
+                         |> List.map (fun c -> DecodeError.sentence c "an x" "a y")
+                         |> List.distinct
+                         |> List.length)
+                        (List.length DecodeError.codes)
+                        "one sentence form per code"
 
                 testCase "at navigates and refuses where a step names nothing"
                 <| fun _ ->
@@ -787,7 +797,11 @@ let tests =
                             | Error e ->
                                 Expect.equal (DecodeError.codeName e.Code) name "andThen raises the code it is handed"
                                 Expect.equal e.Path [] "at the value"
-                                Expect.equal (e.Expected, e.Message) ("e", "m") "its phrases, untouched"
+
+                                Expect.equal
+                                    (e.Expected, e.Message)
+                                    ("e", DecodeError.sentence e.Code "e" "m")
+                                    "its expectation untouched, its sentence the code's projection of its detail"
 
                                 Expect.equal
                                     (Error e)
@@ -849,7 +863,11 @@ let tests =
                     with
                     | Error e ->
                         Expect.equal (e.Code, e.Path) (DecodeCode.OutOfRange, [ key "args"; index 1 ]) "at args[1]"
-                        Expect.equal e.Message "argument 'n' is given more than once" "its sentence"
+
+                        Expect.equal
+                            e.Message
+                            (DecodeError.sentence e.Code e.Expected "argument 'n' is given more than once")
+                            "its sentence, projected from the detail"
                     | Ok v -> failtestf "accepted %A" v
 
                 testCase "a path round-trips its wire form"
@@ -984,8 +1002,8 @@ let tests =
 
                     Expect.equal
                         (Proposal.parse """{"delta":[]}""")
-                        (Error "proposal has no 'id'")
-                        "the sentence is kept"
+                        (Error(DecodeError.sentence DecodeCode.MissingField "a member 'id'" "id"))
+                        "the string form is the refusal's projected sentence"
 
                 testCase "the artifact reader reports the path into idl.json"
                 <| fun _ ->
@@ -1005,11 +1023,19 @@ let tests =
                         | other -> other
 
                     Expect.equal
-                        (refusal (Artifact.ofJsonDetailed broken))
+                        (Artifact.ofJsonDetailed broken |> Result.mapError List.exactlyOne |> refusal)
                         (DecodeCode.MissingField, [ key "kinds"; index 0; key "category" ])
                         "the first kind lacks its category"
 
-                    Expect.equal (Artifact.ofJson broken) (Error "missing 'category'") "the sentence is kept"
+                    // Phase 520: the string form is the refusal rendered — code, path and sentence
+                    Expect.equal
+                        (Artifact.ofJson broken)
+                        (Error(
+                            DecodeError.render (
+                                Decoder.missing "category" |> DecodeError.within [ key "kinds"; index 0 ]
+                            )
+                        ))
+                        "the string form renders the code and the path"
 
                 testCase "the pipeline codec reports the path to the node at fault"
                 <| fun _ ->
@@ -1025,10 +1051,13 @@ let tests =
                             [ key "nodes"; index 1; key "args"; index 0; key "source"; key "$type" ]
                             "the path"
 
+                        Expect.equal e.Expected "one of 'literal', 'fromNode'" "naming the known sources"
+                        Expect.equal e.Message (DecodeError.sentence e.Code e.Expected "$type 'elsewhere'") "projected"
+
                         Expect.equal
                             (CapabilityPipeline.decode doc)
-                            (Error "unknown arg source: elsewhere")
-                            "the sentence is kept"
+                            (Error e.Message)
+                            "the string form is that sentence"
                     | Ok v -> failtestf "decoded %A" v ]
 
           testList
@@ -1089,7 +1118,8 @@ let tests =
                     holds (
                         Corpus.refusalLaws
                             (fun (_: Idl) -> parse text)
-                            Artifact.ofJsonDetailed
+                            (Artifact.ofJsonDetailed >> Result.mapError List.head)
+
                             (fun _ -> MiniIdl.miniIdl)
                             0
                             1

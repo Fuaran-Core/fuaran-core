@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 378 claims — 273 proved across 35 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 379 claims — 274 proved across 35 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -1023,11 +1023,11 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Conformance` | 162 | 2 | 108 | 2 | 6 | 0 | 0 | 44 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 159 | 41 | 64 | 5 | 0 | 0 | 0 | 49 |
-| `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
+| `Fuaran.Core.Idl` | 63 | 0 | 6 | 1 | 1 | 0 | 0 | 55 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
-| `Fuaran.Core.OpStream` | 126 | 28 | 54 | 3 | 1 | 0 | 2 | 38 |
+| `Fuaran.Core.OpStream` | 144 | 28 | 54 | 3 | 1 | 0 | 2 | 56 |
 | `Fuaran.Core.OpStream.Dag` | 91 | 38 | 30 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 56 | 21 | 12 | 14 | 0 | 0 | 0 | 9 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
@@ -1036,8 +1036,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 65 | 16 | 8 | 1 | 2 | 0 | 0 | 38 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
-| `Fuaran.Core.Wire` | 138 | 66 | 14 | 3 | 2 | 0 | 0 | 53 |
-| **Total** | 1230 | 305 | 413 | 38 | 13 | 0 | 3 | 458 |
+| `Fuaran.Core.Wire` | 138 | 64 | 12 | 3 | 2 | 0 | 0 | 57 |
+| **Total** | 1249 | 303 | 411 | 38 | 13 | 0 | 3 | 481 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

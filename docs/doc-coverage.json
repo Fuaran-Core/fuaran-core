@@ -9,20 +9,20 @@
   "packages": [
     {
       "package": "Fuaran.Core.AiSurface",
-      "documented": 81,
-      "total": 81,
+      "documented": 86,
+      "total": 86,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Column",
-      "documented": 260,
-      "total": 260,
+      "documented": 262,
+      "total": 262,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Conformance",
-      "documented": 382,
-      "total": 382,
+      "documented": 402,
+      "total": 402,
       "undocumented": []
     },
     {
@@ -33,14 +33,14 @@
     },
     {
       "package": "Fuaran.Core.Function",
-      "documented": 376,
-      "total": 376,
+      "documented": 409,
+      "total": 409,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Idl",
-      "documented": 250,
-      "total": 250,
+      "documented": 258,
+      "total": 258,
       "undocumented": []
     },
     {
@@ -51,14 +51,14 @@
     },
     {
       "package": "Fuaran.Core.Idl.Codegen",
-      "documented": 276,
-      "total": 276,
+      "documented": 278,
+      "total": 278,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Observer",
-      "documented": 34,
-      "total": 34,
+      "documented": 25,
+      "total": 25,
       "undocumented": []
     },
     {
@@ -75,8 +75,8 @@
     },
     {
       "package": "Fuaran.Core.Ops",
-      "documented": 193,
-      "total": 193,
+      "documented": 179,
+      "total": 179,
       "undocumented": []
     },
     {
@@ -87,8 +87,8 @@
     },
     {
       "package": "Fuaran.Core.Propagation",
-      "documented": 44,
-      "total": 44,
+      "documented": 50,
+      "total": 50,
       "undocumented": []
     },
     {
@@ -111,14 +111,14 @@
     },
     {
       "package": "Fuaran.Core.Validator",
-      "documented": 111,
-      "total": 111,
+      "documented": 126,
+      "total": 126,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Wire",
-      "documented": 321,
-      "total": 321,
+      "documented": 335,
+      "total": 335,
       "undocumented": []
     }
   ]

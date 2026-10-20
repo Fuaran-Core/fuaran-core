@@ -65,7 +65,7 @@ let private cList (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result
         match results |> List.collect cErrs with
         | [] -> Ok(results |> List.choose (function Ok v -> Some v | Error _ -> None))
         | errors -> Error errors
-    | _ -> cOne (dFail DecodeCode.WrongKind "array" "expected an array")
+    | other -> cOne (Error(Decoder.wrongKind "array" other))
 
 // Every entry is checked, in document order; a repeated key keeps its FIRST value, as `dMap` does.
 let private cMap (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<Map<string, 'T>, DecodeError list> =
@@ -82,7 +82,7 @@ let private cMap (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<
                 | _ -> items)
             |> Ok
         | errors -> Error errors
-    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected an object")
+    | other -> cOne (Error(Decoder.wrongKind "object" other))
 
 // An absent required member is `dReq`'s refusal, sentence and path included.
 let private cReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T, DecodeError list> =

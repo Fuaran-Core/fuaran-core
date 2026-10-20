@@ -26,10 +26,10 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 // than a second set written: a tag is a string read out of a `jval`, and Phase 149 already has
 // the string bridge that matches the model's own character alphabet.
 
-/// A production `Versioning.Profile` as the model reads it. The two counters cross a width
+/// A production `Versioning.Capability` as the model reads it. The two counters cross a width
 /// boundary — production holds `int`, the model's `nat` extracts to `BigInteger` per
 /// `oracle/Prims.fs` — so the conversion is here and not hidden inside a comparison.
-let private toModelProfile (p: Versioning.Profile) : WireVersioning.profile =
+let private toModelProfile (p: Versioning.Capability) : WireVersioning.profile =
     { WireVersioning.name = canonToChs p.Name
       WireVersioning.major = bigint p.Major
       WireVersioning.minor = bigint p.Minor }
@@ -151,7 +151,7 @@ let private withAnExtraField (optClass: string) (k: JVal) : JVal =
     | other -> other
 
 /// The four perturbations §15.4's table distinguishes, each as `(label, before-text, after-text)`.
-/// `Canon.render` is what writes them back, so the perturbed artifact is canonical bytes and the
+/// `Canonical.write Rendering.CrossHost` is what writes them back, so the perturbed artifact is canonical bytes and the
 /// snapshot reader meets exactly what it would meet in a repository.
 let private idlPairs () : (string * Set<string> * Set<string>) list =
     let text = pinnedIdlText ()
@@ -164,7 +164,7 @@ let private idlPairs () : (string * Set<string> * Set<string>) list =
     let before = kindTagsOf "pinned" text
     let firstTag = before |> Set.toList |> List.head
 
-    let render (v: JVal) = Canon.render v
+    let render (v: JVal) = Canonical.write Rendering.CrossHost v
 
     let added =
         idl
@@ -302,7 +302,7 @@ let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: st
             | other -> failtestf "the `%s` perturbation's only row is %A, not a FieldAdded" optClass other
 
         let subject = canonToChs (subjectOf row)
-        let baseProfile = toModelProfile Versioning.Profile.coreV1
+        let baseProfile = toModelProfile Versioning.Capability.coreV1
 
         let modelSeverity = WireVersioning.classify_field_add (canonToChs declared)
 
@@ -313,7 +313,7 @@ let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: st
             profileTriple (WireVersioning.bump baseProfile (WireVersioning.evolution_of [ sev, subject ]))
 
         let productionProfile =
-            match IdlDiff.bumpProfile Versioning.Profile.coreV1 v with
+            match IdlDiff.bumpProfile Versioning.Capability.coreV1 v with
             | IdlDiff.Bump.Bumped p -> p.Name, p.Major, p.Minor
             | IdlDiff.Bump.Undecided rows ->
                 failtestf "the `%s` field-add perturbation left %d rows undecided" optClass (List.length rows)
@@ -338,7 +338,7 @@ let private fieldAddMeasurements () : FieldAddMeasurement list =
         | Result.Ok v -> v
 
     let firstTag = kindTagsOf "pinned" text |> Set.toList |> List.head
-    let before = Canon.render idl
+    let before = Canonical.write Rendering.CrossHost idl
 
     let perturb (optClass: string) =
         idl
@@ -349,7 +349,7 @@ let private fieldAddMeasurements () : FieldAddMeasurement list =
                 else
                     k)
         )
-        |> Canon.render
+        |> Canonical.write Rendering.CrossHost
 
     [ "optional"; "required"; "hostOnly" ]
     |> List.map (fun c -> fieldAddProbe c before (perturb c))
@@ -370,10 +370,10 @@ let private envelopeTagOf (el: JVal) : Result<string, string> =
     |> Result.bind (Decoder.describing (Decoder.field "$type" Decoder.json))
     |> Result.bind (Decoder.describing Decoder.str)
 
-let private envelopeRequiredProfile (el: JVal) : Versioning.Profile option =
+let private envelopeRequiredProfile (el: JVal) : Versioning.Capability option =
     match Decoder.describing (Decoder.field "requiredProfile" Decoder.json) el with
     | Result.Ok(JStr s) ->
-        match Versioning.Profile.tryParse s with
+        match Versioning.Capability.tryParse s with
         | Result.Ok p -> Some p
         | Result.Error _ -> None
     | _ -> None
@@ -420,7 +420,7 @@ let private envelopeRejects () : Map<string, string * string> =
 ///   1. the NEGOTIATION — `Current` / `Behind` / `Foreign`, and the authored profile each carries;
 ///   2. whether the tolerant decode found a KNOWN kind or preserved an UNKNOWN one;
 ///   3. the `requiredProfile` the unknown carries, which is what a degraded placeholder names;
-///   4. the BYTES out of `reencode` + `Canon.render` — which for a `Foreign` fixture is not asked,
+///   4. the BYTES out of `reencode` + `Canonical.write Rendering.CrossHost` — which for a `Foreign` fixture is not asked,
 ///      because a `Foreign` artifact is refused before any payload is decoded.
 ///
 /// A fixture production REFUSES is compared on the refusal alone: the corpus must declare it an
@@ -432,17 +432,25 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
     match Versioning.parse text with
     | Result.Error m ->
         match Map.tryFind label rejects with
-        | Some("FOREIGN_PROFILE", "$.$profile") when m.StartsWith "malformed profile" -> diffs
+        // Phase 520: production's refusal is TYPED, so the arm asserts the code and the path the
+        // corpus declares, never a sentence's prefix.
+        | Some("FOREIGN_PROFILE", "$.$profile") when
+            (match m with
+             | Versioning.EnvelopeRefusal.ForeignProfile _ ->
+                 Versioning.EnvelopeRefusal.path m = [ PathSegment.Key "$profile" ]
+             | Versioning.EnvelopeRefusal.Malformed _ -> false)
+            ->
+            diffs
         | declared ->
             failtestf
                 "the envelope fixture %s did not parse: %s (the corpus declares it %s)"
                 label
-                m
+                (Versioning.EnvelopeRefusal.describe m)
                 (match declared with
                  | Some(code, path) -> sprintf "a reject, %s at %s" code path
                  | None -> "no reject")
     | Result.Ok env ->
-        let consumer = Versioning.Profile.coreV1
+        let consumer = Versioning.Capability.coreV1
         let expectedNeg = Versioning.negotiate consumer env.Profile
 
         let gotNeg =
@@ -501,13 +509,18 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                         sprintf "%s: production decoded %A, the model decoded a different shape" label d
                         :: diffs
 
-                // §15.3 at the bytes. Production's own `Canon.render` on both sides — the model's
+                // §15.3 at the bytes. Production's own `Canonical.write Rendering.CrossHost` on both sides — the model's
                 // renderer is Phase 149's family's subject, and re-testing it here would be
                 // measuring that rather than preservation.
-                let expectedBytes = Canon.render (Versioning.reencode id d)
-                let gotBytes = Canon.render (canonOfModel (WireVersioning.reencode id d'))
+                let expectedBytes = Canonical.write Rendering.CrossHost (Versioning.reencode id d)
 
-                if expectedBytes = gotBytes && expectedBytes = Canon.render env.Payload then
+                let gotBytes =
+                    Canonical.write Rendering.CrossHost (canonOfModel (WireVersioning.reencode id d'))
+
+                if
+                    expectedBytes = gotBytes
+                    && expectedBytes = Canonical.write Rendering.CrossHost env.Payload
+                then
                     diffs
                 else
                     sprintf
@@ -515,7 +528,7 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                         label
                         expectedBytes
                         gotBytes
-                        (Canon.render env.Payload)
+                        (Canonical.write Rendering.CrossHost env.Payload)
                     :: diffs
             | _ ->
                 sprintf "%s: production and the model disagreed on whether the decode succeeded" label
@@ -583,7 +596,7 @@ let tests =
               let byClass c =
                   ms |> List.find (fun m -> m.OptClass = c)
 
-              let baseP = Versioning.Profile.coreV1
+              let baseP = Versioning.Capability.coreV1
 
               // 1. the SEVERITY, clause for clause against `Diff.classifyFieldAdd`.
               for m in ms do
@@ -677,7 +690,7 @@ let tests =
                   fixtures
                   |> List.choose (fun (_, text) ->
                       match Versioning.parse text with
-                      | Result.Ok env -> Some(Versioning.negotiate Versioning.Profile.coreV1 env.Profile)
+                      | Result.Ok env -> Some(Versioning.negotiate Versioning.Capability.coreV1 env.Profile)
                       | Result.Error _ -> None)
 
               Expect.isTrue
@@ -736,7 +749,7 @@ let tests =
 
               for major in counters do
                   for minor in counters do
-                      let p: Versioning.Profile =
+                      let p: Versioning.Capability =
                           { Name = "core"
                             Major = major
                             Minor = minor }

@@ -266,7 +266,10 @@ let declareErrorsTests =
                               [ { level with
                                     CaseAnnotations = [ "Medium", note ] } ] }
 
-                  Expect.contains (Declare.enumWireErrors byLiteral) errs.Head "the backstop's own sentence"
+                  Expect.contains
+                      (Declare.enumWireErrors byLiteral |> List.map _.Detail)
+                      errs.Head
+                      "the backstop's own sentence"
 
               match Declare.enumAnnotate [ "Low", note; "Low", note ] level with
               | Error errs -> Expect.equal errs [ "enum 'Level': two annotation entries name the same case" ] "twice"
@@ -277,13 +280,62 @@ let declareErrorsTests =
               | Error errs -> failtestf "refused a declared case: %A" errs
           }
 
+          test "a default the encoder would refuse to write is refused at Declare, at its path (Phase 520)" {
+              // A map value is an entry list, so it can carry one key twice: it is a value of the
+              // slot's TYPE, so a check through `Encode.valueJson` admitted it, and the first
+              // `encode` of a node carrying it refused (Phase 495's repeated-member guard). Through
+              // the guarded renderer the declaration is refused where it is written.
+              let twice = VMap [ "a", VInt 1; "a", VInt 2 ]
+
+              let idl =
+                  small |> withKinds [ kind "Bad" [ f "m" (TMap TInt) (OmitDefault twice) ] ]
+
+              let i = idl.Kinds |> List.findIndex (fun k -> k.Tag = "Bad")
+
+              match Declare.errors idl with
+              | [ e ] ->
+                  Expect.equal
+                      e.At
+                      [ PathSegment.Key "kinds"
+                        PathSegment.Index i
+                        PathSegment.Key "fields"
+                        PathSegment.Index 0
+                        PathSegment.Key "optionality"
+                        PathSegment.Key "default" ]
+                      "at the field's default"
+
+                  Expect.stringContains e.Detail "repeated member" "naming the guard's class"
+
+                  Expect.equal
+                      (VocabularyFault.describe e)
+                      (DecodePath.render e.At + ": " + e.Detail)
+                      "its one line is the path and the detail"
+              | errs -> failtestf "one fault, at the default: %A" errs
+
+              // the declared-default twin, at its entry
+              let declared =
+                  { (small |> withKinds [ kind "Bad" [ f "m" (TMap TInt) Optional ] ]) with
+                      Defaults =
+                          [ { Kind = "Bad"
+                              Field = "m"
+                              Value = twice } ] }
+
+              match Declare.errors declared with
+              | [ e ] ->
+                  Expect.equal
+                      e.At
+                      [ PathSegment.Key "defaults"; PathSegment.Index 0; PathSegment.Key "value" ]
+                      "at the default entry's value"
+              | errs -> failtestf "one fault, at the default entry: %A" errs
+          }
+
           test "each adversarial vocabulary is refused, naming the rule it breaks" {
               for name, fragment, idl in adversarial do
                   let errs = Declare.errors idl
                   Expect.isNonEmpty errs (sprintf "%s: refused" name)
 
                   Expect.isTrue
-                      (errs |> List.exists (fun e -> e.Contains fragment))
+                      (errs |> List.exists (fun e -> e.Detail.Contains fragment))
                       (sprintf "%s: an error names '%s' — got %A" name fragment errs)
           }
 

@@ -124,7 +124,7 @@ field Fuaran.Core.Idl.SupportArtifact.version : System.Int32 (literal)
 field Fuaran.Core.Idl.Trust+CustomGate+Tags.Allowed : System.Int32 (literal)
 field Fuaran.Core.Idl.Trust+CustomGate+Tags.InertPlaceholder : System.Int32 (literal)
 method Fuaran.Core.Idl.CodegenErrorModule.describe(Fuaran.Core.Idl.CodegenError) : System.String
-method Fuaran.Core.Idl.Diff.bumpProfile(Fuaran.Core.Versioning+Profile, Fuaran.Core.Idl.Diff+Verdict) : Fuaran.Core.Idl.Diff+Bump
+method Fuaran.Core.Idl.Diff.bumpProfile(Fuaran.Core.Versioning+Capability, Fuaran.Core.Idl.Diff+Verdict) : Fuaran.Core.Idl.Diff+Bump
 method Fuaran.Core.Idl.Diff.changes(Fuaran.Core.Idl.Diff+Snapshot, Fuaran.Core.Idl.Diff+Snapshot) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Change>
 method Fuaran.Core.Idl.Diff.classLabel(Fuaran.Core.Idl.Diff+VerdictClass) : System.String
 method Fuaran.Core.Idl.Diff.classOfLabel(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Diff+VerdictClass>
@@ -383,7 +383,7 @@ union-case Fuaran.Core.Idl.CodegenError.NewUndeclaredHardenToken #3(member_: Sys
 union-case Fuaran.Core.Idl.CodegenError.NewUnmodellableInFStar #2(construct: System.String, where: System.String)
 union-case Fuaran.Core.Idl.CodegenError.NewUnsupportedConstruct #5(construct: System.String, principle: System.String, alternative: System.String)
 union-case Fuaran.Core.Idl.CodegenError.NewUnsupportedDefault #0(ty: Fuaran.Core.Idl.IdlType, value: Fuaran.Core.Idl.IdlValue)
-union-case Fuaran.Core.Idl.Diff+Bump.NewBumped #0(Item: Fuaran.Core.Versioning+Profile)
+union-case Fuaran.Core.Idl.Diff+Bump.NewBumped #0(Item: Fuaran.Core.Versioning+Capability)
 union-case Fuaran.Core.Idl.Diff+Bump.NewUndecided #1(rows: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>)
 union-case Fuaran.Core.Idl.Diff+Change.NewArtifactVersionChanged #0(before: System.Int32, after: System.Int32)
 union-case Fuaran.Core.Idl.Diff+Change.NewDefaultAdded #31(kind: System.String, field: System.String, value: System.String)

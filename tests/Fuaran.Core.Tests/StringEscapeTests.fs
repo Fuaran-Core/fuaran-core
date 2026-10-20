@@ -139,7 +139,9 @@ module RunBoundaries =
         [ "Json.escape", body, escaped s
           "Json.escapeInto", "<" + body + ">", into
           "Json.render", q, Json.render (JStr s)
-          "Canon.render", "{" + q + ":" + q + "}", Canon.render (JObj [ s, JStr s ])
+          "Canonical.write Rendering.CrossHost",
+          "{" + q + ":" + q + "}",
+          Canonical.write Rendering.CrossHost (JObj [ s, JStr s ])
           "Actor.encode", human, Actor.encode (Human s)
           // Phase 388 - the op-stream package's one escaper, public; `Dag.toJsonl` spells through it.
           "OpStream.Jsonl.quote", q, OpStream.Jsonl.quote s
@@ -312,15 +314,15 @@ let tests =
                   "{\"kind\":\"human\",\"id\":\"\\u0000\"}"
                   "the NUL human the chain laws carry"
 
-          testCase "Json.escape and Canon.render agree with each other on every C0 character"
+          testCase "Json.escape and Canonical.write Rendering.CrossHost agree with each other on every C0 character"
           <| fun _ ->
               for c in 0..0x1F do
                   let s = string (char c)
 
                   Expect.equal
-                      (Canon.render (JStr s))
+                      (Canonical.write Rendering.CrossHost (JStr s))
                       ("\"" + Json.escape s + "\"")
-                      (sprintf "U+%04X: Canon.render is Json.escape in quotes" c)
+                      (sprintf "U+%04X: Canonical.write Rendering.CrossHost is Json.escape in quotes" c)
 
           testCase "the parser reads both spellings back to the same string (nothing changes on read)"
           <| fun _ ->
