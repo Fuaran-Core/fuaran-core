@@ -1843,12 +1843,39 @@
     },
     {
       "members": [
-        "ColumnValidator.asCheck",
         "ColumnValidator.validateTagged"
       ],
       "class": "measured-elsewhere",
       "reason": "Column-validator registry and tagged validation beside the rostered rule constructors and `validate`; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.replace",
+        "ColumnValidator.restrict",
+        "ColumnValidator.union",
+        "ColumnValidator.unregister"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The column registry's lifecycle (Phase 521): each verb is the `Validator.Rules` verb at the column table, named case by case beside the other four registries' in the lifecycle tests.",
+      "standIn": "tests/Fuaran.Core.Tests/RegistryLifecycleTests.fs"
+    },
+    {
+      "members": [
+        "Validator.Rules.empty",
+        "Validator.Rules.enumerate",
+        "Validator.Rules.ofChecks",
+        "Validator.Rules.register",
+        "Validator.Rules.replace",
+        "Validator.Rules.restrict",
+        "Validator.Rules.run",
+        "Validator.Rules.tryFind",
+        "Validator.Rules.union",
+        "Validator.Rules.unregister"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion), Phase 521: the registration-ordered lattice and the one walk over a domain's own rules. The validator tests name each verb, its refusals and the walk's agreement with `runAllTagged` and `ColumnValidator.validateTagged`.",
+      "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
     },
     {
       "members": [
