@@ -139,6 +139,9 @@ method Fuaran.Core.DecimalText.compare(System.String, System.String) : Microsoft
 method Fuaran.Core.DecimalText.isCanonical(System.String) : System.Boolean
 method Fuaran.Core.DecimalText.tryCanonical(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.DecimalText.tryToFloat(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
+method Fuaran.Core.FieldChangeSeamCodec.decodeFieldChange(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FieldChange, Fuaran.Core.DecodeError>
+method Fuaran.Core.FieldChangeSeamCodec.decodeFieldChangeStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FieldChange, Fuaran.Core.DecodeError>
+method Fuaran.Core.FieldChangeSeamCodec.encodeFieldChange(Fuaran.Core.FieldChange) : Fuaran.Core.JVal
 method Fuaran.Core.FieldModule.create(System.String, Fuaran.Core.ColumnType) : Fuaran.Core.Field
 method Fuaran.Core.FieldModule.hasMetadata(Fuaran.Core.Field) : System.Boolean
 method Fuaran.Core.FieldModule.withDescription(System.String, Fuaran.Core.Field) : Fuaran.Core.Field
@@ -305,6 +308,7 @@ type Fuaran.Core.FieldChange+Ext (type)
 type Fuaran.Core.FieldChange+Label (type)
 type Fuaran.Core.FieldChange+Tags (type)
 type Fuaran.Core.FieldChange+Unit (type)
+type Fuaran.Core.FieldChangeSeamCodec (module)
 type Fuaran.Core.FieldModule (module)
 type Fuaran.Core.SchemaCompat (union)
 type Fuaran.Core.SchemaCompat+Breaking (type)

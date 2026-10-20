@@ -125,46 +125,14 @@ type PatternCard<'Op> =
 [<RequireQualifiedAccess>]
 module RejectionCodec =
 
-    /// The rejection as a canonical wire value; `idText` renders an id.
-    let encode (idText: 'Id -> string) (r: Rejection<'Id>) : JVal =
-        let one (i: 'Id) = JStr(idText i)
-        let many (xs: 'Id list) = JArr(xs |> List.map one)
-
-        match r with
-        | Rejection.UnknownNode(target, addressable) ->
-            Canonical.typed "unknownNode" [ "target", one target; "addressable", many addressable ]
-        | DuplicateId d -> Canonical.typed "duplicateId" [ "id", one d ]
-        | CannotRemoveRoot -> Canonical.typed "cannotRemoveRoot" []
-        | WouldNestUnderSelf(target, relation) ->
-            let rel =
-                match relation with
-                | NestRelation.Self -> "self"
-                | NestRelation.Descendant -> "descendant"
-
-            Canonical.typed "wouldNestUnderSelf" [ "target", one target; "relation", JStr rel ]
-        | NotAContainer(target, kindTag) ->
-            Canonical.typed "notAContainer" [ "target", one target; "kindTag", JStr kindTag ]
-        | ReorderMismatch(parent, expected, got) ->
-            Canonical.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
-        | Rejected(code, message) -> Canonical.typed "rejected" [ "code", JStr code; "message", JStr message ]
-        | KeyedPosition(target, holder, slot) ->
-            Canonical.typed "keyedPosition" [ "target", one target; "holder", one holder; "slot", JInt slot ]
-        | IllegalChild(child, childKind, parent, parentKind, legal) ->
-            Canonical.typed
-                "illegalChild"
-                [ "child", one child
-                  "childKind", JStr childKind
-                  "parent", one parent
-                  "parentKind", JStr parentKind
-                  "legal", JArr(legal |> List.map JStr) ]
-        | StillReferenced(target, referrers) ->
-            Canonical.typed "stillReferenced" [ "target", one target; "referrers", many referrers ]
-        | RootIdMismatch(before, after) -> Canonical.typed "rootIdMismatch" [ "before", one before; "after", one after ]
-
-    /// `encode` rendered canonically (`Canonical.write Rendering.CrossHost`: sorted keys, the pinned escaping). A caller that
-    /// must refuse an ill-formed id rather than write it through renders with `Canonical.tryWrite Rendering.CrossHost`.
+    /// The rejection rendered canonically (`Canonical.write Rendering.CrossHost`: sorted keys, the pinned
+    /// escaping), each id written as the string `idText` gives. Its value is
+    /// `RejectionSeamCodec.encodeRejection (idText >> JStr) r`, the codec DERIVED from the union's IDL
+    /// declaration (Phase 551, DECISIONS.md D200), which also reads one back (`decodeRejection`). A
+    /// caller that must refuse an ill-formed id rather than write it through renders that value with
+    /// `Canonical.tryWrite Rendering.CrossHost`.
     let render (idText: 'Id -> string) (r: Rejection<'Id>) : string =
-        Canonical.write Rendering.CrossHost (encode idText r)
+        Canonical.write Rendering.CrossHost (RejectionSeamCodec.encodeRejection (idText >> JStr) r)
 
 /// The per-domain AI-surface seam — one witness bundling the four parts. The
 /// core sees the artifact (`'State`), the op (`'Op`), and the rejection

@@ -10,6 +10,8 @@
     <!-- Phase 402 - the one boundary this package reads Fuaran.Core.Function's internals through,
          each forwarder NoInlining (DECISIONS.md D129). -->
     <Compile Include="FunctionInternals.fs" />
+    <Compile Include="QueryTypes.fs" />
+    <Compile Include="QuerySeamCodec.fs" />
     <Compile Include="Query.fs" />
     <Compile Include="QueryRegistry.fs" />
     <Compile Include="QueryCodec.fs" />

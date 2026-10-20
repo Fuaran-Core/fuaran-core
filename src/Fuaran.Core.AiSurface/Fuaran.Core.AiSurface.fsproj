@@ -7,6 +7,7 @@
     <Description>Fuaran.Core.AiSurface — the generic AI-surface seam: a per-domain witness bundling read tools, the mutation-op emission catalogue (JSON schema per op kind), an NL→op pattern bank with a deterministic fast-path resolver, and a proposals/approval flow with agent-readable rejection guidance. All read-tool logic, pattern content, and policy rules stay domain-side; the core owns only the shapes. FSharp.Core + Fuaran.Core.Wire + Fuaran.Core.Ops + Fuaran.Core.Function only, Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="RejectionSeamCodec.fs" />
     <Compile Include="AiSurface.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -9,3 +9,8 @@ tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs
 tests/Fuaran.Core.Tests/RefusalCornersGenerated.fs
 tests/Fuaran.Core.Tests/DeriveGenerated.fs
 tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs
+src/Fuaran.Core.Function/CapabilitySeamCodec.fs
+src/Fuaran.Core.Function/PipelineSeamCodec.fs
+src/Fuaran.Core.Query/QuerySeamCodec.fs
+src/Fuaran.Core.Column/FieldChangeSeamCodec.fs
+src/Fuaran.Core.AiSurface/RejectionSeamCodec.fs

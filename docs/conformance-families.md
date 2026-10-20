@@ -41,7 +41,7 @@ misses one stays green unless the family is guarded).
 **Package.** The package a family ships from. The families that read the dataframe layer ship
 from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census lists them.
 
-94 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+95 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -119,6 +119,7 @@ from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census list
 | `Conformance.referenceLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `RefWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `drawn` |
 | `Conformance.registryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 3200 | `unconditional` | `built` |
 | `Conformance.sanitizeLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `SanitizeWitness` | — | 1200 | `unconditional` | `built` |
+| `Conformance.seamRefusalLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 276 | `unconditional` | `built` |
 | `Conformance.snapshotLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.streamConfigLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 500 | `unconditional` | `built` |
 | `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | `op-stream-load-premises` | 800 | `guarded-reached` | `drawn` |

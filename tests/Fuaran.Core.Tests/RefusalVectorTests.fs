@@ -250,6 +250,42 @@ module RefusalCorpus =
               Items = "vectors"
               Rows = vectors |> List.map line }
 
+    // ---- the seam-refusal family (Phase 551) ----
+    // The seams' refusal and declaration documents (`Fuaran.Core.SeamRefusalLaws`, held by
+    // `Conformance.seamRefusalLaws`): each vector names its reader, its document and what the reader
+    // answers, the canonical bytes back or a refusal's code and path (D188: a host certifies on code and
+    // path; the sentence is a projection of them). Core-internal: no corpus copy carries it.
+
+    let seamFileName = "seam-refusals.json"
+    let seamFamilyId = "seamRefusals"
+
+    let private seamLine (v: SeamRefusalLaws.Vector) : CorpusCell =
+        let result =
+            match SeamRefusalLaws.outcome v with
+            | Ok canonical -> [ "canonical", JStr canonical ]
+            | Error e -> [ "code", JStr(DecodeError.codeName e.Code); "path", DecodePath.toJson e.Path ]
+
+        CorpusCell.Value(
+            JObj(
+                [ "name", JStr v.Name; "reader", JStr v.Reader; "document", JStr v.Document ]
+                @ result
+            )
+        )
+
+    /// The seam-refusal vectors file, rendered.
+    let renderSeam () : string =
+        CorpusFile.render
+            { Head =
+                [ "family", CorpusFile.str seamFamilyId
+                  "description",
+                  CorpusFile.str
+                      "Seam refusal vectors (Phase 551). The capability and query seams' refusal and declaration unions (InvokeError with DeclarationFault, Placement, the Deferred envelope, the capability pipeline, QueryError with ColumnPredicate, SortKey, the schema delta's FieldChange, and the ops Rejection envelope), each read by the codec derived from its IDL declaration. Each vector names its `reader` (a `/strict` reader refuses an undeclared member, at it), its `document`, and the outcome computed by the reference: `canonical`, the re-encoding of what it reads, or the refusal's `code` and `path`. A host certifies its reader by reproducing every outcome, on code and path." ]
+              Items = "vectors"
+              Rows = SeamRefusalLaws.vectors |> List.map seamLine }
+
+    let seamPath (dir: string) =
+        Path.Combine(dir, familyDirName, seamFileName)
+
     /// The hosts adoption is recorded for — the codec twins that certify against the shared corpus.
     let hostRoster = [ "fuaran"; "fuaran-ts"; "fuaran-py"; "fuaran-go"; "fuaran-rs" ]
 
@@ -265,7 +301,14 @@ module RefusalCorpus =
                 Vectors = List.length vectors
                 Adoption = hostRoster |> List.map (fun h -> h, "proposed")
                 Description =
-                  "The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of." } ] }
+                  "The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of." }
+              { Id = seamFamilyId
+                Kind = "seam-refusals"
+                File = seamFileName
+                Vectors = List.length SeamRefusalLaws.vectors
+                Adoption = hostRoster |> List.map (fun h -> h, "proposed")
+                Description =
+                  "The seams' refusal and declaration documents (Phase 551): every case of every seam union read back to its own bytes, and its readers' refusals by code and path, the strict readers' undeclared members among them." } ] }
 
     let renderManifest () : string =
         CorpusFile.render (CorpusFile.manifest (manifest ()))

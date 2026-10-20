@@ -15,7 +15,7 @@ module QueryCodec =
     // spelled into this codec's `QueryError` envelope at the entry points, with the sentence it
     // has always carried.
 
-    let private colTypeOf: Decoder<ColumnType> = QueryShape.colTypeOf
+    let private colTypeOf: Decoder<ColumnType> = QueryWire.columnTypeOf
 
     // The effect class is `EffectCodec`'s (Phase 295), the capability codec's reader and writer.
 
@@ -86,11 +86,11 @@ module QueryCodec =
             @ (if List.isEmpty q.Where then
                    []
                else
-                   [ "where", JArr(q.Where |> List.map QueryShape.predicateJson) ])
+                   [ "where", JArr(q.Where |> List.map QuerySeamCodec.encodeColumnPredicate) ])
             @ (if List.isEmpty q.OrderBy then
                    []
                else
-                   [ "orderBy", JArr(q.OrderBy |> List.map QueryShape.sortKeyJson) ])
+                   [ "orderBy", JArr(q.OrderBy |> List.map QuerySeamCodec.encodeSortKey) ])
         )
 
     /// A declaration as canonical JSON text (`"$type": "query"`): the same declaration always
@@ -145,7 +145,13 @@ module QueryCodec =
     // admission gate the registry runs (`QueryRegistry.admissionFault`, D111) — so a declaration
     // that decodes is one `register` admits, and a refused one is refused with the registry's error.
 
-    let internal queryOf (el: JVal) : Result<Query, DecodeError> =
+    /// The declaration's reader, with the readers of its `where` predicates and `orderBy` keys (the
+    /// lenient or the strict derived ones, Phase 551).
+    let private queryUnder
+        (predicate: Decoder<ColumnPredicate>)
+        (sortKey: Decoder<SortKey>)
+        (el: JVal)
+        : Result<Query, DecodeError> =
         Decoder.field "$type" (Decoder.oneOf [ "query", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
@@ -159,9 +165,9 @@ module QueryCodec =
                         |> Result.bind (fun tmo ->
                             Decoder.optField "pageSize" Decoder.int el
                             |> Result.bind (fun pg ->
-                                Decoder.optField "where" (Decoder.list QueryShape.predicateDecoder) el
+                                Decoder.optField "where" (Decoder.list predicate) el
                                 |> Result.bind (fun wh ->
-                                    Decoder.optField "orderBy" (Decoder.list QueryShape.sortKeyDecoder) el
+                                    Decoder.optField "orderBy" (Decoder.list sortKey) el
                                     |> Result.bind (fun ob ->
                                         Decoder.field "source" Decoder.json el
                                         |> Result.bind (fun srcEl ->
@@ -182,6 +188,9 @@ module QueryCodec =
                                                 match QueryRegistry.admissionFaultAt q with
                                                 | Some(path, e) -> Error(admissionRefused path e)
                                                 | None -> Ok q)))))))))
+
+    let internal queryOf: Decoder<Query> =
+        queryUnder QuerySeamCodec.decodeColumnPredicate QuerySeamCodec.decodeSortKey
 
     // ---- query result ----
 
@@ -226,53 +235,39 @@ module QueryCodec =
                               NextPageToken = tok }))))
 
     // ---- deferred query result (Phase 198) ----
-    // The seam's result type is now `Deferred<QueryResult>`, so it has to cross the wire like every
-    // other Query type — a host that answers `Pending` over a transport has nothing to send
-    // otherwise. This reuses the shipped envelope codec (`CapabilityCodec.deferredJson` /
-    // `deferredOf`, `"$type"`-tagged `pending` / `ready` / `failed`) rather than minting a second
-    // encoding of the same three cases: one envelope, one wire shape, both seams.
+    // The seam's result type is `Deferred<QueryResult>`, so it crosses the wire like every other Query
+    // type — a host that answers `Pending` over a transport has nothing to send otherwise. It is the
+    // ONE envelope both seams share (`pending` / `ready` / `failed`): the codec derived from its IDL
+    // declaration (`CapabilitySeamCodec`, Phase 551), over this codec's result writer and reader, so a
+    // refusal keeps its code and its path (a page's `pageNum` that is not an integer is `WrongKind` at
+    // `value.pageNum`, Phase 455).
 
     let internal deferredResultJson (d: Deferred<QueryResult>) : JVal =
-        CapabilityCodec.deferredJson resultJson d
+        CapabilitySeamCodec.encodeDeferred resultJson d
 
     /// The seam's async envelope as canonical JSON text, in the `pending` / `ready` / `failed`
     /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it.
     let encodeDeferredResult (d: Deferred<QueryResult>) : string =
         Canonical.write Rendering.CrossHost (deferredResultJson d)
 
-    // Phase 455: the envelope's TYPED reader over `resultOf`, so a refusal keeps its code and its
-    // path — a page's `pageNum` that is not an integer is `WrongKind` at `value.pageNum`, and a
-    // missing `$type` is `MissingField` at `$type`. Until 455 this went through the string reader
-    // and answered every refusal `OutOfRange` at the root, the path and the code both lost.
-    // `deferredDecoder` is `Fuaran.Core.Function`'s internal member, so the reference sits in a
-    // `NoInlining` body taking the full argument list, never copied into a caller's assembly
-    // (DECISIONS.md D129, `CrossAssemblyInliningTests`).
-    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, DecodeError> =
-        CapabilityCodec.deferredDecoder resultOf el
+        CapabilitySeamCodec.decodeDeferred resultOf el
 
     // ---- typed refusal (Phase 251) ----
-    // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
-    // type by its tag. The sentence a model reads is `QueryError.describe`. Since Phase 385 the
-    // codec lives below the registry (`QueryErrorWire`), so the keyed capture journals a refusal in
-    // this form and replays it back; these are its published spellings.
+    // `QueryError`'s document is `QuerySeamCodec`'s, DERIVED from the union's IDL declaration (Phase
+    // 551): one `$type` per case, its case name with the first letter lowered (D163), and a column type
+    // by its tag. The sentence a model reads is `QueryError.describe`. The keyed capture journals a
+    // refusal in this form below the registry (`QueryErrorWire`) and replays it back; these are its
+    // text forms.
 
-    /// Encode a `QueryError` to a `JVal` (`"$type"` is the case: `noSuchQuery`, `paramTypeMismatch`, …).
-    let queryErrorJson (e: QueryError) : JVal = QueryErrorWire.toJson e
-
-    /// `queryErrorJson` as canonical JSON text — the wire form; `QueryError.describe` is the
-    /// sentence a model reads.
+    /// A `QueryError` as canonical JSON text — the wire form; `QueryError.describe` is the sentence a
+    /// model reads.
     let encodeQueryError (e: QueryError) : string = QueryErrorWire.render e
 
-    /// Decode a `QueryError` from a `JVal`. The error side is a plain `string`: a refusal that
-    /// cannot be read is not itself a refusal of the query.
-    let queryErrorOf (el: JVal) : Result<QueryError, string> =
-        Decoder.describing QueryErrorWire.decoder el
-
-    /// `queryErrorOf` over text. A parse failure or an unknown `$type` is the `Error` sentence,
-    /// never a `QueryError`.
+    /// Parse, then read a `QueryError`. A parse failure or an unknown `$type` is the `Error` sentence,
+    /// never a `QueryError`: a refusal that cannot be read is not itself a refusal of the query.
     let decodeQueryError (s: string) : Result<QueryError, string> =
-        Json.parse s |> Result.bind queryErrorOf
+        Json.parse s |> Result.bind (Decoder.describing QuerySeamCodec.decodeQueryError)
 
     // ---- a model's arguments (Phase 251) ----
     // `Query.toJsonSchema` tells a model to emit one object keyed by parameter name; this reads that
@@ -403,24 +398,9 @@ module QueryCodec =
         |> Result.bind (fun () -> within "params" (each (Decoder.members [ "name"; "type"; "required" ])) el)
         |> Result.bind (fun () -> within "resultSchema" (each (Decoder.members fieldMembers)) el)
         |> Result.bind (fun () -> within "effect" (Decoder.members EffectCodec.members) el)
-        |> Result.bind (fun () -> within "where" (each (fun p -> Decoder.members (QueryShape.predicateMembers p) p)) el)
-        |> Result.bind (fun () -> within "orderBy" (each (Decoder.members [ "column"; "direction" ])) el)
 
     let private strictResult (el: JVal) =
         Decoder.members [ "$type"; "rows"; "pageNum"; "totalRowCount"; "nextPageToken" ] el
-
-    let private strictDeferredResult (el: JVal) =
-        let extra =
-            match tagOf el with
-            | Some "ready" -> [ "value" ]
-            | Some "failed" -> [ "message" ]
-            | _ -> []
-
-        Decoder.members ("$type" :: extra) el
-        |> Result.bind (fun () ->
-            match tagOf el with
-            | Some "ready" -> within "value" strictResult el
-            | _ -> Ok())
 
     let private readWith
         (policy: ReadPolicy)
@@ -439,7 +419,14 @@ module QueryCodec =
     /// `Strict` refuses an unknown member of the declaration, its parameters, its result columns or
     /// its effect. A parse failure is refused at the root.
     let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<Query, DecodeError> =
-        readWith policy strictQuery queryOf s
+        match policy with
+        | ReadPolicy.Lenient -> readWith policy strictQuery queryOf s
+        | ReadPolicy.Strict ->
+            readWith
+                policy
+                strictQuery
+                (queryUnder QuerySeamCodec.decodeColumnPredicateStrict QuerySeamCodec.decodeSortKeyStrict)
+                s
 
     /// `decodeResult` under a read policy, answering a typed refusal (Phase 295).
     let decodeResultDetailedWith (policy: ReadPolicy) (s: string) : Result<QueryResult, DecodeError> =
@@ -447,7 +434,15 @@ module QueryCodec =
 
     /// `decodeDeferredResult` under a read policy, answering a typed refusal (Phase 295).
     let decodeDeferredResultDetailedWith (policy: ReadPolicy) (s: string) : Result<Deferred<QueryResult>, DecodeError> =
-        readWith policy strictDeferredResult deferredResultOf s
+        match policy with
+        | ReadPolicy.Lenient -> readWith policy strictResult deferredResultOf s
+        | ReadPolicy.Strict ->
+            // The envelope's roster is its declaration's (`decodeDeferredStrict`); a `ready` result is
+            // held to its own members before it is read.
+            Decoder.parse ReadOptions.strict s
+            |> Result.bind (
+                CapabilitySeamCodec.decodeDeferredStrict (fun v -> strictResult v |> Result.bind (fun () -> resultOf v))
+            )
 
     /// Decode a query declaration — `Result`-typed with a named error, as `CapabilityCodec.decode`
     /// (Phase 295: the sentence of `decodeDetailedWith`'s refusal; it was an `ExecutionFailed` before).

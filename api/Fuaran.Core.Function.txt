@@ -142,16 +142,11 @@ method Fuaran.Core.CapabilityCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSha
 method Fuaran.Core.CapabilityCodec.decodeJsonDetailedWith(Fuaran.Core.ReadPolicy, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, Fuaran.Core.DecodeError>
 method Fuaran.Core.CapabilityCodec.decodeJsonWith(Fuaran.Core.ReadPolicy, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.decodeWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
-method Fuaran.Core.CapabilityCodec.deferredJson`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.JVal
-method Fuaran.Core.CapabilityCodec.deferredOfWith`1(Fuaran.Core.ReadPolicy, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
-method Fuaran.Core.CapabilityCodec.deferredOf`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.encode(Fuaran.Core.Capability) : System.String
 method Fuaran.Core.CapabilityCodec.encodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : System.String
 method Fuaran.Core.CapabilityCodec.encodeInvocation(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : System.String
 method Fuaran.Core.CapabilityCodec.encodeInvokeError(Fuaran.Core.InvokeError) : System.String
 method Fuaran.Core.CapabilityCodec.encodeJson(Fuaran.Core.Capability) : Fuaran.Core.JVal
-method Fuaran.Core.CapabilityCodec.invokeErrorJson(Fuaran.Core.InvokeError) : Fuaran.Core.JVal
-method Fuaran.Core.CapabilityCodec.invokeErrorOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, System.String>
 method Fuaran.Core.CapabilityCodec.signatureOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Signature, System.String>
 method Fuaran.Core.CapabilityCodec.tryEncode(Fuaran.Core.Capability) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.CapabilityLookupModule.ofFunctionRegistry(Fuaran.Core.FunctionRegistry) : Fuaran.Core.CapabilityLookup
@@ -189,6 +184,18 @@ method Fuaran.Core.CapabilityRegistryModule.tryFind(System.String, Fuaran.Core.C
 method Fuaran.Core.CapabilityRegistryModule.union(Fuaran.Core.CapabilityRegistry, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityRegistryModule.unregister(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityRegistryModule.withGate(Fuaran.Core.PolicyGate`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, Fuaran.Core.CapabilityRegistry) : Fuaran.Core.CapabilityRegistry
+method Fuaran.Core.CapabilitySeamCodec.decodeDeclarationFault(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DeclarationFault, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodeDeclarationFaultStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DeclarationFault, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodeDeferredStrict`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodeInvokeError(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodeInvokeErrorStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodePlacement(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Placement, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.decodePlacementStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Placement, Fuaran.Core.DecodeError>
+method Fuaran.Core.CapabilitySeamCodec.encodeDeclarationFault(Fuaran.Core.DeclarationFault) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilitySeamCodec.encodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilitySeamCodec.encodeInvokeError(Fuaran.Core.InvokeError) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilitySeamCodec.encodePlacement(Fuaran.Core.Placement) : Fuaran.Core.JVal
 method Fuaran.Core.ContentPack.load(Fuaran.Core.PackManifest, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.PackLoadError>
 method Fuaran.Core.ContentPack.pack(System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.FunctionEntry) : Fuaran.Core.PackedFunction
 method Fuaran.Core.ContentPack.signatureFingerprint(Fuaran.Core.Signature) : System.String
@@ -244,6 +251,15 @@ method Fuaran.Core.InvokeErrorModule.describeAll(Microsoft.FSharp.Collections.FS
 method Fuaran.Core.Memo.count`1(Fuaran.Core.MemoCache`1<!!0>) : System.Int32
 method Fuaran.Core.Memo.empty`1() : Fuaran.Core.MemoCache`1<!!0>
 method Fuaran.Core.Memo.isMemoisable(Fuaran.Core.EffectClass) : System.Boolean
+method Fuaran.Core.PipelineSeamCodec.decodeArgSource(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.ArgSource, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.decodeArgSourceStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.ArgSource, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.decodeCapabilityPipeline(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.decodeCapabilityPipelineStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.decodePipelineNode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.PipelineNode, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.decodePipelineNodeStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.PipelineNode, Fuaran.Core.DecodeError>
+method Fuaran.Core.PipelineSeamCodec.encodeArgSource(Fuaran.Core.ArgSource) : Fuaran.Core.JVal
+method Fuaran.Core.PipelineSeamCodec.encodeCapabilityPipeline(Fuaran.Core.CapabilityPipeline) : Fuaran.Core.JVal
+method Fuaran.Core.PipelineSeamCodec.encodePipelineNode(Fuaran.Core.PipelineNode) : Fuaran.Core.JVal
 method Fuaran.Core.PolicyDecisionModule.all(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PolicyDecision>) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.PolicyDecisionModule.any(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PolicyDecision>) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.PolicyDecisionModule.deny(System.String) : Fuaran.Core.PolicyDecision
@@ -413,6 +429,7 @@ type Fuaran.Core.CapabilityPipeline (record)
 type Fuaran.Core.CapabilityPipelineModule (module)
 type Fuaran.Core.CapabilityRegistry (record)
 type Fuaran.Core.CapabilityRegistryModule (module)
+type Fuaran.Core.CapabilitySeamCodec (module)
 type Fuaran.Core.CapturedDispatch`2 (record)
 type Fuaran.Core.ContentPack (module)
 type Fuaran.Core.DeclarationFault (union)
@@ -502,6 +519,7 @@ type Fuaran.Core.PipelineNode (union)
 type Fuaran.Core.PipelineNode+Invoke (type)
 type Fuaran.Core.PipelineNode+Source (type)
 type Fuaran.Core.PipelineNode+Tags (type)
+type Fuaran.Core.PipelineSeamCodec (module)
 type Fuaran.Core.Placement (union)
 type Fuaran.Core.Placement+ClientIsland (type)
 type Fuaran.Core.Placement+Tags (type)

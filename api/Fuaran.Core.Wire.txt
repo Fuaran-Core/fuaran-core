@@ -145,6 +145,7 @@ method Fuaran.Core.Corpus.roundTrip`1(Fuaran.Core.Corpus+Codec`1<!!0>, !!0) : Mi
 method Fuaran.Core.Corpus.runCorpus`1(Fuaran.Core.Corpus+Codec`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Case>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
 method Fuaran.Core.Corpus.runRejects`1(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+RejectVector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
 method Fuaran.Core.DecodeErrorModule.codeName(Fuaran.Core.DecodeCode) : System.String
+method Fuaran.Core.DecodeErrorModule.decoder(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DecodeError, Fuaran.Core.DecodeError>
 method Fuaran.Core.DecodeErrorModule.describe(Fuaran.Core.DecodeError) : System.String
 method Fuaran.Core.DecodeErrorModule.make(Fuaran.Core.DecodeCode, System.String, System.String) : Fuaran.Core.DecodeError
 method Fuaran.Core.DecodeErrorModule.ofJsonRefusal(Fuaran.Core.JsonRefusal) : Fuaran.Core.DecodeError

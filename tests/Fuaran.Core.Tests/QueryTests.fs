@@ -1340,7 +1340,8 @@ let private shapeRefusals528: (string * string * string * string) list =
     [ "\"$type\":\"contains\"",
       "\"$type\":\"like\"",
       "UnknownTag at $[\"where\"][0][\"$type\"]: unknown $type 'like'; expected one of 'equalTo', 'greaterThan', 'atLeast', 'lessThan', 'atMost', 'contains', 'isNull', 'isNotNull'",
-      "UndeclaredMember at $[\"where\"][0][\"text\"]: undeclared member: 'text'; expected one of the members '$type', 'column', 'type', 'value'"
+      // Phase 551: a tag the union does not declare has no roster; the strict read answers as the lenient.
+      "UnknownTag at $[\"where\"][0][\"$type\"]: unknown $type 'like'; expected one of 'equalTo', 'greaterThan', 'atLeast', 'lessThan', 'atMost', 'contains', 'isNull', 'isNotNull'"
       "\"text\":\"U\"",
       "\"text\":1",
       "WrongKind at $[\"where\"][0][\"text\"]: expected string, got int",
@@ -1355,8 +1356,8 @@ let private shapeRefusals528: (string * string * string * string) list =
       "UnknownTag at $[\"where\"][1][\"type\"]: unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'"
       "\"direction\":\"descending\"",
       "\"direction\":\"down\"",
-      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown value 'down'; expected one of 'ascending', 'descending'",
-      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown value 'down'; expected one of 'ascending', 'descending'"
+      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown case 'down' of enum 'SortDirection'; expected one of 'ascending', 'descending'",
+      "UnknownTag at $[\"orderBy\"][0][\"direction\"]: unknown case 'down' of enum 'SortDirection'; expected one of 'ascending', 'descending'"
       "{\"column\":\"revenue\",\"direction\":\"descending\"}",
       "{\"direction\":\"descending\"}",
       "MissingField at $[\"orderBy\"][0][\"column\"]: missing property: column",
@@ -1520,6 +1521,24 @@ let seamBaselineTests528 =
                   Expect.notEqual doc shapeHost528 ("the plant landed: " + from)
                   Expect.equal (render ReadPolicy.Lenient doc) lenient ("lenient " + into)
                   Expect.equal (render ReadPolicy.Strict doc) strict ("strict " + into)
+
+          testCase "Phase 551: under Strict an undeclared predicate member loses to a fault read before it"
+          <| fun _ ->
+              // A predicate's members are policed by its derived strict reader where it is read, after the
+              // declaration's `params`; so a document wrong at both is refused at the parameter.
+              let doc =
+                  shapeHost528
+                      .Replace("\"required\":true,\"type\":\"int\"", "\"required\":true,\"type\":\"blob\"")
+                      .Replace("\"$type\":\"isNotNull\"", "\"$type\":\"isNotNull\",\"x\":1")
+
+              Expect.notEqual doc shapeHost528 "the plants landed"
+
+              Expect.equal
+                  (QueryCodec.decodeDetailedWith ReadPolicy.Strict doc
+                   |> Result.mapError DecodeError.render)
+                  (Error
+                      "UnknownTag at $[\"params\"][0][\"type\"]: unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'")
+                  "the earlier-read fault wins"
 
           testCase "the query seam's captured journal is pinned, and a pinned journal replays to the same answers"
           <| fun _ ->

@@ -2197,8 +2197,8 @@ let private placementRefusals528: (string * string * string) list =
       "MissingField at $[\"placement\"][\"island\"]: missing property: island",
       "MissingField at $[\"placement\"][\"island\"]: missing property: island"
       "{\"$type\":\"clientIsland\",\"island\":\"lua\"}",
-      "UnknownTag at $[\"placement\"][\"island\"]: unknown value 'lua'; expected one of 'pyodide', 'fable', 'js'",
-      "UnknownTag at $[\"placement\"][\"island\"]: unknown value 'lua'; expected one of 'pyodide', 'fable', 'js'"
+      "UnknownTag at $[\"placement\"][\"island\"]: unknown case 'lua' of enum 'IslandKind'; expected one of 'pyodide', 'fable', 'js'",
+      "UnknownTag at $[\"placement\"][\"island\"]: unknown case 'lua' of enum 'IslandKind'; expected one of 'pyodide', 'fable', 'js'"
       "{\"$type\":\"clientIsland\",\"island\":1}",
       "WrongKind at $[\"placement\"][\"island\"]: expected string, got int",
       "WrongKind at $[\"placement\"][\"island\"]: expected string, got int"
@@ -2208,6 +2208,11 @@ let private placementRefusals528: (string * string * string) list =
       "{\"$type\":\"clientIsland\",\"island\":\"js\",\"x\":1}",
       "OK",
       "UndeclaredMember at $[\"placement\"][\"x\"]: undeclared member: 'x'; expected one of the members '$type', 'island'"
+      // Phase 551: a tag the union does not declare has no roster, so the strict read of an unknown tag
+      // that carries a member answers the lenient read's refusal, `UnknownTag` at `$type`.
+      "{\"$type\":\"moon\",\"x\":1}",
+      "UnknownTag at $[\"placement\"][\"$type\"]: unknown $type 'moon'; expected one of 'buildTime', 'server', 'clientDeclarative', 'precomputed', 'clientIsland'",
+      "UnknownTag at $[\"placement\"][\"$type\"]: unknown $type 'moon'; expected one of 'buildTime', 'server', 'clientDeclarative', 'precomputed', 'clientIsland'"
       "{}",
       "MissingField at $[\"placement\"][\"$type\"]: missing property: $type",
       "MissingField at $[\"placement\"][\"$type\"]: missing property: $type"
@@ -2258,9 +2263,9 @@ let private deltaBaseline528 =
 /// A delta document, then the `ColumnError` `SchemaDeltaCodec.decode` answers (`%A`, whitespace folded).
 let private deltaRefusals528: (string * string) list =
     [ "{\"added\":[],\"amended\":[{\"member\":\"colour\",\"name\":\"a\",\"to\":\"m\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
-      "MalformedShape \"amended.member: expected one of unit, label, description, ext; got 'colour'\""
+      "MalformedShape \"amended.member: unknown member 'colour'; expected one of 'unit', 'label', 'description', 'ext'\""
       "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"furlongs per quark\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
-      "MalformedShape \"amended.to: 'furlongs per quark' is not a unit the kit parses\""
+      "MalformedShape \"amended.to: out of range: 'furlongs per quark' is not a unit the kit parses; expected a unit the kit parses\""
       "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"m\"},{\"from\":\"x\",\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":7,\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
       "MalformedShape \"amended.key: expected string, got int\""
       "{\"added\":[],\"amended\":[{\"member\":\"unit\",\"name\":\"a\",\"to\":\"m\"},{\"from\":1,\"member\":\"label\",\"name\":\"a\"},{\"from\":\"d\",\"member\":\"description\",\"name\":\"a\",\"to\":\"e\"},{\"key\":\"k\",\"member\":\"ext\",\"name\":\"a\",\"to\":\"v\"}],\"order\":[\"a\"],\"removed\":[],\"reordered\":false,\"retyped\":[]}",
@@ -2495,4 +2500,25 @@ let seamBaselineTests528 =
 
               Expect.equal (replay "1") (Ok(Ready "ok")) "the completion"
               Expect.equal (replay "2") (Error(ReplayFailure.Refused(BodyFailed "down"))) "the recorded refusal"
-              Expect.equal (replay "3") (Ok Pending) "the attempt that never settled" ]
+              Expect.equal (replay "3") (Ok Pending) "the attempt that never settled"
+
+          testCase "Phase 551: under Strict an undeclared placement member loses to a fault read before it"
+          <| fun _ ->
+              // The placement's members are policed by its derived strict reader where it is read, after
+              // the declaration's `determinism`; so a document wrong at both is refused at `determinism`.
+              let doc =
+                  placementHost528
+                      .Replace(
+                          "\"capability\",\"determinism\":\"deterministic\"",
+                          "\"capability\",\"determinism\":\"network\""
+                      )
+                      .Replace("{\"$type\":\"server\"}", "{\"$type\":\"server\",\"x\":1}")
+
+              Expect.notEqual doc placementHost528 "the plants landed"
+
+              Expect.equal
+                  (CapabilityCodec.decodeDetailedWith ReadPolicy.Strict doc
+                   |> Result.mapError DecodeError.render)
+                  (Error
+                      "OutOfRange at $[\"determinism\"]: out of range: capability determinism disagrees with signature effect: wire 'network' vs signature 'deterministic'; expected 'deterministic', the signature's determinism")
+                  "the earlier-read fault wins" ]

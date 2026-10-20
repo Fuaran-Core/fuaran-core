@@ -2046,7 +2046,7 @@ let private seamCodecDifferential
         // ---- the typed refusal: every case, a value space and a declaration fault inside ----
         let e, r3 = genInvokeError rng.Value
         rng.Value <- r3
-        let ej = CapabilityCodec.invokeErrorJson e
+        let ej = CapabilitySeamCodec.encodeInvokeError e
         errorsEncoded <- errorsEncoded + 1
 
         if jvalToModel ej <> ModelCap.invoke_error_json (invokeErrorToModel e) then
@@ -2055,7 +2055,7 @@ let private seamCodecDifferential
         for j in mutations ej do
             documents <- documents + 1
 
-            match CapabilityCodec.invokeErrorOf j, ModelCap.invoke_error_of_j codecReaders (jvalToModel j) with
+            match CapabilitySeamCodec.decodeInvokeError j, ModelCap.invoke_error_of_j codecReaders (jvalToModel j) with
             | Ok pe, ModelCap.Ok me when invokeErrorToModel pe = me -> ()
             | Error _, ModelCap.Error me ->
                 errorsRefused <- errorsRefused + 1
@@ -2086,7 +2086,7 @@ let private seamCodecDifferential
             | Ready v -> ModelCap.Ready v
             | Failed m -> ModelCap.Failed m
 
-        let dj = CapabilityCodec.deferredJson JStr d
+        let dj = CapabilitySeamCodec.encodeDeferred JStr d
         deferred <- deferred + 1
 
         let mEnc (s: string) = ModelCap.JStr s
@@ -2107,7 +2107,14 @@ let private seamCodecDifferential
         for j in mutations dj do
             documents <- documents + 1
 
-            match CapabilityCodec.deferredOf pDec j, ModelCap.deferred_of_j mDec (jvalToModel j) with
+            match
+                CapabilitySeamCodec.decodeDeferred
+                    (fun v ->
+                        pDec v
+                        |> Result.mapError (DecodeError.make DecodeCode.OutOfRange "a payload its reader accepts"))
+                    j,
+                ModelCap.deferred_of_j mDec (jvalToModel j)
+            with
             | Ok Pending, ModelCap.Ok ModelCap.Pending -> ()
             | Ok(Ready a), ModelCap.Ok(ModelCap.Ready b) when a = b -> ()
             | Ok(Failed a), ModelCap.Ok(ModelCap.Failed b) when a = b -> ()

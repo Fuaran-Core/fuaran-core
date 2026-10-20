@@ -51,8 +51,10 @@ method Fuaran.Core.Proposals.renderGuidance(Fuaran.Core.RejectionGuidance) : Sys
 method Fuaran.Core.Proposals.submitGuarded`3(Fuaran.Core.GuardedSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Fuaran.Core.Proposals+SubmitOutcome`3<!!0, !!1, !!2>
 method Fuaran.Core.Proposals.submit`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Fuaran.Core.Proposals+SubmitOutcome`3<!!0, !!1, !!2>
 method Fuaran.Core.Proposals.toOpScript`2(Fuaran.Core.Proposals+Proposal`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Fuaran.Core.OpScriptProposal`2<!!0, !!1>
-method Fuaran.Core.RejectionCodec.encode`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.Rejection`1<!!0>) : Fuaran.Core.JVal
 method Fuaran.Core.RejectionCodec.render`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.Rejection`1<!!0>) : System.String
+method Fuaran.Core.RejectionSeamCodec.decodeRejectionStrict`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Rejection`1<!!0>, Fuaran.Core.DecodeError>
+method Fuaran.Core.RejectionSeamCodec.decodeRejection`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Rejection`1<!!0>, Fuaran.Core.DecodeError>
+method Fuaran.Core.RejectionSeamCodec.encodeRejection`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Rejection`1<!!0>) : Fuaran.Core.JVal
 record-field Fuaran.Core.AiSurfaceWitness`3.Apply #5 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>
 record-field Fuaran.Core.AiSurfaceWitness`3.Decide #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>
 record-field Fuaran.Core.AiSurfaceWitness`3.Explain #6 : Microsoft.FSharp.Core.FSharpFunc`2<!2, Fuaran.Core.RejectionGuidance>
@@ -115,6 +117,7 @@ type Fuaran.Core.Proposals+SubmitOutcome`3+SubmitProposed (type)
 type Fuaran.Core.Proposals+SubmitOutcome`3+Tags (type)
 type Fuaran.Core.ReadTool`1 (record)
 type Fuaran.Core.RejectionCodec (module)
+type Fuaran.Core.RejectionSeamCodec (module)
 union-case Fuaran.Core.AiSurface+ReadToolFailure.NewUnknownReadTool #0(name: System.String, available: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewApprovalDenied #4(id: System.Int32, guidance: Fuaran.Core.RejectionGuidance)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewNotPending #1(id: System.Int32, status: Fuaran.Core.Proposals+ProposalStatus)

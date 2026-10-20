@@ -1034,11 +1034,11 @@ families credit are credited over nested batches as well as flat ones.
 <!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `Fuaran.Core.AiSurface` | 24 | 0 | 11 | 1 | 0 | 0 | 0 | 12 |
-| `Fuaran.Core.Column` | 121 | 47 | 48 | 3 | 0 | 0 | 0 | 23 |
-| `Fuaran.Core.Conformance` | 159 | 2 | 105 | 2 | 6 | 0 | 0 | 44 |
+| `Fuaran.Core.AiSurface` | 26 | 0 | 14 | 1 | 0 | 0 | 0 | 11 |
+| `Fuaran.Core.Column` | 124 | 47 | 51 | 3 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Conformance` | 160 | 2 | 106 | 2 | 6 | 0 | 0 | 44 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
-| `Fuaran.Core.Function` | 159 | 41 | 64 | 5 | 0 | 0 | 0 | 49 |
+| `Fuaran.Core.Function` | 175 | 42 | 80 | 5 | 0 | 0 | 0 | 48 |
 | `Fuaran.Core.Idl` | 71 | 0 | 6 | 1 | 1 | 0 | 0 | 63 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 49 | 8 | 0 | 0 | 0 | 0 | 0 | 41 |
@@ -1048,13 +1048,13 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 56 | 21 | 12 | 14 | 0 | 0 | 0 | 9 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 27 | 7 | 6 | 0 | 0 | 0 | 0 | 14 |
-| `Fuaran.Core.Query` | 50 | 23 | 12 | 0 | 0 | 0 | 0 | 15 |
+| `Fuaran.Core.Query` | 57 | 23 | 19 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Text` | 30 | 5 | 2 | 1 | 2 | 0 | 0 | 20 |
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
-| `Fuaran.Core.Wire` | 140 | 64 | 10 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1239 | 304 | 389 | 38 | 15 | 0 | 3 | 490 |
+| `Fuaran.Core.Wire` | 141 | 64 | 11 | 3 | 4 | 0 | 0 | 59 |
+| **Total** | 1269 | 305 | 420 | 38 | 15 | 0 | 3 | 488 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -7288,9 +7288,11 @@ directly; rebuilding either codec on the blocks was considered and not done (DEC
 entry).
 
 `Capability.fst` section 18 models the invocation (`encodeInvocationJson` / `invocationOf`, the
-repeated-address refusal raised through `at` at `args[i]`), the async envelope (`deferredJson` and the
-typed `deferredDecoder` under `deferredOf`, the payload codec a parameter) and the twelve-case
-refusal (`invokeErrorJson` / `invokeErrorOf` over `gated_error`, `faultJson` / `faultOf` inside). It
+repeated-address refusal raised through `at` at `args[i]`), the async envelope
+(`CapabilitySeamCodec.encodeDeferred` / `decodeDeferred`, the payload codec a parameter) and the
+twelve-case refusal (`CapabilitySeamCodec.encodeInvokeError` / `decodeInvokeError` over `gated_error`,
+`encodeDeclarationFault` / `decodeDeclarationFault` inside), the codecs derived from the unions' IDL
+declaration. It
 restates `DecodeError.resolvesIn` over the module's `jval` (`resolves_in`), with the transport lemma
 `ok_at_under` and one soundness lemma per combinator — theorem 22's section 6 at this module's types,
 because the module is self-contained. `Query.fst` section 19 reads that layer by name (module `C`)

@@ -17,6 +17,7 @@
     <Compile Include="Table.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="ColumnCodec.fs" />
+    <Compile Include="FieldChangeSeamCodec.fs" />
     <Compile Include="SchemaDeltaCodec.fs" />
   </ItemGroup>
   <ItemGroup>

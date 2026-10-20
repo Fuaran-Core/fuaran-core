@@ -1390,7 +1390,7 @@ let private queryCodecDifferential
         // ---- the typed refusal ----
         let e, r3 = genWireError rng.Value
         rng.Value <- r3
-        let ej = QueryCodec.queryErrorJson e
+        let ej = QuerySeamCodec.encodeQueryError e
 
         if jvalToModel ej <> ModelQuery.query_error_json columnCodec (wireErrorToModel e) then
             diffs.Add(sprintf "seed %d: the query error encodes differently: %A" i e)
@@ -1398,7 +1398,7 @@ let private queryCodecDifferential
         for _, j in mutations ej do
             documents.Value <- documents.Value + 1
 
-            match QueryCodec.queryErrorOf j, ModelQuery.query_error_of_j columnCodec (jvalToModel j) with
+            match QuerySeamCodec.decodeQueryError j, ModelQuery.query_error_of_j columnCodec (jvalToModel j) with
             | Ok pe, ModelCap.Ok me when wireErrorToModel pe = me -> ()
             | Error _, ModelCap.Error me ->
                 refused.Value <- refused.Value + 1

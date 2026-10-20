@@ -484,6 +484,8 @@
     <Compile Include="DeriveIdl.fs" />
     <Compile Include="DeriveGenerated.fs" />
     <Compile Include="IdlDeriveTests.fs" />
+    <!-- Phase 551 - the seams' IDL declarations and the drift guard over their five generated codec modules. -->
+    <Compile Include="SeamIdl.fs" />
     <!-- Phase 539 - the canonical-form declarations (aliases, presence conditions, map and JSON
          defaults) over CanonicalFormVectorExport's fixture: the interpreter, the generated F# codec
          (compiled through IdlDeriveTests.Projected), the sampler, the validator, the artifact and

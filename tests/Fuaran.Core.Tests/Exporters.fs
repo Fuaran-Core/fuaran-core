@@ -66,11 +66,15 @@ let table: Exporter list =
       { Family = "refusals"
         Root = OwnedConformance.root
         Files =
-          twoFiles
-              RefusalVectorTests.RefusalCorpus.vectorsPath
-              RefusalVectorTests.RefusalCorpus.manifestPath
-              RefusalVectorTests.RefusalCorpus.render
-              RefusalVectorTests.RefusalCorpus.renderManifest
+          fun dir ->
+              twoFiles
+                  RefusalVectorTests.RefusalCorpus.vectorsPath
+                  RefusalVectorTests.RefusalCorpus.manifestPath
+                  RefusalVectorTests.RefusalCorpus.render
+                  RefusalVectorTests.RefusalCorpus.renderManifest
+                  dir
+              // Phase 551 — the seam-refusal family, beside the codec refusals in the same index.
+              @ [ RefusalVectorTests.RefusalCorpus.seamPath dir, RefusalVectorTests.RefusalCorpus.renderSeam () ]
         Write = None
         Freshness = Bytes }
       { Family = "decode"

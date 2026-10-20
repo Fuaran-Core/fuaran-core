@@ -11,13 +11,13 @@ namespace Fuaran.Core
 //
 //  ---- The facade (Phase 297) ------------------------------------------------
 //  This module is the kit's PUBLIC surface and is compiled LAST. The families
-//  themselves live in the twenty-two topic modules ahead of it — the tree
+//  themselves live in the twenty-three topic modules ahead of it — the tree
 //  families (`AlgebraTreeLaws`, `PlacementTreeLaws`, `ValidityTreeLaws`,
 //  `KeyedApplyLaws`), the stream families (`ChainStreamLaws`, `DagStreamLaws`,
 //  `CaptureStreamLaws`), `IntegrityLaws`, `ConcurrencyLaws`,
 //  `KeyedArbitrationLaws`, the seam families (`CapabilitySeamLaws`,
 //  `QuerySeamLaws`, `RegistrySeamLaws`, `ColumnarSeamLaws`, `PipelineSeamLaws`,
-//  `PolicySeamLaws`), `FunctionLaws`, `PropagationLaws`, `SurfaceLaws`,
+//  `PolicySeamLaws`, `SeamRefusalLaws`), `FunctionLaws`, `PropagationLaws`, `SurfaceLaws`,
 //  `ObserverLaws`, `SanitizeLaws` and `CodecLaws` (Phase 388 split the tree,
 //  stream and seam files along their banners) — every one of them internal, written over
 //  the `LawKit` runner, and reachable by a domain only through the forwards
@@ -693,6 +693,14 @@ module Conformance =
         : LawResult list =
         CapabilitySeamLaws.capabilityLawsAt w body
         |> within (family "capabilityLawsAt" seed) iterations
+
+    /// Forward — see `SeamRefusalLaws.seamRefusalLaws` (Phase 551): the seams' refusal and declaration
+    /// documents, read through their derived codecs, against the authored seam-refusal vectors — each read
+    /// back to its own bytes, or refused with its code at its path. Self-contained: one pass over the
+    /// vectors, so its case count is the vector count.
+    let seamRefusalLaws () : LawResult list =
+        SeamRefusalLaws.seamRefusalLaws
+        |> within (family "seamRefusalLaws" 0) (List.length SeamRefusalLaws.vectors)
 
     /// Forward — see `QuerySeamLaws.queryLaws`.
     let queryLaws (seed: int) (iterations: int) : LawResult list =

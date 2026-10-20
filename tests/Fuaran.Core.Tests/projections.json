@@ -135,6 +135,36 @@
       "heldBy": "IdlSpecDecoderTests"
     },
     {
+      "path": "src/Fuaran.Core.Function/CapabilitySeamCodec.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "CapabilitySeamCodec",
+      "heldBy": "SeamIdl"
+    },
+    {
+      "path": "src/Fuaran.Core.Function/PipelineSeamCodec.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "PipelineSeamCodec",
+      "heldBy": "SeamIdl"
+    },
+    {
+      "path": "src/Fuaran.Core.Query/QuerySeamCodec.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "QuerySeamCodec",
+      "heldBy": "SeamIdl"
+    },
+    {
+      "path": "src/Fuaran.Core.Column/FieldChangeSeamCodec.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "FieldChangeSeamCodec",
+      "heldBy": "SeamIdl"
+    },
+    {
+      "path": "src/Fuaran.Core.AiSurface/RejectionSeamCodec.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "RejectionSeamCodec",
+      "heldBy": "SeamIdl"
+    },
+    {
       "path": "tests/Fuaran.Core.Tests/snapshots/spike.json",
       "render": "--regen-snapshots",
       "switch": "FUARAN_REGEN",
@@ -184,6 +214,11 @@
     },
     {
       "path": "conformance/refusals/codec-refusals.json",
+      "render": "--emit-refusals",
+      "heldBy": "Exporters"
+    },
+    {
+      "path": "conformance/refusals/seam-refusals.json",
       "render": "--emit-refusals",
       "heldBy": "Exporters"
     },

@@ -15,25 +15,14 @@ namespace Fuaran.Core
 /// question.
 module SchemaDeltaCodec =
 
-    let private stated (name: string) (v: string option) : (string * JVal) list =
-        match v with
-        | Some s -> [ name, JStr s ]
-        | None -> []
+    // Phase 551: an `amended` entry is the field's `name` beside a `FieldChange`, whose members (its
+    // `member` discriminator, `from`, `to` and an `ext` entry's `key`) are written and read by the codec
+    // DERIVED from the union's IDL declaration (`FieldChangeSeamCodec`, DECISIONS.md D200).
 
     let private amendedJson (name: string, change: FieldChange) : JVal =
-        let entry (memberName: string) (key: (string * JVal) list) (before: string option) (after: string option) =
-            JObj(
-                [ "name", JStr name; "member", JStr memberName ]
-                @ key
-                @ stated "from" before
-                @ stated "to" after
-            )
-
-        match change with
-        | FieldChange.Unit(b, a) -> entry "unit" [] (Option.map Unit.render b) (Option.map Unit.render a)
-        | FieldChange.Label(b, a) -> entry "label" [] b a
-        | FieldChange.Description(b, a) -> entry "description" [] b a
-        | FieldChange.Ext(key, b, a) -> entry "ext" [ "key", JStr key ] b a
+        match FieldChangeSeamCodec.encodeFieldChange change with
+        | JObj members -> JObj(("name", JStr name) :: members)
+        | other -> other
 
     /// Encode a delta to a `JVal`; `encode` renders it under `Canon`, which sorts the keys.
     let encodeJson (d: SchemaDelta) : JVal =
@@ -89,51 +78,20 @@ module SchemaDeltaCodec =
 
             go [] xs)
 
-    /// An optional text member of an `amended` entry: absent is `None`, present must be a string.
-    let private optionalText (ctx: string) (name: string) (el: JVal) : Result<string option, ColumnError> =
-        match Decoder.tryMember name el with
-        | None -> Ok None
-        | Some v -> text (ctx + "." + name) v |> Result.map Some
-
-    let private unitOf (ctx: string) (name: string) (v: string option) : Result<UnitOfMeasure option, ColumnError> =
-        match v with
-        | None -> Ok None
-        | Some s ->
-            match Unit.parse s with
-            | Ok u -> Ok(Some u)
-            | Error _ -> Error(MalformedShape(ctx + "." + name + ": '" + s + "' is not a unit the kit parses"))
+    /// A derived reader's refusal of an `amended` entry, in this codec's envelope: placed by the member
+    /// it names (`amended.from: expected string, got int`).
+    let private amendedRefused (e: DecodeError) : ColumnError =
+        match List.tryLast e.Path with
+        | Some(PathSegment.Key name) -> ColumnCodec.ofDecodeError ("amended." + name) e
+        | _ -> ColumnCodec.ofDecodeError "amended" e
 
     let private amendedEntry (el: JVal) : Result<string * FieldChange, ColumnError> =
         field "name" el
         |> Result.bind (text "amended.name")
         |> Result.bind (fun name ->
-            field "member" el
-            |> Result.bind (text "amended.member")
-            |> Result.bind (fun memberName ->
-                optionalText "amended" "from" el
-                |> Result.bind (fun before ->
-                    optionalText "amended" "to" el
-                    |> Result.bind (fun after ->
-                        match memberName with
-                        | "unit" ->
-                            unitOf "amended" "from" before
-                            |> Result.bind (fun b ->
-                                unitOf "amended" "to" after
-                                |> Result.map (fun a -> name, FieldChange.Unit(b, a)))
-                        | "label" -> Ok(name, FieldChange.Label(before, after))
-                        | "description" -> Ok(name, FieldChange.Description(before, after))
-                        | "ext" ->
-                            field "key" el
-                            |> Result.bind (text "amended.key")
-                            |> Result.map (fun key -> name, FieldChange.Ext(key, before, after))
-                        | other ->
-                            Error(
-                                MalformedShape(
-                                    "amended.member: expected one of unit, label, description, ext; got '"
-                                    + other
-                                    + "'"
-                                )
-                            )))))
+            FieldChangeSeamCodec.decodeFieldChange el
+            |> Result.mapError amendedRefused
+            |> Result.map (fun change -> name, change))
 
     let private retypedEntry (el: JVal) : Result<string * ColumnType * ColumnType, ColumnError> =
         field "name" el

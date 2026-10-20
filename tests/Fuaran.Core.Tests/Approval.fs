@@ -266,6 +266,21 @@ module Regenerated =
     [<Literal>]
     let Doc = "DocGenerated"
 
+    [<Literal>]
+    let CapabilitySeam = "CapabilitySeamCodec"
+
+    [<Literal>]
+    let PipelineSeam = "PipelineSeamCodec"
+
+    [<Literal>]
+    let QuerySeam = "QuerySeamCodec"
+
+    [<Literal>]
+    let FieldChangeSeam = "FieldChangeSeamCodec"
+
+    [<Literal>]
+    let RejectionSeam = "RejectionSeamCodec"
+
 /// Stems of the two projections `CORE_APPROVE_LADDER` governs (both rewrite blocks of proofs/README.md).
 module Ladders =
     [<Literal>]

@@ -9,20 +9,20 @@
   "packages": [
     {
       "package": "Fuaran.Core.AiSurface",
-      "documented": 86,
-      "total": 86,
+      "documented": 89,
+      "total": 89,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Column",
-      "documented": 262,
-      "total": 262,
+      "documented": 266,
+      "total": 266,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Conformance",
-      "documented": 402,
-      "total": 402,
+      "documented": 399,
+      "total": 399,
       "undocumented": []
     },
     {
@@ -33,14 +33,14 @@
     },
     {
       "package": "Fuaran.Core.Function",
-      "documented": 409,
-      "total": 409,
+      "documented": 427,
+      "total": 427,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.Idl",
-      "documented": 258,
-      "total": 258,
+      "documented": 284,
+      "total": 284,
       "undocumented": []
     },
     {
@@ -51,8 +51,8 @@
     },
     {
       "package": "Fuaran.Core.Idl.Codegen",
-      "documented": 278,
-      "total": 278,
+      "documented": 285,
+      "total": 285,
       "undocumented": []
     },
     {
@@ -63,14 +63,14 @@
     },
     {
       "package": "Fuaran.Core.OpStream",
-      "documented": 308,
-      "total": 308,
+      "documented": 332,
+      "total": 332,
       "undocumented": []
     },
     {
       "package": "Fuaran.Core.OpStream.Dag",
-      "documented": 197,
-      "total": 197,
+      "documented": 226,
+      "total": 226,
       "undocumented": []
     },
     {
@@ -93,8 +93,8 @@
     },
     {
       "package": "Fuaran.Core.Query",
-      "documented": 117,
-      "total": 117,
+      "documented": 125,
+      "total": 125,
       "undocumented": []
     },
     {
@@ -123,8 +123,8 @@
     },
     {
       "package": "Fuaran.Core.Wire",
-      "documented": 312,
-      "total": 312,
+      "documented": 313,
+      "total": 313,
       "undocumented": []
     }
   ]

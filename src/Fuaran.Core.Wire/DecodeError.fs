@@ -176,6 +176,62 @@ module DecodeError =
               "expected", JStr e.Expected
               "message", JStr e.Message ]
 
+    /// `toJson`'s form read back (Phase 551; it was a private reader of the query seam's, which journals a
+    /// refusal inside `QueryError.UnreadableArgs`): `code` one of `codes` by `codeName`, `path` a decode
+    /// path (`DecodePath.ofJson`), `expected` and `message` strings, read in that order. The stored
+    /// `message` is read back VERBATIM, never re-projected from the code (D188), so a refusal journalled
+    /// before a sentence moved replays as it was written. Each refusal is the one `Decoder.field`,
+    /// `Decoder.oneOf` and `Decoder.str` give, written here because this file compiles before `Decoder`.
+    let decoder (el: JVal) : Result<DecodeError, DecodeError> =
+        let missing (name: string) =
+            under (PathSegment.Key name) (make DecodeCode.MissingField ("a member '" + name + "'") name)
+
+        let wrongKind (expected: string) (found: JVal) =
+            make DecodeCode.WrongKind expected (JVal.kindName found)
+
+        let field (name: string) (read: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
+            match el with
+            | JObj fields ->
+                match fields |> List.tryFind (fun (k, _) -> k = name) with
+                | Some(_, v) -> read v |> Result.mapError (under (PathSegment.Key name))
+                | None -> Error(missing name)
+            | other -> Error(wrongKind "object" other)
+
+        let str (v: JVal) =
+            match v with
+            | JStr s -> Ok s
+            | other -> Error(wrongKind "string" other)
+
+        let code (v: JVal) =
+            match v with
+            | JStr s ->
+                match codes |> List.tryFind (fun c -> codeName c = s) with
+                | Some c -> Ok c
+                | None ->
+                    let known =
+                        codes |> List.map (fun c -> "'" + codeName c + "'") |> String.concat ", "
+
+                    Error(make DecodeCode.UnknownTag ("one of " + known) ("value '" + s + "'"))
+            | other -> Error(wrongKind "string" other)
+
+        let path (v: JVal) =
+            match DecodePath.ofJson v with
+            | Some p -> Ok p
+            | None -> Error(make DecodeCode.WrongKind "an array of member names and item indices" "not a decode path")
+
+        field "code" code
+        |> Result.bind (fun c ->
+            field "path" path
+            |> Result.bind (fun p ->
+                field "expected" str
+                |> Result.bind (fun expected ->
+                    field "message" str
+                    |> Result.map (fun message ->
+                        { Code = c
+                          Path = p
+                          Expected = expected
+                          Message = message }))))
+
     /// Whether the refusal's path RESOLVES in the document it was raised over — the law every
     /// decoder refusal answers (`Corpus.refusalLaws`): an `InvalidJson` names the root; a
     /// `MissingField` names a member of a resolving object that does not carry it; every other code

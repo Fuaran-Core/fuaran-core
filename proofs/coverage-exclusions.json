@@ -228,15 +228,6 @@
     },
     {
       "members": [
-        "RejectionCodec.encode"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The rejection-guidance JSON value; `render` is its canonical text, which the tests read.",
-      "through": "RejectionCodec.render",
-      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
-    },
-    {
-      "members": [
         "Cell.typeOf",
         "Cell.decimal"
       ],
@@ -618,15 +609,6 @@
       "class": "measured-elsewhere",
       "reason": "The typed-error invocation reader; the string-error `decodeInvocationWith` is it plus the sentence, and the decode tests call that.",
       "through": "CapabilityCodec.decodeInvocationWith",
-      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityCodec.deferredOfWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The policy-parameterised deferred reader; `decodeDeferredWith` parses the text and calls it.",
-      "through": "CapabilityCodec.decodeDeferredWith",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {

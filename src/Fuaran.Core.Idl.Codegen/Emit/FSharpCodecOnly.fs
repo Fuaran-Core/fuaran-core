@@ -257,6 +257,17 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
               sprintf "let decode%sStrict (j: JVal) : Result<%s, DecodeError> = dec%s j" name name name ]
             |> String.concat "\n"
 
+    /// The module's own doc comment (Phase 551): a codec-only module is published, so its module type
+    /// is documented like every public member: which host types it carries codecs for (its roots, in
+    /// request order), where they come from, and that it is regenerated, not edited.
+    let private moduleDoc (request: CodecOnly) : string =
+        let roots = request.Roots |> List.map (fun r -> "`" + r + "`") |> String.concat ", "
+
+        "/// Generated codecs for "
+        + roots
+        + ", derived from their IDL declaration: per root\n"
+        + "/// `encode<Name>`, `decode<Name>` and `decode<Name>Strict`. Regenerate it from its inputs; do not edit it."
+
     /// The codec-only module, before end-of-line normalisation.
     let private moduleText (sup: GenSupport) (request: CodecOnly) (moduleName: string) (idl: Idl) =
         let roots = request.Roots |> List.map (fun n -> n, rootType idl n)
@@ -334,7 +345,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                         (decl.Unions |> List.map (unionWalker idl))
                         @ (decl.Records |> List.map (recordWalker idl))
 
-                    [ [ sprintf "module %s\n\nopen Fuaran.Core" moduleName ]
+                    [ [ sprintf "%s\nmodule %s\n\nopen Fuaran.Core" (moduleDoc request) moduleName ]
                       [ "// Phase 550 — the host declares every type; each is named here by abbreviation."
                         + "\n"
                         + ((decl.Enums |> List.map (fun e -> abbreviation e.Name []))

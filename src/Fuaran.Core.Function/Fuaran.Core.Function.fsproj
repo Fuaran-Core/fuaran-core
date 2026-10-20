@@ -15,8 +15,12 @@
     <Compile Include="Policy.fs" />
     <Compile Include="KeyedRegistry.fs" />
     <Compile Include="Capability.fs" />
+    <Compile Include="CapabilitySeamCodec.fs" />
+    <Compile Include="CapabilityCodec.fs" />
     <Compile Include="FunctionRegistry.fs" />
     <Compile Include="ContentPack.fs" />
+    <Compile Include="CapabilityPipelineTypes.fs" />
+    <Compile Include="PipelineSeamCodec.fs" />
     <Compile Include="CapabilityPipeline.fs" />
   </ItemGroup>
   <ItemGroup>

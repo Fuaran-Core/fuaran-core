@@ -583,6 +583,8 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                   (Conformance.hashFnAdversarialLaws ConformanceTests.wideHash 500000 4242)
               run "Conformance.capabilityLaws" 200 (Conformance.capabilityLaws 4242 200)
               run "Conformance.queryLaws" 200 (Conformance.queryLaws 4242 200)
+              // Phase 551 — the seam-refusal vectors, one pass: its case count is the vector count.
+              run "Conformance.seamRefusalLaws" (List.length SeamRefusalLaws.vectors) (Conformance.seamRefusalLaws ())
               run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
               // Phase 318 — the policy gate, the write gate and the keyed capture journal.
               run "Conformance.policyLaws" 200 (Conformance.policyLaws 4242 200)

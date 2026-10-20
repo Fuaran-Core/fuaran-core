@@ -62,8 +62,6 @@ method Fuaran.Core.QueryCodec.encode(Fuaran.Core.Query) : System.String
 method Fuaran.Core.QueryCodec.encodeDeferredResult(Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>) : System.String
 method Fuaran.Core.QueryCodec.encodeQueryError(Fuaran.Core.QueryError) : System.String
 method Fuaran.Core.QueryCodec.encodeResult(Fuaran.Core.QueryResult) : System.String
-method Fuaran.Core.QueryCodec.queryErrorJson(Fuaran.Core.QueryError) : Fuaran.Core.JVal
-method Fuaran.Core.QueryCodec.queryErrorOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryError, System.String>
 method Fuaran.Core.QueryErrorModule.describe(Fuaran.Core.QueryError) : System.String
 method Fuaran.Core.QueryErrorModule.describeAll(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.QueryError>) : System.String
 method Fuaran.Core.QueryModule.determinismTag(Fuaran.Core.Query) : System.String
@@ -96,6 +94,15 @@ method Fuaran.Core.QueryRegistryModule.tryFind(System.String, Fuaran.Core.QueryR
 method Fuaran.Core.QueryRegistryModule.union(Fuaran.Core.QueryRegistry, Fuaran.Core.QueryRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryRegistry, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryRegistryModule.unregister(System.String, Fuaran.Core.QueryRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryRegistry, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryRegistryModule.withGate(Fuaran.Core.PolicyGate`2<Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>>, Fuaran.Core.QueryRegistry) : Fuaran.Core.QueryRegistry
+method Fuaran.Core.QuerySeamCodec.decodeColumnPredicate(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.ColumnPredicate, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.decodeColumnPredicateStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.ColumnPredicate, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.decodeQueryError(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryError, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.decodeQueryErrorStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryError, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.decodeSortKey(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SortKey, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.decodeSortKeyStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SortKey, Fuaran.Core.DecodeError>
+method Fuaran.Core.QuerySeamCodec.encodeColumnPredicate(Fuaran.Core.ColumnPredicate) : Fuaran.Core.JVal
+method Fuaran.Core.QuerySeamCodec.encodeQueryError(Fuaran.Core.QueryError) : Fuaran.Core.JVal
+method Fuaran.Core.QuerySeamCodec.encodeSortKey(Fuaran.Core.SortKey) : Fuaran.Core.JVal
 property Fuaran.Core.QueryRegistryModule.empty : Fuaran.Core.QueryRegistry { get }
 record-field Fuaran.Core.Query.Effect #3 : Fuaran.Core.EffectClass
 record-field Fuaran.Core.Query.Id #0 : System.String
@@ -154,6 +161,7 @@ type Fuaran.Core.QueryParam (record)
 type Fuaran.Core.QueryRegistry (record)
 type Fuaran.Core.QueryRegistryModule (module)
 type Fuaran.Core.QueryResult (record)
+type Fuaran.Core.QuerySeamCodec (module)
 type Fuaran.Core.ResolveFault (union)
 type Fuaran.Core.ResolveFault+Failed (type)
 type Fuaran.Core.ResolveFault+OrderUnsupported (type)
