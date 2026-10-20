@@ -9,22 +9,9 @@
     <WarningsAsErrors>$(WarningsAsErrors);FS3390</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Phase 502 - the suite's one child-process runner (both pipes, UTF-8 pinned), its one
-         release-tag reader and its one repository-root resolver. Before every consumer, the
-         climbing families among them; it references nothing here. -->
-    <Compile Include="ChildProcess.fs" />
-    <!-- Phase 396 - the ONE reading of the approval switches (CORE_APPROVE_*, FUARAN_REGEN); since Phase 503
-         its stems are read from the projection registry (projections.json beside this project), located through
-         Repo.root, so it follows ChildProcess.fs. Every family below that regenerates a committed artefact reads it. -->
-    <Compile Include="Approval.fs" />
     <!-- Phase 386 - a Dag.T is built through Dag.ofNodes (the constructor is private); the fixtures'
          one spelling of it. Depends on nothing here. -->
     <Compile Include="DagOf.fs" />
-    <Compile Include="Reference.fs" />
-    <Compile Include="Reference2.fs" />
-    <!-- Phase 257 — the law-family roster as the suite reads it (one share since Phase 258 moved
-         the dataframe share out). Early, because every roster and census check below reads it. -->
-    <Compile Include="KitRoster.fs" />
     <!-- The `Hash` pin suite — the FIPS 180-4 known-answer vectors and platform byte-equality for
          SHA-256, plus the pinned FNV-1a values. First: everything below folds through one or the
          other, so a digest defect should surface as itself rather than as a downstream mismatch. -->
@@ -76,28 +63,11 @@
     <Compile Include="QueryTests.fs" />
     <Compile Include="RegistryLifecycleTests.fs" />
     <Compile Include="SeamModelTests.fs" />
-    <Compile Include="Snapshots.fs" />
     <!-- Phase 396 - the sweep holding every approval site to Approval.fs. Reads Snapshots.fs for the repository root. -->
     <Compile Include="ApprovalTests.fs" />
-    <!-- Phase 172 — where the conformance families THIS repository emits live (the committed
-         conformance/ directory) and the registry's fingerprint equality their published copies
-         are held to. Reads Snapshots.fs above for the repo-root marker and nothing else here.
-         Before SiblingCorpus.fs, which is its counterpart for the corpus another repository
-         owns, and before every exporter and suite that reads the owned files. -->
-    <Compile Include="OwnedConformance.fs" />
-    <!-- Phase 130 — the one lookup for the shared conformance corpus, anchored at the
-         repository's MAIN working tree (git's own common-dir question) so a linked worktree
-         resolves what the main tree resolves, and loud rather than silent when the corpus
-         is absent. Phase 172 put the opt-in gate (FUARAN_CORE_CORPUS_FRESHNESS) in front of
-         it: the live-corpus legs run only when asked for, and fail as before once they are.
-         Before its consumers (the nodes/ drift guard below, the proof-oracle pools, the laws/
-         and apply/ copy-freshness legs further down); reads ChildProcess.fs above and nothing
-         else here. -->
-    <Compile Include="SiblingCorpus.fs" />
-    <!-- Phase 230 — the mini IDL and the F# emitted from it, carried here when the spike
-         project left `src/`. They are the fixtures IdlSpikeTests, IdlProposalTests and the
-         certification and end-of-line families read, so they sit before every one of them. -->
-    <Compile Include="MiniIdl.fs" />
+    <!-- Phase 230 — the F# emitted from the mini IDL (MiniIdl, in the fixtures library), carried here when
+         the spike project left `src/`; IdlSpikeTests, IdlProposalTests and the certification and
+         end-of-line families read it, so it sits before every one of them. -->
     <Compile Include="MiniGenerated.fs" />
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
@@ -160,12 +130,6 @@
          plan domain, so it follows both. -->
     <Compile Include="FootprintLawsAtTests.fs" />
     <Compile Include="FootprintInTests.fs" />
-    <!-- Phase 139 — the `apply/` corpus family: the host-neutral skeleton envelope, its codec,
-         and the emitter behind the `emit-apply` flag. It sits HERE rather than beside the other
-         corpus exporters further down because ProofOracle.PreservationTests.fs below reads its decoder, to run the
-         Phase 138 preservation differential over the committed fixtures as a second host beside
-         the generator. Reads Reference.fs and the kit, and nothing else here. -->
-    <Compile Include="ApplyVectorExport.fs" />
     <!-- Phase 131 — the F* oracle as a corpus host: each extracted model (proofs/oracle/*.fs) run
          beside the production code it models, one file per model over the bridges more than one of
          them reads (ProofOracle.Bridges.fs). The DAG-fold differential reads the Phase 100 lane
@@ -214,12 +178,6 @@
          throwaway measurement code, kept for its findings. Certifies a score-shaped slice
          against samples vendored at fixtures/score-domain/. -->
     <Compile Include="ScoreDomainSpike.fs" />
-    <!-- Phase 114 - the engine's own domain-neutral reference VOCABULARY (the D7
-         reference-witness posture applied to the IDL) plus its declared-support
-         document, and the certification that runs over it and the two vendored foreign
-         vocabularies. Appended at the end of the list: the certification enumerates
-         which leg each neutral vocabulary carries, so it must follow both spikes. -->
-    <Compile Include="ReferenceIdl.fs" />
     <Compile Include="IdlCertificationTests.fs" />
     <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
          IdlDiffTests, not DiffTests: the latter is Phase 245's TREE diff. Moved
@@ -231,18 +189,6 @@
          Fuaran.Core.Conformance since Phase 217 (`ParityVectors`), so this pins the very module a
          Fable consumer runs on both pipelines. Reads nothing here, so it simply follows. -->
     <Compile Include="ParityVectorTests.fs" />
-    <!-- The host-neutral export of the transform-parity family's reference answers, and the
-         checks that keep it an oracle: the law over the declared sample, a decode-and-recompute
-         pass over every rendered vector, and the comparison against the shared corpus when it is
-         checked out alongside. Reads nothing here, so it simply follows. -->
-    <!-- Phase 538 - the propagation law set, drawn by the families' own generator and written by
-         LawVectorExport.emitted beside the other law sets, so it compiles first. -->
-    <Compile Include="PropagationVectorExport.fs" />
-    <!-- Phase 539 - the canonical-form law set (aliases, presence conditions, map and JSON
-         defaults) over its fixture vocabulary, written by LawVectorExport.emitted beside the
-         other law sets, so it compiles first. -->
-    <Compile Include="CanonicalFormVectorExport.fs" />
-    <Compile Include="LawVectorExport.fs" />
     <Compile Include="LawVectorTests.fs" />
     <!-- Phase 139 — the checks that keep the `apply/` family an oracle: a decode-and-recompute
          pass over every rendered vector, three go-reds proving the pass can fail, the sample's
@@ -438,15 +384,11 @@
     <Compile Include="IdlThreeHostTests.fs" />
     <Compile Include="IdlSchemaValidatorTests.fs" />
 
-    <!-- Phase 337 — the generated decoders refuse with the typed decode error. The decode vectors
-         (conformance/decode/) as an IDL vocabulary, its generated F# module (AUTO-GENERATED by the
-         regen-snapshots entry point, with a drift guard), and the cross-host refusal law: the
-         interpreter, the compiled F# host and the TypeScript host refuse one malformed document
-         with one code and one path. Reads ReferenceIdl.fs, both spikes and their generated
-         modules; appended (append-only). -->
-    <Compile Include="DecodeVectorsIdl.fs" />
+    <!-- Phase 337 — the generated decoders refuse with the typed decode error. The decode vectors'
+         vocabulary's generated F# module (rendered by the tool's `render generated`, with a drift guard)
+         and the cross-host refusal law: the interpreter, the compiled F# host and the TypeScript host
+         refuse one malformed document with one code and one path. -->
     <Compile Include="DecodeVectorsGenerated.fs" />
-    <Compile Include="RefusalCornersIdl.fs" />
     <Compile Include="RefusalCornersGenerated.fs" />
     <Compile Include="IdlRefusalHostTests.fs" />
 
@@ -477,11 +419,9 @@
          zeros and generated tokens, with two go-red references. Reads WireBench/Corpus.fs. Appended
          (append-only). -->
     <Compile Include="ReadInt32DigitCountTests.fs" />
-    <!-- Phase 374 - the structural derivations. A work-plan vocabulary that is not a UI one, its
-         generated F# module with every derivation requested (AUTO-GENERATED by the regen-snapshots
-         entry point, with a drift guard), and the laws each derivation is held to over the compiled
-         module, the keyed go-red among them. Depends on nothing here. Appended (append-only). -->
-    <Compile Include="DeriveIdl.fs" />
+    <!-- Phase 374 - the structural derivations: the work-plan vocabulary's generated F# module with every
+         derivation requested (rendered by the tool's `render generated`, with a drift guard), and the laws
+         each derivation is held to over the compiled module, the keyed go-red among them. -->
     <Compile Include="DeriveGenerated.fs" />
     <Compile Include="IdlDeriveTests.fs" />
     <!-- Phase 551 - the seams' IDL declarations and the drift guard over their five generated codec modules. -->
@@ -491,12 +431,10 @@
          (compiled through IdlDeriveTests.Projected), the sampler, the validator, the artifact and
          the classifier. Appended (append-only). -->
     <Compile Include="IdlCanonicalFormTests.fs" />
-    <!-- Phase 377 - the collecting decoders and the public per-spec entries. The reference
-         vocabulary under its support document, with the decoders requested (AUTO-GENERATED by the
-         regen-snapshots entry point, with a drift guard), beside the derivations module, which
-         requests them too; the tests hold the collecting form to its order, its paths and its
-         first-defect agreement with the short-circuiting form. Appended (append-only). -->
-    <Compile Include="SpecDecodersIdl.fs" />
+    <!-- Phase 377 - the collecting decoders and the public per-spec entries: the reference vocabulary's
+         generated module with the decoders requested (rendered by the tool's `render generated`, with a
+         drift guard); the tests hold the collecting form to its order, its paths and its first-defect
+         agreement with the short-circuiting form. -->
     <Compile Include="SpecDecodersGenerated.fs" />
     <Compile Include="IdlSpecDecoderTests.fs" />
     <!-- Phase 379 - Canonical and Codec<'T>: the committed bytes a declaration writes under each
@@ -524,12 +462,18 @@
          (append-only). -->
     <Compile Include="UnitTests.fs" />
     <Compile Include="IdlStampTests.fs" />
-    <!-- Phase 508 - the exporter table: one row per emitted family, the one writer and the one
-         freshness reading; Program.fs dispatches the emit verb over it. Appended (append-only). -->
-    <Compile Include="Exporters.fs" />
+    <!-- Phase 508 - the exporter table's family (the table is in the fixtures library); after
+         ConformanceVacuityTests, whose reference run measures the families row. -->
+    <Compile Include="ExportersTests.fs" />
+    <!-- Phase 532 - the propagation law set's vectors held to the laws they export. -->
+    <Compile Include="PropagationVectorExportTests.fs" />
+    <!-- Phase 532 - the fixtures library holds no test and the tool writes what the registry names. -->
+    <Compile Include="FixturesTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Phase 532 - the fixtures library this suite and the tool share. -->
+    <ProjectReference Include="..\Fuaran.Core.Tests.Fixtures\Fuaran.Core.Tests.Fixtures.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Ops\Fuaran.Core.Ops.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />

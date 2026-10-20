@@ -9,7 +9,7 @@ open Fuaran.Core.Tests.Reference
 //  The `apply/` fixture family, checked from both ends.
 //
 //  `ApplyVectorExport` renders it; nothing here writes into the shared corpus.
-//  Emitting is an explicit command (`--emit-apply <corpus dir>`), because the
+//  Emitting is an explicit command (`render apply <corpus dir>`), because the
 //  corpus is a separate repository and a suite that wrote into it on every run
 //  would dirty a shared clone.
 //
@@ -228,7 +228,7 @@ let tests =
                   let requireBoth (copy: string) (source: string) =
                       if not (File.Exists copy) then
                           failtestf
-                              "the corpus at '%s' carries no %s — re-run `--emit-apply <corpus dir>` and commit the corpus"
+                              "the corpus at '%s' carries no %s — re-run `render apply <corpus dir>` and commit the corpus"
                               root
                               (Path.GetFileName copy)
 
@@ -248,14 +248,14 @@ let tests =
                       (OwnedConformance.fingerprint (File.ReadAllText copyVectors))
                       (OwnedConformance.fingerprint (File.ReadAllText ownVectors))
                       (sprintf
-                          "the corpus copy '%s' is STALE against this repository's conformance/%s/%s — re-run `--emit-apply <corpus dir>` and commit the corpus"
+                          "the corpus copy '%s' is STALE against this repository's conformance/%s/%s — re-run `render apply <corpus dir>` and commit the corpus"
                           copyVectors
                           ApplyVectorExport.familyDirName
                           (Path.GetFileName ownVectors))
 
                   // The manifest is SHARED: a sibling producer's family (the wire specification's `limitsApply`)
                   // sits beside this one in the corpus copy, so only this family's row is this
-                  // producer's to keep fresh — the row line, as `--emit-apply` writes and preserves it.
+                  // producer's to keep fresh — the row line, as `render apply` writes and preserves it.
                   let copyManifest, ownManifest =
                       ApplyVectorExport.manifestPath root, ApplyVectorExport.manifestPath owned
 
@@ -269,7 +269,7 @@ let tests =
                   match ownRow copyManifest, ownRow ownManifest with
                   | None, _ ->
                       failtestf
-                          "the corpus manifest at '%s' carries no %s row — re-run `--emit-apply <corpus dir>` and commit the corpus"
+                          "the corpus manifest at '%s' carries no %s row — re-run `render apply <corpus dir>` and commit the corpus"
                           copyManifest
                           ApplyVectorExport.familyId
                   | _, None -> failtestf "this repository's %s carries no %s row" ownManifest ApplyVectorExport.familyId
@@ -278,5 +278,5 @@ let tests =
                           copyRow
                           sourceRow
                           (sprintf
-                              "the corpus manifest's %s row is STALE against this repository's — re-run `--emit-apply <corpus dir>` and commit the corpus (the other rows are their producers' to keep fresh)"
+                              "the corpus manifest's %s row is STALE against this repository's — re-run `render apply <corpus dir>` and commit the corpus (the other rows are their producers' to keep fresh)"
                               ApplyVectorExport.familyId) ]

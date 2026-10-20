@@ -14,7 +14,7 @@ module Fuaran.Core.Tests.Snapshots
 // Phase 123 took the domain vocabulary to its own repository), and makes
 // re-vendoring one command:
 //
-//     dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots
+//     dotnet run --project tools/Fuaran.Core.Tools -- render generated
 //
 // which re-encodes every authored `case` through its IDL and rewrites the maps.
 // The authoring leg then *freezes* the result (catches an accidental encoder
@@ -38,7 +38,7 @@ let private mapPath (surface: string) : string =
     Path.Combine(snapshotsDir (), surface + ".json")
 
 /// A repo-relative path under the repository root: `Repo.file`, the one root resolver (Phase
-/// 502). Used to rewrite the committed generated F# modules on `--regen-snapshots`, and by the
+/// 502). Used to rewrite the committed generated F# modules on `render generated`, and by the
 /// families that read a repository file.
 let repoFile (relPath: string) : string = Repo.file relPath
 
@@ -77,7 +77,7 @@ let private readMap (surface: string) : Map<string, string> =
     let path = mapPath surface
 
     if not (File.Exists path) then
-        failwithf "Snapshots: %s missing — run `dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots`" path
+        failwithf "Snapshots: %s missing — run `dotnet run --project tools/Fuaran.Core.Tools -- render generated`" path
 
     use doc = JsonDocument.Parse(File.ReadAllText path)
 
@@ -94,7 +94,7 @@ let loadPaired (surface: string) (cases: (string * 'a) list) : (string * string)
     |> List.map (fun (name, _) ->
         match Map.tryFind name m with
         | Some wire -> name, wire
-        | None -> failwithf "Snapshots: no '%s' entry in %s.json — run --regen-snapshots" name surface)
+        | None -> failwithf "Snapshots: no '%s' entry in %s.json — run render generated" name surface)
 
 /// The committed map file for a surface. Public so a byte-for-byte guard can read the
 /// bytes without re-implementing the climb that located them.

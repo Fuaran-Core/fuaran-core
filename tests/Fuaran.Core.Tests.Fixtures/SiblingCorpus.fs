@@ -237,7 +237,7 @@ let anchoredFrom (family: string) (from: string) : Result<string, string> =
     underAnchor family anchor how
 
 /// The lookup itself, with the ask IMPLIED: the explicit directory when one is named, else the
-/// anchored search. This is what a COMMAND uses — `--emit-fstar` reads the pinned corpus because
+/// anchored search. This is what a COMMAND uses — `render fstar` reads the pinned corpus because
 /// the operator ran it, and an invocation is its own ask — and what `resolveWith` puts the
 /// opt-in gate in front of for the test legs.
 let locateWith (dirValue: string option) (family: string) (from: string) : Result<string, string> =

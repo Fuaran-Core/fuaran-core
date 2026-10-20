@@ -7,7 +7,7 @@ gate.
 
 | Question | Who answers it | Where |
 |---|---|---|
-| **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read; every committed file is held to its exporter row's render by one reading (Phase 508) | `tests/Fuaran.Core.Tests/Exporters.fs` (freshness); `LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracle.PreservationTests.fs` (the oracle) |
+| **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read; every committed file is held to its exporter row's render by one reading (Phase 508) | `tests/Fuaran.Core.Tests/ExportersTests.fs` (freshness); `LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracle.PreservationTests.fs` (the oracle) |
 | **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (warn-first, on every workspace sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
 | **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
 
@@ -15,24 +15,24 @@ gate.
 
 ```
 conformance/
-  laws/capability-laws.json    the capability-law vectors (`--emit-laws`, since Phase 235)
-  laws/decimal-laws.json       the exact decimal's documents (`--emit-laws`, since Phase 276)
-  laws/field-laws.json         the schema field's documents (`--emit-laws`, since Phase 427)
-  laws/propagation-laws.json   the propagation vectors (`--emit-laws`, since Phase 538)
-  apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
-  apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
-  refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, the decode-determinism rows (Phase 462), column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
-  refusals/manifest.json       the refusals family's own index + per-host adoption (`--emit-refusals`)
-  decode/decode-rejects.json   the decode error contract: every decode code at the path it names, and the syntax rows at the shape reader (`--emit-decode`, since Phase 310)
-  decode/manifest.json         the decode family's own index + per-host adoption (`--emit-decode`)
-  escape/string-escape.json   the string-escape table as the lines a host diffs (`--emit-escape`, since Phase 349; no corpus copy yet)
+  laws/capability-laws.json    the capability-law vectors (`render laws`, since Phase 235)
+  laws/decimal-laws.json       the exact decimal's documents (`render laws`, since Phase 276)
+  laws/field-laws.json         the schema field's documents (`render laws`, since Phase 427)
+  laws/propagation-laws.json   the propagation vectors (`render laws`, since Phase 538)
+  apply/skeleton-apply.json    the skeleton-op apply contract (`render apply`)
+  apply/manifest.json          the apply family's own index + per-host adoption (`render apply`)
+  refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, the decode-determinism rows (Phase 462), column cells, the wire-profile grammar (`render refusals`, since Phase 299; profiles since Phase 306)
+  refusals/manifest.json       the refusals family's own index + per-host adoption (`render refusals`)
+  decode/decode-rejects.json   the decode error contract: every decode code at the path it names, and the syntax rows at the shape reader (`render decode`, since Phase 310)
+  decode/manifest.json         the decode family's own index + per-host adoption (`render decode`)
+  escape/string-escape.json   the string-escape table as the lines a host diffs (`render escape`, since Phase 349; no corpus copy yet)
 ```
 
 ### Which law sets Core emits — all of them, and the UI tier emits none
 
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
 reimplementation against. Since Phase 538 that is **four** families under `laws/`, all written by
-the `--emit-laws` command (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests/`):
+the tool's `render laws` (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests.Fixtures/`):
 
 | Family | File | Shape |
 |---|---|---|
@@ -58,7 +58,7 @@ resolves to nothing counting `0`. The four cases:
 
 The corpus's first copy, its `laws/manifest.json` row and the producer record are the UI tier's corpus
 commit (fuaran#2328); `LawVectorExport.manifestRows` lists the row in that change-set, because a row
-named before the index holds it would refuse every `--emit-laws <corpus dir>` until then.
+named before the index holds it would refuse every `render laws <corpus dir>` until then.
 
 #### The `decimal` family: what a host must reproduce
 
@@ -103,7 +103,7 @@ propagation set fuaran#1764 planned was (Phase 538) — never as a second export
 INDEX: no exporter renders it, because it lists families this repository does not own and a
 wholesale renderer would drop them. But its rows for Core's families repeat members DERIVED from
 the files they name — `kitVersion`, `vectors`, and `seed` / `iterations` for the drawn family — and
-since Phase 394 `--emit-laws <corpus dir>` restamps exactly those members of exactly those rows in
+since Phase 394 `render laws <corpus dir>` restamps exactly those members of exactly those rows in
 the same act that writes the files, so a `<Version>` move can no longer leave a row naming the
 previous kit beside a file stamped with the new one (the lag that was hand-edited at every cut until
 then). The edit is surgical and self-checking: a row that is absent, repeated, or missing a derived
@@ -134,18 +134,19 @@ names it. Nothing moved OUT of the corpus.
 
 ```powershell
 # the source of truth — this repository's conformance/ (what the default suite certifies)
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply
+dotnet run --project tools/Fuaran.Core.Tools -- render laws
+dotnet run --project tools/Fuaran.Core.Tools -- render apply
 
 # the corpus copy — the same exporter, pointed at a corpus checkout
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
+dotnet run --project tools/Fuaran.Core.Tools -- render laws <corpus dir>
+dotnet run --project tools/Fuaran.Core.Tools -- render apply <corpus dir>
 ```
 
-Since Phase 508 every family is one row of ONE exporter table (`tests/Fuaran.Core.Tests/Exporters.fs`),
-and the verb is `--emit <family>` — `laws`, `apply`, `refusals`, `decode`, `escape`, `encoding` or
-`families`. The `--emit-<family>` spellings above are kept as aliases of it, because `copies.json`, the
-projection registry and the corpus's own producer record quote them.
+Since Phase 508 every family is one row of ONE exporter table (`tests/Fuaran.Core.Tests.Fixtures/Exporters.fs`),
+and since Phase 532 the one writer is the tool (`tools/Fuaran.Core.Tools`), not the test runner: the
+verb is `render <family>` — `laws`, `apply`, `refusals`, `decode`, `escape`, `encoding` or `families`.
+`copies.json`, `version-derives.json` and the projection registry quote that form, rendered from one
+spelling (`Tool.fs`); the suite holds the committed files and writes none of them.
 
 ### The exporter table (Phase 508)
 
@@ -186,7 +187,7 @@ rows; #481 (the limits vector family) is one row; and #484 (each host declares i
 validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaces
 the `adoption` member's value in `CorpusManifestRow`, in one place, for every manifest at once.
 
-A flag rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
+A tool verb rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
 into it on every run would dirty a shared clone. Note the name — the UI language repository's
 `--emit-corpus` renders THAT domain's node vectors and knows nothing about this engine; the apply
 semantics and the capability laws are Core's, so Core emits them.
@@ -218,11 +219,11 @@ to somebody else. Phase 216 moved the discovery; the sequence it discovers is th
 
 ```powershell
 # 1. move <Version> in Directory.Build.props, then re-emit the source of truth
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws
+dotnet run --project tools/Fuaran.Core.Tools -- render laws
 
 # 2. re-stamp the corpus copy (and, since Phase 394, its laws/manifest.json rows) with the same
 #    exporter, pointed at the corpus checkout
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws ../Fuaran-UI/wire-format-fixtures
+dotnet run --project tools/Fuaran.Core.Tools -- render laws ../Fuaran-UI/wire-format-fixtures
 
 # 3. commit and push the CORPUS first — it is a separate, public repository
 # 4. bump the pin to that corpus commit (see "Bumping the pin") and commit it IN THE SAME COMMIT as
@@ -320,7 +321,7 @@ none of them had read. The failure names every path it tried and the remedy. The
 opt-out `FUARAN_CORE_SKIP_CORPUS` is retired — with nothing left to skip by default, there was
 nothing for it to say.
 
-`--emit-fstar` no longer reads the corpus at all (Phase 173): the generated F\* models and proof
+`render fstar` (the former `--emit-fstar`) no longer reads the corpus at all (Phase 173): the generated F\* models and proof
 scripts under `proofs/` are emitted from the certification vocabularies in the test project, and
 the `Proofs.Vocabulary` generation diff is not a corpus leg and is not gated on the ask.
 
@@ -531,7 +532,7 @@ parser's `JsonErrorKind` names the class inside it, closed at thirteen cases (`U
 `TruncatedUnicodeEscape`, `BadEscape`, `BadHexDigit`, `MalformedNumber`, `NullNotRepresentable`,
 `MaxDepthExceeded`, `TrailingCharacters`, `DuplicateMember`). A host reproduces the class per vector;
 the sentence beside it is the host's own. The vectors are emitted, never hand-edited
-(`--emit-refusals`, `--emit-decode`), and the manifests are authoritative for the counts.
+(`render refusals`, `render decode`), and the manifests are authoritative for the counts.
 
 ## The `apply/` family
 

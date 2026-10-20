@@ -129,5 +129,8 @@
          a System.Type); the suite's go-red plants still drive them with decoy records, through
          `SurfaceLaws`. Nothing else sees the kit's internals. -->
     <InternalsVisibleTo Include="Fuaran.Core.Tests" />
+    <!-- Phase 532 - and the fixtures library the suite and the tool share, whose exporters render the
+         committed corpus through the kit's one writer (`CorpusFile`, `CorpusManifest`). -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tests.Fixtures" />
   </ItemGroup>
 </Project>

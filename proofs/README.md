@@ -53,7 +53,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `Utf8.fst` | The UTF-8 ENCODER the digests hash through (Phase 306): `Hash.utf8Bytes` and `Hash.tryUtf8Bytes` clause for clause over integer code units, with the encoding proved INJECTIVE on well-formed UTF-16 and the unguarded path's collisions proved as refutations. **Checked and not extracted** — its integers do not survive the extraction — so its bridge to the code is an independent-oracle differential against the platform's encoder. See theorem 15. |
 | `WireColumn.fst` | The COLUMNAR CODEC (Phase 306): `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` and the decimal canonicaliser at the `JVal`, with the codec's image proved inside what `validate` accepts and the round trip proved up to a normal form — the literal round trip refuted three ways. `Fuaran.Core.Column`'s first model. See theorem 15. |
 | `oracle/WireColumn.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173: `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, `SecondDomainSpike.fs`, `ScoreDomainSpike.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
+| `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173; in the fixtures library since Phase 532: `tests/Fuaran.Core.Tests.Fixtures/ReferenceIdl.fs`, `SecondDomainIdl.fs`, `ScoreDomainIdl.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -1258,8 +1258,8 @@ they reference `DEP`, by the same closure and the same tool (Phase 522): until t
 exactly what it named, and a named model whose shared modules were not named failed at extraction as
 an apparatus fault, because nothing had checked the modules it opens.
 
-**Where it is computed.** In the host test project (`--proof-cone`, beside `parseRoster` in
-`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`), which `check.ps1` builds and asks before it hands
+**Where it is computed.** In the tool (`proof-cone` in `../tools/Fuaran.Core.Tools`, over `ProofCone`
+beside `parseRoster` in `../tests/Fuaran.Core.Tests.Fixtures/`), which `check.ps1` builds and asks before it hands
 the kit the cone. That placement is the point rather than a convenience: the roster is read by the
 same function the `Proofs.Ladder` family reads it with, so the ladder and the selector cannot
 disagree about which models exist. The kit is handed the cone and a copy of `modules.json` without
@@ -1762,7 +1762,7 @@ JSON schema) from the vocabularies this repository certifies the engine on. Ther
 one per certification vocabulary, and each pair is emitted from ONE walk:
 
 - **`Vocabulary.fst` / `VocabularyProofs.fst`** — the engine's own REFERENCE vocabulary
-  (`tests/Fuaran.Core.Tests/ReferenceIdl.fs`; Phase 114, completing D14 for the F# backend): the
+  (`tests/Fuaran.Core.Tests.Fixtures/ReferenceIdl.fs`; Phase 114, completing D14 for the F# backend): the
   part of the type model neither vendored sample uses — a hosted slot, an opaque sentinel, a
   closure on the wire, a `TMap`, a `TJson`, a generic union at two arguments, a wire-mapped enum, a
   host-only member — on the DEFAULT wire shape.
@@ -1794,7 +1794,7 @@ to reach, and the one boundary the backend has (below). A domain proves its OWN 
 own repository with the same generator, and the cost is charged to the commits that change its
 kinds: the UI vocabulary's model, its proofs, its cost and its exhaustive-coverage decision are
 `fuaran#1754`'s, the proof kit's first adopter. Nothing under `proofs/` names a UI kind, and the
-corpus read has left the leg — `--emit-fstar` takes its vocabularies from the test project, so the
+corpus read has left the leg — `render fstar` takes its vocabularies from the fixtures library, so the
 generation diff is not gated on a sibling clone.
 
 **Why the proof script is generated and not written.** A hand-written proof over a real vocabulary
@@ -1808,7 +1808,7 @@ oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The `
 family holds each committed model AND its proof script to a fresh GENERATION from the vocabulary
 in the test project, so the model is the vocabulary the engine is certified on — a vocabulary that
 moves without a regeneration is **vocabulary drift** and the leg names it, with
-`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The models are
+`dotnet run --project tools/Fuaran.Core.Tools -- render fstar` as the remedy. The models are
 CHECKED but not EXTRACTED (`kind: generated` in `modules.json`): nothing here runs them beside production,
 because the decoder they model is one a generator emits into a consuming host and not one this
 repository ships. A proof script extracts to nothing at all.

@@ -1213,8 +1213,7 @@ let tests =
           test "the friend-grant paragraph states the tree's counts and names every party" {
               let root = Repo.root ()
 
-              let packable =
-                  PackageRosterTests.packableProjects root |> List.map _.PackageId |> Set.ofList
+              let packable = Roster.derive root |> List.map _.PackageId |> Set.ofList
 
               let grants = friendGrants root
               Expect.isNonEmpty grants "the `InternalsVisibleTo` declarations under src/ were read"

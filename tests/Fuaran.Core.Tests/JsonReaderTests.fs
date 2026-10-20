@@ -314,7 +314,7 @@ let private variants (seed: int) (doc: string) : string list =
       doc + ch () ]
 
 let private corpusInputs: string list =
-    Fuaran.Core.Tests.RefusalVectorTests.RefusalCorpus.vectors
+    RefusalCorpus.vectors
     |> List.filter (fun v -> v.Codec = "json")
     |> List.map _.Input
 

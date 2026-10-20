@@ -112,11 +112,11 @@ let private vocabularyCase (name: string, idl: Idl, wires: string list) =
 let schemaValidator =
     testList
         "Phase 303 — the schema leg is certified by the pinned validator"
-        [ for c in IdlThreeHostTests.certificationWires () do
+        [ for c in CertificationVectors.certificationWires () do
               vocabularyCase c
 
           testCase "reference: every drawn op validates against the two-rooted schema" (fun _ ->
-              let idl, ops = IdlThreeHostTests.certificationOps ()
+              let idl, ops = CertificationVectors.certificationOps ()
               let text = schemaOf idl
               assertClosed "reference ops" text
               let schema = build text

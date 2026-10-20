@@ -381,8 +381,8 @@ let tests =
           testCase "each neutral vocabulary regenerates byte-identically from its own artifact bytes" (fun _ ->
               for name, idl in
                   [ "reference", ReferenceIdl.refIdl
-                    "document", SecondDomainSpike.docIdl
-                    "score", ScoreDomainSpike.scoreIdl ] do
+                    "document", SecondDomainIdl.docIdl
+                    "score", ScoreDomainIdl.scoreIdl ] do
                   let canonical = Artifact.canonicalise idl
 
                   let reloaded =

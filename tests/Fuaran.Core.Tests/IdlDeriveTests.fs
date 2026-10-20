@@ -114,8 +114,8 @@ let private vocabularies () : (string * GenSupport * Idl) list =
     let decodeIdl, _, _ = DecodeVectorsIdl.current ()
 
     [ "mini", GenSupport.Empty, MiniIdl.miniIdl
-      "doc", GenSupport.Empty, SecondDomainSpike.docIdl
-      "score", GenSupport.Empty, ScoreDomainSpike.scoreIdl
+      "doc", GenSupport.Empty, SecondDomainIdl.docIdl
+      "score", GenSupport.Empty, ScoreDomainIdl.scoreIdl
       "reference", ReferenceIdl.support.Support, ReferenceIdl.refIdl
       "decode-vectors", GenSupport.Empty, decodeIdl
       "refusal-corners", GenSupport.Empty, RefusalCornersIdl.idl
@@ -185,7 +185,7 @@ let tests =
                     Expect.equal
                         generated
                         (File.ReadAllText path)
-                        "regenerate with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+                        "regenerate with: dotnet run --project tools/Fuaran.Core.Tools -- render generated")
 
                 testCase "a derived member is appended, never interleaved: the plain module is a prefix" (fun _ ->
                     let plain =
@@ -425,7 +425,7 @@ let tests =
                     Expect.stringContains c "Nothing" "names the type")
 
                 testCase "a message map over a vocabulary with no message parameter is refused" (fun _ ->
-                    refusedAs (derive [ Derivation.MapMsg ] ScoreDomainSpike.scoreIdl) |> ignore)
+                    refusedAs (derive [ Derivation.MapMsg ] ScoreDomainIdl.scoreIdl) |> ignore)
 
                 testCase "a message map through a contravariant signature is refused" (fun _ ->
                     let c = refusedAs (derive [ Derivation.MapMsg ] contravariantIdl)
@@ -440,8 +440,8 @@ let tests =
                               Derivation.VocabularyConstants ]
 
                         for idl, extra in
-                            [ ScoreDomainSpike.scoreIdl, [ Derivation.SlotsOf "Duration"; Derivation.DefaultRecords ]
-                              SecondDomainSpike.docIdl, [] ] do
+                            [ ScoreDomainIdl.scoreIdl, [ Derivation.SlotsOf "Duration"; Derivation.DefaultRecords ]
+                              SecondDomainIdl.docIdl, [] ] do
                             match derive (common @ extra) idl with
                             | Ok _ -> ()
                             | Error e -> failtestf "refused: %s" (CodegenError.describe e))
@@ -706,13 +706,13 @@ let typescriptTests =
                     DeriveIdl.deriveIdl
                     "slots, undeclared", [ Derivation.SlotsOf "Nothing" ], DeriveIdl.deriveIdl
                     "slots, unheld", [ Derivation.SlotsOf "Guard" ], DeriveIdl.deriveIdl
-                    "message map, no parameter", [ Derivation.MapMsg ], ScoreDomainSpike.scoreIdl
+                    "message map, no parameter", [ Derivation.MapMsg ], ScoreDomainIdl.scoreIdl
                     "message map, contravariant", [ Derivation.MapMsg ], contravariantIdl
                     "every request", DeriveIdl.derivations, DeriveIdl.deriveIdl
                     "score",
                     common @ [ Derivation.SlotsOf "Duration"; Derivation.DefaultRecords ],
-                    ScoreDomainSpike.scoreIdl
-                    "document", common, SecondDomainSpike.docIdl ]
+                    ScoreDomainIdl.scoreIdl
+                    "document", common, SecondDomainIdl.docIdl ]
 
               let refusals =
                   [ for name, ds, idl in cases do
@@ -1513,8 +1513,8 @@ module private DeclLaws =
           "reference", ReferenceIdl.refIdl
           "value-coverage", ReferenceIdl.valueCoverageIdl
           "unsorted-coverage", ReferenceIdl.unsortedCoverageIdl
-          "score", ScoreDomainSpike.scoreIdl
-          "second-domain", SecondDomainSpike.docIdl
+          "score", ScoreDomainIdl.scoreIdl
+          "second-domain", SecondDomainIdl.docIdl
           "doc-annotated", IdlDocAnnotationTests.docIdl
           "refusal-corners", RefusalCornersIdl.idl
           "decode-vectors", vectors

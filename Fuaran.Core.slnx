@@ -22,7 +22,13 @@
     <Project Path="src/Fuaran.Core.Unit/Fuaran.Core.Unit.fsproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Fuaran.Core.Tests.Fixtures/Fuaran.Core.Tests.Fixtures.fsproj" />
     <Project Path="tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj" />
+  </Folder>
+  <!-- Phase 532: the tool that writes every generated artefact and answers the proof leg's cone. The gate
+       builds it and never runs it. -->
+  <Folder Name="/tools/">
+    <Project Path="tools/Fuaran.Core.Tools/Fuaran.Core.Tools.fsproj" />
   </Folder>
   <!-- Phase 400: the wire benchmarks are BUILT by the gate and never RUN by it. A harness nobody compiles
        rots silently against the API it times; compiling it here costs seconds, while running it costs

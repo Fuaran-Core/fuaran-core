@@ -1489,8 +1489,7 @@ let private git (root: string) (arguments: string) : Result<string, string> = Ch
 /// The packable roster, from Phase 199's derivation. ONE spelling of "what ships" in this
 /// repository, deliberately: a second would drift from the first exactly the way the documents
 /// that derivation gates had drifted.
-let private roster () =
-    PackageRosterTests.packableProjects (repoRoot ())
+let private roster () = Roster.derive (repoRoot ())
 
 /// One packable package's baseline read against a tag's (Phase 386 — the comparison the since-tag
 /// report prints and the `OneDotZero` family's within-a-major law asserts, written once).
@@ -2019,7 +2018,8 @@ let tests =
                   "no lowered artefact (closure, state machine, startup class) reaches the surface"
 
               Expect.isEmpty
-                  (own |> List.filter (fun t -> t.Contains ".PackageRosterTests.isPackable"))
+                  (own
+                   |> List.filter (fun t -> t.Contains ".PackageRosterTests.projectsOutsideSrc"))
                   "an `internal` function is not surface — it cannot break a consumer in another assembly"
 
               Expect.isEmpty

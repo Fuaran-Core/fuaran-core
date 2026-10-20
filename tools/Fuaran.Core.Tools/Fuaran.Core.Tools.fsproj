@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Phase 532 - the TOOL: the one writer of every generated artefact the projection registry
+       (tests/Fuaran.Core.Tests/projections.json) names, and the proof leg's cone selector. The suite
+       holds what it writes; the gate runs the suite and never the tool. Its two verbs, `render` and
+       `proof-cone`, are stated in Program.fs. It references the test project for ONE input the fixtures library cannot compute: the
+       conformance reference run that measures the families export's `cases` column, whose witnesses
+       are the suite's own (DECISIONS.md D201). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\tests\Fuaran.Core.Tests.Fixtures\Fuaran.Core.Tests.Fixtures.fsproj" />
+    <ProjectReference Include="..\..\tests\Fuaran.Core.Tests\Fuaran.Core.Tests.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

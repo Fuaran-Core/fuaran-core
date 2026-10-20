@@ -11,7 +11,7 @@
 #
 # Step 2b (Phase 150; re-sourced by Phase 173) is this repository's own and sits in the host step
 # below rather than in the engine: the GENERATED models and their proof scripts are held to a fresh
-# generation from the certification vocabularies in `tests/Fuaran.Core.Tests` by the
+# generation from the certification vocabularies in `tests/Fuaran.Core.Tests.Fixtures` by the
 # Proofs.Vocabulary family — the same discipline as the engine's extraction diff, one level further
 # up. Step 2 says the oracle is the model; this says the model is the vocabulary the engine is
 # certified on. Nothing in this leg reads the shared corpus for the generated files any more.
@@ -223,13 +223,13 @@ if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 # safe form of the same saving: it recomputes from the tree EVERY time, still verifies cold, and
 # the only thing it reuses is the knowledge of what did not change.
 #
-# WHAT. `-Since <tree>` asks the host test project (`--proof-cone`, `ProofsLadderTests.fs`) for the
+# WHAT. `-Since <tree>` asks the tool (`tools/Fuaran.Core.Tools`, its `proof-cone` verb) for the
 # cone: the registered modules whose model, committed oracle, `modules.json` entry (which is also
 # its registration and its kind) or covered production sources (`modules.json`'s `packages`) changed
 # between <tree> and the working tree, plus every module that references a changed model, however
 # transitively — and EVERY module when a shared input of the leg moved (the prover pin, the kit's
 # engine, this script's code, a `shared` module). It runs there, not here, so that the roster is
-# read by `parseRoster` — the very function the `Proofs.Ladder` family reads it with.
+# read by `parseRoster` — the very function the `Proofs.Ladder` family reads it with (DECISIONS.md D74).
 # The kit is then handed the cone (IN) and the modules the cone references (DEP, checked ahead of
 # the modules that need them, so every clock is the module's own) in the roster's order, with a
 # copy of `modules.json` that drops the entries of the modules left OUT — so the kit's both-ways
@@ -245,8 +245,8 @@ if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 # reads, so the full leg's verdict cannot move. `-PlanOnly` prints what the kit would be handed and
 # stops, which is how the Proofs.Cone family holds that claim.
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$hostProjectDir = Join-Path $repoRoot 'tests/Fuaran.Core.Tests'
-$hostProjectPath = Join-Path $hostProjectDir 'Fuaran.Core.Tests.fsproj'
+$toolProjectDir = Join-Path $repoRoot 'tools/Fuaran.Core.Tools'
+$toolProjectPath = Join-Path $toolProjectDir 'Fuaran.Core.Tools.fsproj'
 $coneWork = Join-Path $PSScriptRoot "obj/cone-$PID"
 $selected = $null   # $null is the full leg
 $coneBudget = $null
@@ -261,9 +261,9 @@ function Stop-Leg([string] $message, [int] $code = 1) {
     exit $code
 }
 
-# Ask the host project. Its answer comes back as a JSON file, printed lines included, so that no
-# console code page sits between the two processes. The build is incremental, and the host step
-# builds the same project anyway. With -Soft a failure to answer returns $null instead of ending the
+# Ask the tool. Its answer comes back as a JSON file, printed lines included, so that no console
+# code page sits between the two processes. The build is incremental, and the host step builds the
+# test project the tool references anyway. The caller names the verb. With -Soft a failure to answer returns $null instead of ending the
 # leg: that is for the strict record, which must never turn a green leg red.
 function Invoke-ConeTool([string[]] $ToolArgs, [switch] $Soft) {
     New-Item -ItemType Directory -Force $coneWork | Out-Null
@@ -271,15 +271,15 @@ function Invoke-ConeTool([string[]] $ToolArgs, [switch] $Soft) {
     if (Test-Path $answerPath) { Remove-Item $answerPath -Force }
 
     $global:LASTEXITCODE = 0
-    & dotnet build $hostProjectPath --nologo -v q | Out-Host
+    & dotnet build $toolProjectPath --nologo -v q | Out-Host
     if ($LASTEXITCODE -ne 0) {
-        $why = "the cone selector could not build $hostProjectPath (exit $LASTEXITCODE); it reads the roster with the ladder's own parser, so it runs from the test project"
+        $why = "the cone selector could not build $toolProjectPath (exit $LASTEXITCODE); it reads the roster with the ladder's own parser, so it runs from the tool"
         if ($Soft) { Write-Host "==== proofs: $why" -ForegroundColor Yellow; return $null }
         Stop-Leg $why $LASTEXITCODE
     }
 
     $global:LASTEXITCODE = 0
-    & dotnet run --project $hostProjectDir --no-build -- --proof-cone @ToolArgs --out $answerPath | Out-Host
+    & dotnet run --project $toolProjectDir --no-build -- proof-cone @ToolArgs --out $answerPath | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $answerPath)) {
         $why = "the cone selector could not answer (exit $LASTEXITCODE); its reason is printed above"
         if ($Soft) { Write-Host "==== proofs: $why" -ForegroundColor Yellow; return $null }

@@ -75,7 +75,7 @@ downstream version check reads the same DRAFT marker.
 before it:
 
 1. If `<Version>` moved since the conformance corpus was last emitted, re-stamp it
-   (`--emit-laws` and `--emit-apply`, `docs/conformance-corpus.md`) and commit.
+   (`dotnet run --project tools/Fuaran.Core.Tools -- render laws`, then `render apply`; `docs/conformance-corpus.md`) and commit.
 2. Pack every packable project from that clean commit into a folder, and run the receiving gate
    against it: `fuaran-dotnet`'s `pwsh ./tests/core-fable/core-fable.ps1 -CoreVersion <v> -CoreFeed
    <folder>`, green on both legs. A package this repository adds since the last release needs the
@@ -150,10 +150,10 @@ CORE_APPROVE_API=Fuaran.Core.Wire dotnet run --project tests/Fuaran.Core.Tests
 ```
 
 Every approval switch in the repository (`CORE_APPROVE_API`, `_WIRE`, `_LADDER`, `_README`, `_DOCS`
-and `FUARAN_REGEN`) has one reading (`tests/Fuaran.Core.Tests/Approval.fs`, Phase 396): absent, empty,
+and `FUARAN_REGEN`) has one reading (`tests/Fuaran.Core.Tests.Fixtures/Approval.fs`, Phase 396): absent, empty,
 `0` or `false` is no; `1` or `true` is every file the switch governs; any other value is a filter, a
 comma-separated list of file stems (a package id here). A filter that matches nothing is red by name,
-and each file a switch rewrites is printed.
+and each file a switch rewrites is printed. **Since `0.40.0` (Phase 532, DECISIONS.md D201, internal):** a switch rewrites only a projection its family holds; every other generated artefact (the corpus families, the generated F# modules, the classifier fixtures, the F\* models and the oracle project's `Compile` list) is written by the tool, `dotnet run --project tools/Fuaran.Core.Tools -- render <family>`, the test runner has no verb, and nothing a package ships moves.
 
 **The hazard of the bare form is that it rewrites EVERY drifted
 baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your
@@ -597,9 +597,9 @@ columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse
 `Fuaran.Core.*` is twenty packable assemblies. Between them it grants `InternalsVisibleTo` in exactly eight
 declarations — `Fuaran.Core.Text` to `Fuaran.Core.Tree`, `Fuaran.Core.ContentAddress`, `Fuaran.Core.Wire`, `Fuaran.Core.Idl`
 and `Fuaran.Core.Conformance` (the digest's constructor and the xorshift32 kernel, Phase 531), `Fuaran.Core.Function` to
-`Fuaran.Core.Query`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the three
+`Fuaran.Core.Query`, `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen`, and `Fuaran.Core.Wire` to `Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (D129); the four
 further declarations, `Fuaran.Core.Idl.Cli`, `Fuaran.Core.Conformance` and (Phase 511) `Fuaran.Core.Idl.Codegen`
-to the test project, grant nothing a consumer reaches.
+to the test project and (Phase 532) `Fuaran.Core.Conformance` to the fixtures library the test project and the tool share, grant nothing a consumer reaches.
 Everywhere else a function one Core package needs from another has to be public — `internal` cannot
 express it. Three members are exactly that and nothing else: no caller outside these packages, no test, and until
 `0.19.0` no document saying why they were public. A reading that classifies surface by caller count

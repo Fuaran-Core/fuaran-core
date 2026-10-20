@@ -172,7 +172,7 @@ let decodeVectors =
                   Expect.equal
                       (File.ReadAllText(path).Replace("\r\n", "\n"))
                       src
-                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tools/Fuaran.Core.Tools -- render generated")
 
           testCase "the translated vocabulary is well-formed" (fun _ ->
               let idl, _, _ = DecodeVectorsIdl.current ()
@@ -252,11 +252,11 @@ type private Certified =
 
 let private certified: Certified list =
     [ { Name = "document"
-        Idl = SecondDomainSpike.docIdl
+        Idl = SecondDomainIdl.docIdl
         Compiled = fun s -> ofResult (DocGenerated.decodeNode s)
         Verbatim = [] }
       { Name = "score"
-        Idl = ScoreDomainSpike.scoreIdl
+        Idl = ScoreDomainIdl.scoreIdl
         Compiled = fun s -> ofResult (ScoreGenerated.decodeNode s)
         Verbatim = [] }
       { Name = "reference"
@@ -679,7 +679,7 @@ let cornerTests =
                   Expect.equal
                       (File.ReadAllText(path).Replace("\r\n", "\n"))
                       src
-                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tools/Fuaran.Core.Tools -- render generated")
 
           testCase
               "the corner vocabulary is well-formed and its valid document is accepted by all three hosts"

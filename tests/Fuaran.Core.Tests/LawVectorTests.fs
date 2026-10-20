@@ -11,7 +11,7 @@ open Fuaran.Core
 //  copy of them held to what this kit renders.
 //
 //  `LawVectorExport` renders them; nothing here writes into the shared corpus.
-//  Emitting is an explicit command (`--emit-laws <dir>`), because the corpus is
+//  Emitting is an explicit command (`render laws <dir>`), because the corpus is
 //  a separate repository and a suite that wrote into it on every run would
 //  dirty a shared clone.
 //
@@ -44,10 +44,10 @@ let private str (name: string) (el: JVal) : string option =
 [<Literal>]
 let private stampMember = "kitVersion"
 
-let private emitHere = "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws"
+let private emitHere = "dotnet run --project tools/Fuaran.Core.Tools -- render laws"
 
 let private emitCopy =
-    "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>"
+    "dotnet run --project tools/Fuaran.Core.Tools -- render laws <corpus dir>"
 
 /// The registry's own normalisation, not a second one beside it: `OwnedConformance.fingerprint` IS
 /// `String.concat "\n"` of these lines, so the reading below refines the equality
@@ -713,7 +713,7 @@ let tests =
 
               if not (File.Exists path) then
                   failtestf
-                      "this repository carries no %s at '%s' — re-run `--emit-laws` (no argument writes into conformance/) and commit the result"
+                      "this repository carries no %s at '%s' — re-run `render laws` (no argument writes into conformance/) and commit the result"
                       LawVectorExport.Capabilities.fileName
                       path
               else
@@ -906,7 +906,7 @@ let tests =
 
               if not (File.Exists path) then
                   failtestf
-                      "this repository carries no %s at '%s' — re-run `--emit-laws` (no argument writes into conformance/) and commit the result"
+                      "this repository carries no %s at '%s' — re-run `render laws` (no argument writes into conformance/) and commit the result"
                       LawVectorExport.Decimals.fileName
                       path
               else
@@ -1051,7 +1051,7 @@ let tests =
 
               if not (File.Exists path) then
                   failtestf
-                      "this repository carries no %s at '%s' — re-run `--emit-laws` (no argument writes into conformance/) and commit the result"
+                      "this repository carries no %s at '%s' — re-run `render laws` (no argument writes into conformance/) and commit the result"
                       LawVectorExport.Fields.fileName
                       path
               else
@@ -1238,6 +1238,6 @@ let tests =
                               ([ sprintf "manifest  %s" manifest; SiblingCorpus.pinSummary root; "" ]
                                @ findings
                                @ [ ""
-                                   "`--emit-laws <corpus dir>` restamps the rows with the files (Phase 394):"
+                                   "`render laws <corpus dir>` restamps the rows with the files (Phase 394):"
                                    "    " + emitCopy ]))
                           fatal ]

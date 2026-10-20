@@ -15,7 +15,7 @@
 > costs) is what a second IDL adopter meets, and that has not aged.
 
 **Artefacts:** [`src/Fuaran.Core.Idl/`](../src/Fuaran.Core.Idl/) (the IDL model + a schema-driven encoder +
-an illustrative F#-type emitter), [`tests/Fuaran.Core.Tests/MiniIdl.fs`](../tests/Fuaran.Core.Tests/MiniIdl.fs)
+an illustrative F#-type emitter), [`tests/Fuaran.Core.Tests.Fixtures/MiniIdl.fs`](../tests/Fuaran.Core.Tests.Fixtures/MiniIdl.fs)
 (the mini UI IDL + the authored corpus trees — the spike project it came from was deleted in Phase 230, and
 its vocabulary stays as a test fixture), and `tests/Fuaran.Core.Tests/IdlSpikeTests.fs` (the gate).
 

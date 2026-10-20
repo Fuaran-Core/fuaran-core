@@ -75,7 +75,7 @@ type Projection =
     {
         /// Repository-relative, forward-slashed; `{package}` stands for a package id.
         Path: string
-        /// The test runner's verb that writes it (`--emit-laws`), if one does.
+        /// The tool's family that writes it (`laws`: `render laws`), if one does.
         Render: string option
         /// The approval switch that rewrites it from inside the suite, if one does.
         Switch: string option
@@ -174,8 +174,8 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
                 if row.Path.Contains PackageHole <> (row.Stem = Some PackageHole) then
                     yield sprintf "%s (%s): a `%s` path and a `%s` stem go together" at row.Path PackageHole PackageHole
                 match row.Render with
-                | Some r when not (r.StartsWith "--") ->
-                    yield sprintf "%s (%s): `render` is not a `--<verb>`" at row.Path
+                | Some r when not (System.Text.RegularExpressions.Regex.IsMatch(r, "^[a-z][a-z-]*$")) ->
+                    yield sprintf "%s (%s): `render` is not a family name (the tool's `render <family>`)" at row.Path
                 | _ -> ()
                 if row.VersionStamped && row.Copies.IsEmpty then
                     yield sprintf "%s (%s) is version-stamped and declares no copy" at row.Path
@@ -186,7 +186,7 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
 
 /// The registry's rows from its text, or every reason it is not well formed: an unknown member, a
 /// missing path or holder, a switch without its stem (or the reverse), a template path without a
-/// template stem (or the reverse), a verb that is not `--<name>`, a copy not in the one spelling, a
+/// template stem (or the reverse), a `render` that is not a family name, a copy not in the one spelling, a
 /// version-stamped row with no copy, or two rows with one path and one stem.
 let parseRegistry (json: string) : Result<Projection list, string list> =
     try

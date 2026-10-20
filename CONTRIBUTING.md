@@ -56,9 +56,10 @@ variable that names a clone kept elsewhere.
 
 Several files are projections the suite holds to what the code renders today, and
 [`tests/Fuaran.Core.Tests/projections.json`](tests/Fuaran.Core.Tests/projections.json) lists every one:
-the test runner's verb that writes it, the environment switch that rewrites it from inside the suite,
+the tool's family that writes it (`dotnet run --project tools/Fuaran.Core.Tools -- render <family>`;
+the test runner has no verb), the environment switch that rewrites it from inside the suite,
 the family that holds it, and the copies other repositories carry. A new generated artefact is one row
-there. The switches are read by ONE rule (`tests/Fuaran.Core.Tests/Approval.fs`), and the table below is
+there. The switches are read by ONE rule (`tests/Fuaran.Core.Tests.Fixtures/Approval.fs`), and the table below is
 rendered from the registry (`CORE_APPROVE_DOCS=CONTRIBUTING` rewrites it):
 
 | Switch | Governs | A filter value is |

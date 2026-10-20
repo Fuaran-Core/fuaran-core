@@ -205,7 +205,7 @@ let unguarded (guarded: Site -> bool) (sites: Site list) : Site list = sites |> 
 /// whose assembly was not built, as the public-surface gate does.
 let private shipped () : Result<(string * Assembly) list, string list> =
     let root = Snapshots.repoFile ""
-    let projects = PackageRosterTests.packableProjects root
+    let projects = Roster.derive root
 
     let located =
         projects

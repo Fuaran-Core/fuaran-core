@@ -489,7 +489,7 @@ let strictTests =
         [ testCase "every refusal vector that applies to a line gets the grammar's answer, as a value and as the line"
           <| fun _ ->
               let applicable =
-                  RefusalVectorTests.RefusalCorpus.vectors
+                  RefusalCorpus.vectors
                   |> List.filter (fun v -> Option.isNone (Strict.notApplicable v))
 
               Expect.isGreaterThan applicable.Length 60 "the corpus is the one the grammar is written in"
@@ -502,7 +502,7 @@ let strictTests =
           testCase "the vectors that do not apply are exactly the named ones, and the comparison can fail"
           <| fun _ ->
               let named =
-                  RefusalVectorTests.RefusalCorpus.vectors
+                  RefusalCorpus.vectors
                   |> List.choose (fun v -> Strict.notApplicable v |> Option.map (fun _ -> v.Codec, v.Name))
 
               Expect.equal
@@ -512,11 +512,11 @@ let strictTests =
 
               // The go-red: a vector whose expectation is flipped is caught as a disagreement, so the
               // comparison above is able to fail.
-              let flipped: RefusalVectorTests.RefusalCorpus.Vector =
+              let flipped: RefusalCorpus.Vector =
                   { Name = "flipped"
                     Codec = "json"
                     Input = "{\"a\":1,\"a\":2}"
-                    Intent = RefusalVectorTests.RefusalCorpus.Accept }
+                    Intent = RefusalCorpus.Accept }
 
               Expect.isNonEmpty (Strict.disagreements flipped) "a repeated member read as accepted disagrees"
 

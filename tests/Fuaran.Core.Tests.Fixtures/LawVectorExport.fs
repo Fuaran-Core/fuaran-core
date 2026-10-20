@@ -865,7 +865,7 @@ module LawVectorExport =
     ///
     /// `propagationLaws` (Phase 538) is emitted and not yet listed: the corpus indexes it in the commit
     /// that first carries the file (fuaran#2328), and a row named here before the index holds it would
-    /// refuse every `--emit-laws <corpus dir>` and redden the asked manifest leg until then. That same
+    /// refuse every `render laws <corpus dir>` and redden the asked manifest leg until then. That same
     /// change-set appends `"propagationLaws", PropagationVectorExport.fileName` here.
     let manifestRows: (string * string) list =
         [ "capabilityLaws", Capabilities.fileName

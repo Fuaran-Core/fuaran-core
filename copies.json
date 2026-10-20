@@ -174,7 +174,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/laws/capability-laws.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render laws <the wire-format-fixtures checkout>"
     },
     {
       "source": "conformance/apply/skeleton-apply.json",
@@ -182,7 +182,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/apply/skeleton-apply.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render apply <the wire-format-fixtures checkout>"
     },
     {
       "source": "conformance/apply/manifest.json",
@@ -190,7 +190,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/apply/manifest.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render apply <the wire-format-fixtures checkout>"
     },
     {
       "source": "conformance/laws/decimal-laws.json",
@@ -198,7 +198,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/laws/decimal-laws.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render laws <the wire-format-fixtures checkout>"
     },
     {
       "source": "conformance/laws/field-laws.json",
@@ -206,7 +206,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/laws/field-laws.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render laws <the wire-format-fixtures checkout>"
     },
     {
       "source": "conformance/laws/propagation-laws.json",
@@ -214,7 +214,7 @@
         "Fuaran/Fuaran-UI/wire-format-fixtures/laws/propagation-laws.json"
       ],
       "check": "fingerprint",
-      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <the wire-format-fixtures checkout>"
+      "regen": "dotnet run --project tools/Fuaran.Core.Tools -- render laws <the wire-format-fixtures checkout>"
     }
   ]
 }

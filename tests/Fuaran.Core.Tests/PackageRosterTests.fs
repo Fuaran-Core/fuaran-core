@@ -43,95 +43,16 @@ open System.Text.Json
 open System.Text.RegularExpressions
 open Expecto
 
-/// A project under `src/` that `pack` would produce a package from.
-type internal PackableProject =
-    {
-        /// The package id — `<PackageId>` where declared, else the project file's base name.
-        PackageId: string
-        /// Repo-relative, forward-slashed.
-        ProjectFile: string
-    }
-
-let private isPackableRe =
-    Regex(@"<IsPackable>([^<]*)</IsPackable>", RegexOptions.Compiled)
-
-let private packageIdRe =
-    Regex(@"<PackageId>([^<]*)</PackageId>", RegexOptions.Compiled)
-
-let private firstGroup (re: Regex) (text: string) : string option =
-    let m = re.Match text
-
-    if m.Success then
-        let v = m.Groups[1].Value.Trim()
-        if v = "" then None else Some v
-    else
-        None
-
-/// `IsPackable` for one project: what the project declares, else what
-/// `Directory.Build.props` declares, else MSBuild's own default (true). Only the literal
-/// `false` excludes — anything else, including a value this reader does not understand,
-/// leaves the project IN the roster, so a misread widens the table rather than silently
-/// dropping a shipping package from it.
-let internal isPackable (fallback: string option) (projectText: string) : bool =
-    match firstGroup isPackableRe projectText |> Option.orElse fallback with
-    | Some v -> not (String.Equals(v, "false", StringComparison.OrdinalIgnoreCase))
-    | None -> true
-
-/// THE derivation, kept in one small function on purpose: the Fable surface's completeness
-/// check (Phase 185) derives the same set, and two spellings of "what ships" would drift
-/// exactly the way the documents this file gates drifted. `src/*/*.fsproj` +
-/// `src/*/*.csproj` — a C# project is a published package too (the C# facade was one, from
-/// Phase 128 until Phase 231 removed it at `0.33.0`), and a roster scoped to F# would leave one
-/// undocumented by construction, which is the same excusal-by-the-shape-of-the-derivation that
-/// 185's own header names. Checked against that sibling: it covers every project type under
-/// `src/` and names a packable C# project as an explicit exclusion, so the two rosters range
-/// over one set.
-let internal packableProjects (root: string) : PackableProject list =
-    let srcDir = Path.Combine(root, "src")
-
-    let fallback =
-        let props = Path.Combine(root, "Directory.Build.props")
-
-        if File.Exists props then
-            firstGroup isPackableRe (File.ReadAllText props)
-        else
-            None
-
-    if not (Directory.Exists srcDir) then
-        []
-    else
-        Directory.GetDirectories srcDir
-        |> Array.collect (fun d -> Array.append (Directory.GetFiles(d, "*.fsproj")) (Directory.GetFiles(d, "*.csproj")))
-        |> Array.toList
-        |> List.choose (fun path ->
-            let text = File.ReadAllText path
-
-            if isPackable fallback text then
-                Some
-                    { PackageId =
-                        firstGroup packageIdRe text
-                        |> Option.defaultValue (Path.GetFileNameWithoutExtension path)
-                      ProjectFile = Path.GetRelativePath(root, path).Replace('\\', '/') }
-            else
-                None)
-        |> List.sortBy _.PackageId
-
 /// Every project file in the tree that is NOT under `src/`, paired with its packability —
 /// the instrument for the scope property.
 let internal projectsOutsideSrc (root: string) : (string * bool) list =
-    let fallback =
-        let props = Path.Combine(root, "Directory.Build.props")
-
-        if File.Exists props then
-            firstGroup isPackableRe (File.ReadAllText props)
-        else
-            None
+    let fallback = Roster.propsFallback root
 
     [ yield! Directory.GetFiles(root, "*.fsproj", SearchOption.AllDirectories)
       yield! Directory.GetFiles(root, "*.csproj", SearchOption.AllDirectories) ]
     |> List.map (fun p -> Path.GetRelativePath(root, p).Replace('\\', '/'), p)
     |> List.filter (fun (rel, _) -> not (rel.StartsWith("src/", StringComparison.Ordinal)))
-    |> List.map (fun (rel, full) -> rel, isPackable fallback (File.ReadAllText full))
+    |> List.map (fun (rel, full) -> rel, Roster.isPackable fallback (File.ReadAllText full))
     |> List.sortBy fst
 
 // ---- README ---------------------------------------------------------------
@@ -196,7 +117,7 @@ let internal rosterDiff (packable: string list) (documented: string list) : stri
 
 /// The standing `<Version>` from `Directory.Build.props`.
 let internal standingVersion (propsText: string) : string option =
-    firstGroup (Regex @"<Version>([^<]*)</Version>") propsText
+    Roster.firstGroup (Regex @"<Version>([^<]*)</Version>") propsText
 
 /// GitHub's anchor for a heading: the text lower-cased, link targets and backslash escapes dropped,
 /// every character that is not a letter, digit, space, `-` or `_` removed, spaces made `-`.
@@ -317,7 +238,7 @@ let private withRoot (f: string -> unit) =
 
 /// The roster `.github/scripts/probe-registry.ps1 -ListRoster` derives from `root`, run the way
 /// the publish workflow runs it, or why it could not be read. The probe asks nuget.org about
-/// exactly these ids after a push, so a probe whose derivation drifted from `packableProjects`
+/// exactly these ids after a push, so a probe whose derivation drifted from `Roster.derive`
 /// would verify a different list than the one the README table is gated on.
 let private probeRoster (repo: string) (root: string) : Result<string list, string> =
     let probe = Path.Combine(repo, ".github", "scripts", "probe-registry.ps1")
@@ -399,7 +320,7 @@ let tests =
 
           test "the README package table lists exactly the packable projects" {
               withRoot (fun root ->
-                  let packable = packableProjects root |> List.map _.PackageId
+                  let packable = Roster.derive root |> List.map _.PackageId
 
                   let documented =
                       readmePackageIds (File.ReadAllText(Path.Combine(root, "README.md")))
@@ -447,7 +368,7 @@ let tests =
               // Phase 393. The post-push probe in publish-packages.yml runs without the suite, so
               // it carries its own derivation in PowerShell; this holds the two to one set.
               withRoot (fun root ->
-                  let packable = packableProjects root |> List.map _.PackageId |> Set.ofList
+                  let packable = Roster.derive root |> List.map _.PackageId |> Set.ofList
 
                   match probeRoster root root with
                   | Error e -> failtest e
@@ -457,7 +378,7 @@ let tests =
                       Expect.equal
                           (Set.ofList probed)
                           packable
-                          "the registry probe's roster is the packable set — edit .github/scripts/probe-registry.ps1 to match `packableProjects`, never the reverse")
+                          "the registry probe's roster is the packable set — edit .github/scripts/probe-registry.ps1 to match `Roster.derive`, never the reverse")
           }
 
           test "the registry probe's derivation agrees on the edge cases (go-red over a synthetic tree)" {
@@ -497,9 +418,9 @@ let tests =
                       let expected = set [ "Bare"; "Other.Id" ]
 
                       Expect.equal
-                          (packableProjects dir |> List.map _.PackageId |> Set.ofList)
+                          (Roster.derive dir |> List.map _.PackageId |> Set.ofList)
                           expected
-                          "packableProjects over the synthetic tree"
+                          "Roster.derive over the synthetic tree"
 
                       match probeRoster repo dir with
                       | Error e -> failtest e
@@ -528,7 +449,7 @@ let tests =
                           |> Set.ofList
 
                       let declared =
-                          packableProjects root
+                          Roster.derive root
                           |> List.map _.PackageId
                           |> List.filter (excluded.Contains >> not)
 
@@ -601,14 +522,20 @@ let tests =
           }
 
           test "packability reads the project, then the props fallback, then MSBuild's default" {
-              Expect.isFalse (isPackable None "<IsPackable>false</IsPackable>") "an explicit false excludes"
-              Expect.isFalse (isPackable None "<IsPackable>FALSE</IsPackable>") "case does not matter"
-              Expect.isTrue (isPackable None "<IsPackable>true</IsPackable>") "an explicit true includes"
-              Expect.isTrue (isPackable None "<PropertyGroup></PropertyGroup>") "undeclared with no fallback includes"
-              Expect.isFalse (isPackable (Some "false") "<PropertyGroup></PropertyGroup>") "the props fallback applies"
+              Expect.isFalse (Roster.isPackable None "<IsPackable>false</IsPackable>") "an explicit false excludes"
+              Expect.isFalse (Roster.isPackable None "<IsPackable>FALSE</IsPackable>") "case does not matter"
+              Expect.isTrue (Roster.isPackable None "<IsPackable>true</IsPackable>") "an explicit true includes"
 
               Expect.isTrue
-                  (isPackable (Some "false") "<IsPackable>true</IsPackable>")
+                  (Roster.isPackable None "<PropertyGroup></PropertyGroup>")
+                  "undeclared with no fallback includes"
+
+              Expect.isFalse
+                  (Roster.isPackable (Some "false") "<PropertyGroup></PropertyGroup>")
+                  "the props fallback applies"
+
+              Expect.isTrue
+                  (Roster.isPackable (Some "false") "<IsPackable>true</IsPackable>")
                   "the project's own declaration wins over the fallback"
           }
 

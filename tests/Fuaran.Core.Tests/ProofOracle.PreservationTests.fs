@@ -1065,7 +1065,7 @@ let tests =
 
               if not (System.IO.File.Exists path) then
                   failtestf
-                      "this repository carries no %s at '%s' — the differential's second host is not committed; re-run `--emit-apply` (no argument) and commit conformance/"
+                      "this repository carries no %s at '%s' — the differential's second host is not committed; re-run `render apply` (no argument) and commit conformance/"
                       ApplyVectorExport.vectorsFileName
                       path
 

@@ -7,7 +7,7 @@ failures to suppress". This is that run, and its findings.
 Reproduce with:
 
 ```
-dotnet run --project tests/Fuaran.Core.Tests -- --idl-diff <old.json> <new.json> [<manifest.json>]
+dotnet run --project src/Fuaran.Core.Idl.Cli -- classify <old.json> <new.json> [--manifest <manifest.json>]
 ```
 
 The two artifacts are `idl.json` revisions extracted from the wire-format specification repository

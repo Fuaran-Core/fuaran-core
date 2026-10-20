@@ -6,7 +6,7 @@
 /// in this repo's tests is not a home but an engine-certification FIXTURE, and named
 /// the completion criterion: it moves to the domain's own repo once the engine's
 /// certification no longer rests on it. Two vendored foreign vocabularies already
-/// carry most of that load — `SecondDomainSpike.docIdl` and `ScoreDomainSpike.scoreIdl`
+/// carry most of that load — `SecondDomainIdl.docIdl` and `ScoreDomainIdl.scoreIdl`
 /// certify the interpreter, the generated F# module and the generated TypeScript module
 /// against corpora written OUTSIDE this repo, which is the strongest byte-identity
 /// evidence available. What they do not reach is the part of the type model neither

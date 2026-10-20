@@ -255,7 +255,7 @@ let private standingMajor () : string * int =
 let private liveVerdicts () : string * (string * Verdict) list =
     let version, major = standingMajor ()
 
-    let ids = PackageRosterTests.packableProjects (repoRoot ()) |> List.map _.PackageId
+    let ids = Roster.derive (repoRoot ()) |> List.map _.PackageId
 
     let assemblies = ids |> List.map (fun id -> Assembly.Load(AssemblyName id))
     let offenders = assemblies |> List.collect obsoleteMembers
@@ -561,7 +561,7 @@ let tests =
           }
 
           test "no public function in any Core package answers a tuple of three or more positions" {
-              let ids = PackageRosterTests.packableProjects (repoRoot ()) |> List.map _.PackageId
+              let ids = Roster.derive (repoRoot ()) |> List.map _.PackageId
               let assemblies = ids |> List.map (fun id -> Assembly.Load(AssemblyName id))
               let scans = assemblies |> List.map wideTupleAnswers
               let functions = scans |> List.sumBy fst

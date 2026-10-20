@@ -400,7 +400,7 @@ let internal notWire: (string * string) list =
       "Fuaran.Core.Validator", "validation results are in-process values; emits no document"
       "Fuaran.Core.Projection", "renders TEXT for a model to read, not a wire document"
       "Fuaran.Core.Conformance",
-      "a law kit; the law corpus it exports is pinned by its own emission test (`--emit-laws`)"
+      "a law kit; the law corpus it exports is pinned by its own emission test (`render laws`)"
       "Fuaran.Core.Idl.Cli", "a command-line host over Fuaran.Core.Idl; it emits through it"
       "Fuaran.Core.ContentAddress", "a digest of a document's canonical text; emits no document of its own"
       "Fuaran.Core.Unit", "a unit's canonical text is a string another package's document carries; emits no document"
@@ -715,8 +715,7 @@ let tests =
     testList
         "Wire surface"
         [ test "every packable package is a wire root or says why it is not" {
-              let packable =
-                  PackageRosterTests.packableProjects (repoRoot ()) |> List.map _.PackageId
+              let packable = Roster.derive (repoRoot ()) |> List.map _.PackageId
 
               Expect.isNonEmpty packable "at least one packable project was found under src/"
               let wire = wirePackages ()

@@ -9,7 +9,7 @@
 # `publish-packages.yml` pushes with `--skip-duplicate`, which is right for a re-run and means a
 # re-run after a PARTIAL push prints success without saying which ids were new — and nothing asked
 # the registry afterwards what it serves. This script asks. It derives the PACKABLE ROSTER from the
-# project files, exactly as `PackageRosterTests.packableProjects` does (`src/*/*.fsproj` and
+# project files, exactly as `Roster.derive` (tests/Fuaran.Core.Tests.Fixtures/Roster.fs) does (`src/*/*.fsproj` and
 # `src/*/*.csproj`; `<IsPackable>` from the project, else `Directory.Build.props`, else true — only
 # a literal `false` excludes; `<PackageId>` else the file's base name), and the suite holds the two
 # derivations to one set (`PackageRosterTests`, "the registry probe derives the same roster"), so
@@ -61,7 +61,7 @@ function Fail([string] $message, [int] $code) {
     exit $code
 }
 
-# ---- the roster: THE derivation `PackageRosterTests.packableProjects` uses -------------------------
+# ---- the roster: THE derivation `Roster.derive` uses -------------------------------------------------
 
 function Get-FirstGroup([string] $pattern, [string] $text) {
     $m = [regex]::Match($text, $pattern)

@@ -26,7 +26,7 @@ module Fuaran.Core.Tests.PackageDocsTests
 // Each reader has a go-red case beside it over synthetic input, so a reader that matched nothing
 // cannot pass the live case by accident.
 //
-// The roster is `PackageRosterTests.packableProjects` — the ONE derivation of "what ships".
+// The roster is `Roster.derive` — the ONE derivation of "what ships".
 // ---------------------------------------------------------------------------
 
 open System
@@ -90,7 +90,7 @@ let tests =
         "PackageDocs"
         [ test "every packable project's built assembly has its XML documentation file beside it" {
               let root = repoRoot ()
-              let packable = PackageRosterTests.packableProjects root
+              let packable = Roster.derive root
               Expect.isNonEmpty packable "the packable roster is empty — the derivation found nothing to check"
 
               let faults =
@@ -130,7 +130,7 @@ let tests =
                   "Directory.Build.props no longer sets GenerateDocumentationFile for the projects under src/"
 
               let off =
-                  PackageRosterTests.packableProjects root
+                  Roster.derive root
                   |> List.filter (fun p -> switchesDocsOff (File.ReadAllText(Path.Combine(root, p.ProjectFile))))
                   |> List.map _.ProjectFile
 
@@ -475,7 +475,7 @@ let private measureAll () : Result<DocCoverage list, string list> =
     let root = repoRoot ()
 
     let results =
-        PackageRosterTests.packableProjects root
+        Roster.derive root
         |> List.map (fun p ->
             let assembly = Path.GetFileNameWithoutExtension p.ProjectFile
             let xml = Path.Combine(AppContext.BaseDirectory, assembly + ".xml")

@@ -244,8 +244,8 @@ let declareErrorsTests =
                     "reference", ReferenceIdl.refIdl
                     "value-coverage", ReferenceIdl.valueCoverageIdl
                     "unsorted-coverage", ReferenceIdl.unsortedCoverageIdl
-                    "second-domain", SecondDomainSpike.docIdl
-                    "score", ScoreDomainSpike.scoreIdl
+                    "second-domain", SecondDomainIdl.docIdl
+                    "score", ScoreDomainIdl.scoreIdl
                     "doc-annotated", IdlDocAnnotationTests.docIdl ] do
                   Expect.isEmpty (Declare.errors idl) (sprintf "%s: Declare.errors" name)
           }

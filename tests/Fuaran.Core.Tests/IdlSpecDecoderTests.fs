@@ -137,8 +137,8 @@ let private vocabularies () : (string * GenSupport * Idl) list =
     let decodeIdl, _, _ = DecodeVectorsIdl.current ()
 
     [ "mini", GenSupport.Empty, MiniIdl.miniIdl
-      "doc", GenSupport.Empty, SecondDomainSpike.docIdl
-      "score", GenSupport.Empty, ScoreDomainSpike.scoreIdl
+      "doc", GenSupport.Empty, SecondDomainIdl.docIdl
+      "score", GenSupport.Empty, ScoreDomainIdl.scoreIdl
       "reference", ReferenceIdl.support.Support, ReferenceIdl.refIdl
       "decode-vectors", GenSupport.Empty, decodeIdl
       "refusal-corners", GenSupport.Empty, RefusalCornersIdl.idl
@@ -230,7 +230,7 @@ let tests =
                     Expect.equal
                         generated
                         (File.ReadAllText path)
-                        "regenerate with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots") ]
+                        "regenerate with: dotnet run --project tools/Fuaran.Core.Tools -- render generated") ]
 
           testList
               "one multi-defect input per field shape"

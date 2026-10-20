@@ -29,7 +29,7 @@ module G = Fuaran.Core.Tests.MiniGenerated
 // ---------------------------------------------------------------------------
 
 // Vendored wire snapshots load from the golden store (regenerate with
-// `--regen-snapshots`); the spike's own `expected` literal is retired.
+// `render generated`); the spike's own `expected` literal is retired.
 let private expected = Snapshots.loadPaired "spike" cases
 let private expectedMap = Map.ofList expected
 
@@ -41,7 +41,7 @@ let private wire (name: string) =
 /// The kinds the generated F# encoder (`MiniGenerated.fs`) covers — the 6-kind slice
 /// (Fuaran-UI 0.2.0: Card / Stack unified into `Box`, Divider retired), plus
 /// `Tabs`, the Phase 689 `'Msg`-threading spike kind. This list and the one in
-/// `Program.fs`'s `--regen-snapshots` must stay in step: the generative
+/// `GeneratedModules.regen` (the tool's `render generated`) must stay in step: the generative
 /// conformance test samples from the whole IDL but compares against a TS module
 /// built from THIS list, so a kind missing here shows up as `"kind":undefined` on
 /// the TS side rather than as a missing-kind error.
@@ -55,12 +55,12 @@ let private generatedKinds =
 [<Literal>]
 let private corpusFamily = "nodes"
 
-/// The committed generated module, at the path `--regen-snapshots` writes it to.
+/// The committed generated module, at the path `render generated` writes it to.
 let private miniGeneratedFile = "tests/Fuaran.Core.Tests/MiniGenerated.fs"
 
 /// The command that regenerates both of this file's held artefacts.
 let private regenerate =
-    "dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots"
+    "dotnet run --project tools/Fuaran.Core.Tools -- render generated"
 
 /// A held artefact that is ABSENT is red, naming the file and the command that writes it (Phase 499):
 /// a guard that skipped here read green over a deleted artefact, where every other held artefact
@@ -306,7 +306,7 @@ let tests =
 
           testCase "snapshot store: the committed spike.json IS what the store renders (byte-for-byte)" (fun _ ->
               // D30's third artefact. The two guards above cover the generated F# modules;
-              // this one covers the golden map the SAME `--regen-snapshots` command writes,
+              // this one covers the golden map the SAME `render generated` command writes,
               // which nothing byte-compared until now: the legs above it read this file
               // through `loadPaired`, which parses it and compares only the wire STRINGS it
               // holds — so its own key order, indentation and line endings were unpinned, and

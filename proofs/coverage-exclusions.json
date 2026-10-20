@@ -381,7 +381,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Projections and renderings of the law-family roster; held to the tree by the roster tests and the generated `docs/conformance-families.*` approval.",
-      "standIn": "tests/Fuaran.Core.Tests/KitRoster.fs"
+      "standIn": "tests/Fuaran.Core.Tests.Fixtures/KitRoster.fs"
     },
     {
       "members": [
@@ -390,7 +390,7 @@
       "class": "measured-elsewhere",
       "reason": "Renders an opt-in reason token into the roster exports; measured through the generated export approval.",
       "through": "Families.toJsonOf",
-      "standIn": "tests/Fuaran.Core.Tests/KitRoster.fs"
+      "standIn": "tests/Fuaran.Core.Tests.Fixtures/KitRoster.fs"
     },
     {
       "members": [
@@ -833,7 +833,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Vocabulary well-formedness: every rule a declaration must satisfy, refused at parse (Phase 292); the declare tests enumerate each rule.",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeVectorsIdl.fs"
+      "standIn": "tests/Fuaran.Core.Tests.Fixtures/DecodeVectorsIdl.fs"
     },
     {
       "members": [
@@ -1929,7 +1929,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "The `$type`-discriminated object of the cross-host form (`Canon.typed` until Phase 520); example-tested beside the modelled rendering.",
-      "standIn": "tests/Fuaran.Core.Tests/ApplyVectorExport.fs"
+      "standIn": "tests/Fuaran.Core.Tests.Fixtures/ApplyVectorExport.fs"
     },
     {
       "members": [

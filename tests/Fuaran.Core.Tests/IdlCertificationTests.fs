@@ -38,8 +38,8 @@ open Fuaran.Core.Idl.Codegen.Types
 /// The vocabularies the engine is certified over — no domain owns any of them.
 let private neutralVocabularies =
     [ "reference", refIdl
-      "second-domain", SecondDomainSpike.docIdl
-      "score-domain", ScoreDomainSpike.scoreIdl
+      "second-domain", SecondDomainIdl.docIdl
+      "score-domain", ScoreDomainIdl.scoreIdl
       "spike", Fuaran.Core.Tests.MiniIdl.miniIdl ]
 
 /// The round-trip sweep runs over the certification set PLUS the value-coverage

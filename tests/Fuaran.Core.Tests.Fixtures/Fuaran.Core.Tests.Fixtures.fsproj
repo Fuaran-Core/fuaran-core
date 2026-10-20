@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Phase 532 - the FIXTURES library: what the suite and the tool (tools/Fuaran.Core.Tools) both read.
+       The reference domains and the certification vocabularies, the exporters and the generators of every
+       committed artefact, the one child-process runner and repository root, the approval reader, the
+       package roster, and the proof leg's ladder check, coverage predicate and cone selector. It holds no
+       test: a [<Tests>] value here would never run (the runner discovers its own assembly), which the
+       suite's `Fixtures` family holds. Compile order is dependency order. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Fuaran.Core.Tests" />
+    <InternalsVisibleTo Include="Fuaran.Core.Tools" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Tool.fs" />
+    <Compile Include="ChildProcess.fs" />
+    <Compile Include="Approval.fs" />
+    <Compile Include="Reference.fs" />
+    <Compile Include="Reference2.fs" />
+    <Compile Include="KitRoster.fs" />
+    <Compile Include="Roster.fs" />
+    <Compile Include="Snapshots.fs" />
+    <Compile Include="OwnedConformance.fs" />
+    <Compile Include="SiblingCorpus.fs" />
+    <Compile Include="MiniIdl.fs" />
+    <Compile Include="SecondDomainIdl.fs" />
+    <Compile Include="ScoreDomainIdl.fs" />
+    <Compile Include="ReferenceIdl.fs" />
+    <Compile Include="DecodeVectorsIdl.fs" />
+    <Compile Include="RefusalCornersIdl.fs" />
+    <Compile Include="DeriveIdl.fs" />
+    <Compile Include="SpecDecodersIdl.fs" />
+    <Compile Include="IdlClassifyFixtures.fs" />
+    <Compile Include="CertificationVectors.fs" />
+    <Compile Include="FStarModels.fs" />
+    <Compile Include="GeneratedModules.fs" />
+    <Compile Include="ApplyVectorExport.fs" />
+    <Compile Include="PropagationVectorExport.fs" />
+    <Compile Include="CanonicalFormVectorExport.fs" />
+    <Compile Include="LawVectorExport.fs" />
+    <Compile Include="RefusalCorpus.fs" />
+    <Compile Include="DecodeRejectCorpus.fs" />
+    <Compile Include="EscapeCorpus.fs" />
+    <Compile Include="EncodingCorpus.fs" />
+    <Compile Include="FamiliesExport.fs" />
+    <Compile Include="Exporters.fs" />
+    <Compile Include="ProofLadder.fs" />
+    <Compile Include="ProofCone.fs" />
+    <Compile Include="ProofCoverage.fs" />
+    <Compile Include="OracleProject.fs" />
+    <Compile Include="Renders.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Ops\Fuaran.Core.Ops.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+    <!-- Approval.fs fails the case that named an unmatched stem (failtestf); nothing else here uses it. -->
+    <PackageReference Include="Expecto" />
+  </ItemGroup>
+</Project>

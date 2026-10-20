@@ -85,7 +85,7 @@ let private tagRead =
 /// `path:line`.
 let private secondReaders (files: (string * string list) list) : string list =
     [ for rel, lines in files do
-          if rel <> "tests/Fuaran.Core.Tests/ChildProcess.fs" then
+          if rel <> "tests/Fuaran.Core.Tests.Fixtures/ChildProcess.fs" then
               for i, line in List.indexed lines do
                   if tagRead.IsMatch line then
                       yield sprintf "%s:%d" rel (i + 1) ]
@@ -252,7 +252,7 @@ let tests =
 
           test "one tag reader: no source but ChildProcess.fs asks git for tags" {
               let files =
-                  [ "src"; "tests" ]
+                  [ "src"; "tests"; "tools" ]
                   |> List.collect (fun d ->
                       Directory.EnumerateFiles(Repo.file d, "*.fs", SearchOption.AllDirectories)
                       |> Seq.filter (fun f ->
@@ -286,7 +286,7 @@ let tests =
                   "so is reading the tag refs another way"
 
               Expect.isEmpty
-                  (secondReaders [ "tests/Fuaran.Core.Tests/ChildProcess.fs", [ line ] ])
+                  (secondReaders [ "tests/Fuaran.Core.Tests.Fixtures/ChildProcess.fs", [ line ] ])
                   "the one reader is admitted"
 
               Expect.isEmpty

@@ -191,30 +191,6 @@ let private ladderDischarges () : (string * string) list =
     out |> List.ofSeq |> List.sortBy fst
 
 // ---------------------------------------------------------------------------
-//  the generated artefacts
-// ---------------------------------------------------------------------------
-
-/// Where `--emit-families` writes, and the suite compares.
-module Export =
-
-    let markdownPath (root: string) =
-        Path.Combine(root, "conformance-families.md")
-
-    let jsonPath (root: string) =
-        Path.Combine(root, "conformance-families.json")
-
-    /// The directory the two artefacts live in — this repository's own `docs/`, resolved through
-    /// the same root marker every other owned artefact uses, so a linked worktree writes and reads
-    /// its own copy.
-    let root () = Snapshots.repoFile "docs"
-
-    /// The measured half of the export — Phase 196. A roster cannot run a law, so the `cases`
-    /// column is supplied by the reference run beside it rather than derived here. One call site
-    /// for the emit and the freshness legs alike, so the committed artefacts and what the suite
-    /// compares them against cannot be rendered from different runs.
-    let cases () = ConformanceVacuityTests.cases ()
-
-// ---------------------------------------------------------------------------
 
 [<Tests>]
 let familiesTests =
@@ -399,7 +375,7 @@ let familiesTests =
               // rendering broken at the families array. So the lines, trimmed and joined, are the
               // canonical rendering of what they parse to: member order, escaping and number layout
               // are the wire's own, not this renderer's.
-              let json = KitRoster.toJsonWith (Export.cases ())
+              let json = KitRoster.toJsonWith (ConformanceVacuityTests.cases ())
               Expect.isTrue (json.EndsWith "\n") "the export ends with a newline"
 
               match Json.parse json with
@@ -440,7 +416,7 @@ let familiesTests =
               // every bump free on the claim that no such reader existed. The contract entry carries
               // the schema number it was written against, so a bump that does not revisit the entry
               // is red here rather than discovered by the reader.
-              let json = KitRoster.toJsonWith (Export.cases ())
+              let json = KitRoster.toJsonWith (ConformanceVacuityTests.cases ())
               let schema = string Families.schema
 
               Expect.stringContains json ("\"schema\":" + schema) "the export carries the schema the module declares"
@@ -470,7 +446,7 @@ let familiesTests =
               // Phase 498 — `Fuaran.Core.DataFrame.Conformance` stopped at `0.34.0`; the compute
               // repository ships the dataframe families as `Fuaran.Compute.Conformance` since its
               // `0.36.0`. The generated document said the old id until this phase.
-              let md = KitRoster.toMarkdownWith (Export.cases ())
+              let md = KitRoster.toMarkdownWith (ConformanceVacuityTests.cases ())
               Expect.stringContains md "`Fuaran.Compute.Conformance`" "the document names the current id"
 
               Expect.isFalse
@@ -506,7 +482,7 @@ let familiesTests =
                     "spellings"
                     "witness" ]
 
-              match Json.parse (KitRoster.toJsonWith (Export.cases ())) with
+              match Json.parse (KitRoster.toJsonWith (ConformanceVacuityTests.cases ())) with
               | Error e -> failtestf "the export does not parse as JSON: %s" e
               | Ok(JObj top) ->
                   let member_ name =
@@ -586,7 +562,7 @@ let familiesTests =
           testCase "both renderings are sorted by id, so a diff shows only what moved"
           <| fun _ ->
               let sorted = KitRoster.ids
-              let md = KitRoster.toMarkdownWith (Export.cases ())
+              let md = KitRoster.toMarkdownWith (ConformanceVacuityTests.cases ())
 
               let positions =
                   sorted
@@ -598,7 +574,7 @@ let familiesTests =
               let jsonPositions =
                   sorted
                   |> List.map (fun id ->
-                      (KitRoster.toJsonWith (Export.cases ()))
+                      (KitRoster.toJsonWith (ConformanceVacuityTests.cases ()))
                           .IndexOf("\"id\":\"" + id + "\"", StringComparison.Ordinal))
 
               Expect.equal jsonPositions (List.sort jsonPositions) "the JSON families array is in id order" ]

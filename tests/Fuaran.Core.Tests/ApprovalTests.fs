@@ -11,9 +11,9 @@ open System.Text.RegularExpressions
 open Expecto
 open Fuaran.Core.Tests.Approval
 
-/// Every `.fs` under `src/` and `tests/`, build residue excluded, repository-relative with `/`.
+/// Every `.fs` under `src/`, `tests/` and `tools/`, build residue excluded, repository-relative with `/`.
 let private sourceFiles () : (string * string) list =
-    [ "src"; "tests" ]
+    [ "src"; "tests"; "tools" ]
     |> List.collect (fun dir ->
         Directory.EnumerateFiles(Snapshots.repoFile dir, "*.fs", SearchOption.AllDirectories)
         |> Seq.filter (fun f ->
@@ -36,7 +36,7 @@ let private directSpawn =
 /// The sources that spawn a child anywhere but `ChildProcess.fs`, as `path:line  text`.
 let internal spawnOffenders (files: (string * string list) list) : string list =
     [ for rel, lines in files do
-          if rel <> "tests/Fuaran.Core.Tests/ChildProcess.fs" then
+          if rel <> "tests/Fuaran.Core.Tests.Fixtures/ChildProcess.fs" then
               for i, line in List.indexed lines do
                   if directSpawn.IsMatch line then
                       yield sprintf "  %s:%d  %s" rel (i + 1) (line.Trim()) ]
@@ -160,7 +160,7 @@ let tests =
 
               let offenders =
                   [ for rel, full in files do
-                        if rel <> "tests/Fuaran.Core.Tests/Approval.fs" then
+                        if rel <> "tests/Fuaran.Core.Tests.Fixtures/Approval.fs" then
                             for i, line in File.ReadAllLines full |> Array.indexed do
                                 if directRead.IsMatch line then
                                     yield sprintf "  %s:%d  %s" rel (i + 1) (line.Trim()) ]
@@ -189,7 +189,7 @@ let tests =
 
               Expect.isTrue
                   (files
-                   |> List.exists (fun (rel, _) -> rel = "tests/Fuaran.Core.Tests/ChildProcess.fs"))
+                   |> List.exists (fun (rel, _) -> rel = "tests/Fuaran.Core.Tests.Fixtures/ChildProcess.fs"))
                   "the sweep sees the runner it exempts"
 
               let offenders = spawnOffenders files
@@ -212,7 +212,7 @@ let tests =
                   "both spellings, by file and line"
 
               Expect.isEmpty
-                  (spawnOffenders [ "tests/Fuaran.Core.Tests/ChildProcess.fs", [ "use p = " + start ] ])
+                  (spawnOffenders [ "tests/Fuaran.Core.Tests.Fixtures/ChildProcess.fs", [ "use p = " + start ] ])
                   "the runner's own spawn is the one admitted"
 
               Expect.isEmpty
@@ -226,10 +226,6 @@ let tests =
 // `records` (the workspace copy registry) and CONTRIBUTING.md's switch table (a contributor). Each is
 // rendered here from the rows, spliced into its file's hand-written remainder, and held byte for byte;
 // the readers outside this repository read exactly the members and the spelling they read before.
-
-/// The prefix of every test runner verb's invocation.
-[<Literal>]
-let internal Runner = "dotnet run --project tests/Fuaran.Core.Tests -- "
 
 /// A JSON string literal, escaping only what JSON requires (`<` and `>` stay as they are written).
 let internal jsonString (s: string) : string =
@@ -288,7 +284,7 @@ let internal derivesBlock (rows: Projection list) : string list =
               if r.VersionStamped then
                   for c in r.Copies do
                       [ "    {"
-                        member' "      " "emit" (jsonString (Runner + Option.get r.Render)) + ","
+                        member' "      " "emit" (jsonString (Tool.render (Option.get r.Render))) + ","
                         member' "      " "writes" (jsonString r.Path) + ","
                         member' "      " "copiedTo" (jsonString c.Spelling)
                         "    }" ] ]
@@ -325,7 +321,8 @@ let internal recordsBlock (rows: Projection list) : string list =
 
                     yield "      ],"
                     yield member' "      " "check" (jsonString "fingerprint") + ","
-                    yield member' "      " "regen" (jsonString (Runner + Option.get r.Render + " " + checkout repo))
+                    yield
+                        member' "      " "regen" (jsonString (Tool.render (Option.get r.Render) + " " + checkout repo))
                     yield "    }" ] ]
 
     [ yield member' "  " "records" "["
@@ -412,14 +409,6 @@ let internal renders (rows: Projection list) : (string * string * (string -> Res
           | Some t -> Ok t
           | None -> Error(sprintf "the file has no `%s` table" SwitchTableHeader)) ]
 
-/// The test runner's verbs that write a committed file: every `--emit-…` and `--regen-…` arm of
-/// `Program.fs`'s argument match.
-let internal runnerVerbs (programText: string) : string list =
-    Regex.Matches(programText, @"^\s*\|\s*""(--(?:emit|regen)-[a-z-]+)""\s*::", RegexOptions.Multiline)
-    |> Seq.map _.Groups[1].Value
-    |> Seq.distinct
-    |> Seq.toList
-
 /// The stem handles `Approval` declares for the sites (`Regenerated`, `Ladders`, `Files`), read by
 /// reflection so the comparison below cannot be a third list.
 let internal handles () : string list =
@@ -443,11 +432,10 @@ let internal switches = [ Api; Wire; Ladder; Readme; Docs; Regen ]
 let internal registryFaults
     (exists: string -> bool)
     (templateHits: string -> int)
-    (programText: string)
+    (verbs: string list)
     (handles: string list)
     (rows: Projection list)
     : string list =
-    let verbs = runnerVerbs programText
 
     let fixedRowStems =
         rows
@@ -469,7 +457,7 @@ let internal registryFaults
 
           match r.Render with
           | Some v when not (List.contains v verbs) ->
-              yield sprintf "%s names the verb `%s`, which the test runner (Program.fs) does not have" r.Path v
+              yield sprintf "%s names the family `%s`, which the tool's `render` does not have" r.Path v
           | _ -> ()
 
           match r.Switch with
@@ -479,7 +467,7 @@ let internal registryFaults
 
       for v in verbs do
           if not (rows |> List.exists (fun r -> r.Render = Some v)) then
-              yield sprintf "the test runner's `%s` writes files no registry row names" v
+              yield sprintf "the tool's `render %s` writes files no registry row names" v
 
       for h in handles do
           if not (List.contains h fixedRowStems) then
@@ -510,7 +498,7 @@ let private templateHits (template: string) =
 
 let private sampleRows =
     [ { Path = "conformance/laws/a-laws.json"
-        Render = Some "--emit-laws"
+        Render = Some "laws"
         Switch = None
         Stem = None
         HeldBy = "LawVectorTests"
@@ -519,7 +507,7 @@ let private sampleRows =
               Path = "laws/a-laws.json" } ]
         VersionStamped = true }
       { Path = "conformance/apply/manifest.json"
-        Render = Some "--emit-apply"
+        Render = Some "apply"
         Switch = None
         Stem = None
         HeldBy = "ApplyVectorTests"
@@ -558,7 +546,7 @@ let projectionTests =
                       registryFaults
                           (fun rel -> File.Exists(Repo.file rel))
                           templateHits
-                          (repoText "tests/Fuaran.Core.Tests/Program.fs")
+                          Renders.names
                           (handles ())
                           registry.Value
 
@@ -606,14 +594,14 @@ let projectionTests =
               reds """{"path":"a.fs"}""" "has no `heldBy`"
               reds """{"path":"a.fs","heldBy":"T","switch":"FUARAN_REGEN"}""" "a switch without its stem"
               reds """{"path":"api/{package}.txt","heldBy":"T","switch":"CORE_APPROVE_API","stem":"x"}""" "go together"
-              reds """{"path":"a.json","heldBy":"T","render":"emit-laws"}""" "is not a `--<verb>`"
+              reds """{"path":"a.json","heldBy":"T","render":"--emit-laws"}""" "is not a family name"
 
               reds
-                  """{"path":"a.json","heldBy":"T","render":"--emit-laws","copies":["corpus/laws/a.json"]}"""
+                  """{"path":"a.json","heldBy":"T","render":"laws","copies":["corpus/laws/a.json"]}"""
                   "is not `<repo>:<path>`"
 
               reds """{"path":"a.json","heldBy":"T","copies":["r:a.json"]}""" "no verb to regenerate it with"
-              reds """{"path":"a.json","heldBy":"T","render":"--emit-laws","versionStamped":true}""" "declares no copy"
+              reds """{"path":"a.json","heldBy":"T","render":"laws","versionStamped":true}""" "declares no copy"
 
               match parseRegistry """{"rows":[{"path":"a","heldBy":"T"},{"path":"a","heldBy":"U"}]}""" with
               | Error es -> Expect.exists es (fun e -> e.Contains "declared twice") "a repeated row is refused"
@@ -622,8 +610,7 @@ let projectionTests =
           testCase
               "go-red: the walk names a missing file, a stray holder, an unknown verb, an unlisted verb and an orphan handle"
               (fun _ ->
-                  let program =
-                      "match argv with\n    | \"--emit-laws\" :: rest -> 0\n    | \"--emit-apply\" :: _ -> 0\n"
+                  let program = [ "laws"; "apply" ]
 
                   let ok = registryFaults (fun _ -> true) (fun _ -> 1) program [ "Gen" ] sampleRows
                   Expect.isEmpty ok "the sample registry is green against a tree that has it"
@@ -647,24 +634,14 @@ let projectionTests =
                       "a holder that is not a test module is red"
 
                   Expect.stringContains
-                      (faults
-                          (fun _ -> true)
-                          (fun _ -> 1)
-                          (program + "    | \"--regen-other\" :: _ -> 0\n")
-                          [ "Gen" ]
-                          sampleRows)
-                      "`--regen-other` writes files no registry row names"
-                      "a runner verb no row names is red"
+                      (faults (fun _ -> true) (fun _ -> 1) (program @ [ "other" ]) [ "Gen" ] sampleRows)
+                      "`render other` writes files no registry row names"
+                      "a tool family no row names is red"
 
                   Expect.stringContains
-                      (faults
-                          (fun _ -> true)
-                          (fun _ -> 1)
-                          "match argv with\n    | \"--emit-laws\" :: rest -> 0\n"
-                          [ "Gen" ]
-                          sampleRows)
-                      "names the verb `--emit-apply`, which the test runner"
-                      "a row naming a verb the runner lost is red"
+                      (faults (fun _ -> true) (fun _ -> 1) [ "laws" ] [ "Gen" ] sampleRows)
+                      "names the family `apply`, which the tool's `render` does not have"
+                      "a row naming a family the tool lost is red"
 
                   Expect.stringContains
                       (faults (fun _ -> true) (fun _ -> 1) program [ "Gen"; "Orphan" ] sampleRows)
@@ -686,7 +663,7 @@ let projectionTests =
                   (derivesBlock sampleRows)
                   [ "  \"derives\": ["
                     "    {"
-                    "      \"emit\": \"dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws\","
+                    "      \"emit\": \"dotnet run --project tools/Fuaran.Core.Tools -- render laws\","
                     "      \"writes\": \"conformance/laws/a-laws.json\","
                     "      \"copiedTo\": \"x/corpus:laws/a-laws.json\""
                     "    }"
@@ -698,7 +675,7 @@ let projectionTests =
 
               Expect.stringContains
                   records
-                  "--emit-apply <the corpus checkout>\""
+                  "render apply <the corpus checkout>\""
                   "and the verb, with the checkout it writes into"
 
               Expect.equal
