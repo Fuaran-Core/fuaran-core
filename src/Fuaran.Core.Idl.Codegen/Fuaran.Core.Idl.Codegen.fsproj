@@ -47,6 +47,7 @@
          runtime preludes are template files (Templates/), read by name. -->
     <Compile Include="Emit/Printer.fs" />
     <Compile Include="Emit/Template.fs" />
+    <Compile Include="Emit/DeriveTraversal.fs" />
     <Compile Include="Emit/FSharpTypes.fs" />
     <Compile Include="Emit/FSharpDefaults.fs" />
     <Compile Include="Emit/FSharpDerive.fs" />

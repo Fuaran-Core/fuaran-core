@@ -1000,7 +1000,7 @@ let private encFloat (f: float) : JVal =
     // structural layer plugs straight into `Fuaran.Core.Tree` / `.Validator` /
     // `.Observer` — the "serves every domain via the Core witness, not just UI"
     // promise. `Children` / `ReplaceChildren` are derived from the IDL: a field
-    // is a child position iff `FSharpDerive.structuralField` says so — a node or
+    // is a child position iff `Derive.structural` says so — a node or
     // node list the kind always carries (Phase 545: an optional node is a keyed
     // position, on both the private and the public emission).
     // -----------------------------------------------------------------------
@@ -1063,7 +1063,7 @@ let private encFloat (f: float) : JVal =
 
         let childBearing =
             kinds
-            |> List.filter (fun k -> fieldsOf k |> List.exists (FSharpDerive.structuralField >> Option.isSome))
+            |> List.filter (fun k -> not (List.isEmpty (Derive.structuralFields (fieldsOf k))))
 
         let allBearing = List.length childBearing = List.length kinds
 
@@ -1074,40 +1074,42 @@ let private encFloat (f: float) : JVal =
 
         let childArm (k: IdlKind) =
             let exprs =
-                fieldsOf k
-                |> List.choose FSharpDerive.structuralField
-                |> List.map (fun (name, isList) -> if isList then "s." + name else "[ s." + name + " ]")
+                Derive.structuralFields (fieldsOf k)
+                |> List.map (fun (f, isList) ->
+                    if isList then
+                        "s." + pascal f.Name
+                    else
+                        "[ s." + pascal f.Name + " ]")
                 |> String.concat " @ "
 
             sprintf "    | NodeKind.%s s -> %s" k.Tag exprs
 
         let replaceArm (k: IdlKind) : Result<string, CodegenError> =
-            match fieldsOf k |> List.choose FSharpDerive.structuralField with
-            | [ (name, true) ] ->
-                Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }" k.Tag k.Tag name)
-            | [ (name, false) ] ->
-                Ok(
+            Derive.childLayout k.Tag (Derive.structuralFields (fieldsOf k))
+            |> Result.map (fun layout ->
+                match layout with
+                | ChildLayout.Whole f ->
+                    sprintf
+                        "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }"
+                        k.Tag
+                        k.Tag
+                        (pascal f.Name)
+                | ChildLayout.Positional [ f ] ->
                     sprintf
                         "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = List.head kids } }"
                         k.Tag
                         k.Tag
-                        name
-                )
-            | fields when fields |> List.forall (fun (_, isList) -> not isList) ->
-                // Several single-`Node` fields (real tier: `ErrorBoundary` has `child` + `fallback`).
-                // `witnessChildren` returns them in field order, so re-assign `kids` positionally.
-                let assigns =
-                    fields
-                    |> List.mapi (fun i (name, _) -> sprintf "%s = List.item %d kids" name i)
-                    |> String.concat "; "
+                        (pascal f.Name)
+                | ChildLayout.Positional fs ->
+                    // Several single-`Node` fields (real tier: `ErrorBoundary` has `child` +
+                    // `fallback`). `witnessChildren` returns them in field order, so re-assign `kids`
+                    // positionally.
+                    let assigns =
+                        fs
+                        |> List.mapi (fun i f -> sprintf "%s = List.item %d kids" (pascal f.Name) i)
+                        |> String.concat "; "
 
-                Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s } }" k.Tag k.Tag assigns)
-            | _ ->
-                // A kind mixing a `Node list` field with other node-bearing fields has no
-                // unambiguous positional split; none exists in the vocabulary, so the generator
-                // refuses at generation time (GP4) rather than emitting a runtime throwing
-                // guard into the generated code.
-                Error(CodegenError.MultiChildFieldKind k.Tag)
+                    sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s } }" k.Tag k.Tag assigns)
 
         let childArms =
             (childBearing |> List.map childArm)
