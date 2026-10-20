@@ -1186,9 +1186,16 @@
         "Idl.SupportArtifact.ofJson"
       ],
       "class": "measured-elsewhere",
-      "reason": "Reads a support document from JSON; `parse` parses the text and calls it.",
-      "through": "SupportArtifact.parse",
-      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+      "reason": "Reads a support document from its parsed root through `SupportArtifact.decoder` (Phase 526), the refusal rendered with its code and path; the decode-layer refusal tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SupportArtifact.parseDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error support-document reader (Phase 526); `parse` is it plus the sentence. The decode-layer tests pin each refusal on its code and path and the reference document's round trip.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [

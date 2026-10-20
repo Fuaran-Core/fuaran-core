@@ -197,157 +197,111 @@ module SupportArtifact =
     let render (doc: SupportDocument) : string = Artifact.renderJson (json doc)
 
     // ---- reading ----------------------------------------------------------
+    //
+    // Phase 526 — the reader is a `Decoder` on Core's typed decode layer (Phase 310), so a refusal
+    // carries a `DecodeCode` and the path to the value at fault, as `Artifact`'s does, instead of a
+    // sentence spelt here. The document stays OPEN to members it does not know (as it always was);
+    // a member it does know is read strictly, so a `splices` block that is not an object is now
+    // refused where it used to read as no splices at all.
 
-    let private atKey (name: string) (v: JVal) : JVal option =
-        match v with
-        | JObj fields -> fields |> List.tryPick (fun (n, x) -> if n = name then Some x else None)
-        | _ -> None
+    /// One more member into a record being decoded — the applicative step, so a reader with seven
+    /// members is seven `<*>`s rather than seven nested binds. The first refusal wins.
+    let private (<*>) (df: Decoder<'a -> 'b>) (da: Decoder<'a>) : Decoder<'b> = Decoder.pair df da (fun f a -> f a)
 
-    let private strAt (name: string) (v: JVal) : Result<string, string> =
-        match atKey name v with
-        | Some(JStr s) -> Ok s
-        | Some _ -> Error("'" + name + "' is not a string")
-        | None -> Error("missing '" + name + "'")
+    let private str (name: string) : Decoder<string> = Decoder.field name Decoder.str
 
-    let private optStrAt (name: string) (v: JVal) : Result<string option, string> =
-        match atKey name v with
-        | None -> Ok None
-        | Some(JStr s) -> Ok(Some s)
-        | Some _ -> Error("'" + name + "' is not a string")
+    let private optStr (name: string) : Decoder<string option> = Decoder.optField name Decoder.str
 
-    let private sequence (results: Result<'a, string> list) : Result<'a list, string> =
-        (Ok [], results)
-        ||> List.fold (fun acc r ->
-            match acc, r with
-            | Error e, _ -> Error e
-            | _, Error e -> Error e
-            | Ok xs, Ok x -> Ok(x :: xs))
-        |> Result.map List.rev
+    /// A list-valued key that is OMITTED when empty reads back as empty; each entry is read under
+    /// its index.
+    let private entries (name: string) (entry: Decoder<string * 'v>) : Decoder<Map<string, 'v>> =
+        Decoder.fieldOr name [] (Decoder.list entry) |> Decoder.map Map.ofList
 
-    /// A list-valued key that is OMITTED when empty reads back as empty.
-    let private mapAt
-        (name: string)
-        (read: JVal -> Result<string * 'v, string>)
-        (root: JVal)
-        : Result<Map<string, 'v>, string> =
-        match atKey name root with
-        | None -> Ok Map.empty
-        | Some(JArr xs) -> xs |> List.map read |> sequence |> Result.map Map.ofList
-        | Some _ -> Error("'" + name + "' is not an array")
+    let private docEntry: Decoder<string * string list> =
+        Decoder.succeed (fun path ls -> path, ls)
+        <*> str "path"
+        <*> Decoder.field "lines" Decoder.strings
 
-    let private readDocEntry (v: JVal) : Result<string * string list, string> =
-        strAt "path" v
-        |> Result.bind (fun path ->
-            match atKey "lines" v with
-            | Some(JArr ls) ->
-                ls
-                |> List.map (function
-                    | JStr s -> Ok s
-                    | _ -> Error("doc '" + path + "' has a non-string line"))
-                |> sequence
-                |> Result.map (fun ls -> path, ls)
-            | Some _ -> Error("doc '" + path + "' has a non-array 'lines'")
-            | None -> Error("doc '" + path + "' has no 'lines'"))
-
-    let private readRefine (v: JVal) : Result<string * string, string> =
-        strAt "case" v
-        |> Result.bind (fun c -> strAt "expression" v |> Result.map (fun e -> c, e))
+    let private refine: Decoder<string * string> =
+        Decoder.succeed (fun case expr -> case, expr)
+        <*> str "case"
+        <*> str "expression"
 
     /// A projection's declared record fields, in authored order — the vocabulary's own field
     /// reader, so a field reads alike in `idl.json` and here.
-    let private readRecordFields (kindTag: string) (v: JVal) : Result<IdlField list option, string> =
-        match atKey "recordFields" v with
-        | None -> Ok None
-        | Some(JArr xs) ->
-            xs
-            |> List.map (fun x ->
-                CodegenLookup.readField x
-                |> Result.mapError (fun e ->
-                    "projection '"
-                    + kindTag
-                    + "' has a malformed record field: "
-                    + DecodeError.describe e))
-            |> sequence
-            |> Result.map Some
-        | Some _ -> Error("projection '" + kindTag + "' has a non-array 'recordFields'")
+    let private projection: Decoder<string * KindProjection> =
+        Decoder.succeed (fun kindTag spec enc dec mk map fields ->
+            kindTag,
+            { SpecDecl = spec
+              Encoder = enc
+              Decoder = dec
+              Mk = mk
+              MapMsg = map
+              RecordFields = fields })
+        <*> str "kind"
+        <*> str "specDecl"
+        <*> str "encoder"
+        <*> str "decoder"
+        <*> optStr "mk"
+        <*> optStr "mapMsg"
+        <*> Decoder.optField "recordFields" (Decoder.list CodegenLookup.readField)
 
-    let private readProjection (v: JVal) : Result<string * KindProjection, string> =
-        strAt "kind" v
-        |> Result.bind (fun kindTag ->
-            strAt "specDecl" v
-            |> Result.bind (fun spec ->
-                strAt "encoder" v
-                |> Result.bind (fun enc ->
-                    strAt "decoder" v
-                    |> Result.bind (fun dec ->
-                        optStrAt "mk" v
-                        |> Result.bind (fun mk ->
-                            optStrAt "mapMsg" v
-                            |> Result.bind (fun map ->
-                                readRecordFields kindTag v
-                                |> Result.map (fun fields ->
-                                    kindTag,
-                                    { SpecDecl = spec
-                                      Encoder = enc
-                                      Decoder = dec
-                                      Mk = mk
-                                      MapMsg = map
-                                      RecordFields = fields })))))))
+    let private splices: Decoder<string option * string option * string option * string option> =
+        Decoder.succeed (fun t e d a -> t, e, d, a)
+        <*> optStr "type"
+        <*> optStr "encode"
+        <*> optStr "decode"
+        <*> optStr "accessor"
 
-    let private readPrelude (root: JVal) : Result<HostPreludeRef option, string> =
-        match atKey "hostPrelude" root with
-        | None -> Ok None
-        | Some p ->
-            strAt "module" p
-            |> Result.bind (fun m -> strAt "path" p |> Result.map (fun path -> Some { Module = m; Path = path }))
+    let private prelude: Decoder<HostPreludeRef> =
+        Decoder.succeed (fun m path -> { Module = m; Path = path })
+        <*> str "module"
+        <*> str "path"
 
-    /// Read the document from its parsed root. The encoding version is refused by
-    /// name when it is not this engine's, for the reason `Artifact.ofJson` gives:
-    /// a support record that silently loses a projection emits a module that
+    /// The encoding version, refused by name when it is not this engine's (`OutOfRange`, as
+    /// `Artifact`'s is): a support record that silently loses a projection emits a module that
     /// compiles and is wrong.
-    let ofJson (root: JVal) : Result<SupportDocument, string> =
-        match atKey "version" root with
-        | None -> Error "support.json has no 'version'"
-        | Some(JInt v) when v <> version ->
-            Error(
-                "support.json declares encoding version "
-                + string v
-                + "; this engine reads version "
-                + string version
-            )
-        | Some(JInt _) ->
-            let splice name =
-                match atKey "splices" root with
-                | None -> Ok None
-                | Some block -> optStrAt name block
+    let private encodingVersion: Decoder<unit> =
+        Decoder.int
+        |> Decoder.andThen (fun v ->
+            if v = version then
+                Ok()
+            else
+                Error(RootDecodeCode.OutOfRange, "encoding version " + string version, "encoding version " + string v))
 
-            mapAt "docs" readDocEntry root
-            |> Result.bind (fun docs ->
-                mapAt "caseRefines" readRefine root
-                |> Result.bind (fun refines ->
-                    mapAt "kindProjections" readProjection root
-                    |> Result.bind (fun projections ->
-                        splice "type"
-                        |> Result.bind (fun ts ->
-                            splice "encode"
-                            |> Result.bind (fun es ->
-                                splice "decode"
-                                |> Result.bind (fun ds ->
-                                    splice "accessor"
-                                    |> Result.bind (fun accs ->
-                                        readPrelude root
-                                        |> Result.map (fun prelude ->
-                                            { Support =
-                                                { Docs = docs
-                                                  TypeSplice = ts
-                                                  EncodeSplice = es
-                                                  DecodeSplice = ds
-                                                  AccessorSplice = accs
-                                                  CaseRefines = refines
-                                                  KindProjections = projections }
-                                              HostPrelude = prelude }))))))))
-        | Some _ -> Error "support.json 'version' is not an integer"
+    let private body: Decoder<SupportDocument> =
+        Decoder.succeed (fun docs refines projections (ts, es, ds, accs) prelude ->
+            { Support =
+                { Docs = docs
+                  TypeSplice = ts
+                  EncodeSplice = es
+                  DecodeSplice = ds
+                  AccessorSplice = accs
+                  CaseRefines = refines
+                  KindProjections = projections }
+              HostPrelude = prelude })
+        <*> entries "docs" docEntry
+        <*> entries "caseRefines" refine
+        <*> entries "kindProjections" projection
+        <*> Decoder.fieldOr "splices" (None, None, None, None) splices
+        <*> Decoder.optField "hostPrelude" prelude
+
+    /// The document's reader (Phase 526): the encoding version FIRST and alone — a document from
+    /// another encoder may spell members this one does not know, and the version is the refusal
+    /// that explains them — then every member it knows, each refusal at its path.
+    let decoder: Decoder<SupportDocument> =
+        Decoder.field "version" encodingVersion |> Decoder.bind (fun () -> body)
+
+    /// Read the document from its parsed root — [[decoder]]'s refusal as one line in
+    /// `DecodeError.render`'s form (code, path, sentence).
+    let ofJson (root: JVal) : Result<SupportDocument, string> =
+        decoder root |> Result.mapError DecodeError.render
+
+    /// [[decoder]] over `support.json` bytes; text that is not JSON is refused at the root.
+    let parseDetailed (text: string) : Result<SupportDocument, DecodeError> =
+        Decoder.parse ReadOptions.strict text |> Result.bind decoder
 
     /// Read the declared-support document from `support.json` bytes — the inverse of
-    /// [[render]].
-    let parse (text: string) : Result<SupportDocument, string> = Json.parse text |> Result.bind ofJson
+    /// [[render]]; [[parseDetailed]]'s refusal as one line, with its code and path.
+    let parse (text: string) : Result<SupportDocument, string> =
+        parseDetailed text |> Result.mapError DecodeError.render
