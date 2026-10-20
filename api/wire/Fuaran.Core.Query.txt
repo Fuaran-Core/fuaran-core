@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.38.1: breaking
+# class since v0.39.0: unchanged
 doc	deferredQueryResult	sha256:d4153f11108020d1acee7de988d8e650af3b1adb12bc2f29588d75a23cde3f45	{"$type":"pending"}
 doc	deferredQueryResult / ColumnData.Bools	sha256:31d2e7b01b7361669cd09a1288361729afe90b65acb935047939bbb562a7c7ac	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true,true],"values":[true,false]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]},"totalRowCount":1}}
 doc	deferredQueryResult / ColumnData.Dates	sha256:5f8732fd775ac77cad0bc18d5e4cbe16ce064712d66ad95725955489cd67ebf9	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true,true],"values":["1970-01-02","1970-01-02"]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]},"totalRowCount":1}}

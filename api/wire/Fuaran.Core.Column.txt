@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.36.0: breaking
+# class since v0.39.0: unchanged
 doc	dataSource	sha256:7c79cbf69761b44c11965fc93de7901e93bfebced2450c7efd5a7e7f0b316aea	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]}
 doc	dataSource / ColumnData.Bools	sha256:074935a758655529340d9c904dc4ab58f9863ae44b3bafdc14e7eed73020e4d7	{"columns":{"s":{"validity":[true,true],"values":[true,false]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]}
 doc	dataSource / ColumnData.Dates	sha256:99d1d74b81705e9dca4fc4068d2133bb86f326d172b50a8ad383250812a43d1c	{"columns":{"s":{"validity":[true,true],"values":["1970-01-02","1970-01-02"]}},"schema":[{"description":"s","ext":{"s":"s"},"label":"s","name":"s","type":"int","unit":"kg"}]}
