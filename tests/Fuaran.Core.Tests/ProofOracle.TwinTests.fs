@@ -4,6 +4,8 @@ module Fuaran.Core.Tests.ProofOracle.TwinTests
 
 open Expecto
 
+open Fuaran.Core.Tests.ProofOracle.Bridges
+
 // Phase 309 — TWIN EVALUATION. Every extracted module ends with a `twins` list: fixtures that apply
 // the model's own functions to a concrete input and compare the result with the value the model
 // means there, asserted `true` by F*'s NORMALISER (`assert_norm (twins_hold twins == true)` in the
@@ -29,12 +31,22 @@ let twinRoster: (string * (string * (unit -> bool)) list) list =
           | _ -> () ]
     |> List.sortBy fst
 
-/// Every twin that does NOT hold on the extracted F#, as "<model>/<twin>" — empty is clean.
-let twinFailures (roster: (string * (string * (unit -> bool)) list) list) : string list =
-    [ for model, ts in roster do
-          for name, holds in ts do
-              if not (holds ()) then
-                  yield model + "/" + name ]
+/// The twin tally: the fixtures run. A twin that does NOT hold on the extracted F# is a
+/// disagreement, recorded as "<model>/<twin>" — none is clean.
+let private twinTally = Tally.empty [ "Twins" ]
+
+/// Every twin of the roster, run once. Twin evaluation is not a production-vs-model differential —
+/// both "sides" are the model, the extracted F# against the normaliser's verdict — so the tally
+/// carries no render pair; each fixture is one `Differential.check`.
+let twinEvaluation (roster: (string * (string * (unit -> bool)) list) list) : Tally =
+    Differential.over
+        [ for model, ts in roster do
+              for name, holds in ts -> model, name, holds ]
+        (fun (model, name, holds) t ->
+            t
+            |> Tally.bump "Twins"
+            |> Differential.check (holds ()) (fun () -> model + "/" + name))
+        twinTally
 
 open Fuaran.Core
 open Fuaran.Core.Tests
@@ -57,7 +69,7 @@ let tests =
               for model, ts in twinRoster do
                   Expect.isNonEmpty ts (sprintf "%s declares at least one twin" model)
 
-              match twinFailures twinRoster with
+              match Tally.disagreements (twinEvaluation twinRoster) with
               | [] -> ()
               | fs ->
                   failtestf
