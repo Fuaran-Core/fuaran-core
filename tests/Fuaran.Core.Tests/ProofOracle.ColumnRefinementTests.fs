@@ -70,7 +70,7 @@ module private RefinementDiff =
         cells
         |> List.map (fun c ->
             match c with
-            | Float f -> "Float " + Canon.canonicalFloat f
+            | Float f -> "Float " + FloatLayout.canonical f
             | other -> sprintf "%A" other)
         |> String.concat ";"
 

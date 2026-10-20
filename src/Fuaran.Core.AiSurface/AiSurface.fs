@@ -132,25 +132,25 @@ module RejectionCodec =
 
         match r with
         | Rejection.UnknownNode(target, addressable) ->
-            Canon.typed "unknownNode" [ "target", one target; "addressable", many addressable ]
-        | DuplicateId d -> Canon.typed "duplicateId" [ "id", one d ]
-        | CannotRemoveRoot -> Canon.typed "cannotRemoveRoot" []
+            Canonical.typed "unknownNode" [ "target", one target; "addressable", many addressable ]
+        | DuplicateId d -> Canonical.typed "duplicateId" [ "id", one d ]
+        | CannotRemoveRoot -> Canonical.typed "cannotRemoveRoot" []
         | WouldNestUnderSelf(target, relation) ->
             let rel =
                 match relation with
                 | NestRelation.Self -> "self"
                 | NestRelation.Descendant -> "descendant"
 
-            Canon.typed "wouldNestUnderSelf" [ "target", one target; "relation", JStr rel ]
+            Canonical.typed "wouldNestUnderSelf" [ "target", one target; "relation", JStr rel ]
         | NotAContainer(target, kindTag) ->
-            Canon.typed "notAContainer" [ "target", one target; "kindTag", JStr kindTag ]
+            Canonical.typed "notAContainer" [ "target", one target; "kindTag", JStr kindTag ]
         | ReorderMismatch(parent, expected, got) ->
-            Canon.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
-        | Rejected(code, message) -> Canon.typed "rejected" [ "code", JStr code; "message", JStr message ]
+            Canonical.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
+        | Rejected(code, message) -> Canonical.typed "rejected" [ "code", JStr code; "message", JStr message ]
         | KeyedPosition(target, holder, slot) ->
-            Canon.typed "keyedPosition" [ "target", one target; "holder", one holder; "slot", JInt slot ]
+            Canonical.typed "keyedPosition" [ "target", one target; "holder", one holder; "slot", JInt slot ]
         | IllegalChild(child, childKind, parent, parentKind, legal) ->
-            Canon.typed
+            Canonical.typed
                 "illegalChild"
                 [ "child", one child
                   "childKind", JStr childKind
@@ -158,12 +158,13 @@ module RejectionCodec =
                   "parentKind", JStr parentKind
                   "legal", JArr(legal |> List.map JStr) ]
         | StillReferenced(target, referrers) ->
-            Canon.typed "stillReferenced" [ "target", one target; "referrers", many referrers ]
-        | RootIdMismatch(before, after) -> Canon.typed "rootIdMismatch" [ "before", one before; "after", one after ]
+            Canonical.typed "stillReferenced" [ "target", one target; "referrers", many referrers ]
+        | RootIdMismatch(before, after) -> Canonical.typed "rootIdMismatch" [ "before", one before; "after", one after ]
 
-    /// `encode` rendered canonically (`Canon.render`: sorted keys, the pinned escaping). A caller that
-    /// must refuse an ill-formed id rather than write it through renders with `Canon.tryRender`.
-    let render (idText: 'Id -> string) (r: Rejection<'Id>) : string = Canon.render (encode idText r)
+    /// `encode` rendered canonically (`Canonical.write Rendering.CrossHost`: sorted keys, the pinned escaping). A caller that
+    /// must refuse an ill-formed id rather than write it through renders with `Canonical.tryWrite Rendering.CrossHost`.
+    let render (idText: 'Id -> string) (r: Rejection<'Id>) : string =
+        Canonical.write Rendering.CrossHost (encode idText r)
 
 /// The per-domain AI-surface seam — one witness bundling the four parts. The
 /// core sees the artifact (`'State`), the op (`'Op`), and the rejection

@@ -74,7 +74,7 @@
    paragraph is the correction.
 
    WHY `WireCanon` IS OPENED. `preserve_exact` is a claim about BYTES. Phase 149 modelled
-   `Canon.render` clause for clause, proved it deterministic up to the member-order rule, and
+   `Canonical.write Rendering.CrossHost` clause for clause, proved it deterministic up to the member-order rule, and
    proved the round trip; re-deriving any of that here would be a second renderer to keep in step
    with the first. What is taken is small and named: `jval`, `ch`, `wire`, `render`, `read`,
    `normalise`, `canonical`, `key_order_ok`, `tok_read_ok`, and two lemmas

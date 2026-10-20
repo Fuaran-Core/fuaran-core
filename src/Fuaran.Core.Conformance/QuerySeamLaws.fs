@@ -585,8 +585,11 @@ module internal QuerySeamLaws =
                     QueryRegistry.register stray QueryRegistry.empty = Error strayError
                     && (match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode stray) with
                         | Error e ->
-                            e.Path = [ PathSegment.Key "where"; PathSegment.Index 0 ]
-                            && e.Message = QueryError.describe strayError
+                            // the code, the path, and the sentence as the projection of the registry's
+                            // own error (Phase 520: no reader re-spells a refusal)
+                            e.Code = DecodeCode.OutOfRange
+                            && e.Path = [ PathSegment.Key "where"; PathSegment.Index 0 ]
+                            && e.Message = DecodeError.sentence e.Code e.Expected (QueryError.describe strayError)
                         | Ok _ -> false)
 
                 // Absent is absent: a declaration with neither member writes neither.

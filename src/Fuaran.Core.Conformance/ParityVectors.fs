@@ -88,15 +88,15 @@ let private nested (depth: int) : JVal =
 /// A float aggregate over a float column, through the canonical layout, or the refusal's class.
 let private floatAggregate (fn: AggFn) (xs: float list) : string =
     match Column.aggregate fn (Column.ofFloats "f" (Vector.ofList xs) AllValid) with
-    | Ok(Float f) -> Canon.canonicalFloat f
+    | Ok(Float f) -> FloatLayout.canonical f
     | Ok _ -> "<not-a-float>"
     | Error(AggregateOverflow _) -> "<overflow>"
     | Error _ -> "<refused>"
 
-/// `Profile.tryParse` then `render`, or `refused`.
+/// `Capability.tryParse` then `render`, or `refused`.
 let private profileRoundTrip (s: string) : string =
-    match Versioning.Profile.tryParse s with
-    | Ok p -> Versioning.Profile.render p
+    match Versioning.Capability.tryParse s with
+    | Ok p -> Versioning.Capability.render p
     | Error _ -> "refused"
 
 /// The wire fuzz generator's sample (Phase 495): `count` values `Corpus.genJVal` draws from
@@ -133,7 +133,7 @@ let private drawsOf (seed: int) : string =
     String.concat "-" out
 
 /// The reference witness: one committed document exercising every `JVal` case, both key orders
-/// (`Json.render` keeps author order, `Canon.render` sorts Ordinal), the escape path — including
+/// (`Json.render` keeps author order, `Canonical.write Rendering.CrossHost` sorts Ordinal), the escape path — including
 /// the `Hash.foldSep` control byte — and a float in each renderer. ASCII in its content, so its
 /// rendered form can be emitted verbatim.
 let private witness: JVal =
@@ -186,7 +186,7 @@ let private aggregateNanOrder: string =
     [ Min; Max; Median; CountDistinct ]
     |> List.map (fun fn ->
         match Column.aggregate fn col with
-        | Ok(Float f) -> Canon.canonicalFloat f
+        | Ok(Float f) -> FloatLayout.canonical f
         | Ok(Int i) -> string i
         | Ok _ -> "<not-a-number>"
         | Error _ -> "<refused>")
@@ -248,7 +248,7 @@ let private decAdd (a: string) (b: string) : string =
 /// `DecimalText.tryToFloat`'s answer through the canonical float layout, or `refused`.
 let private decToFloat (s: string) : string =
     match DecimalText.tryToFloat s with
-    | Some f -> Canon.canonicalFloat f
+    | Some f -> FloatLayout.canonical f
     | None -> "refused"
 
 /// A codec refusal's class. Exhaustive, so a case added to `ColumnError` is a build error here rather
@@ -587,21 +587,21 @@ let vectors: (string * string) list =
       "utf8Bytes/ill-formed-beside-a-pair", hexOf (Hash.utf8Bytes (units [ 0xD83D; 0xDE00; 0xDE00 ]))
       "sha256/ill-formed-lone-high", Hash.sha256Hex (units [ 0xD800 ])
 
-      // ---- Wire.Canon.canonicalFloat — the pinned cross-host float layout (Phase 55) ----
-      "canonicalFloat/zero", Canon.canonicalFloat 0.0
-      "canonicalFloat/neg-zero", Canon.canonicalFloat -0.0
-      "canonicalFloat/one-and-a-half", Canon.canonicalFloat 1.5
-      "canonicalFloat/tenth", Canon.canonicalFloat 0.1
-      "canonicalFloat/neg-third", Canon.canonicalFloat (-1.0 / 3.0)
-      "canonicalFloat/e16", Canon.canonicalFloat 1e16
-      "canonicalFloat/e17", Canon.canonicalFloat 1e17
-      "canonicalFloat/e21", Canon.canonicalFloat 1e21
-      "canonicalFloat/e-7", Canon.canonicalFloat 1e-7
-      "canonicalFloat/max", Canon.canonicalFloat System.Double.MaxValue
-      "canonicalFloat/denormal-min", Canon.canonicalFloat System.Double.Epsilon
-      "canonicalFloat/nan", Canon.canonicalFloat nan
-      "canonicalFloat/inf", Canon.canonicalFloat infinity
-      "canonicalFloat/neg-inf", Canon.canonicalFloat -infinity
+      // ---- Wire.FloatLayout.canonical — the pinned cross-host float layout (Phase 55) ----
+      "canonicalFloat/zero", FloatLayout.canonical 0.0
+      "canonicalFloat/neg-zero", FloatLayout.canonical -0.0
+      "canonicalFloat/one-and-a-half", FloatLayout.canonical 1.5
+      "canonicalFloat/tenth", FloatLayout.canonical 0.1
+      "canonicalFloat/neg-third", FloatLayout.canonical (-1.0 / 3.0)
+      "canonicalFloat/e16", FloatLayout.canonical 1e16
+      "canonicalFloat/e17", FloatLayout.canonical 1e17
+      "canonicalFloat/e21", FloatLayout.canonical 1e21
+      "canonicalFloat/e-7", FloatLayout.canonical 1e-7
+      "canonicalFloat/max", FloatLayout.canonical System.Double.MaxValue
+      "canonicalFloat/denormal-min", FloatLayout.canonical System.Double.Epsilon
+      "canonicalFloat/nan", FloatLayout.canonical nan
+      "canonicalFloat/inf", FloatLayout.canonical infinity
+      "canonicalFloat/neg-inf", FloatLayout.canonical -infinity
 
       // ---- Wire.Json — the author-ordered renderer's OWN float case, a separate layout from
       // `canonicalFloat`: it keeps the sign of -0 and emits the bare non-finite tokens that
@@ -620,18 +620,19 @@ let vectors: (string * string) list =
 
       // ---- Wire.Json / Wire.Canon — encode and decode of the reference witness ----
       "witness/render", Json.render witness
-      "witness/canon", Canon.render witness
+      "witness/canon", Canonical.write Rendering.CrossHost witness
       "witness/render-parse-render",
       (match Json.parse (Json.render witness) with
        | Ok back -> Json.render back
        | Error e -> "<parse-failed:" + e + ">")
       "witness/canon-parse-canon",
-      (match Json.parse (Canon.render witness) with
-       | Ok back -> Canon.render back
+      (match Json.parse (Canonical.write Rendering.CrossHost witness) with
+       | Ok back -> Canonical.write Rendering.CrossHost back
        | Error e -> "<parse-failed:" + e + ">")
       // The non-ASCII document: rendered through the escape path, then folded through the digest so
       // only hex reaches the terminal.
-      "witness/unicode-canon-sha256", Hash.sha256Hex (Canon.render (JObj [ "u", JStr unicodeSample ]))
+      "witness/unicode-canon-sha256",
+      Hash.sha256Hex (Canonical.write Rendering.CrossHost (JObj [ "u", JStr unicodeSample ]))
 
       // ---- OpStream.defaultHash — the op-stream CHAIN hash over a two-op chain ----
       "defaultHash/genesis", OpStream.defaultHash "" "{\"seq\":0}"
@@ -678,13 +679,16 @@ let vectors: (string * string) list =
       "tryUtf8Bytes/high-then-high", guardedUtf8 (units [ 0xD801; 0xD800 ])
       "tryUtf8Bytes/stray-low-after-a-pair", guardedUtf8 (units [ 0xD83D; 0xDE00; 0xDE00 ])
       // The guarded canonical render refuses an ill-formed string, as a value and as a member key.
-      "canonTryRender/well-formed", guardedRender (Canon.tryRender (JObj [ "k", JStr unicodeSample ]))
-      "canonTryRender/ill-formed-value", guardedRender (Canon.tryRender (JObj [ "k", JStr(units [ 0xD801; 0xD800 ]) ]))
-      "canonTryRender/ill-formed-key", guardedRender (Canon.tryRender (JObj [ units [ 0xDC00 ], JInt 1 ]))
+      "canonTryRender/well-formed",
+      guardedRender (Canonical.tryWrite Rendering.CrossHost (JObj [ "k", JStr unicodeSample ]))
+      "canonTryRender/ill-formed-value",
+      guardedRender (Canonical.tryWrite Rendering.CrossHost (JObj [ "k", JStr(units [ 0xD801; 0xD800 ]) ]))
+      "canonTryRender/ill-formed-key",
+      guardedRender (Canonical.tryWrite Rendering.CrossHost (JObj [ units [ 0xDC00 ], JInt 1 ]))
       "jsonTryRender/ill-formed-value", guardedRender (Json.tryRender (JArr [ JStr(units [ 0xDFFF ]) ]))
       // A value 10,000 deep renders — folded through the digest, since the text is 20,001 bytes.
       "render/depth-10000-json", Hash.sha256Hex (Json.render (nested 10000))
-      "render/depth-10000-canon", guardedRender (Canon.tryRender (nested 10000))
+      "render/depth-10000-canon", guardedRender (Canonical.tryWrite Rendering.CrossHost (nested 10000))
       // The float aggregates over finite input whose plain formulas overflowed an intermediate.
       "aggregate/median-at-the-edge", floatAggregate Median [ 1e308; 1e308 ]
       "aggregate/mean-at-the-edge", floatAggregate Mean [ 1.7e308; 1.7e308; -1.7e308 ]

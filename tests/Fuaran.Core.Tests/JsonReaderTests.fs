@@ -426,7 +426,11 @@ let tests =
               Expect.equal (mismatchAt (read Reader.strings "[\"a\",1]")) (Some([ item 1 ], "a string")) "item"
 
               match read Reader.strings "[\"a\",1]" with
-              | Error e -> Expect.equal e.Message "expected a string at position 5" "the sentence keeps the position"
+              | Error e ->
+                  Expect.equal
+                      e.Message
+                      (DecodeError.sentence DecodeCode.WrongKind "a string" "the value at position 5")
+                      "the sentence, projected, keeps the position"
               | Ok v -> failtestf "read %A" v
 
               Expect.equal

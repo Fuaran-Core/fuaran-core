@@ -1653,7 +1653,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
              if wf then
                  diffs.Add(sprintf "seed %d: a well-formed capability was refused (%s)" i (prodDecodeErrRender e)))
 
-        // ... and through the BYTES, where the document can be written: `Canon.render` then the
+        // ... and through the BYTES, where the document can be written: `Canonical.write Rendering.CrossHost` then the
         // parser, which is where a whole float comes back as an integer token.
         (match CapabilityCodec.tryEncode cap with
          | Ok s ->
@@ -1786,7 +1786,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
 
         if
             CapabilityPipeline.encode pl
-            <> Canon.render (jvalOfModel (ModelCap.pipeline_json mpl))
+            <> Canonical.write Rendering.CrossHost (jvalOfModel (ModelCap.pipeline_json mpl))
         then
             diffs.Add(sprintf "seed %d: the pipeline encodes differently" i)
 
@@ -1819,7 +1819,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
 
                 for j in pdocs do
                     nodeDocuments <- nodeDocuments + 1
-                    let text = Canon.render j
+                    let text = Canonical.write Rendering.CrossHost j
 
                     match Decoder.parse ReadOptions.strict text with
                     | Error _ -> diffs.Add(sprintf "seed %d: a mutated pipeline document did not parse" i)
@@ -1994,7 +1994,10 @@ let private seamCodecDifferential
         | Error e -> diffs.Add(sprintf "seed %d: the invocation did not parse: %A" i e)
         | Ok j0 ->
             // The encoding is compared as the canonical TEXT both write: `encodeInvocation` renders it.
-            if Canon.render (jvalOfModel (invocationJson cid args)) <> text then
+            if
+                Canonical.write Rendering.CrossHost (jvalOfModel (invocationJson cid args))
+                <> text
+            then
                 diffs.Add(sprintf "seed %d: the invocation encodes differently: %s" i text)
 
             for jm in mutations j0 do
@@ -2002,12 +2005,14 @@ let private seamCodecDifferential
                 // The document production reads is the text the mutation renders to, so the model
                 // reads exactly that document too.
                 let j =
-                    match Json.parse (Canon.render jm) with
+                    match Json.parse (Canonical.write Rendering.CrossHost jm) with
                     | Ok v -> v
                     | Error _ -> jm
 
                 let p =
-                    CapabilityCodec.decodeInvocationDetailedWith ReadPolicy.Lenient (Canon.render j)
+                    CapabilityCodec.decodeInvocationDetailedWith
+                        ReadPolicy.Lenient
+                        (Canonical.write Rendering.CrossHost j)
 
                 let m = ModelCap.invocation_of_j (jvalToModel j)
 
@@ -2026,10 +2031,17 @@ let private seamCodecDifferential
                                 "seed %d: an invocation refusal does not resolve: %s in %s"
                                 i
                                 (prodDecodeErrRender pe)
-                                (Canon.render j)
+                                (Canonical.write Rendering.CrossHost j)
                         )
                 | _ ->
-                    diffs.Add(sprintf "seed %d: the invocation readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+                    diffs.Add(
+                        sprintf
+                            "seed %d: the invocation readers disagree on %s: %A vs %A"
+                            i
+                            (Canonical.write Rendering.CrossHost j)
+                            p
+                            m
+                    )
 
         // ---- the typed refusal: every case, a value space and a declaration fault inside ----
         let e, r3 = genInvokeError rng.Value
@@ -2049,7 +2061,14 @@ let private seamCodecDifferential
                 errorsRefused <- errorsRefused + 1
                 codes <- codes.Add(string (modelCodeOf me.d_code))
             | p, m ->
-                diffs.Add(sprintf "seed %d: the invoke-error readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+                diffs.Add(
+                    sprintf
+                        "seed %d: the invoke-error readers disagree on %s: %A vs %A"
+                        i
+                        (Canonical.write Rendering.CrossHost j)
+                        p
+                        m
+                )
 
         // ---- the async envelope, over a string payload ----
         let k, r4 = ConfRng.intBelow 3 rng.Value
@@ -2095,7 +2114,15 @@ let private seamCodecDifferential
             | Error _, ModelCap.Error me ->
                 deferredRefused <- deferredRefused + 1
                 codes <- codes.Add(string (modelCodeOf me.d_code))
-            | p, m -> diffs.Add(sprintf "seed %d: the envelope readers disagree on %s: %A vs %A" i (Canon.render j) p m)
+            | p, m ->
+                diffs.Add(
+                    sprintf
+                        "seed %d: the envelope readers disagree on %s: %A vs %A"
+                        i
+                        (Canonical.write Rendering.CrossHost j)
+                        p
+                        m
+                )
 
     { ScDiffs = List.ofSeq diffs
       ScDocuments = documents

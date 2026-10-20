@@ -219,7 +219,7 @@ let escapeAll (p: Prepared) : int =
 let cases: (string * (Prepared -> unit -> obj)) list =
     [ "escape", (fun p () -> box (escapeAll p))
       "render", (fun p () -> box (Json.render p.Value))
-      "canon", (fun p () -> box (Canon.render p.Value))
+      "canon", (fun p () -> box (Canonical.write Rendering.CrossHost p.Value))
       "parse", (fun p () -> box (Json.parse p.Rendered)) ]
 
 /// The OUTPUT of a case as text, for its fingerprint: the escapes concatenated, the rendered text,
@@ -228,7 +228,7 @@ let output (p: Prepared) (case: string) : string =
     match case with
     | "escape" -> p.Strings |> Array.map Json.escape |> String.concat "\n"
     | "render" -> Json.render p.Value
-    | "canon" -> Canon.render p.Value
+    | "canon" -> Canonical.write Rendering.CrossHost p.Value
     | "parse" ->
         match Json.parse p.Rendered with
         | Ok v -> Json.render v
@@ -285,13 +285,13 @@ let laws (name: string) (p: Prepared) : Result<unit, string> =
         | Error e -> fail ("the rendered text does not parse: " + e)
         | Ok v when v <> p.Value -> fail "the rendered text parses to a different value"
         | Ok v ->
-            let canon = Canon.render p.Value
+            let canon = Canonical.write Rendering.CrossHost p.Value
 
-            if Canon.render v <> canon then
+            if Canonical.write Rendering.CrossHost v <> canon then
                 fail "the canonical text of the parsed value differs"
             else
                 match Json.parse canon with
-                | Ok c when Canon.render c = canon -> Ok()
+                | Ok c when Canonical.write Rendering.CrossHost c = canon -> Ok()
                 | _ -> fail "the canonical text is not a fixed point of parse then canon"
 
 /// The cases of corpus `name` whose fingerprint is not the pinned one, as `(case, measured, pinned)`.

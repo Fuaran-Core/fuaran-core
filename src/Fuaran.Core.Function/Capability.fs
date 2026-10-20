@@ -695,9 +695,9 @@ module CapabilityCodec =
     // read as absent.
 
     // Phase 509: the combinators these readers share are Wire's — `Decoder.pair` (two members of
-    // one object), `Decoder.oneOfWith` (a string from a closed set, in this codec's sentence
-    // `<what><value>`), `Decoder.strings` — and the `"$type"` dispatch is `SeamCodec.dispatch`, the
-    // pipeline codec's too; each was written here, body for body.
+    // one object), `Decoder.oneOf` (a string from a closed set), `Decoder.strings` and the
+    // `"$type"` dispatch `Decoder.tagDispatch` (each in `Decoder`'s own sentence since Phase 520);
+    // each was written here, body for body.
 
     // ---- signature entry + signature ----
 
@@ -717,10 +717,7 @@ module CapabilityCodec =
             str "name"
             |> Result.bind (fun name ->
                 // Phase 295: the tag is one of `HoleKind.tags`; any other is refused.
-                Decoder.field
-                    "kind"
-                    (Decoder.oneOfWith "unknown hole kind: " (HoleKind.tags |> List.map (fun t -> t, t)))
-                    el
+                Decoder.field "kind" (Decoder.oneOf (HoleKind.tags |> List.map (fun t -> t, t))) el
                 |> Result.bind (fun kind ->
                     Decoder.field "required" Decoder.bool el
                     |> Result.bind (fun required ->
@@ -803,19 +800,19 @@ module CapabilityCodec =
         | Js -> "js"
 
     let private islandOf: Decoder<IslandKind> =
-        Decoder.oneOfWith "unknown island kind: " [ "pyodide", Pyodide; "fable", Fable; "js", Js ]
+        Decoder.oneOf [ "pyodide", Pyodide; "fable", Fable; "js", Js ]
 
     let private placementJson (p: Placement) : JVal =
         match p with
-        | BuildTime -> Canon.typed "buildTime" []
-        | Server -> Canon.typed "server" []
-        | ClientDeclarative -> Canon.typed "clientDeclarative" []
-        | Precomputed -> Canon.typed "precomputed" []
-        | ClientIsland k -> Canon.typed "clientIsland" [ "island", JStr(islandTag k) ]
+        | BuildTime -> Canonical.typed "buildTime" []
+        | Server -> Canonical.typed "server" []
+        | ClientDeclarative -> Canonical.typed "clientDeclarative" []
+        | Precomputed -> Canonical.typed "precomputed" []
+        | ClientIsland k -> Canonical.typed "clientIsland" [ "island", JStr(islandTag k) ]
 
     let private placementOf: Decoder<Placement> =
-        SeamCodec.dispatch
-            "unknown placement: "
+        Decoder.tagDispatch
+            "$type"
             [ "buildTime", Decoder.succeed BuildTime
               "server", Decoder.succeed Server
               "clientDeclarative", Decoder.succeed ClientDeclarative
@@ -826,7 +823,7 @@ module CapabilityCodec =
 
     /// Encode a `Capability` declaration to a `JVal` (`"$type":"capability"`).
     let encodeJson (c: Capability) : JVal =
-        Canon.typed
+        Canonical.typed
             "capability"
             [ "id", JStr c.Id
               "signature", signatureJson c.Signature
@@ -837,16 +834,18 @@ module CapabilityCodec =
     /// over a declaration the admission gate accepts it is exactly `tryEncode`'s `Ok`, and over one
     /// with a non-finite bound it writes bytes no reader takes back — use `tryEncode` for a
     /// declaration nothing has validated.
-    let encode (c: Capability) : string = Canon.render (encodeJson c)
+    let encode (c: Capability) : string =
+        Canonical.write Rendering.CrossHost (encodeJson c)
 
-    /// The GUARDED encode (Phase 307): `Canon.tryRender` of `encodeJson`, so a declaration with a
+    /// The GUARDED encode (Phase 307): `Canonical.tryWrite Rendering.CrossHost` of `encodeJson`, so a declaration with a
     /// non-finite bound or an ill-formed string is refused, naming it, rather than written as bytes
     /// the decoder would refuse. `Ok` is exactly `encode`'s string.
-    let tryEncode (c: Capability) : Result<string, string> = Canon.tryRender (encodeJson c)
+    let tryEncode (c: Capability) : Result<string, string> =
+        Canonical.tryWrite Rendering.CrossHost (encodeJson c)
 
     let private decodeJsonDetailed (el: JVal) : Result<Capability, DecodeError> =
         // Phase 307: a capability document says so — its `"$type"` is `capability`.
-        Decoder.field "$type" (Decoder.oneOfWith "not a capability declaration: " [ "capability", () ]) el
+        Decoder.field "$type" (Decoder.oneOf [ "capability", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "signature" signatureFieldsOf el
@@ -913,7 +912,7 @@ module CapabilityCodec =
 
     /// Encode a typed invocation `(capabilityId, args)` to a `JVal` (`"$type":"invocation"`).
     let internal encodeInvocationJson (capabilityId: string) (args: (string * string) list) : JVal =
-        Canon.typed
+        Canonical.typed
             "invocation"
             [ "capabilityId", JStr capabilityId
               "args", JArr(args |> List.map (fun (a, v) -> JObj [ "addr", JStr a; "value", JStr v ])) ]
@@ -921,7 +920,7 @@ module CapabilityCodec =
     /// A typed invocation as a canonical `"$type":"invocation"` document. The arguments keep the
     /// order given, each an `{addr, value}` object; nothing is validated against a signature here.
     let encodeInvocation (capabilityId: string) (args: (string * string) list) : string =
-        Canon.render (encodeInvocationJson capabilityId args)
+        Canonical.write Rendering.CrossHost (encodeInvocationJson capabilityId args)
 
     let private invocationOf: Decoder<string * (string * string) list> =
         let arg =
@@ -965,19 +964,20 @@ module CapabilityCodec =
     /// `encodeT` for a `Ready` payload. The async-invocation result wire shape every host shares.
     let deferredJson (encodeT: 'T -> JVal) (d: Deferred<'T>) : JVal =
         match d with
-        | Pending -> Canon.typed "pending" []
-        | Ready v -> Canon.typed "ready" [ "value", encodeT v ]
-        | Failed m -> Canon.typed "failed" [ "message", JStr m ]
+        | Pending -> Canonical.typed "pending" []
+        | Ready v -> Canonical.typed "ready" [ "value", encodeT v ]
+        | Failed m -> Canonical.typed "failed" [ "message", JStr m ]
 
     /// `deferredJson` rendered canonically.
-    let encodeDeferred (encodeT: 'T -> JVal) (d: Deferred<'T>) : string = Canon.render (deferredJson encodeT d)
+    let encodeDeferred (encodeT: 'T -> JVal) (d: Deferred<'T>) : string =
+        Canonical.write Rendering.CrossHost (deferredJson encodeT d)
 
     /// The envelope's TYPED reader (Phase 455): `payload` reads a `ready` value, and its refusal
     /// keeps its code and its path, under `value`. `deferredOf` is this over a sentence-answering
     /// reader; the query seam's typed result reader is this over `resultOf`.
     let internal deferredDecoder (payload: Decoder<'T>) : Decoder<Deferred<'T>> =
-        SeamCodec.dispatch
-            "unknown deferred kind: "
+        Decoder.tagDispatch
+            "$type"
             [ "pending", Decoder.succeed Pending
               "ready", Decoder.field "value" payload |> Decoder.map Ready
               "failed", Decoder.field "message" Decoder.str |> Decoder.map Failed ]
@@ -1009,16 +1009,17 @@ module CapabilityCodec =
     /// A declaration fault as a wire document (Phase 307), `"$type"`-tagged.
     let internal faultJson (f: DeclarationFault) : JVal =
         match f with
-        | EmptySpace(addr, space) -> Canon.typed "emptySpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space ]
-        | NonFiniteBound addr -> Canon.typed "nonFiniteBound" [ "addr", JStr addr ]
-        | DuplicateHoleAddr addr -> Canon.typed "duplicateHoleAddr" [ "addr", JStr addr ]
-        | HoleUnderSlot node -> Canon.typed "holeUnderSlot" [ "node", JStr node ]
+        | EmptySpace(addr, space) ->
+            Canonical.typed "emptySpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space ]
+        | NonFiniteBound addr -> Canonical.typed "nonFiniteBound" [ "addr", JStr addr ]
+        | DuplicateHoleAddr addr -> Canonical.typed "duplicateHoleAddr" [ "addr", JStr addr ]
+        | HoleUnderSlot node -> Canonical.typed "holeUnderSlot" [ "node", JStr node ]
 
     let private faultOf: Decoder<DeclarationFault> =
         let str name = Decoder.field name Decoder.str
 
-        SeamCodec.dispatch
-            "unknown declaration fault: "
+        Decoder.tagDispatch
+            "$type"
             [ "emptySpace",
               Decoder.pair (str "addr") (Decoder.field "space" SpaceCodec.decoder) (fun a sp -> EmptySpace(a, sp))
               "nonFiniteBound", str "addr" |> Decoder.map NonFiniteBound
@@ -1028,24 +1029,25 @@ module CapabilityCodec =
     /// Encode an `InvokeError` to a `JVal` (`"$type"` is the case: `noSuchCapability`, `argOutOfSpace`, …).
     let invokeErrorJson (e: InvokeError) : JVal =
         match e with
-        | NoSuchCapability(id, known) -> Canon.typed "noSuchCapability" [ "id", JStr id; "known", strs known ]
-        | DuplicateCapability id -> Canon.typed "duplicateCapability" [ "id", JStr id ]
-        | UnknownArg(addr, declared) -> Canon.typed "unknownArg" [ "addr", JStr addr; "declared", strs declared ]
+        | NoSuchCapability(id, known) -> Canonical.typed "noSuchCapability" [ "id", JStr id; "known", strs known ]
+        | DuplicateCapability id -> Canonical.typed "duplicateCapability" [ "id", JStr id ]
+        | UnknownArg(addr, declared) -> Canonical.typed "unknownArg" [ "addr", JStr addr; "declared", strs declared ]
         | ArgOutOfSpace(addr, space, got) ->
-            Canon.typed "argOutOfSpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space; "got", JStr got ]
-        | RequiredArgsUnbound addrs -> Canon.typed "requiredArgsUnbound" [ "addrs", strs addrs ]
-        | UninvocableArg addr -> Canon.typed "uninvocableArg" [ "addr", JStr addr ]
-        | BodyFailed reason -> Canon.typed "bodyFailed" [ "reason", JStr reason ]
-        | NonTotalCapability(id, addrs) -> Canon.typed "nonTotalCapability" [ "id", JStr id; "addrs", strs addrs ]
+            Canonical.typed "argOutOfSpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space; "got", JStr got ]
+        | RequiredArgsUnbound addrs -> Canonical.typed "requiredArgsUnbound" [ "addrs", strs addrs ]
+        | UninvocableArg addr -> Canonical.typed "uninvocableArg" [ "addr", JStr addr ]
+        | BodyFailed reason -> Canonical.typed "bodyFailed" [ "reason", JStr reason ]
+        | NonTotalCapability(id, addrs) -> Canonical.typed "nonTotalCapability" [ "id", JStr id; "addrs", strs addrs ]
         | IllFormedCapability(id, fault) ->
-            Canon.typed "illFormedCapability" [ "id", JStr id; "fault", faultJson fault ]
-        | DuplicateArg addr -> Canon.typed "duplicateArg" [ "addr", JStr addr ]
+            Canonical.typed "illFormedCapability" [ "id", JStr id; "fault", faultJson fault ]
+        | DuplicateArg addr -> Canonical.typed "duplicateArg" [ "addr", JStr addr ]
         | PolicyRefused(policy, reason, allowed) ->
-            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
-        | ApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
+            Canonical.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | ApprovalRequired policy -> Canonical.typed "approvalRequired" [ "policy", JStr policy ]
 
     /// `invokeErrorJson` rendered canonically; `decodeInvokeError` reads it back to the same value.
-    let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
+    let encodeInvokeError (e: InvokeError) : string =
+        Canonical.write Rendering.CrossHost (invokeErrorJson e)
 
     /// Decode an `InvokeError` from a `JVal` — `Result`-typed with a named error.
     let invokeErrorOf (el: JVal) : Result<InvokeError, string> =
@@ -1054,8 +1056,8 @@ module CapabilityCodec =
         let strList name = Decoder.field name Decoder.strings
 
         let invokeError =
-            SeamCodec.dispatch
-                "unknown invoke error: "
+            Decoder.tagDispatch
+                "$type"
                 [ "noSuchCapability",
                   Decoder.pair (str "id") (strList "known") (fun id known -> NoSuchCapability(id, known))
                   "duplicateCapability", str "id" |> Decoder.map DuplicateCapability
@@ -1110,17 +1112,17 @@ module CapabilityCodec =
             | Some "slotTree" -> [ "slotKind" ]
             | _ -> []
 
-        members "value space" ("$type" :: extra) el
+        Decoder.members ("$type" :: extra) el
 
-    let private strictEffect (el: JVal) = members "effect" EffectCodec.members el
+    let private strictEffect (el: JVal) = Decoder.members EffectCodec.members el
 
     let private strictEntry (el: JVal) =
-        members "signature hole" [ "addr"; "name"; "kind"; "required"; "space"; "slotKind"; "actionEffect" ] el
+        Decoder.members [ "addr"; "name"; "kind"; "required"; "space"; "slotKind"; "actionEffect" ] el
         |> Result.bind (fun () -> within "space" strictSpace el)
         |> Result.bind (fun () -> within "actionEffect" strictEffect el)
 
     let private strictSignature (el: JVal) =
-        members "signature" [ "name"; "effect"; "holes" ] el
+        Decoder.members [ "name"; "effect"; "holes" ] el
         |> Result.bind (fun () -> within "effect" strictEffect el)
         |> Result.bind (fun () -> within "holes" (each strictEntry) el)
 
@@ -1130,16 +1132,16 @@ module CapabilityCodec =
             | Some "clientIsland" -> [ "island" ]
             | _ -> []
 
-        members "placement" ("$type" :: extra) el
+        Decoder.members ("$type" :: extra) el
 
     let private strictCapability (el: JVal) =
-        members "capability" [ "$type"; "id"; "signature"; "determinism"; "placement" ] el
+        Decoder.members [ "$type"; "id"; "signature"; "determinism"; "placement" ] el
         |> Result.bind (fun () -> within "signature" strictSignature el)
         |> Result.bind (fun () -> within "placement" strictPlacement el)
 
     let private strictInvocation (el: JVal) =
-        members "invocation" [ "$type"; "capabilityId"; "args" ] el
-        |> Result.bind (fun () -> within "args" (each (members "invocation argument" [ "addr"; "value" ])) el)
+        Decoder.members [ "$type"; "capabilityId"; "args" ] el
+        |> Result.bind (fun () -> within "args" (each (Decoder.members [ "addr"; "value" ])) el)
 
     let private strictDeferred (el: JVal) =
         let extra =
@@ -1148,7 +1150,7 @@ module CapabilityCodec =
             | Some "failed" -> [ "message" ]
             | _ -> []
 
-        members "deferred" ("$type" :: extra) el
+        Decoder.members ("$type" :: extra) el
 
     let private under (policy: ReadPolicy) (check: Decoder<unit>) (d: Decoder<'T>) : Decoder<'T> =
         match policy with

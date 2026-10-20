@@ -276,7 +276,7 @@ module internal QueryShape =
 
     /// A column type, spelled by `ColumnType.tag`.
     let colTypeOf: Decoder<ColumnType> =
-        Decoder.oneOfWith "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
+        Decoder.oneOf (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
 
     /// A predicate's wire tag.
     let tag (p: ColumnPredicate) : string =
@@ -352,21 +352,21 @@ module internal QueryShape =
         let col = column p
 
         match p with
-        | ColumnPredicate.Contains(_, text) -> Canon.typed (tag p) [ "column", JStr col; "text", JStr text ]
+        | ColumnPredicate.Contains(_, text) -> Canonical.typed (tag p) [ "column", JStr col; "text", JStr text ]
         | ColumnPredicate.IsNull _
-        | ColumnPredicate.IsNotNull _ -> Canon.typed (tag p) [ "column", JStr col ]
+        | ColumnPredicate.IsNotNull _ -> Canonical.typed (tag p) [ "column", JStr col ]
         | _ ->
             match literal p with
             | Some v ->
                 // `Null` has no type: admission refuses it, and nothing reaches here with one.
                 let ty = Cell.typeOf v |> Option.defaultValue StringType
 
-                Canon.typed
+                Canonical.typed
                     (tag p)
                     [ "column", JStr col
                       "type", JStr(ColumnType.tag ty)
                       "value", literalJson ty v ]
-            | None -> Canon.typed (tag p) [ "column", JStr col ]
+            | None -> Canonical.typed (tag p) [ "column", JStr col ]
 
     /// The reader of `predicateJson`'s documents. A literal that is not a value of the type its
     /// document states is refused `OutOfRange` at `value`, with `IllFormedLiteral`'s reason; the
@@ -394,8 +394,7 @@ module internal QueryShape =
                                      + " column cannot carry")
                             ))))
 
-        Decoder.tagDispatchWith
-            "unknown predicate: "
+        Decoder.tagDispatch
             "$type"
             [ "equalTo", compared ColumnPredicate.EqualTo
               "greaterThan", compared ColumnPredicate.GreaterThan
@@ -436,9 +435,7 @@ module internal QueryShape =
         |> Decoder.bind (fun c ->
             Decoder.field
                 "direction"
-                (Decoder.oneOfWith
-                    "unknown sort direction: "
-                    [ "ascending", SortDirection.Ascending; "descending", SortDirection.Descending ])
+                (Decoder.oneOf [ "ascending", SortDirection.Ascending; "descending", SortDirection.Descending ])
             |> Decoder.map (fun d -> { Column = c; Direction = d }))
 
     /// Why a well-typed literal is not one its column carries, from `Table.validate`'s refusal.
@@ -525,11 +522,15 @@ module internal QueryShape =
         (if List.isEmpty where then
              []
          else
-             [ ""; "w"; Canon.render (JArr(where |> List.map predicateJson)) ])
+             [ ""
+               "w"
+               Canonical.write Rendering.CrossHost (JArr(where |> List.map predicateJson)) ])
         @ (if List.isEmpty order then
                []
            else
-               [ ""; "o"; Canon.render (JArr(order |> List.map sortKeyJson)) ])
+               [ ""
+                 "o"
+                 Canonical.write Rendering.CrossHost (JArr(order |> List.map sortKeyJson)) ])
 
 /// What a model reads when a dispatch is refused (Phase 251) — the `InvokeError.describe` twin. Every
 /// case that refuses against a closed set names its members, and a `ParamTypeMismatch` over a type
@@ -681,18 +682,14 @@ module QueryError =
 module internal QueryErrorWire =
 
     // `colTypeOf` is `QueryShape`'s since Phase 398, which reads the shape below this module; a
-    // string from a closed set is Wire's `Decoder.oneOfWith` since Phase 509 (`tagged`, before).
+    // string from a closed set is Wire's `Decoder.oneOf` (Phase 509's `oneOfWith` until Phase 520).
     let private colTypeOf: Decoder<ColumnType> = QueryShape.colTypeOf
 
     let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
 
     /// The decode refusal an `UnreadableArgs` carries, read back from `DecodeError.toJson`'s form.
     let private decodeErrorOf: Decoder<DecodeError> =
-        Decoder.field
-            "code"
-            (Decoder.oneOfWith
-                "unknown decode code: "
-                (DecodeError.codes |> List.map (fun c -> DecodeError.codeName c, c)))
+        Decoder.field "code" (Decoder.oneOf (DecodeError.codes |> List.map (fun c -> DecodeError.codeName c, c)))
         |> Decoder.bind (fun code ->
             Decoder.field "path" (fun el ->
                 match DecodePath.ofJson el with
@@ -717,45 +714,49 @@ module internal QueryErrorWire =
     /// A `QueryError` as its wire document: one `"$type"` per case, in camelCase.
     let toJson (e: QueryError) : JVal =
         match e with
-        | NoSuchQuery(id, known) -> Canon.typed "noSuchQuery" [ "id", JStr id; "known", strs known ]
-        | DuplicateQuery id -> Canon.typed "duplicateQuery" [ "id", JStr id ]
-        | UnknownParam(name, declared) -> Canon.typed "unknownParam" [ "name", JStr name; "declared", strs declared ]
+        | NoSuchQuery(id, known) -> Canonical.typed "noSuchQuery" [ "id", JStr id; "known", strs known ]
+        | DuplicateQuery id -> Canonical.typed "duplicateQuery" [ "id", JStr id ]
+        | UnknownParam(name, declared) ->
+            Canonical.typed "unknownParam" [ "name", JStr name; "declared", strs declared ]
         | ParamTypeMismatch(name, expected, got) ->
-            Canon.typed
+            Canonical.typed
                 "paramTypeMismatch"
                 [ "name", JStr name
                   "expected", JStr(ColumnType.tag expected)
                   "got", JStr(ColumnType.tag got) ]
-        | RequiredParamsUnbound names -> Canon.typed "requiredParamsUnbound" [ "names", strs names ]
-        | SourceNotResolved r -> Canon.typed "sourceNotResolved" [ "ref", JStr r ]
+        | RequiredParamsUnbound names -> Canonical.typed "requiredParamsUnbound" [ "names", strs names ]
+        | SourceNotResolved r -> Canonical.typed "sourceNotResolved" [ "ref", JStr r ]
         | ExecutionFailed(detail, recoverable) ->
-            Canon.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
-        | Timeout -> Canon.typed "timeout" []
-        | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
-        | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
+            Canonical.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
+        | Timeout -> Canonical.typed "timeout" []
+        | RequiredParamsNull names -> Canonical.typed "requiredParamsNull" [ "names", strs names ]
+        | DuplicateParam name -> Canonical.typed "duplicateParam" [ "name", JStr name ]
         | QueryPolicyRefused(policy, reason, allowed) ->
-            Canon.typed "queryPolicyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
-        | QueryApprovalRequired policy -> Canon.typed "queryApprovalRequired" [ "policy", JStr policy ]
-        | UnreadableArgs error -> Canon.typed "unreadableArgs" [ "error", DecodeError.toJson error ]
-        | UnknownColumn(name, declared) -> Canon.typed "unknownColumn" [ "name", JStr name; "declared", strs declared ]
+            Canonical.typed
+                "queryPolicyRefused"
+                [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | QueryApprovalRequired policy -> Canonical.typed "queryApprovalRequired" [ "policy", JStr policy ]
+        | UnreadableArgs error -> Canonical.typed "unreadableArgs" [ "error", DecodeError.toJson error ]
+        | UnknownColumn(name, declared) ->
+            Canonical.typed "unknownColumn" [ "name", JStr name; "declared", strs declared ]
         | PredicateTypeMismatch(column, expected, got) ->
-            Canon.typed
+            Canonical.typed
                 "predicateTypeMismatch"
                 [ "column", JStr column
                   "expected", JStr(ColumnType.tag expected)
                   "got", JStr(ColumnType.tag got) ]
         | PredicateNotApplicable(predicate, column, columnType) ->
-            Canon.typed
+            Canonical.typed
                 "predicateNotApplicable"
                 [ "predicate", JStr predicate
                   "column", JStr column
                   "columnType", JStr(ColumnType.tag columnType) ]
         | IllFormedLiteral(column, reason) ->
-            Canon.typed "illFormedLiteral" [ "column", JStr column; "reason", JStr reason ]
-        | DuplicateSortColumn column -> Canon.typed "duplicateSortColumn" [ "column", JStr column ]
+            Canonical.typed "illFormedLiteral" [ "column", JStr column; "reason", JStr reason ]
+        | DuplicateSortColumn column -> Canonical.typed "duplicateSortColumn" [ "column", JStr column ]
         | PredicateNotHonoured predicate ->
-            Canon.typed "predicateNotHonoured" [ "predicate", QueryShape.predicateJson predicate ]
-        | OrderNotHonoured column -> Canon.typed "orderNotHonoured" [ "column", JStr column ]
+            Canonical.typed "predicateNotHonoured" [ "predicate", QueryShape.predicateJson predicate ]
+        | OrderNotHonoured column -> Canonical.typed "orderNotHonoured" [ "column", JStr column ]
 
     /// The reader of `toJson`'s documents; an unknown `"$type"` keeps the codec's sentence.
     let decoder: Decoder<QueryError> =
@@ -792,9 +793,7 @@ module internal QueryErrorWire =
                   Decoder.pair (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
                       PredicateTypeMismatch(column, exp, got)))
               "predicateNotApplicable",
-              Decoder.field
-                  "predicate"
-                  (Decoder.oneOfWith "unknown predicate: " (QueryShape.tags |> List.map (fun t -> t, t)))
+              Decoder.field "predicate" (Decoder.oneOf (QueryShape.tags |> List.map (fun t -> t, t)))
               |> Decoder.bind (fun predicate ->
                   Decoder.pair (str "column") (Decoder.field "columnType" colTypeOf) (fun column ty ->
                       PredicateNotApplicable(predicate, column, ty)))
@@ -806,10 +805,11 @@ module internal QueryErrorWire =
               "orderNotHonoured", str "column" |> Decoder.map OrderNotHonoured ]
 
         // The dispatch's own miss keeps this codec's sentence.
-        Decoder.tagDispatchWith "unknown query error: " "$type" cases
+        Decoder.tagDispatch "$type" cases
 
     /// A refusal as the text the keyed capture journals for it.
-    let render (e: QueryError) : string = Canon.render (toJson e)
+    let render (e: QueryError) : string =
+        Canonical.write Rendering.CrossHost (toJson e)
 
     /// The refusal a journalled reason records, or `None` for a reason that is not a query-error
     /// document (a journal written before Phase 385 recorded `QueryError.describe`'s sentence).
@@ -854,7 +854,7 @@ module Query =
     let private cellFields (c: Cell) : string * string =
         match c with
         | Int v -> "i", string v
-        | Float v -> "f", Canon.canonicalFloat v
+        | Float v -> "f", FloatLayout.canonical v
         | Bool v -> "b", (if v then "1" else "0")
         | Str v -> "s", v
         | Date v -> "d", v
@@ -1161,7 +1161,7 @@ module Query =
     /// `properties` under `x-` keys — `x-effect` (the two-axis effect class, as there) and
     /// `x-result`, the schema of ONE result row keyed by column name, so a model reads what comes
     /// back without it reading as an argument to fill. A parameter's value is what
-    /// `QueryCodec.decodeArgs` reads. `Canon.render` of the result is canonical and stable for a
+    /// `QueryCodec.decodeArgs` reads. `Canonical.write Rendering.CrossHost` of the result is canonical and stable for a
     /// fixed query.
     let toJsonSchema (q: Query) : JVal =
         JObj

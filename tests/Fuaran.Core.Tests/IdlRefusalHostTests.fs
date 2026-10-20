@@ -331,12 +331,14 @@ let private replacements =
       JObj [ "q", JInt 1 ] ]
 
 /// A string no sampled document carries. A mutation that writes RAW text at a position puts this
-/// there, renders, and replaces it: `Canon.render` can spell neither a whole number as a float token
+/// there, renders, and replaces it: `Canonical.write Rendering.CrossHost` can spell neither a whole number as a float token
 /// nor a repeated key, and those are two of the corners the law draws.
 let private marker = "__mutation_347__"
 
 let private withRaw (path: PathSegment list) (raw: string) (doc: JVal) : string =
-    (edit path (fun _ -> Some(JStr marker)) doc |> Canon.render).Replace("\"" + marker + "\"", raw)
+    (edit path (fun _ -> Some(JStr marker)) doc
+     |> Canonical.write Rendering.CrossHost)
+        .Replace("\"" + marker + "\"", raw)
 
 /// One mutation of a valid document's bytes, or `None` where the drawn position is one the law
 /// does not mutate.
@@ -389,9 +391,9 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
             let others =
                 replacements |> List.filter (fun r -> kindOf r <> kindOf value) |> List.toArray
 
-            let mine = Canon.render value
-            let other = Canon.render others[rng.Next others.Length]
-            let key = Canon.render (JStr k)
+            let mine = Canonical.write Rendering.CrossHost value
+            let other = Canonical.write Rendering.CrossHost others[rng.Next others.Length]
+            let key = Canonical.write Rendering.CrossHost (JStr k)
 
             Some(
                 withRaw
@@ -411,15 +413,15 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
                 None
             else
                 Some(
-                    Canon.render (
-                        edit
+                    Canonical.write
+                        Rendering.CrossHost
+                        (edit
                             path
                             (fun _ ->
                                 Some(
                                     JObj(fields |> List.map (fun (n, x) -> if n = name then "__proto__", x else n, x))
                                 ))
-                            doc
-                    )
+                            doc)
                 )
         | _ ->
             let mutated =
@@ -442,7 +444,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
 
                     Some(edit path (fun _ -> Some others[rng.Next others.Length]) doc)
 
-            mutated |> Option.map Canon.render
+            mutated |> Option.map (Canonical.write Rendering.CrossHost)
 
 /// The mutated documents for one vocabulary, drawn from its sampled valid documents.
 let private mutationsOf (c: Certified) (count: int) : string list =
@@ -530,7 +532,7 @@ let mutationLaw =
         [ for c in certified do
               lawOn c
 
-          testCase "a refusal carries the interpreter's code, path and expectation, and the pre-337 sentence" (fun _ ->
+          testCase "a refusal carries the interpreter's code, path, expectation and projected sentence" (fun _ ->
               // A pinned example: an int slot given a string, two levels down a document node.
               let bytes = """{"id":"n","kind":"V05","v":{"a":"x"}}"""
 
@@ -547,10 +549,14 @@ let mutationLaw =
                       (interp.Code, interp.Path, interp.Expected)
                       "the interpreter's"
 
+                  // Phase 520: the sentence is the projection of the code, the expectation and the kind
+                  // found, so the generated layer and the interpreter write the same one
                   Expect.equal
                       (DecodeError.describe fs)
-                      "expected an int"
-                      "the generated layer's own sentence, unchanged"
+                      (DecodeError.sentence DecodeCode.WrongKind "int" "string")
+                      "the projected sentence"
+
+                  Expect.equal fs.Message interp.Message "the interpreter's sentence too"
               | other -> failtestf "both must refuse: %A" other) ]
 
 // ---------------------------------------------------------------------------
@@ -729,7 +735,7 @@ let cornerTests =
               let script =
                   tsModuleOf RefusalCornersIdl.idl
                   + "\nconst r = decodeNode("
-                  + Canon.render (JStr doc)
+                  + Canonical.write Rendering.CrossHost (JStr doc)
                   + ");\nconst m = r.value.counts;\nconsole.log(JSON.stringify({\n"
                   + "  ok: r.ok,\n"
                   + "  keys: Object.keys(m).sort(),\n"
@@ -920,7 +926,7 @@ let declarationTests =
               let script =
                   tsModuleOf RefusalCornersIdl.idl
                   + "\nconst __out = [];\nfor (const d of "
-                  + Canon.render (JArr(docs |> List.map JStr))
+                  + Canonical.write Rendering.CrossHost (JArr(docs |> List.map JStr))
                   + ") {\n"
                   + "  const r = decodeNode(d);\n"
                   + "  if (r.ok) { __out.push('accepted'); continue; }\n"
@@ -1038,24 +1044,27 @@ let inheritedNameTests =
                   let disc = idl.Wire.Discriminator
 
                   let present =
-                      Canon.render (JObj [ "id", JStr "x"; disc, JStr "K"; "a", JStr "s"; name, JStr "v" ])
+                      Canonical.write
+                          Rendering.CrossHost
+                          (JObj [ "id", JStr "x"; disc, JStr "K"; "a", JStr "s"; name, JStr "v" ])
 
-                  let absent = Canon.render (JObj [ "id", JStr "x"; disc, JStr "K"; "a", JStr "s" ])
+                  let absent =
+                      Canonical.write Rendering.CrossHost (JObj [ "id", JStr "x"; disc, JStr "K"; "a", JStr "s" ])
 
                   let script =
                       tsModuleOf idl
                       + "\nconst __rt = (d) => { try { const r = decodeNode(d); return r.ok && encodeNode(r.value) === d; } catch (e) { return false; } };\n"
                       + "const __built = (v) => { try { return encodeNode(v) === "
-                      + Canon.render (JStr absent)
+                      + Canonical.write Rendering.CrossHost (JStr absent)
                       + "; } catch (e) { return false; } };\n"
                       + "const __absent = decodeNode("
-                      + Canon.render (JStr absent)
+                      + Canonical.write Rendering.CrossHost (JStr absent)
                       + ");\n"
                       + "const __plain = __absent.ok ? JSON.parse(JSON.stringify(__absent.value)) : null;\n"
                       + "console.log(JSON.stringify(__rt("
-                      + Canon.render (JStr present)
+                      + Canonical.write Rendering.CrossHost (JStr present)
                       + ") && __rt("
-                      + Canon.render (JStr absent)
+                      + Canonical.write Rendering.CrossHost (JStr absent)
                       + ") && __plain !== null && __built(__plain)));\n"
 
                   nodeJson script

@@ -32,13 +32,7 @@ module QueryCodec =
         |> Result.bind (fun name ->
             Decoder.field "type" colTypeOf el
             |> Result.bind (fun ty ->
-                // This codec's sentence for a non-bool `required` is its own, kept.
-                Decoder.field
-                    "required"
-                    (fun j ->
-                        Decoder.bool j
-                        |> Result.mapError (DecodeError.reword (fun _ -> "expected a bool")))
-                    el
+                Decoder.field "required" Decoder.bool el
                 |> Result.map (fun req ->
                     { Name = name
                       Type = ty
@@ -106,7 +100,8 @@ module QueryCodec =
     /// `value`; `contains` with its `text`; `isNull`, `isNotNull`) and a non-empty `OrderBy` the
     /// `orderBy` array of `{column, direction}` keys; both are omitted when empty, so a declaration
     /// with neither renders the bytes it rendered before the members existed.
-    let encode (q: Query) : string = Canon.render (queryJson q)
+    let encode (q: Query) : string =
+        Canonical.write Rendering.CrossHost (queryJson q)
 
     // Phase 295 — a decode failure is a decode failure: the readers answer a typed `DecodeError` (the
     // `…Detailed` entry points, Phase 310's convention) and the string forms its sentence, as
@@ -151,7 +146,7 @@ module QueryCodec =
     // that decodes is one `register` admits, and a refused one is refused with the registry's error.
 
     let internal queryOf (el: JVal) : Result<Query, DecodeError> =
-        Decoder.field "$type" (Decoder.oneOfWith "not a query declaration: " [ "query", () ]) el
+        Decoder.field "$type" (Decoder.oneOf [ "query", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "params" (Decoder.list paramOf) el
@@ -206,10 +201,11 @@ module QueryCodec =
 
     /// A result page as canonical JSON text (`"$type": "queryResult"`), the rows written by the
     /// column codec as an embedded table; `totalRowCount` / `nextPageToken` are omitted when `None`.
-    let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
+    let encodeResult (qr: QueryResult) : string =
+        Canonical.write Rendering.CrossHost (resultJson qr)
 
     let internal resultOf (el: JVal) : Result<QueryResult, DecodeError> =
-        Decoder.field "$type" (Decoder.oneOfWith "not a query result: " [ "queryResult", () ]) el
+        Decoder.field "$type" (Decoder.oneOf [ "queryResult", () ]) el
         |> Result.bind (fun () -> Decoder.field "rows" Decoder.json el)
         |> Result.bind (fun rowsEl ->
             match ColumnCodec.decodeJson rowsEl with
@@ -241,7 +237,8 @@ module QueryCodec =
 
     /// The seam's async envelope as canonical JSON text, in the `pending` / `ready` / `failed`
     /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it.
-    let encodeDeferredResult (d: Deferred<QueryResult>) : string = Canon.render (deferredResultJson d)
+    let encodeDeferredResult (d: Deferred<QueryResult>) : string =
+        Canonical.write Rendering.CrossHost (deferredResultJson d)
 
     // Phase 455: the envelope's TYPED reader over `resultOf`, so a refusal keeps its code and its
     // path — a page's `pageNum` that is not an integer is `WrongKind` at `value.pageNum`, and a
@@ -385,14 +382,13 @@ module QueryCodec =
     // `Lenient` is byte-for-byte the old behaviour. The embedded `source` and `rows` documents are
     // the column codec's, read by its own rules; the check stops at them.
 
-    // Phase 310 — the members check is the decode layer's strict policy (`Decoder.members`); the
-    // refusal keeps this codec's sentence, naming the object it is in. The helpers are the seam
-    // codecs' one set (`SeamCodec`, Phase 388), shared with `CapabilityCodec`.
+    // Phase 310 — the members check is the decode layer's strict policy (`Decoder.members`), its
+    // refusal `Decoder`'s own since Phase 520. The helpers are the seam codecs' one set
+    // (`SeamCodec`, Phase 388), shared with `CapabilityCodec`.
     open FunctionInternals.Reads
 
     let private strictQuery (el: JVal) =
-        members
-            "query"
+        Decoder.members
             [ "$type"
               "id"
               "params"
@@ -404,15 +400,14 @@ module QueryCodec =
               "where"
               "orderBy" ]
             el
-        |> Result.bind (fun () -> within "params" (each (members "query parameter" [ "name"; "type"; "required" ])) el)
-        |> Result.bind (fun () -> within "resultSchema" (each (members "result column" fieldMembers)) el)
-        |> Result.bind (fun () -> within "effect" (members "effect" EffectCodec.members) el)
-        |> Result.bind (fun () ->
-            within "where" (each (fun p -> members "filter predicate" (QueryShape.predicateMembers p) p)) el)
-        |> Result.bind (fun () -> within "orderBy" (each (members "order key" [ "column"; "direction" ])) el)
+        |> Result.bind (fun () -> within "params" (each (Decoder.members [ "name"; "type"; "required" ])) el)
+        |> Result.bind (fun () -> within "resultSchema" (each (Decoder.members fieldMembers)) el)
+        |> Result.bind (fun () -> within "effect" (Decoder.members EffectCodec.members) el)
+        |> Result.bind (fun () -> within "where" (each (fun p -> Decoder.members (QueryShape.predicateMembers p) p)) el)
+        |> Result.bind (fun () -> within "orderBy" (each (Decoder.members [ "column"; "direction" ])) el)
 
     let private strictResult (el: JVal) =
-        members "query result" [ "$type"; "rows"; "pageNum"; "totalRowCount"; "nextPageToken" ] el
+        Decoder.members [ "$type"; "rows"; "pageNum"; "totalRowCount"; "nextPageToken" ] el
 
     let private strictDeferredResult (el: JVal) =
         let extra =
@@ -421,7 +416,7 @@ module QueryCodec =
             | Some "failed" -> [ "message" ]
             | _ -> []
 
-        members "deferred" ("$type" :: extra) el
+        Decoder.members ("$type" :: extra) el
         |> Result.bind (fun () ->
             match tagOf el with
             | Some "ready" -> within "value" strictResult el

@@ -303,7 +303,7 @@ let private decimalAnswer (case: string) (input: JVal) : Result<string * string 
         match str "text" input with
         | Some t ->
             match DecimalText.tryToFloat t, DecimalText.tryCanonical t with
-            | Some f, _ -> accept "float" (Canon.canonicalFloat f)
+            | Some f, _ -> accept "float" (FloatLayout.canonical f)
             | None, Some _ -> reject "pastFloatRange"
             | None, None -> reject "notDecimal"
         | None -> Error "input.text missing"
@@ -369,7 +369,7 @@ let private fieldAnswer (case: string) (input: JVal) : Result<string * (string *
     match case with
     | "fieldEncode" ->
         match ColumnCodec.decodeField input with
-        | Ok f -> accept [ "canonical", Canon.render (ColumnCodec.fieldJson f) ]
+        | Ok f -> accept [ "canonical", Canonical.write Rendering.CrossHost (ColumnCodec.fieldJson f) ]
         | Error e -> Error("the input members did not read as a field: " + ColumnCodec.errorString e)
     | "codecDecode" ->
         match str "document" input with
@@ -423,7 +423,7 @@ let private checkFieldVector (v: JVal) : string option =
             let fileValue (name: string) =
                 match field name expected with
                 | Some(JStr s) -> Some s
-                | Some other -> Some(Canon.render other)
+                | Some other -> Some(Canonical.write Rendering.CrossHost other)
                 | None -> None
 
             let disagreements =

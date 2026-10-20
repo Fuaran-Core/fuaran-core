@@ -45,7 +45,7 @@ module RefusalCorpus =
             Name: string
             /// `json` — `Json.read ReadOptions.strict`, the refusal class a `JsonErrorKind`; `column` —
             /// `ColumnCodec.decode`, the class a `ColumnError` case (`NotJson/<kind>` for a parse failure);
-            /// `profile` (Phase 306) — `Versioning.Profile.tryParse`, whose one refusal class is
+            /// `profile` (Phase 306) — `Versioning.Capability.tryParse`, whose one refusal class is
             /// `MalformedProfile` and whose acceptance is the profile's canonical string.
             Codec: string
             Input: string
@@ -212,18 +212,18 @@ module RefusalCorpus =
         case.Name
 
     /// The outcome the codec gives `v`: `Error <class>` for a refusal, `Ok <canonical bytes>` for an
-    /// acceptance (`Canon.render` of the parse; `ColumnCodec.encode` of the decode; `Profile.render`
+    /// acceptance (`Canonical.write Rendering.CrossHost` of the parse; `ColumnCodec.encode` of the decode; `Profile.render`
     /// of the parsed profile).
     let outcome (v: Vector) : Result<string, string> =
         match v.Codec with
         | "json" ->
             match Json.read ReadOptions.strict v.Input with
-            | Ok jv -> Ok(Canon.render jv)
+            | Ok jv -> Ok(Canonical.write Rendering.CrossHost jv)
             | Error(JsonRefusal.Malformed e) -> Error(caseName (box e.Kind))
             | Error(JsonRefusal.LimitExceeded b) -> Error("LimitExceeded/" + JsonLimit.name b.Limit)
         | "profile" ->
-            match Versioning.Profile.tryParse v.Input with
-            | Ok p -> Ok(Versioning.Profile.render p)
+            match Versioning.Capability.tryParse v.Input with
+            | Ok p -> Ok(Versioning.Capability.render p)
             | Error _ -> Error "MalformedProfile"
         | _ ->
             match ColumnCodec.decode v.Input with

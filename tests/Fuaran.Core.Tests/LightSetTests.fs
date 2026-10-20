@@ -38,7 +38,7 @@ let private computeCellToken (c: Cell) : string option =
             + (if System.Double.IsNaN f then "NaN"
                elif System.Double.IsPositiveInfinity f then "Inf"
                elif System.Double.IsNegativeInfinity f then "-Inf"
-               else Canon.canonicalFloat f)
+               else FloatLayout.canonical f)
         )
     | Bool b -> Some("b:" + (if b then "1" else "0"))
     | Str s -> Some("s:" + s)

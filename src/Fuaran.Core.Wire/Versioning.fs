@@ -11,14 +11,16 @@ namespace Fuaran.Core
 ///     transport-only `Unknown` is reachable on decode, un-constructible on encode.
 module Versioning =
 
-    /// A wire profile id — `<name>@<major>.<minor>` (e.g. `core@1.0`). `Name` is the capability
-    /// namespace; `Major` is the `/vN/` incompatibility boundary (a removal/rename mints a new
-    /// major — old consumers cannot interpret it, see `negotiate`); `Minor` is the additive
-    /// capability counter (a new kind/case/field bumps the minor — an older consumer tolerates
-    /// it via the must-ignore-but-preserve rule).
-    type Profile =
+    /// A wire capability id — `<name>@<major>.<minor>` (e.g. `core@1.0`), the value of an envelope's
+    /// `$profile` member (WIRE_FORMAT §15.1). `Name` is the capability namespace; `Major` is the
+    /// `/vN/` incompatibility boundary (a removal/rename mints a new major — old consumers cannot
+    /// interpret it, see `negotiate`); `Minor` is the additive capability counter (a new
+    /// kind/case/field bumps the minor — an older consumer tolerates it via the
+    /// must-ignore-but-preserve rule). `Versioning.Profile` until Phase 520, renamed so that
+    /// "profile" in this package means one thing — a byte rule (`EncodingProfile`, `Rendering`).
+    type Capability =
         {
-            /// The capability namespace — a name of the grammar (`Profile.isValidName`) to cross the
+            /// The capability namespace — a name of the grammar (`Capability.isValidName`) to cross the
             /// wire. Two profiles with different names are `Foreign` to each other.
             Name: string
             /// The incompatibility boundary: any difference makes `negotiate` answer `Foreign`.
@@ -29,9 +31,9 @@ module Versioning =
             Minor: int
         }
 
-    /// The profile grammar: validation, the canonical rendering, and the parser that reads exactly
+    /// The capability grammar: validation, the canonical rendering, and the parser that reads exactly
     /// the strings `render` writes.
-    module Profile =
+    module Capability =
 
         // THE PROFILE GRAMMAR (Phase 306) — a BIJECTION between the valid profiles and their
         // canonical strings:
@@ -63,18 +65,18 @@ module Versioning =
 
         /// True where `p` is a profile the wire can carry: a name of the grammar and two
         /// non-negative counters. The record is public, so one can be built that is not.
-        let isValid (p: Profile) : bool =
+        let isValid (p: Capability) : bool =
             isValidName p.Name && p.Major >= 0 && p.Minor >= 0
 
         /// The canonical string form: `<name>@<major>.<minor>`. **Assumes a valid profile**
         /// (`isValid`) — over one, the string is the one `tryParse` reads back to it. `tryRender`
         /// is the guarded, total entry point for a profile built by hand.
-        let render (p: Profile) : string =
+        let render (p: Capability) : string =
             p.Name + "@" + string p.Major + "." + string p.Minor
 
         /// `render`, refusing a profile `tryParse` could not read back (Phase 306): a name outside
         /// the grammar or a negative counter. Over a valid profile it is exactly `Ok (render p)`.
-        let tryRender (p: Profile) : Result<string, string> =
+        let tryRender (p: Capability) : Result<string, string> =
             if not (isValidName p.Name) then
                 Error(
                     "profile name is outside the grammar (an ASCII letter, then letters, digits, '.', '_' or '-'): "
@@ -86,12 +88,12 @@ module Versioning =
                 Ok(render p)
 
         /// The base `core` profile — `core@1.0`.
-        let coreV1: Profile = { Name = "core"; Major = 1; Minor = 0 }
+        let coreV1: Capability = { Name = "core"; Major = 1; Minor = 0 }
 
         /// Parse `<name>@<major>.<minor>` — the canonical form and nothing else (the grammar
         /// above). Names a typed `Error` on any other shape — the same envelope discipline as the
         /// parser (no exceptions escape).
-        let tryParse (s: string) : Result<Profile, string> =
+        let tryParse (s: string) : Result<Capability, string> =
             let at = s.LastIndexOf '@'
 
             if at <= 0 || at = s.Length - 1 then
@@ -139,14 +141,14 @@ module Versioning =
         | Current
         /// Authored *ahead* of the consumer (same name + major, higher minor) — the consumer
         /// may meet kinds it does not understand; it must tolerate (preserve + degrade), not crash.
-        | Behind of authored: Profile
+        | Behind of authored: Capability
         /// A different namespace or a different major — an incompatible `/vN/` boundary the
         /// consumer cannot interpret at all (hard-refuse, never silently mis-decode).
-        | Foreign of authored: Profile
+        | Foreign of authored: Capability
 
-    /// Negotiate a consumer's supported `Profile` against an artifact's authored `Profile`.
+    /// Negotiate a consumer's supported `Capability` against an artifact's authored one.
     /// Minor-ahead is `Behind` (tolerable); a different name or major is `Foreign` (refuse).
-    let negotiate (consumer: Profile) (authored: Profile) : Compatibility =
+    let negotiate (consumer: Capability) (authored: Capability) : Compatibility =
         if authored.Name <> consumer.Name || authored.Major <> consumer.Major then
             Foreign authored
         elif authored.Minor > consumer.Minor then
@@ -157,7 +159,7 @@ module Versioning =
     [<Literal>]
     let internal profileKey = "$profile"
 
-    /// The envelope member that carries the artifact. `$`-prefixed, so under `Canon.render` it sorts
+    /// The envelope member that carries the artifact. `$`-prefixed, so under `Canonical.write Rendering.CrossHost` it sorts
     /// before every lower-case data key, and before `$profile`.
     [<Literal>]
     let payloadKey = "$payload"
@@ -167,44 +169,86 @@ module Versioning =
 
     /// A versioned wire envelope: the producer's authored `Profile` + the artifact `Payload`
     /// (a `Node` / `TreeOp` JVal). `$profile` / `$payload` keys are `$`-prefixed so they sort
-    /// before any lower-case data key under `Canon.render`. The envelope is the
+    /// before any lower-case data key under `Canonical.write Rendering.CrossHost`. The envelope is the
     /// capability-negotiation carrier — a consumer reads `$profile`, `negotiate`s, then decodes
     /// `$payload` (tolerantly when `Behind`).
     type Envelope =
         {
             /// The profile the producer authored against — what a consumer `negotiate`s before it
             /// reads the payload.
-            Profile: Profile
+            Profile: Capability
             /// The artifact, carried verbatim; `decode` does not interpret it.
             Payload: JVal
         }
 
     /// Build the canonical envelope JVal.
     let encode (env: Envelope) : JVal =
-        JObj [ payloadKey, env.Payload; profileKey, JStr(Profile.render env.Profile) ]
+        JObj [ payloadKey, env.Payload; profileKey, JStr(Capability.render env.Profile) ]
 
     /// Render an envelope to canonical wire bytes. **Assumes a valid profile and a payload
-    /// `Canon.tryRender` accepts** — `tryRender` is the guarded entry point.
-    let render (env: Envelope) : string = Canon.render (encode env)
+    /// `Canonical.tryWrite Rendering.CrossHost` accepts** — `tryRender` is the guarded entry point.
+    let render (env: Envelope) : string =
+        Canonical.write Rendering.CrossHost (encode env)
 
-    /// `render`, guarded (Phase 306): the profile through `Profile.tryRender`, then the whole
-    /// envelope through `Canon.tryRender` — so an envelope this returns `Ok` for is one `parse`
+    /// `render`, guarded (Phase 306): the profile through `Capability.tryRender`, then the whole
+    /// envelope through `Canonical.tryWrite Rendering.CrossHost` — so an envelope this returns `Ok` for is one `parse`
     /// reads back to the same profile. Over a valid profile and an accepted payload it is exactly
     /// `Ok (render env)`.
     let tryRender (env: Envelope) : Result<string, string> =
-        Profile.tryRender env.Profile
-        |> Result.bind (fun _ -> Canon.tryRender (encode env))
+        Capability.tryRender env.Profile
+        |> Result.bind (fun _ -> Canonical.tryWrite Rendering.CrossHost (encode env))
 
-    /// Decode an envelope JVal — reads `$profile` (parsed) + the verbatim `$payload`.
-    let decode (el: JVal) : Result<Envelope, string> =
-        Decoder.describing (Decoder.field profileKey Decoder.str) el
-        |> Result.bind Profile.tryParse
-        |> Result.bind (fun p ->
-            Decoder.describing (Decoder.field payloadKey Decoder.json) el
-            |> Result.map (fun payload -> { Profile = p; Payload = payload }))
+    /// Why an envelope was refused (Phase 520) — typed, so a host maps it to its own envelope code
+    /// rather than reading a sentence.
+    [<RequireQualifiedAccess>]
+    type EnvelopeRefusal =
+        /// The text, or the envelope's own shape: not JSON, `$profile` absent or not a string,
+        /// `$payload` absent — the decode refusal, with its code and its path (a host's
+        /// `MISSING_FIELD` / `WRONG_TYPE` at `$.$profile`, WIRE_FORMAT §15.2).
+        | Malformed of DecodeError
+        /// `$profile` is a string that names no capability (WIRE_FORMAT §15.2, Phase 1938): it is
+        /// `Foreign`, at `$.$profile`, exactly as a parseable foreign capability is refused at
+        /// negotiation — one fact to a consumer (it cannot read the payload under any capability it
+        /// holds) and one repair to an author. Carries the text and why it does not parse.
+        | ForeignProfile of text: string * reason: string
 
-    /// Parse + decode an envelope from wire bytes.
-    let parse (s: string) : Result<Envelope, string> = Json.parse s |> Result.bind decode
+    /// The `EnvelopeRefusal` companions (Phase 520).
+    [<RequireQualifiedAccess>]
+    module EnvelopeRefusal =
+
+        /// Where the refusal is, from the envelope's root: the decode refusal's own path, or
+        /// `$profile` for a profile that names no capability.
+        let path (r: EnvelopeRefusal) : PathSegment list =
+            match r with
+            | EnvelopeRefusal.Malformed e -> e.Path
+            | EnvelopeRefusal.ForeignProfile _ -> [ PathSegment.Key profileKey ]
+
+        /// One line naming the refusal and its path, for a reader — never matched on.
+        let describe (r: EnvelopeRefusal) : string =
+            match r with
+            | EnvelopeRefusal.Malformed e -> DecodeError.render e
+            | EnvelopeRefusal.ForeignProfile(_, reason) -> "Foreign at " + DecodePath.render (path r) + ": " + reason
+
+    /// Decode an envelope JVal — reads `$profile` (parsed) + the verbatim `$payload`. A `$profile`
+    /// that does not parse is `EnvelopeRefusal.ForeignProfile` (WIRE_FORMAT §15.2); every other
+    /// refusal is the decode's own, typed (Phase 520).
+    let decode (el: JVal) : Result<Envelope, EnvelopeRefusal> =
+        match Decoder.field profileKey Decoder.str el with
+        | Error e -> Error(EnvelopeRefusal.Malformed e)
+        | Ok text ->
+            match Capability.tryParse text with
+            | Error reason -> Error(EnvelopeRefusal.ForeignProfile(text, reason))
+            | Ok p ->
+                Decoder.field payloadKey Decoder.json el
+                |> Result.map (fun payload -> { Profile = p; Payload = payload })
+                |> Result.mapError EnvelopeRefusal.Malformed
+
+    /// Parse + decode an envelope from wire bytes, under `ReadOptions.strict` (`Decoder.parse`):
+    /// text that does not parse is `Malformed` with `InvalidJson` at the root.
+    let parse (s: string) : Result<Envelope, EnvelopeRefusal> =
+        Decoder.parse ReadOptions.strict s
+        |> Result.mapError EnvelopeRefusal.Malformed
+        |> Result.bind decode
 
     /// A kind the consumer does not understand, captured on the decode boundary. **Transport-only**:
     /// it is reachable here and nowhere on the authoring/encode path — no host can construct one to
@@ -220,7 +264,7 @@ module Versioning =
             Payload: JVal
             /// The artifact's `requiredProfile` member when present and well-formed; a malformed one
             /// reads as `None`, not as a refusal.
-            RequiredProfile: Profile option
+            RequiredProfile: Capability option
         }
 
     /// The result of a tolerant decode: a fully-understood `'T`, or a preserved `Unknown`.
@@ -232,10 +276,10 @@ module Versioning =
 
     /// Read an optional `requiredProfile` declaration off an artifact object (the
     /// "artifact declares the profile it requires" shape). Malformed / absent ⇒ `None`.
-    let private readRequiredProfile (el: JVal) : Profile option =
+    let private readRequiredProfile (el: JVal) : Capability option =
         match Decoder.tryMember requiredProfileKey el with
         | Some(JStr s) ->
-            match Profile.tryParse s with
+            match Capability.tryParse s with
             | Ok p -> Some p
             | Error _ -> None
         | _ -> None
@@ -267,7 +311,7 @@ module Versioning =
 
     /// Re-encode a tolerant decode back to a JVal. The `Unknown` branch returns its preserved
     /// `Payload` **verbatim** — must-ignore-but-preserve, so an old client cannot destroy data a
-    /// newer producer authored. Composed with `Canon.render` (deterministic key order) the
+    /// newer producer authored. Composed with `Canonical.write Rendering.CrossHost` (deterministic key order) the
     /// unknown artifact round-trips byte-for-byte, which is what makes preservation verifiable on
     /// the op-stream hash chain.
     let reencode (encodeKnown: 'T -> JVal) (d: Decoded<'T>) : JVal =
@@ -309,14 +353,14 @@ module Versioning =
     /// to a NEGATIVE minor — a profile `render` then wrote as `core@1.-2147483648` and `tryParse`
     /// refused, and one `negotiate` read as older than every consumer. The refusal names the
     /// counter; `bump` is the saturating form for a caller with no error channel.
-    let tryBump (baseProfile: Profile) (ev: Evolution) : Result<Profile, string> =
+    let tryBump (baseProfile: Capability) (ev: Evolution) : Result<Capability, string> =
         match ev with
         | Evolution.Additive [] -> Ok baseProfile
         | Evolution.Additive _ ->
             if baseProfile.Minor = System.Int32.MaxValue then
                 Error(
                     "the minor of "
-                    + Profile.render baseProfile
+                    + Capability.render baseProfile
                     + " is at Int32.MaxValue and cannot be bumped"
                 )
             else
@@ -327,7 +371,7 @@ module Versioning =
             if baseProfile.Major = System.Int32.MaxValue then
                 Error(
                     "the major of "
-                    + Profile.render baseProfile
+                    + Capability.render baseProfile
                     + " is at Int32.MaxValue and cannot be bumped"
                 )
             else
@@ -339,7 +383,7 @@ module Versioning =
     /// `tryBump`, SATURATING where it refuses: a counter at `Int32.MaxValue` stays there rather
     /// than wrapping negative, and the profile comes back unchanged. Everywhere below that edge it
     /// is the bump it always was. A caller that must know the bump did not happen uses `tryBump`.
-    let bump (baseProfile: Profile) (ev: Evolution) : Profile =
+    let bump (baseProfile: Capability) (ev: Evolution) : Capability =
         match tryBump baseProfile ev with
         | Ok p -> p
         | Error _ -> baseProfile

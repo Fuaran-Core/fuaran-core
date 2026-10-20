@@ -127,7 +127,12 @@ let tests =
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"
-              Expect.stringContains errs[0] "parallel" "names the invariant")
+              Expect.stringContains errs[0].Detail "parallel" "names the invariant"
+
+              Expect.equal
+                  errs[0].At
+                  [ PathSegment.Key "enums"; PathSegment.Index 0; PathSegment.Key "hostCases" ]
+                  "at the enum's host cases (Phase 520)")
 
           testCase "enumWireErrors catches a non-invertible mapping" (fun _ ->
               let broken =
@@ -141,7 +146,12 @@ let tests =
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"
-              Expect.stringContains errs[0] "invertible" "names the consequence")
+              Expect.stringContains errs[0].Detail "invertible" "names the consequence"
+
+              Expect.equal
+                  errs[0].At
+                  [ PathSegment.Key "enums"; PathSegment.Index 0; PathSegment.Key "cases" ]
+                  "at the enum's wire cases (Phase 520)")
 
           testCase "enumWireErrors catches a duplicate case name" (fun _ ->
               let broken =

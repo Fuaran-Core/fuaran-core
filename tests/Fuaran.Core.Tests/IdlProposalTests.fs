@@ -220,17 +220,49 @@ let tests =
                                         "type": { "$type": "closure", "wire": "<closure>" },
                                         "optionality": { "$type": "optional" } } }"""
 
-                    match Proposal.parse (completeJson hostDelta candidateWire) with
+                    match Proposal.parseDetailed (completeJson hostDelta candidateWire) with
                     | Ok _ -> failtest "a closure slot was accepted from a proposal document"
-                    | Error e -> Expect.stringContains e "host-surface" "the refusal names why")
+                    | Error e ->
+                        // Phase 520: the code, the path and the projected sentence, not a phrase of it
+                        Expect.equal
+                            (e.Code, e.Path)
+                            (DecodeCode.NotAdmitted,
+                             [ PathSegment.Key "delta"
+                               PathSegment.Index 0
+                               PathSegment.Key "field"
+                               PathSegment.Key "type"
+                               PathSegment.Key "$type" ])
+                            "NotAdmitted at the type's tag"
+
+                        Expect.equal
+                            e.Message
+                            (DecodeError.sentence e.Code "a wire-data type" "the host-surface type 'closure'")
+                            "the refusal names why")
 
                 testCase "a host-only optionality cannot be minted by a proposal" (fun _ ->
                     let hostOnly =
                         tooltipDelta.Replace("{ \"$type\": \"optional\" }", "{ \"$type\": \"hostOnly\" }")
 
-                    match Proposal.parse (completeJson hostOnly candidateWire) with
+                    match Proposal.parseDetailed (completeJson hostOnly candidateWire) with
                     | Ok _ -> failtest "a wire-invisible slot was accepted from a proposal document"
-                    | Error e -> Expect.stringContains e "hostOnly" "the refusal names why") ]
+                    | Error e ->
+                        Expect.equal
+                            (e.Code, e.Path)
+                            (DecodeCode.NotAdmitted,
+                             [ PathSegment.Key "delta"
+                               PathSegment.Index 0
+                               PathSegment.Key "field"
+                               PathSegment.Key "optionality"
+                               PathSegment.Key "$type" ])
+                            "NotAdmitted at the optionality's tag"
+
+                        Expect.equal
+                            e.Message
+                            (DecodeError.sentence
+                                e.Code
+                                "a wire-visible optionality"
+                                "'hostOnly', a host slot with no wire projection")
+                            "the refusal names why") ]
 
           testList
               "applying a delta"

@@ -349,8 +349,8 @@ module FStarTarget =
     /// Phase 293 — the declared key order, applied ONCE here to every member list the closure
     /// carries, so that every site that emits a constructor (its type, its encoder arm, its
     /// decoder reads, its binders and its lemmas) walks the same ordered list. `Sorted` is the
-    /// Ordinal order `Canon.render` applies; `Declared` is the authored order, which is what
-    /// `Canon.renderOrdered` leaves alone.
+    /// Ordinal order `Canonical.write Rendering.CrossHost` applies; `Declared` is the authored order, which is what
+    /// `Canonical.write Rendering.Declared` leaves alone.
     let private orderMembers (order: KeyOrder) (ms: Member list) =
         match order with
         | KeyOrder.Sorted -> ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
@@ -854,7 +854,7 @@ module FStarTarget =
     /// The entries of one object in the vocabulary's declared key order: under `Declared` the
     /// fixed keys lead and the members follow in authored order, exactly as `Encode` builds the
     /// object; under `Sorted` the whole list is Ordinal-sorted, fixed keys included, exactly as
-    /// `Canon.render` leaves it. A member list handed in is already in the closure's order
+    /// `Canonical.write Rendering.CrossHost` leaves it. A member list handed in is already in the closure's order
     /// ([[orderMembers]]), so the sort here only merges the fixed keys into it.
     let private layout (order: KeyOrder) (placed: (string * string) list) (ms: Member list) : Entry list =
         let entries = (placed |> List.map Fixed) @ (ms |> List.map Mem)
@@ -2967,7 +2967,7 @@ module FStarTarget =
     /// can check about a float is that it sits in the right member of the right object.
     let private floatCarrier (where: string) (f: float) : Result<string, CodegenError> =
         if System.Double.IsFinite f then
-            Ok(lit (Canon.render (JFloat f)))
+            Ok(lit (Canonical.write Rendering.CrossHost (JFloat f)))
         else
             unmodellable
                 "a non-finite float — the wire spells it as a quoted string (WIRE_FORMAT §7), and the model's float slot carries a number"

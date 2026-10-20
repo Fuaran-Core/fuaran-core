@@ -186,10 +186,10 @@ module Corpus =
         gen 0
 
     /// Generative round-trip law: over `count` seed-replayable random `JVal`s, BOTH renderers —
-    /// `Json.render` and, since Phase 299, `Canon.render` — must be idempotent under a `parse`
+    /// `Json.render` and, since Phase 299, `Canonical.write Rendering.CrossHost` — must be idempotent under a `parse`
     /// round-trip: `parse (render v) |> Result.map render = Ok (render v)`. The string form is robust
     /// to the documented canonical normalisations (an integer-valued `JFloat` renders without a
-    /// point and re-parses as `JInt`; `Canon.render` sorts keys); the rendered text still
+    /// point and re-parses as `JInt`; `Canonical.write Rendering.CrossHost` sorts keys); the rendered text still
     /// round-trips. A value holding a string that is NOT well-formed UTF-16 (a lone or ill-ordered
     /// surrogate — the alphabet draws them) has no string to round-trip to, and there the law is
     /// the refusal: `parse` must reject the rendered text as `BadEscape`, under both renderers.
@@ -242,7 +242,9 @@ module Corpus =
                 match check "Json.render" Json.render (seed + i) v with
                 | Error m -> Error m
                 | Ok() ->
-                    match check "Canon.render" Canon.render (seed + i) v with
+                    match
+                        check "Canonical.write Rendering.CrossHost" (Canonical.write Rendering.CrossHost) (seed + i) v
+                    with
                     | Error m -> Error m
                     | Ok() -> go (i + 1)
 

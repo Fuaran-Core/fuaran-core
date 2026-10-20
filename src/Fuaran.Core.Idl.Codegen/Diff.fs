@@ -335,7 +335,7 @@ module Diff =
         match str "$type" v with
         | Some "omitDefault" ->
             match field "default" v with
-            | Some d -> "omitDefault " + Canon.render d
+            | Some d -> "omitDefault " + Canonical.write Rendering.CrossHost d
             | None -> "omitDefault"
         | Some t -> t
         | None -> "?"
@@ -347,7 +347,7 @@ module Diff =
     /// correct rather than merely convenient.
     let private readAnnotations (v: JVal) : string =
         match field "annotations" v with
-        | Some a -> Canon.render a
+        | Some a -> Canonical.write Rendering.CrossHost a
         | None -> ""
 
     let private readField (v: JVal) : FieldSnap option =
@@ -357,10 +357,10 @@ module Diff =
                 { Name = name
                   Label = typeLabel ty
                   TypeTag = str "$type" ty |> Option.defaultValue "?"
-                  TypeWire = Canon.render (stripHostSurface ty)
+                  TypeWire = Canonical.write Rendering.CrossHost (stripHostSurface ty)
                   TypeHost =
                     hostSurfaceOnly "" ty
-                    |> List.map (fun (p, h) -> p + "=" + Canon.render h)
+                    |> List.map (fun (p, h) -> p + "=" + Canonical.write Rendering.CrossHost h)
                     |> String.concat "; "
                   OptClass = str "$type" opt |> Option.defaultValue "?"
                   Opt = optLabel opt
@@ -395,7 +395,9 @@ module Diff =
                     | Some map -> [ "mapMsg:\n" + map ]
                     | None -> [])
                  @ (match p.RecordFields with
-                    | Some fs -> [ "recordFields:\n" + Canon.render (CodegenLookup.fieldsJson fs) ]
+                    | Some fs ->
+                        [ "recordFields:\n"
+                          + Canonical.write Rendering.CrossHost (CodegenLookup.fieldsJson fs) ]
                     | None -> []))
 
         [ for KeyValue(path, lines) in sup.Docs -> "doc:" + path, String.concat "\n" lines
@@ -493,7 +495,7 @@ module Diff =
                             match field "caseAnnotations" e with
                             | Some(JObj entries) ->
                                 entries
-                                |> List.map (fun (wire, block) -> wire, Canon.render block)
+                                |> List.map (fun (wire, block) -> wire, Canonical.write Rendering.CrossHost block)
                                 |> Map.ofList
                             | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields
@@ -509,7 +511,7 @@ module Diff =
                     arr "defaults" artifact
                     |> List.choose (fun d ->
                         match str "kind" d, str "field" d, field "value" d with
-                        | Some k, Some f, Some v -> Some((k, f), Canon.render v)
+                        | Some k, Some f, Some v -> Some((k, f), Canonical.write Rendering.CrossHost v)
                         | _ -> None)
                     |> Map.ofList
                   NodeFields = arr "nodeFields" artifact |> List.choose readField
@@ -3297,7 +3299,7 @@ module Diff =
     type Bump =
         /// Every row was decided: the base profile under `Versioning.bump` of the verdict's
         /// evolution (unchanged when nothing on the wire moved).
-        | Bumped of Versioning.Profile
+        | Bumped of Versioning.Capability
         /// At least one row crosses an erased slot; `rows` are those rows, to check by hand
         /// before any profile can be named.
         | Undecided of rows: Classification list
@@ -3309,7 +3311,7 @@ module Diff =
     /// An UNDECIDED verdict yields no profile, and that is the load-bearing half: a
     /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
     /// caller a number to publish for a revision whose class nobody has established.
-    let bumpProfile (baseProfile: Versioning.Profile) (v: Verdict) : Bump =
+    let bumpProfile (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
         match v.Undecided with
         | [] -> Bump.Bumped(Versioning.bump baseProfile v.Evolution)
         | rows -> Bump.Undecided rows

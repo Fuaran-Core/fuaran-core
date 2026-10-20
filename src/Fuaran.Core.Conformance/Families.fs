@@ -615,7 +615,7 @@ module Families =
           Unconditional
               "each iteration BUILDS one float in each of four strata — a small-magnitude spread, the whole normal range, the subnormals and the integral range past 2^53 — and every run asserts the edges (the largest finite, the smallest subnormal, the neighbours of 2^53) and the three non-finite tokens (Phase 253)",
           none "no refused outcome is read",
-          "Canon.canonicalFloat FloatLayout.finite"
+          "FloatLayout.canonical FloatLayout.finite"
           ("Conformance.chainBreakReasonLaws", [], seam, []),
           Unconditional
               "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed",
@@ -881,16 +881,19 @@ module Families =
                    |> Option.map (fun reason -> "reason", JStr(reasonToken reason))
                    |> Option.toList)
             )
-            |> Canon.render
+            |> Canonical.write Rendering.CrossHost
 
         let rows = composed rosters |> List.map family
         let last = List.length rows - 1
 
         let mem (key: string) (v: JVal) =
-            "  " + Canon.render (JStr key) + ":" + Canon.render v
+            "  "
+            + Canonical.write Rendering.CrossHost (JStr key)
+            + ":"
+            + Canonical.write Rendering.CrossHost v
 
         [ yield "{"
-          yield "  " + Canon.render (JStr "families") + ":["
+          yield "  " + Canonical.write Rendering.CrossHost (JStr "families") + ":["
           for i, line in List.indexed rows -> "    " + line + (if i < last then "," else "")
           yield "  ],"
           yield mem "kind" (JStr "fuaran.core.conformance.families") + ","

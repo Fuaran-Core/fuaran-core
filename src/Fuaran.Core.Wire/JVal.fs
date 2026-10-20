@@ -28,7 +28,7 @@ type JVal =
     /// Items in order. `parse` caps nesting at `Json.defaultMaxDepth`; the renderers cap nothing.
     | JArr of JVal list
     /// Members in AUTHORED order, a repeated key kept as written: `Json.render` keeps the order,
-    /// `Canon.render` sorts keys Ordinal, and every reader takes the FIRST member of a repeated key.
+    /// `Canonical.write Rendering.CrossHost` sorts keys Ordinal, and every reader takes the FIRST member of a repeated key.
     | JObj of (string * JVal) list
 
 /// Accessors over `JVal` that absorb the wire's numeric normalization (see the type doc:

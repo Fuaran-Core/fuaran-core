@@ -58,7 +58,8 @@ module SchemaDeltaCodec =
         )
 
     /// The canonical wire string for a delta. Total: every delta encodes.
-    let encode (d: SchemaDelta) : string = Canon.render (encodeJson d)
+    let encode (d: SchemaDelta) : string =
+        Canonical.write Rendering.CrossHost (encodeJson d)
 
     let private field (name: string) (el: JVal) : Result<JVal, ColumnError> =
         Decoder.field name Decoder.json el

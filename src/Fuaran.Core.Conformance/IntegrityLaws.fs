@@ -4,7 +4,7 @@ namespace Fuaran.Core
 module internal IntegrityLaws =
 
     // ---- canonical float encoder (Phase 55) ----
-    // The teeth on `Wire.Canon.canonicalFloat` — the single cross-host float→string encoder every
+    // The teeth on `Wire.FloatLayout.canonical` — the single cross-host float→string encoder every
     // float→wire / float→key path routes through, so the bytes match across the .NET / Fable / TS /
     // Python hosts.
 
@@ -79,8 +79,8 @@ module internal IntegrityLaws =
             LawKit.LawCell "non-finite floats render to stable, distinct tokens (NaN / ±Infinity)"
 
         let assertOne (at: string -> string) (stratum: string) (f: float) =
-            let s1 = Canon.canonicalFloat f
-            let s2 = Canon.canonicalFloat f
+            let s1 = FloatLayout.canonical f
+            let s2 = FloatLayout.canonical f
 
             determinism.Check(
                 (s1 = s2),
@@ -110,7 +110,7 @@ module internal IntegrityLaws =
 
             match parsed with
             | Ok v ->
-                let again = Canon.render v
+                let again = Canonical.write Rendering.CrossHost v
 
                 fixedPoint.Check(
                     (again = s1),
@@ -172,9 +172,9 @@ module internal IntegrityLaws =
             assertOne (fun msg -> "seed=" + string runner.Seed + " edge: " + msg) "edge" f
 
         // stable, distinct non-finite tokens (fixed text, not host-/locale-specific).
-        let nan = Canon.canonicalFloat System.Double.NaN
-        let pinf = Canon.canonicalFloat System.Double.PositiveInfinity
-        let ninf = Canon.canonicalFloat System.Double.NegativeInfinity
+        let nan = FloatLayout.canonical System.Double.NaN
+        let pinf = FloatLayout.canonical System.Double.PositiveInfinity
+        let ninf = FloatLayout.canonical System.Double.NegativeInfinity
 
         nonFinite.Check(
             nan = "\"NaN\""
