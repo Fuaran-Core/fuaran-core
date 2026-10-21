@@ -33,12 +33,6 @@
       "heldBy": "ReadmeClaimsTests"
     },
     {
-      "path": "docs/doc-coverage.json",
-      "switch": "CORE_APPROVE_DOCS",
-      "stem": "doc-coverage",
-      "heldBy": "PackageDocsTests"
-    },
-    {
       "path": "DECISIONS.md",
       "switch": "CORE_APPROVE_DOCS",
       "stem": "DECISIONS",

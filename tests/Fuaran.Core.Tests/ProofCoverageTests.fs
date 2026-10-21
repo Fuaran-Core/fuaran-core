@@ -21,8 +21,8 @@ module Fuaran.Core.Tests.ProofCoverageTests
 //   2. EVERY ASSUMED ROW IS ACCOUNTED FOR. Each `assumed` row carries its Phase 174 class, and
 //      each class carries its own account of what would close it: a `premise` is closed by nothing
 //      and that IS its class; a `domain-obligation` is discharged at a domain's own witness by the
-//      law it names; a `model-bridge` names `closes` — `permanent`, `unscheduled`, or a phase,
-//      and a phase must be OPEN. A scheduled row naming a shipped or unknown phase fails.
+//      law it names; a `model-bridge` names `closes` — `permanent` or `unscheduled`. No
+//      schedule is kept here (Phase 537), so a phase in `closes` fails.
 //
 //   3. EVERY DIFFERENTIAL IS PAIRED TO A THEOREM. A `tested` row on the `Proofs.Oracle` family
 //      names the model it runs beside (`evidence.model`, Phase 203), and that model must carry at
@@ -45,16 +45,11 @@ module Fuaran.Core.Tests.ProofCoverageTests
 //    input that differs from a clean baseline in exactly one way. The live case alone cannot show
 //    a clause works: it reads files expected to be correct, so a clause that computed nothing
 //    would pass it.
-//  * The scheduled half of clause 2 is VACUOUS ON TODAY'S DATA — no row carries a phase-form
-//    `closes`, because every bridge is `permanent` or `unscheduled`. It is stated plainly rather
-//    than left to be discovered, and it is not vacuous as CODE: the go-reds exercise both the
-//    shipped-phase and the no-oracle arms. The oracle is a COMMITTED data file,
-//    `tests/Fuaran.Core.Tests/open-phases.json` (Phase 294): either the list of open phase ids or a declaration that
-//    no list is kept, with the reason. It replaces an environment variable that named a private
-//    projection's rendered index — a public test tied to another repository's output, which public
-//    CI never set, so the first real scheduling claim would have reddened it permanently. Where a
-//    row makes a scheduling claim and the file declares itself inert, the clause FAILS rather than
-//    passes, because a check that reads as green without its instrument is worse than an absent one.
+//  * There is no scheduled half of clause 2 (Phase 537). This repository's roadmap lives outside
+//    it and cannot be read from here, so a `closes` naming a phase would be a claim nothing in
+//    this tree can check. It was once held to a committed list of open phases that no writer ever
+//    filled; that list and its reader are deleted until a writer exists, and a phase-form `closes`
+//    is refused as outside the closed set rather than passed or waved through.
 //  * The predicate LINE is emitted whatever the verdict, and says which verdict it is. A line that
 //    only appeared when green would make its absence the signal, and an absence is the one thing a
 //    reader scanning a log does not see.
@@ -125,69 +120,6 @@ let contractSection (readmeText: string) : string =
         | -1 -> rest
         | j -> rest.Substring(0, j)
 
-/// The open phases on this side, from `tests/Fuaran.Core.Tests/open-phases.json`. The roadmap store is not in this
-/// repository — it cannot be, since phases routinely name siblings a public repository must not —
-/// so what this repository keeps is the one fact the clause needs, as DATA: the ids of the phases
-/// that are open. The file has exactly one of two shapes, and a file with both or neither is
-/// refused, because a reader that guessed which was meant would make the clause's verdict depend on
-/// the guess:
-///
-///  * `{ "open": ["NNN", ...] }` — the list, written by whoever owns the phases;
-///  * `{ "inert": "<why no list is kept>" }` — the declared-inert form. The reason is required and
-///    must be prose, so an inert file says what instrument is missing instead of merely being absent.
-///
-/// `None` is the inert form.
-let openPhasesFromJson (text: string) : Result<Set<string> option, string> =
-    try
-        use doc = JsonDocument.Parse text
-        let root = doc.RootElement
-
-        if root.ValueKind <> JsonValueKind.Object then
-            Error "open-phases.json is not a JSON object"
-        else
-            let has (name: string) =
-                match root.TryGetProperty name with
-                | true, _ -> true
-                | _ -> false
-
-            match has "open", has "inert" with
-            | true, true -> Error "open-phases.json carries both `open` and `inert` — it must be exactly one"
-            | false, false -> Error "open-phases.json carries neither `open` nor `inert` — it must be exactly one"
-            | false, true ->
-                let inert = root.GetProperty "inert"
-
-                if inert.ValueKind = JsonValueKind.String && inert.GetString().Trim().Length >= 20 then
-                    Ok None
-                else
-                    Error "`inert` must be a reason in prose (a string of at least 20 characters), not a bare flag"
-            | true, false ->
-                let openNode = root.GetProperty "open"
-
-                if openNode.ValueKind <> JsonValueKind.Array then
-                    Error "`open` must be an array of phase-id strings"
-                else
-                    let ids =
-                        [ for e in openNode.EnumerateArray() ->
-                              if e.ValueKind = JsonValueKind.String then
-                                  e.GetString()
-                              else
-                                  null ]
-
-                    if
-                        ids
-                        |> List.exists (fun i -> isNull i || not (Regex.IsMatch(i, @"^[1-9][0-9]*$")))
-                    then
-                        Error "`open` holds an entry that is not a phase id (a positive integer, as a string)"
-                    else
-                        Ok(Some(Set.ofList ids))
-    with :? JsonException as e ->
-        Error(sprintf "open-phases.json is not valid JSON: %s" e.Message)
-
-let private liveOpenPhases () =
-    match openPhasesFromJson (File.ReadAllText(Snapshots.repoFile "tests/Fuaran.Core.Tests/open-phases.json")) with
-    | Ok phases -> phases
-    | Error why -> failwithf "tests/Fuaran.Core.Tests/open-phases.json is malformed: %s" why
-
 let private liveInputs () =
     use exclusionsDoc = liveExclusionsDoc ()
 
@@ -196,7 +128,6 @@ let private liveInputs () =
       Exclusions = liveExclusions exclusionsDoc.RootElement
       Reasons = liveReasons exclusionsDoc.RootElement
       Laws = liveLaws ()
-      OpenPhases = liveOpenPhases ()
       ContractText = contractSection (File.ReadAllText(Snapshots.repoFile "proofs/README.md")) }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +171,6 @@ let private fixtureBase =
             Phase = "fuaran-core#203" } ]
       Reasons = Set.ofList [ "facade"; "law-tested-by-design"; "content-free-seam" ]
       Laws = Set.ofList [ "fixtureLaws" ]
-      OpenPhases = Some(Set.ofList [ "999" ])
       ContractText = fixtureContract }
 
 /// A go-red: this perturbation yields EXACTLY one finding, naming the clause and its subject.
@@ -677,33 +607,14 @@ let proofCoverageTests =
                   "assumed-accounted"
                   "t5"
 
-          testCase "go-red: closes-open — a scheduled row naming a phase that is not open"
+          testCase "go-red: assumed-accounted — a model bridge scheduled against a phase"
           <| fun _ ->
               expectOneFinding
-                  "a row scheduled against a shipped phase"
+                  "a scheduling claim nothing here can check"
                   fixtureBase
-                  (fixtureLadder.Replace("\"closes\": \"permanent\"", "\"closes\": \"fuaran-core#7\""))
-                  "closes-open"
-                  "t5"
-
-          testCase "go-red: closes-open — a scheduling claim with no oracle to check it against"
-          <| fun _ ->
-              expectOneFinding
-                  "a scheduling claim and no oracle"
-                  { fixtureBase with OpenPhases = None }
                   (fixtureLadder.Replace("\"closes\": \"permanent\"", "\"closes\": \"fuaran-core#999\""))
-                  "closes-open"
+                  "assumed-accounted"
                   "t5"
-
-          testCase "a scheduled row naming an OPEN phase is clean, so the clause can pass"
-          <| fun _ ->
-              let findings, tally =
-                  checkCoverage
-                      fixtureBase
-                      (fixtureLadder.Replace("\"closes\": \"permanent\"", "\"closes\": \"fuaran-core#999\""))
-
-              Expect.isEmpty findings (sprintf "an open phase closes cleanly — got:\n%s" (String.concat "\n" findings))
-              Expect.equal tally.Scheduled 1 "the row counts as scheduled"
 
           // ---- clause 3 ----
 
@@ -789,59 +700,6 @@ let proofCoverageTests =
                   fixtureLadder
                   "contract-counts"
                   "assumed rows"
-
-          // ---- the oracle reader ----
-
-          testCase "the open-phase reader reads the list form and the declared-inert form"
-          <| fun _ ->
-              Expect.equal
-                  (openPhasesFromJson """{ "open": ["13", "14"] }""")
-                  (Ok(Some(Set.ofList [ "13"; "14" ])))
-                  "the list form is the set of ids"
-
-              Expect.equal
-                  (openPhasesFromJson """{ "open": [] }""")
-                  (Ok(Some Set.empty))
-                  "an empty list is a list: nothing is open, so every scheduling claim fails as closed"
-
-              Expect.equal
-                  (openPhasesFromJson """{ "inert": "no roadmap side writes this list yet, so none is kept" }""")
-                  (Ok None)
-                  "the inert form is None, which the clause reads as no oracle"
-
-          testCase "go-red: the open-phase reader refuses every malformed file rather than guessing"
-          <| fun _ ->
-              for bad in
-                  [ "[]"
-                    "{}"
-                    """{ "open": ["1"], "inert": "both shapes at once is ambiguous" }"""
-                    """{ "inert": true }"""
-                    """{ "inert": "short" }"""
-                    """{ "open": "13" }"""
-                    """{ "open": [13] }"""
-                    """{ "open": ["thirteen"] }"""
-                    """{ "open": ["013"] }"""
-                    "{ not json" ] do
-                  match openPhasesFromJson bad with
-                  | Error _ -> ()
-                  | Ok v -> failtestf "a malformed file was accepted: %s -> %A" bad v
-
-          testCase "the committed open-phases file is well-formed and needs no environment"
-          <| fun _ ->
-              let before = Environment.GetEnvironmentVariable "FUARAN_CORE_ROADMAP"
-
-              try
-                  Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", null)
-
-                  match
-                      openPhasesFromJson (
-                          File.ReadAllText(Snapshots.repoFile "tests/Fuaran.Core.Tests/open-phases.json")
-                      )
-                  with
-                  | Ok _ -> ()
-                  | Error why -> failtestf "tests/Fuaran.Core.Tests/open-phases.json is malformed: %s" why
-              finally
-                  Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", before)
 
           // ---- Phase 335: the operation clause ----
 

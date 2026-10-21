@@ -494,10 +494,7 @@ let familiesTests =
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
                   Expect.equal (member_ "schema") (JInt Families.schema) "schema"
 
-                  Expect.equal
-                      (member_ "packages")
-                      (JArr(KitRoster.rosters |> List.map (fun r -> JStr r.Package)))
-                      "packages"
+                  Expect.equal (member_ "packages") (JArr [ JStr KitRoster.roster.Package ]) "packages"
 
                   let objects =
                       match member_ "families" with
