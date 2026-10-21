@@ -532,19 +532,25 @@ let tests =
                       r3,
                       t
                       |> Tally.bump "WithUpdate"
-                      |> Tally.bumpIf (diffScript.Production prod <> diffScript.Model model) "Lost"
+                      |> Differential.compare
+                          diffScript
+                          "a pair whose script carries a rewrite, kind-blind bridge"
+                          prod
+                          model
                   | _ -> r3, t
 
               let t =
-                  Differential.seeded 1000 (ConfRng.ofSeed 30508) step (Tally.empty [ "WithUpdate"; "Lost" ])
+                  Differential.seeded 1000 (ConfRng.ofSeed 30508) step (Tally.empty [ "WithUpdate" ])
 
               Expect.isGreaterThan
                   (Tally.count "WithUpdate" t)
                   50
                   "the sample reached pairs whose script carries a rewrite"
 
+              Differential.expectLoses "a bridge that erases every kind" t
+
               Expect.equal
-                  (Tally.count "Lost" t)
+                  (List.length (Tally.disagreements t))
                   (Tally.count "WithUpdate" t)
                   "every such pair lost under the blind bridge"
 

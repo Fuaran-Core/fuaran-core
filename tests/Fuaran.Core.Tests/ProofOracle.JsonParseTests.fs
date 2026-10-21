@@ -390,7 +390,10 @@ let tests =
 
               Expect.stringStarts p "limit arrayLength" "production refuses at the bound it was given"
               Expect.stringStarts m "ok " "and an over-budgeted model does not"
-              Expect.notEqual p m "so the items comparison can lose"
+
+              Tally.empty []
+              |> Differential.compare Differential.text "[1,2,3] under an items bound of 2" p m
+              |> Differential.expectLoses "so the items comparison can lose"
 
           // ---- the teeth: both comparisons can lose ----
 

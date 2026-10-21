@@ -102,7 +102,9 @@ let tests =
                       "pairs whose concatenation is the merge (%d)"
                       ((Tally.count "Pairs" t) - (Tally.count "Reordered" t)))
 
+              Differential.expectLoses "a canonicaliser that skips the merge" t
+
               Expect.equal
-                  (Tally.count "LiteralLost" t)
+                  (List.length (Tally.disagreements t))
                   (Tally.count "Reordered" t)
                   "the concatenation lost on the reordered pairs, and on no other" ]

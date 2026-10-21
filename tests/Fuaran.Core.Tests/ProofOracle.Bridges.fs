@@ -113,6 +113,21 @@ module Tally =
     /// The disagreements, in the order they were found.
     let disagreements (t: Tally) : string list = findings Disagreement t
 
+    let private goRedClass (instrument: string) = "go-red:" + instrument
+
+    /// Declares the named GO-RED instruments a differential runs IN THE SAME PASS as its agreement:
+    /// a perturbed bridge or model asked beside the real one. Its losses are findings the go-red
+    /// arm reads and the agreement arm does not.
+    let goRed (instruments: string list) (t: Tally) : Tally =
+        classes (List.map goRedClass instruments) t
+
+    /// Records one loss of the in-pass `instrument`.
+    let lose (instrument: string) (message: string) (t: Tally) : Tally =
+        record (goRedClass instrument) message t
+
+    /// The losses of the in-pass `instrument`, in the order they were found.
+    let losses (instrument: string) (t: Tally) : string list = findings (goRedClass instrument) t
+
     /// Two tallies of the same declaration, summed.
     let merge (a: Tally) (b: Tally) : Tally =
         { Findings = Map.map (fun k ms -> (Map.tryFind k b.Findings |> Option.defaultValue []) @ ms) a.Findings
@@ -140,6 +155,10 @@ module Differential =
     /// Records `message ()` as a disagreement unless `agree` — the primitive every check rides.
     let check (agree: bool) (message: unit -> string) (t: Tally) : Tally =
         if agree then t else Tally.disagree (message ()) t
+
+    /// Records `message ()` as a loss of the in-pass go-red `instrument` unless `agree`.
+    let checkOn (instrument: string) (agree: bool) (message: unit -> string) (t: Tally) : Tally =
+        if agree then t else Tally.lose instrument (message ()) t
 
     /// Compares one answer pair through the render pair. `message` receives the two renders.
     let compareWith
@@ -187,7 +206,7 @@ module Differential =
     /// The agreement arm: no finding of any class, or the first five of each are printed.
     let expectAgrees (label: string) (t: Tally) =
         for KeyValue(cls, ms) in t.Findings do
-            if not (List.isEmpty ms) then
+            if not (List.isEmpty ms) && not (cls.StartsWith "go-red:") then
                 failtestf
                     "%s: the oracle and production DISAGREE — %d %s finding(s):\n%s"
                     label
@@ -198,6 +217,10 @@ module Differential =
     /// The GO-RED arm: the same differential, handed a perturbed model or bridge, must disagree.
     let expectLoses (label: string) (t: Tally) =
         Expect.isNonEmpty (Tally.disagreements t) (sprintf "%s: the perturbed differential must DISAGREE" label)
+
+    /// The GO-RED arm for an instrument run in the agreement's own pass (`Tally.goRed`).
+    let expectLosesOn (label: string) (instrument: string) (t: Tally) =
+        Expect.isNonEmpty (Tally.losses instrument t) (sprintf "%s: the perturbed %s must DISAGREE" label instrument)
 
 // ---------------------------------------------------------------------------
 //  The bridge — Core's types as the model reads them, and the model's back.
@@ -2575,8 +2598,7 @@ module UnitDiff =
               "Pairs"
               "Compatible"
               "Overflowed"
-              "Reordered"
-              "LiteralLost" ]
+              "Reordered" ]
         |> Tally.sets [ "Refusals" ]
 
     let private compareText = ColumnDiff.compareText
@@ -2684,7 +2706,13 @@ module UnitDiff =
                  None)
         with
         | None -> t
-        | Some p -> Tally.bumpIf (Unit.render p <> modelRender concat) "LiteralLost" t
+        | Some p ->
+            t
+            |> Differential.compare
+                (Differential.pair Unit.render modelRender)
+                (sprintf "%s: render (mul a b) against the model's render of the concatenation" label)
+                p
+                concat
 
     // ---- the pools ----
 

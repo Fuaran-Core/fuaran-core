@@ -1059,10 +1059,9 @@ let tests =
               let model =
                   TreeOps.fp_in_all (toModelTree treeBase) (script |> List.map (toModelOpWith toModelTree))
 
-              Expect.notEqual
-                  (prodFpParts prod)
-                  (modelFpParts pureModel)
-                  "the pure model footprint is not production's base-aware one"
+              Tally.empty []
+              |> Differential.compare footprint "RemoveNode a at the base, the model's pure footprint" prod pureModel
+              |> Differential.expectLoses "the pure model footprint is not production's base-aware one"
 
               Expect.equal (prodFpParts prod) (modelFpParts model) "the base-aware model footprint is"
 

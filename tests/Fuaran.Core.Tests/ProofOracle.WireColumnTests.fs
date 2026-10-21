@@ -116,8 +116,7 @@ module private FieldDiff =
               "Docs"
               "Tables"
               "Valid"
-              "OutsideNormalForm"
-              "LiteralLost" ]
+              "OutsideNormalForm" ]
         |> Tally.sets [ "Refusals" ]
 
     let private compareText = ColumnDiff.compareText
@@ -149,7 +148,12 @@ module private FieldDiff =
         let modelJson = canonOfModel (WireColumn.field_json (toModelFieldWith reverseExt f))
 
         if reverseExt then
-            Tally.bumpIf (Json.render prodJson <> Json.render modelJson) "LiteralLost" t
+            compareText
+                label
+                "fieldJson through the extension-reversing bridge"
+                (Json.render prodJson)
+                (Json.render modelJson)
+                t
         else
             t
             |> compareText label "fieldJson" (Json.render prodJson) (Json.render modelJson)
@@ -611,7 +615,9 @@ let tests =
                   300
                   (sprintf "fields with fewer (%d)" ((Tally.count "Fields" t) - (Tally.count "ExtMulti" t)))
 
+              Differential.expectLoses "a bridge that drops the extension order" t
+
               Expect.equal
-                  (Tally.count "LiteralLost" t)
+                  (List.length (Tally.disagreements t))
                   (Tally.count "ExtMulti" t)
                   "the reversed bridge lost on those fields, and on no other" ]

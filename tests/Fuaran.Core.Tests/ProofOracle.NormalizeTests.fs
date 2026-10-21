@@ -121,31 +121,39 @@ let tests =
                           | UpdateNode n, RemoveNode t -> n.Id = t
                           | _ -> false)
 
-                  let agree =
-                      normalized.Production(Ops.normalize nodew idw script) = normalized.Model(
-                          Normalize.normalize (blind script)
-                      )
+                  let prod = Ops.normalize nodew idw script
+                  let model = Normalize.normalize (blind script)
 
                   rng,
                   if hasPair then
-                      t |> Tally.bump "WithPair" |> Tally.bumpIf (not agree) "Lost"
+                      t
+                      |> Tally.bump "WithPair"
+                      |> Differential.compare
+                          normalized
+                          (sprintf "a script with a cancelling pair, blind bridge")
+                          prod
+                          model
                   else
-                      t |> Tally.bump "WithoutPair" |> Tally.bumpIf agree "Agreed"
+                      t
+                      |> Tally.bump "WithoutPair"
+                      |> Tally.bumpIf (normalized.Production prod = normalized.Model model) "Agreed"
 
               let t =
                   Differential.seeded
                       400
                       (System.Random 30306)
                       step
-                      (Tally.empty [ "WithPair"; "Lost"; "WithoutPair"; "Agreed" ])
+                      (Tally.empty [ "WithPair"; "WithoutPair"; "Agreed" ])
 
               Expect.isGreaterThan
                   (Tally.count "WithPair" t)
                   50
                   "the sample reached an insert/remove or rewrite/remove pair"
 
+              Differential.expectLoses "a bridge that renames the remove of a cancelling pair" t
+
               Expect.equal
-                  (Tally.count "Lost" t)
+                  (List.length (Tally.disagreements t))
                   (Tally.count "WithPair" t)
                   "every script carrying a cancelling pair lost under the blind bridge"
 

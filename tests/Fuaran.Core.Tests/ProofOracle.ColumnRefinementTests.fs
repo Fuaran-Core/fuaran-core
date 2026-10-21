@@ -140,8 +140,9 @@ module private RefinementDiff =
     /// `toCells (ofCells cs)` held to `cs` — lost; and the column types drawn and the refusal
     /// classes reached.
     let private refinementTally =
-        Tally.empty [ "Draws"; "Built"; "Refused"; "Widened"; "WithNull"; "LiteralLost" ]
+        Tally.empty [ "Draws"; "Built"; "Refused"; "Widened"; "WithNull" ]
         |> Tally.sets [ "Types"; "Classes" ]
+        |> Tally.goRed [ "literal bridge" ]
 
     let private compareText = ColumnDiff.compareText
 
@@ -201,7 +202,12 @@ module private RefinementDiff =
             |> Tally.bumpIf widened "Widened"
             |> Tally.bumpIf (cells |> List.exists (fun c -> c = Null)) "WithNull"
             // the literal bridge: production's `toCells` against the cells it was handed
-            |> Tally.bumpIf (showCells prodCells <> showCells cells) "LiteralLost"
+            |> Differential.checkOn "literal bridge" (showCells prodCells = showCells cells) (fun () ->
+                sprintf
+                    "%s: toCells (ofCells cells) held to the cells themselves - production %s, the cells %s"
+                    label
+                    (showCells prodCells)
+                    (showCells cells))
         | Result.Error pe, WireColumn.Bad me ->
             let p = ColumnDiff.prodClass pe
 
@@ -488,8 +494,10 @@ let tests =
                   500
                   "and draws with nothing to widen"
 
+              Differential.expectLosesOn "a bridge that drops the widening normalisation" "literal bridge" t
+
               Expect.equal
-                  (Tally.count "LiteralLost" t)
+                  (List.length (Tally.losses "literal bridge" t))
                   (Tally.count "Widened" t)
                   "the literal bridge lost on the widened draws, and on no other"
 
