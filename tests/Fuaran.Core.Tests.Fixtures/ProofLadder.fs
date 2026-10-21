@@ -659,14 +659,14 @@ let checkContract (ladderText: string) (readmeText: string) : string list =
 //  The header used to say "eight in all" over a ladder that had long since grown past it, and the
 //  contract section's counts and table were held to `proofs.json` by checks that could only say
 //  they were wrong. The three are now a PROJECTION: `regenerateReadme` renders the header's summary
-//  block, the contract table's rows and the contract prose's four counts from the ladder, the
-//  family below holds the committed README to that rendering, and `CORE_APPROVE_LADDER=1` writes it
-//  — the same idiom as the API baselines. Prose around the blocks is untouched: what a number says
-//  is generated, what it means is written.
+//  block, the contract table's rows and the contract prose's four counts from the ladder. Since Phase
+//  533 it is one step of `ProofReadme.render`, which the tool's `render proofs-readme` writes and the
+//  Proofs.Ladder family holds. Prose around the blocks is untouched: what a number says is generated,
+//  what it means is written.
 // ---------------------------------------------------------------------------
 
 let ladderSummaryBegin =
-    "<!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->"
+    "<!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->"
 
 let ladderSummaryEnd = "<!-- ladder-summary:end -->"
 

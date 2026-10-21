@@ -1,7 +1,7 @@
 module Fuaran.Core.Tools.Program
 
 // ============================================================================
-//  The tool (Phase 532). Two verbs:
+//  The tool (Phase 532). Three verbs:
 //
 //    render <family> [<dir>]   write one generated artefact family (`Renders.names`): the corpus
 //                              families into this repository's committed copies, or into <dir> where
@@ -12,6 +12,10 @@ module Fuaran.Core.Tools.Program
 //                              registered models are in the module cone, and records a green
 //                              `-Strict` full run as the baseline (`ProofCone.coneCli` states the
 //                              arguments). The caller names the verb.
+//    proofs-inventory          print the one sentence stating the proof inventory (models, their
+//                              lines, the ladder's rows by level), for a document outside this
+//                              repository that quotes it (Phase 533). `render proofs-readme` writes
+//                              the README itself.
 //
 //  The test project used to be this tool: its runner carried a dozen flags whose exporters lived in
 //  test files, so running the suite and producing the corpus were one assembly's two jobs. The suite
@@ -26,7 +30,17 @@ let private usage () =
     eprintfn
         "       proof-cone --since <tree> --out <file> | --modules <a,b,...> --out <file> | --record-strict --verdict <file> --out <file>"
 
+    eprintfn "       proofs-inventory"
     2
+
+let private inventory () : int =
+    match ProofReadme.inventoryLive () with
+    | Ok line ->
+        printfn "%s" line
+        0
+    | Error why ->
+        eprintfn "proofs-inventory: %s" why
+        2
 
 let private render (family: string) (rest: string list) : int =
     let table = Renders.tableWith ConformanceVacuityTests.cases
@@ -55,4 +69,5 @@ let main argv =
     match List.ofArray argv with
     | "render" :: family :: rest -> render family rest
     | "proof-cone" :: rest -> ProofCone.coneCli rest
+    | [ "proofs-inventory" ] -> inventory ()
     | _ -> usage ()

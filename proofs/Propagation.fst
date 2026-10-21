@@ -95,10 +95,10 @@
    production's `Set` and `Map` sort by id, the model holds both as lists, and every theorem
    about a set is about membership.
 
-   HOW TO READ IT. Every definition names its F# counterpart, as in `ColumnOps.fst` and
-   `Capability.fst`. The module is SELF-CONTAINED like them — it opens no other model, restates
-   `outcome` and the list helpers it needs, and extracts beside the other models into the same
-   oracle assembly sharing only `Prims.fs` and the `option` shim. Every walk a lemma has to
+   HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
+   `Capability.fst`. The module is SELF-CONTAINED — it opens no other model, only the shared
+   `Twin` and `ListAlgebra`, restates `outcome` and the list helpers it needs, and extracts beside
+   the other models into the same oracle assembly. Every walk a lemma has to
    name is a NAMED function (`always`, `in_set`, `resolve_in`), never a lambda written twice.
 
    Apache-2.0, like everything beside it.

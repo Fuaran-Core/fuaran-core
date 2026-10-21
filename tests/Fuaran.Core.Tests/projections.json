@@ -16,15 +16,8 @@
     },
     {
       "path": "proofs/README.md",
-      "switch": "CORE_APPROVE_LADDER",
-      "stem": "ladder",
+      "render": "proofs-readme",
       "heldBy": "ProofsLadderTests"
-    },
-    {
-      "path": "proofs/README.md",
-      "switch": "CORE_APPROVE_LADDER",
-      "stem": "operations",
-      "heldBy": "ProofCoverageTests"
     },
     {
       "path": "README.md",

@@ -51,7 +51,8 @@ let tableWith (measuredCases: unit -> (string * Fuaran.Core.CaseCount) list) : (
               0)
 
       yield "fstar", inRepo (fun () -> max (FStarModels.emit ()) (CertificationVectors.emitVectors ()))
-      yield "oracle-project", inRepo oracleProject ]
+      yield "oracle-project", inRepo oracleProject
+      yield ProofReadme.Family, inRepo ProofReadme.write ]
 
 /// The family names, in table order (nothing is measured to list them).
 let names: string list = tableWith (fun () -> []) |> List.map fst

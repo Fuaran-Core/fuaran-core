@@ -139,7 +139,7 @@
    which refuses it: a value space has one reader spelling, `"$type"`.)
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
-   `ColumnOps.fst`. The module opens ONE other model, `Propagation` (Phase 544): the pipeline's dirty
+   `Propagation.fst`. The module opens ONE other model, `Propagation` (Phase 544): the pipeline's dirty
    set is that module's closure instantiated at the pipeline's edges, and the set helpers that closure
    needs are read from it rather than restated. It restates `outcome` and the list helpers its own
    sections need, and extracts beside the other models into the same oracle assembly.

@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 176, 177, 187 and 157).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 177, 187 and 157).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it hands the kit
 # what THIS repository has — the models and which of them are checked but not extracted (read from

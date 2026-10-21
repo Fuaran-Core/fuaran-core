@@ -149,11 +149,11 @@ CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
 CORE_APPROVE_API=Fuaran.Core.Wire dotnet run --project tests/Fuaran.Core.Tests
 ```
 
-Every approval switch in the repository (`CORE_APPROVE_API`, `_WIRE`, `_LADDER`, `_README`, `_DOCS`
+Every approval switch in the repository (`CORE_APPROVE_API`, `_WIRE`, `_README`, `_DOCS`
 and `FUARAN_REGEN`) has one reading (`tests/Fuaran.Core.Tests.Fixtures/Approval.fs`, Phase 396): absent, empty,
 `0` or `false` is no; `1` or `true` is every file the switch governs; any other value is a filter, a
 comma-separated list of file stems (a package id here). A filter that matches nothing is red by name,
-and each file a switch rewrites is printed. **Since `0.40.0` (Phase 532, DECISIONS.md D201, internal):** a switch rewrites only a projection its family holds; every other generated artefact (the corpus families, the generated F# modules, the classifier fixtures, the F\* models and the oracle project's `Compile` list) is written by the tool, `dotnet run --project tools/Fuaran.Core.Tools -- render <family>`, the test runner has no verb, and nothing a package ships moves.
+and each file a switch rewrites is printed. **Since `0.40.0` (Phase 532, DECISIONS.md D201, internal):** a switch rewrites only a projection its family holds; every other generated artefact (the corpus families, the generated F# modules, the classifier fixtures, the F\* models and the oracle project's `Compile` list) is written by the tool, `dotnet run --project tools/Fuaran.Core.Tools -- render <family>`, the test runner has no verb, and nothing a package ships moves. **Since `0.40.0` (Phase 533, internal):** `proofs/README.md` is the tool's render (`render proofs-readme`: the ladder summary, the contract and operation tables, and one section per model rendered from `proofs.json`'s rows and the model's header), held by the `Proofs.Ladder` family; `CORE_APPROVE_LADDER` is retired with the two suite writers it governed, and the projection registry refuses two rows naming one path.
 
 **The hazard of the bare form is that it rewrites EVERY drifted
 baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your

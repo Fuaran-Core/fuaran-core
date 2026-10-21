@@ -758,7 +758,7 @@ let renderOperationPredicate (mapped: bool) (t: OperationTally) : string =
         (t.ByClass |> List.map (fun (c, n) -> sprintf "%d %s" n c) |> String.concat ", ")
 
 let operationTableBegin =
-    "<!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->"
+    "<!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by `render proofs-readme`; held by the Proofs.Ladder family -->"
 
 let operationTableEnd = "<!-- operation-coverage:end -->"
 
@@ -803,3 +803,120 @@ let regenerateOperationTable (table: string) (readmeText: string) : Result<strin
             + "\n"
             + text.Substring e
         )
+
+// ---------------------------------------------------------------------------
+//  The operation clause's live inputs, read from the tree (Phase 533 moved them here from the suite, so
+//  the README's render, which the tool writes, reads the same census the clause checks)
+// ---------------------------------------------------------------------------
+
+
+let liveCensus () : Operation list =
+    Directory.GetFiles(Snapshots.repoFile "api", "*.txt")
+    |> Array.sort
+    |> Array.toList
+    |> List.collect (fun path -> censusOf (Path.GetFileNameWithoutExtension path) (File.ReadAllText path))
+
+let liveLadderOperations () =
+    use doc = JsonDocument.Parse(File.ReadAllText(Snapshots.repoFile "proofs.json"))
+
+    doc.RootElement.GetProperty("claims").EnumerateArray()
+    |> Seq.choose (fun row ->
+        match objMember row "evidence" with
+        | Some ev ->
+            match ev.TryGetProperty "operations" with
+            | true, ops when ops.ValueKind = JsonValueKind.Array ->
+                Some(
+                    strMember row "id" |> Option.defaultValue "",
+                    strMember row "level" |> Option.defaultValue "",
+                    ops.EnumerateArray() |> Seq.map _.GetString() |> List.ofSeq
+                )
+            | _ -> None
+        | None -> None)
+    |> List.ofSeq
+
+let operationExclusionsOf (root: JsonElement) : OperationExclusion list =
+    match root.TryGetProperty "operations" with
+    | true, ops when ops.ValueKind = JsonValueKind.Array ->
+        ops.EnumerateArray()
+        |> Seq.map (fun el ->
+            { Members =
+                match el.TryGetProperty "members" with
+                | true, v when v.ValueKind = JsonValueKind.Array ->
+                    v.EnumerateArray() |> Seq.map _.GetString() |> List.ofSeq
+                | _ -> []
+              Class = strMember el "class" |> Option.defaultValue ""
+              Reason = strMember el "reason" |> Option.defaultValue ""
+              ForwardsTo = strMember el "forwardsTo"
+              StandIn = strMember el "standIn"
+              Through = strMember el "through" })
+        |> List.ofSeq
+    | _ -> []
+
+let operationClassesOf (root: JsonElement) : Set<string> =
+    match root.TryGetProperty "operationClasses" with
+    | true, v when v.ValueKind = JsonValueKind.Object -> v.EnumerateObject() |> Seq.map _.Name |> Set.ofSeq
+    | _ -> Set.empty
+
+/// Whether the baseline member carries `System.Obsolete`, on itself or on a declaring type —
+/// read from the loaded assembly, so an `obsolete` entry cannot claim an attribute the code lacks.
+let carriesObsolete (o: Operation) : bool =
+    try
+        let asm = Reflection.Assembly.Load(Reflection.AssemblyName o.Package)
+        let cut = o.Clr.LastIndexOf '.'
+        let ty = asm.GetType(o.Clr.Substring(0, cut))
+        let name = Regex.Replace(o.Clr.Substring(cut + 1), "`[0-9]+$", "")
+
+        let rec typeObsolete (t: Type) =
+            not (isNull t)
+            && (t.IsDefined(typeof<ObsoleteAttribute>, false) || typeObsolete t.DeclaringType)
+
+        not (isNull ty)
+        && (typeObsolete ty
+            || ty.GetMethods(
+                Reflection.BindingFlags.Public
+                ||| Reflection.BindingFlags.Static
+                ||| Reflection.BindingFlags.Instance
+               )
+               |> Array.exists (fun m -> m.Name = name && m.IsDefined(typeof<ObsoleteAttribute>, false)))
+    with _ ->
+        false
+
+let liveOperationInputs () : OperationInputs =
+    use exclusionsDoc =
+        JsonDocument.Parse(File.ReadAllText(Snapshots.repoFile "proofs/coverage-exclusions.json"))
+
+    let exclusions = operationExclusionsOf exclusionsDoc.RootElement
+    let census = liveCensus ()
+
+    let claimedObsolete =
+        exclusions
+        |> List.filter (fun e -> e.Class = "obsolete")
+        |> List.collect _.Members
+        |> Set.ofList
+
+    let standIns =
+        exclusions
+        |> List.choose _.StandIn
+        |> List.distinct
+        |> List.choose (fun p ->
+            let full = Snapshots.repoFile p
+
+            if p.StartsWith "tests/" && not (p.Contains "..") && File.Exists full then
+                Some(p, File.ReadAllText full)
+            else
+                None)
+        |> Map.ofList
+
+    { Census = census
+      Ladder = liveLadderOperations ()
+      Rosters = Fuaran.Core.Families.families |> List.map (fun f -> f.Id, f.Operations)
+      // A family's pinned-default spellings are its entry points too (Phase 507).
+      Families = KitRoster.families |> List.collect (fun f -> f.Id :: f.Spellings) |> Set.ofList
+      Exclusions = exclusions
+      Classes = operationClassesOf exclusionsDoc.RootElement
+      StandIns = standIns
+      Obsolete =
+        census
+        |> List.filter (fun o -> claimedObsolete.Contains o.Name && carriesObsolete o)
+        |> List.map _.Name
+        |> Set.ofList }
