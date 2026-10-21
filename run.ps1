@@ -27,7 +27,7 @@ if (-not $SkipFormat) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $global:LASTEXITCODE = 0
     # `samples` is formatted with `src` and `tests`: the adoption sample is code a reader copies.
-    dotnet fantomas src tests samples
+    dotnet fantomas src tests tools samples
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
