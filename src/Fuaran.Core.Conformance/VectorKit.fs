@@ -152,18 +152,21 @@ module internal VectorFamily =
     /// `lawsWith []` — the per-vector laws and the corpus law.
     let laws (family: VectorFamily<'V>) : LawResult list = lawsWith [] family
 
-/// How one value is laid out in a committed conformance file (Phase 508).
+/// How one value is laid out in a committed conformance file (Phase 508; public since Phase 543,
+/// DECISIONS.md D210). A producer builds its file's items from these three shapes and nothing else, so
+/// every producer's file escapes and spaces alike.
 [<RequireQualifiedAccess>]
-type internal CorpusCell =
+type CorpusCell =
     /// The value as `Canonical.write Rendering.CrossHost` writes it: a scalar, or a compact canonical object or array.
-    | Value of JVal
+    | Value of value: JVal
     /// An object in AUTHOR order, spaced — `{ "k": v, "k2": v2 }` — and `{}` with no member.
-    | Row of (string * CorpusCell) list
+    | Row of members: (string * CorpusCell) list
     /// An array in AUTHOR order, spaced — `[a, b]` — and `[]` with no item.
-    | List of CorpusCell list
+    | List of items: CorpusCell list
 
 /// One family's row in a self-enumerated family manifest (Phase 508) — the ONE manifest schema the
-/// emitted families share, so a validator over a manifest reads one shape.
+/// emitted families share, so a validator over a manifest reads one shape. Internal (D210): only this
+/// repository writes a manifest, and fuaran-core#477's adoption record will replace `Adoption`.
 type internal CorpusManifestRow =
     {
         /// The family's id.
@@ -181,6 +184,7 @@ type internal CorpusManifestRow =
     }
 
 /// A self-enumerated family manifest (Phase 508): a version, what the index is, and one row per family.
+/// Internal, as `CorpusManifestRow` is (D210).
 type internal CorpusManifest =
     {
         /// The manifest's version.
@@ -191,36 +195,40 @@ type internal CorpusManifest =
         Families: CorpusManifestRow list
     }
 
-/// A committed conformance file (Phase 508): header members one per line, then ONE array member with
-/// one item per line.
-type internal CorpusDocument =
+/// A committed conformance file (Phase 508; public since Phase 543, D210): header members one per line,
+/// then ONE array member with one item per line. It is the whole of what a producer states about a
+/// file's layout; `CorpusFile.render` decides every byte.
+type CorpusDocument =
     {
-        /// The header members, in order.
+        /// The header members, in order — the family's id, its stamps, its description.
         Head: (string * CorpusCell) list
-        /// The array member's name — `vectors`, `lines`, `families`.
+        /// The name of the one array member, written last — `vectors`, `lines`, `families`.
         Items: string
-        /// The array's items, in order.
+        /// That array's items, in order, one line each.
         Rows: CorpusCell list
     }
 
-/// Where a committed file first differs from the text its exporter renders (Phase 508).
-type internal CorpusDifference =
+/// Where a committed file first differs from the text its exporter renders (Phase 508; public since
+/// Phase 543, D210).
+type CorpusDifference =
     {
         /// The 1-based number of the first line that differs.
         Line: int
-        /// That line as committed, `<absent>` past the committed text's end.
-        Committed: string
-        /// That line as rendered, `<absent>` past the rendered text's end.
-        Rendered: string
+        /// That line as committed; `None` past the committed text's end.
+        Committed: string option
+        /// That line as rendered; `None` past the rendered text's end.
+        Rendered: string option
     }
 
 /// The one writer of the conformance files a repository emits (Phase 508). Every key, string, number
 /// and compact value goes through `Canonical.write Rendering.CrossHost`, so a file escapes by the spine's one rule; the layout
 /// is the one every host reads line by line — a header member per line, an item per line, LF endings,
 /// a trailing newline. An exporter builds a `CorpusDocument` and calls `render`; it writes no JSON of
-/// its own.
+/// its own. Public since Phase 543 (D210), for every producer of a file in the shared conformance corpus:
+/// `render` and `firstDifference` are the writer and the freshness reading, `str` and `num` the two
+/// scalar cells. The manifest helpers stay internal with the manifest schema.
 [<RequireQualifiedAccess>]
-module internal CorpusFile =
+module CorpusFile =
 
     let rec private cell (c: CorpusCell) : string =
         match c with
@@ -241,7 +249,7 @@ module internal CorpusFile =
     let num (n: int) : CorpusCell = CorpusCell.Value(JInt n)
 
     /// One cell as `render` writes it, indentation excluded — the text of one item line.
-    let renderCell (c: CorpusCell) : string = cell c
+    let internal renderCell (c: CorpusCell) : string = cell c
 
     /// The document's text.
     let render (doc: CorpusDocument) : string =
@@ -265,7 +273,7 @@ module internal CorpusFile =
 
     /// A manifest row as one item: its members in schema order, the adoption a spaced object in
     /// roster order.
-    let manifestRow (r: CorpusManifestRow) : CorpusCell =
+    let internal manifestRow (r: CorpusManifestRow) : CorpusCell =
         CorpusCell.Row
             [ "id", str r.Id
               "kind", str r.Kind
@@ -275,20 +283,20 @@ module internal CorpusFile =
               "description", str r.Description ]
 
     /// A manifest as the document `render` writes.
-    let manifest (m: CorpusManifest) : CorpusDocument =
+    let internal manifest (m: CorpusManifest) : CorpusDocument =
         { Head = [ "version", num m.Version; "description", str m.Description ]
           Items = "families"
           Rows = m.Families |> List.map manifestRow }
 
     /// The ONE freshness reading of a committed file against the text its exporter renders: `None`
     /// when they agree once CRLF line endings are read as LF (the one difference a checkout's
-    /// end-of-line policy may introduce), else the first line that differs (`<absent>` past either end).
+    /// end-of-line policy may introduce), else the first line that differs (`None` past either end).
     let firstDifference (committed: string) (rendered: string) : CorpusDifference option =
         let a = committed.Replace("\r\n", "\n").Split('\n')
         let b = rendered.Split('\n')
 
         let at (xs: string[]) i =
-            if i < xs.Length then xs[i] else "<absent>"
+            if i < xs.Length then Some xs[i] else None
 
         if a = b then
             None

@@ -153,15 +153,20 @@ let findings (e: Exporter) : string list =
                           (OwnedConformance.fingerprint committed)
                           (OwnedConformance.fingerprint rendered)
 
+              let shown =
+                  function
+                  | Some line -> sprintf "%A" line
+                  | None -> "nothing (past the end)"
+
               match reading with
               | None -> ()
               | Some d ->
                   yield
                       sprintf
-                          "%s is not what the `%s` row renders: line %d reads %A where the render has %A — %s"
+                          "%s is not what the `%s` row renders: line %d reads %s where the render has %s — %s"
                           path
                           e.Family
                           d.Line
-                          d.Committed
-                          d.Rendered
+                          (shown d.Committed)
+                          (shown d.Rendered)
                           remedy ]

@@ -157,7 +157,8 @@ One table, one writer, one manifest schema, one freshness reading:
   renders, and — only where writing is more than writing those texts — its own writer: `laws` restamps
   the corpus's shared `laws/manifest.json` rows (Phase 394), and `apply` merges its row into the corpus's
   shared `apply/manifest.json` beside other producers' rows.
-- **The writer** is `CorpusFile.render` (internal to `Fuaran.Core.Conformance` until its first outside adopter publishes it, D171): a header member per line, then one
+- **The writer** is `CorpusFile.render`, public in `Fuaran.Core.Conformance` since `0.40.1` (D210; D171 kept it internal
+  until a second producer was ready to adopt it): a header member per line, then one
   array member with an item per line, LF endings and a trailing newline. Every key, string and number,
   and every compact item, goes through `Canonical.write Rendering.CrossHost`, so a file escapes by the spine's one string rule.
   An item is either a spaced object or array in author order (`CorpusCell.Row`, `CorpusCell.List`: the
@@ -179,6 +180,15 @@ One table, one writer, one manifest schema, one freshness reading:
   first, as its two files always were. `Exporters.tests` holds every row's committed files to it; each
   family's own tests keep the ORACLE question — is what the file records still true of the code? — and
   no longer compare bytes.
+
+**The second producer.** The compute repository (https://github.com/Fuaran-Core/fuaran-core-compute) emits
+`laws/transform-laws.json` and `laws/dataframe-parity.json`, which the corpus carries for every host, and it is
+adopting this writer: it will build each file as a `CorpusDocument`, write it with `CorpusFile.render` and hold
+its committed copy with `CorpusFile.firstDifference`, deleting its own hand writer, against the first released
+Core that publishes them (`0.40.1`). It pins Core from the public feed, so its adoption follows that release
+rather than riding Core's change. The public surface is the writer, the three cell shapes, the document and the
+difference; the manifest schema stays internal, because only this repository writes a self-enumerated manifest
+(D210).
 
 A new family is one row. The four host-compliance phases that were parked behind this table land on it:
 fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on the

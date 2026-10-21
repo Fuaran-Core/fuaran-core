@@ -2317,6 +2317,17 @@
       "class": "measured-elsewhere",
       "reason": "The sealed state over its anchor (Phase 530): `OpStream.Snapshots`, the compacted stream and the DAG checkpoint seal, verify and replay through these, so the snapshot and checkpoint law families reach them; the stand-in holds each to the snapshot verb it is, at every boundary and in both modes.",
       "standIn": "tests/Fuaran.Core.Tests/SnapshotTests.fs"
+    },
+    {
+      "members": [
+        "CorpusFile.firstDifference",
+        "CorpusFile.num",
+        "CorpusFile.render",
+        "CorpusFile.str"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one writer and the one freshness reading of a committed conformance file (Phase 508; public since Phase 543, D210): every exporter's committed file is held byte for byte to its render, so the freshness family reaches each of these through every emitted corpus file; the stand-in holds the layout, the cells and the first-difference reading (CRLF forgiven, a lost trailing newline not) directly.",
+      "standIn": "tests/Fuaran.Core.Tests/ExportersTests.fs"
     }
   ]
 }

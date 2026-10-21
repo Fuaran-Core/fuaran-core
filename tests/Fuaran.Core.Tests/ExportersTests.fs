@@ -37,16 +37,16 @@ let tests =
                       (CorpusFile.firstDifference (rendered.Replace("1", "2")) rendered)
                       (Some
                           { Line = 2
-                            Committed = "  \"a\": 2,"
-                            Rendered = "  \"a\": 1," })
+                            Committed = Some "  \"a\": 2,"
+                            Rendered = Some "  \"a\": 1," })
                       "a moved byte is named by its line"
 
                   Expect.equal
                       (CorpusFile.firstDifference (rendered.TrimEnd('\n')) rendered)
                       (Some
                           { Line = 6
-                            Committed = "<absent>"
-                            Rendered = "" })
+                            Committed = None
+                            Rendered = Some "" })
                       "a lost trailing newline is a difference, not forgiven"
 
           yield

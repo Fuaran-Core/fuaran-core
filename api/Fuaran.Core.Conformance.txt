@@ -4,6 +4,8 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.CorpusCell RequireQualifiedAccess
+attribute Fuaran.Core.CorpusFile RequireQualifiedAccess
 attribute Fuaran.Core.Families+Takes RequireQualifiedAccess
 attribute Fuaran.Core.FoldConfluence RequireQualifiedAccess
 attribute Fuaran.Core.LawKind RequireQualifiedAccess
@@ -16,6 +18,8 @@ ctor Fuaran.Core.CompositionSample`2..ctor(!0, System.String, System.String, Mic
 ctor Fuaran.Core.ConfRng+T..ctor(System.UInt32)
 ctor Fuaran.Core.ConformanceReport..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>, System.Boolean)
 ctor Fuaran.Core.ConstructWitness`1..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
+ctor Fuaran.Core.CorpusDifference..ctor(System.Int32, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.CorpusDocument..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CorpusCell>>, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.CorpusCell>)
 ctor Fuaran.Core.EncodingProfileVectors+ActorVector..ctor(System.String, Fuaran.Core.Actor, System.String, System.String)
 ctor Fuaran.Core.EncodingProfileVectors+Vector..ctor(System.String, Fuaran.Core.JVal, System.String, System.String, System.String, System.String)
 ctor Fuaran.Core.EvaluatorWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<System.Tuple`2<!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Fuaran.Core.ConfRng+T>>>)
@@ -42,6 +46,9 @@ field Fuaran.Core.AdequacyClass+Tags.Guarded : System.Int32 (literal)
 field Fuaran.Core.AdequacyClass+Tags.Unconditional : System.Int32 (literal)
 field Fuaran.Core.AdequacyDemand`1+Tags.ReachesEvery : System.Int32 (literal)
 field Fuaran.Core.AdequacyDemand`1+Tags.Spans : System.Int32 (literal)
+field Fuaran.Core.CorpusCell+Tags.List : System.Int32 (literal)
+field Fuaran.Core.CorpusCell+Tags.Row : System.Int32 (literal)
+field Fuaran.Core.CorpusCell+Tags.Value : System.Int32 (literal)
 field Fuaran.Core.Families+Election+Tags.BaseRun : System.Int32 (literal)
 field Fuaran.Core.Families+Election+Tags.OptIn : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.NeedsWitnessCapability : System.Int32 (literal)
@@ -192,6 +199,10 @@ method Fuaran.Core.Conformance.witnessDeclaredFieldsLaw(System.String, Microsoft
 method Fuaran.Core.Conformance.witnessLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.witnessSurfaceLaws() : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.writeGateLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.CorpusFile.firstDifference(System.String, System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.CorpusDifference>
+method Fuaran.Core.CorpusFile.num(System.Int32) : Fuaran.Core.CorpusCell
+method Fuaran.Core.CorpusFile.render(Fuaran.Core.CorpusDocument) : System.String
+method Fuaran.Core.CorpusFile.str(System.String) : Fuaran.Core.CorpusCell
 method Fuaran.Core.EncodingProfileVectors.check() : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.EncodingProfileVectors.laws() : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.EncodingProfileVectors.lawsWith(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfileVectors+Vector>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfileVectors+ActorVector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
@@ -305,6 +316,12 @@ record-field Fuaran.Core.ConformanceReport.AllPassed #1 : System.Boolean
 record-field Fuaran.Core.ConformanceReport.Results #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 record-field Fuaran.Core.ConstructWitness`1.Construct #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>
 record-field Fuaran.Core.ConstructWitness`1.Surface #0 : System.String
+record-field Fuaran.Core.CorpusDifference.Committed #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.CorpusDifference.Line #0 : System.Int32
+record-field Fuaran.Core.CorpusDifference.Rendered #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.CorpusDocument.Head #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CorpusCell>>
+record-field Fuaran.Core.CorpusDocument.Items #1 : System.String
+record-field Fuaran.Core.CorpusDocument.Rows #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.CorpusCell>
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.Actor #1 : Fuaran.Core.Actor
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.Name #0 : System.String
 record-field Fuaran.Core.EncodingProfileVectors+ActorVector.V1 #2 : System.String
@@ -403,6 +420,14 @@ type Fuaran.Core.ConfRng+T (record)
 type Fuaran.Core.Conformance (module)
 type Fuaran.Core.ConformanceReport (record)
 type Fuaran.Core.ConstructWitness`1 (record)
+type Fuaran.Core.CorpusCell (union)
+type Fuaran.Core.CorpusCell+List (type)
+type Fuaran.Core.CorpusCell+Row (type)
+type Fuaran.Core.CorpusCell+Tags (type)
+type Fuaran.Core.CorpusCell+Value (type)
+type Fuaran.Core.CorpusDifference (record)
+type Fuaran.Core.CorpusDocument (record)
+type Fuaran.Core.CorpusFile (module)
 type Fuaran.Core.EncodingProfileVectors (module)
 type Fuaran.Core.EncodingProfileVectors+ActorVector (record)
 type Fuaran.Core.EncodingProfileVectors+Vector (record)
@@ -472,6 +497,9 @@ union-case Fuaran.Core.AdequacyClass.NewGuarded #0(dimensions: Microsoft.FSharp.
 union-case Fuaran.Core.AdequacyClass.NewUnconditional #1(why: System.String)
 union-case Fuaran.Core.AdequacyDemand`1.NewReachesEvery #0(dimension: System.String, verdicts: Microsoft.FSharp.Collections.FSharpList`1<System.String>, classify: Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 union-case Fuaran.Core.AdequacyDemand`1.NewSpans #1(measure: System.String, atLeast: System.Int32, measureOf: Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Int32>)
+union-case Fuaran.Core.CorpusCell.NewList #2(items: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.CorpusCell>)
+union-case Fuaran.Core.CorpusCell.NewRow #1(members: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CorpusCell>>)
+union-case Fuaran.Core.CorpusCell.NewValue #0(value: Fuaran.Core.JVal)
 union-case Fuaran.Core.Families+Election.BaseRun #0()
 union-case Fuaran.Core.Families+Election.NewOptIn #1(Item: Fuaran.Core.Families+OptInReason)
 union-case Fuaran.Core.Families+OptInReason.NeedsWitnessCapability #0()
