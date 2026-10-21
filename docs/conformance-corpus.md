@@ -184,11 +184,11 @@ One table, one writer, one manifest schema, one freshness reading:
   no longer compare bytes.
 
 **The second producer.** The compute repository (https://github.com/Fuaran-Core/fuaran-core-compute) emits
-`laws/transform-laws.json` and `laws/dataframe-parity.json`, which the corpus carries for every host, and it is
-adopting this writer: it will build each file as a `CorpusDocument`, write it with `CorpusFile.render` and hold
-its committed copy with `CorpusFile.firstDifference`, deleting its own hand writer, against the first released
-Core that publishes them (`0.40.1`). It pins Core from the public feed, so its adoption follows that release
-rather than riding Core's change. The public surface is the writer, the three cell shapes, the document and the
+`laws/transform-laws.json` and `laws/dataframe-parity.json`, which the corpus carries for every host, through this
+writer: it builds each file as a `CorpusDocument`, writes it with `CorpusFile.render` and holds its committed copy
+with `CorpusFile.firstDifference`, and its own hand writer is deleted. It adopted the writer against the first
+released Core that publishes it (`0.40.1`), and neither file moved a byte. It pins Core from the public feed, so
+its adoption followed that release rather than riding Core's change. The public surface is the writer, the three cell shapes, the document and the
 difference; the manifest schema stays internal, because only this repository writes a self-enumerated manifest
 (D210).
 
