@@ -42,11 +42,6 @@ let asString (where: string) (v: J) : string =
     | JStr s -> s
     | _ -> bad $"{where}: expected a string"
 
-let asBool (where: string) (v: J) : bool =
-    match v with
-    | JBool b -> b
-    | _ -> bad $"{where}: expected true or false"
-
 let asList (where: string) (v: J) : J list =
     match v with
     | JArr xs -> xs
@@ -558,7 +553,7 @@ let ofRejection (r: TreeOps.rejection) : J =
 // ---- the hash chain model (Chain) ----------------------------------------------------------------
 
 /// The chain model's sequence numbers are Peano naturals.
-let rec toPos (n: int) : Chain.pos =
+let toPos (n: int) : Chain.pos =
     let mutable p = Chain.PZero
 
     for _ in 1..n do
