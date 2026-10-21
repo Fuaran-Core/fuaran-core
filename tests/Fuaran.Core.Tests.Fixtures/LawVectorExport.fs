@@ -860,17 +860,14 @@ module LawVectorExport =
 
     /// Each emitted family's row id in the corpus manifest, with the file that row names.
     ///
-    /// `canonicalFormLaws` (Phase 539) is emitted and not yet listed, for the same reason and with the
-    /// same remedy: the corpus indexes it in the change-set that first carries the file.
-    ///
-    /// `propagationLaws` (Phase 538) is emitted and not yet listed: the corpus indexes it in the commit
-    /// that first carries the file (fuaran#2328), and a row named here before the index holds it would
-    /// refuse every `render laws <corpus dir>` and redden the asked manifest leg until then. That same
-    /// change-set appends `"propagationLaws", PropagationVectorExport.fileName` here.
+    /// `canonicalFormLaws` (Phase 539) is emitted and not yet listed: the corpus indexes it in the
+    /// change-set that first carries the file, and a row named here before the index holds it would refuse
+    /// every `render laws <corpus dir>` and redden the asked manifest leg until then.
     let manifestRows: (string * string) list =
         [ "capabilityLaws", Capabilities.fileName
           "decimal", Decimals.fileName
-          "fieldLaws", Fields.fileName ]
+          "fieldLaws", Fields.fileName
+          "propagationLaws", PropagationVectorExport.fileName ]
 
     /// The members of a manifest row derived from the text of the file it names, in row order:
     /// `kitVersion` always; `seed` and `iterations` when the file declares them (a drawn family);
