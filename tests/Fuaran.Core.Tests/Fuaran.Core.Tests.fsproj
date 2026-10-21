@@ -94,6 +94,9 @@
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="DigestTests.fs" />
     <Compile Include="SmallSeamsTests.fs" />
+    <!-- Phase 552: the relation package - laws against brute-force references, and the Phase-298 walker kept as the
+         differential that holds Propagation.sort byte-identical to what it was. -->
+    <Compile Include="RelationTests.fs" />
     <Compile Include="PropagationTests.fs" />
     <Compile Include="PropagationContractTests.fs" />
     <Compile Include="PropagationCompositionTests.fs" />
@@ -499,6 +502,7 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.ContentAddress\Fuaran.Core.ContentAddress.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Relation\Fuaran.Core.Relation.fsproj" />
     <!-- Phase 131 — the F*-extracted oracle (never packed; see proofs/README.md). -->
     <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
   </ItemGroup>

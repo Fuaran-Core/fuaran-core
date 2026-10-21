@@ -20,6 +20,7 @@
     <Project Path="src/Fuaran.Core.Idl.Cli/Fuaran.Core.Idl.Cli.fsproj" />
     <Project Path="src/Fuaran.Core.ContentAddress/Fuaran.Core.ContentAddress.fsproj" />
     <Project Path="src/Fuaran.Core.Unit/Fuaran.Core.Unit.fsproj" />
+    <Project Path="src/Fuaran.Core.Relation/Fuaran.Core.Relation.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Fuaran.Core.Tests.Fixtures/Fuaran.Core.Tests.Fixtures.fsproj" />

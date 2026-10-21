@@ -1,0 +1,24 @@
+# Fuaran.Core.Relation — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Relation RequireQualifiedAccess
+ctor Fuaran.Core.Relation+Topo`1..ctor(Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!0>>)
+method Fuaran.Core.Relation.components`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!!0>>
+method Fuaran.Core.Relation.cyclesAmong`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Collections.FSharpSet`1<!!0>
+method Fuaran.Core.Relation.cycles`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!!0>>
+method Fuaran.Core.Relation.inverse`1(Fuaran.Core.Relation+Relation`1<!!0>) : Fuaran.Core.Relation+Relation`1<!!0>
+method Fuaran.Core.Relation.nodes`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
+method Fuaran.Core.Relation.ofMap`2(Microsoft.FSharp.Collections.FSharpMap`2<!!0, !!1>) : Fuaran.Core.Relation+Relation`1<!!0>
+method Fuaran.Core.Relation.reachable`1(Fuaran.Core.Relation+Relation`1<!!0>, System.Collections.Generic.IEnumerable`1<!!0>) : Microsoft.FSharp.Collections.FSharpSet`1<!!0>
+method Fuaran.Core.Relation.sort`1(Fuaran.Core.Relation+Relation`1<!!0>) : Fuaran.Core.Relation+Topo`1<!!0>
+method Fuaran.Core.Relation.successors`1(Fuaran.Core.Relation+Relation`1<!!0>, !!0) : Microsoft.FSharp.Collections.FSharpSet`1<!!0>
+method Fuaran.Core.Relation.terminals`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<!!0>>>
+method Fuaran.Core.Relation.toMap`1(Fuaran.Core.Relation+Relation`1<!!0>) : Microsoft.FSharp.Collections.FSharpMap`2<!!0, Microsoft.FSharp.Collections.FSharpSet`1<!!0>>
+record-field Fuaran.Core.Relation+Topo`1.Cycles #1 : Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!0>>
+record-field Fuaran.Core.Relation+Topo`1.Order #0 : Microsoft.FSharp.Collections.FSharpList`1<!0>
+type Fuaran.Core.Relation (module)
+type Fuaran.Core.Relation+Relation`1 (record)
+type Fuaran.Core.Relation+Topo`1 (record)

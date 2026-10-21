@@ -14,7 +14,9 @@ namespace Fuaran.Core
 /// relation is a **per-call function argument** (`readsOf : 'Node -> 'Id seq`), never a witness field (GP2) —
 /// the same capability-as-argument posture as `Tree.remapIds`' `setId`. Ids are keyed by their `IdWitness`
 /// string form (the `Tree.NodeIndex` precedent), so this stays generic over any `'Id` without a `comparison`
-/// constraint. FSharp.Core only, Fable-clean.
+/// constraint. The graph questions — the components pass, the closures, the inverse — are
+/// `Fuaran.Core.Relation`'s (Phase 552), asked here over the string-keyed map; this module holds no graph
+/// algorithm of its own. FSharp.Core only, Fable-clean.
 ///
 /// (Named `Propagation` — the headline job — rather than `Topology`, which would collide with the
 /// geometric/world topology a geometry or worldbuilding domain would mean by the word. Topological *sort* is one function
@@ -49,104 +51,25 @@ module Propagation =
         |> List.map (fun n -> idw.ToString(w.Id n), (readsOf n |> Seq.map idw.ToString |> Set.ofSeq))
         |> Map.ofList
 
-    // Tarjan strongly-connected components over the reference sub-graph — SCCs emit in reverse-topological
-    // order (dependencies-first), exactly evaluation order (the Fuaran.Calc `Topology.tarjan`, string-id
-    // keyed). ITERATIVE (Phase 298, the Phase-19 walker posture): the recursion is an explicit frame stack,
-    // each frame a node and the successors it has not yet visited, so a dependency chain as long as a
-    // spreadsheet's row count cannot overflow the thread stack (the recursive form died near 3,500 deep
-    // in a Debug test host and 13,700 in Release). The frames replay the recursive visit exactly — the
-    // successors in `succ` order, a child's low-link folded into its parent's when the child's frame
-    // finishes, a component emitted when its root's frame does — so the SCCs and their order are the
-    // recursive version's, item for item.
-    let private tarjan (nodes: string list) (succ: string -> string list) : string list list =
-        let mutable index = 0
-        let idx = System.Collections.Generic.Dictionary<string, int>()
-        let low = System.Collections.Generic.Dictionary<string, int>()
-        let onStack = System.Collections.Generic.HashSet<string>()
-        let stack = System.Collections.Generic.Stack<string>()
-        let sccs = ResizeArray<string list>()
-        // the call stack: each frame's node, and the successors that node has still to visit
-        let frames = System.Collections.Generic.Stack<string>()
-        let pending = System.Collections.Generic.Dictionary<string, string list>()
-
-        let enter v =
-            idx[v] <- index
-            low[v] <- index
-            index <- index + 1
-            stack.Push v
-            onStack.Add v |> ignore
-            pending[v] <- succ v
-            frames.Push v
-
-        for n in nodes do
-            if not (idx.ContainsKey n) then
-                enter n
-
-                while frames.Count > 0 do
-                    let v = frames.Peek()
-
-                    match pending[v] with
-                    | w :: rest ->
-                        pending[v] <- rest
-
-                        if not (idx.ContainsKey w) then
-                            enter w
-                        elif onStack.Contains w then
-                            low[v] <- min low[v] idx[w]
-                    | [] ->
-                        frames.Pop() |> ignore
-                        pending.Remove v |> ignore
-
-                        if low[v] = idx[v] then
-                            let comp = ResizeArray<string>()
-                            let mutable popped = false
-
-                            while not popped do
-                                let w = stack.Pop()
-                                onStack.Remove w |> ignore
-                                comp.Add w
-
-                                if w = v then
-                                    popped <- true
-
-                            sccs.Add(List.ofSeq comp)
-
-                        // the return to the caller's frame: fold the child's low-link into it
-                        if frames.Count > 0 then
-                            let parent = frames.Peek()
-                            low[parent] <- min low[parent] low[v]
-
-        List.ofSeq sccs
-
     /// Derive the evaluation order of a dependency map + report circular groups as data. Edges to ids not in
     /// the map (dangling references) are ignored for ordering (they are validator defects, not cycles). A
     /// singleton SCC with no self-edge is an `Order` entry; a self-referential singleton or any multi-node
     /// SCC is a `Cycle`. Total — never diverges on a cycle (GP4).
+    ///
+    /// The pass is `Fuaran.Core.Relation`'s (Phase 552; the iterative Tarjan Phase 298 wrote here moved
+    /// there whole): over the map with its dangling reads removed, so the relation's nodes are exactly the
+    /// map's keys, visited ascending with their reads ascending — the walk this module always made — and
+    /// `Order`, `Cycles` and the order of each cycle's members are the Phase-298 walker's, item for item
+    /// (`RelationTests` holds the two equal on every drawn map).
     let sort (deps: Map<string, Set<string>>) : TopoResult =
-        let nodes = deps |> Map.toList |> List.map fst
+        let known =
+            deps
+            |> Map.map (fun _ reads -> reads |> Set.filter (fun d -> Map.containsKey d deps))
 
-        let succ id =
-            match Map.tryFind id deps with
-            | Some ds -> ds |> Set.toList |> List.filter (fun d -> Map.containsKey d deps)
-            | None -> []
+        let topo = Relation.ofMap known |> Relation.sort
 
-        let sccs = tarjan nodes succ
-
-        let order =
-            sccs
-            |> List.choose (fun comp ->
-                match comp with
-                | [ single ] when not (List.contains single (succ single)) -> Some single
-                | _ -> None)
-
-        let cycles =
-            sccs
-            |> List.filter (fun comp ->
-                match comp with
-                | [ single ] -> List.contains single (succ single)
-                | _ -> true)
-
-        { Order = order; Cycles = cycles }
+        { Order = topo.Order
+          Cycles = topo.Cycles }
 
     /// The CERTIFICATE `sort`'s result is checked against (Phase 308): `true` exactly when `topo` is a
     /// valid evaluation order of `deps` —
@@ -193,50 +116,31 @@ module Propagation =
         (sort deps).Cycles |> List.tryFind (List.contains target)
 
     /// Invert a dependency map into its dependents map: `id → the ids that reference it`. The reverse edges
-    /// dirty propagation walks.
+    /// dirty propagation walks — `Relation.inverse` read back as a map, keeping only the ids something
+    /// reads (an id nothing reads has no key, as the `Plan` says of this field).
     let dependents (deps: Map<string, Set<string>>) : Map<string, Set<string>> =
-        [ for KeyValue(node, reads) in deps do
-              for r in reads -> r, node ]
-        |> List.groupBy fst
-        |> List.map (fun (k, vs) -> k, vs |> List.map snd |> Set.ofList)
-        |> Map.ofList
-
-    /// The reachability closure of `seed` over an edge map: `seed` ∪ every id reachable from it by
-    /// following `edges` (an id with no entry has no out-edges). The one frontier loop behind both
-    /// directions of propagation (Phase 317): over the DEPENDENTS map it is the dirty set (push), over
-    /// the dependency map itself it is the needed set (pull). `grow` in `proofs/Propagation.fst`.
-    let private closureOver (edges: Map<string, Set<string>>) (seed: Set<string>) : Set<string> =
-        let rec grow (frontier: Set<string>) (acc: Set<string>) =
-            if Set.isEmpty frontier then
-                acc
-            else
-                let next =
-                    (Set.empty, frontier)
-                    ||> Set.fold (fun s node ->
-                        match Map.tryFind node edges with
-                        | Some ds -> Set.union s ds
-                        | None -> s)
-
-                let fresh = Set.difference next acc
-                grow fresh (Set.union acc fresh)
-
-        grow seed seed
+        Relation.ofMap deps
+        |> Relation.inverse
+        |> Relation.toMap
+        |> Map.filter (fun _ readers -> not (Set.isEmpty readers))
 
     /// The **minimal dirty set** for a changed-input set: `changed` ∪ every id transitively downstream of it
-    /// (the reverse-reachability closure over the dependents map). Minimal by construction — an id not
+    /// (`Relation.reachable` over the inverse relation — the one closure behind both directions of
+    /// propagation (Phase 317), `grow` in `proofs/Propagation.fst`). Minimal by construction — an id not
     /// reverse-reachable from any change is never included. This is the primary entry point: a *value* edit
     /// (a formula / cell-body change) names the changed ids directly. Pure, total.
     let dirtyFromChangedIds (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
-        closureOver (dependents deps) changed
+        Relation.reachable (Relation.ofMap deps |> Relation.inverse) changed
 
     /// The **needed set** for a target set (Phase 317) — the pull dual of `dirtyFromChangedIds`:
-    /// `targets` ∪ every id transitively UPSTREAM of one (the reachability closure over the dependency
-    /// map itself, where the dirty set closes over its inverse). It is the ⊆-least set that holds the
+    /// `targets` ∪ every id transitively UPSTREAM of one (`Relation.reachable` over the dependency
+    /// relation itself, where the dirty set closes over its inverse). It is the ⊆-least set that holds the
     /// targets and is closed under "is read by a member" — every read of a member is a member — so it
     /// is exactly what evaluating the targets requires (`needed_for_least`, `proofs/Propagation.fst`).
     /// A dangling read, and a target the map does not hold, are members like any other id: the set is
     /// about ids, and whether an id is evaluable is the map's question, not this one. Pure, total.
-    let neededFor (deps: Map<string, Set<string>>) (targets: Set<string>) : Set<string> = closureOver deps targets
+    let neededFor (deps: Map<string, Set<string>>) (targets: Set<string>) : Set<string> =
+        Relation.reachable (Relation.ofMap deps) targets
 
     /// The string ids a structural `SkeletonOp` touches — the *container* ids whose structure changed
     /// (over-approximation always safe, the Phase-34 contract). Because bindings are id-addressed, a
@@ -706,7 +610,7 @@ module Propagation =
             if not (Set.isEmpty unknown) then
                 Error(PropagationError.EvalUnknownChange(Set.toList unknown))
             else
-                let dirty = closureOver (dependentsOf ()) changed
+                let dirty = Relation.reachable (Relation.ofMap (dependentsOf ())) changed
                 walkTopo evalNode (fun id -> Set.contains id dirty) prior deps topo
         | Scope.For targets ->
             walkTopo evalNode (fun _ -> true) Map.empty deps (restrictTopo (neededFor deps targets) topo)

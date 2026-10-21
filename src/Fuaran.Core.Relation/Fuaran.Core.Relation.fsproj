@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Relation</PackageId>
+    <Description>Fuaran.Core.Relation — questions over a finite relation, answered once and totally: the strongly-connected components dependencies-first, the cycles (as data, never a divergence), the nodes on a cycle, the topological sort, the forward closure from a seed set, the inverse relation (dependents), and where a chain of redirects ends. One iterative Tarjan pass — no recursion depth bound, no fuel — linear in nodes plus edges whatever the number of paths; every answer a function of the edge set alone. Generic over any comparable node. FSharp.Core only, Fable-clean.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Relation.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 552: `Relation.work`, the pass's counted work, is the evidence the linearity law reads
+         and nothing a consumer needs; the suite reads it through this grant. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

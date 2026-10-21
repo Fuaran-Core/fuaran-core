@@ -396,6 +396,7 @@ let internal notWire: (string * string) list =
     [ "Fuaran.Core.Tree", "generic over a domain's node witness; emits no document"
       "Fuaran.Core.Ops", "the op algebra is generic over the domain's nodes; ops are encoded by the domain"
       "Fuaran.Core.Propagation", "an evaluator over a dependency map; emits no document"
+      "Fuaran.Core.Relation", "questions over a relation, answered as in-process values; emits no document"
       "Fuaran.Core.Observer", "an in-process observer seam; emits no document"
       "Fuaran.Core.Validator", "validation results are in-process values; emits no document"
       "Fuaran.Core.Projection", "renders TEXT for a model to read, not a wire document"
