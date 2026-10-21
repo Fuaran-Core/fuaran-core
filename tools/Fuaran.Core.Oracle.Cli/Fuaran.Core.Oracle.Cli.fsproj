@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Phase 482 - `fuaran-core-oracle`: the extracted proof models behind a JSON-lines protocol, so a
+       host's fuzzer in any language can run a differential against them (docs/oracle-protocol.md).
+       It references the ORACLE assembly and nothing else of this repository: no production project,
+       no package beyond FSharp.Core. `OracleCliTests` holds that, red on a planted reference.
+       Released as a self-contained single-file binary per runtime identifier, attached to the `v*`
+       release (DECISIONS.md D208, RELEASING.md "The oracle binaries"); never packed. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>fuaran-core-oracle</AssemblyName>
+    <RootNamespace>Fuaran.Core.Oracle.Cli</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- The protocol reads no culture and no time zone; without ICU a self-contained Linux binary runs
+         on a host that has none installed. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Json.fs" />
+    <Compile Include="Marshal.fs" />
+    <Compile Include="Protocol.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>
