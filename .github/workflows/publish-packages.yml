@@ -35,8 +35,22 @@ name: publish-packages
 #      GitHub release, creating the release when the tag has none. An asset already attached is
 #      downloaded and compared instead of replaced: the same bytes pass, different bytes fail the job.
 #      It then downloads the asset from its public url and checks the sha once more, so what an
-#      adopter's pin fetches is what was verified. Tag-only, like the rest of this workflow, and the
-#      only job granted `contents: write`.
+#      adopter's pin fetches is what was verified. Tag-only, like the rest of this workflow.
+#
+# Phase 482 — a publish also attaches THE ORACLE BINARIES (DECISIONS.md D208, RELEASING.md "The
+# oracle binaries"):
+#   6. `oracle-build` publishes `fuaran-core-oracle` self-contained, one single file per runtime
+#      identifier, with `tools/Fuaran.Core.Oracle.Cli/publish-oracle.ps1`, all on ONE runner so each
+#      asset has one producer, and writes the manifest `fuaran-core-oracle-<Version>.sha256`.
+#      `oracle-smoke` then runs each binary on its OWN operating system: it refuses a binary whose
+#      sha256 is not the manifest's, then drives it with tests/oracle-smoke.py. `oracle-release`
+#      refuses a set missing any identifier or the manifest, refuses a release already carrying
+#      some oracle assets but no manifest (a partial earlier attach; RELEASING.md says how to clear
+#      it), and on a re-run that finds the manifest attached checks what is attached and replaces
+#      nothing. Otherwise it attaches the binaries, then the manifest LAST, so a manifest on a
+#      release means the set is complete. It finishes by downloading every asset from its public
+#      url and checking each sha256 against the manifest. Tag-only, after the kit job, which
+#      creates the release; these and `proofs-kit` are the only jobs granted `contents: write`.
 # RELEASING.md is the operator's page: the tag-and-publish mechanics, the Trusted Publishing policy
 # this job's login depends on, and what a 401 at the login step means.
 on:
@@ -163,6 +177,152 @@ jobs:
           $fetchedSha = (Get-FileHash $fetched -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($fetchedSha -ne $sha) { throw "$url serves sha256 $fetchedSha, not the committed $sha" }
           Write-Host "$url serves the committed sha256 $sha"
+
+  # The oracle binaries (item 6 above). One producer for every identifier: cross-publishing a
+  # self-contained single file needs no native toolchain, and one runner means one sha per asset.
+  oracle-build:
+    needs: [tag, proofs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Publish one binary per runtime identifier, and the manifest
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $out = "${{ runner.temp }}/oracle"
+          $lines = foreach ($rid in 'linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64') {
+              pwsh ./tools/Fuaran.Core.Oracle.Cli/publish-oracle.ps1 -Rid $rid -OutDir $out
+              if ($LASTEXITCODE -ne 0) { throw "publish-oracle.ps1 failed for $rid" }
+              $name = "fuaran-core-oracle-$version-$rid" + $(if ($rid -like 'win-*') { '.exe' } else { '' })
+              $sha = (Get-FileHash (Join-Path $out $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$sha  $name"
+          }
+          # sha256sum's format, LF-terminated, so `sha256sum -c` reads it as it stands.
+          [System.IO.File]::WriteAllText((Join-Path $out "fuaran-core-oracle-$version.sha256"), (($lines -join "`n") + "`n"))
+          Get-Content (Join-Path $out "fuaran-core-oracle-$version.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oracle-binaries
+          path: ${{ runner.temp }}/oracle/
+          if-no-files-found: error
+
+  # Each binary on its own operating system, the bytes the release will carry: refused unless its
+  # sha256 is the manifest's, then driven from Python as a host's harness drives it.
+  oracle-smoke:
+    needs: oracle-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+          - { os: macos-latest, rid: osx-arm64 }
+          - { os: windows-latest, rid: win-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: oracle-binaries
+          path: ${{ runner.temp }}/oracle
+      - name: Refuse a binary that is not the manifest's, then smoke-test it
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+          RID: ${{ matrix.rid }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $dir = "${{ runner.temp }}/oracle"
+          $name = "fuaran-core-oracle-$version-$($env:RID)" + $(if ($env:RID -like 'win-*') { '.exe' } else { '' })
+          $binary = Join-Path $dir $name
+          if (-not (Test-Path $binary)) { throw "the build produced no $name" }
+          $manifest = Get-Content (Join-Path $dir "fuaran-core-oracle-$version.sha256")
+          $line = @($manifest | Where-Object { $_ -match "^[0-9a-f]{64}  $([regex]::Escape($name))$" })
+          if ($line.Count -ne 1) { throw "the manifest has no single line for $name" }
+          $want = $line[0].Substring(0, 64)
+          $got = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($got -ne $want) { throw "$name has sha256 $got, not the manifest's $want" }
+          if (-not $IsWindows) { chmod +x $binary }
+          python tests/oracle-smoke.py $binary
+          if ($LASTEXITCODE -ne 0) { throw "the smoke test failed on $name (exit $LASTEXITCODE)" }
+
+  oracle-release:
+    needs: [tag, proofs-kit, oracle-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: oracle-binaries
+          path: ${{ runner.temp }}/oracle
+      - name: Attach the binaries, then the manifest, never replacing anything attached
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $dir = "${{ runner.temp }}/oracle"
+          $manifestName = "fuaran-core-oracle-$version.sha256"
+          $names = 'linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64' | ForEach-Object {
+              "fuaran-core-oracle-$version-$_" + $(if ($_ -like 'win-*') { '.exe' } else { '' })
+          }
+          foreach ($n in @($names) + $manifestName) {
+              if (-not (Test-Path (Join-Path $dir $n))) { throw "the build set has no $n; nothing was attached" }
+          }
+          gh release view $env:TAG --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) { throw "there is no release for $($env:TAG); the proofs-kit job creates it" }
+          $attached = @(gh release view $env:TAG --json assets --jq '.assets[].name')
+          $mine = @($attached | Where-Object { $_ -like "fuaran-core-oracle-$version*" })
+          if ($attached -contains $manifestName) {
+              Write-Host "$manifestName is already attached: this run checks what is attached and replaces nothing"
+          }
+          elseif ($mine.Count -gt 0) {
+              throw "$($env:TAG) carries oracle assets ($($mine -join ', ')) but no $manifestName, a partial earlier attach. Delete them (RELEASING.md, The oracle binaries) and re-run; nothing was replaced."
+          }
+          else {
+              foreach ($n in $names) {
+                  gh release upload $env:TAG (Join-Path $dir $n)
+                  if ($LASTEXITCODE -ne 0) { throw "could not attach $n" }
+              }
+              gh release upload $env:TAG (Join-Path $dir $manifestName)
+              if ($LASTEXITCODE -ne 0) { throw "could not attach $manifestName" }
+          }
+      - name: Fetch every asset from its public url and check it against the attached manifest
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $base = "https://github.com/${{ github.repository }}/releases/download/$($env:TAG)"
+          $manifestFile = Join-Path "${{ runner.temp }}" 'fetched-oracle.sha256'
+          Invoke-WebRequest -Uri "$base/fuaran-core-oracle-$version.sha256" -OutFile $manifestFile -UseBasicParsing
+          $lines = @(Get-Content $manifestFile | Where-Object { $_ -ne '' })
+          if ($lines.Count -ne 4) { throw "the attached manifest names $($lines.Count) binaries, not 4" }
+          foreach ($line in $lines) {
+              if ($line -notmatch '^([0-9a-f]{64})  (\S+)$') { throw "a manifest line is malformed: $line" }
+              $want = $Matches[1]
+              $name = $Matches[2]
+              $fetched = Join-Path "${{ runner.temp }}" "fetched-$name"
+              Invoke-WebRequest -Uri "$base/$name" -OutFile $fetched -UseBasicParsing
+              $got = (Get-FileHash $fetched -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($got -ne $want) { throw "$base/$name serves sha256 $got, not the manifest's $want" }
+              Write-Host "$name serves the manifest's sha256 $want"
+          }
 
   publish:
     needs: [tag, proofs]

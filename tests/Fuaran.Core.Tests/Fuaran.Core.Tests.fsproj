@@ -167,6 +167,9 @@
     <!-- Phase 301 — the bridge for Chain.fst sections 7b/7c (the compacted stream, the capture journal);
          ProofsLadderTests.fs below reads its case names. -->
     <Compile Include="ProofOracle.CompactedTests.fs" />
+    <!-- Phase 482 — the oracle CLI: its independence, its golden protocol lines, and the process held
+         to the oracle called in-process (reads the Proofs.Oracle bridges above). -->
+    <Compile Include="OracleCliTests.fs" />
     <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
          findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
          against a corpus of sample documents written in that vocabulary's wire shape,
@@ -506,6 +509,8 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Relation\Fuaran.Core.Relation.fsproj" />
     <!-- Phase 131 — the F*-extracted oracle (never packed; see proofs/README.md). -->
     <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
+    <!-- Phase 482 — the oracle CLI, run as a process by OracleCliTests.fs (its copy in this output). -->
+    <ProjectReference Include="..\..\tools\Fuaran.Core.Oracle.Cli\Fuaran.Core.Oracle.Cli.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

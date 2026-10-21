@@ -44,10 +44,15 @@ module ChildProcess =
     /// One child to run: the program, its arguments, where, and any variables set in its environment
     /// on top of the inherited one.
     type Command =
-        { File: string
-          Arguments: Arguments
-          WorkingDirectory: string option
-          Environment: (string * string) list }
+        {
+            File: string
+            Arguments: Arguments
+            WorkingDirectory: string option
+            Environment: (string * string) list
+            /// Text written to the child's standard input as UTF-8 (no byte-order mark), which is then
+            /// closed; `None` leaves standard input unredirected.
+            Stdin: string option
+        }
 
     /// What a child that ran said: its exit code and both pipes, each decoded as UTF-8 and whole, with
     /// standard output's raw bytes beside its text (a byte-order-mark check reads what the child wrote,
@@ -63,7 +68,8 @@ module ChildProcess =
         { File = file
           Arguments = Line arguments
           WorkingDirectory = None
-          Environment = [] }
+          Environment = []
+          Stdin = None }
 
     /// `file` with an argument vector.
     let argv (file: string) (arguments: string list) : Command =
@@ -74,6 +80,9 @@ module ChildProcess =
     let inDir (dir: string) (c: Command) : Command = { c with WorkingDirectory = Some dir }
 
     /// The same command, with `name` set to `value` in the child's environment.
+    /// The same command, with `text` on its standard input.
+    let withStdin (text: string) (c: Command) : Command = { c with Stdin = Some text }
+
     let withEnv (name: string) (value: string) (c: Command) : Command =
         { c with
             Environment = c.Environment @ [ name, value ] }
@@ -107,6 +116,11 @@ module ChildProcess =
         psi.UseShellExecute <- false
         psi.StandardOutputEncoding <- utf8
         psi.StandardErrorEncoding <- utf8
+
+        if c.Stdin.IsSome then
+            psi.RedirectStandardInput <- true
+            psi.StandardInputEncoding <- utf8
+
         c.WorkingDirectory |> Option.iter (fun d -> psi.WorkingDirectory <- d)
 
         for name, value in c.Environment do
@@ -124,6 +138,14 @@ module ChildProcess =
             use raw = new MemoryStream()
             let out = p.StandardOutput.BaseStream.CopyToAsync raw
             let err = p.StandardError.ReadToEndAsync()
+
+            // Written only once both pipes are being drained, so a child answering as it reads
+            // cannot block on a full stdout while the parent blocks writing its stdin.
+            c.Stdin
+            |> Option.iter (fun text ->
+                p.StandardInput.Write text
+                p.StandardInput.Close())
+
             p.WaitForExit()
             out.Wait()
             let bytes = raw.ToArray()

@@ -130,3 +130,23 @@ jobs:
       - name: Proof leg (./proofs/check.ps1 -Runs 3 -SkipOracleHost)
         shell: pwsh
         run: ./proofs/check.ps1 -Runs 3 -SkipOracleHost
+
+  # Phase 482 — the oracle protocol driven from OUTSIDE .NET. The suite's `Oracle CLI` family holds
+  # the CLI process to the oracle called in-process; this holds the protocol to a caller that shares
+  # no code with it: tests/oracle-smoke.py, standard-library Python, one process, request by request,
+  # every function and every error code, a line that is not UTF-8, and `--version`. The release runs
+  # the same script against each published binary on its own OS (publish-packages.yml `oracle-smoke`).
+  oracle-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the oracle CLI
+        run: dotnet build tools/Fuaran.Core.Oracle.Cli/Fuaran.Core.Oracle.Cli.fsproj -c Release --nologo
+      - name: Smoke test from Python (tests/oracle-smoke.py)
+        run: python tests/oracle-smoke.py dotnet tools/Fuaran.Core.Oracle.Cli/bin/Release/net10.0/fuaran-core-oracle.dll
