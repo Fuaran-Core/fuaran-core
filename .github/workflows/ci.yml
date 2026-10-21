@@ -59,6 +59,22 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      # Phase 348 — the generated TypeScript declarations are TYPE-CHECKED here and only here. The
+      # IDL suites' type-check legs run `tsc --noEmit --strict` over a consumer of the generated
+      # `.d.mts` when FUARAN_CORE_TSC names a compiler (`typescript/lib/tsc.js`), and skip without
+      # one. The repository carries no JavaScript dependency, so the local gate keeps skipping; CI
+      # installs one PINNED compiler outside the tree and names it below, so a drift between a
+      # declaration and the runtime shape it describes is red on the push that makes it
+      # (STABILITY.md, "The generated layer is printed from ONE resolution"). Bumping the pin is a deliberate
+      # change in this file, like the corpus pin above.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the pinned TypeScript compiler (outside the tree)
+        shell: bash
+        run: |
+          npm install --no-save --no-fund --no-audit --prefix "$RUNNER_TEMP/tsc" typescript@5.9.3
+          echo "FUARAN_CORE_TSC=$RUNNER_TEMP/tsc/node_modules/typescript/lib/tsc.js" >> "$GITHUB_ENV"
       # The repo green gate — the same command contributors run locally, so CI and
       # local never diverge: tool restore + fantomas --check + build + tests + the adoption
       # sample. No Fable compiler runs here (Phase 217): the "Fable-clean on encode AND decode"
