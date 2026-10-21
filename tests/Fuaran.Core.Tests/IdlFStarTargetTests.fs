@@ -282,7 +282,7 @@ let private uiScaleIdl: Idl =
 
 /// Phase 204 — the synthetic vocabulary Phase 182's probe measured the MODEL at: one kind, `Grid`,
 /// carrying `k` optional string members and one always-emitted member that sorts after them.
-/// `proofs/README.md` records the prover's verdict on it at k = 5, 8, 12, 16; the pin below is
+/// The `vocabulary-generated-model` row records the prover's verdict on it; the pin below is
 /// about the emitted text alone.
 let private gridAt (k: int) : Idl =
     let field name t opt =
@@ -1053,7 +1053,7 @@ let idlFStarTargetTests =
               // needs at a vocabulary nothing else owns: the two emitters agree about WHICH
               // vocabulary they are talking about. (Phase 150 measured the emitted round trip
               // NOT discharging at the UI vocabulary's twenty kinds, for a structural reason
-              // `proofs/README.md`'s theorem 1 records; at the certification set it discharges,
+              // the `vocabulary-round-trip` row records; at the certification set it discharges,
               // which is why the scripts are committed since Phase 173. The per-constructor lemma
               // shape that reaches UI scale is Phase 168's, pinned below.)
               match

@@ -10,36 +10,9 @@
    run threads `TreeOps.apply`, the footprint is `TreeOps.fp_all` and independence is
    `DagFold.independent` — the same relation the fold theorem is about, imported, not restated.
 
-   WHAT IS PROVED. The three promises, each under the name the roadmap gave it:
-
-     1. `accepted_pairwise_independent` — the accepted set is pairwise `Ops.independent`. With
-        `accepted_pair_commutes` beside it: any two accepted scripts both apply at the base, and
-        (by `TreeOps.tree_independence_diamond`, at a well-formed base) each applies after the
-        other and the two orders reach the same tree. That is the doc comment's "by footprint
-        soundness, confluent in any order", for a pair, as a theorem.
-     2. `accepted_maximal` — every rejection is JUSTIFIED: an `Inapplicable` carries exactly the
-        dry run's index and envelope, and a `Conflicts` names a script that does apply, is NOT
-        independent of the accepted set, and cites a NON-EMPTY list that is exactly the accepted
-        ids it interferes with (`conflict_cites_an_accepted_interferer` resolves each cited id to
-        an accepted proposal that genuinely interferes). Nothing rejected could be added.
-     3. `arbitrate_deterministic` — under every arrival order (`DagFold.perm`) of a proposal list
-        whose ids are DISTINCT, the whole result is equal: accepted set, merged script, and every
-        rejection with its reason.
-
-   THE ID-UNIQUENESS HYPOTHESIS IS NEEDED, AND THAT IS A FINDING. `arbitrate` is total on any
-   input — every function here is `Tot`, duplicates included — but `duplicate_ids_break_invariance`
-   exhibits two proposals sharing an id whose two arrival orders accept DIFFERENT proposals. The
-   stable sort breaks the tie by input order, exactly as the F# doc comment says, so invariance is
-   a property of id-unique input and of nothing weaker that the function can see. The hypothesis
-   is on the theorem, by name (`distinct_ids`), and `Arbitration.duplicateIds` is the shipped total
-   check for it.
-
-   WHAT IS NOT CLAIMED. MAXIMUM. Greedy-in-pinned-order yields A maximal independent set, not THE
-   largest one: `maximal_is_not_maximum` is a three-proposal witness where the pinned order accepts
-   one proposal and a different order would accept two. The pinned order is a POLICY choice —
-   documented, deterministic, and not argued for here. Nor is anything claimed about which
-   proposal is better, and independence stays conservative (Phase 78): `Conflicts` means "not
-   provably coexistent", never "wrong".
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    ONE SIMPLIFICATION, NAMED. The F# carries each accepted proposal's footprint beside it
    (`(p, fp) :: accepted`) so it is computed once. A footprint is a pure function of the script,

@@ -2549,10 +2549,11 @@ let tests =
 
           testCase "the extracted checkpoint, replay_from and truncation are production's over every node and head"
           <| fun _ ->
-              // Theorems 1 and 2, measured: every node as a checkpoint and every node (and an absent
-              // id) as a head, on fold-pull-fold DAGs with a side merge — so the replay meets a covered
-              // head, a head below the checkpoint and a branch from below it — and `compactAt` at every
-              // node, its kept set held to the model's contract and its replays to the full DAG's.
+              // `DagClosure.fst`'s section 21 theorems 1 and 2, measured: every node as a checkpoint
+              // and every node (and an absent id) as a head, on fold-pull-fold DAGs with a side
+              // merge — so the replay meets a covered head, a head below the checkpoint and a branch
+              // from below it — and `compactAt` at every node, its kept set held to the model's
+              // contract and its replays to the full DAG's.
               let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
@@ -2579,7 +2580,7 @@ let tests =
 
           testCase "a model checkpoint sealed at ANOTHER node loses — the measurement can fail"
           <| fun _ ->
-              // The go-red of theorem 1, at the differential: the checkpoint production took, handed to
+              // The go-red of that theorem 1, at the differential: the checkpoint production took, handed to
               // the model with its node moved to the base — the state of one node sealed at another.
               let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng

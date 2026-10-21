@@ -32,32 +32,9 @@
    terms (`reduce_exact`). `Map<UnitAtom, int64>` is a strictly sorted association list here
    (`smap`), which is what an F# map's `toList` is.
 
-   THE FOUR THEOREMS.
-     1. THE GROUP. Over well-formed factor lists (`wf`: strictly sorted, no zero exponent) the merge
-        is commutative (`combine_comm`), associative (`combine_assoc`), has the empty product as its
-        identity (`combine_unit`) and every element its inverse (`combine_inverse`), and `div` is
-        multiplication by the inverse (`div_is_mul_inverse`): exponent vectors form an abelian group
-        under multiplication, with the exponent of every atom read off by `exp_of` (`combine_exp`)
-        and two well-formed lists equal exactly when every exponent agrees (`ext`).
-     2. ONE TEXT. For every CANONICAL unit — well-formed, every exponent within production's bound,
-        every atom admitted (its prefix-and-symbol token resolves to it, and lexes as one symbol
-        token) — `parse (render u) == Ok u` (`parse_render`). Equal units have one text because
-        `render` is a function; this is the half that is not free: the text reads back to the unit
-        that wrote it, so two different canonical units have two texts. The theorem is about
-        STRUCTURAL identity, as Phase 426 ruled it: `km/h` and `m/s` are different units, compatible
-        with factor 5/18, each with its own text.
-     3. COMPATIBILITY IS EQUALITY OF DIMENSION. `compatible a b` holds exactly when every base
-        dimension's and every currency's exponent agrees (`compatible_iff`, through `dim_val`), and
-        the dimension of a product is the sum (`dim_combine`), so compatibility is a congruence for
-        the algebra.
-     4. FACTORS COMPOSE AND ARE EXACT. The scale is multiplicative over the merge (`scale_combine`),
-        so for pairwise compatible `a`, `b`, `c` the factor from `a` to `c` is the product of the
-        factors through `b` as rationals (`factor_compose`), a unit's factor to itself is one
-        (`factor_self`), and `reduce` — production's gcd to lowest terms — changes no value
-        (`reduce_exact`): the `Ratio` a consumer receives IS the exact quotient of the two scales.
-        That two lowest-terms pairs of one value are one pair (uniqueness of the reduced form) is a
-        fact about gcd this module does not prove; the differential holds production's `Ratio` to
-        the model's reduced pair over the drawn pool, and the ladder's row says so.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    PROOF DISCIPLINE. No `assume`, no `admit`; checked by the proof leg at the leg's flags
    (`--z3rlimit 40 --quake 3 --report_assumes error`). Default fuel; `--ifuel 2` scoped where a

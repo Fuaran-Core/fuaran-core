@@ -793,7 +793,7 @@ let private compareLoads (blind: bool) (text: string) (t: Tally) : Tally =
 /// The lines of a text as `scanRecords` counts them.
 let private linesOf (text: string) : string[] = text.Replace("\r\n", "\n").Split '\n'
 
-/// THEOREM 2 held to production: a fault names a line that exists, is not blank, and is that
+/// `OpStreamLoad.fst`'s THEOREM 2 held to production: a fault names a line that exists, is not blank, and is that
 /// line's own fault; a site names a line whose record the witness refused, by its hash. Each
 /// breach is a `locate` finding.
 let private faultsLocate (text: string) (t: Tally) : Tally =
@@ -1034,7 +1034,7 @@ let tests =
               Expect.isGreaterThan faults.Length 100 "the pool holds many unreadable texts"
               Expect.isGreaterThan sites.Length 5 "the pool holds undecodable texts"
 
-              // THEOREM 3 held to production: what the checked writer wrote loads back, verified
+              // `OpStreamLoad.fst`'s THEOREM 3 held to production: what the checked writer wrote loads back, verified
               // or not, with no snapshot.
               for rs, text, _ in p do
                   Expect.equal (Jsonl.read w text) (Ok rs) "fromJsonl reads the written records"

@@ -1,6 +1,6 @@
 (*
    WireDecode — an F* model of Fuaran.Core's wire DECODE combinators, with decoder totality as a
-   machine-checked theorem (fuaran-core Phase 135 — the attested-stack programme's theorem 1).
+   machine-checked theorem (fuaran-core Phase 135).
 
    WHAT IS MODELLED. `Fuaran.Core.Decode` (src/Fuaran.Core.Wire/Decode.fs), clause for clause:
    `getProp`, `asString` / `asInt` / `asBool` / `asFloat`, `kindOf`, `strField` / `intField`, and
@@ -9,19 +9,9 @@
    decoder a domain writes: read the `"kind"` tag, match it, read the declared members, walk the
    child array. And, separately, the Phase 102 read policy — see the boundary note below.
 
-   WHAT IS PROVED.
-     - `decode_total` — every combinator returns `Ok` or `Error` for EVERY input, never diverges
-       and never throws, and WHICH outcome it returns is characterised structurally, so the
-       failure classification is exhaustive rather than merely non-empty.
-     - `decode_node_total` / `decode_node_wf` — the recursive node decoder is `Tot` on an
-       arbitrary `jval` (its termination is the content: see the measure note below), and it
-       succeeds on exactly the well-formed documents, `wf`.
-     - `decode_encode_roundtrip` — `decode_node (encode n) == Ok n` for every `rnode`.
-     - `lenient_agrees_off_policy` / `strict_unchanged_on_null_free` — the Phase 102 promise.
-     - `no_null_ever` / `no_invokable` / `sentinel_inert` — Phase 153, section 9: no `jval` contains
-       a null, no value a combinator returns can carry a function, and no combinator inspects a
-       string value, so the closure sentinel is inert. The three facts "no code-execution surface"
-       rests on, with names.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IS NOT MODELLED, AND WHY — the theorem's boundary.
 
@@ -699,8 +689,8 @@ and has_null_fields (#num #flt: eqtype) (fs: list (string & jvaln num flt))
   | (_, v) :: t -> has_null v || has_null_fields t
 
 (* Two outcomes agree: the same value, or both refused. The message is deliberately NOT part
-   of this — see `reject_msg` / `no_absence_msg` above, and the README's statement of exactly
-   how far the Phase 102 promise reaches. *)
+   of this — see `reject_msg` / `no_absence_msg` above, and the `lenient-agrees-off-policy` row's boundary
+   for exactly how far the Phase 102 promise reaches. *)
 let agree (#a: Type) (o1 o2: outcome a) : prop =
   match o1, o2 with
   | Ok x, Ok y -> x == y
@@ -1469,7 +1459,7 @@ let no_null_ever (#num #flt: eqtype) (p: null_policy) (v: jval num flt) (d: jval
    for an inductive only when EVERY constructor argument has it, and is derivable for no arrow
    type; a constructor carrying a function makes the type definition itself an error unless it is
    qualified `noeq`, and then this lemma does not discharge. (Both directions were measured before
-   the lemma was believed — README, "the control".) `t` is the domain's own decoded type, for the
+   the lemma was believed — the `no-invokable-term` row states the control.) `t` is the domain's own decoded type, for the
    walker. *)
 let no_invokable (#num #flt: eqtype) (#t: eqtype) (u: unit)
   : Lemma (ensures

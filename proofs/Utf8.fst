@@ -20,22 +20,9 @@
    `Hash.tryUtf8Bytes`, the guarded form: the scan that names the first unpaired surrogate, and
    the encoder behind it.
 
-   WHAT IS PROVED.
-     - `utf8_injective` — two WELL-FORMED unit strings with one byte string are one string. This is
-       the theorem; it is proved the way `WireCanon` proves its own, by exhibiting a left inverse
-       (`unread`) rather than by case analysis on pairs of strings.
-     - `try_utf8_is_utf8_on_well_formed` / `try_utf8_refuses_exactly_ill_formed` — the guard IS the
-       encoder wherever the string is well-formed, and refuses exactly where it is not, naming a
-       unit that is a surrogate and is at the index it gives.
-     - `guarded_utf8_injective` — the two together, in the shape a caller holds: two strings the
-       guard ACCEPTED, with equal bytes, are equal.
-     - `replacement_is_not_injective` / `unpaired_pair_collides` — the refutations. The unguarded
-       encoder maps three different one-unit strings to `EF BF BD`, and the units D801 D800 to the
-       bytes of two replacement characters. Not defects of this encoder: they are what
-       `System.Text.Encoding.UTF8` answers, and the unguarded path is pinned to it.
-     - `well_formed_app`, `no_surrogates_well_formed` — well-formedness is closed under
-       concatenation and holds of any surrogate-free string; what a renderer that concatenates
-       well-formed pieces needs, and what `WireCanon`'s digest theorem takes from here.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IS NOT MODELLED, AND WHY.
      - A UNIT IS AN INTEGER, and so is a byte. Production's `>>> 6` and `&&& 0x3F` are written as

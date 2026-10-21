@@ -25,27 +25,9 @@
    list-level theorem then transfers unchanged, and section 6 states the two of `WireColumn` of the
    typed column through it.
 
-   THE FOUR THEOREMS.
-
-     - `to_cells_of_cells` — `toCells (ofCells n ty cs)`, when it builds, is `norm_cells ty cs`:
-       the cells with each widened `Int` normalised EXACTLY as `WireColumn`'s decode normalises it
-       (the same `norm_cell`). And it builds exactly when no present cell is outside the column's
-       type (`of_cells_good_iff`), so a list column `validate`'s clause (e) passes is one `ofCells`
-       builds (`validated_cells_build`).
-     - `of_cells_to_cells` — `ofCells n ty (toCells c)` is `Good` of a column EQUAL to `c` under
-       `ColumnData.Equals` — one mask, equal at every present row — for every well-formed typed
-       column (mask and values one length), and is `c` itself when the absent rows hold the type's
-       zero, which is how every column `ofCells` or decode builds holds them (`of_cells_to_cells_exact`).
-       Well-formedness is NEEDED (`of_cells_to_cells_needs_wf`): a column whose mask is shorter
-       than its values reads its tail as absent, and comes back with a longer mask.
-     - `validate_agrees` — the typed `Table.validate` and the list model's agree through the map
-       on every table whose columns are well-formed; and a typed table the typed `validate` accepts
-       IS well-formed (`validate_t_good_wf`), since clause (e) names a mask of the wrong length
-       first. That clause is the one place the two validators differ, and it is reached only by a
-       column the list model cannot express — a list column has one length.
-     - `encode_agrees` — `columnJson`'s walks off the typed storage write exactly what `cellJson`
-       wrote over the cells, so `encodeJson` agrees through the map on EVERY typed table, valid or
-       not, well-formed or not: both walk the values' length and read the mask the same way.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    AND WHAT FOLLOWS, FOR THE TYPED COLUMN (section 6). `norm_cells_vacuous`: the widening half of
    `WireColumn`'s normal form is the IDENTITY on a typed column — an `Int` cell comes only from an

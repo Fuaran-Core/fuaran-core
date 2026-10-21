@@ -25,23 +25,9 @@
    carries, and every set bit of slot `s` is at a position no greater than `s`. That is the stated
    premise; `Conformance.reachLaws` and the differential sample it.
 
-   WHAT IS PROVED.
-     - `merge_base_now_maximal` (THEOREM 5): over a witnessed closure, production's `mergeBase`
-       either refuses exactly over two disjoint histories or returns a common ancestor no other
-       common ancestor descends from. `deepest` picks what the maximum over the whole common set
-       picks (`deepest_is_max_by`), and `DagClosure.max_common_is_maximal` is that maximum's fact.
-     - `merge_base_now_is_divergence` (Phase 158's theorem, stated over the code that runs since
-       Phase 534): `mergeBase` of two lane heads off a merged head is that head, for every `lt`;
-       `merge_base_now_is_divergence_acyclic` is it on section 13's witness.
-     - `common_base_maximal`: `commonBase` over N heads either refuses exactly when no node is
-       common to every head, or returns a node common to every head that no other such node
-       descends from.
-     - `reach_merge_base_agrees`, `reach_common_base_agrees`, `reach_try_topo_agrees`,
-       `reach_between_agrees`: the index's four queries answer what the DAG-level functions
-       answer.
-     - `cut_keep_meets_contract`: the set `cut` keeps satisfies `truncation_ok`, so with
-       `DagClosure.truncation_preserves_replay` truncation is proved end to end; its refusal names a
-       node that is neither behind nor after the checkpoint's node; and its fuel never runs out.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IS NOT MODELLED. `Reach.extend`'s copy-and-shift of the order and position arrays (the
    index here is the one `Reach.ofDag` builds; an extended index's ORDER is sampled by
@@ -283,7 +269,7 @@ let deepest_is_max_by (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (no
       max_by_is better b' r b
 #pop-options
 
-(* ---- 1.4 THEOREM 5: production's `mergeBase` over ANY two heads, a criss-cross included ---- *)
+(* ---- 1.4 production's `mergeBase` over ANY two heads, a criss-cross included ---- *)
 
 let merge_base_now_maximal (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
   (d:dag op) (fuel:list (node op)) (left right:string) (wl:list string)

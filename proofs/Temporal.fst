@@ -36,28 +36,9 @@
    + min_day`, which is that floor for every second from `0000-01-01` on and a non-negative dividend
    there. `%` is F*'s Euclidean remainder, which the backend writes as `mod_f`.
 
-   THE THEOREMS (sections 7 to 10).
-     1. THE CALENDAR IS A BIJECTION. `civil_of_days` answers a civil date that exists (`civil_valid`:
-        a month `1`..`12`, a day `1`..`daysIn`), `days_of_civil` of it is the day count it was asked
-        for (`days_civil_days`), and `civil_of_days` of `days_of_civil y m d` is `{y; m; d}` for every
-        civil date that exists (`civil_days_civil`). Strictly monotone: a later civil date is a larger
-        day count (`days_of_civil_mono`), so the integers order chronologically; and the canonical
-        range `0000-01-01`..`9999-12-31` is exactly `min_day`..`max_day` (`year_in_range`).
-     2. A DATE HAS ONE TEXT. For every day in range `try_days (date_text d) == Some d`
-        (`try_days_date_text`); whatever `try_days` reads back to a day is `date_text` of that day,
-        in range (`date_text_try_days`); and `date_text` is canonical exactly on the range
-        (`date_text_canonical`).
-     3. AN INSTANT HAS ONE TEXT PER UNIT, AND THE SAME TEXT IN EVERY UNIT. For every unit and every
-        pair in range `try_instant u (instant_text u s f) == Some (s, f)` (`try_instant_instant_text`);
-        whatever `try_instant u` reads back is `instant_text u` of the pair, in range
-        (`instant_text_try_instant`); widening a coarser unit into a finer one keeps the text — the
-        pair scales by the units' ratio and `instant_text` writes the same characters
-        (`widen_keeps_instant`); and `type_of`'s unit, `unit_of`, is the coarsest unit that reads the
-        text (`unit_of_coarsest`).
-     4. THE ORDER IS CHRONOLOGICAL. For two canonical texts read at one unit, `compare_instants` is
-        the order of the pairs, second first then fraction (`compare_instants_chronological`): text
-        order that is NOT ordinal string order once fraction lengths vary, proved to be the order of
-        the instants it spells.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    PROOF DISCIPLINE. No `assume`, no `admit`; checked by the proof leg at the leg's flags
    (`--z3rlimit 40 --quake 3 --report_assumes error`). The calendar's one hard fact — that

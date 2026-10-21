@@ -663,7 +663,7 @@ module internal FStarProofs =
           "   (that predicate) el` is then a theorem about two renderings of one definition — true,"
           "   and empty. A characterisation worth the name needs an INDEPENDENT statement of the"
           "   accept set (a schema-shaped predicate), which is a model-sized artefact of its own;"
-          "   `proofs/README.md` (theorem 1) records the halt. The round trip covers one direction"
+          "   Fuaran.Core's `vocabulary-round-trip` row records the halt. The round trip covers one direction"
           "   (everything the encoder can produce is read back exactly); the characterisation of what"
           "   ELSE is accepted is not covered, and is named here rather than left to be assumed."
           ""

@@ -56,9 +56,9 @@ resolves to nothing counting `0`. The four cases:
 | `evalFrom` | `deps`, `base`, `changed`, `changedBase` | the incremental re-evaluation over the prior `eval` of `base`: `values` (equal to a full evaluation of `changedBase`) and `recomputed`, exactly the dirty set — or `evalUnknownChange` naming a changed id the graph does not hold |
 | `undeclaredRead` | `deps`, `base`, `node`, `read` | `evalUndeclaredRead` naming the node and the read, from `eval` and from `evalFrom` alike, whether the read names a node of the graph or an id it does not hold |
 
-The corpus's first copy, its `laws/manifest.json` row and the producer record are the UI tier's corpus
-commit (fuaran#2328); `LawVectorExport.manifestRows` lists the row in that change-set, because a row
-named before the index holds it would refuse every `render laws <corpus dir>` until then.
+The corpus carries the file's first copy, its `laws/manifest.json` row and the producer record (fuaran#2328);
+`LawVectorExport.manifestRows` lists the row, so `render laws <corpus dir>` and the asked manifest leg
+check it like the other three.
 
 #### The `decimal` family: what a host must reproduce
 

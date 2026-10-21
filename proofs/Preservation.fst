@@ -7,46 +7,9 @@
    Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops.canApply` and
    `Ops.invert` — the two surfaces of the engine that model did not reach — clause for clause.
 
-   WHAT IS PROVED, over the six skeleton operations (Phase 250 added `UpdateNode`, an in-place
-   rewrite of a node's content that keeps its children) and any tree:
-
-     - `apply_total` — `Ops.apply` reaches exactly one outcome on every input, and WHICH rejection
-       it can raise is characterised per clause. That characterisation is the content: it proves
-       `NotAContainer` and `Rejected` unreachable from `apply`, which until now was a sentence in
-       a README.
-     - `reject_identity` — a refused step leaves the caller holding the input tree. For one
-       operation that is a fact about persistent values; for a `Batch` it is the all-or-nothing
-       discipline, and there the intermediate trees a prefix computed really are discarded however
-       deep the failure lies.
-     - `apply_preserves_wf` — an accepted operation preserves id uniqueness. Phase 133 proved the
-       insert clause of this CONDITIONALLY (`TreeOps.ins_wf`) and refuted the unconditional form,
-       because the validator of the day admitted a subtree that broke it. Phase 137 fixed the
-       validator; this is the unconditional statement, for every operation, finally true.
-     - `canapply_preserves` — every operation the dry run accepts is one `apply` accepts, and
-       conversely. The corollary worth naming is that two defensive `UnknownNode` fallbacks in the
-       shipped code are unreachable: `Tree.parentOf` cannot fail on a non-root node the tree holds.
-     - `invert_applicable` — the inverse of an accepted operation is itself accepted at the result
-       and restores the input, so `apply (invert o pre) (apply o pre) = pre` stops being a sampled
-       law and becomes a theorem, for the leaf alphabet.
-
-   AND, SINCE PHASE 167, SECTION 11: a per-node view of a tree (`kids_at` / `kind_at`) and what
-   `ins` and `rem_at` do to it, one lemma per operation per node. Nothing there mentions the diff;
-   they are here because `TreeDiff.fst`'s reconstruction induction needs facts about INTERMEDIATE
-   trees, and inductions over `ins` and `rem_at` are this module's cost class rather than that
-   one's. `TreeDiff.fst` opens this module for them.
-
-   AND, SINCE PHASE 286, SECTION 12: the KEYED engine's insert (`Ops.applyContainedKeyed`) over a
-   tree that holds children in keyed positions as well as structural ones, shown to be the unkeyed
-   insert over the keyed walk, so `apply_preserves_wf` transfers to every id-bearing position a domain
-   declares (`keyed_apply_preserves_wf`). Placed last because it depends on section 4 and on nothing
-   after it.
-
-   WHAT IS NOT CLAIMED. The witness laws themselves: `ReplaceChildren` is taken as an abstract
-   function satisfying them, exactly as `DagFold.fst` takes the diamond, and a domain's own
-   `ReplaceChildren` remains its promise (sampled by `Conformance.witnessLaws`). Vocabulary and
-   schema validity, which live at the wire boundary and in domain rule families. `Ops.normalize`
-   and `Diff`. `applyContained`'s container capability — `canHold` is `fun _ -> true` under
-   `apply`, which is why `NotAContainer` is unreachable above rather than merely unmet.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `DagFold.fst` and
    `TreeOps.fst`. The tree, the operations, the rejection envelope and the whole membership algebra
@@ -1237,8 +1200,8 @@ let arrange_same_multiset (ord:list string) (cs:list tree)
    inverse is its members' inverses in reverse order, each derived against the state that member
    saw, so the lift is the one `DagFold.replay_diamond` performs at lane granularity rather than
    a new idea. The lift itself — `invert_applicable` over `Batch`, and over a SCRIPT, which is
-   what `Ops.invertAll` (Phase 305) returns — is not yet stated here; it stays on the README's
-   not-claimed list, and `Conformance.opAlgebra` and the `invertAll` differential sample it. *)
+   what `Ops.invertAll` (Phase 305) returns — is stated in section 15 below
+   (`invert-all-round-trip`), and `Conformance.opAlgebra` and the `invertAll` differential sample it. *)
 (* The four cases are four independent arguments in one query, and the theorem sits at the top of
    the whole module's context. Measured on the pinned prover it proves 78 goals; at the leg's
    default budget it is close enough to the ceiling that a different seed under `--quake 3` can
@@ -2495,7 +2458,7 @@ let apply_preserves_parent_first (o:op) (t:tree) (t':tree) (y q:string)
 (* ======================================================================================
    11. THE INTERMEDIATE-TREE LEMMAS THE DIFF'S RECONSTRUCTION INDUCTION NEEDS (Phase 167).
 
-       Theorem 6's boundary was never a missing FACT about `after` — Phase 162 proved every
+       `TreeDiff.fst`'s boundary was never a missing FACT about `after` — Phase 162 proved every
        positional fact it named. It was that `apply` validates each step against the tree IN
        HAND, the before-tree with the script's earlier operations already run on it, and nothing
        here described those intermediate trees. That is what this section is: a per-node view of

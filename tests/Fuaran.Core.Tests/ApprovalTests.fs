@@ -70,12 +70,10 @@ let tests =
               Expect.isFalse (admitsFor NotRequested Regen Regenerated.Mini) "0 admits nothing"
 
               Expect.isTrue
-                  (admitsFor (Only [ Ladders.Operations ]) Ladder Ladders.Operations)
-                  "the ladder's second projection is addressable on its own"
+                  (admitsFor (Only [ Files.Decisions ]) Docs Files.Decisions)
+                  "one of a switch's several projections is addressable on its own"
 
-              Expect.isFalse
-                  (admitsFor (Only [ Ladders.Operations ]) Ladder Ladders.Summary)
-                  "and leaves the first alone"
+              Expect.isFalse (admitsFor (Only [ Files.Decisions ]) Docs Files.LedgerIndex) "and leaves the others alone"
 
           testCase "a filter that matches nothing is red by name, never a quiet no-op"
           <| fun _ ->
@@ -101,7 +99,7 @@ let tests =
 
           testCase "the fixed stems cover every switch with a fixed roster and no other"
           <| fun _ ->
-              for name in [ Regen; Ladder; Readme; Docs ] do
+              for name in [ Regen; Readme; Docs ] do
                   Expect.isSome (fixedStems name) (name + " has a fixed roster")
 
               for name in [ Api; Wire ] do
@@ -415,19 +413,19 @@ let internal handles () : string list =
     let approval = typeof<Request>.DeclaringType
 
     approval.GetNestedTypes()
-    |> Array.filter (fun t -> List.contains t.Name [ "Regenerated"; "Ladders"; "Files" ])
+    |> Array.filter (fun t -> List.contains t.Name [ "Regenerated"; "Files" ])
     |> Array.collect (fun t -> t.GetFields(Reflection.BindingFlags.Public ||| Reflection.BindingFlags.Static))
     |> Array.filter _.IsLiteral
     |> Array.map (fun f -> string (f.GetRawConstantValue()))
     |> Array.sort
     |> Array.toList
 
-/// The six switches, by their `Approval` names.
-let internal switches = [ Api; Wire; Ladder; Readme; Docs; Regen ]
+/// The five switches, by their `Approval` names.
+let internal switches = [ Api; Wire; Readme; Docs; Regen ]
 
 /// What is wrong with the registry against the tree: a row's file missing (a template row's
 /// directory holding no file of its shape), a holder that is no test module, a verb the runner
-/// does not have, a runner verb no row names, a switch that is not one of the six, a handle that is
+/// does not have, a runner verb no row names, a switch that is not one of the five, a handle that is
 /// no row's stem, or a fixed stem with no handle.
 let internal registryFaults
     (exists: string -> bool)
@@ -604,8 +602,21 @@ let projectionTests =
               reds """{"path":"a.json","heldBy":"T","render":"laws","versionStamped":true}""" "declares no copy"
 
               match parseRegistry """{"rows":[{"path":"a","heldBy":"T"},{"path":"a","heldBy":"U"}]}""" with
-              | Error es -> Expect.exists es (fun e -> e.Contains "declared twice") "a repeated row is refused"
-              | Ok _ -> failtest "a repeated row was accepted")
+              | Error es -> Expect.exists es (fun e -> e.Contains "a path has one writer") "a repeated row is refused"
+              | Ok _ -> failtest "a repeated row was accepted"
+
+              // Phase 533 — two rows that name one file under DIFFERENT stems are two writers of it
+              // too: the shape proofs/README.md had, which raced in a parallel approval run.
+              match
+                  parseRegistry
+                      """{"rows":[{"path":"a.md","heldBy":"T","switch":"CORE_APPROVE_DOCS","stem":"x"},{"path":"a.md","heldBy":"U","switch":"CORE_APPROVE_DOCS","stem":"y"}]}"""
+              with
+              | Error es ->
+                  Expect.exists
+                      es
+                      (fun e -> e.Contains "a path has one writer")
+                      "a second writer under another stem is refused"
+              | Ok _ -> failtest "a second writer of one path under another stem was accepted")
 
           testCase
               "go-red: the walk names a missing file, a stray holder, an unknown verb, an unlisted verb and an orphan handle"
