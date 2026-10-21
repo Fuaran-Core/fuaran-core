@@ -410,28 +410,36 @@ let private modelQueryDeferredRender (d: ModelQuery.deferred<QueryResult>) : str
     | ModelQuery.Ready r -> sprintf "Ready(page %d)" r.PageNum
     | ModelQuery.Failed m -> sprintf "Failed(%s)" m
 
-type private QueryTally =
-    { QDiffs: string list
-      QRegistered: int
-      QDupRefused: int
-      QSettled: int
-      QStillPending: int
-      QNoSuch: int
-      QValidated: int
-      QRefused: int
-      QExecFailed: int
-      QResolverRan: int
-      QRefusedWithoutResolver: int
-      QKeys: int
-      QKeysWithNull: int
-      QKeysPermuted: int
-      QRepeatedParamDecls: int
-      QClasses: Set<string>
-      // Phase 398 — shaped declarations registered, shape refusals compared, keys over a shape.
-      QShapedRegistered: int
-      QShapeRefused: int
-      QShapedKeys: int
-      QRegisterClasses: Set<string> }
+/// The typed refusal's render pair.
+let private queryError = Differential.pair prodQueryErrRender modelQueryErrRender
+
+/// The async envelope's render pair.
+let private queryDeferred =
+    Differential.pair prodQueryDeferredRender modelQueryDeferredRender
+
+/// The seam tally. Phase 398 added the shaped declarations registered, the shape refusals compared
+/// and the keys over a shape; `RegisterClasses` is the shape refusals reached at registration,
+/// `Classes` every refusal class reached at dispatch.
+let private queryTally =
+    Tally.empty
+        [ "Registered"
+          "DupRefused"
+          "Settled"
+          "StillPending"
+          "NoSuch"
+          "Validated"
+          "Refused"
+          "ExecFailed"
+          "ResolverRan"
+          "RefusedWithoutResolver"
+          "Keys"
+          "KeysWithNull"
+          "KeysPermuted"
+          "RepeatedParamDecls"
+          "ShapedRegistered"
+          "ShapeRefused"
+          "ShapedKeys" ]
+    |> Tally.sets [ "Classes"; "RegisterClasses" ]
 
 let private queryIdPool = [ "q-a"; "q-b"; "q-c" ]
 let private queryParamNamePool = [ "p0"; "p1"; "p2"; "when" ]
@@ -674,42 +682,40 @@ let private queryProbe
     (bridge: Query -> ModelQuery.query)
     (rn: ModelQuery.renderers)
     (seedTag: int)
-    (acc: QueryTally)
     (r: ConfRng.T)
-    : QueryTally * ConfRng.T =
-    let diffs = System.Collections.Generic.List<string>()
+    (t0: Tally)
+    : ConfRng.T * Tally =
     let mutable rng = r
+    let mutable t = t0
 
     // build a registry on both sides, in the same order, with duplicates possible
     let n, r1 = ConfRng.intBelow 4 rng
     rng <- r1
     let mutable preg = QueryRegistry.empty
     let mutable mreg = ModelQuery.empty
-    let mutable registered = 0
-    let mutable dupRefused = 0
-    let mutable repeatedDecls = 0
-    let mutable shapedRegistered = 0
-    let mutable shapeRefused = 0
-    let mutable registerClasses = acc.QRegisterClasses
 
     for _ in 1..n do
         let id, r2 = ConfRng.choose queryIdPool rng
         let q, r3 = genQueryDecl id r2
         rng <- r3
 
-        if (q.Params |> List.map _.Name |> List.distinct |> List.length) < List.length q.Params then
-            repeatedDecls <- repeatedDecls + 1
+        t <-
+            Tally.bumpIf
+                ((q.Params |> List.map _.Name |> List.distinct |> List.length) < List.length q.Params)
+                "RepeatedParamDecls"
+                t
 
         match QueryRegistry.register q preg, ModelQuery.register (bridge q) mreg with
         | Ok p', ModelQuery.Ok m' ->
             preg <- p'
             mreg <- m'
-            registered <- registered + 1
 
-            if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
-                shapedRegistered <- shapedRegistered + 1
+            t <-
+                t
+                |> Tally.bump "Registered"
+                |> Tally.bumpIf (not (List.isEmpty q.Where && List.isEmpty q.OrderBy)) "ShapedRegistered"
         | Error pe, ModelQuery.Error me ->
-            dupRefused <- dupRefused + 1
+            t <- Tally.bump "DupRefused" t
 
             match pe with
             | UnknownColumn _
@@ -717,47 +723,37 @@ let private queryProbe
             | PredicateNotApplicable _
             | IllFormedLiteral _
             | DuplicateSortColumn _ ->
-                shapeRefused <- shapeRefused + 1
-                registerClasses <- Set.add (queryErrClass pe) registerClasses
+                t <-
+                    t
+                    |> Tally.bump "ShapeRefused"
+                    |> Tally.reach "RegisterClasses" (queryErrClass pe)
             | _ -> ()
 
-            if prodQueryErrRender pe <> modelQueryErrRender me then
-                diffs.Add(
-                    sprintf
-                        "seed %d: register refused differently (%s vs %s)"
-                        seedTag
-                        (prodQueryErrRender pe)
-                        (modelQueryErrRender me)
-                )
-        | _ -> diffs.Add(sprintf "seed %d: register verdict differs on %s" seedTag id)
+            t <-
+                t
+                |> Differential.compareWith
+                    queryError
+                    (fun p m -> sprintf "seed %d: register refused differently (%s vs %s)" seedTag p m)
+                    pe
+                    me
+        | _ -> t <- Tally.disagree (sprintf "seed %d: register verdict differs on %s" seedTag id) t
 
     // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
     let penum = QueryRegistry.enumerate preg |> List.map bridge
     let menum = ModelQuery.enumerate mreg |> List.sortBy _.q_id
 
-    if penum <> menum then
-        diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
+    t <-
+        t
+        |> Differential.check (penum = menum) (fun () -> sprintf "seed %d: enumerate differs" seedTag)
 
     for id in "q-x" :: queryIdPool do
         let p = QueryRegistry.tryFind id preg |> Option.map bridge
         let m = ofMOpt (ModelQuery.try_find_query id mreg)
 
-        if p <> m then
-            diffs.Add(sprintf "seed %d: tryFind %s differs" seedTag id)
+        t <-
+            t
+            |> Differential.check (p = m) (fun () -> sprintf "seed %d: tryFind %s differs" seedTag id)
 
-    let mutable settled = 0
-    let mutable stillPending = 0
-    let mutable noSuch = 0
-    let mutable validated = 0
-    let mutable refused = 0
-    let mutable execFailed = 0
-    let mutable resolverRan = 0
-    let mutable refusedWithoutResolver = 0
-    let mutable keys = 0
-    let mutable keysWithNull = 0
-    let mutable keysPermuted = 0
-    let mutable shapedKeys = 0
-    let mutable classes = acc.QClasses
     let k, r4 = ConfRng.intBelow 4 rng
     rng <- r4
 
@@ -798,85 +794,87 @@ let private queryProbe
         let p = QueryRegistry.dispatch preg id args pResolve
         let m = ModelQuery.dispatch mreg id margs mResolve
 
-        (match p, m with
-         | Ok pv, ModelQuery.Ok mv ->
-             (match pv with
-              | Pending -> stillPending <- stillPending + 1
-              | _ -> settled <- settled + 1)
-
-             if prodQueryDeferredRender pv <> modelQueryDeferredRender mv then
-                 diffs.Add(
-                     sprintf
-                         "seed %d: dispatch %s accepted with different envelopes\n  prod %s\n  model %s"
-                         seedTag
-                         id
-                         (prodQueryDeferredRender pv)
-                         (modelQueryDeferredRender mv)
-                 )
-
-             // and neither side ever hands an `Ok(Failed _)` out of the seam
-             // (`invoke_never_ok_failed` / `dispatch_never_ok_failed`, sampled on the shipped one).
-             match pv, mv with
-             | Failed _, _
-             | _, ModelQuery.Failed _ ->
-                 diffs.Add(sprintf "seed %d: dispatch %s accepted with an Ok(Failed _) envelope" seedTag id)
-             | _ -> ()
-         | Error pe, ModelQuery.Error me ->
-             classes <- Set.add (queryErrClass pe) classes
-
-             if prodQueryErrRender pe <> modelQueryErrRender me then
-                 diffs.Add(
-                     sprintf
-                         "seed %d: dispatch %s refused differently\n  prod %s\n  model %s"
-                         seedTag
-                         id
-                         (prodQueryErrRender pe)
-                         (modelQueryErrRender me)
-                 )
-
-             match pe with
-             | NoSuchQuery _ -> noSuch <- noSuch + 1
-             | ExecutionFailed _ -> execFailed <- execFailed + 1
-             | _ -> refused <- refused + 1
-         | Ok _, ModelQuery.Error me ->
-             diffs.Add(
-                 sprintf
-                     "seed %d: dispatch %s accepted by production, refused by the model (%s)"
-                     seedTag
-                     id
-                     (modelQueryErrRender me)
-             )
-         | Error pe, ModelQuery.Ok _ ->
-             diffs.Add(
-                 sprintf
-                     "seed %d: dispatch %s refused by production (%s), accepted by the model"
-                     seedTag
-                     id
-                     (prodQueryErrRender pe)
-             ))
+        t <-
+            match p, m with
+            | Ok pv, ModelQuery.Ok mv ->
+                t
+                |> Tally.bump (
+                    match pv with
+                    | Pending -> "StillPending"
+                    | _ -> "Settled"
+                )
+                |> Differential.compareWith
+                    queryDeferred
+                    (fun pr mr ->
+                        sprintf
+                            "seed %d: dispatch %s accepted with different envelopes\n  prod %s\n  model %s"
+                            seedTag
+                            id
+                            pr
+                            mr)
+                    pv
+                    mv
+                // and neither side ever hands an `Ok(Failed _)` out of the seam
+                // (`invoke_never_ok_failed` / `dispatch_never_ok_failed`, sampled on the shipped one).
+                |> Differential.check
+                    (match pv, mv with
+                     | Failed _, _
+                     | _, ModelQuery.Failed _ -> false
+                     | _ -> true)
+                    (fun () -> sprintf "seed %d: dispatch %s accepted with an Ok(Failed _) envelope" seedTag id)
+            | Error pe, ModelQuery.Error me ->
+                t
+                |> Tally.reach "Classes" (queryErrClass pe)
+                |> Differential.compareWith
+                    queryError
+                    (fun pr mr ->
+                        sprintf "seed %d: dispatch %s refused differently\n  prod %s\n  model %s" seedTag id pr mr)
+                    pe
+                    me
+                |> Tally.bump (
+                    match pe with
+                    | NoSuchQuery _ -> "NoSuch"
+                    | ExecutionFailed _ -> "ExecFailed"
+                    | _ -> "Refused"
+                )
+            | Ok _, ModelQuery.Error me ->
+                Tally.disagree
+                    (sprintf
+                        "seed %d: dispatch %s accepted by production, refused by the model (%s)"
+                        seedTag
+                        id
+                        (modelQueryErrRender me))
+                    t
+            | Error pe, ModelQuery.Ok _ ->
+                Tally.disagree
+                    (sprintf
+                        "seed %d: dispatch %s refused by production (%s), accepted by the model"
+                        seedTag
+                        id
+                        (prodQueryErrRender pe))
+                    t
 
         // the resolver ran on both sides or on neither — and never past a refusal that is not its own
-        if pRan.Value <> mRan.Value then
-            diffs.Add(
+        t <-
+            t
+            |> Differential.check (pRan.Value = mRan.Value) (fun () ->
                 sprintf
                     "seed %d: dispatch %s ran the resolver on one side only (prod %b, model %b)"
                     seedTag
                     id
                     pRan.Value
-                    mRan.Value
-            )
-
-        if pRan.Value then
-            resolverRan <- resolverRan + 1
+                    mRan.Value)
+            |> Tally.bumpIf pRan.Value "ResolverRan"
 
         (match p with
          | Error(ExecutionFailed _)
          | Ok _ -> ()
          | Error _ ->
-             refusedWithoutResolver <- refusedWithoutResolver + 1
-
-             if pRan.Value then
-                 diffs.Add(sprintf "seed %d: dispatch %s was REFUSED and the resolver still ran" seedTag id))
+             t <-
+                 t
+                 |> Tally.bump "RefusedWithoutResolver"
+                 |> Differential.check (not pRan.Value) (fun () ->
+                     sprintf "seed %d: dispatch %s was REFUSED and the resolver still ran" seedTag id))
 
         // validateParams, the capture key and the determinism tag on their own, on the resolved
         // declaration — the key for EVERY argument set, accepted or not: `invocationKey` is total
@@ -885,33 +883,29 @@ let private queryProbe
         | Some q ->
             let mq = bridge q
 
-            (match Query.validateParams q args, ModelQuery.validate_params mq margs with
-             | Ok(), ModelQuery.Ok() -> validated <- validated + 1
-             | Error pe, ModelQuery.Error me ->
-                 if prodQueryErrRender pe <> modelQueryErrRender me then
-                     diffs.Add(
-                         sprintf
-                             "seed %d: validateParams refused differently\n  prod %s\n  model %s"
-                             seedTag
-                             (prodQueryErrRender pe)
-                             (modelQueryErrRender me)
-                     )
-             | _ -> diffs.Add(sprintf "seed %d: validateParams verdict differs on %s" seedTag id))
+            t <-
+                match Query.validateParams q args, ModelQuery.validate_params mq margs with
+                | Ok(), ModelQuery.Ok() -> Tally.bump "Validated" t
+                | Error pe, ModelQuery.Error me ->
+                    t
+                    |> Differential.compareWith
+                        queryError
+                        (fun pr mr ->
+                            sprintf "seed %d: validateParams refused differently\n  prod %s\n  model %s" seedTag pr mr)
+                        pe
+                        me
+                | _ -> Tally.disagree (sprintf "seed %d: validateParams verdict differs on %s" seedTag id) t
 
             let pKey = Query.invocationKey q args
             let mKey = ModelQuery.invocation_key rn mq margs
-            keys <- keys + 1
 
-            if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
-                shapedKeys <- shapedKeys + 1
-
-            if args |> List.exists (fun (_, c) -> c = Cell.Null) then
-                keysWithNull <- keysWithNull + 1
-
-            if pKey <> mKey then
-                diffs.Add(
-                    sprintf "seed %d: invocationKey differs on %s %A\n  prod %s\n  model %s" seedTag id args pKey mKey
-                )
+            t <-
+                t
+                |> Tally.bump "Keys"
+                |> Tally.bumpIf (not (List.isEmpty q.Where && List.isEmpty q.OrderBy)) "ShapedKeys"
+                |> Tally.bumpIf (args |> List.exists (fun (_, c) -> c = Cell.Null)) "KeysWithNull"
+                |> Differential.check (pKey = mKey) (fun () ->
+                    sprintf "seed %d: invocationKey differs on %s %A\n  prod %s\n  model %s" seedTag id args pKey mKey)
 
             // Phase 316 — the PAGE key, byte for byte, over a token alphabet carrying the page tag
             // and the canonical encoding's own symbols; and the first page keys as `invocationKey`.
@@ -924,8 +918,9 @@ let private queryProbe
                 let pPage = Query.invocationKeyPage q args token
                 let mPage = ModelQuery.invocation_key_page rn mq margs mToken
 
-                if pPage <> mPage then
-                    diffs.Add(
+                t <-
+                    t
+                    |> Differential.check (pPage = mPage) (fun () ->
                         sprintf
                             "seed %d: invocationKeyPage differs on %s %A %A\n  prod %s\n  model %s"
                             seedTag
@@ -933,105 +928,43 @@ let private queryProbe
                             args
                             token
                             pPage
-                            mPage
-                    )
-
-                if token.IsNone && pPage <> pKey then
-                    diffs.Add(sprintf "seed %d: the first page's key is not invocationKey on %s" seedTag id)
+                            mPage)
+                    |> Differential.check (not (token.IsNone && pPage <> pKey)) (fun () ->
+                        sprintf "seed %d: the first page's key is not invocationKey on %s" seedTag id)
 
             // `invocation_key_deterministic`, sampled on the shipped seam: with distinct names the
             // caller's order does not reach the key.
             let names = args |> List.map fst
 
             if List.length names > 1 && List.length (List.distinct names) = List.length names then
-                keysPermuted <- keysPermuted + 1
+                t <-
+                    t
+                    |> Tally.bump "KeysPermuted"
+                    |> Differential.check (Query.invocationKey q (List.rev args) = pKey) (fun () ->
+                        sprintf "seed %d: the shipped invocationKey moved under a reordering of %A" seedTag args)
 
-                if Query.invocationKey q (List.rev args) <> pKey then
-                    diffs.Add(sprintf "seed %d: the shipped invocationKey moved under a reordering of %A" seedTag args)
-
-            if Query.determinismTag q <> ModelQuery.determinism_tag_of mq then
-                diffs.Add(sprintf "seed %d: determinismTag differs on %s" seedTag id)
+            t <-
+                t
+                |> Differential.check (Query.determinismTag q = ModelQuery.determinism_tag_of mq) (fun () ->
+                    sprintf "seed %d: determinismTag differs on %s" seedTag id)
         | None -> ()
 
-    { QDiffs = acc.QDiffs @ List.ofSeq diffs
-      QRegistered = acc.QRegistered + registered
-      QDupRefused = acc.QDupRefused + dupRefused
-      QSettled = acc.QSettled + settled
-      QStillPending = acc.QStillPending + stillPending
-      QNoSuch = acc.QNoSuch + noSuch
-      QValidated = acc.QValidated + validated
-      QRefused = acc.QRefused + refused
-      QExecFailed = acc.QExecFailed + execFailed
-      QResolverRan = acc.QResolverRan + resolverRan
-      QRefusedWithoutResolver = acc.QRefusedWithoutResolver + refusedWithoutResolver
-      QKeys = acc.QKeys + keys
-      QKeysWithNull = acc.QKeysWithNull + keysWithNull
-      QKeysPermuted = acc.QKeysPermuted + keysPermuted
-      QRepeatedParamDecls = acc.QRepeatedParamDecls + repeatedDecls
-      QClasses = classes
-      QShapedRegistered = acc.QShapedRegistered + shapedRegistered
-      QShapeRefused = acc.QShapeRefused + shapeRefused
-      QShapedKeys = acc.QShapedKeys + shapedKeys
-      QRegisterClasses = registerClasses },
-    rng
+    rng, t
 
 let private queryDifferential
     (bridge: Query -> ModelQuery.query)
     (rn: ModelQuery.renderers)
     (seed: int)
     (trials: int)
-    : QueryTally =
-    let mutable rng = ConfRng.ofSeed seed
-
-    let mutable tally =
-        { QDiffs = []
-          QRegistered = 0
-          QDupRefused = 0
-          QSettled = 0
-          QStillPending = 0
-          QNoSuch = 0
-          QValidated = 0
-          QRefused = 0
-          QExecFailed = 0
-          QResolverRan = 0
-          QRefusedWithoutResolver = 0
-          QKeys = 0
-          QKeysWithNull = 0
-          QKeysPermuted = 0
-          QRepeatedParamDecls = 0
-          QClasses = Set.empty
-          QShapedRegistered = 0
-          QShapeRefused = 0
-          QShapedKeys = 0
-          QRegisterClasses = Set.empty }
-
-    for i in 1..trials do
-        let t, r' = queryProbe bridge rn i tally rng
-        tally <- t
-        rng <- r'
-
-    tally
+    : Tally =
+    Differential.seeded trials (ConfRng.ofSeed seed) (queryProbe bridge rn) queryTally
 
 // ---- Phase 455 — the query codec, whole: the declaration, the result page, the async result and
 //      the typed refusal, beside `QueryCodec` over its own column codec ----
 
-let private segRender (s: PathSegment) =
-    match s with
-    | PathSegment.Key k -> "k:" + k
-    | PathSegment.Index n -> "i:" + string n
-
-let private pErrRender (e: DecodeError) : string =
-    sprintf "%A@%s" e.Code (e.Path |> List.map segRender |> String.concat "/")
-
-let private mErrRender (e: ModelCap.decode_error) : string =
-    sprintf
-        "%A@%s"
-        e.d_code
-        (e.d_path
-         |> List.map (function
-             | ModelCap.Key k -> "k:" + k
-             | ModelCap.Index n -> "i:" + string n)
-         |> String.concat "/")
+/// The decode refusal's render pair — its code and its path — is the capability codec's: the two
+/// seams share `DecodeError`, and one render of it is the comparison both read.
+let private decodeError = CapabilityTests.decodeError
 
 let private qColOfModel (t: ModelQuery.column_type) : ColumnType =
     match t with
@@ -1211,113 +1144,101 @@ let private genWireError (r: ConfRng.T) : QueryError * ConfRng.T =
 
     e, r4
 
-type private QueryCodecTally =
-    { QcDiffs: string list
-      QcDocuments: int
-      QcAdmissionRefused: int
-      QcRefused: int
-      QcCodes: Set<string> }
+/// The codec tally: the documents read, the refusals compared (and of them the unmutated
+/// declarations the admission gate refused), and the refusal codes reached.
+let private queryCodecTally =
+    Tally.empty [ "Documents"; "AdmissionRefused"; "Refused" ]
+    |> Tally.sets [ "Codes" ]
 
 /// Runs the model's query codec beside `QueryCodec` over its own column codec: each encoding, and
 /// the reading of each encoding and of mutations of it — acceptance, the value, and every typed
 /// refusal's code and path — and, on production, that every typed refusal RESOLVES in the document
 /// it read. `queryJson` is the model's declaration writer, a parameter for the go-red.
-let private queryCodecDifferential
-    (queryJson: ModelQuery.query -> ModelCap.jval)
-    (seed: int)
-    (trials: int)
-    : QueryCodecTally =
-    let rng = ref (ConfRng.ofSeed seed)
-    let diffs = System.Collections.Generic.List<string>()
-    let documents = ref (0)
-    let admission = ref (0)
-    let refused = ref (0)
-    let codes = ref (Set.empty)
+let private queryCodecDifferential (queryJson: ModelQuery.query -> ModelCap.jval) (seed: int) (trials: int) : Tally =
+    let step (i: int) (r0: ConfRng.T) (t0: Tally) =
+        let mutable rng = r0
+        let mutable t = t0
 
-    let mutations (j: JVal) =
-        let mutable out = [ j ]
+        let mutations (j: JVal) =
+            let mutable out = [ j ]
 
-        for _ in 1..4 do
-            let m, r = jmutate j rng.Value
-            rng.Value <- r
-            out <- m :: out
+            for _ in 1..4 do
+                let m, r = jmutate j rng
+                rng <- r
+                out <- m :: out
 
-        // The document production reads is the text the mutation renders to.
-        out
-        |> List.map (fun m ->
-            match Json.parse (Canonical.write Rendering.CrossHost m) with
-            | Ok v -> m = j, v
-            | Error _ -> m = j, m)
+            // The document production reads is the text the mutation renders to.
+            out
+            |> List.map (fun m ->
+                match Json.parse (Canonical.write Rendering.CrossHost m) with
+                | Ok v -> m = j, v
+                | Error _ -> m = j, m)
 
-    let typed
-        (what: string)
-        (i: int)
-        (j: JVal)
-        (p: Result<'P, DecodeError>)
-        (m: ModelCap.outcome<'M, ModelCap.decode_error>)
-        (same: 'P -> 'M -> bool)
-        (unmutated: bool)
-        =
-        documents.Value <- documents.Value + 1
+        let typed
+            (what: string)
+            (j: JVal)
+            (p: Result<'P, DecodeError>)
+            (m: ModelCap.outcome<'M, ModelCap.decode_error>)
+            (same: 'P -> 'M -> bool)
+            (unmutated: bool)
+            (t: Tally)
+            =
+            let t = Tally.bump "Documents" t
 
-        match p, m with
-        | Ok a, ModelCap.Ok b when same a b -> ()
-        | Error pe, ModelCap.Error me when pErrRender pe = mErrRender me ->
-            refused.Value <- refused.Value + 1
-            codes.Value <- codes.Value.Add(string pe.Code)
-
-            if unmutated then
-                admission.Value <- admission.Value + 1
-
-            if not (DecodeError.resolvesIn j pe) then
-                diffs.Add(
+            match p, m with
+            | Ok a, ModelCap.Ok b when same a b -> t
+            | Error pe, ModelCap.Error me when decodeError.Production pe = decodeError.Model me ->
+                t
+                |> Tally.bump "Refused"
+                |> Tally.reach "Codes" (string pe.Code)
+                |> Tally.bumpIf unmutated "AdmissionRefused"
+                |> Differential.check (DecodeError.resolvesIn j pe) (fun () ->
                     sprintf
                         "seed %d: a %s refusal does not resolve: %s in %s"
                         i
                         what
-                        (pErrRender pe)
+                        (decodeError.Production pe)
+                        (Canonical.write Rendering.CrossHost j))
+            | _ ->
+                Tally.disagree
+                    (sprintf
+                        "seed %d: the %s readers disagree on %s: %A vs %A"
+                        i
+                        what
                         (Canonical.write Rendering.CrossHost j)
-                )
-        | _ ->
-            diffs.Add(
-                sprintf
-                    "seed %d: the %s readers disagree on %s: %A vs %A"
-                    i
-                    what
-                    (Canonical.write Rendering.CrossHost j)
-                    p
-                    m
-            )
+                        p
+                        m)
+                    t
 
-    for i in 1..trials do
         // ---- the declaration, drawn by the seam differential's own generator ----
-        let q, r1 = genQueryDecl (sprintf "q-%d" i) rng.Value
-        rng.Value <- r1
+        let q, r1 = genQueryDecl (sprintf "q-%d" i) rng
+        rng <- r1
         let text = QueryCodec.encode q
 
         match Json.parse text with
-        | Error e -> diffs.Add(sprintf "seed %d: the declaration did not parse: %A" i e)
+        | Error e -> t <- Tally.disagree (sprintf "seed %d: the declaration did not parse: %A" i e) t
         | Ok j0 ->
             // The encoding is compared as the canonical TEXT both write.
-            if
-                Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q)))
-                <> text
-            then
-                diffs.Add(sprintf "seed %d: the declaration encodes differently: %s" i text)
+            t <-
+                t
+                |> Differential.check
+                    (Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q))) = text)
+                    (fun () -> sprintf "seed %d: the declaration encodes differently: %s" i text)
 
             for unmutated, j in mutations j0 do
-                typed
-                    "declaration"
-                    i
-                    j
-                    (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
-                    (ModelQuery.query_of_j columnCodec (jvalToModel j))
-                    (fun a b -> codecQueryToModel a = b)
-                    unmutated
+                t <-
+                    typed
+                        "declaration"
+                        j
+                        (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
+                        (ModelQuery.query_of_j columnCodec (jvalToModel j))
+                        (fun a b -> codecQueryToModel a = b)
+                        unmutated
+                        t
 
         // ---- a result page, and the async envelope around it ----
-        let k, r2 = ConfRng.intBelow 4 rng.Value
-        rng.Value <- r2
+        let k, r2 = ConfRng.intBelow 4 rng
+        rng <- r2
 
         let qr =
             { queryResultOf i with
@@ -1327,25 +1248,26 @@ let private queryCodecDifferential
         let rtext = QueryCodec.encodeResult qr
 
         match Json.parse rtext with
-        | Error e -> diffs.Add(sprintf "seed %d: the result did not parse: %A" i e)
+        | Error e -> t <- Tally.disagree (sprintf "seed %d: the result did not parse: %A" i e) t
         | Ok rj ->
-            if
-                Canonical.write
-                    Rendering.CrossHost
-                    (jvalOfModel (ModelQuery.result_json columnCodec (resultToModel qr)))
-                <> rtext
-            then
-                diffs.Add(sprintf "seed %d: the result encodes differently" i)
+            t <-
+                t
+                |> Differential.check
+                    (Canonical.write
+                        Rendering.CrossHost
+                        (jvalOfModel (ModelQuery.result_json columnCodec (resultToModel qr))) = rtext)
+                    (fun () -> sprintf "seed %d: the result encodes differently" i)
 
             for _, j in mutations rj do
-                typed
-                    "result"
-                    i
-                    j
-                    (QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
-                    (ModelQuery.result_of_j columnCodec (jvalToModel j))
-                    sameResult
-                    false
+                t <-
+                    typed
+                        "result"
+                        j
+                        (QueryCodec.decodeResultDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
+                        (ModelQuery.result_of_j columnCodec (jvalToModel j))
+                        sameResult
+                        false
+                        t
 
         let d =
             match k with
@@ -1362,62 +1284,64 @@ let private queryCodecDifferential
         let dtext = QueryCodec.encodeDeferredResult d
 
         match Json.parse dtext with
-        | Error e -> diffs.Add(sprintf "seed %d: the envelope did not parse: %A" i e)
+        | Error e -> t <- Tally.disagree (sprintf "seed %d: the envelope did not parse: %A" i e) t
         | Ok dj ->
-            if
-                Canonical.write Rendering.CrossHost (jvalOfModel (ModelQuery.deferred_result_json columnCodec md))
-                <> dtext
-            then
-                diffs.Add(sprintf "seed %d: the async result encodes differently" i)
+            t <-
+                t
+                |> Differential.check
+                    (Canonical.write Rendering.CrossHost (jvalOfModel (ModelQuery.deferred_result_json columnCodec md)) = dtext)
+                    (fun () -> sprintf "seed %d: the async result encodes differently" i)
 
             for _, j in mutations dj do
-                typed
-                    "async result"
-                    i
-                    j
-                    (QueryCodec.decodeDeferredResultDetailedWith
-                        ReadPolicy.Lenient
-                        (Canonical.write Rendering.CrossHost j))
-                    (ModelQuery.deferred_result_of_j columnCodec (jvalToModel j))
-                    (fun a b ->
-                        match a, b with
-                        | Pending, ModelCap.Pending -> true
-                        | Failed x, ModelCap.Failed y -> x = y
-                        | Ready x, ModelCap.Ready y -> sameResult x y
-                        | _ -> false)
-                    false
+                t <-
+                    typed
+                        "async result"
+                        j
+                        (QueryCodec.decodeDeferredResultDetailedWith
+                            ReadPolicy.Lenient
+                            (Canonical.write Rendering.CrossHost j))
+                        (ModelQuery.deferred_result_of_j columnCodec (jvalToModel j))
+                        (fun a b ->
+                            match a, b with
+                            | Pending, ModelCap.Pending -> true
+                            | Failed x, ModelCap.Failed y -> x = y
+                            | Ready x, ModelCap.Ready y -> sameResult x y
+                            | _ -> false)
+                        false
+                        t
 
         // ---- the typed refusal ----
-        let e, r3 = genWireError rng.Value
-        rng.Value <- r3
+        let e, r3 = genWireError rng
+        rng <- r3
         let ej = QuerySeamCodec.encodeQueryError e
 
-        if jvalToModel ej <> ModelQuery.query_error_json columnCodec (wireErrorToModel e) then
-            diffs.Add(sprintf "seed %d: the query error encodes differently: %A" i e)
+        t <-
+            t
+            |> Differential.check
+                (jvalToModel ej = ModelQuery.query_error_json columnCodec (wireErrorToModel e))
+                (fun () -> sprintf "seed %d: the query error encodes differently: %A" i e)
 
         for _, j in mutations ej do
-            documents.Value <- documents.Value + 1
+            t <- Tally.bump "Documents" t
 
             match QuerySeamCodec.decodeQueryError j, ModelQuery.query_error_of_j columnCodec (jvalToModel j) with
             | Ok pe, ModelCap.Ok me when wireErrorToModel pe = me -> ()
             | Error _, ModelCap.Error me ->
-                refused.Value <- refused.Value + 1
-                codes.Value <- codes.Value.Add(sprintf "%A" me.d_code)
+                t <- t |> Tally.bump "Refused" |> Tally.reach "Codes" (sprintf "%A" me.d_code)
             | p, m ->
-                diffs.Add(
-                    sprintf
-                        "seed %d: the query-error readers disagree on %s: %A vs %A"
-                        i
-                        (Canonical.write Rendering.CrossHost j)
-                        p
-                        m
-                )
+                t <-
+                    Tally.disagree
+                        (sprintf
+                            "seed %d: the query-error readers disagree on %s: %A vs %A"
+                            i
+                            (Canonical.write Rendering.CrossHost j)
+                            p
+                            m)
+                        t
 
-    { QcDiffs = List.ofSeq diffs
-      QcDocuments = documents.Value
-      QcAdmissionRefused = admission.Value
-      QcRefused = refused.Value
-      QcCodes = codes.Value }
+        rng, t
+
+    Differential.seeded trials (ConfRng.ofSeed seed) step queryCodecTally
 
 /// The go-red's writer: the model's declaration writer handed the declaration with its last
 /// parameter DROPPED.
@@ -1442,128 +1366,148 @@ let tests =
           <| fun _ ->
               let t = queryDifferential queryToModel queryRenderers 1871 500
 
-              match t.QDiffs with
-              | d :: _ -> failtestf "the query oracle and production DISAGREE\n%s" d
-              | [] ->
-                  // Measured at 500 registries (Phase 316: 300 until the registry began refusing a
-                  // declaration that names a parameter twice, which left fewer queries registered and
-                  // the Null-binding key floor short): registered 506, dupRefused 246 (duplicate ids
-                  // and repeated parameter names), repeated-name declarations 161; settled 83,
-                  // pending 45, noSuch 885, validated 171, refused 133, execFailed 43,
-                  // refusedWithoutResolver 1018; keys 304 (36 over a Null binding, 72 held still
-                  // under a reordering), each compared with its six page keys.
-                  // Phase 398 draws one declaration in two with a filter and an order over a drawn schema,
-                  // after every earlier draw; re-measured at the same 500: registered 394, refused at
-                  // registration 356 (138 of them a filter or order the schema does not admit, every one of
-                  // the five shape refusals reached), 96 shaped declarations registered; settled 70,
-                  // pending 27, noSuch 1006, validated 134, refused 101, execFailed 37,
-                  // refusedWithoutResolver 1107; keys 235 (37 over a Null binding, 58 held still, 60 over a
-                  // filter or an order). Every earlier floor still holds.
-                  Expect.isGreaterThan
-                      t.QRegistered
-                      200
-                      (sprintf "queries were registered (registered=%d)" t.QRegistered)
+              Differential.expectAgrees "query" t
 
-                  Expect.isGreaterThan
-                      t.QDupRefused
-                      40
-                      (sprintf "duplicate registrations were refused (dupRefused=%d)" t.QDupRefused)
+              // Measured at 500 registries (Phase 316: 300 until the registry began refusing a
+              // declaration that names a parameter twice, which left fewer queries registered and
+              // the Null-binding key floor short): registered 506, dupRefused 246 (duplicate ids
+              // and repeated parameter names), repeated-name declarations 161; settled 83,
+              // pending 45, noSuch 885, validated 171, refused 133, execFailed 43,
+              // refusedWithoutResolver 1018; keys 304 (36 over a Null binding, 72 held still
+              // under a reordering), each compared with its six page keys.
+              // Phase 398 draws one declaration in two with a filter and an order over a drawn schema,
+              // after every earlier draw; re-measured at the same 500: registered 394, refused at
+              // registration 356 (138 of them a filter or order the schema does not admit, every one of
+              // the five shape refusals reached), 96 shaped declarations registered; settled 70,
+              // pending 27, noSuch 1006, validated 134, refused 101, execFailed 37,
+              // refusedWithoutResolver 1107; keys 235 (37 over a Null binding, 58 held still, 60 over a
+              // filter or an order). Every earlier floor still holds.
+              Expect.isGreaterThan
+                  (Tally.count "Registered" t)
+                  200
+                  (sprintf "queries were registered (registered=%d)" (Tally.count "Registered" t))
 
-                  Expect.isGreaterThan
-                      t.QRepeatedParamDecls
-                      40
+              Expect.isGreaterThan
+                  (Tally.count "DupRefused" t)
+                  40
+                  (sprintf "duplicate registrations were refused (dupRefused=%d)" (Tally.count "DupRefused" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "RepeatedParamDecls" t)
+                  40
+                  (sprintf
+                      "declarations repeating a param name arose, so the registration refusal was compared (repeated=%d)"
+                      (Tally.count "RepeatedParamDecls" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Settled" t)
+                  30
+                  (sprintf "dispatches settled (settled=%d)" (Tally.count "Settled" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "StillPending" t)
+                  10
+                  (sprintf "dispatches stayed pending inside the Ok (pending=%d)" (Tally.count "StillPending" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "NoSuch" t)
+                  200
+                  (sprintf "unregistered ids were refused (noSuch=%d)" (Tally.count "NoSuch" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Validated" t)
+                  50
+                  (sprintf "argument sets were accepted (validated=%d)" (Tally.count "Validated" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Refused" t)
+                  50
+                  (sprintf "argument sets were refused (refused=%d)" (Tally.count "Refused" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "ExecFailed" t)
+                  10
+                  (sprintf "resolvers failed and were named (execFailed=%d)" (Tally.count "ExecFailed" t))
+
+              Expect.equal
+                  (Tally.count "ResolverRan" t)
+                  ((Tally.count "Settled" t)
+                   + (Tally.count "StillPending" t)
+                   + (Tally.count "ExecFailed" t))
+                  "the resolver ran exactly on the invocations validation passed"
+
+              Expect.isGreaterThan
+                  (Tally.count "RefusedWithoutResolver" t)
+                  300
+                  (sprintf
+                      "refusals were checked for a resolver that did not run (refusedWithoutResolver=%d)"
+                      (Tally.count "RefusedWithoutResolver" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Keys" t)
+                  100
+                  (sprintf "capture keys were compared (keys=%d)" (Tally.count "Keys" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "KeysWithNull" t)
+                  20
+                  (sprintf "capture keys over a Null binding were compared (withNull=%d)" (Tally.count "KeysWithNull" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "KeysPermuted" t)
+                  25
+                  (sprintf
+                      "the shipped key was held still under a reordering of distinct names (permuted=%d)"
+                      (Tally.count "KeysPermuted" t))
+
+              // Phase 398 — the declared filter and order were drawn, admitted, refused and keyed.
+              Expect.isGreaterThan
+                  (Tally.count "ShapedRegistered" t)
+                  40
+                  (sprintf
+                      "filtered or ordered declarations were registered (shaped=%d)"
+                      (Tally.count "ShapedRegistered" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "ShapeRefused" t)
+                  50
+                  (sprintf
+                      "filters and orders the schema does not admit were refused (shapeRefused=%d)"
+                      (Tally.count "ShapeRefused" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "ShapedKeys" t)
+                  25
+                  (sprintf
+                      "capture keys over a filter or an order were compared (shapedKeys=%d)"
+                      (Tally.count "ShapedKeys" t))
+
+              for cls in
+                  [ "UnknownColumn"
+                    "PredicateTypeMismatch"
+                    "PredicateNotApplicable"
+                    "IllFormedLiteral"
+                    "DuplicateSortColumn" ] do
+                  Expect.isTrue
+                      (Set.contains cls (Tally.reached "RegisterClasses" t))
                       (sprintf
-                          "declarations repeating a param name arose, so the registration refusal was compared (repeated=%d)"
-                          t.QRepeatedParamDecls)
-
-                  Expect.isGreaterThan t.QSettled 30 (sprintf "dispatches settled (settled=%d)" t.QSettled)
-
-                  Expect.isGreaterThan
-                      t.QStillPending
-                      10
-                      (sprintf "dispatches stayed pending inside the Ok (pending=%d)" t.QStillPending)
-
-                  Expect.isGreaterThan t.QNoSuch 200 (sprintf "unregistered ids were refused (noSuch=%d)" t.QNoSuch)
-
-                  Expect.isGreaterThan
-                      t.QValidated
-                      50
-                      (sprintf "argument sets were accepted (validated=%d)" t.QValidated)
-
-                  Expect.isGreaterThan t.QRefused 50 (sprintf "argument sets were refused (refused=%d)" t.QRefused)
-
-                  Expect.isGreaterThan
-                      t.QExecFailed
-                      10
-                      (sprintf "resolvers failed and were named (execFailed=%d)" t.QExecFailed)
-
-                  Expect.equal
-                      t.QResolverRan
-                      (t.QSettled + t.QStillPending + t.QExecFailed)
-                      "the resolver ran exactly on the invocations validation passed"
-
-                  Expect.isGreaterThan
-                      t.QRefusedWithoutResolver
-                      300
-                      (sprintf
-                          "refusals were checked for a resolver that did not run (refusedWithoutResolver=%d)"
-                          t.QRefusedWithoutResolver)
-
-                  Expect.isGreaterThan t.QKeys 100 (sprintf "capture keys were compared (keys=%d)" t.QKeys)
-
-                  Expect.isGreaterThan
-                      t.QKeysWithNull
-                      20
-                      (sprintf "capture keys over a Null binding were compared (withNull=%d)" t.QKeysWithNull)
-
-                  Expect.isGreaterThan
-                      t.QKeysPermuted
-                      25
-                      (sprintf
-                          "the shipped key was held still under a reordering of distinct names (permuted=%d)"
-                          t.QKeysPermuted)
-
-                  // Phase 398 — the declared filter and order were drawn, admitted, refused and keyed.
-                  Expect.isGreaterThan
-                      t.QShapedRegistered
-                      40
-                      (sprintf "filtered or ordered declarations were registered (shaped=%d)" t.QShapedRegistered)
-
-                  Expect.isGreaterThan
-                      t.QShapeRefused
-                      50
-                      (sprintf
-                          "filters and orders the schema does not admit were refused (shapeRefused=%d)"
-                          t.QShapeRefused)
-
-                  Expect.isGreaterThan
-                      t.QShapedKeys
-                      25
-                      (sprintf "capture keys over a filter or an order were compared (shapedKeys=%d)" t.QShapedKeys)
-
-                  for cls in
-                      [ "UnknownColumn"
-                        "PredicateTypeMismatch"
-                        "PredicateNotApplicable"
-                        "IllFormedLiteral"
-                        "DuplicateSortColumn" ] do
-                      Expect.isTrue
-                          (Set.contains cls t.QRegisterClasses)
-                          (sprintf "the sample reached a %s registration refusal (reached: %A)" cls t.QRegisterClasses)
+                          "the sample reached a %s registration refusal (reached: %A)"
+                          cls
+                          (Tally.reached "RegisterClasses" t))
 
 
-                  for cls in
-                      [ "NoSuchQuery"
-                        "UnknownParam"
-                        "ParamTypeMismatch"
-                        "RequiredParamsUnbound"
-                        "RequiredParamsNull"
-                        "ExecutionFailed" ] do
-                      Expect.isTrue
-                          (Set.contains cls t.QClasses)
-                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.QClasses)
+              for cls in
+                  [ "NoSuchQuery"
+                    "UnknownParam"
+                    "ParamTypeMismatch"
+                    "RequiredParamsUnbound"
+                    "RequiredParamsNull"
+                    "ExecutionFailed" ] do
+                  Expect.isTrue
+                      (Set.contains cls (Tally.reached "Classes" t))
+                      (sprintf "the sample reached a %s refusal (reached: %A)" cls (Tally.reached "Classes" t))
 
-                  Expect.equal (queryDifferential queryToModel queryRenderers 1871 500) t "same seed => identical tally"
+              Expect.equal (queryDifferential queryToModel queryRenderers 1871 500) t "same seed => identical tally"
 
           testCase
               "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail"
@@ -1577,17 +1521,18 @@ let tests =
               // 200 draws since Phase 430: the pool draws every timestamp unit, and a required param
               // refused as a type mismatch never reaches the step the forgetful bridge drops.
               let forgetful = queryDifferential (queryToModelWith false) queryRenderers 1871 200
-              Expect.isNonEmpty forgetful.QDiffs "a bridge that forgets `Required` MUST disagree with production"
+              Differential.expectLoses "a bridge that forgets `Required`" forgetful
 
               Expect.isTrue
-                  (forgetful.QDiffs |> List.exists (fun d -> d.Contains "RequiredParamsUnbound"))
+                  (Tally.disagreements forgetful
+                   |> List.exists (fun d -> d.Contains "RequiredParamsUnbound"))
                   "and the disagreement is about the required-params step, which is what the bridge forgot"
 
               let blind = queryDifferential queryToModel orderBlindRenderers 1871 80
-              Expect.isNonEmpty blind.QDiffs "an order-blind comparator MUST disagree with production"
+              Differential.expectLoses "an order-blind comparator" blind
 
               Expect.isTrue
-                  (blind.QDiffs
+                  (Tally.disagreements blind
                    |> List.forall (fun d ->
                        d.Contains "invocationKey differs" || d.Contains "invocationKeyPage differs"))
                   "and every disagreement is about the capture key — the comparator reaches nothing else"
@@ -2063,29 +2008,36 @@ let tests =
           <| fun _ ->
               let t = queryCodecDifferential (ModelQuery.query_json columnCodec) 4552 200
 
-              match t.QcDiffs with
-              | d :: _ -> failtestf "the query-codec oracle and production DISAGREE\n%s" d
-              | [] ->
-                  Expect.isGreaterThan t.QcDocuments 3000 (sprintf "documents were read (%d)" t.QcDocuments)
+              Differential.expectAgrees "query codec" t
 
-                  Expect.isGreaterThan
-                      t.QcAdmissionRefused
-                      10
-                      (sprintf
-                          "an UNMUTATED declaration was refused by the admission gate on read (%d)"
-                          t.QcAdmissionRefused)
+              Expect.isGreaterThan
+                  (Tally.count "Documents" t)
+                  3000
+                  (sprintf "documents were read (%d)" (Tally.count "Documents" t))
 
-                  Expect.isGreaterThan t.QcRefused 300 (sprintf "documents were refused (%d)" t.QcRefused)
+              Expect.isGreaterThan
+                  (Tally.count "AdmissionRefused" t)
+                  10
+                  (sprintf
+                      "an UNMUTATED declaration was refused by the admission gate on read (%d)"
+                      (Tally.count "AdmissionRefused" t))
 
-                  for c in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange" ] do
-                      Expect.isTrue (t.QcCodes.Contains c) (sprintf "a %s refusal was compared (%A)" c t.QcCodes)
+              Expect.isGreaterThan
+                  (Tally.count "Refused" t)
+                  300
+                  (sprintf "documents were refused (%d)" (Tally.count "Refused" t))
+
+              for c in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange" ] do
+                  Expect.isTrue
+                      (Set.contains c (Tally.reached "Codes" t))
+                      (sprintf "a %s refusal was compared (%A)" c (Tally.reached "Codes" t))
 
           testCase
               "a query-codec oracle whose declaration writer DROPS a parameter DISAGREES with QueryCodec — the measurement can fail"
           <| fun _ ->
               let t = queryCodecDifferential droppingQueryJson 4553 60
-              Expect.isNonEmpty t.QcDiffs "a writer that drops a parameter MUST disagree with production's"
+              Differential.expectLoses "a writer that drops a parameter" t
 
               Expect.isTrue
-                  (t.QcDiffs |> List.exists (fun d -> d.Contains "encodes differently"))
+                  (Tally.disagreements t |> List.exists (fun d -> d.Contains "encodes differently"))
                   "and the disagreement is about the encoding, which is what the writer dropped" ]

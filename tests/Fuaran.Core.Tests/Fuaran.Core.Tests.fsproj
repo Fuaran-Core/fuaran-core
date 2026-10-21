@@ -162,7 +162,7 @@
     <Compile Include="ProofOracle.TwinTests.fs" />
     <!-- Phase 301 — the bridge for Chain.fst sections 7b/7c (the compacted stream, the capture journal);
          ProofsLadderTests.fs below reads its case names. -->
-    <Compile Include="ProofOracleCompactedTests.fs" />
+    <Compile Include="ProofOracle.CompactedTests.fs" />
     <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
          findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
          against a corpus of sample documents written in that vocabulary's wire shape,

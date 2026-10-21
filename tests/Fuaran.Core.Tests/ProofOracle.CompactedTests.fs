@@ -1,54 +1,19 @@
-module Fuaran.Core.Tests.ProofOracleCompactedTests
+module Fuaran.Core.Tests.ProofOracle.CompactedTests
 
 // Phase 301 — the bridge for `proofs/Chain.fst` sections 7b and 7c: the extracted model of the
 // compacted stream (`append_to`, `compact_from`, `index_onto`) and of the capture journal
 // (`record_session`, `first_capture_break_from`, `replay_session`) run beside production. A file of
 // its own rather than more cases in `ProofOracle.ChainTests.fs`, beside the other models' `ProofOracle.*Tests.fs`; the
-// ladder reads its case names beside that suite's (`ProofsLadderTests.realCases`).
+// ladder reads its case names beside that suite's (`ProofsLadderTests.realCases`). The chain bridges
+// (`posOfInt`, `toChainRecords`, `chainApply`, `modelPay`, ...) are that suite's.
 
 open Expecto
 open Fuaran.Core
+open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.ProofOracle.ChainTests
 open Fuaran.Core.Tests.Reference.Counter
 
-let rec private posOfInt (i: int) : Chain.pos =
-    if i <= 0 then
-        Chain.PZero
-    else
-        Chain.PSucc(posOfInt (i - 1))
-
-let rec private intOfPos (p: Chain.pos) : int =
-    match p with
-    | Chain.PZero -> 0
-    | Chain.PSucc m -> 1 + intOfPos m
-
-let private showPos (p: Chain.pos) : string = string (intOfPos p)
-
-let private toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
-    rs
-    |> List.map (fun r ->
-        { Chain.rseq = posOfInt r.Seq
-          Chain.ractor = Actor.encode r.Actor
-          Chain.rop = r.Op
-          Chain.rprev = r.PrevHash
-          Chain.rhash = r.Hash })
-
-let private toModelSnapshot (s: Snapshot<'State>) : Chain.snapshot<'State> =
-    { Chain.sseq = posOfInt s.Seq
-      Chain.sstate = s.State
-      Chain.sprev = s.PrevHash
-      Chain.shash = s.Hash }
-
-let private chainApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : Chain.applied<'State, 'Rej> =
-    match w.Apply op st with
-    | Ok s -> Chain.Applied s
-    | Error e -> Chain.Refused e
-
 let private stateEnc (s: int) = string s
-
-let private modelPay (mode: SnapshotMode) : Chain.pos -> int -> string =
-    match mode with
-    | SnapshotMode.Strict -> Chain.snap_payload showPos stateEnc
-    | SnapshotMode.ChainOnly -> Chain.snap_payload_chain_only showPos
 
 /// A compaction's whole outcome — the refusal rendered as the model spells it, or every field of the
 /// snapshot and the tail record for record.
@@ -112,92 +77,98 @@ let private compactProd mode rs n =
     Compacted.compactAt mode (OpStream.canonical OpStream.defaultHash witness) stateEnc keyOf 0 rs n
 
 let private compactModel (hashFn: HashFn) mode rs n =
-    Chain.compact hashFn showPos (modelPay mode) (chainApply witness) "" 0 (toChainRecords rs) (posOfInt n)
+    Chain.compact hashFn showPos (modelPay mode stateEnc) (chainApply witness) "" 0 (toChainRecords rs) (posOfInt n)
+
+/// The re-compaction tally: the (n, k) pairs `Compared`, production's refusals among them (`Refused`)
+/// and the prefix refusals by their origin index (`PrefixRefused`), and the in-range compositions
+/// met (`Composed`).
+let private recompactionTally =
+    Tally.empty [ "Compared"; "Refused"; "PrefixRefused"; "Composed" ]
 
 /// Every (n, k) pair of every stream in the pool, both modes, plus a STARVED snapshot (its state set
 /// back to the initial one) so the prefix refusal is met: production's `compactFrom` against the
 /// model's `compact_from`, and production's `compactFrom` against production's own `compactAt` at
-/// `n + k` — the theorem held of production's values. Returns the first disagreement and the tally.
-let private recompactionDifferential (modelHash: HashFn) =
-    let mutable failure = None
-    let mutable compared, refused, prefixRefused, composed = 0, 0, 0, 0
+/// `n + k` — the theorem held of production's values.
+let private recompactionDifferential (modelHash: HashFn) : Tally =
+    let boundaries =
+        [ for _, rs in streams 301 60 do
+              for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
+                  for n in 0 .. List.length rs do
+                      yield rs, mode, n ]
 
-    let note why =
-        if failure.IsNone then
-            failure <- Some why
-
-    for _, rs in streams 301 60 do
+    let boundary (rs: OpRecord<CounterOp> list, mode: SnapshotMode, n: int) (t: Tally) : Tally =
         let len = List.length rs
 
-        for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
-            for n in 0..len do
-                match compactProd mode rs n, compactModel modelHash mode rs n with
-                | Ok c, Chain.Compacted(snap, tail) ->
-                    for starved in [ false; true ] do
-                        let c, snap =
-                            if starved then
-                                { c with
-                                    Snapshot = { c.Snapshot with State = 0 } },
-                                { snap with Chain.sstate = 0 }
-                            else
-                                c, snap
+        match compactProd mode rs n, compactModel modelHash mode rs n with
+        | Ok c, Chain.Compacted(snap, tail) ->
+            let probe (starved: bool, k: int) (t: Tally) : Tally =
+                let c, snap =
+                    if starved then
+                        { c with
+                            Snapshot = { c.Snapshot with State = 0 } },
+                        { snap with Chain.sstate = 0 }
+                    else
+                        c, snap
 
-                        for k in 0 .. len - n + 1 do
-                            let p =
-                                ofProd (
-                                    Compacted.compactFrom
-                                        (OpStream.canonical OpStream.defaultHash witness)
-                                        stateEnc
-                                        keyOf
-                                        c
-                                        (n + k)
-                                )
+                let p =
+                    ofProd (
+                        Compacted.compactFrom (OpStream.canonical OpStream.defaultHash witness) stateEnc keyOf c (n + k)
+                    )
 
-                            let m =
-                                ofModel (
-                                    Chain.compact_from
-                                        modelHash
-                                        showPos
-                                        (modelPay mode)
-                                        (chainApply witness)
-                                        snap
-                                        tail
-                                        (posOfInt k)
-                                )
+                let m =
+                    ofModel (
+                        Chain.compact_from
+                            modelHash
+                            showPos
+                            (modelPay mode stateEnc)
+                            (chainApply witness)
+                            snap
+                            tail
+                            (posOfInt k)
+                    )
 
-                            compared <- compared + 1
+                let refusal (t: Tally) : Tally =
+                    match p with
+                    | RefusedWith e ->
+                        t
+                        |> Tally.bump "Refused"
+                        |> Tally.bumpIf (e.Contains "prefix replay") "PrefixRefused"
+                    | CompactedTo _ -> t
 
-                            match p with
-                            | RefusedWith e ->
-                                refused <- refused + 1
+                let t =
+                    t
+                    |> Tally.bump "Compared"
+                    |> refusal
+                    |> Differential.check (p = m) (fun () ->
+                        sprintf "mode=%A n=%d k=%d starved=%b\n  production: %A\n  model:      %A" mode n k starved p m)
 
-                                if e.Contains "prefix replay" then
-                                    prefixRefused <- prefixRefused + 1
-                            | CompactedTo _ -> ()
+                if starved then
+                    t
+                else
+                    let whole = ofProd (compactProd mode rs (n + k))
 
-                            if p <> m then
-                                note (
-                                    sprintf
-                                        "mode=%A n=%d k=%d starved=%b\n  production: %A\n  model:      %A"
-                                        mode
-                                        n
-                                        k
-                                        starved
-                                        p
-                                        m
-                                )
+                    t
+                    |> Tally.bumpIf (k <= len - n) "Composed"
+                    |> Differential.check (p = whole) (fun () ->
+                        sprintf "compact_compose fails of production: mode=%A n=%d k=%d" mode n k)
 
-                            if not starved then
-                                let whole = ofProd (compactProd mode rs (n + k))
+            Differential.over
+                [ for starved in [ false; true ] do
+                      for k in 0 .. len - n + 1 do
+                          yield starved, k ]
+                probe
+                t
+        | p, m -> Tally.disagree (sprintf "the compactions disagree before composing: n=%d\n  %A\n  %A" n p m) t
 
-                                if k <= len - n then
-                                    composed <- composed + 1
+    Differential.over boundaries boundary recompactionTally
 
-                                if p <> whole then
-                                    note (sprintf "compact_compose fails of production: mode=%A n=%d k=%d" mode n k)
-                | p, m -> note (sprintf "the compactions disagree before composing: n=%d\n  %A\n  %A" n p m)
-
-    failure, compared, refused, prefixRefused, composed
+/// One equality held of production against the model (or of production against itself), under the
+/// `Expect.equal` reading: `what`, and both values.
+let private agreeOn (what: string) (production: 'T) (model: 'T) (t: Tally) : Tally =
+    Differential.check
+        (production = model)
+        (fun () -> sprintf "%s\n  production: %A\n  the model:  %A" what production model)
+        t
 
 [<Tests>]
 let compactedOracleTests =
@@ -205,30 +176,22 @@ let compactedOracleTests =
         "Proofs.Oracle"
         [ testCase "the re-compaction oracle agrees with production at every (n, k), and production composes"
           <| fun _ ->
-              let failure, compared, refused, prefixRefused, composed =
-                  recompactionDifferential OpStream.defaultHash
+              let t = recompactionDifferential OpStream.defaultHash
 
-              match failure with
-              | Some why -> failtest why
-              | None -> ()
-
-              Expect.isGreaterThan compared 500 "every (n, k) pair over the pool was compared"
-              Expect.isGreaterThan composed 200 "in-range compositions met"
-              Expect.isGreaterThan refused 0 "out-of-range refusals met"
-              Expect.isGreaterThan prefixRefused 0 "a prefix refusal met, by its origin index"
+              Differential.expectAgrees "re-compaction" t
+              Expect.isGreaterThan (Tally.count "Compared" t) 500 "every (n, k) pair over the pool was compared"
+              Expect.isGreaterThan (Tally.count "Composed" t) 200 "in-range compositions met"
+              Expect.isGreaterThan (Tally.count "Refused" t) 0 "out-of-range refusals met"
+              Expect.isGreaterThan (Tally.count "PrefixRefused" t) 0 "a prefix refusal met, by its origin index"
 
           testCase "a re-compaction model handed a DIFFERENT hash disagrees with production — the comparison can lose"
           <| fun _ ->
               let other: HashFn = fun prev payload -> OpStream.defaultHash ("x" + prev) payload
-              let failure, _, _, _, _ = recompactionDifferential other
-              Expect.isSome failure "a wrong hash must be caught"
+              Differential.expectLoses "a re-compaction model under a wrong hash" (recompactionDifferential other)
 
           testCase "append after compaction: the oracle's appendTo mints production's record, at every boundary"
           <| fun _ ->
-              let mutable compared = 0
-              let mutable emptyTail = 0
-
-              for st, rs in streams 3011 60 do
+              let stream (st: int, rs: OpRecord<CounterOp> list) (t: Tally) : Tally =
                   let len = List.length rs
 
                   let fullModel =
@@ -242,18 +205,15 @@ let compactedOracleTests =
                           (Inc 2)
 
                   match OpStream.append (OpStream.canonical OpStream.defaultHash witness) (Human "w") (Inc 2) st rs with
-                  | Error e -> failtestf "append refused: %A" e
+                  | Error e -> Tally.disagree (sprintf "append refused: %A" e) t
                   | Ok(_, full) ->
-                      Expect.equal (toChainRecords full) fullModel "the model's append is production's"
-
-                      for n in 0..len do
+                      let boundary (n: int) (t: Tally) : Tally =
                           match
                               compactProd SnapshotMode.Strict rs n,
                               compactModel OpStream.defaultHash SnapshotMode.Strict rs n
                           with
                           | Ok c, Chain.Compacted(snap, tail) ->
-                              if List.isEmpty c.Tail then
-                                  emptyTail <- emptyTail + 1
+                              let t = Tally.bumpIf (List.isEmpty c.Tail) "EmptyTail" t
 
                               match
                                   Compacted.appendTo
@@ -264,9 +224,10 @@ let compactedOracleTests =
                                       c
                               with
                               | Ok(_, c') ->
-                                  compared <- compared + 1
-
-                                  Expect.equal
+                                  t
+                                  |> Tally.bump "Compared"
+                                  |> agreeOn
+                                      (sprintf "appendTo at %d" n)
                                       (toChainRecords c'.Tail)
                                       (Chain.append_to
                                           OpStream.defaultHash
@@ -276,46 +237,56 @@ let compactedOracleTests =
                                           tail
                                           (Actor.encode (Human "w"))
                                           (Inc 2))
-                                      (sprintf "appendTo at %d" n)
-
-                                  Expect.equal
+                                  |> agreeOn
+                                      (sprintf "append_after_compact_verifies_iff, of production, at %d" n)
                                       (Compacted.verify (OpStream.canonical OpStream.defaultHash witness) stateEnc c')
                                       (OpStream.verifyChain (OpStream.canonical OpStream.defaultHash witness) full)
-                                      (sprintf "append_after_compact_verifies_iff, of production, at %d" n)
-                              | Error e -> failtestf "appendTo refused: %A" e
-                          | p, m -> failtestf "compactions disagree at %d: %A / %A" n p m
+                              | Error e -> Tally.disagree (sprintf "appendTo refused: %A" e) t
+                          | p, m -> Tally.disagree (sprintf "compactions disagree at %d: %A / %A" n p m) t
 
-              Expect.isGreaterThan compared 200 "boundaries compared"
-              Expect.isGreaterThan emptyTail 30 "the empty tail, where the defect lived, was met"
+                      t
+                      |> agreeOn "the model's append is production's" (toChainRecords full) fullModel
+                      |> Differential.over [ 0..len ] boundary
+
+              let t =
+                  Tally.empty [ "Compared"; "EmptyTail" ]
+                  |> Differential.over (streams 3011 60) stream
+
+              Differential.expectAgrees "append after compaction" t
+              Expect.isGreaterThan (Tally.count "Compared" t) 200 "boundaries compared"
+              Expect.isGreaterThan (Tally.count "EmptyTail" t) 30 "the empty tail, where the defect lived, was met"
 
           testCase "the key-index oracle agrees with production, and the fold splits at every boundary"
           <| fun _ ->
-              let mutable compared = 0
-
-              for _, rs in streams 30111 60 do
+              let stream (_: int, rs: OpRecord<CounterOp> list) (t: Tally) : Tally =
                   let whole = Chain.index_onto modelKeyOf [] (toChainRecords rs)
-                  Expect.equal (ofModelIndex whole) (ofProdIndex (KeyIndex.ofStream encode rs)) "ofStream"
 
-                  for n in 0 .. List.length rs do
+                  let boundary (n: int) (t: Tally) : Tally =
                       match compactProd SnapshotMode.ChainOnly rs n with
                       | Ok c ->
-                          compared <- compared + 1
-
                           let modelSplit =
                               Chain.index_onto
                                   modelKeyOf
                                   (Chain.index_onto modelKeyOf [] (toChainRecords (List.truncate n rs)))
                                   (toChainRecords c.Tail)
 
-                          Expect.equal (ofModelIndex modelSplit) (ofModelIndex whole) "key_index_rebuild_parity"
-
-                          Expect.equal
+                          t
+                          |> Tally.bump "Compared"
+                          |> agreeOn "key_index_rebuild_parity" (ofModelIndex modelSplit) (ofModelIndex whole)
+                          |> agreeOn
+                              (sprintf "Compacted.keyIndex at %d" n)
                               (ofProdIndex (Compacted.keyIndex keyOf c))
                               (ofModelIndex modelSplit)
-                              (sprintf "Compacted.keyIndex at %d" n)
-                      | Error e -> failtestf "compact failed: %A" e
+                      | Error e -> Tally.disagree (sprintf "compact failed: %A" e) t
 
-              Expect.isGreaterThan compared 200 "boundaries compared" ]
+                  t
+                  |> agreeOn "ofStream" (ofProdIndex (KeyIndex.ofStream encode rs)) (ofModelIndex whole)
+                  |> Differential.over [ 0 .. List.length rs ] boundary
+
+              let t = Tally.empty [ "Compared" ] |> Differential.over (streams 30111 60) stream
+
+              Differential.expectAgrees "the key index" t
+              Expect.isGreaterThan (Tally.count "Compared" t) 200 "boundaries compared" ]
 
 // ---- the capture journal (section 7c) ----
 
@@ -382,24 +353,18 @@ let private replayProd (session: (string * string * int) list) (caps: EffectCapt
 
     go [] caps session
 
-let private captureDifferential (modelHash: HashFn) =
-    let mutable failure = None
-    let mutable journals, tampers, detected, truncated, exhausted = 0, 0, 0, 0, 0
+/// The capture tally: the sessions recorded (`Journals`), the single-capture `Tampers` compared and
+/// those production `Detected`, and the journals cut short of their last capture (`Truncated`) and
+/// those whose strict replay stopped exhausted (`Exhausted`).
+let private captureTally =
+    Tally.empty [ "Journals"; "Tampers"; "Detected"; "Truncated"; "Exhausted" ]
 
-    let note why =
-        if failure.IsNone then
-            failure <- Some why
-
-    for session in sessions 3017 120 do
+let private captureDifferential (modelHash: HashFn) : Tally =
+    let journal (session: (string * string * int) list) (t: Tally) : Tally =
         let caps = recordProd session
 
         let modelCaps =
             Chain.record_session modelHash showPos esc "" Chain.PZero (toReqs session)
-
-        journals <- journals + 1
-
-        if toModelCaptures caps <> modelCaps then
-            note (sprintf "record: %A\n  production: %A\n  model:      %A" session caps modelCaps)
 
         let walk (cs: EffectCapture list) =
             EffectCapture.firstCaptureBreak StreamConfig.canonical OpStream.defaultHash cs
@@ -408,47 +373,56 @@ let private captureDifferential (modelHash: HashFn) =
 
         let p, m = walk caps
 
-        if p <> m || p.IsSome then
-            note (sprintf "an intact journal: production %A, model %A" p m)
+        let tamper (i: int, forge: EffectCapture -> EffectCapture) (t: Tally) : Tally =
+            let forged = caps |> List.mapi (fun j c -> if j = i then forge c else c)
+            let p, m = walk forged
 
-        for i in 0 .. List.length caps - 1 do
-            for tamper in
-                [ (fun (c: EffectCapture) -> { c with Value = c.Value + "0" })
-                  (fun c -> { c with Seq = c.Seq + 1 })
-                  (fun c -> { c with PrevHash = c.PrevHash + "x" }) ] do
-                let forged = caps |> List.mapi (fun j c -> if j = i then tamper c else c)
-                let p, m = walk forged
-                tampers <- tampers + 1
+            t
+            |> Tally.bump "Tampers"
+            |> Tally.bumpIf p.IsSome "Detected"
+            |> Differential.check (p = m) (fun () -> sprintf "a tamper at %d: production %A, model %A" i p m)
 
-                if p.IsSome then
-                    detected <- detected + 1
-
-                if p <> m then
-                    note (sprintf "a tamper at %d: production %A, model %A" i p m)
+        let tampers =
+            [ for i in 0 .. List.length caps - 1 do
+                  for forge in
+                      [ (fun (c: EffectCapture) -> { c with Value = c.Value + "0" })
+                        (fun c -> { c with Seq = c.Seq + 1 })
+                        (fun c -> { c with PrevHash = c.PrevHash + "x" }) ] do
+                      yield i, forge ]
 
         let canonical = EffectCapture.isDeterminismLabel
         let full = replayProd session caps
         let model = Chain.replay_session canonical (toReqs session) modelCaps
 
-        if full <> model then
-            note (sprintf "replay: production %A, model %A" full model)
+        let truncated (t: Tally) : Tally =
+            match caps with
+            | [] -> t
+            | _ ->
+                let cut = List.truncate (List.length caps - 1) caps
+                let p = replayProd session cut
+                let m = Chain.replay_session canonical (toReqs session) (toModelCaptures cut)
 
-        match caps with
-        | [] -> ()
-        | _ ->
-            let cut = List.truncate (List.length caps - 1) caps
-            truncated <- truncated + 1
-            let p = replayProd session cut
-            let m = Chain.replay_session canonical (toReqs session) (toModelCaptures cut)
+                let exhausted =
+                    match p with
+                    | Chain.RStopped(Chain.RExhausted _) -> true
+                    | _ -> false
 
-            match p with
-            | Chain.RStopped(Chain.RExhausted _) -> exhausted <- exhausted + 1
-            | _ -> ()
+                t
+                |> Tally.bump "Truncated"
+                |> Tally.bumpIf exhausted "Exhausted"
+                |> Differential.check (p = m) (fun () ->
+                    sprintf "replay of a truncated journal: production %A, model %A" p m)
 
-            if p <> m then
-                note (sprintf "replay of a truncated journal: production %A, model %A" p m)
+        t
+        |> Tally.bump "Journals"
+        |> Differential.check (toModelCaptures caps = modelCaps) (fun () ->
+            sprintf "record: %A\n  production: %A\n  model:      %A" session caps modelCaps)
+        |> Differential.check (p = m && p.IsNone) (fun () -> sprintf "an intact journal: production %A, model %A" p m)
+        |> Differential.over tampers tamper
+        |> Differential.check (full = model) (fun () -> sprintf "replay: production %A, model %A" full model)
+        |> truncated
 
-    failure, journals, tampers, detected, truncated, exhausted
+    Differential.over (sessions 3017 120) journal captureTally
 
 [<Tests>]
 let captureOracleTests =
@@ -456,21 +430,26 @@ let captureOracleTests =
         "Proofs.Oracle"
         [ testCase "the capture oracle agrees with production — record, walk, tamper and strict replay"
           <| fun _ ->
-              let failure, journals, tampers, detected, truncated, exhausted =
-                  captureDifferential OpStream.defaultHash
+              let t = captureDifferential OpStream.defaultHash
 
-              match failure with
-              | Some why -> failtest why
-              | None -> ()
+              Differential.expectAgrees "the capture journal" t
+              Expect.isGreaterThan (Tally.count "Journals" t) 100 "sessions recorded"
 
-              Expect.isGreaterThan journals 100 "sessions recorded"
-              Expect.equal detected tampers "every single-capture tamper is detected, by both"
-              Expect.isGreaterThan tampers 100 "tampers compared"
-              Expect.equal exhausted truncated "every journal missing its last capture stops exhausted"
-              Expect.isGreaterThan truncated 50 "truncated journals compared"
+              Expect.equal
+                  (Tally.count "Detected" t)
+                  (Tally.count "Tampers" t)
+                  "every single-capture tamper is detected, by both"
+
+              Expect.isGreaterThan (Tally.count "Tampers" t) 100 "tampers compared"
+
+              Expect.equal
+                  (Tally.count "Exhausted" t)
+                  (Tally.count "Truncated" t)
+                  "every journal missing its last capture stops exhausted"
+
+              Expect.isGreaterThan (Tally.count "Truncated" t) 50 "truncated journals compared"
 
           testCase "a capture model handed a DIFFERENT hash disagrees with production — the comparison can lose"
           <| fun _ ->
               let other: HashFn = fun prev payload -> OpStream.defaultHash ("x" + prev) payload
-              let failure, _, _, _, _, _ = captureDifferential other
-              Expect.isSome failure "a wrong hash must be caught" ]
+              Differential.expectLoses "a capture model under a wrong hash" (captureDifferential other) ]

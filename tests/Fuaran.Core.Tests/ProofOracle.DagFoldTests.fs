@@ -32,8 +32,16 @@ open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
 
+/// Counts one production outcome into a `foldTally`: folded clean, or halted (a rejection counts as neither).
+let private countOutcome (outcome: LaneFoldOutcome) (t: Tally) : Tally =
+    match outcome with
+    | LaneFolded _ -> Tally.bump "Folded" t
+    | LaneHalted _ -> Tally.bump "Halted" t
+    | LaneRejected _ -> t
+
 /// Run the differential over `iterations` generated lane sets; the first disagreement is shrunk
-/// and reported with its seed, iteration and the lanes in the domain's own encoding.
+/// and reported with its seed, iteration and the lanes in the domain's own encoding, and the run
+/// stops there.
 let private differential
     (label: string)
     (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -44,44 +52,35 @@ let private differential
     (laneCount: int)
     (seed: int)
     (iterations: int)
-    : Verdict =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable folded = 0
-    let mutable halted = 0
-    let mutable failure: string option = None
+    : Tally =
+    let differs (ls: 'Op list list) =
+        disagreements true w fp oracleFp hashState gen.State0 gen.BaseOp ls
 
-    let diverges (ls: 'Op list list) =
-        not (List.isEmpty (disagreements true w fp oracleFp hashState gen.State0 gen.BaseOp ls))
+    let diverges (ls: 'Op list list) = not (List.isEmpty (differs ls))
 
-    for i in 0 .. iterations - 1 do
-        if failure.IsNone then
+    let step (i: int) (rng: ConfRng.T) (t: Tally) =
+        if not (List.isEmpty (Tally.disagreements t)) then
+            rng, t
+        else
             let lanes, r' = gen.Lanes laneCount rng
-            rng <- r'
 
-            match disagreements true w fp oracleFp hashState gen.State0 gen.BaseOp lanes with
-            | [] ->
-                match productionFold w fp hashState gen.State0 gen.BaseOp lanes with
-                | LaneFolded _ -> folded <- folded + 1
-                | LaneHalted _ -> halted <- halted + 1
-                | LaneRejected _ -> ()
+            match differs lanes with
+            | [] -> r', countOutcome (productionFold w fp hashState gen.State0 gen.BaseOp lanes) t
             | _ ->
-                let small = FoldConfluence.shrinkLanes diverges lanes
+                let small = Differential.shrunk diverges FoldConfluence.shrinkLanes lanes
 
-                failure <-
-                    Some(
-                        sprintf
-                            "%s: seed=%d iter=%d — the oracle and production DISAGREE; shrunk to\n%s\n%s"
-                            label
-                            seed
-                            i
-                            (renderLanes w.Encode small)
-                            (disagreements true w fp oracleFp hashState gen.State0 gen.BaseOp small
-                             |> List.head)
-                    )
+                r',
+                Tally.disagree
+                    (sprintf
+                        "%s: seed=%d iter=%d — the oracle and production DISAGREE; shrunk to\n%s\n%s"
+                        label
+                        seed
+                        (i - 1)
+                        (renderLanes w.Encode small)
+                        (differs small |> List.head))
+                    t
 
-    { Failure = failure
-      Folded = folded
-      Halted = halted }
+    Differential.seeded iterations (ConfRng.ofSeed seed) step foldTally
 
 // ---------------------------------------------------------------------------
 //  The wire corpus's ops/ fixtures as a third lane pool.
@@ -253,6 +252,23 @@ let private loadCorpusOps (root: string) : Result<CorpusOp list, string> =
             | _, Error e -> Error e)
         (Ok [])
 
+/// The corpus pool's lane sets, in order: every pair and triple of one-op lanes, then a two-op lane
+/// beside a one-op lane at every position. Multi-op lanes are where the WALK is exercised, and a lane
+/// whose ops interfere with each other is legal (a lane is one writer's sequence) and must not be
+/// reported as a cross-lane halt.
+let private corpusLaneSets (ops: CorpusOp list) : CorpusOp list list list =
+    let n = List.length ops
+
+    [ for i in 0 .. n - 1 do
+          for j in i + 1 .. n - 1 do
+              yield [ [ List.item i ops ]; [ List.item j ops ] ]
+
+              for k in j + 1 .. n - 1 do
+                  yield [ [ List.item i ops ]; [ List.item j ops ]; [ List.item k ops ] ]
+
+      for i in 0 .. n - 2 do
+          yield [ [ List.item i ops; List.item (i + 1) ops ]; [ List.item ((i + 2) % n) ops ] ] ]
+
 // ---------------------------------------------------------------------------
 //  The theorem's HYPOTHESIS, measured on the domain it names (Phase 132).
 //
@@ -273,55 +289,46 @@ let private diamondBreaks
     (oracleFp: 'Op -> Footprint)
     (ops: 'Op list)
     (states: 'State list)
-    : string list * int =
+    (t0: Tally)
+    : Tally =
     let apply = modelApply w
-    let mutable met = 0
-    let mutable breaks = []
 
-    for a in ops do
-        for b in ops do
-            if DagFold.independent (toModelFootprint (oracleFp a)) (toModelFootprint (oracleFp b)) then
-                for s in states do
-                    match apply a s, apply b s with
-                    | DagFold.Ok sa, DagFold.Ok sb ->
-                        // The premise is met here, and only here: both ops apply at `s`.
-                        met <- met + 1
+    let premises =
+        seq {
+            for a in ops do
+                for b in ops do
+                    if DagFold.independent (toModelFootprint (oracleFp a)) (toModelFootprint (oracleFp b)) then
+                        for s in states do
+                            yield a, b, s
+        }
 
-                        let broke (why: string) =
-                            breaks <-
-                                breaks
-                                @ [ sprintf
-                                        "independent %s / %s both apply at a state, but %s"
-                                        (w.Encode a)
-                                        (w.Encode b)
-                                        why ]
+    t0
+    |> Differential.over premises (fun (a, b, s) t ->
+        match apply a s, apply b s with
+        | DagFold.Ok sa, DagFold.Ok sb ->
+            // The premise is met here, and only here: both ops apply at `s`.
+            let broke (why: string) =
+                Tally.disagree (
+                    sprintf "independent %s / %s both apply at a state, but %s" (w.Encode a) (w.Encode b) why
+                )
 
-                        match apply b sa, apply a sb with
-                        | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> ()
-                        | DagFold.Ok _, DagFold.Ok _ -> broke "the two orders reach different states"
-                        | DagFold.Error _, _ -> broke "the second does not apply after the first"
-                        | _, DagFold.Error _ -> broke "the first does not apply after the second"
-                    | _ -> ()
+            let t = Tally.bump "Met" t
 
-    breaks, met
+            match apply b sa, apply a sb with
+            | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> t
+            | DagFold.Ok _, DagFold.Ok _ -> broke "the two orders reach different states" t
+            | DagFold.Error _, _ -> broke "the second does not apply after the first" t
+            | _, DagFold.Error _ -> broke "the first does not apply after the second" t
+        | _ -> t)
 
 /// The op and state pools Phase 80's construction yields for the reference witness: applyable
 /// skeleton-op scripts threaded from the base tree (`treeLaneGen` — the public form of that
 /// construction, shared with the differential above), pooled into ops, and every state a prefix
 /// of that pool reaches. The states matter: the hypothesis quantifies over ALL of them, and a
 /// check at the base tree alone would measure one instance of a `forall s`.
-let private treeDiamondSample
-    (oracleFp: SkeletonOp<RNode, string> -> Footprint)
-    (seed: int)
-    (trials: int)
-    : string list * int =
-    let mutable r = ConfRng.ofSeed seed
-    let mutable breaks = []
-    let mutable met = 0
-
-    for _ in 1..trials do
+let private treeDiamondSample (oracleFp: SkeletonOp<RNode, string> -> Footprint) (seed: int) (trials: int) : Tally =
+    let step (_: int) (r: ConfRng.T) (t: Tally) =
         let lanes, r' = treeLaneGen.Lanes 3 r
-        r <- r'
         let ops = List.concat lanes
 
         let states =
@@ -334,11 +341,9 @@ let private treeDiamondSample
                 ([ treeBase ], treeBase)
             |> fst
 
-        let b, m = diamondBreaks treeW oracleFp ops states
-        breaks <- breaks @ b
-        met <- met + m
+        r', diamondBreaks treeW oracleFp ops states t
 
-    breaks, met
+    Differential.seeded trials (ConfRng.ofSeed seed) step (Tally.empty [ "Met" ])
 
 // ---------------------------------------------------------------------------
 //  Phase 134 — the DAG BENEATH the fold, differentially.
@@ -451,14 +456,10 @@ let private oracleFoldFromDag
     DagClosure.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads
     |> renderModelOutcome w hashState state0
 
-type private DeltaTally =
-    {
-        Failure: string option
-        /// Ops recovered across every lane of every trial — the vacuity guard.
-        Recovered: int
-        /// Lane sets carrying a lane of two or more ops: a one-node chain exercises no walk.
-        Chains: int
-    }
+/// The delta tally: `Recovered` counts the ops recovered across every lane of every trial (the
+/// vacuity guard), `Chains` the lane sets carrying a lane of two or more ops (a one-node chain
+/// exercises no walk).
+let private deltaTally = Tally.empty [ "Recovered"; "Chains" ]
 
 /// Run the delta differential over `iterations` generated lane sets from one pool.
 let private deltaDifferential
@@ -469,41 +470,32 @@ let private deltaDifferential
     (laneCount: int)
     (seed: int)
     (iterations: int)
-    : DeltaTally =
-    let mutable rng = ConfRng.ofSeed seed
-    let mutable failure: string option = None
-    let mutable recovered = 0
-    let mutable chains = 0
-
-    for i in 0 .. iterations - 1 do
+    : Tally =
+    let step (i: int) (rng: ConfRng.T) (t: Tally) =
         let lanes, r' = gen.Lanes laneCount rng
-        rng <- r'
-
-        if lanes |> List.exists (fun l -> List.length l > 1) then
-            chains <- chains + 1
-
         let diffs, got = deltaDisagreements bridge w gen.BaseOp lanes
-        recovered <- recovered + got
 
-        match diffs, failure with
-        | d :: _, None ->
-            failure <- Some(sprintf "%s: seed=%d iter=%d\n%s\n%s" label seed i (renderLanes w.Encode lanes) d)
-        | _ -> ()
+        let t =
+            t
+            |> Tally.bumpIf (lanes |> List.exists (fun l -> List.length l > 1)) "Chains"
+            |> Tally.add "Recovered" got
 
-    { Failure = failure
-      Recovered = recovered
-      Chains = chains }
+        r',
+        (t, diffs)
+        ||> List.fold (fun t d ->
+            Tally.disagree (sprintf "%s: seed=%d iter=%d\n%s\n%s" label seed (i - 1) (renderLanes w.Encode lanes) d) t)
 
-let private expectDeltaAgreement (label: string) (t: DeltaTally) =
-    match t.Failure with
-    | Some why -> failtest why
-    | None ->
-        Expect.isGreaterThan t.Recovered 0 (sprintf "%s: no ops were recovered at all (recovered=%d)" label t.Recovered)
+    Differential.seeded iterations (ConfRng.ofSeed seed) step deltaTally
 
-        Expect.isGreaterThan
-            t.Chains
-            0
-            (sprintf "%s: no trial carried a lane longer than one op, so no chain was walked" label)
+let private expectDeltaAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees label t
+    let recovered = Tally.count "Recovered" t
+    Expect.isGreaterThan recovered 0 (sprintf "%s: no ops were recovered at all (recovered=%d)" label recovered)
+
+    Expect.isGreaterThan
+        (Tally.count "Chains" t)
+        0
+        (sprintf "%s: no trial carried a lane longer than one op, so no chain was walked" label)
 
 // ---------------------------------------------------------------------------
 //  Phase 156 — the ID-ORDERED DRAIN over an abstract node set, beside production's own.
@@ -663,6 +655,13 @@ let private renderModelReplay
     | DagFold.Error(DagClosure.RCyclicHistory h) -> "cyclic " + h
     | DagFold.Error(DagClosure.RRejected(id, e)) -> sprintf "rejected %s %A" id e
 
+/// The replay's render pair at one head: production's `tryReplayTo` answer and the model's `replay_to`.
+let private replay
+    (hashState: 'State -> string)
+    (head: string)
+    : Differential<Result<'State, Dag.ReplayFault<'Rej>>, DagFold.outcome<'State, DagClosure.replay_fault<'Rej>>> =
+    Differential.pair (renderProductionReplay hashState head) (renderModelReplay hashState)
+
 /// The extracted `replay_to` over a model DAG, at production's id order, with fuel for every node.
 let private modelReplay
     (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -682,8 +681,9 @@ let private replayDisagreement
     (dag: Dag.T<'Op>)
     (head: string)
     : string option * string =
-    let p = renderProductionReplay hashState head (Dag.tryReplayTo w state0 dag head)
-    let m = renderModelReplay hashState (modelReplay w state0 (bridge dag) head)
+    let pair = replay hashState head
+    let p = pair.Production(Dag.tryReplayTo w state0 dag head)
+    let m = pair.Model(modelReplay w state0 (bridge dag) head)
     let arm = p.Split(' ')[0]
 
     if p = m then
@@ -776,84 +776,80 @@ let private shallowestCommon
     | [] -> None
     | c :: t -> Some(DagClosure.max_by (fun x y -> DagClosure.deeper ordLt model fuel y x) c t)
 
-type private MergedTally =
-    {
-        Failures: string list
-        /// Ops recovered across every round-two lane — the vacuity guard.
-        Recovered: int
-        /// Round-two lanes of two or more ops: a one-node lane walks no chain.
-        Chains: int
-        /// Two-parent nodes beneath the merged heads: with none, the "merged head" was a plain node
-        /// and the case re-measured Phase 134's shape under a different name.
-        MergeNodes: int
-        /// Head pairs whose merge base was located.
-        Pairs: int
-    }
+/// The fold-pull-fold counters: `Recovered` — ops recovered across every round-two lane, the vacuity
+/// guard; `Chains` — round-two lanes of two or more ops (a one-node lane walks no chain);
+/// `MergeNodes` — two-parent nodes beneath the merged heads (with none, the "merged head" was a plain
+/// node and the case re-measured Phase 134's shape under a different name); `Pairs` — head pairs
+/// whose merge base was located.
+let private mergedCounters = [ "Recovered"; "Chains"; "MergeNodes"; "Pairs" ]
 
 /// One fold-pull-fold union, compared three ways: each round-two head's recovered delta (production
 /// `betweenOps` from the merged head, the model's `between_ops_drained`, and the lane that was
 /// appended — the theorem's own right-hand side); every pair of round-two heads' merge base
 /// (production, the model, and the merged head itself); and the model's computable premises, so a
-/// green run is known to be one the theorems are ABOUT.
+/// green run is known to be one the theorems are ABOUT. Each finding is recorded under `where`.
 let private mergedDisagreements
     (locate: DagClosure.dag<'Op> -> DagClosure.node<'Op> list -> string -> string -> string option)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (baseOp: 'Op)
     (round1: 'Op list list)
     (round2: 'Op list list)
-    : MergedTally =
+    (where: string)
+    (t0: Tally)
+    : Tally =
     let _, merged, _, heads2, dag = foldPullFold w baseOp round1 round2
     let model = toModelDag dag
     let fuel = model.nodes
     let kfuel = drainFuel model.nodes
-    let failures = ResizeArray<string>()
-    let mutable recovered = 0
 
-    for (i, (head, lane)) in List.indexed (List.zip heads2 round2) do
-        let p = Dag.betweenOps dag merged head
-        let o = DagClosure.between_ops_drained ordLt kfuel model fuel merged head
-        recovered <- recovered + List.length p
+    let found (ok: bool) (message: unit -> string) =
+        Differential.check ok (fun () -> where + "\n" + message ())
 
-        if p <> o then
-            failures.Add(
+    let encode (ops: 'Op list) =
+        ops |> List.map w.Encode |> String.concat "; "
+
+    let lanes =
+        t0
+        |> Differential.over (List.indexed (List.zip heads2 round2)) (fun (i, (head, lane)) t ->
+            let p = Dag.betweenOps dag merged head
+            let o = DagClosure.between_ops_drained ordLt kfuel model fuel merged head
+
+            t
+            |> Tally.add "Recovered" (List.length p)
+            |> found (p = o) (fun () ->
                 sprintf
                     "round-two lane %d: the recovered delta differs\n  production: [%s]\n  model:      [%s]"
                     i
-                    (p |> List.map w.Encode |> String.concat "; ")
-                    (o |> List.map w.Encode |> String.concat "; ")
-            )
-
-        if o <> lane then
-            failures.Add(
+                    (encode p)
+                    (encode o))
+            |> found (o = lane) (fun () ->
                 sprintf
                     "round-two lane %d: the model did not recover the lane that was appended (between_ops_merged)\n  lane:  [%s]\n  model: [%s]"
                     i
-                    (lane |> List.map w.Encode |> String.concat "; ")
-                    (o |> List.map w.Encode |> String.concat "; ")
-            )
+                    (encode lane)
+                    (encode o))
+            // The FUEL premise of `merged_recovers`, evaluated: the walk below the lane completed.
+            |> found (DagClosure.walk_ok model (DagClosure.drop_by fuel (List.rev lane)) merged) (fun () ->
+                sprintf "round-two lane %d: the model's walk below the lane ran out of fuel — premise unmet" i))
 
-        // The FUEL premise of `merged_recovers`, evaluated: the walk below the lane completed.
-        if not (DagClosure.walk_ok model (DagClosure.drop_by fuel (List.rev lane)) merged) then
-            failures.Add(sprintf "round-two lane %d: the model's walk below the lane ran out of fuel — premise unmet" i)
+    let headPairs =
+        [ for (i, hi) in List.indexed heads2 do
+              for (j, hj) in List.indexed heads2 do
+                  if i < j then
+                      yield i, hi, j, hj ]
 
-    let mutable pairs = 0
+    let pairs =
+        lanes
+        |> Differential.over headPairs (fun (i, hi, j, hj) t ->
+            let p = Dag.mergeBase dag hi hj
+            let o = locate model fuel hi hj
 
-    for (i, hi) in List.indexed heads2 do
-        for (j, hj) in List.indexed heads2 do
-            if i < j then
-                pairs <- pairs + 1
-                let p = Dag.mergeBase dag hi hj
-                let o = locate model fuel hi hj
-
-                if p <> o then
-                    failures.Add(
-                        sprintf "heads %d and %d: the merge base differs\n  production: %A\n  model:      %A" i j p o
-                    )
-
-                if p <> Some merged then
-                    failures.Add(
-                        sprintf "heads %d and %d: production's merge base %A is not the merged head %s" i j p merged
-                    )
+            t
+            |> Tally.bump "Pairs"
+            |> found (p = o) (fun () ->
+                sprintf "heads %d and %d: the merge base differs\n  production: %A\n  model:      %A" i j p o)
+            |> found (p = Some merged) (fun () ->
+                sprintf "heads %d and %d: production's merge base %A is not the merged head %s" i j p merged))
 
     let mergeNodes =
         let anc = Dag.ancestorsOf dag merged
@@ -863,11 +859,9 @@ let private mergedDisagreements
         |> List.filter (fun (id, n) -> Set.contains id anc && List.length n.Parents > 1)
         |> List.length
 
-    { Failures = List.ofSeq failures
-      Recovered = recovered
-      Chains = round2 |> List.filter (fun l -> List.length l > 1) |> List.length
-      MergeNodes = mergeNodes
-      Pairs = pairs }
+    pairs
+    |> Tally.add "Chains" (round2 |> List.filter (fun l -> List.length l > 1) |> List.length)
+    |> Tally.add "MergeNodes" mergeNodes
 
 /// The faithful locator — the extracted `merge_base_now` (production's `deepest`) at production's id order.
 let private modelMergeBase (model: DagClosure.dag<'Op>) (fuel: DagClosure.node<'Op> list) (l: string) (r: string) =
@@ -993,10 +987,7 @@ let private crissCross
 /// The model's `merge_base_now` at production's id order, with fuel for every node.
 let private modelMergeBaseOf (dag: Dag.T<'Op>) (left: string) (right: string) : string option =
     let model = toModelDag dag
-
-    match DagPrimitives.merge_base_now ordLt model.nodes model model.nodes left right with
-    | DagClosure.Found id -> Some id
-    | DagClosure.Missing -> None
+    modelMergeBase model model.nodes left right
 
 /// A conflict rendered by node ids, address and shape — the canonical reading both sides share.
 let private renderNodeConflict (left: string, right: string, address: string, shape: MergeConflictShape) =
@@ -1047,6 +1038,14 @@ let private renderModelFrom (hashState: 'State -> string) (r: DagFold.outcome<'S
     | DagFold.Error(DagClosure.CUnreached h) -> "unreached " + h
     | DagFold.Error(DagClosure.CUncovered n) -> "uncovered " + n
 
+/// The checkpoint replay's render pair at one head: production's `replayFrom` / `checkpointAt`
+/// answer and the model's `replay_from` / `checkpoint_at`.
+let private resume
+    (hashState: 'State -> string)
+    (head: string)
+    : Differential<Result<'State, Dag.CheckpointFault<'Rej>>, DagFold.outcome<'State, DagClosure.ck_fault<'Rej>>> =
+    Differential.pair (renderProductionFrom hashState head) (renderModelFrom hashState)
+
 let private toModelCheckpoint (cp: Dag.Checkpoint<'State>) : DagClosure.checkpoint<'State> =
     { DagClosure.cnode = cp.Node
       DagClosure.cstate = cp.State
@@ -1081,147 +1080,147 @@ let private foldPullFoldSide
         baseId, merged, heads1, side :: rest, dag'
     | _ -> baseId, merged, heads1, heads2, dag
 
-type private CheckpointTally =
-    { mutable Resumed: int
-      mutable Uncovered: int
-      mutable Unreached: int
-      mutable Compacted: int
-      mutable Banded: int
-      mutable CutRefused: int }
+/// The checkpoint tally: replays that resumed, the two refusals a replay from a checkpoint can meet,
+/// the compactions that succeeded, those that kept a band behind their node, and those refused.
+let private checkpointTally =
+    Tally.empty [ "Resumed"; "Uncovered"; "Unreached"; "Compacted"; "Banded"; "CutRefused" ]
 
 /// Every node as a checkpoint, every head as a target: production's `checkpointAt` / `replayFrom` /
 /// `compactAt` beside the extracted `checkpoint_at` / `replay_from` / `truncate` + `truncation_ok`.
+/// Each finding is recorded under `where`.
 let private checkpointDisagreements
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (hashState: 'State -> string)
     (state0: 'State)
-    (tally: CheckpointTally)
+    (where: string)
     (dag: Dag.T<'Op>)
     (heads: string list)
-    : string list =
+    (t0: Tally)
+    : Tally =
     let h = OpStream.defaultHash
     let model = toModelDag dag
     let fuel = drainFuel model.nodes
     let seal (n: string) (st: 'State) = (Dag.sealAt h hashState w n st).Hash
     let targets = (dag.Nodes |> Map.toList |> List.map fst) @ heads @ [ "no-such-node" ]
 
-    [ for c in (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ] do
-          let p = Dag.checkpointAt h hashState w state0 dag c
+    let found (ok: bool) (message: unit -> string) =
+        Differential.check ok (fun () -> where + "\n" + message ())
 
-          let m = DagClosure.checkpoint_at (modelApply w) ordLt fuel model fuel seal state0 c
+    let fail (message: string) = found false (fun () -> message)
 
-          match p, m with
-          | Ok pc, DagFold.Ok mc ->
-              if
-                  pc.Node <> mc.cnode
-                  || hashState pc.State <> hashState mc.cstate
-                  || pc.Hash <> mc.cseal
-              then
-                  yield
-                      sprintf "checkpointAt %s: production (%s, %s) model (%s, %s)" c pc.Node pc.Hash mc.cnode mc.cseal
+    // Every target replayed from production's checkpoint at `c`, on both sides.
+    let replays (c: string) (pc: Dag.Checkpoint<'State>) (t: Tally) =
+        t
+        |> Differential.over (List.distinct targets) (fun target t ->
+            let pair = resume hashState target
+            let pr = pair.Production(Dag.replayFrom w pc dag target)
+            let mr = pair.Model(modelReplayFrom w model (toModelCheckpoint pc) target)
 
-              for t in targets |> List.distinct do
-                  let pr = renderProductionFrom hashState t (Dag.replayFrom w pc dag t)
+            if pr <> mr then
+                fail (sprintf "replayFrom %s -> %s\n  production: %s\n  model:      %s" c target pr mr) t
+            elif pr.StartsWith "ok " then
+                Tally.bump "Resumed" t
+            elif pr.StartsWith "uncovered " then
+                Tally.bump "Uncovered" t
+            elif pr.StartsWith "unreached " then
+                Tally.bump "Unreached" t
+            else
+                t)
 
-                  let mr =
-                      renderModelFrom hashState (modelReplayFrom w model (toModelCheckpoint pc) t)
+    // The compaction at `c`: its kept set held to the model's truncation, its replays to the full DAG's.
+    let compaction (c: string) (t: Tally) =
+        match Dag.compactAt h hashState w state0 dag c with
+        | Ok { Checkpoint = cp; Dag = compacted } ->
+            let keep = compacted.Nodes |> Map.toList |> List.map fst
+            let truncated = DagClosure.truncate model keep
+            let behind = Dag.ancestorsOf dag c
 
-                  if pr <> mr then
-                      yield sprintf "replayFrom %s -> %s\n  production: %s\n  model:      %s" c t pr mr
-                  elif pr.StartsWith "ok " then
-                      tally.Resumed <- tally.Resumed + 1
-                  elif pr.StartsWith "uncovered " then
-                      tally.Uncovered <- tally.Uncovered + 1
-                  elif pr.StartsWith "unreached " then
-                      tally.Unreached <- tally.Unreached + 1
+            t
+            |> found (DagClosure.truncation_ok model fuel c keep) (fun () ->
+                sprintf "compactAt %s: the kept set does not meet the model's truncation contract" c)
+            |> found ((truncated.nodes |> List.map (fun n -> n.nid) |> List.sort) = (keep |> List.sort)) (fun () ->
+                sprintf "compactAt %s: the model's truncation is not production's DAG" c)
+            |> Tally.bump "Compacted"
+            |> Tally.bumpIf (keep |> List.exists (fun id -> id <> c && Set.contains id behind)) "Banded"
+            |> Differential.over keep (fun target t ->
+                let pair = resume hashState target
+                let full = pair.Production(Dag.replayFrom w cp dag target)
+                let cut = pair.Production(Dag.replayFrom w cp compacted target)
+                let mcut = pair.Model(modelReplayFrom w truncated (toModelCheckpoint cp) target)
 
-              match Dag.compactAt h hashState w state0 dag c with
-              | Ok { Checkpoint = cp; Dag = compacted } ->
-                  let keep = compacted.Nodes |> Map.toList |> List.map fst
+                t
+                |> found (cut = mcut) (fun () ->
+                    sprintf "compacted at %s, head %s\n  production: %s\n  model:      %s" c target cut mcut)
+                |> found (not (full.StartsWith "ok " || full.StartsWith "rejected ") || cut = full) (fun () ->
+                    sprintf
+                        "compacted at %s, head %s: the truncation changed the replay\n  full: %s\n  cut:  %s"
+                        c
+                        target
+                        full
+                        cut))
+        | Error(Dag.CheckpointFault.Uncovered _) -> Tally.bump "CutRefused" t
+        | Error e -> fail (sprintf "compactAt %s refused a checkpoint checkpointAt took: %A" c e) t
 
-                  if not (DagClosure.truncation_ok model fuel c keep) then
-                      yield sprintf "compactAt %s: the kept set does not meet the model's truncation contract" c
+    t0
+    |> Differential.over ((dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ]) (fun c t ->
+        let pair = resume hashState c
+        let p = Dag.checkpointAt h hashState w state0 dag c
+        let m = DagClosure.checkpoint_at (modelApply w) ordLt fuel model fuel seal state0 c
 
-                  let truncated = DagClosure.truncate model keep
+        match p, m with
+        | Ok pc, DagFold.Ok mc ->
+            t
+            |> found
+                (pc.Node = mc.cnode
+                 && hashState pc.State = hashState mc.cstate
+                 && pc.Hash = mc.cseal)
+                (fun () ->
+                    sprintf "checkpointAt %s: production (%s, %s) model (%s, %s)" c pc.Node pc.Hash mc.cnode mc.cseal)
+            |> replays c pc
+            |> compaction c
+        | Error pe, DagFold.Error me ->
+            let pr = pair.Production(Error pe)
+            let mr = pair.Model(DagFold.Error me)
 
-                  if
-                      (truncated.nodes |> List.map (fun n -> n.nid) |> List.sort)
-                      <> (keep |> List.sort)
-                  then
-                      yield sprintf "compactAt %s: the model's truncation is not production's DAG" c
-
-                  tally.Compacted <- tally.Compacted + 1
-
-                  let behind = Dag.ancestorsOf dag c
-
-                  if keep |> List.exists (fun id -> id <> c && Set.contains id behind) then
-                      tally.Banded <- tally.Banded + 1
-
-                  for t in keep do
-                      let full = renderProductionFrom hashState t (Dag.replayFrom w cp dag t)
-                      let cut = renderProductionFrom hashState t (Dag.replayFrom w cp compacted t)
-
-                      let mcut =
-                          renderModelFrom hashState (modelReplayFrom w truncated (toModelCheckpoint cp) t)
-
-                      if cut <> mcut then
-                          yield sprintf "compacted at %s, head %s\n  production: %s\n  model:      %s" c t cut mcut
-
-                      if full.StartsWith "ok " || full.StartsWith "rejected " then
-                          if cut <> full then
-                              yield
-                                  sprintf
-                                      "compacted at %s, head %s: the truncation changed the replay\n  full: %s\n  cut:  %s"
-                                      c
-                                      t
-                                      full
-                                      cut
-              | Error(Dag.CheckpointFault.Uncovered _) -> tally.CutRefused <- tally.CutRefused + 1
-              | Error e -> yield sprintf "compactAt %s refused a checkpoint checkpointAt took: %A" c e
-          | Error pe, DagFold.Error me ->
-              let pr = renderProductionFrom hashState c (Error pe)
-              let mr = renderModelFrom hashState (DagFold.Error me)
-
-              if pr <> mr then
-                  yield sprintf "checkpointAt %s refused differently\n  production: %s\n  model:      %s" c pr mr
-          | Ok _, DagFold.Error me ->
-              yield
-                  sprintf
-                      "checkpointAt %s: production took it, the model refused %s"
-                      c
-                      (renderModelFrom hashState (DagFold.Error me))
-          | Error pe, DagFold.Ok _ -> yield sprintf "checkpointAt %s: the model took it, production refused %A" c pe ]
+            found
+                (pr = mr)
+                (fun () -> sprintf "checkpointAt %s refused differently\n  production: %s\n  model:      %s" c pr mr)
+                t
+        | Ok _, DagFold.Error me ->
+            fail
+                (sprintf "checkpointAt %s: production took it, the model refused %s" c (pair.Model(DagFold.Error me)))
+                t
+        | Error pe, DagFold.Ok _ -> fail (sprintf "checkpointAt %s: the model took it, production refused %A" c pe) t)
 
 /// Every ordered pair of ids (and a missing one): production's index and walk beside the extracted
-/// index built over the model's drain.
-let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
+/// index built over the model's drain. `Positives` counts the pairs where the walk says "ancestor".
+let private reachDisagreements (where: string) (dag: Dag.T<'Op>) (t0: Tally) : Tally =
     let model = toModelDag dag
     let fuel = drainFuel model.nodes
     let idx = DagClosure.reach_of_dag ordLt fuel model
     let reach = Dag.Reach.ofDag dag
     let ids = (dag.Nodes |> Map.toList |> List.map fst) @ [ "no-such-node" ]
-    let mutable positives = 0
 
-    let failures =
-        [ for d in ids do
-              let walk = Dag.ancestorsOf dag d
-              let mAnc = DagClosure.reach_ancestors model fuel idx d |> Set.ofList
+    let found (ok: bool) (message: unit -> string) =
+        Differential.check ok (fun () -> where + ": " + message ())
 
-              if mAnc <> walk || Dag.Reach.ancestors reach d <> walk then
-                  yield sprintf "ancestors %s: walk %A, model %A" d walk mAnc
+    t0
+    |> Differential.over ids (fun d t ->
+        let walk = Dag.ancestorsOf dag d
+        let mAnc = DagClosure.reach_ancestors model fuel idx d |> Set.ofList
 
-              for a in ids do
-                  let truth = Set.contains a walk
-                  let p = Dag.Reach.reaches reach a d
-                  let m = DagClosure.reach_reaches model fuel idx a d
+        t
+        |> found (mAnc = walk && Dag.Reach.ancestors reach d = walk) (fun () ->
+            sprintf "ancestors %s: walk %A, model %A" d walk mAnc)
+        |> Differential.over ids (fun a t ->
+            let truth = Set.contains a walk
+            let p = Dag.Reach.reaches reach a d
+            let m = DagClosure.reach_reaches model fuel idx a d
 
-                  if truth then
-                      positives <- positives + 1
-
-                  if p <> truth || m <> truth then
-                      yield sprintf "reaches %s %s: walk %b, production %b, model %b" a d truth p m ]
-
-    failures, positives
+            t
+            |> Tally.bumpIf truth "Positives"
+            |> found (p = truth && m = truth) (fun () ->
+                sprintf "reaches %s %s: walk %b, production %b, model %b" a d truth p m)))
 
 // ---------------------------------------------------------------------------
 //  Phase 457 — the lane DAG's remaining boundaries (`proofs/DagPrimitives.fst`).
@@ -1231,11 +1230,6 @@ let private reachDisagreements (dag: Dag.T<'Op>) : string list * int =
 //  `tryTopoOrder` over its slots and the whole DAG's drain, and `cut`'s kept set. Each runs here
 //  beside production's over every pair, every node and several head sets of the DAGs a clone holds.
 // ---------------------------------------------------------------------------
-
-let private ofFound (f: DagClosure.found<string>) : string option =
-    match f with
-    | DagClosure.Found x -> Some x
-    | DagClosure.Missing -> None
 
 let private renderTopo (r: Result<string list, Dag.Cyclic>) : string =
     match r with
@@ -1247,34 +1241,27 @@ let private renderModelTopo (r: DagPrimitives.topo_result) : string =
     | DagPrimitives.TopoOk l -> "ok " + String.concat "," l
     | DagPrimitives.TopoCyclic _ -> "cyclic"
 
-type private BoundaryTally =
-    { mutable Based: int
-      mutable Disjoint: int
-      mutable Deltas: int
-      mutable NHead: int
-      mutable Kept: int
-      mutable Banded: int
-      mutable Refused: int }
+/// The topological order's render pair: production's `tryTopoOrder` and the model's `try_topo_order`.
+let private topo: Differential<Result<string list, Dag.Cyclic>, DagPrimitives.topo_result> =
+    Differential.pair renderTopo renderModelTopo
 
-let private newBoundaryTally () =
-    { Based = 0
-      Disjoint = 0
-      Deltas = 0
-      NHead = 0
-      Kept = 0
-      Banded = 0
-      Refused = 0 }
+/// The boundary tally: pairs that share a base and pairs that refuse, non-empty deltas, N-head sets
+/// with a common base, compactions kept, kept with a band behind their node, and refused.
+let private boundaryTally =
+    Tally.empty [ "Based"; "Disjoint"; "Deltas"; "NHead"; "Kept"; "Banded"; "Refused" ]
 
 /// Every ordered pair of ids (and an absent one), several head sets, and every node as a cut point:
-/// production's DAG-level and index-level answers beside the extracted ones.
+/// production's DAG-level and index-level answers beside the extracted ones. Each finding is
+/// recorded under `where`.
 let private boundaryDisagreements
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (hashState: 'State -> string)
     (state0: 'State)
-    (tally: BoundaryTally)
+    (where: string)
     (dag: Dag.T<'Op>)
     (heads: string list)
-    : string list =
+    (t0: Tally)
+    : Tally =
     let model = toModelDag dag
     let fuel = drainFuel model.nodes
     let idx = DagClosure.reach_of_dag ordLt fuel model
@@ -1284,77 +1271,73 @@ let private boundaryDisagreements
     let ids = held @ [ "no-such-node" ]
     let nids (ns: DagClosure.node<'Op> list) = ns |> List.map (fun n -> n.nid)
 
-    [ for a in ids do
-          let pt = renderTopo (Dag.tryTopoOrder dag a)
-          let mt = renderModelTopo (DagPrimitives.try_topo_order ordLt fuel model fuel a)
+    let found (ok: bool) (message: unit -> string) =
+        Differential.check ok (fun () -> where + ": " + message ())
 
-          let rt =
-              renderModelTopo (DagPrimitives.reach_try_topo_order ordLt fuel model fuel idx ord a)
+    let pairs =
+        t0
+        |> Differential.over ids (fun a t ->
+            let pt = topo.Production(Dag.tryTopoOrder dag a)
+            let mt = topo.Model(DagPrimitives.try_topo_order ordLt fuel model fuel a)
 
-          if mt <> pt || rt <> pt || renderTopo (Dag.Reach.tryTopoOrder reach a) <> pt then
-              yield sprintf "tryTopoOrder %s: production %s, model %s, model index %s" a pt mt rt
+            let rt =
+                topo.Model(DagPrimitives.reach_try_topo_order ordLt fuel model fuel idx ord a)
 
-          for b in ids do
-              let pm = Dag.mergeBase dag a b
-              let mm = ofFound (DagPrimitives.merge_base_now ordLt fuel model fuel a b)
-              let rm = ofFound (DagPrimitives.reach_merge_base ordLt fuel model fuel idx a b)
+            t
+            |> found (mt = pt && rt = pt && topo.Production(Dag.Reach.tryTopoOrder reach a) = pt) (fun () ->
+                sprintf "tryTopoOrder %s: production %s, model %s, model index %s" a pt mt rt)
+            |> Differential.over ids (fun b t ->
+                let pm = Dag.mergeBase dag a b
+                let mm = foundId (DagPrimitives.merge_base_now ordLt fuel model fuel a b)
+                let rm = foundId (DagPrimitives.reach_merge_base ordLt fuel model fuel idx a b)
+                let pb = Dag.between dag a b |> List.map _.Id
+                let mb = DagClosure.between_drained ordLt fuel model fuel a b |> nids
+                let rb = DagPrimitives.reach_between ordLt fuel model fuel idx ord a b |> nids
 
-              if mm <> pm || rm <> pm || Dag.Reach.mergeBase reach a b <> pm then
-                  yield sprintf "mergeBase %s %s: production %A, model %A, model index %A" a b pm mm rm
+                t
+                |> found (mm = pm && rm = pm && Dag.Reach.mergeBase reach a b = pm) (fun () ->
+                    sprintf "mergeBase %s %s: production %A, model %A, model index %A" a b pm mm rm)
+                |> Tally.bump (if pm.IsSome then "Based" else "Disjoint")
+                |> found (mb = pb && rb = pb && (Dag.Reach.between reach a b |> List.map _.Id) = pb) (fun () ->
+                    sprintf "between %s %s: production %A, model %A, model index %A" a b pb mb rb)
+                |> Tally.bumpIf (not (List.isEmpty pb)) "Deltas"))
 
-              if pm.IsSome then
-                  tally.Based <- tally.Based + 1
-              else
-                  tally.Disjoint <- tally.Disjoint + 1
+    let headSets =
+        pairs
+        |> Differential.over [ heads; held; List.rev heads @ heads; heads @ [ "no-such-node" ]; [] ] (fun hs t ->
+            let pc = Dag.commonBase dag hs
+            let mc = foundId (DagPrimitives.common_base ordLt fuel model fuel hs)
+            let rc = foundId (DagPrimitives.reach_common_base ordLt fuel model fuel idx hs)
 
-              let pb = Dag.between dag a b |> List.map _.Id
-              let mb = DagClosure.between_drained ordLt fuel model fuel a b |> nids
-              let rb = DagPrimitives.reach_between ordLt fuel model fuel idx ord a b |> nids
+            t
+            |> found (mc = pc && rc = pc && Dag.Reach.commonBase reach hs = pc) (fun () ->
+                sprintf "commonBase %A: production %A, model %A, model index %A" hs pc mc rc)
+            |> Tally.bumpIf (List.length (List.distinct hs) >= 3 && pc.IsSome) "NHead")
 
-              if mb <> pb || rb <> pb || (Dag.Reach.between reach a b |> List.map _.Id) <> pb then
-                  yield sprintf "between %s %s: production %A, model %A, model index %A" a b pb mb rb
+    headSets
+    |> Differential.over held (fun c t ->
+        match
+            Dag.compactAt OpStream.defaultHash hashState w state0 dag c, DagPrimitives.cut_keep ordLt model fuel c
+        with
+        | Ok { Dag = compacted }, DagPrimitives.CutKeep k ->
+            let kept = compacted.Nodes |> Map.toList |> List.map fst |> Set.ofList
+            let behind = Dag.ancestorsOf dag c
 
-              if not (List.isEmpty pb) then
-                  tally.Deltas <- tally.Deltas + 1
-
-      for hs in [ heads; held; List.rev heads @ heads; heads @ [ "no-such-node" ]; [] ] do
-          let pc = Dag.commonBase dag hs
-          let mc = ofFound (DagPrimitives.common_base ordLt fuel model fuel hs)
-          let rc = ofFound (DagPrimitives.reach_common_base ordLt fuel model fuel idx hs)
-
-          if mc <> pc || rc <> pc || Dag.Reach.commonBase reach hs <> pc then
-              yield sprintf "commonBase %A: production %A, model %A, model index %A" hs pc mc rc
-
-          if List.length (List.distinct hs) >= 3 && pc.IsSome then
-              tally.NHead <- tally.NHead + 1
-
-      for c in held do
-          let m = DagPrimitives.cut_keep ordLt model fuel c
-
-          match Dag.compactAt OpStream.defaultHash hashState w state0 dag c, m with
-          | Ok { Dag = compacted }, DagPrimitives.CutKeep k ->
-              let kept = compacted.Nodes |> Map.toList |> List.map fst |> Set.ofList
-
-              if Set.ofList k <> kept then
-                  yield sprintf "cut %s: production keeps %A, the model %A" c kept (Set.ofList k)
-
-              if not (DagClosure.truncation_ok model fuel c k) then
-                  yield sprintf "cut %s: the model's kept set misses its own contract" c
-
-              tally.Kept <- tally.Kept + 1
-
-              let behind = Dag.ancestorsOf dag c
-
-              if kept |> Set.exists (fun id -> id <> c && Set.contains id behind) then
-                  tally.Banded <- tally.Banded + 1
-          | Error(Dag.CheckpointFault.Uncovered u), DagPrimitives.CutUncovered v ->
-              if u <> v then
-                  yield sprintf "cut %s: production refuses %s uncovered, the model %s" c u v
-
-              tally.Refused <- tally.Refused + 1
-          | Error(Dag.CheckpointFault.Uncovered _), _
-          | Ok _, _ -> yield sprintf "cut %s: production and the model disagree on whether it is refused" c
-          | Error _, _ -> () ] // checkpointAt refused: the domain rejects the history, so there is no cut
+            t
+            |> found (Set.ofList k = kept) (fun () ->
+                sprintf "cut %s: production keeps %A, the model %A" c kept (Set.ofList k))
+            |> found (DagClosure.truncation_ok model fuel c k) (fun () ->
+                sprintf "cut %s: the model's kept set misses its own contract" c)
+            |> Tally.bump "Kept"
+            |> Tally.bumpIf (kept |> Set.exists (fun id -> id <> c && Set.contains id behind)) "Banded"
+        | Error(Dag.CheckpointFault.Uncovered u), DagPrimitives.CutUncovered v ->
+            t
+            |> found (u = v) (fun () -> sprintf "cut %s: production refuses %s uncovered, the model %s" c u v)
+            |> Tally.bump "Refused"
+        | Error(Dag.CheckpointFault.Uncovered _), _
+        | Ok _, _ ->
+            found false (fun () -> sprintf "cut %s: production and the model disagree on whether it is refused" c) t
+        | Error _, _ -> t) // checkpointAt refused: the domain rejects the history, so there is no cut
 
 [<Tests>]
 let tests =
@@ -1394,21 +1377,21 @@ let tests =
                     SlotReads = Set.empty
                     SlotWrites = Set.empty }
 
-              let v =
+              let t =
                   differential "blind oracle" planW planFootprint blind planHash planLaneGen 3 4100 150
 
-              match v.Failure with
-              | None -> failtest "a blind oracle never halts, so it must disagree with a production fold that does"
-              | Some why ->
-                  Expect.stringContains why "shrunk to" "the disagreement was shrunk"
-                  Expect.stringContains why "outcome differs" "the disagreement names what differed"
+              // a blind oracle never halts, so it must disagree with a production fold that does
+              Differential.expectLoses "blind oracle" t
+              let why = List.head (Tally.disagreements t)
+              Expect.stringContains why "shrunk to" "the disagreement was shrunk"
+              Expect.stringContains why "outcome differs" "the disagreement names what differed"
 
-                  let laneLines =
-                      why.Split('\n')
-                      |> Array.filter (fun l -> l.StartsWith "  lane ")
-                      |> List.ofArray
+              let laneLines =
+                  why.Split('\n')
+                  |> Array.filter (fun l -> l.StartsWith "  lane ")
+                  |> List.ofArray
 
-                  Expect.equal (List.length laneLines) 2 (sprintf "two lanes survive the shrink — got:\n%s" why)
+              Expect.equal (List.length laneLines) 2 (sprintf "two lanes survive the shrink — got:\n%s" why)
 
           // ---- the wire corpus's ops/ fixtures ----
 
@@ -1429,33 +1412,15 @@ let tests =
                       { Name = "base"
                         Fp = (List.head ops).Fp }
 
-                  let n = List.length ops
-                  let mutable folded = 0
-                  let mutable halted = 0
-
-                  let check (lanes: CorpusOp list list) =
+                  let check (lanes: CorpusOp list list) (t: Tally) =
                       match disagreements false corpusW corpusFp corpusFp id "" baseOp lanes with
-                      | [] ->
-                          match productionFold corpusW corpusFp id "" baseOp lanes with
-                          | LaneFolded _ -> folded <- folded + 1
-                          | LaneHalted _ -> halted <- halted + 1
-                          | LaneRejected _ -> ()
-                      | d :: _ -> failtestf "corpus lanes\n%s\n%s" (renderLanes corpusW.Encode lanes) d
+                      | [] -> countOutcome (productionFold corpusW corpusFp id "" baseOp lanes) t
+                      | d :: _ -> Tally.disagree (sprintf "corpus lanes\n%s\n%s" (renderLanes corpusW.Encode lanes) d) t
 
-                  for i in 0 .. n - 1 do
-                      for j in i + 1 .. n - 1 do
-                          check [ [ List.item i ops ]; [ List.item j ops ] ]
-
-                          for k in j + 1 .. n - 1 do
-                              check [ [ List.item i ops ]; [ List.item j ops ]; [ List.item k ops ] ]
-
-                  // Two-op lanes as well: a lane whose ops interfere with each other is legal (a
-                  // lane is one writer's sequence) and must not be reported as a cross-lane halt.
-                  for i in 0 .. n - 2 do
-                      check [ [ List.item i ops; List.item (i + 1) ops ]; [ List.item ((i + 2) % n) ops ] ]
-
-                  Expect.isGreaterThan folded 0 "some corpus lane sets fold"
-                  Expect.isGreaterThan halted 0 "some corpus lane sets halt"
+                  let t = foldTally |> Differential.over (corpusLaneSets ops) check
+                  Differential.expectAgrees "corpus ops" t
+                  Expect.isGreaterThan (Tally.count "Folded" t) 0 "some corpus lane sets fold"
+                  Expect.isGreaterThan (Tally.count "Halted" t) 0 "some corpus lane sets halt"
 
           // ---- the pieces the comparison rests on ----
 
@@ -1463,25 +1428,31 @@ let tests =
           <| fun _ ->
               // The model's `independent` is `Ops.independent` clause for clause; over every pair
               // of ops the reference generator produces, the two booleans agree.
-              let mutable r = ConfRng.ofSeed 77
-              let mutable pairs = 0
-
-              for _ in 1..40 do
+              let step (_: int) (r: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 2 r
-                  r <- r'
+                  let ops = List.concat lanes
 
-                  for a in List.concat lanes do
-                      for b in List.concat lanes do
-                          pairs <- pairs + 1
-                          let fa = treeFootprint a
-                          let fb = treeFootprint b
+                  r',
+                  t
+                  |> Differential.over (List.allPairs ops ops) (fun (a, b) t ->
+                      let fa = treeFootprint a
+                      let fb = treeFootprint b
+                      let model = DagFold.independent (toModelFootprint fa) (toModelFootprint fb)
+                      let production = Ops.independent fa fb
 
-                          Expect.equal
-                              (DagFold.independent (toModelFootprint fa) (toModelFootprint fb))
-                              (Ops.independent fa fb)
-                              (sprintf "independence of %s / %s" (treeW.Encode a) (treeW.Encode b))
+                      t
+                      |> Tally.bump "Pairs"
+                      |> Differential.check (model = production) (fun () ->
+                          sprintf
+                              "independence of %s / %s: model %b, production %b"
+                              (treeW.Encode a)
+                              (treeW.Encode b)
+                              model
+                              production))
 
-              Expect.isGreaterThan pairs 0 "pairs were compared"
+              let t = Differential.seeded 40 (ConfRng.ofSeed 77) step (Tally.empty [ "Pairs" ])
+              Differential.expectAgrees "independence" t
+              Expect.isGreaterThan (Tally.count "Pairs" t) 0 "pairs were compared"
 
           testCase "the model's conflicts are Dag.conflicts up to the canonical rendering"
           <| fun _ ->
@@ -1504,16 +1475,14 @@ let tests =
 
           testCase "the reference witness keeps the theorem's hypothesis: independent ops form a diamond"
           <| fun _ ->
-              let breaks, met = treeDiamondSample treeFootprint 1320 250
-
-              match breaks with
-              | why :: _ -> failtestf "the reference witness BREAKS independence_diamond: %s" why
-              | [] ->
-                  // Sample adequacy, the pack's posture: a run that never met the premise
-                  // measures nothing at all, and a run that met it a handful of times measures
-                  // almost nothing. The threshold is far below what the sample delivers and is
-                  // there to catch a generator that stops producing independent pairs.
-                  Expect.isGreaterThan met 300 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+              let t = treeDiamondSample treeFootprint 1320 250
+              Differential.expectAgrees "the reference witness BREAKS independence_diamond" t
+              // Sample adequacy, the pack's posture: a run that never met the premise
+              // measures nothing at all, and a run that met it a handful of times measures
+              // almost nothing. The threshold is far below what the sample delivers and is
+              // there to catch a generator that stops producing independent pairs.
+              let met = Tally.count "Met" t
+              Expect.isGreaterThan met 300 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
 
           testCase "a blind footprint BREAKS the diamond over the same sample — the measurement can fail"
           <| fun _ ->
@@ -1529,14 +1498,21 @@ let tests =
                     SlotReads = Set.empty
                     SlotWrites = Set.empty }
 
-              let breaks, met = treeDiamondSample blind 1320 250
-              Expect.isGreaterThan met 0 "the blind run met the premise, so it had something to measure"
+              let t = treeDiamondSample blind 1320 250
 
-              match breaks with
-              | [] ->
-                  failtest
-                      "a footprint declaring EVERY pair independent must break the diamond — otherwise this comparison cannot lose"
-              | why :: _ -> Expect.stringContains why "independent" "the break names the pair it found"
+              Expect.isGreaterThan
+                  (Tally.count "Met" t)
+                  0
+                  "the blind run met the premise, so it had something to measure"
+
+              Differential.expectLoses
+                  "a footprint declaring EVERY pair independent must break the diamond — otherwise this comparison cannot lose"
+                  t
+
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "independent"
+                  "the break names the pair it found"
 
           testCase "the reference algebra cannot keep rejection identity — the clause the diamond drops"
           <| fun _ ->
@@ -1616,32 +1592,21 @@ let tests =
                       { Name = "base"
                         Fp = (List.head ops).Fp }
 
-                  let n = List.length ops
-                  let mutable recovered = 0
-                  let mutable chains = 0
-
-                  let check (lanes: CorpusOp list list) =
-                      if lanes |> List.exists (fun l -> List.length l > 1) then
-                          chains <- chains + 1
+                  let check (lanes: CorpusOp list list) (t: Tally) =
+                      let t =
+                          t |> Tally.bumpIf (lanes |> List.exists (fun l -> List.length l > 1)) "Chains"
 
                       match deltaDisagreements unperturbed corpusW baseOp lanes with
-                      | [], got -> recovered <- recovered + got
-                      | d :: _, _ -> failtestf "corpus lanes\n%s\n%s" (renderLanes corpusW.Encode lanes) d
-
-                  for i in 0 .. n - 1 do
-                      for j in i + 1 .. n - 1 do
-                          check [ [ List.item i ops ]; [ List.item j ops ] ]
-
-                          for k in j + 1 .. n - 1 do
-                              check [ [ List.item i ops ]; [ List.item j ops ]; [ List.item k ops ] ]
+                      | [], got -> Tally.add "Recovered" got t
+                      | d :: _, _ ->
+                          Tally.disagree (sprintf "corpus lanes\n%s\n%s" (renderLanes corpusW.Encode lanes) d) t
 
                   // Multi-op lanes are where the WALK is exercised: a one-node chain is recovered
                   // by a single step and would certify almost nothing about the closure.
-                  for i in 0 .. n - 2 do
-                      check [ [ List.item i ops; List.item (i + 1) ops ]; [ List.item ((i + 2) % n) ops ] ]
-
-                  Expect.isGreaterThan recovered 0 "ops were recovered"
-                  Expect.isGreaterThan chains 0 "multi-op lanes were walked"
+                  let t = deltaTally |> Differential.over (corpusLaneSets ops) check
+                  Differential.expectAgrees "corpus ops" t
+                  Expect.isGreaterThan (Tally.count "Recovered" t) 0 "ops were recovered"
+                  Expect.isGreaterThan (Tally.count "Chains" t) 0 "multi-op lanes were walked"
 
           testCase "the oracle's DAG-shaped fold agrees with production over the work-plan domain"
           <| fun _ ->
@@ -1650,13 +1615,8 @@ let tests =
               // composing and replaying — where `fold_once` is handed the deltas. Compared against
               // production end to end, and against the deltas-first oracle beside it, so a
               // disagreement says which of the two halves moved.
-              let mutable rng = ConfRng.ofSeed 1344
-              let mutable folded = 0
-              let mutable halted = 0
-
-              for i in 1..120 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
 
                   let p =
                       productionFold planW planFootprint planHash planLaneGen.State0 planLaneGen.BaseOp lanes
@@ -1666,29 +1626,28 @@ let tests =
 
                   let deltasFirst = oracleFold planW planFootprint planHash planLaneGen.State0 lanes
 
-                  if p <> o then
-                      failtestf
+                  r',
+                  t
+                  |> Differential.check (p = o) (fun () ->
+                      sprintf
                           "iter %d: the DAG-shaped oracle and production differ\n%s\n  production: %A\n  oracle:     %A"
                           i
                           (renderLanes encPlanOp lanes)
                           p
-                          o
-
-                  if o <> deltasFirst then
-                      failtestf
+                          o)
+                  |> Differential.check (o = deltasFirst) (fun () ->
+                      sprintf
                           "iter %d: fold_once_dag and fold_once differ on the same lanes\n%s\n  from the DAG: %A\n  from deltas:  %A"
                           i
                           (renderLanes encPlanOp lanes)
                           o
-                          deltasFirst
+                          deltasFirst)
+                  |> countOutcome p
 
-                  match p with
-                  | LaneFolded _ -> folded <- folded + 1
-                  | LaneHalted _ -> halted <- halted + 1
-                  | LaneRejected _ -> ()
-
-              Expect.isGreaterThan folded 0 "some lane sets folded"
-              Expect.isGreaterThan halted 0 "some lane sets halted"
+              let t = Differential.seeded 120 (ConfRng.ofSeed 1344) step foldTally
+              Differential.expectAgrees "the DAG-shaped fold" t
+              Expect.isGreaterThan (Tally.count "Folded" t) 0 "some lane sets folded"
+              Expect.isGreaterThan (Tally.count "Halted" t) 0 "some lane sets halted"
 
           testCase "a model DAG whose lanes hang off the WRONG parent disagrees with production"
           <| fun _ ->
@@ -1696,28 +1655,17 @@ let tests =
               // the model walk a longer spine than the DAG has, so it recovers a longer delta. If
               // this comes back clean, the green cases above certify nothing: they would be
               // comparing a recovery that cannot notice the shape it walks.
-              let mutable rng = ConfRng.ofSeed 1342
-              let mutable found = 0
-              let mutable example = ""
+              let t =
+                  deltaDifferential "re-parented model" reparented planW planLaneGen 3 1342 150
 
-              for _ in 1..150 do
-                  let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
-
-                  match deltaDisagreements reparented planW planLaneGen.BaseOp lanes with
-                  | [], _ -> ()
-                  | d :: _, _ ->
-                      found <- found + 1
-
-                      if example = "" then
-                          example <- d
-
-              Expect.isGreaterThan
-                  found
-                  0
+              Differential.expectLoses
                   "a DAG whose lanes hang off the wrong parent must recover different deltas — this comparison cannot lose"
+                  t
 
-              Expect.stringContains example "the recovered delta differs" "the disagreement names what moved"
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "the recovered delta differs"
+                  "the disagreement names what moved"
 
           // ---- Phase 156: the ID-ORDERED DRAIN beside production's own topological order ----
 
@@ -1726,24 +1674,22 @@ let tests =
               // The SPINE case: one head's closure is a chain, the frontier is one element wide at
               // every step, and Phase 142 already proves the two orders coincide there. It runs
               // because a green multi-head case means little if the easy case is broken.
-              let mutable rng = ConfRng.ofSeed 1560
-              let mutable heads = 0
-
-              for i in 1..80 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
-                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let _, hs, dag = productionDag planW planLaneGen.BaseOp lanes
 
-                  for h in hs do
-                      heads <- heads + 1
+                  r',
+                  t
+                  |> Differential.over hs (fun h t ->
+                      let diffs, _ = drainDisagreements ordLt dag h
 
-                      match drainDisagreements ordLt dag h with
-                      | [], _ -> ()
-                      | d :: _, _ -> failtestf "iter %d\n%s\n%s" i (renderLanes encPlanOp lanes) d
+                      (Tally.bump "Heads" t, diffs)
+                      ||> List.fold (fun t d ->
+                          Tally.disagree (sprintf "iter %d\n%s\n%s" i (renderLanes encPlanOp lanes) d) t))
 
-                  ignore baseId
-
-              Expect.isGreaterThan heads 0 "some lane heads were drained"
+              let t = Differential.seeded 80 (ConfRng.ofSeed 1560) step (Tally.empty [ "Heads" ])
+              Differential.expectAgrees "the drain over every lane head" t
+              Expect.isGreaterThan (Tally.count "Heads" t) 0 "some lane heads were drained"
 
           testCase "the extracted drain is production's topological order over a MULTI-HEAD UNION"
           <| fun _ ->
@@ -1752,33 +1698,45 @@ let tests =
               // node and the ready frontier is N wide once the base is drained. The adequacy guard
               // is the frontier WIDTH — a run whose frontier never passed one has re-measured the
               // spine case under a different name.
-              let mutable rng = ConfRng.ofSeed 1561
-              let mutable widest = 0
-              let mutable unions = 0
+              // the frontier widths reached are recorded as a set; the adequacy guard reads its maximum
+              let drained (where: string) (diffs: string list, width: int) (t: Tally) =
+                  let t = Tally.bump "Unions" t
 
-              for i in 1..80 do
+                  match diffs with
+                  | [] -> Tally.reach "Widths" (string width) t
+                  | d :: _ -> Tally.disagree (where + "\n" + d) t
+
+              let planStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
-                  unions <- unions + 1
 
-                  match drainDisagreements ordLt merged unionHead with
-                  | [], w -> widest <- max widest w
-                  | d :: _, _ -> failtestf "iter %d\n%s\n%s" i (renderLanes encPlanOp lanes) d
+                  r',
+                  drained
+                      (sprintf "iter %d\n%s" i (renderLanes encPlanOp lanes))
+                      (drainDisagreements ordLt merged unionHead)
+                      t
 
-              for i in 1..40 do
+              let treeStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 4 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag treeW treeLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion treeW treeLaneGen.BaseOp baseId hs dag
-                  unions <- unions + 1
 
-                  match drainDisagreements ordLt merged unionHead with
-                  | [], w -> widest <- max widest w
-                  | d :: _, _ -> failtestf "reference witness iter %d\n%s\n%s" i (renderLanes treeW.Encode lanes) d
+                  r',
+                  drained
+                      (sprintf "reference witness iter %d\n%s" i (renderLanes treeW.Encode lanes))
+                      (drainDisagreements ordLt merged unionHead)
+                      t
 
-              Expect.isGreaterThan unions 0 "some unions were drained"
+              let r, t =
+                  Tally.empty [ "Unions" ]
+                  |> Tally.sets [ "Widths" ]
+                  |> Differential.seededFrom 80 (ConfRng.ofSeed 1561) planStep
+
+              let t = Differential.seeded 40 r treeStep t
+              Differential.expectAgrees "the drain over a multi-head union" t
+              Expect.isGreaterThan (Tally.count "Unions" t) 0 "some unions were drained"
+              let widest = Tally.reached "Widths" t |> Seq.map int |> Seq.fold max 0
 
               Expect.isGreaterThan
                   widest
@@ -1794,30 +1752,25 @@ let tests =
               // asks — so a green run above certifies nothing unless this one is red. It is
               // deliberately run over the UNIONS and not the lane heads: on a spine the frontier
               // holds one id, whose minimum and maximum are the same id, and no tie-break can lose.
-              let mutable rng = ConfRng.ofSeed 1561
-              let mutable found = 0
-              let mutable example = ""
-
-              for _ in 1..80 do
+              let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
 
                   match drainDisagreements ordGt merged unionHead with
-                  | [], _ -> ()
-                  | d :: _, _ ->
-                      found <- found + 1
+                  | [], _ -> r', t
+                  | d :: _, _ -> r', Tally.disagree d t
 
-                      if example = "" then
-                          example <- d
+              let t = Differential.seeded 80 (ConfRng.ofSeed 1561) step (Tally.empty [])
 
-              Expect.isGreaterThan
-                  found
-                  0
+              Differential.expectLoses
                   "a drain taking the LARGEST ready id must disagree with production — this comparison cannot lose"
+                  t
 
-              Expect.stringContains example "the drain differs" "the disagreement names what moved"
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "the drain differs"
+                  "the disagreement names what moved"
 
           testCase "the drain is a function of the node SET — every arrival order gives one sequence"
           <| fun _ ->
@@ -1825,12 +1778,8 @@ let tests =
               // order, so permuting the node set hands the selector a permuted frontier; only an
               // order-invariant selector survives that, and this is the arm that would catch a
               // drain that took the head of an unsorted frontier instead of its minimum.
-              let mutable rng = ConfRng.ofSeed 1562
-              let mutable compared = 0
-
-              for i in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
                   let ns = modelClosure merged unionHead
@@ -1838,27 +1787,35 @@ let tests =
 
                   // Three permutations, two of them fixed so the case cannot go quiet on a seed
                   // that happened to shuffle nothing, and one drawn.
-                  let shuffled, r'' = ConfRng.shuffle ns rng
-                  rng <- r''
+                  let shuffled, r'' = ConfRng.shuffle ns r'
 
-                  for perm in
+                  let perms =
                       [ List.rev ns
                         (match ns with
                          | [] -> []
                          | h :: t -> t @ [ h ])
-                        shuffled ] do
-                      compared <- compared + 1
+                        shuffled ]
+
+                  r'',
+                  t
+                  |> Differential.over perms (fun perm t ->
                       let got = DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel perm) perm
 
-                      if got <> canonical then
-                          failtestf
+                      t
+                      |> Tally.bump "Compared"
+                      |> Differential.check (got = canonical) (fun () ->
+                          sprintf
                               "iter %d: a permuted node set drained differently\n%s\n  canonical: %A\n  permuted:  %A"
                               i
                               (renderLanes encPlanOp lanes)
                               canonical
-                              got
+                              got))
 
-              Expect.isGreaterThan compared 0 "some permutations were drained"
+              let t =
+                  Differential.seeded 60 (ConfRng.ofSeed 1562) step (Tally.empty [ "Compared" ])
+
+              Differential.expectAgrees "the drain over permuted node sets" t
+              Expect.isGreaterThan (Tally.count "Compared" t) 0 "some permutations were drained"
 
           testCase "the two dangling-parent policies are the two production call sites, and differ only on a dangler"
           <| fun _ ->
@@ -1869,54 +1826,65 @@ let tests =
               // refuses, exactly as `Dag.firstBreak` reports `MissingParent`, while
               // `IgnoreDangling` still drains every remaining node, exactly as `Dag.topoCore`'s
               // `parentsIn` filter makes it.
-              let mutable rng = ConfRng.ofSeed 1563
-              let mutable refusals = 0
-              let mutable agreements = 0
+              let ordinal (ids: string list) =
+                  List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) ids
 
-              for i in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
                   let ns = modelClosure merged unionHead
-
-                  Expect.isTrue
-                      (Dag.verifyDag (OpStream.canonical OpStream.defaultHash planW) merged)
-                      "the production DAG holds every parent it names"
-
                   let ignored = DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel ns) ns
                   let refused = DagClosure.drain DagClosure.RefuseDangling ordLt (drainFuel ns) ns
-
-                  if ignored <> refused then
-                      failtestf "iter %d: the policies differ on a closure with no dangling parent" i
-
-                  agreements <- agreements + 1
 
                   // … and now WITH one: the base node dropped, so every lane's first node names it
                   // from outside the set.
                   let orphaned = ns |> List.filter (fun n -> n.nid <> baseId)
 
-                  match DagClosure.drain DagClosure.RefuseDangling ordLt (drainFuel orphaned) orphaned with
-                  | DagClosure.Refused id ->
-                      refusals <- refusals + 1
+                  let t =
+                      t
+                      |> Differential.check
+                          (Dag.verifyDag (OpStream.canonical OpStream.defaultHash planW) merged)
+                          (fun () -> sprintf "iter %d: the production DAG holds every parent it names" i)
+                      |> Differential.check (ignored = refused) (fun () ->
+                          sprintf "iter %d: the policies differ on a closure with no dangling parent" i)
+                      |> Tally.bump "Agreements"
 
-                      Expect.isTrue
-                          (orphaned |> List.exists (fun n -> n.nid = id && List.contains baseId n.nparents))
-                          "the refusal names a node that really does name the dropped base"
-                  | DagClosure.Drained _ -> failtestf "iter %d: RefuseDangling drained a set missing the base" i
+                  let t =
+                      match DagClosure.drain DagClosure.RefuseDangling ordLt (drainFuel orphaned) orphaned with
+                      | DagClosure.Refused id ->
+                          t
+                          |> Tally.bump "Refusals"
+                          |> Differential.check
+                              (orphaned |> List.exists (fun n -> n.nid = id && List.contains baseId n.nparents))
+                              (fun () ->
+                                  sprintf "iter %d: the refusal names a node that really does name the dropped base" i)
+                      | DagClosure.Drained _ ->
+                          Tally.disagree (sprintf "iter %d: RefuseDangling drained a set missing the base" i) t
 
+                  r',
                   match DagClosure.drain DagClosure.IgnoreDangling ordLt (drainFuel orphaned) orphaned with
                   | DagClosure.Drained ord ->
-                      Expect.equal
-                          (List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) ord)
-                          (orphaned
-                           |> List.map _.nid
-                           |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)))
-                          "IgnoreDangling places every remaining node — the dropped parent constrains nothing"
-                  | DagClosure.Refused _ -> failtestf "iter %d: IgnoreDangling refused" i
+                      let placed = ordinal ord
+                      let remaining = orphaned |> List.map _.nid |> ordinal
 
-              Expect.isGreaterThan agreements 0 "the policies were compared on a clean closure"
-              Expect.isGreaterThan refusals 0 "the refusing policy was made to refuse"
+                      Differential.check
+                          (placed = remaining)
+                          (fun () ->
+                              sprintf
+                                  "iter %d: IgnoreDangling places every remaining node — the dropped parent constrains nothing\n  placed:    %A\n  remaining: %A"
+                                  i
+                                  placed
+                                  remaining)
+                          t
+                  | DagClosure.Refused _ -> Tally.disagree (sprintf "iter %d: IgnoreDangling refused" i) t
+
+              let t =
+                  Differential.seeded 60 (ConfRng.ofSeed 1563) step (Tally.empty [ "Agreements"; "Refusals" ])
+
+              Differential.expectAgrees "the two dangling-parent policies" t
+              Expect.isGreaterThan (Tally.count "Agreements" t) 0 "the policies were compared on a clean closure"
+              Expect.isGreaterThan (Tally.count "Refusals" t) 0 "the refusing policy was made to refuse"
 
           testCase "a CYCLE is surfaced as a SHORT drain — the model and production read the same signal"
           <| fun _ ->
@@ -1988,27 +1956,28 @@ let tests =
               // Every lane head, the merged union head (whose closure is every node, so the drain's
               // tie-break decides the order the ops are applied in), and a head the DAG does not
               // hold — the arm the pre-296 `replayTo` answered with the initial state as `Ok`.
-              let mutable rng = ConfRng.ofSeed 3090
-              let arms = System.Collections.Generic.Dictionary<string, int>()
-
-              let tally arm =
-                  arms[arm] <-
-                      (match arms.TryGetValue arm with
-                       | true, n -> n + 1
-                       | _ -> 1)
-
-              let checkAll (w: StreamWitness<'Op, 'State, 'Rej>) hashState state0 label (dag: Dag.T<'Op>) heads =
-                  for h in heads @ [ "no-such-node" ] do
+              // one counter per replay arm — the first word of the rendered answer
+              let checkAll
+                  (w: StreamWitness<'Op, 'State, 'Rej>)
+                  hashState
+                  state0
+                  label
+                  (dag: Dag.T<'Op>)
+                  heads
+                  (t: Tally)
+                  =
+                  t
+                  |> Differential.over (heads @ [ "no-such-node" ]) (fun h t ->
                       match replayDisagreement w hashState state0 toModelDag dag h with
-                      | None, arm -> tally arm
-                      | Some d, _ -> failtestf "%s\n%s" label d
+                      | None, arm -> Tally.bump arm t
+                      | Some d, _ -> Tally.disagree (sprintf "%s\n%s" label d) t)
 
-              for i in 1..60 do
+              let planStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
 
+                  r',
                   checkAll
                       planW
                       planHash
@@ -2016,13 +1985,14 @@ let tests =
                       (sprintf "plan iter %d" i)
                       merged
                       (unionHead :: baseId :: hs)
+                      t
 
-              for i in 1..30 do
+              let treeStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = treeLaneGen.Lanes 4 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag treeW treeLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion treeW treeLaneGen.BaseOp baseId hs dag
 
+                  r',
                   checkAll
                       treeW
                       treeHash
@@ -2030,14 +2000,16 @@ let tests =
                       (sprintf "tree iter %d" i)
                       merged
                       (unionHead :: baseId :: hs)
+                      t
 
-              let count arm =
-                  match arms.TryGetValue arm with
-                  | true, n -> n
-                  | _ -> 0
+              let r, t =
+                  Tally.empty [ "ok"; "unknown-head"; "cyclic"; "rejected" ]
+                  |> Differential.seededFrom 60 (ConfRng.ofSeed 3090) planStep
 
-              Expect.isGreaterThan (count "ok") 0 "some heads replayed to a state"
-              Expect.isGreaterThan (count "unknown-head") 0 "the missing-head arm ran"
+              let t = Differential.seeded 30 r treeStep t
+              Differential.expectAgrees "replay_to" t
+              Expect.isGreaterThan (Tally.count "ok" t) 0 "some heads replayed to a state"
+              Expect.isGreaterThan (Tally.count "unknown-head" t) 0 "the missing-head arm ran"
 
           testCase "a CYCLIC closure is refused as cyclic by both — and the acyclic control replays"
           <| fun _ ->
@@ -2072,32 +2044,27 @@ let tests =
               // node of some head's history. A model replaying a DAG with one closure node gone must
               // disagree with production somewhere over the pool, or the green case above certifies
               // nothing about which nodes were folded.
-              let mutable rng = ConfRng.ofSeed 3091
-              let mutable found = 0
-              let mutable example = ""
-
-              for _ in 1..60 do
+              let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r' = planLaneGen.Lanes 3 rng
-                  rng <- r'
                   let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
                   let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
 
                   match
                       replayDisagreement planW planHash planLaneGen.State0 (droppingOneNode unionHead) merged unionHead
                   with
-                  | None, _ -> ()
-                  | Some d, _ ->
-                      found <- found + 1
+                  | None, _ -> r', t
+                  | Some d, _ -> r', Tally.disagree d t
 
-                      if example = "" then
-                          example <- d
+              let t = Differential.seeded 60 (ConfRng.ofSeed 3091) step (Tally.empty [])
 
-              Expect.isGreaterThan
-                  found
-                  0
+              Differential.expectLoses
                   "a store missing a closure node must replay differently — this comparison cannot lose"
+                  t
 
-              Expect.stringContains example "the replay differs" "the disagreement names what moved"
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "the replay differs"
+                  "the disagreement names what moved"
 
           testCase "the extracted add_node refuses a differing node and never replaces — beside Dag.append"
           <| fun _ ->
@@ -2176,60 +2143,59 @@ let tests =
               // The adequacy guards are the ones a green run could otherwise hide behind: ops were
               // recovered, a chain was walked, a merge base was located, and the head the lanes
               // hang off really had two-parent nodes beneath it.
-              let mutable rng = ConfRng.ofSeed 1580
-              let mutable recovered = 0
-              let mutable chains = 0
-              let mutable mergeNodes = 0
-              let mutable pairs = 0
-
-              for i in 1..60 do
+              let planStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 3 r1
-                  rng <- r2
-                  let t = mergedDisagreements modelMergeBase planW planLaneGen.BaseOp round1 round2
 
-                  match t.Failures with
-                  | [] -> ()
-                  | d :: _ ->
-                      failtestf
-                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                  r2,
+                  mergedDisagreements
+                      modelMergeBase
+                      planW
+                      planLaneGen.BaseOp
+                      round1
+                      round2
+                      (sprintf
+                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s"
                           i
                           (renderLanes encPlanOp round1)
-                          (renderLanes encPlanOp round2)
-                          d
+                          (renderLanes encPlanOp round2))
+                      t
 
-                  recovered <- recovered + t.Recovered
-                  chains <- chains + t.Chains
-                  mergeNodes <- mergeNodes + t.MergeNodes
-                  pairs <- pairs + t.Pairs
-
-              for i in 1..30 do
+              let treeStep (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = treeLaneGen.Lanes 4 rng
                   let round2, r2 = treeLaneGen.Lanes 3 r1
-                  rng <- r2
-                  let t = mergedDisagreements modelMergeBase treeW treeLaneGen.BaseOp round1 round2
 
-                  match t.Failures with
-                  | [] -> ()
-                  | d :: _ ->
-                      failtestf
-                          "reference witness iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                  r2,
+                  mergedDisagreements
+                      modelMergeBase
+                      treeW
+                      treeLaneGen.BaseOp
+                      round1
+                      round2
+                      (sprintf
+                          "reference witness iter %d\nround one:\n%s\nround two:\n%s"
                           i
                           (renderLanes treeW.Encode round1)
-                          (renderLanes treeW.Encode round2)
-                          d
+                          (renderLanes treeW.Encode round2))
+                      t
 
-                  recovered <- recovered + t.Recovered
-                  chains <- chains + t.Chains
-                  mergeNodes <- mergeNodes + t.MergeNodes
-                  pairs <- pairs + t.Pairs
+              let r, t =
+                  Differential.seededFrom 60 (ConfRng.ofSeed 1580) planStep (Tally.empty mergedCounters)
 
+              let t = Differential.seeded 30 r treeStep t
+              Differential.expectAgrees "fold-pull-fold" t
+              let recovered = Tally.count "Recovered" t
               Expect.isGreaterThan recovered 0 (sprintf "no ops were recovered at all (recovered=%d)" recovered)
-              Expect.isGreaterThan chains 0 "no round-two lane was longer than one op, so no chain was walked"
-              Expect.isGreaterThan pairs 0 "no pair of round-two heads had its merge base located"
 
               Expect.isGreaterThan
-                  mergeNodes
+                  (Tally.count "Chains" t)
+                  0
+                  "no round-two lane was longer than one op, so no chain was walked"
+
+              Expect.isGreaterThan (Tally.count "Pairs" t) 0 "no pair of round-two heads had its merge base located"
+
+              Expect.isGreaterThan
+                  (Tally.count "MergeNodes" t)
                   0
                   "no merged head had a two-parent node beneath it, so this case re-measured Phase 134's base-plus-chains shape"
 
@@ -2240,14 +2206,9 @@ let tests =
               // deltas-first `reconcile_many` handed the round-two lanes directly — the theorem's
               // own right-hand side. Scripts are compared as scripts and halts as canonical
               // reports, exactly as the Phase 131 cases compare them.
-              let mutable rng = ConfRng.ofSeed 1581
-              let mutable folded = 0
-              let mutable halted = 0
-
-              for i in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 3 r1
-                  rng <- r2
                   let _, merged, _, heads2, dag = foldPullFold planW planLaneGen.BaseOp round1 round2
                   let model = toModelDag dag
 
@@ -2273,21 +2234,23 @@ let tests =
 
                   let deltasFirst = oracleScript planW planFootprint round2
 
-                  match production with
-                  | Ok _ -> folded <- folded + 1
-                  | Error _ -> halted <- halted + 1
-
-                  if production <> fromDag || fromDag <> deltasFirst then
-                      failtestf
+                  r2,
+                  t
+                  |> Tally.bump (if Result.isOk production then "Folded" else "Halted")
+                  |> Differential.check (production = fromDag && fromDag = deltasFirst) (fun () ->
+                      sprintf
                           "iter %d\nround one:\n%s\nround two:\n%s\n  production:   %A\n  model (DAG):  %A\n  deltas-first: %A"
                           i
                           (renderLanes encPlanOp round1)
                           (renderLanes encPlanOp round2)
                           production
                           fromDag
-                          deltasFirst
+                          deltasFirst)
 
-              Expect.isGreaterThan (folded + halted) 0 "some unions were folded"
+              let t = Differential.seeded 60 (ConfRng.ofSeed 1581) step foldTally
+              Differential.expectAgrees "the fold from a merged head" t
+              let folded = Tally.count "Folded" t
+              Expect.isGreaterThan (folded + Tally.count "Halted" t) 0 "some unions were folded"
               Expect.isGreaterThan folded 0 "no union folded clean, so no merge script was ever compared"
 
           testCase "a model whose mergeBase returns the BASE rather than the divergence point loses"
@@ -2299,59 +2262,62 @@ let tests =
               // divergence point from anything else the two heads share. Two things must lose —
               // the merge base itself, and the delta recovered from the base it names, which is
               // the whole of round one as well as the lane.
-              let mutable rng = ConfRng.ofSeed 1580
-              let mutable found = 0
-              let mutable namedTheBase = 0
-              let mutable longerDeltas = 0
-              let mutable example = ""
-
-              for _ in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 3 r1
-                  rng <- r2
-                  let t = mergedDisagreements shallowestCommon planW planLaneGen.BaseOp round1 round2
 
-                  match t.Failures with
-                  | [] -> ()
-                  | d :: _ ->
-                      found <- found + 1
-
-                      if example = "" then
-                          example <- d
+                  let t =
+                      mergedDisagreements
+                          shallowestCommon
+                          planW
+                          planLaneGen.BaseOp
+                          round1
+                          round2
+                          (sprintf "iter %d" i)
+                          t
 
                   let baseId, merged, _, heads2, dag =
                       foldPullFold planW planLaneGen.BaseOp round1 round2
 
                   let model = toModelDag dag
 
+                  r2,
                   match heads2 with
                   | h0 :: h1 :: _ ->
                       match shallowestCommon model model.nodes h0 h1 with
                       | Some wrong when wrong = baseId && baseId <> merged ->
-                          namedTheBase <- namedTheBase + 1
-
                           let fromWrong =
                               DagClosure.between_ops_drained ordLt (drainFuel model.nodes) model model.nodes wrong h0
 
-                          if fromWrong <> Dag.betweenOps dag merged h0 then
-                              longerDeltas <- longerDeltas + 1
-                      | _ -> ()
-                  | _ -> ()
+                          t
+                          |> Tally.bump "NamedTheBase"
+                          |> Tally.bumpIf (fromWrong <> Dag.betweenOps dag merged h0) "LongerDeltas"
+                      | _ -> t
+                  | _ -> t
 
-              Expect.isGreaterThan
-                  found
-                  0
+              let t =
+                  Differential.seeded
+                      60
+                      (ConfRng.ofSeed 1580)
+                      step
+                      (Tally.empty (mergedCounters @ [ "NamedTheBase"; "LongerDeltas" ]))
+
+              Differential.expectLoses
                   "a locator naming the SHALLOWEST common ancestor must disagree with production — this comparison cannot lose"
+                  t
 
-              Expect.stringContains example "the merge base differs" "the disagreement names what moved"
+              Expect.stringContains
+                  (List.head (Tally.disagreements t))
+                  "the merge base differs"
+                  "the disagreement names what moved"
 
               Expect.isGreaterThan
-                  namedTheBase
+                  (Tally.count "NamedTheBase" t)
                   0
                   "the reversed locator named the ORIGINAL BASE, which is the go-red the phase asks for"
 
               Expect.isGreaterThan
-                  longerDeltas
+                  (Tally.count "LongerDeltas" t)
                   0
                   "a delta recovered from the base rather than the divergence point must differ from production's"
 
@@ -2359,17 +2325,15 @@ let tests =
 
           testCase "the extracted reconcile partition is production's over the four shapes"
           <| fun _ ->
-              let mutable rng = ConfRng.ofSeed 3001
-              let mutable shared = 0
-
-              for _ in 1..40 do
+              let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r = planLaneGen.Lanes 4 rng
-                  rng <- r
 
                   let a, b, c, d =
                       List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
 
-                  for name, dag, baseId, heads in reconcileShapes a b c d do
+                  r,
+                  t
+                  |> Differential.over (reconcileShapes a b c d) (fun (name, dag, baseId, heads) t ->
                       let production =
                           match heads with
                           | [ h1; h2 ] -> Dag.reconcile blindPlanFootprint dag baseId h1 h2
@@ -2377,35 +2341,39 @@ let tests =
 
                       let model = modelReconcileOps dag baseId heads
 
-                      Expect.equal
-                          production
-                          (Ok model)
-                          (sprintf "%s: production's script is the model's partition" name)
-
                       // the old rule — each lane's whole delta, concatenated — is what the model is
                       // measured AGAINST: over a shape whose heads share history it must differ
                       let old = heads |> List.collect (Dag.betweenOps dag baseId)
 
-                      if old <> model then
-                          shared <- shared + 1
+                      t
+                      |> Differential.check (production = Ok model) (fun () ->
+                          sprintf
+                              "%s: production's script is the model's partition\n  production: %A\n  the model:  %A"
+                              name
+                              production
+                              model)
+                      |> Tally.bumpIf (old <> model) "Shared")
 
-              Expect.isGreaterThan shared 0 "the pool reached a shape where the old rule applied shared history twice"
+              let t = Differential.seeded 40 (ConfRng.ofSeed 3001) step (Tally.empty [ "Shared" ])
+              Differential.expectAgrees "the reconcile partition" t
+
+              Expect.isGreaterThan
+                  (Tally.count "Shared" t)
+                  0
+                  "the pool reached a shape where the old rule applied shared history twice"
 
           testCase
               "the extracted fold and production refuse a rejecting-lane pool identically, under every arrival order"
           <| fun _ ->
-              let mutable rng = ConfRng.ofSeed 3002
-              let mutable refused = 0
               let rejecting = [ Retitle("missing", "x") ]
 
-              for i in 1..40 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes0, r = planLaneGen.Lanes 3 rng
-                  rng <- r
                   // a lane that does not apply from the base, at a position that moves
                   let at = i % (List.length lanes0 + 1)
                   let lanes = List.take at lanes0 @ [ rejecting ] @ List.skip at lanes0
 
-                  let outcomes =
+                  let runs =
                       FoldConfluence.arrivalOrders (List.length lanes)
                       |> List.map (fun p ->
                           let ls = p |> List.map (fun k -> List.item k lanes)
@@ -2413,18 +2381,37 @@ let tests =
                           let production =
                               productionFold planW planFootprint planHash basePlan planLaneGen.BaseOp ls
 
-                          let oracle = oracleFold planW planFootprint planHash basePlan ls
-                          Expect.equal oracle production "the extracted fold renders what production renders"
-                          production)
-                      |> List.distinct
+                          p, production, oracleFold planW planFootprint planHash basePlan ls)
 
-                  Expect.equal (List.length outcomes) 1 "one outcome under every arrival order"
+                  let outcomes =
+                      runs |> List.map (fun (_, production, _) -> production) |> List.distinct
 
-                  match outcomes with
-                  | [ LaneRejected report ] when report.Contains "T|missing|x" -> refused <- refused + 1
-                  | _ -> ()
+                  r,
+                  t
+                  |> Differential.over runs (fun (p, production, oracle) t ->
+                      Differential.check
+                          (oracle = production)
+                          (fun () ->
+                              sprintf
+                                  "iter %d, order %A: the extracted fold renders what production renders\n  production: %A\n  oracle:     %A"
+                                  i
+                                  p
+                                  production
+                                  oracle)
+                          t)
+                  |> Differential.check (List.length outcomes = 1) (fun () ->
+                      sprintf "iter %d: one outcome under every arrival order, got %A" i outcomes)
+                  |> Tally.bumpIf
+                      (match outcomes with
+                       | [ LaneRejected report ] when report.Contains "T|missing|x" -> true
+                       | _ -> false)
+                      "Refused"
 
-              Expect.isGreaterThan refused 0 "the pool reached the refusal it exists to measure"
+              let t =
+                  Differential.seeded 40 (ConfRng.ofSeed 3002) step (Tally.empty [ "Refused" ])
+
+              Differential.expectAgrees "the rejecting-lane pool" t
+              Expect.isGreaterThan (Tally.count "Refused" t) 0 "the pool reached the refusal it exists to measure"
 
           // ---- Phase 437: the lane-DAG primitives beside sections 18 to 21 ----
 
@@ -2435,12 +2422,8 @@ let tests =
               // extracted one over two merges of the same two lanes, and the answer checked to be a
               // common ancestor no other common ancestor descends from. The guard: the pool reached
               // pairs with SEVERAL maximal common ancestors, where the tie-break genuinely decides.
-              let mutable rng = ConfRng.ofSeed 4370
-              let mutable crissCrossed = 0
-
-              for i in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r = planLaneGen.Lanes 4 rng
-                  rng <- r
 
                   let a, b, c, d =
                       List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
@@ -2448,14 +2431,7 @@ let tests =
                   let h1, h2, dag = crissCross planW planLaneGen.BaseOp a b c d
                   let production = Dag.mergeBase dag h1 h2
                   let model = modelMergeBaseOf dag h1 h2
-
-                  Expect.equal model production (sprintf "iter %d: the extracted merge_base_now is production's" i)
-
-                  Expect.equal
-                      (Dag.Reach.mergeBase (Dag.Reach.ofDag dag) h1 h2)
-                      production
-                      (sprintf "iter %d: the index answers alike" i)
-
+                  let index = Dag.Reach.mergeBase (Dag.Reach.ofDag dag) h1 h2
                   let common = Set.intersect (Dag.ancestorsOf dag h1) (Dag.ancestorsOf dag h2)
 
                   let maximal =
@@ -2464,15 +2440,34 @@ let tests =
                           common
                           |> Set.forall (fun y -> y = x || not (Set.contains x (Dag.ancestorsOf dag y))))
 
-                  match production with
-                  | None -> Expect.isTrue (Set.isEmpty common) "a refusal only over disjoint histories"
-                  | Some mb ->
-                      Expect.isTrue (Set.contains mb maximal) (sprintf "iter %d: %s is a maximal common ancestor" i mb)
+                  r,
+                  t
+                  |> Differential.check (model = production) (fun () ->
+                      sprintf
+                          "iter %d: the extracted merge_base_now is production's\n  production: %A\n  the model:  %A"
+                          i
+                          production
+                          model)
+                  |> Differential.check (index = production) (fun () ->
+                      sprintf "iter %d: the index answers alike\n  production: %A\n  the index:  %A" i production index)
+                  |> (match production with
+                      | None ->
+                          Differential.check (Set.isEmpty common) (fun () ->
+                              sprintf "iter %d: a refusal only over disjoint histories" i)
+                      | Some mb ->
+                          Differential.check (Set.contains mb maximal) (fun () ->
+                              sprintf "iter %d: %s is a maximal common ancestor" i mb))
+                  |> Tally.bumpIf (Set.count maximal >= 2) "CrissCrossed"
 
-                  if Set.count maximal >= 2 then
-                      crissCrossed <- crissCrossed + 1
+              let t =
+                  Differential.seeded 60 (ConfRng.ofSeed 4370) step (Tally.empty [ "CrissCrossed" ])
 
-              Expect.isGreaterThan crissCrossed 0 "the pool reached a pair with two maximal common ancestors"
+              Differential.expectAgrees "merge_base_now over criss-crosses" t
+
+              Expect.isGreaterThan
+                  (Tally.count "CrissCrossed" t)
+                  0
+                  "the pool reached a pair with two maximal common ancestors"
 
           testCase "the extracted conflicts_of_heads is production's Dag.conflictsOfHeads over the four shapes"
           <| fun _ ->
@@ -2481,53 +2476,55 @@ let tests =
               // footprint, read canonically (the model's set algebra lists a member once per clause it
               // fails). And the theorem's corollary on production: the report is empty exactly when
               // `reconcileMany` does not refuse with `LanesInterfere`.
-              let mutable rng = ConfRng.ofSeed 4371
-              let mutable reported = 0
-              let mutable clean = 0
-
-              for i in 1..60 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let lanes, r = planLaneGen.Lanes 4 rng
-                  rng <- r
 
                   let a, b, c, d =
                       List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
 
-                  for name, dag, baseId, heads in reconcileShapes a b c d do
+                  r,
+                  t
+                  |> Differential.over (reconcileShapes a b c d) (fun (name, dag, baseId, heads) t ->
                       let production = productionHeadsReport planFootprint dag baseId heads
                       let model = modelHeadsReport planFootprint dag baseId heads
-
-                      Expect.equal model production (sprintf "iter %d, %s: the report is production's" i name)
 
                       let interferes =
                           match Dag.reconcileMany planW planFootprint dag baseId planLaneGen.State0 heads with
                           | Error(ReconcileFault.LanesInterfere _) -> true
                           | _ -> false
 
-                      Expect.equal
-                          (not (List.isEmpty production))
-                          interferes
-                          (sprintf "iter %d, %s: a report exactly when reconcileMany refuses with LanesInterfere" i name)
+                      t
+                      |> Differential.check (model = production) (fun () ->
+                          sprintf
+                              "iter %d, %s: the report is production's\n  production: %A\n  the model:  %A"
+                              i
+                              name
+                              production
+                              model)
+                      |> Differential.check (not (List.isEmpty production) = interferes) (fun () ->
+                          sprintf
+                              "iter %d, %s: a report exactly when reconcileMany refuses with LanesInterfere (report %A, interferes %b)"
+                              i
+                              name
+                              production
+                              interferes)
+                      |> Tally.bump (if List.isEmpty production then "Clean" else "Reported"))
 
-                      if List.isEmpty production then
-                          clean <- clean + 1
-                      else
-                          reported <- reported + 1
+              let t =
+                  Differential.seeded 60 (ConfRng.ofSeed 4371) step (Tally.empty [ "Reported"; "Clean" ])
 
-              Expect.isGreaterThan reported 0 "the pool reached interfering heads"
-              Expect.isGreaterThan clean 0 "the pool reached heads that do not interfere"
+              Differential.expectAgrees "conflicts_of_heads" t
+              Expect.isGreaterThan (Tally.count "Reported" t) 0 "the pool reached interfering heads"
+              Expect.isGreaterThan (Tally.count "Clean" t) 0 "the pool reached heads that do not interfere"
 
           testCase "the extracted reachability index answers production's Reach and the walk over every pair"
           <| fun _ ->
               // `reach_of_dag_agrees`, measured: every ordered pair of ids, and an absent id, over
               // fold-pull-fold DAGs with a side merge and over criss-crosses.
-              let mutable rng = ConfRng.ofSeed 4372
-              let mutable positives = 0
-
-              for i in 1..30 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 3 r1
                   let cc, r3 = planLaneGen.Lanes 4 r2
-                  rng <- r3
                   let _, _, _, _, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
 
                   let _, _, ccDag =
@@ -2539,12 +2536,16 @@ let tests =
                           (List.item 2 cc)
                           (List.item 3 cc)
 
-                  for label, d in [ "fold-pull-fold", dag; "criss-cross", ccDag ] do
-                      match reachDisagreements d with
-                      | [], n -> positives <- positives + n
-                      | f :: _, _ -> failtestf "iter %d, %s: %s" i label f
+                  r3,
+                  t
+                  |> Differential.over [ "fold-pull-fold", dag; "criss-cross", ccDag ] (fun (label, d) t ->
+                      reachDisagreements (sprintf "iter %d, %s" i label) d t)
 
-              Expect.isGreaterThan positives 0 "some pairs were ancestors"
+              let t =
+                  Differential.seeded 30 (ConfRng.ofSeed 4372) step (Tally.empty [ "Positives" ])
+
+              Differential.expectAgrees "the reachability index" t
+              Expect.isGreaterThan (Tally.count "Positives" t) 0 "some pairs were ancestors"
 
           testCase "the extracted checkpoint, replay_from and truncation are production's over every node and head"
           <| fun _ ->
@@ -2552,72 +2553,62 @@ let tests =
               // id) as a head, on fold-pull-fold DAGs with a side merge — so the replay meets a covered
               // head, a head below the checkpoint and a branch from below it — and `compactAt` at every
               // node, its kept set held to the model's contract and its replays to the full DAG's.
-              let tally =
-                  { Resumed = 0
-                    Uncovered = 0
-                    Unreached = 0
-                    Compacted = 0
-                    Banded = 0
-                    CutRefused = 0 }
-
-              let mutable rng = ConfRng.ofSeed 4373
-
-              for i in 1..25 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
-                  rng <- r2
 
                   let _, _, _, heads2, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
 
-                  match checkpointDisagreements planW planHash planLaneGen.State0 tally dag heads2 with
-                  | [] -> ()
-                  | f :: _ ->
-                      failtestf
-                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                  let where =
+                      sprintf
+                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s"
                           i
                           (renderLanes encPlanOp round1)
                           (renderLanes encPlanOp round2)
-                          f
 
-              Expect.isGreaterThan tally.Resumed 0 "some replays resumed from a checkpoint"
-              Expect.isGreaterThan tally.Uncovered 0 "the branch-from-below refusal was reached"
-              Expect.isGreaterThan tally.Unreached 0 "the unreached refusal was reached"
-              Expect.isGreaterThan tally.Compacted 0 "some compactions succeeded"
-              Expect.isGreaterThan tally.Banded 0 "some compaction kept a band behind its node"
-              Expect.isGreaterThan tally.CutRefused 0 "some compaction was refused as uncovered"
+                  r2, checkpointDisagreements planW planHash planLaneGen.State0 where dag heads2 t
+
+              let t = Differential.seeded 25 (ConfRng.ofSeed 4373) step checkpointTally
+              Differential.expectAgrees "checkpoints" t
+              Expect.isGreaterThan (Tally.count "Resumed" t) 0 "some replays resumed from a checkpoint"
+              Expect.isGreaterThan (Tally.count "Uncovered" t) 0 "the branch-from-below refusal was reached"
+              Expect.isGreaterThan (Tally.count "Unreached" t) 0 "the unreached refusal was reached"
+              Expect.isGreaterThan (Tally.count "Compacted" t) 0 "some compactions succeeded"
+              Expect.isGreaterThan (Tally.count "Banded" t) 0 "some compaction kept a band behind its node"
+              Expect.isGreaterThan (Tally.count "CutRefused" t) 0 "some compaction was refused as uncovered"
 
           testCase "a model checkpoint sealed at ANOTHER node loses — the measurement can fail"
           <| fun _ ->
               // The go-red of theorem 1, at the differential: the checkpoint production took, handed to
               // the model with its node moved to the base — the state of one node sealed at another.
-              let mutable rng = ConfRng.ofSeed 4374
-              let mutable lost = 0
-
-              for _ in 1..20 do
+              let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
-                  rng <- r2
 
                   let baseId, merged, _, heads2, dag =
                       foldPullFold planW planLaneGen.BaseOp round1 round2
 
                   let model = toModelDag dag
 
+                  r2,
                   match Dag.checkpointAt OpStream.defaultHash planHash planW planLaneGen.State0 dag merged with
                   | Ok cp ->
                       let moved =
                           { toModelCheckpoint cp with
                               DagClosure.cnode = baseId }
 
-                      for t in heads2 do
-                          let p = renderProductionFrom planHash t (Dag.replayFrom planW cp dag t)
-                          let m = renderModelFrom planHash (modelReplayFrom planW model moved t)
+                      t
+                      |> Differential.over heads2 (fun head t ->
+                          Differential.compare
+                              (resume planHash head)
+                              (sprintf "replayFrom %s -> %s" merged head)
+                              (Dag.replayFrom planW cp dag head)
+                              (modelReplayFrom planW model moved head)
+                              t)
+                  | Error _ -> t // the merged history does not replay in this domain: no checkpoint to move
 
-                          if p <> m then
-                              lost <- lost + 1
-                  | Error _ -> () // the merged history does not replay in this domain: no checkpoint to move
-
-              Expect.isGreaterThan lost 0 "a checkpoint sealed at the wrong node disagrees with production"
+              let t = Differential.seeded 20 (ConfRng.ofSeed 4374) step (Tally.empty [])
+              Differential.expectLoses "a checkpoint sealed at the wrong node disagrees with production" t
 
           testCase "the extracted mergeBase, commonBase and index queries are production's over every pair and head set"
           <| fun _ ->
@@ -2626,14 +2617,10 @@ let tests =
               // criss-crosses — every ordered pair of ids, an absent id, and head sets of three or
               // more, a repeated head and an absent head included. The guards: some pairs share a
               // base and some do not, some deltas are non-empty, and some N-head base was found.
-              let tally = newBoundaryTally ()
-              let mutable rng = ConfRng.ofSeed 4570
-
-              for i in 1..12 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
                   let cc, r3 = planLaneGen.Lanes 4 r2
-                  rng <- r3
 
                   let _, _, heads1, heads2, dag =
                       foldPullFoldSide planW planLaneGen.BaseOp round1 round2
@@ -2647,15 +2634,26 @@ let tests =
                           (List.item 2 cc)
                           (List.item 3 cc)
 
-                  for label, d, hs in [ "fold-pull-fold", dag, heads1 @ heads2; "criss-cross", ccDag, [ h1; h2 ] ] do
-                      match boundaryDisagreements planW planHash planLaneGen.State0 tally d hs with
-                      | [] -> ()
-                      | f :: _ -> failtestf "iter %d, %s: %s" i label f
+                  r3,
+                  t
+                  |> Differential.over
+                      [ "fold-pull-fold", dag, heads1 @ heads2; "criss-cross", ccDag, [ h1; h2 ] ]
+                      (fun (label, d, hs) t ->
+                          boundaryDisagreements
+                              planW
+                              planHash
+                              planLaneGen.State0
+                              (sprintf "iter %d, %s" i label)
+                              d
+                              hs
+                              t)
 
-              Expect.isGreaterThan tally.Based 0 "some pairs share a base"
-              Expect.isGreaterThan tally.Disjoint 0 "some pairs refuse"
-              Expect.isGreaterThan tally.Deltas 0 "some deltas are non-empty"
-              Expect.isGreaterThan tally.NHead 0 "some head set of three or more has a common base"
+              let t = Differential.seeded 12 (ConfRng.ofSeed 4570) step boundaryTally
+              Differential.expectAgrees "the lane-DAG boundaries" t
+              Expect.isGreaterThan (Tally.count "Based" t) 0 "some pairs share a base"
+              Expect.isGreaterThan (Tally.count "Disjoint" t) 0 "some pairs refuse"
+              Expect.isGreaterThan (Tally.count "Deltas" t) 0 "some deltas are non-empty"
+              Expect.isGreaterThan (Tally.count "NHead" t) 0 "some head set of three or more has a common base"
 
           testCase "the extracted cut keeps production's set at every node, and refuses where production refuses"
           <| fun _ ->
@@ -2663,35 +2661,27 @@ let tests =
               // DAGs with a side merge, its kept set equal to the extracted `cut_keep`'s and its
               // refusal naming the same node. The guards: a compaction kept a band behind its node,
               // and a compaction was refused as uncovered.
-              let tally = newBoundaryTally ()
-              let mutable rng = ConfRng.ofSeed 4571
-
-              for i in 1..12 do
+              let step (i: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
-                  rng <- r2
                   let _, _, _, heads2, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
 
-                  match boundaryDisagreements planW planHash planLaneGen.State0 tally dag heads2 with
-                  | [] -> ()
-                  | f :: _ -> failtestf "iter %d: %s" i f
+                  r2, boundaryDisagreements planW planHash planLaneGen.State0 (sprintf "iter %d" i) dag heads2 t
 
-              Expect.isGreaterThan tally.Kept 0 "some compactions succeeded"
-              Expect.isGreaterThan tally.Banded 0 "some compaction kept a band behind its node"
-              Expect.isGreaterThan tally.Refused 0 "some compaction was refused as uncovered"
+              let t = Differential.seeded 12 (ConfRng.ofSeed 4571) step boundaryTally
+              Differential.expectAgrees "the cut" t
+              Expect.isGreaterThan (Tally.count "Kept" t) 0 "some compactions succeeded"
+              Expect.isGreaterThan (Tally.count "Banded" t) 0 "some compaction kept a band behind its node"
+              Expect.isGreaterThan (Tally.count "Refused" t) 0 "some compaction was refused as uncovered"
 
           testCase "an index between that drops one node loses — the measurement can fail"
           <| fun _ ->
               // The go-red of `reach_between_agrees`, at the differential: the extracted index's
               // delta with its first node dropped disagrees with production wherever the delta is
               // non-empty. The proof leg carries the same go-red, run by Phase 457 against the model.
-              let mutable rng = ConfRng.ofSeed 4572
-              let mutable lost = 0
-
-              for _ in 1..10 do
+              let step (_: int) (rng: ConfRng.T) (t: Tally) =
                   let round1, r1 = planLaneGen.Lanes 3 rng
                   let round2, r2 = planLaneGen.Lanes 2 r1
-                  rng <- r2
                   let _, _, _, _, dag = foldPullFoldSide planW planLaneGen.BaseOp round1 round2
                   let model = toModelDag dag
                   let fuel = drainFuel model.nodes
@@ -2700,15 +2690,22 @@ let tests =
                   let reach = Dag.Reach.ofDag dag
                   let held = dag.Nodes |> Map.toList |> List.map fst
 
-                  for a in held do
-                      for b in held do
-                          let dropped =
-                              match DagPrimitives.reach_between ordLt fuel model fuel idx ord a b with
-                              | [] -> []
-                              | _ :: rest -> rest
-                              |> List.map (fun n -> n.nid)
+                  r2,
+                  t
+                  |> Differential.over (List.allPairs held held) (fun (a, b) t ->
+                      let dropped =
+                          match DagPrimitives.reach_between ordLt fuel model fuel idx ord a b with
+                          | [] -> []
+                          | _ :: rest -> rest
+                          |> List.map (fun n -> n.nid)
 
-                          if dropped <> (Dag.Reach.between reach a b |> List.map _.Id) then
-                              lost <- lost + 1
+                      let production = Dag.Reach.between reach a b |> List.map _.Id
 
-              Expect.isGreaterThan lost 0 "an index between that drops a node disagrees with production" ]
+                      Differential.check
+                          (dropped = production)
+                          (fun () ->
+                              sprintf "between %s %s: production %A, the dropping index %A" a b production dropped)
+                          t)
+
+              let t = Differential.seeded 10 (ConfRng.ofSeed 4572) step (Tally.empty [])
+              Differential.expectLoses "an index between that drops a node disagrees with production" t ]

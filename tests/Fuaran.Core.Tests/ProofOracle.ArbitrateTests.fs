@@ -82,30 +82,19 @@ let private arbitrateAcceptingConflicts (baseTree: TreeOps.tree) (ps: Arbitrate.
       Arbitrate.arbitration.merged = Arbitrate.collect_scripts accepted
       Arbitrate.arbitration.rejected = Arbitrate.recite_all accepted (ListAlgebra.rev rejRev) }
 
-type private ArbTally =
-    {
-        Diffs: string list
-        Sets: int
-        Accepted: int
-        Inapplicable: int
-        Conflicting: int
-        /// Sets carrying a repeated id — the stable sort's tie-break was compared on these.
-        Duplicated: int
-        /// Sets where the shipped `duplicateIds` and the model's `distinct_ids` disagreed.
-        HypothesisDiffs: string list
-        /// Sets where an extracted theorem predicate was FALSE of production's own result.
-        TheoremBreaks: string list
-    }
+/// The arbitration's render pair — one line per accepted proposal, the merged script, one per
+/// rejection with its reason.
+let private arbitration: Differential<Arbitration<RNode, string>, Arbitrate.arbitration> =
+    Differential.pair
+        (renderProdArbitration >> String.concat "\n    ")
+        (renderModelArbitration >> String.concat "\n    ")
 
-let private emptyArbTally =
-    { Diffs = []
-      Sets = 0
-      Accepted = 0
-      Inapplicable = 0
-      Conflicting = 0
-      Duplicated = 0
-      HypothesisDiffs = []
-      TheoremBreaks = [] }
+/// The arbitration tally: the sets drawn and the three verdict buckets reached, the repeated-id
+/// sets, and two further finding classes — the shipped hypothesis check against the model's, and
+/// the extracted theorem predicates asked of production's own result.
+let private arbTally =
+    Tally.empty [ "Sets"; "Accepted"; "Inapplicable"; "Conflicting"; "Duplicated" ]
+    |> Tally.classes [ "hypothesis"; "theorem" ]
 
 /// One generated proposal set: `count` scripts off the base, ~1 in 4 corrupted, under `ids`.
 let private genProposalSet (uniqueIds: bool) (r0: ConfRng.T) : ArbProposal list * ConfRng.T =
@@ -148,85 +137,84 @@ let private arbitrationDifferential
     (modelArbitrate: TreeOps.tree -> Arbitrate.proposal list -> Arbitrate.arbitration)
     (seed: int)
     (trials: int)
-    : ArbTally =
-    let mutable r = ConfRng.ofSeed seed
-    let mutable tally = emptyArbTally
+    : Tally =
     let mbase = toModelTree treeBase
 
-    for uniqueIds in [ true; false ] do
-        for t in 1..trials do
-            let proposals, r' = genProposalSet uniqueIds r
-            r <- r'
+    let step (uniqueIds: bool) (i: int) (r: ConfRng.T) (t: Tally) =
+        let proposals, r' = genProposalSet uniqueIds r
 
-            let prod =
-                Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) treeBase proposals
+        let prod =
+            Arbitration.arbitrate Policy.none (OpScope.plain nodew idw) treeBase proposals
 
-            let mps = proposals |> List.map toModelProposal
-            let p = renderProdArbitration prod
-            let m = renderModelArbitration (modelArbitrate mbase mps)
+        let mps = proposals |> List.map toModelProposal
 
-            let where =
-                sprintf "seed=%d mode=%s trial=%d" seed (if uniqueIds then "unique" else "duplicated") t
+        let where =
+            sprintf "seed=%d mode=%s trial=%d" seed (if uniqueIds then "unique" else "duplicated") i
 
-            let diffs =
-                if p <> m then
-                    [ sprintf
-                          "arbitration differs — %s\n  production:\n    %s\n  oracle:\n    %s"
-                          where
-                          (String.concat "\n    " p)
-                          (String.concat "\n    " m) ]
-                else
-                    []
+        // the shipped check IS the theorem's hypothesis, read off the extracted predicate
+        let dups = Arbitration.duplicateIds proposals
+        // the extracted theorem predicates, asked of PRODUCTION's result bridged across
+        let prodAccepted = prod.Accepted |> List.map toModelProposal
 
-            // the shipped check IS the theorem's hypothesis, read off the extracted predicate
-            let dups = Arbitration.duplicateIds proposals
+        let rejectedBy (isClass: ArbitrationRejection<string> -> bool) =
+            prod.Rejected |> List.filter (snd >> isClass) |> List.length
 
-            let hypothesisDiffs =
+        let theorem (holds: bool) (what: string) (t: Tally) =
+            if holds then
+                t
+            else
+                Tally.record "theorem" (sprintf "%s — %s" what where) t
+
+        let t =
+            t
+            |> Differential.compareWith
+                arbitration
+                (fun p m -> sprintf "arbitration differs — %s\n  production:\n    %s\n  oracle:\n    %s" where p m)
+                prod
+                (modelArbitrate mbase mps)
+            |> fun t ->
                 if List.isEmpty dups <> Arbitrate.distinct_ids mps then
-                    [ sprintf
-                          "duplicateIds = %A but the model's distinct_ids = %b — %s"
-                          dups
-                          (Arbitrate.distinct_ids mps)
-                          where ]
+                    Tally.record
+                        "hypothesis"
+                        (sprintf
+                            "duplicateIds = %A but the model's distinct_ids = %b — %s"
+                            dups
+                            (Arbitrate.distinct_ids mps)
+                            where)
+                        t
                 else
-                    []
+                    t
+            |> theorem
+                (Arbitrate.pairwise_independent prodAccepted)
+                "pairwise_independent is FALSE of production's accepted set"
+            |> theorem
+                (Arbitrate.all_applicable mbase prodAccepted)
+                "all_applicable is FALSE of production's accepted set"
+            |> theorem
+                (List.length prod.Accepted + List.length prod.Rejected = List.length proposals)
+                "the partition is not total"
+            |> Tally.bump "Sets"
+            |> Tally.add "Accepted" (List.length prod.Accepted)
+            |> Tally.add
+                "Inapplicable"
+                (rejectedBy (function
+                    | Inapplicable _ -> true
+                    | Conflicts _ -> false))
+            |> Tally.add
+                "Conflicting"
+                (rejectedBy (function
+                    | Conflicts _ -> true
+                    | Inapplicable _ -> false))
+            |> Tally.bumpIf (not (List.isEmpty dups)) "Duplicated"
 
-            // the extracted theorem predicates, asked of PRODUCTION's result bridged across
-            let prodAccepted = prod.Accepted |> List.map toModelProposal
+        r', t
 
-            let theoremBreaks =
-                [ if not (Arbitrate.pairwise_independent prodAccepted) then
-                      yield sprintf "pairwise_independent is FALSE of production's accepted set — %s" where
-                  if not (Arbitrate.all_applicable mbase prodAccepted) then
-                      yield sprintf "all_applicable is FALSE of production's accepted set — %s" where
-                  if List.length prod.Accepted + List.length prod.Rejected <> List.length proposals then
-                      yield sprintf "the partition is not total — %s" where ]
+    let mode (uniqueIds: bool) (r0: ConfRng.T, t0: Tally) =
+        Differential.seededFrom trials r0 (step uniqueIds) t0
 
-            tally <-
-                { Diffs = tally.Diffs @ diffs
-                  Sets = tally.Sets + 1
-                  Accepted = tally.Accepted + List.length prod.Accepted
-                  Inapplicable =
-                    tally.Inapplicable
-                    + (prod.Rejected
-                       |> List.filter (fun (_, w) ->
-                           match w with
-                           | Inapplicable _ -> true
-                           | Conflicts _ -> false)
-                       |> List.length)
-                  Conflicting =
-                    tally.Conflicting
-                    + (prod.Rejected
-                       |> List.filter (fun (_, w) ->
-                           match w with
-                           | Conflicts _ -> true
-                           | Inapplicable _ -> false)
-                       |> List.length)
-                  Duplicated = tally.Duplicated + (if List.isEmpty dups then 0 else 1)
-                  HypothesisDiffs = tally.HypothesisDiffs @ hypothesisDiffs
-                  TheoremBreaks = tally.TheoremBreaks @ theoremBreaks }
-
-    tally
+    // the generator state runs on across the two modes, as it always has
+    let r = ConfRng.ofSeed seed
+    (r, arbTally) |> mode true |> mode false |> snd
 
 /// The model's witness trees and proposals, as production values — so a finding proved about the
 /// model is pinned on the shipped function over the SAME inputs.
@@ -262,29 +250,23 @@ let tests =
               // a differential that met no conflict would agree about nothing worth agreeing on.
               let t = arbitrationDifferential Arbitrate.arbitrate 1570 150
 
-              if not (List.isEmpty t.Diffs) then
-                  failtestf
-                      "the arbitration oracle DISAGREES with production on %d of %d sets:\n%s"
-                      (List.length t.Diffs)
-                      t.Sets
-                      (t.Diffs |> List.truncate 3 |> String.concat "\n")
-
-              Expect.equal t.Sets 300 "both id modes ran"
-              Expect.isGreaterThan t.Accepted 0 "the sample accepted something"
-              Expect.isGreaterThan t.Inapplicable 0 "the sample reached an Inapplicable rejection"
-              Expect.isGreaterThan t.Conflicting 0 "the sample reached a Conflicts rejection"
+              Differential.expectAgrees "arbitration" t
+              Expect.equal (Tally.count "Sets" t) 300 "both id modes ran"
+              Expect.isGreaterThan (Tally.count "Accepted" t) 0 "the sample accepted something"
+              Expect.isGreaterThan (Tally.count "Inapplicable" t) 0 "the sample reached an Inapplicable rejection"
+              Expect.isGreaterThan (Tally.count "Conflicting" t) 0 "the sample reached a Conflicts rejection"
 
               Expect.isGreaterThan
-                  t.Duplicated
+                  (Tally.count "Duplicated" t)
                   0
                   "the sample reached a repeated id — the stable sort's tie-break was compared"
 
               Expect.isEmpty
-                  t.HypothesisDiffs
+                  (Tally.findings "hypothesis" t)
                   "Arbitration.duplicateIds is empty EXACTLY when the model's distinct_ids holds — the shipped check is the theorem's hypothesis"
 
               Expect.isEmpty
-                  t.TheoremBreaks
+                  (Tally.findings "theorem" t)
                   "the extracted theorem predicates hold of production's own result, on every set, repeated ids included"
 
           testCase "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail"
@@ -295,15 +277,18 @@ let tests =
               let t = arbitrationDifferential arbitrateAcceptingConflicts 1570 150
 
               Expect.isGreaterThan
-                  t.Conflicting
+                  (Tally.count "Conflicting" t)
                   0
                   "the go-red run reached a conflicting pair at all — otherwise it proves nothing"
 
-              Expect.isNonEmpty t.Diffs "a model that accepts a conflicting pair DISAGREES with production"
+              Differential.expectLoses "a model that accepts a conflicting pair" t
 
               // and it disagrees on exactly the sets that held a conflict — never on one that did not
               let clean = arbitrationDifferential Arbitrate.arbitrate 1570 150
-              Expect.isEmpty clean.Diffs "the same sample under the real model agrees, so the loss is the instrument's"
+
+              Expect.isEmpty
+                  (Tally.disagreements clean)
+                  "the same sample under the real model agrees, so the loss is the instrument's"
 
           testCase "the id-uniqueness hypothesis is NEEDED, on the shipped function — `duplicate_ids_break_invariance`"
           <| fun _ ->

@@ -312,32 +312,33 @@ let private errorProbes
 
           yield "resolvesIn " + name, string (DecodeError.resolvesIn el e), string (M.resolves_in m me) ]
 
-type private DecoderTally =
-    { Diffs: string list
-      Probes: int
-      Refusals: int
-      Unresolved: string list
-      Codes: Set<string> }
+/// The decoder tally: the probes asked of both sides, the production refusals held to
+/// `resolvesIn`, the codes they reached, and the refusals that do not resolve (theorem 3's
+/// statement, production only).
+let private decoderTally =
+    Tally.empty [ "Probes"; "Refusals" ]
+    |> Tally.sets [ "Codes" ]
+    |> Tally.classes [ "unresolved" ]
 
 /// Both sides over a generated pool; and the theorem-3 statement held to every refusal
 /// PRODUCTION's sound combinators answer (the ones the model proves sound without a premise).
-let private decoderPool (seed: int) (n: int) (drop: M.derr -> M.derr) : DecoderTally =
-    let rng = System.Random seed
-    let diffs = ResizeArray()
-    let unresolved = ResizeArray()
-    let mutable probes = 0
-    let mutable refusals = 0
-    let mutable codes = Set.empty
-
-    for _ in 1..n do
+let private decoderPool (seed: int) (n: int) (drop: M.derr -> M.derr) : Tally =
+    let step (_: int) (rng: System.Random) (t: Tally) =
         let el = genJVal rng 3
         let path = genPath rng
 
-        for name, p, o in decoderProbes drop el path @ errorProbes el path (genPath rng) do
-            probes <- probes + 1
-
-            if p <> o then
-                diffs.Add(sprintf "%s over %s at %s: production %s, model %s" name (jr el) (DecodePath.render path) p o)
+        // each probe is already rendered by the combinator's own pair of renderers
+        let t =
+            t
+            |> Differential.over (decoderProbes drop el path @ errorProbes el path (genPath rng)) (fun (name, p, o) t ->
+                t
+                |> Tally.bump "Probes"
+                |> Differential.compareWith
+                    Differential.text
+                    (fun p o ->
+                        sprintf "%s over %s at %s: production %s, model %s" name (jr el) (DecodePath.render path) p o)
+                    p
+                    o)
 
         let sound: Result<obj, DecodeError> list =
             [ Decoder.field "a" (Decoder.field "b" Decoder.str) el |> Result.map box
@@ -355,23 +356,27 @@ let private decoderPool (seed: int) (n: int) (drop: M.derr -> M.derr) : DecoderT
               | Ok _ -> ()
               yield! Decoder.undeclared [ "a" ] el ]
 
-        for e in
+        let refusals =
             (sound
              |> List.choose (function
                  | Error e -> Some e
                  | Ok _ -> None))
-            @ collected do
-            refusals <- refusals + 1
-            codes <- codes.Add(DecodeError.codeName e.Code)
+            @ collected
 
-            if not (DecodeError.resolvesIn el e) || e.Code = DecodeCode.InvalidJson then
-                unresolved.Add(sprintf "%s over %s" (DecodeError.render e) (jr el))
+        let t =
+            t
+            |> Differential.over refusals (fun e t ->
+                let t =
+                    t |> Tally.bump "Refusals" |> Tally.reach "Codes" (DecodeError.codeName e.Code)
 
-    { Diffs = List.ofSeq diffs
-      Probes = probes
-      Refusals = refusals
-      Unresolved = List.ofSeq unresolved
-      Codes = codes }
+                if not (DecodeError.resolvesIn el e) || e.Code = DecodeCode.InvalidJson then
+                    Tally.record "unresolved" (sprintf "%s over %s" (DecodeError.render e) (jr el)) t
+                else
+                    t)
+
+        rng, t
+
+    Differential.seeded n (System.Random seed) step decoderTally
 
 // ---------------------------------------------------------------------------
 //  2. The codec combinators, beside `Codec`, over generated shapes.
@@ -721,125 +726,158 @@ let rec private mutate (rng: System.Random) (j: JVal) : JVal =
         JArr(xs |> List.mapi (fun ix v -> if ix = i then mutate rng v else v))
     | _ -> here ()
 
-type private CodecTally =
-    { Diffs: string list
-      Shapes: int
-      Refused: int
-      Writes: int
-      Reads: int
-      RoundTrips: int
-      Statement: string list
-      Codes: Set<string>
-      NonRoot: int
-      BlindLosses: int }
+let private showDV (v: DV) = sprintf "%A" v
+
+/// A declaration's build-time refusals — each fault, in order.
+let private declaration: Differential<CodecDeclarationFault list, M.fault list> =
+    Differential.pair (List.map faultP >> sprintf "%A") (List.map faultM >> sprintf "%A")
+
+/// One write-time refusal.
+let private writeFault: Differential<CodecDeclarationFault, M.fault> =
+    Differential.pair faultP faultM
+
+/// A written value, as JSON text.
+let private written: Differential<JVal, MJVal> = Differential.pair jr mjr
+
+/// The collecting reader's answer: the value, or every refusal.
+let private collecting: Differential<Result<DV, DecodeError list>, M.result<DV, M.derr list>> =
+    Differential.pair (pAll showDV) (mAll showDV)
+
+/// The strict reader's answer: the value, or the first refusal.
+let private strict: Differential<Result<DV, DecodeError>, M.result<DV, M.derr>> =
+    Differential.pair (pRes showDV) (mRes showDV)
+
+/// The codec tally: the shapes drawn, the declarations both sides refused, the values written,
+/// the inputs read and the writes that read back as themselves; the codes the refusals reached;
+/// the refusal lists below the root and those the BLIND comparison loses on; and the theorems'
+/// statements failing on production (a finding class, production only).
+let private codecTally =
+    Tally.empty
+        [ "Shapes"
+          "Refused"
+          "Writes"
+          "Reads"
+          "RoundTrips"
+          "NonRoot"
+          "BlindLosses" ]
+    |> Tally.sets [ "Codes" ]
+    |> Tally.classes [ "statement" ]
 
 /// Build, write and read every generated shape on both sides; hold production to the theorems'
 /// statements over every read; and count where the BLIND comparison — the model's refusals with
 /// their first step dropped — loses.
-let private codecPool (seed: int) (n: int) : CodecTally =
-    let rng = System.Random seed
-    let diffs = ResizeArray()
-    let statement = ResizeArray()
-
-    let mutable shapes, refused, writes, reads, roundTrips, nonRoot, blindLosses =
-        0, 0, 0, 0, 0, 0, 0
-
-    let mutable codes = Set.empty
-    let showDV (v: DV) = sprintf "%A" v
-
+let private codecPool (seed: int) (n: int) : Tally =
     let blind (es: M.derr list) = es |> List.map dropFirstStep
 
-    for _ in 1..n do
-        let shape = genShape rng 3
-        shapes <- shapes + 1
+    let read (c: Codec<DV>) (mc: MCodec) (input: JVal) (t: Tally) =
+        let p = c.ReadAll input
+        let m = mc.read_all (toModel input)
+        let pd = Codec.decoder c input
+        let md = M.c_decoder mc (toModel input)
 
-        match prodCodec shape, modelCodec shape with
+        let t =
+            t
+            |> Tally.bump "Reads"
+            |> Differential.compareWith
+                collecting
+                (fun ps ms -> sprintf "read of %s: production %s, model %s" (jr input) ps ms)
+                p
+                m
+            |> Differential.compareWith
+                strict
+                (fun ps ms -> sprintf "decoder of %s: production %s, model %s" (jr input) ps ms)
+                pd
+                md
+
+        match p, m with
+        | Error es, M.Error mes ->
+            let t =
+                if es.IsEmpty then
+                    Tally.record "statement" (sprintf "an EMPTY refusal list over %s" (jr input)) t
+                else
+                    t
+
+            let t =
+                match pd with
+                | Error first when not es.IsEmpty && first = es.Head -> t
+                | _ ->
+                    Tally.record "statement" (sprintf "the strict reader is not the first defect over %s" (jr input)) t
+
+            let t =
+                t
+                |> Differential.over es (fun e t ->
+                    let t = Tally.reach "Codes" (DecodeError.codeName e.Code) t
+
+                    if not (DecodeError.resolvesIn input e) || e.Code = DecodeCode.InvalidJson then
+                        Tally.record
+                            "statement"
+                            (sprintf "%s does not resolve in %s" (DecodeError.render e) (jr input))
+                            t
+                    else
+                        t)
+
+            t
+            |> Tally.bumpIf (es |> List.exists (fun e -> not e.Path.IsEmpty)) "NonRoot"
+            |> Tally.bumpIf (collecting.Model(M.Error(blind mes)) <> collecting.Production p) "BlindLosses"
+        | _ -> t
+
+    let write (rng: System.Random) (shape: Shape) (c: Codec<DV>) (mc: MCodec) (t: Tally) =
+        let v = genValue rng shape
+        let t = Tally.bump "Writes" t
+
+        match c.Write v, mc.write v with
         | Error pf, M.Error mf ->
-            refused <- refused + 1
+            Differential.compareWith
+                writeFault
+                (fun ps ms -> sprintf "write of %s: production %s, model %s" (showDV v) ps ms)
+                pf
+                mf
+                t
+        | Ok j, M.Ok mj ->
+            let t =
+                t
+                |> Differential.compareWith
+                    written
+                    (fun ps ms -> sprintf "write of %s: production %s, model %s" (showDV v) ps ms)
+                    j
+                    mj
 
-            if List.map faultP pf <> List.map faultM mf then
-                diffs.Add(
-                    sprintf "build of %A: production %A, model %A" shape (List.map faultP pf) (List.map faultM mf)
-                )
-        | Ok c, M.Ok mc ->
-            for _ in 1..4 do
-                let v = genValue rng shape
-                writes <- writes + 1
+            // The written value reads back as itself unless the refinement refuses it (an odd
+            // even-int) — the one premise the generator breaks on purpose.
+            let t =
+                match c.ReadAll j with
+                | Ok back when back = v -> Tally.bump "RoundTrips" t
+                | _ -> t
 
-                match c.Write v, mc.write v with
-                | Error pf, M.Error mf ->
-                    if faultP pf <> faultM mf then
-                        diffs.Add(sprintf "write of %s: production %s, model %s" (showDV v) (faultP pf) (faultM mf))
-                | Ok j, M.Ok mj ->
-                    if jr j <> mjr mj then
-                        diffs.Add(sprintf "write of %s: production %s, model %s" (showDV v) (jr j) (mjr mj))
+            Differential.over (j :: [ for _ in 1..3 -> mutate rng j ]) (read c mc) t
+        | Ok j, M.Error mf ->
+            Tally.disagree (sprintf "write of %s: production %s, model %s" (showDV v) (jr j) (faultM mf)) t
+        | Error pf, M.Ok mj ->
+            Tally.disagree (sprintf "write of %s: production %s, model %s" (showDV v) (faultP pf) (mjr mj)) t
 
-                    // The written value reads back as itself unless the refinement refuses it (an odd
-                    // even-int) — the one premise the generator breaks on purpose.
-                    match c.ReadAll j with
-                    | Ok back when back = v -> roundTrips <- roundTrips + 1
-                    | _ -> ()
+    let step (_: int) (rng: System.Random) (t: Tally) =
+        let shape = genShape rng 3
+        let t = Tally.bump "Shapes" t
 
-                    for input in j :: [ for _ in 1..3 -> mutate rng j ] do
-                        reads <- reads + 1
-                        let p = c.ReadAll input
-                        let m = mc.read_all (toModel input)
+        let t =
+            match prodCodec shape, modelCodec shape with
+            | Error pf, M.Error mf ->
+                t
+                |> Tally.bump "Refused"
+                |> Differential.compareWith
+                    declaration
+                    (fun ps ms -> sprintf "build of %A: production %s, model %s" shape ps ms)
+                    pf
+                    mf
+            | Ok c, M.Ok mc -> Differential.over [ 1..4 ] (fun _ t -> write rng shape c mc t) t
+            | Ok _, M.Error mf ->
+                Tally.disagree (sprintf "build of %A: production Ok, model %A" shape (List.map faultM mf)) t
+            | Error pf, M.Ok _ ->
+                Tally.disagree (sprintf "build of %A: production %A, model Ok" shape (List.map faultP pf)) t
 
-                        if pAll showDV p <> mAll showDV m then
-                            diffs.Add(
-                                sprintf "read of %s: production %s, model %s" (jr input) (pAll showDV p) (mAll showDV m)
-                            )
+        rng, t
 
-                        let pd = Codec.decoder c input
-                        let md = M.c_decoder mc (toModel input)
-
-                        if pRes showDV pd <> mRes showDV md then
-                            diffs.Add(
-                                sprintf
-                                    "decoder of %s: production %s, model %s"
-                                    (jr input)
-                                    (pRes showDV pd)
-                                    (mRes showDV md)
-                            )
-
-                        match p, m with
-                        | Error es, M.Error mes ->
-                            if es.IsEmpty then
-                                statement.Add(sprintf "an EMPTY refusal list over %s" (jr input))
-
-                            match pd with
-                            | Error first when not es.IsEmpty && first = es.Head -> ()
-                            | _ -> statement.Add(sprintf "the strict reader is not the first defect over %s" (jr input))
-
-                            for e in es do
-                                codes <- codes.Add(DecodeError.codeName e.Code)
-
-                                if not (DecodeError.resolvesIn input e) || e.Code = DecodeCode.InvalidJson then
-                                    statement.Add(sprintf "%s does not resolve in %s" (DecodeError.render e) (jr input))
-
-                            if es |> List.exists (fun e -> not e.Path.IsEmpty) then
-                                nonRoot <- nonRoot + 1
-
-                            if mAll showDV (M.Error(blind mes)) <> pAll showDV p then
-                                blindLosses <- blindLosses + 1
-                        | _ -> ()
-                | Ok j, M.Error mf ->
-                    diffs.Add(sprintf "write of %s: production %s, model %s" (showDV v) (jr j) (faultM mf))
-                | Error pf, M.Ok mj ->
-                    diffs.Add(sprintf "write of %s: production %s, model %s" (showDV v) (faultP pf) (mjr mj))
-        | Ok _, M.Error mf -> diffs.Add(sprintf "build of %A: production Ok, model %A" shape (List.map faultM mf))
-        | Error pf, M.Ok _ -> diffs.Add(sprintf "build of %A: production %A, model Ok" shape (List.map faultP pf))
-
-    { Diffs = List.ofSeq diffs
-      Shapes = shapes
-      Refused = refused
-      Writes = writes
-      Reads = reads
-      RoundTrips = roundTrips
-      Statement = List.ofSeq statement
-      Codes = codes
-      NonRoot = nonRoot
-      BlindLosses = blindLosses }
+    Differential.seeded n (System.Random seed) step codecTally
 
 let private show (xs: string list) =
     xs |> List.truncate 12 |> String.concat "\n"
@@ -855,14 +893,18 @@ let tests =
               "the decode-layer oracle agrees with every Decoder combinator, DecodeError's path operations and resolvesIn"
           <| fun _ ->
               let t = decoderPool 436 1500 id
-              Expect.isEmpty t.Diffs (sprintf "the decode-layer oracle disagreed with production:\n%s" (show t.Diffs))
-              Expect.isGreaterThan t.Probes 80000 (sprintf "probes asked of both sides (%d)" t.Probes)
+              Differential.expectAgrees "the decode-layer oracle" t
+              let probes = Tally.count "Probes" t
+              Expect.isGreaterThan probes 80000 (sprintf "probes asked of both sides (%d)" probes)
 
               Expect.isEmpty
-                  t.Unresolved
-                  (sprintf "a production refusal does not resolve in its input:\n%s" (show t.Unresolved))
+                  (Tally.findings "unresolved" t)
+                  (sprintf
+                      "a production refusal does not resolve in its input:\n%s"
+                      (show (Tally.findings "unresolved" t)))
 
-              Expect.isGreaterThan t.Refusals 3000 (sprintf "refusals held to resolvesIn (%d)" t.Refusals)
+              let refusals = Tally.count "Refusals" t
+              Expect.isGreaterThan refusals 3000 (sprintf "refusals held to resolvesIn (%d)" refusals)
 
               for code in
                   [ "MissingField"
@@ -871,31 +913,37 @@ let tests =
                     "OutOfRange"
                     "UndeclaredMember"
                     "LimitExceeded" ] do
-                  Expect.isTrue (t.Codes.Contains code) (sprintf "the pool reached a %s refusal" code)
+                  Expect.isTrue
+                      (Tally.reached "Codes" t |> Set.contains code)
+                      (sprintf "the pool reached a %s refusal" code)
 
           testCase
               "the decode-layer oracle agrees with Codec's builds, writes and collecting and strict reads over generated shapes, valid and mutated"
           <| fun _ ->
               let t = codecPool 4360 700
-              Expect.isEmpty t.Diffs (sprintf "the codec oracle disagreed with production:\n%s" (show t.Diffs))
-              Expect.isGreaterThan t.Refused 20 (sprintf "declarations both sides refused to build (%d)" t.Refused)
-              Expect.isGreaterThan t.Writes 1500 (sprintf "values written by both sides (%d)" t.Writes)
-              Expect.isGreaterThan t.Reads 5000 (sprintf "inputs read by both sides (%d)" t.Reads)
-
-              Expect.isGreaterThan
-                  t.RoundTrips
-                  1000
-                  (sprintf "written values read back as themselves (%d)" t.RoundTrips)
+              Differential.expectAgrees "the codec oracle" t
+              let refused = Tally.count "Refused" t
+              let writes = Tally.count "Writes" t
+              let reads = Tally.count "Reads" t
+              let roundTrips = Tally.count "RoundTrips" t
+              Expect.isGreaterThan refused 20 (sprintf "declarations both sides refused to build (%d)" refused)
+              Expect.isGreaterThan writes 1500 (sprintf "values written by both sides (%d)" writes)
+              Expect.isGreaterThan reads 5000 (sprintf "inputs read by both sides (%d)" reads)
+              Expect.isGreaterThan roundTrips 1000 (sprintf "written values read back as themselves (%d)" roundTrips)
 
           testCase
               "every refusal production's codecs answer is non-empty, first in the strict reader and resolves in its input"
           <| fun _ ->
               let t = codecPool 4361 700
-              Expect.isEmpty t.Statement (sprintf "the theorems' statements fail on production:\n%s" (show t.Statement))
-              Expect.isGreaterThan t.NonRoot 500 (sprintf "refusal lists with a refusal below the root (%d)" t.NonRoot)
+              let statement = Tally.findings "statement" t
+              let nonRoot = Tally.count "NonRoot" t
+              Expect.isEmpty statement (sprintf "the theorems' statements fail on production:\n%s" (show statement))
+              Expect.isGreaterThan nonRoot 500 (sprintf "refusal lists with a refusal below the root (%d)" nonRoot)
 
               for code in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange"; "UndeclaredMember" ] do
-                  Expect.isTrue (t.Codes.Contains code) (sprintf "the codecs reached a %s refusal" code)
+                  Expect.isTrue
+                      (Tally.reached "Codes" t |> Set.contains code)
+                      (sprintf "the codecs reached a %s refusal" code)
 
           testCase "a model that drops a refusal's first step loses - on exactly the refusals below the root"
           <| fun _ ->
@@ -904,8 +952,12 @@ let tests =
               // every refusal list holding a refusal below the root and on no other — so a green
               // comparison above is one that CAN fail.
               let t = codecPool 4362 700
-              Expect.isGreaterThan t.NonRoot 500 "refusal lists with a refusal below the root"
-              Expect.equal t.BlindLosses t.NonRoot "the blind comparison loses on exactly the non-root refusal lists"
+              Expect.isGreaterThan (Tally.count "NonRoot" t) 500 "refusal lists with a refusal below the root"
+
+              Expect.equal
+                  (Tally.count "BlindLosses" t)
+                  (Tally.count "NonRoot" t)
+                  "the blind comparison loses on exactly the non-root refusal lists"
 
               let blindDecoders = decoderPool 437 400 dropFirstStep
-              Expect.isNonEmpty blindDecoders.Diffs "the blind decoder comparison loses too" ]
+              Differential.expectLoses "the blind decoder comparison" blindDecoders ]
