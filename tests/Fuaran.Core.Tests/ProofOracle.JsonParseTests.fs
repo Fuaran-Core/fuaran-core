@@ -64,62 +64,60 @@ let tests =
               // that erased the wrong thing and a production that erased the wrong thing are each
               // caught, and a shared mistake is caught by the two of them disagreeing with each
               // other in the probes above.
-              let bad =
-                  [ for (name, absorbed, erased) in JsonParseDiff.erasurePairs do
-                        let pa =
-                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 absorbed)
+              Tally.empty []
+              |> Tally.classes [ "production-erasure"; "model-erasure" ]
+              |> Differential.over JsonParseDiff.erasurePairs (fun (name, absorbed, erased) t ->
+                  let pa =
+                      JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 absorbed)
 
-                        let pe =
-                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 erased)
+                  let pe =
+                      JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 erased)
 
-                        let ma =
-                            JsonParseDiff.withoutPosition (
-                                JsonParseDiff.modelAnswer
-                                    JsonParseDiff.toChs
-                                    EraseMemberNull
-                                    512
-                                    (JsonParseDiff.budget 512)
-                                    absorbed
-                            )
+                  let ma =
+                      JsonParseDiff.withoutPosition (
+                          JsonParseDiff.modelAnswer
+                              JsonParseDiff.toChs
+                              EraseMemberNull
+                              512
+                              (JsonParseDiff.budget 512)
+                              absorbed
+                      )
 
-                        let me =
-                            JsonParseDiff.withoutPosition (
-                                JsonParseDiff.modelAnswer
-                                    JsonParseDiff.toChs
-                                    RejectNull
-                                    512
-                                    (JsonParseDiff.budget 512)
-                                    erased
-                            )
+                  let me =
+                      JsonParseDiff.withoutPosition (
+                          JsonParseDiff.modelAnswer
+                              JsonParseDiff.toChs
+                              RejectNull
+                              512
+                              (JsonParseDiff.budget 512)
+                              erased
+                      )
 
-                        if pa <> pe then
-                            yield
-                                sprintf
-                                    "%s: PRODUCTION does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
-                                    name
-                                    absorbed
-                                    pa
-                                    erased
-                                    pe
+                  let bridges (cls: string) (who: string) (a: string) (e: string) (t: Tally) =
+                      if a = e then
+                          t
+                      else
+                          Tally.record
+                              cls
+                              (sprintf
+                                  "%s: %s does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
+                                  name
+                                  who
+                                  absorbed
+                                  a
+                                  erased
+                                  e)
+                              t
 
-                        if ma <> me then
-                            yield
-                                sprintf
-                                    "%s: the MODEL does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
-                                    name
-                                    absorbed
-                                    ma
-                                    erased
-                                    me
-
-                        if pa <> ma then
-                            yield sprintf "%s: the model and production disagree on %s: %s vs %s" name absorbed pa ma ]
-
-              if not bad.IsEmpty then
-                  failtestf
-                      "erase-then-compare: %d finding(s). First 5:\n%s"
-                      bad.Length
-                      (bad |> List.truncate 5 |> String.concat "\n")
+                  t
+                  |> bridges "production-erasure" "PRODUCTION" pa pe
+                  |> bridges "model-erasure" "the MODEL" ma me
+                  |> Differential.compareWith
+                      Differential.text
+                      (fun p m -> sprintf "%s: the model and production disagree on %s: %s vs %s" name absorbed p m)
+                      pa
+                      ma)
+              |> Differential.expectAgrees "erase-then-compare"
 
               // Both halves of the bridge were actually reached, so a green run above is not one
               // that only ever accepted or only ever refused.
@@ -169,30 +167,24 @@ let tests =
           <| fun _ ->
               JsonParseDiff.corpusTexts "nodes"
               |> JsonParseDiff.sweep RejectNull 512
-              |> fun (bad, accepted, _) ->
-                  if not bad.IsEmpty then
-                      failtestf
-                          "corpus nodes/: the model and production disagree on %d fixture(s). First 5:\n%s"
-                          bad.Length
-                          (bad |> List.truncate 5 |> String.concat "\n")
+              |> fun t ->
+                  Differential.expectAgrees "corpus nodes/" t
 
                   // Every fixture is valid wire JSON, so this pool is the ACCEPT path and has no
                   // refusals to assert — saying so here rather than letting the shared guard
                   // demand a refusal that would mean the corpus was broken.
-                  Expect.isGreaterThan accepted 100 "the corpus nodes/ pool is far smaller than expected"
+                  Expect.isGreaterThan
+                      (Tally.count "Accepted" t)
+                      100
+                      "the corpus nodes/ pool is far smaller than expected"
 
           testCase "… and over every corpus ops/ fixture"
           <| fun _ ->
               JsonParseDiff.corpusTexts "ops"
               |> JsonParseDiff.sweep RejectNull 512
-              |> fun (bad, accepted, _) ->
-                  if not bad.IsEmpty then
-                      failtestf
-                          "corpus ops/: the model and production disagree on %d fixture(s). First 5:\n%s"
-                          bad.Length
-                          (bad |> List.truncate 5 |> String.concat "\n")
-
-                  Expect.isGreaterThan accepted 10 "the corpus ops/ pool is far smaller than expected"
+              |> fun t ->
+                  Differential.expectAgrees "corpus ops/" t
+                  Expect.isGreaterThan (Tally.count "Accepted" t) 10 "the corpus ops/ pool is far smaller than expected"
 
           testCase "the parser oracle agrees with production over generated deep and wide inputs"
           <| fun _ ->
@@ -204,26 +196,17 @@ let tests =
                             yield sprintf "arr k=%d cap=%d" k cap, (cap, JsonParseDiff.nestArr k)
                             yield sprintf "obj k=%d cap=%d" k cap, (cap, JsonParseDiff.nestObj k) ]
 
-              let bad =
-                  [ for (name, (cap, input)) in deep do
-                        let p = JsonParseDiff.prodAnswer RejectNull cap input
-
-                        let m =
-                            JsonParseDiff.modelAnswer
-                                JsonParseDiff.toChs
-                                RejectNull
-                                cap
-                                (JsonParseDiff.budget cap)
-                                input
-
-                        if p <> m then
-                            yield sprintf "%s:\n    production %s\n    model      %s" name p m ]
-
-              if not bad.IsEmpty then
-                  failtestf
-                      "deep/wide: %d disagreement(s). First 5:\n%s"
-                      bad.Length
-                      (bad |> List.truncate 5 |> String.concat "\n")
+              Tally.empty []
+              |> Differential.over deep (fun (name, (cap, input)) t ->
+                  t
+                  |> Differential.compareWith
+                      (Differential.pair
+                          (JsonParseDiff.prodAnswer RejectNull cap)
+                          (JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull cap (JsonParseDiff.budget cap)))
+                      (fun p m -> sprintf "%s:\n    production %s\n    model      %s" name p m)
+                      input
+                      input)
+              |> Differential.expectAgrees "deep/wide"
 
               // The boundary was actually crossed in both directions.
               Expect.stringStarts
@@ -332,21 +315,17 @@ let tests =
               let bytesOk (r: JsonLimits) (input: string) =
                   System.Text.Encoding.UTF8.GetByteCount input <= r.MaxDocumentBytes
 
-              let bad =
-                  [ for (name, r, input) in pools do
-                        let p = JsonParseDiff.prodAnswerLimited RejectNull r input
-
-                        let m =
-                            JsonParseDiff.modelAnswerLimited JsonParseDiff.toChs RejectNull r (bytesOk r input) input
-
-                        if p <> m then
-                            yield sprintf "%s: input %s\n    production %s\n    model      %s" name input p m ]
-
-              if not bad.IsEmpty then
-                  failtestf
-                      "limits: the model and production disagree on %d input(s). First 5:\n%s"
-                      bad.Length
-                      (bad |> List.truncate 5 |> String.concat "\n")
+              Tally.empty []
+              |> Differential.over pools (fun (name, r, input) t ->
+                  t
+                  |> Differential.compareWith
+                      (Differential.pair
+                          (JsonParseDiff.prodAnswerLimited RejectNull r)
+                          (JsonParseDiff.modelAnswerLimited JsonParseDiff.toChs RejectNull r (bytesOk r input)))
+                      (fun p m -> sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
+                      input
+                      input)
+              |> Differential.expectAgrees "limits"
 
               // Non-vacuity: every one of the five limits was breached somewhere, and some document
               // under a bound was accepted — a comparison that only ever refused measured no bound.
@@ -411,7 +390,10 @@ let tests =
 
               Expect.stringStarts p "limit arrayLength" "production refuses at the bound it was given"
               Expect.stringStarts m "ok " "and an over-budgeted model does not"
-              Expect.notEqual p m "so the items comparison can lose"
+
+              Tally.empty []
+              |> Differential.compare Differential.text "[1,2,3] under an items bound of 2" p m
+              |> Differential.expectLoses "so the items comparison can lose"
 
           // ---- the teeth: both comparisons can lose ----
 
@@ -432,17 +414,16 @@ let tests =
               Expect.notEqual p m "so the depth comparison can lose"
 
               // … and it loses on the generated pool too, not only on one hand-made input.
-              let disagreements =
-                  [ for k in 0..8 do
-                        let i = JsonParseDiff.nestArr k
+              let overBudgeted =
+                  Differential.pair
+                      (JsonParseDiff.prodAnswer RejectNull 3)
+                      (JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8))
 
-                        if
-                            JsonParseDiff.prodAnswer RejectNull 3 i
-                            <> JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) i
-                        then
-                            yield k ]
-
-              Expect.isNonEmpty disagreements "the over-budgeted model must disagree somewhere in the family"
+              Tally.empty []
+              |> Differential.over [ 0..8 ] (fun k t ->
+                  let i = JsonParseDiff.nestArr k
+                  t |> Differential.compare overBudgeted (sprintf "k=%d" k) i i)
+              |> Differential.expectLoses "the over-budgeted model, somewhere in the family"
 
           // Phase 519: the differential's production subject moved to `Json.read` and a breach
           // renders through the lift, so the go-red is put to a PLANTED PRODUCTION defect too — a
@@ -460,19 +441,31 @@ let tests =
               Expect.stringStarts (loose 3 input) "ok " "the loose production accepts past the cap"
               Expect.equal (model 3 input) (JsonParseDiff.depthLine 3) "the model refuses at it"
 
-              let disagreements =
-                  [ for cap in 0..8 do
-                        for k in 0..8 do
-                            if loose cap (JsonParseDiff.nestArr k) <> model cap (JsonParseDiff.nestArr k) then
-                                yield cap, k ]
+              let t =
+                  Tally.empty []
+                  |> Differential.over
+                      [ for cap in 0..8 do
+                            for k in 0..8 -> cap, k ]
+                      (fun (cap, k) t ->
+                          let i = JsonParseDiff.nestArr k
+
+                          t
+                          |> Differential.compareWith
+                              (Differential.pair (loose cap) (model cap))
+                              (fun _ _ -> sprintf "cap=%d k=%d" cap k)
+                              i
+                              i)
+
+              Differential.expectLoses "the loose production depth guard" t
 
               // Exactly the inputs nested past each cap: one past it the loose guard accepts what the
               // model refuses, and further past it both refuse, a bracket apart. Every input within
               // a cap agrees, so the instrument is not red merely for being crude.
               Expect.equal
-                  (List.sort disagreements)
-                  [ for cap in 0..8 do
-                        for k in cap + 1 .. 8 -> cap, k ]
+                  (List.sort (Tally.disagreements t))
+                  (List.sort
+                      [ for cap in 0..8 do
+                            for k in cap + 1 .. 8 -> sprintf "cap=%d k=%d" cap k ])
                   "the loose guard is seen past every cap, and nowhere within one"
 
           testCase "a model handed a BLIND bridge DISAGREES with production"
@@ -482,29 +475,22 @@ let tests =
               // structured document reaches the model as something production never saw.
               let structured = [ "{}"; "[]"; "{\"a\":1}"; "[1,2,3]"; "{\"a\":[1,{\"b\":2}]}" ]
 
-              let disagreements =
-                  [ for input in structured do
-                        let p = JsonParseDiff.prodAnswer RejectNull 512 input
+              let blind =
+                  Differential.pair
+                      (JsonParseDiff.prodAnswer RejectNull 512)
+                      (JsonParseDiff.modelAnswer JsonParseDiff.toChsBlind RejectNull 512 (JsonParseDiff.budget 512))
 
-                        let m =
-                            JsonParseDiff.modelAnswer
-                                JsonParseDiff.toChsBlind
-                                RejectNull
-                                512
-                                (JsonParseDiff.budget 512)
-                                input
+              let t =
+                  Tally.empty []
+                  |> Differential.over structured (fun input t -> t |> Differential.compare blind input input input)
 
-                        if p <> m then
-                            yield input ]
+              Differential.expectLoses "the blind bridge" t
 
               Expect.equal
-                  (List.length disagreements)
+                  (List.length (Tally.disagreements t))
                   (List.length structured)
                   "every structured document must disagree under the blind bridge"
 
               // And it stays narrow: a scalar is untouched by the blinding, so a green run
               // elsewhere is not green merely because this instrument is crude.
-              Expect.equal
-                  (JsonParseDiff.prodAnswer RejectNull 512 "42")
-                  (JsonParseDiff.modelAnswer JsonParseDiff.toChsBlind RejectNull 512 (JsonParseDiff.budget 512) "42")
-                  "a scalar still agrees under the blind bridge" ]
+              Expect.equal (blind.Production "42") (blind.Model "42") "a scalar still agrees under the blind bridge" ]

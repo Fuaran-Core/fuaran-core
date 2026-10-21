@@ -39,20 +39,41 @@ let private decFromSyms (l: ModelDecimal.sym list) : string =
         | ModelDecimal.Other -> "?")
     |> String.concat ""
 
-let private modelDecCanonical (s: string) : string option =
-    match ModelDecimal.try_canonical (decToSyms s) with
-    | FStar_Pervasives_Native.Some c -> Some(decFromSyms c)
-    | FStar_Pervasives_Native.None -> None
+/// A decimal text's render pair — `tryCanonical`'s answer and `add`'s, production's text beside the
+/// model's symbols spelt back, `None` on a refused text.
+let private decimalText: Differential<string option, FStar_Pervasives_Native.option<ModelDecimal.sym list>> =
+    Differential.pair (sprintf "%A") (function
+        | FStar_Pervasives_Native.Some c -> sprintf "%A" (Some(decFromSyms c))
+        | FStar_Pervasives_Native.None -> sprintf "%A" (None: string option))
 
-let private modelDecCompare (a: string) (b: string) : int option =
-    match ModelDecimal.compare (decToSyms a) (decToSyms b) with
-    | FStar_Pervasives_Native.Some r -> Some(int r)
-    | FStar_Pervasives_Native.None -> None
+/// The order's render pair — the sign `compare` answers, `None` on a refused pair.
+let private decimalOrder: Differential<int option, FStar_Pervasives_Native.option<Prims.int>> =
+    Differential.pair (sprintf "%A") (function
+        | FStar_Pervasives_Native.Some r -> sprintf "%A" (Some(int r))
+        | FStar_Pervasives_Native.None -> sprintf "%A" (None: int option))
 
-let private modelDecAdd (a: string) (b: string) : string option =
-    match ModelDecimal.add (decToSyms a) (decToSyms b) with
-    | FStar_Pervasives_Native.Some c -> Some(decFromSyms c)
-    | FStar_Pervasives_Native.None -> None
+/// The decimal-text tally: the texts the canonicaliser read, rewrote and refused, and the pair
+/// shapes the order and the sum were compared over.
+let private decTally =
+    Tally.empty [ "Accepted"; "Refused"; "Trimmed"; "CrossSign"; "DifferentScale"; "Cancelled" ]
+
+/// `tryCanonical` beside the model's, over one text.
+let private canonicalProbe (canonical: string -> string option) (s: string) (t: Tally) : Tally =
+    Differential.compare
+        decimalText
+        (sprintf "tryCanonical %A" s)
+        (canonical s)
+        (ModelDecimal.try_canonical (decToSyms s))
+        t
+
+/// `compare` beside the model's, over one pair.
+let private orderProbe (order: string -> string -> int option) (a: string, b: string) (t: Tally) : Tally =
+    Differential.compare
+        decimalOrder
+        (sprintf "compare %A %A" a b)
+        (order a b)
+        (ModelDecimal.compare (decToSyms a) (decToSyms b))
+        t
 
 /// A decimal-text pool: texts the grammar accepts, shaped so that the clauses the theorems are
 /// about are all reached — leading and trailing zeros to trim, a sign on zero to drop, bare and
@@ -123,25 +144,26 @@ let tests =
               "the decimal-text oracle agrees with DecimalText.tryCanonical, compare and add over a generated pool of texts and pairs"
           <| fun _ ->
               let texts = decTexts 2790 400
-              let mutable accepted = 0
-              let mutable refused = 0
-              let mutable trimmed = 0
 
-              for s in texts do
-                  let model = modelDecCanonical s
-                  Expect.equal (DecimalText.tryCanonical s) model (sprintf "tryCanonical %A" s)
+              let canonicals =
+                  decTally
+                  |> Differential.over texts (fun s t ->
+                      let t = canonicalProbe DecimalText.tryCanonical s t
 
-                  match model with
-                  | Some c ->
-                      accepted <- accepted + 1
+                      match ModelDecimal.try_canonical (decToSyms s) with
+                      | FStar_Pervasives_Native.Some c ->
+                          t |> Tally.bump "Accepted" |> Tally.bumpIf (decFromSyms c <> s) "Trimmed"
+                      | FStar_Pervasives_Native.None -> Tally.bump "Refused" t)
 
-                      if c <> s then
-                          trimmed <- trimmed + 1
-                  | None -> refused <- refused + 1
+              Differential.expectAgrees "the decimal-text canonicaliser" canonicals
+              Expect.isGreaterThan (Tally.count "Accepted" canonicals) 250 "texts the canonicaliser read"
 
-              Expect.isGreaterThan accepted 250 "texts the canonicaliser read"
-              Expect.isGreaterThan trimmed 60 "texts it read AND rewrote (a zero trimmed, a sign on zero dropped)"
-              Expect.isGreaterThan refused 20 "and texts it refused"
+              Expect.isGreaterThan
+                  (Tally.count "Trimmed" canonicals)
+                  60
+                  "texts it read AND rewrote (a zero trimmed, a sign on zero dropped)"
+
+              Expect.isGreaterThan (Tally.count "Refused" canonicals) 20 "and texts it refused"
 
               // every pair: the order and the sum, each compared verbatim — the sign of the order,
               // the text of the sum, and `None` on exactly the pairs the model refuses
@@ -156,29 +178,33 @@ let tests =
                     "0", "-0.0" ]
 
               let pairs = List.zip (decTexts 2791 1500) (decTexts 2792 1500) @ cancelling
-              let mutable crossSign = 0
-              let mutable differentScale = 0
-              let mutable cancelled = 0
 
-              for a, b in pairs do
-                  Expect.equal (DecimalText.compare a b) (modelDecCompare a b) (sprintf "compare %A %A" a b)
-                  Expect.equal (DecimalText.add a b) (modelDecAdd a b) (sprintf "add %A %A" a b)
+              let sums =
+                  decTally
+                  |> Differential.over pairs (fun (a, b) t ->
+                      let t =
+                          t
+                          |> orderProbe DecimalText.compare (a, b)
+                          |> Differential.compare
+                              decimalText
+                              (sprintf "add %A %A" a b)
+                              (DecimalText.add a b)
+                              (ModelDecimal.add (decToSyms a) (decToSyms b))
 
-                  match DecimalText.tryCanonical a, DecimalText.tryCanonical b with
-                  | Some ca, Some cb ->
-                      if ca.StartsWith "-" <> cb.StartsWith "-" then
-                          crossSign <- crossSign + 1
+                      match DecimalText.tryCanonical a, DecimalText.tryCanonical b with
+                      | Some ca, Some cb ->
+                          t
+                          |> Tally.bumpIf (ca.StartsWith "-" <> cb.StartsWith "-") "CrossSign"
+                          |> Tally.bumpIf (ca.Contains "." <> cb.Contains ".") "DifferentScale"
+                          |> Tally.bumpIf (DecimalText.add a b = Some "0") "Cancelled"
+                      | _ -> t)
 
-                      if ca.Contains "." <> cb.Contains "." then
-                          differentScale <- differentScale + 1
+              Differential.expectAgrees "the decimal-text order and sum" sums
+              Expect.isGreaterThan (Tally.count "CrossSign" sums) 100 "pairs of opposite sign (the difference arm)"
 
-                      if DecimalText.add a b = Some "0" then
-                          cancelled <- cancelled + 1
-                  | _ -> ()
+              Expect.isGreaterThan (Tally.count "DifferentScale" sums) 100 "pairs of different scale (the alignment)"
 
-              Expect.isGreaterThan crossSign 100 "pairs of opposite sign (the difference arm)"
-              Expect.isGreaterThan differentScale 100 "pairs of different scale (the alignment)"
-              Expect.isGreaterThan cancelled 0 "a pair that cancels to zero (the sign-on-zero arm)"
+              Expect.isGreaterThan (Tally.count "Cancelled" sums) 0 "a pair that cancels to zero (the sign-on-zero arm)"
 
           testCase
               "a decimal-text canonicaliser that keeps the written scale, or an ORDINAL comparator over canonical text, DISAGREES with the model — the measurement can fail"
@@ -204,29 +230,23 @@ let tests =
               let texts = decTexts 2793 400
               let pairs = List.zip (decTexts 2794 600) (decTexts 2795 600)
 
-              let scaleLost =
-                  texts
-                  |> List.filter (fun s -> keepsScale s <> modelDecCanonical s)
-                  |> List.length
+              let canonicals (canonical: string -> string option) =
+                  Differential.over texts (canonicalProbe canonical) decTally
 
-              let ordinalLost =
-                  pairs
-                  |> List.filter (fun (a, b) -> ordinal a b <> modelDecCompare a b)
-                  |> List.length
+              let orders (order: string -> string -> int option) =
+                  Differential.over pairs (orderProbe order) decTally
 
-              Expect.isGreaterThan scaleLost 0 "the scale-keeping canonicaliser lost against the model"
-              Expect.isGreaterThan ordinalLost 0 "the ordinal comparator lost against the model"
+              Differential.expectLoses "the scale-keeping canonicaliser" (canonicals keepsScale)
+              Differential.expectLoses "the ordinal comparator" (orders ordinal)
 
               // and the shipped clauses do NOT lose on the same pools — the go-red is the clause,
               // not the pool
               Expect.isEmpty
-                  (texts
-                   |> List.filter (fun s -> DecimalText.tryCanonical s <> modelDecCanonical s))
+                  (Tally.disagreements (canonicals DecimalText.tryCanonical))
                   "production's canonicaliser agrees on the pool the wrong one lost on"
 
               Expect.isEmpty
-                  (pairs
-                   |> List.filter (fun (a, b) -> DecimalText.compare a b <> modelDecCompare a b))
+                  (Tally.disagreements (orders DecimalText.compare))
                   "production's comparator agrees on the pool the wrong one lost on"
 
           testCase "the theorems hold on the shipped DecimalText over the pool — idempotence, the order, the sum"

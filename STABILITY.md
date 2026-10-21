@@ -71,8 +71,8 @@ so a release gesture without the heading and the record is refused there; `Direc
 declares the ledger's index as the version's stability record (`<FuaranStabilityRecord>`) so a
 downstream version check reads the same DRAFT marker.
 
-**The release sequence the gate makes mandatory.** In this order, because each step reads the one
-before it:
+**The release sequence the gate makes mandatory — the contract, however the act is performed.** In
+this order, because each step reads the one before it:
 
 1. If `<Version>` moved since the conformance corpus was last emitted, re-stamp it
    (`dotnet run --project tools/Fuaran.Core.Tools -- render laws`, then `render apply`; `docs/conformance-corpus.md`) and commit.
@@ -1114,7 +1114,7 @@ extraction byte for byte. **No shipped surface changes**: the claim is about wha
 `reconcileMany` does, stated as a theorem on a model and tied to production by a differential
 test. The claims ladder — what is proved, what is only tested, what is assumed — is in
 `proofs/README.md`, and "formally verified" is spent on the theorem alone. **Since `0.40.0`** (Phase 534,
-no package surface) it is `fold_confluence_total`, the DAG beneath it `proofs/DagClosure.fst`; adopters re-copy both.
+no package surface) it is `fold_confluence_total`, the DAG beneath it `proofs/DagClosure.fst`; adopters re-copy both. **Since `0.40.0`** (Phase 535, tests only, no package or wire surface) every `Proofs.Oracle` differential runs on ONE harness in `ProofOracle.Bridges.fs` — a declared `Tally`, the seeded loop, a render pair per answer DU and the go-red arm — and every model's go-red loses through it.
 
 ## Open-core posture
 

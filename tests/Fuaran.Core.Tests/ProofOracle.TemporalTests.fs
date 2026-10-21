@@ -39,38 +39,13 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 
 module private TemporalDiff =
 
-    type Tally =
-        {
-            Draws: int
-            Diffs: string list
-            /// Days inside and outside the canonical range; texts canonical and not.
-            InRange: int
-            OutOfRange: int
-            Canonical: int
-            NotCanonical: int
-            /// Instants with a fraction, and the units drawn.
-            Fractional: int
-            Units: Set<string>
-        }
+    /// The temporal tally: the draws; days and pairs inside and outside the canonical range; texts
+    /// canonical and not; instants with a fraction; and the units drawn.
+    let private temporalTally =
+        Tally.empty [ "Draws"; "InRange"; "OutOfRange"; "Canonical"; "NotCanonical"; "Fractional" ]
+        |> Tally.sets [ "Units" ]
 
-    let empty =
-        { Draws = 0
-          Diffs = []
-          InRange = 0
-          OutOfRange = 0
-          Canonical = 0
-          NotCanonical = 0
-          Fractional = 0
-          Units = Set.empty }
-
-    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        { t with
-            Diffs =
-                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
-                :: t.Diffs }
-
-    let private same (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
-        if prod = model then t else diff label what prod model t
+    let private same = ColumnDiff.compareText
 
     let private showPair (o: (bigint * bigint) option) =
         match o with
@@ -79,19 +54,33 @@ module private TemporalDiff =
 
     let private showOpt (o: 'a option) = sprintf "%A" o
 
+    /// An instant read at a unit: production's pair (its second widened to the model's integer)
+    /// beside the model's.
+    let private instantRead: Differential<(bigint * bigint) option, (bigint * bigint) option> =
+        Differential.pair showOpt showPair
+
+    let private prodInstant (u: TimeUnit) (s: string) : (bigint * bigint) option =
+        TemporalText.tryInstant u s
+        |> Option.map (fun (sec, f) -> bigint (int64 sec), bigint f)
+
+    let private modelInstant (u: Temporal.time_unit) (s: string) : (bigint * bigint) option =
+        ofMOpt (Temporal.try_instant u (canonToChs s))
+
+    /// `same` through the instant render pair.
+    let private sameInstant (label: string) (what: string) prod model (t: Tally) : Tally =
+        same label what (instantRead.Production prod) (instantRead.Model model) t
+
     /// A day count, asked of both: its text, that text read back, the range check, and the
     /// calendar both ways. Drawn inside the zone where production's truncating division and the
     /// model's Euclidean one agree (every day from `-865565` on — the shifted dividend is
     /// non-negative there), which holds the whole canonical range with a margin either side.
     let probeDay (label: string) (d: int) (t: Tally) : Tally =
-        let t = { t with Draws = t.Draws + 1 }
         let inRange = TemporalText.isDayInRange d
 
         let t =
-            if inRange then
-                { t with InRange = t.InRange + 1 }
-            else
-                { t with OutOfRange = t.OutOfRange + 1 }
+            t
+            |> Tally.bump "Draws"
+            |> Tally.bump (if inRange then "InRange" else "OutOfRange")
 
         let prodText = TemporalText.dateText d
         let modelText = canonFromChs (Temporal.date_text (bigint d))
@@ -128,18 +117,13 @@ module private TemporalDiff =
 
     /// A date text, asked of both: read to a day, or refused.
     let probeDateText (label: string) (s: string) (t: Tally) : Tally =
-        let t = { t with Draws = t.Draws + 1 }
         let prod = TemporalText.tryDays s
         let model = ofMOpt (Temporal.try_days (canonToChs s)) |> Option.map int
 
-        let t =
-            if prod.IsSome then
-                { t with Canonical = t.Canonical + 1 }
-            else
-                { t with
-                    NotCanonical = t.NotCanonical + 1 }
-
-        same label (sprintf "tryDays %A" s) (showOpt prod) (showOpt model) t
+        t
+        |> Tally.bump "Draws"
+        |> Tally.bump (if prod.IsSome then "Canonical" else "NotCanonical")
+        |> same label (sprintf "tryDays %A" s) (showOpt prod) (showOpt model)
 
     /// A pair at a unit, asked of both: the range check, and in range its text, the text read back
     /// at the unit, and the coarsest unit of the text.
@@ -147,10 +131,10 @@ module private TemporalDiff =
         let mu = ColumnDiff.toModelUnit u
 
         let t =
-            { t with
-                Draws = t.Draws + 1
-                Units = t.Units.Add(ColumnType.tag (TimestampType u))
-                Fractional = t.Fractional + (if fraction <> 0 then 1 else 0) }
+            t
+            |> Tally.bump "Draws"
+            |> Tally.reach "Units" (ColumnType.tag (TimestampType u))
+            |> Tally.bumpIf (fraction <> 0) "Fractional"
 
         let inRange = TemporalText.isInstantInRange u second fraction
 
@@ -163,9 +147,9 @@ module private TemporalDiff =
                 t
 
         if not inRange then
-            { t with OutOfRange = t.OutOfRange + 1 }
+            Tally.bump "OutOfRange" t
         else
-            let t = { t with InRange = t.InRange + 1 }
+            let t = Tally.bump "InRange" t
             let prodText = TemporalText.instantText u second fraction
 
             let modelText =
@@ -174,14 +158,11 @@ module private TemporalDiff =
             let t = same label "instantText" prodText modelText t
 
             let t =
-                same
+                sameInstant
                     label
                     "tryInstant u (instantText u s f)"
-                    (showOpt (
-                        TemporalText.tryInstant u prodText
-                        |> Option.map (fun (s, f) -> bigint (int64 s), bigint f)
-                    ))
-                    (showPair (ofMOpt (Temporal.try_instant mu (canonToChs prodText))))
+                    (prodInstant u prodText)
+                    (modelInstant mu prodText)
                     t
 
             same
@@ -194,15 +175,12 @@ module private TemporalDiff =
     /// An instant text, asked of both at every unit: read to a pair or refused, canonical or not,
     /// and its coarsest unit.
     let probeInstantText (label: string) (s: string) (t: Tally) : Tally =
-        let t = { t with Draws = t.Draws + 1 }
         let canonical = TemporalText.isCanonicalTimestamp s
 
         let t =
-            if canonical then
-                { t with Canonical = t.Canonical + 1 }
-            else
-                { t with
-                    NotCanonical = t.NotCanonical + 1 }
+            t
+            |> Tally.bump "Draws"
+            |> Tally.bump (if canonical then "Canonical" else "NotCanonical")
 
         let t =
             same
@@ -226,20 +204,17 @@ module private TemporalDiff =
           TimeUnit.Nanoseconds ]
         |> List.fold
             (fun t u ->
-                same
+                sameInstant
                     label
                     (sprintf "tryInstant %s %A" (ColumnType.tag (TimestampType u)) s)
-                    (showOpt (
-                        TemporalText.tryInstant u s
-                        |> Option.map (fun (sec, f) -> bigint (int64 sec), bigint f)
-                    ))
-                    (showPair (ofMOpt (Temporal.try_instant (ColumnDiff.toModelUnit u) (canonToChs s))))
+                    (prodInstant u s)
+                    (modelInstant (ColumnDiff.toModelUnit u) s)
                     t)
             t
 
     /// Two texts, asked of both: THE order.
     let probeCompare (label: string) (a: string) (b: string) (t: Tally) : Tally =
-        let t = { t with Draws = t.Draws + 1 }
+        let t = Tally.bump "Draws" t
 
         same
             label
@@ -269,28 +244,6 @@ module private TemporalDiff =
         let draw (n: int) = drawFrom r n
 
         let span = TemporalText.MaxDay - TemporalText.MinDay
-        let mutable t = empty
-
-        // the ends and their neighbours, then the drawn days
-        for d in
-            [ TemporalText.MinDay
-              TemporalText.MaxDay
-              TemporalText.MinDay - 1
-              TemporalText.MaxDay + 1
-              0
-              -1
-              -719468
-              -146097 ] do
-            t <- probeDay "the fixed days" d t
-
-        for i in 1..trials do
-            let d =
-                match draw 6 with
-                | 0 -> TemporalText.MinDay - 1 - draw 3000
-                | 1 -> TemporalText.MaxDay + 1 + draw 3000
-                | _ -> TemporalText.MinDay + draw span
-
-            t <- probeDay (sprintf "generated seed=%d day=%d" seed i) d t
 
         // date texts: a canonical one, and the corruptions
         let dateTexts =
@@ -310,52 +263,6 @@ module private TemporalDiff =
               "-026-01-01"
               ""
               "nope" ]
-
-        for s in dateTexts do
-            t <- probeDateText "the fixed date texts" s t
-
-        for i in 1..trials do
-            let d = TemporalText.MinDay + draw span
-            let text = TemporalText.dateText d
-
-            let text =
-                match draw 5 with
-                | 0 -> text.Substring(0, 9)
-                | 1 -> text + "Z"
-                | 2 -> text.Replace('-', ':')
-                | _ -> text
-
-            t <- probeDateText (sprintf "generated seed=%d date-text=%d" seed i) text t
-
-        // pairs per unit: the ends, inside, and out of range both ways
-        for u in units do
-            let scale = TimeUnit.scale u
-
-            for second, fraction in
-                [ TemporalText.minSecond, 0
-                  TemporalText.maxSecond, scale - 1
-                  TemporalText.minSecond - 1.0, 0
-                  TemporalText.maxSecond + 1.0, 0
-                  0.0, scale - 1
-                  0.0, scale
-                  0.0, -1
-                  86399.0, 1 ] do
-                t <- probeInstant (sprintf "the fixed pairs %s" (ColumnType.tag (TimestampType u))) u second fraction t
-
-        for i in 1..trials do
-            let u = units[draw units.Length]
-            let scale = TimeUnit.scale u
-            let day = TemporalText.MinDay + draw span
-            let second = float day * 86400.0 + float (draw 86400)
-
-            let fraction =
-                match draw 4 with
-                | 0 -> 0
-                | 1 -> draw scale
-                | 2 -> (draw 1000) * (scale / 1000)
-                | _ -> scale - 1 - draw (min scale 50)
-
-            t <- probeInstant (sprintf "generated seed=%d pair=%d" seed i) u second fraction t
 
         // instant texts: every fraction length, and the ill-formed shapes
         let instantTexts =
@@ -382,9 +289,6 @@ module private TemporalDiff =
               "2026-06-22T17:00:00.5"
               "" ]
 
-        for s in instantTexts do
-            t <- probeInstantText "the fixed instant texts" s t
-
         let canonicalDraw () =
             let u = units[draw units.Length]
             let day = TemporalText.MinDay + draw span
@@ -392,7 +296,75 @@ module private TemporalDiff =
             let fraction = if draw 3 = 0 then 0 else draw (TimeUnit.scale u)
             TemporalText.instantText u second fraction
 
-        for i in 1..trials do
+        // Every drawn pool below draws from the one generator `r`, in this order.
+        let drawn (step: int -> Tally -> Tally) (t: Tally) : Tally =
+            Differential.seeded trials r (fun i r t -> r, step i t) t
+
+        temporalTally
+        // the ends and their neighbours, then the drawn days
+        |> Differential.over
+            [ TemporalText.MinDay
+              TemporalText.MaxDay
+              TemporalText.MinDay - 1
+              TemporalText.MaxDay + 1
+              0
+              -1
+              -719468
+              -146097 ]
+            (probeDay "the fixed days")
+        |> drawn (fun i t ->
+            let d =
+                match draw 6 with
+                | 0 -> TemporalText.MinDay - 1 - draw 3000
+                | 1 -> TemporalText.MaxDay + 1 + draw 3000
+                | _ -> TemporalText.MinDay + draw span
+
+            probeDay (sprintf "generated seed=%d day=%d" seed i) d t)
+        |> Differential.over dateTexts (probeDateText "the fixed date texts")
+        |> drawn (fun i t ->
+            let d = TemporalText.MinDay + draw span
+            let text = TemporalText.dateText d
+
+            let text =
+                match draw 5 with
+                | 0 -> text.Substring(0, 9)
+                | 1 -> text + "Z"
+                | 2 -> text.Replace('-', ':')
+                | _ -> text
+
+            probeDateText (sprintf "generated seed=%d date-text=%d" seed i) text t)
+        // pairs per unit: the ends, inside, and out of range both ways
+        |> Differential.over units (fun u t ->
+            let scale = TimeUnit.scale u
+
+            t
+            |> Differential.over
+                [ TemporalText.minSecond, 0
+                  TemporalText.maxSecond, scale - 1
+                  TemporalText.minSecond - 1.0, 0
+                  TemporalText.maxSecond + 1.0, 0
+                  0.0, scale - 1
+                  0.0, scale
+                  0.0, -1
+                  86399.0, 1 ]
+                (fun (second, fraction) ->
+                    probeInstant (sprintf "the fixed pairs %s" (ColumnType.tag (TimestampType u))) u second fraction))
+        |> drawn (fun i t ->
+            let u = units[draw units.Length]
+            let scale = TimeUnit.scale u
+            let day = TemporalText.MinDay + draw span
+            let second = float day * 86400.0 + float (draw 86400)
+
+            let fraction =
+                match draw 4 with
+                | 0 -> 0
+                | 1 -> draw scale
+                | 2 -> (draw 1000) * (scale / 1000)
+                | _ -> scale - 1 - draw (min scale 50)
+
+            probeInstant (sprintf "generated seed=%d pair=%d" seed i) u second fraction t)
+        |> Differential.over instantTexts (probeInstantText "the fixed instant texts")
+        |> drawn (fun i t ->
             let text = canonicalDraw ()
 
             let text =
@@ -402,10 +374,9 @@ module private TemporalDiff =
                 | 2 -> text.Replace('T', ' ')
                 | _ -> text
 
-            t <- probeInstantText (sprintf "generated seed=%d instant-text=%d" seed i) text t
-
+            probeInstantText (sprintf "generated seed=%d instant-text=%d" seed i) text t)
         // the order: canonical pairs, close pairs (one second, one fraction apart), and equal ones
-        for i in 1..trials do
+        |> drawn (fun i t ->
             let a = canonicalDraw ()
 
             let b =
@@ -424,22 +395,21 @@ module private TemporalDiff =
                      | _ -> a)
                 | _ -> canonicalDraw ()
 
-            t <- probeCompare (sprintf "generated seed=%d order=%d" seed i) a b t
-            t <- probeCompare (sprintf "generated seed=%d order=%d reversed" seed i) b a t
-
-        t
+            t
+            |> probeCompare (sprintf "generated seed=%d order=%d" seed i) a b
+            |> probeCompare (sprintf "generated seed=%d order=%d reversed" seed i) b a)
 
     /// The go-red: a model asked to read every text AT THE SECONDS UNIT loses on exactly the texts
-    /// with a fraction — what `try_instant`'s unit arm is for.
-    let secondsOnly (seed: int) (trials: int) : int * int =
+    /// with a fraction — what `try_instant`'s unit arm is for. Its tally counts the fractional
+    /// draws; every draw the seconds-only reading loses is a disagreement.
+    let secondsOnly (seed: int) (trials: int) : Tally =
         let r = ref seed
         let draw (n: int) = drawFrom r n
 
         let span = TemporalText.MaxDay - TemporalText.MinDay
-        let mutable lost = 0
-        let mutable fractional = 0
 
-        for _ in 1..trials do
+        Tally.empty [ "Fractional" ]
+        |> Differential.seeded trials r (fun i r t ->
             let u = units[draw units.Length]
             let day = TemporalText.MinDay + draw span
             let second = float day * 86400.0 + float (draw 86400)
@@ -447,19 +417,14 @@ module private TemporalDiff =
             let fraction = if scale = 1 || draw 2 = 0 then 0 else 1 + draw (scale - 1)
             let text = TemporalText.instantText u second fraction
 
-            let prod =
-                TemporalText.tryInstant u text
-                |> Option.map (fun (s, f) -> bigint (int64 s), bigint f)
-
-            let model = ofMOpt (Temporal.try_instant Temporal.Seconds (canonToChs text))
-
-            if fraction <> 0 then
-                fractional <- fractional + 1
-
-            if showOpt prod <> showPair model then
-                lost <- lost + 1
-
-        lost, fractional
+            r,
+            t
+            |> Tally.bumpIf (fraction <> 0) "Fractional"
+            |> sameInstant
+                (sprintf "generated seed=%d draw=%d" seed i)
+                (sprintf "tryInstant at the seconds unit %A" text)
+                (prodInstant u text)
+                (modelInstant Temporal.Seconds text))
 
 [<Tests>]
 let tests =
@@ -473,24 +438,45 @@ let tests =
           <| fun _ ->
               let t = TemporalDiff.generated 4301 1500
 
-              Expect.isEmpty
-                  t.Diffs
-                  (sprintf "the temporal oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+              Differential.expectAgrees "the temporal oracle" t
 
               // adequacy: both sides of every range and every unit were reached
-              Expect.isGreaterThan t.InRange 2000 (sprintf "days and pairs in range (%d)" t.InRange)
-              Expect.isGreaterThan t.OutOfRange 300 (sprintf "days and pairs out of range (%d)" t.OutOfRange)
-              Expect.isGreaterThan t.Canonical 1000 (sprintf "canonical texts (%d)" t.Canonical)
-              Expect.isGreaterThan t.NotCanonical 500 (sprintf "texts that are not canonical (%d)" t.NotCanonical)
-              Expect.isGreaterThan t.Fractional 800 (sprintf "pairs with a fraction (%d)" t.Fractional)
+              Expect.isGreaterThan
+                  (Tally.count "InRange" t)
+                  2000
+                  (sprintf "days and pairs in range (%d)" (Tally.count "InRange" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "OutOfRange" t)
+                  300
+                  (sprintf "days and pairs out of range (%d)" (Tally.count "OutOfRange" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Canonical" t)
+                  1000
+                  (sprintf "canonical texts (%d)" (Tally.count "Canonical" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "NotCanonical" t)
+                  500
+                  (sprintf "texts that are not canonical (%d)" (Tally.count "NotCanonical" t))
+
+              Expect.isGreaterThan
+                  (Tally.count "Fractional" t)
+                  800
+                  (sprintf "pairs with a fraction (%d)" (Tally.count "Fractional" t))
 
               Expect.equal
-                  t.Units
+                  (Tally.reached "Units" t)
                   (Set.ofList [ "timestamp"; "timestamp_ms"; "timestamp_us"; "timestamp_ns" ])
                   "every unit was drawn"
 
           testCase "a temporal oracle that reads every text at the seconds unit loses — on exactly the fractional draws"
           <| fun _ ->
-              let lost, fractional = TemporalDiff.secondsOnly 4302 1200
-              Expect.isGreaterThan fractional 400 "the pool holds fractional instants"
-              Expect.equal lost fractional "the seconds-only reading lost on the fractional draws, and on no other" ]
+              let t = TemporalDiff.secondsOnly 4302 1200
+              Expect.isGreaterThan (Tally.count "Fractional" t) 400 "the pool holds fractional instants"
+
+              Expect.equal
+                  (List.length (Tally.disagreements t))
+                  (Tally.count "Fractional" t)
+                  "the seconds-only reading lost on the fractional draws, and on no other" ]

@@ -34,30 +34,13 @@ open System.Text.Json
 open System.Xml.Linq
 open Expecto
 
-/// The spine: every assembly this repository ships since the compute layer left (D66). Every
-/// project under `src/` is on it, which the tree test below holds, so a new project is classified
-/// by the commit that adds it.
-let spine: string list =
-    [ "Fuaran.Core.Text"
-      "Fuaran.Core.Tree"
-      "Fuaran.Core.Ops"
-      "Fuaran.Core.OpStream"
-      "Fuaran.Core.OpStream.Dag"
-      "Fuaran.Core.Wire"
-      "Fuaran.Core.ContentAddress"
-      "Fuaran.Core.Unit"
-      "Fuaran.Core.Column"
-      "Fuaran.Core.Validator"
-      "Fuaran.Core.Observer"
-      "Fuaran.Core.Function"
-      "Fuaran.Core.Query"
-      "Fuaran.Core.Projection"
-      "Fuaran.Core.Propagation"
-      "Fuaran.Core.AiSurface"
-      "Fuaran.Core.Idl"
-      "Fuaran.Core.Idl.Codegen"
-      "Fuaran.Core.Idl.Cli"
-      "Fuaran.Core.Conformance" ]
+/// The spine: every assembly this repository ships since the compute layer left (D66), read from
+/// the one derivation of what ships (`Roster.derive`) rather than kept as a second hand list of it.
+/// Every project under `src/` ships, which the tree test below holds, so a new project is
+/// classified by the commit that adds it.
+let spine () : string list =
+    Roster.derive (Snapshots.repoFile "")
+    |> List.map (fun p -> Path.GetFileNameWithoutExtension p.ProjectFile)
 
 /// The compute side of the line, under BOTH sets of ids. The compute repository's Phase 322 renamed
 /// its packages to their own ids from its `0.36.0` (D66's note): `Fuaran.Compute.DataFrame`,
@@ -288,7 +271,7 @@ let tests =
 
               Expect.isGreaterThan
                   (List.length projects)
-                  (List.length spine)
+                  (List.length (spine ()))
                   "the solution reading found the spine and more — a reader that found nothing would pass vacuously"
 
               let named =
@@ -304,7 +287,7 @@ let tests =
                       "the compute strand is back in this tree: %A. D66: those ids are produced by https://github.com/Fuaran-Core/fuaran-core-compute from 0.33.0; the spine does not carry them."
                       named)
 
-          testCase "every project under src/ is on the spine, and every spine name is a project there"
+          testCase "every project under src/ ships, so the spine is the src/ tree"
           <| fun _ ->
               let under =
                   subdirNames (srcDir ())
@@ -312,8 +295,8 @@ let tests =
 
               Expect.equal
                   (List.sort under)
-                  (List.sort spine)
-                  "the spine list is the src/ tree: a new project is classified by the commit that adds it"
+                  (List.sort (spine ()))
+                  "every project under src/ is a packable package on the roster: a new project is classified by the commit that adds it"
 
           testCase "no project in the solution references the compute side, directly or through another project"
           <| fun _ ->
@@ -352,7 +335,7 @@ let tests =
           testCase "no built spine assembly, and nothing this suite loads, references the compute side"
           <| fun _ ->
               let refs =
-                  [ for name in spine ->
+                  [ for name in spine () ->
                         match builtAssembly name with
                         | Ok dll -> name, referencedAssemblies dll
                         | Error e -> failtestf "%s" e ]

@@ -132,57 +132,42 @@ let rec private everyValue (v: JVal) : JVal list =
     | JObj fields -> v :: (fields |> List.collect (fun (_, x) -> everyValue x))
     | _ -> [ v ]
 
-let private emptyTally =
-    { Disagreements = []
-      Accepted = 0
-      Refused = 0 }
+/// The combinator probes' render pair: each probe already carries both answers as text.
+let private probeTally = Tally.empty [ "Accepted"; "Refused" ]
 
 /// Run every probe over every value of `el`, folding the disagreements and the two outcome
 /// classes into `tally`.
 let private runProbes (bridge: JVal -> MJVal) (label: string) (el: JVal) (tally: Tally) : Tally =
-    everyValue el
-    |> List.fold
-        (fun acc v ->
-            decodeProbes bridge v
-            |> List.fold
-                (fun (a: Tally) probe ->
-                    let a =
-                        if probe.Production.StartsWith "Ok" then
-                            { a with Accepted = a.Accepted + 1 }
-                        else
-                            { a with Refused = a.Refused + 1 }
-
-                    if probe.Production <> probe.Oracle then
-                        { a with
-                            Disagreements =
-                                a.Disagreements
-                                @ [ sprintf
-                                        "%s: %s on %s\n  production: %s\n  oracle:     %s"
-                                        label
-                                        probe.Name
-                                        (Json.render v)
-                                        probe.Production
-                                        probe.Oracle ] }
-                    else
-                        a)
-                acc)
-        tally
+    tally
+    |> Differential.over (everyValue el) (fun v t ->
+        t
+        |> Differential.over (decodeProbes bridge v) (fun probe t ->
+            t
+            |> Tally.bump (
+                if probe.Production.StartsWith "Ok" then
+                    "Accepted"
+                else
+                    "Refused"
+            )
+            |> Differential.compareWith
+                Differential.text
+                (fun p m ->
+                    sprintf "%s: %s on %s\n  production: %s\n  oracle:     %s" label probe.Name (Json.render v) p m)
+                probe.Production
+                probe.Oracle))
 
 let private expectProbeAgreement (label: string) (t: Tally) =
-    match t.Disagreements with
-    | d :: _ -> failtestf "%s: the decode oracle and Wire.Decode DISAGREE\n%s" label d
-    | [] ->
-        // Both classes must have been reached, or the agreement certifies one arm only — the
-        // same vacuity posture the fold family's `expectAgreement` takes.
-        Expect.isGreaterThan
-            t.Accepted
-            0
-            (sprintf "%s: no probe was ACCEPTED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+    Differential.expectAgrees label t
+    // Both classes must have been reached, or the agreement certifies one arm only — the
+    // same vacuity posture the fold family's `expectAgreement` takes.
+    let accepted, refused = Tally.count "Accepted" t, Tally.count "Refused" t
 
-        Expect.isGreaterThan
-            t.Refused
-            0
-            (sprintf "%s: no probe was REFUSED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+    Expect.isGreaterThan
+        accepted
+        0
+        (sprintf "%s: no probe was ACCEPTED (accepted=%d refused=%d)" label accepted refused)
+
+    Expect.isGreaterThan refused 0 (sprintf "%s: no probe was REFUSED (accepted=%d refused=%d)" label accepted refused)
 
 // ---- the reference vocabulary, on the production side ----
 
@@ -256,21 +241,18 @@ let rec private renderRnode (n: WireDecode.rnode) : string =
         + (items |> List.map renderRnode |> String.concat ";")
         + "]"
 
-/// Production's node decoder and the model's, on the same document.
-let private refDiff (el: JVal) : string option =
-    let production = resR renderRef (decodeRef el)
-    let oracle = resO renderRnode (WireDecode.decode_node (toModel el))
+/// The node decoder's render pair: the reference decoder written from the shipped combinators, and
+/// the model's `decode_node`.
+let private nodeDecoder = Differential.pair (resR renderRef) (resO renderRnode)
 
-    if production <> oracle then
-        Some(
-            sprintf
-                "the node decoders disagree on %s\n  production: %s\n  oracle:     %s"
-                (Json.render el)
-                production
-                oracle
-        )
-    else
-        None
+/// Production's node decoder and the model's, on the same document.
+let private refProbe (el: JVal) (t: Tally) : Tally =
+    t
+    |> Differential.compareWith
+        nodeDecoder
+        (fun p m -> sprintf "the node decoders disagree on %s\n  production: %s\n  oracle:     %s" (Json.render el) p m)
+        (decodeRef el)
+        (WireDecode.decode_node (toModel el))
 
 // ---- generators ----
 
@@ -428,23 +410,16 @@ let rec private genN (depth: int) (r: ConfRng.T) : MJValN * ConfRng.T =
 
         WireDecode.NObj fields, r3
 
-type private PolicyTally =
-    {
-        Diffs: string list
-        /// Documents the strict reader accepted.
-        StrictOk: int
-        /// Documents the strict reader refused.
-        StrictErr: int
-        /// Documents the POLICY fired on: strict refuses, tolerant accepts. Without these the
-        /// tolerant leg would be a second run of the strict one.
-        Fired: int
-    }
+/// The read-policy tally: the documents the strict reader accepted and refused, and those the
+/// POLICY fired on — strict refuses, tolerant accepts. Without those the tolerant leg would be a
+/// second run of the strict one.
+let private policyTally = Tally.empty [ "StrictOk"; "StrictErr"; "Fired" ]
 
 /// The model's reader beside `Json.read` at the parser's own cap, under both policies, on the same
 /// document — compared on the outcome class, the decoded value AND the message, the last of
 /// which is the half that distinguishes the tolerant policy's "no absence to erase it to"
 /// refusal from the strict policy's blanket one.
-let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
+let private policyProbe (d: MJValN) (t: Tally) : Tally =
     let text = renderN d
 
     let side (policy: NullPolicy) (mp: WireDecode.null_policy) =
@@ -469,21 +444,19 @@ let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
     let strictP, strictO = side RejectNull WireDecode.RejectNull
     let lenientP, lenientO = side EraseMemberNull WireDecode.EraseMemberNull
 
-    let diffs =
-        [ if strictP <> strictO then
-              sprintf "strict read of %s\n  production: %s\n  oracle:     %s" text strictP strictO
-          if lenientP <> lenientO then
-              sprintf "tolerant read of %s\n  production: %s\n  oracle:     %s" text lenientP lenientO ]
+    let read (which: string) (p: string) (o: string) (t: Tally) =
+        t
+        |> Differential.compareWith
+            Differential.text
+            (fun p m -> sprintf "%s read of %s\n  production: %s\n  oracle:     %s" which text p m)
+            p
+            o
 
-    { Diffs = t.Diffs @ diffs
-      StrictOk = t.StrictOk + (if strictP.StartsWith "Ok" then 1 else 0)
-      StrictErr = t.StrictErr + (if strictP.StartsWith "Ok" then 0 else 1)
-      Fired =
-        t.Fired
-        + (if not (strictP.StartsWith "Ok") && lenientP.StartsWith "Ok" then
-               1
-           else
-               0) }
+    t
+    |> read "strict" strictP strictO
+    |> read "tolerant" lenientP lenientO
+    |> Tally.bump (if strictP.StartsWith "Ok" then "StrictOk" else "StrictErr")
+    |> Tally.bumpIf (not (strictP.StartsWith "Ok") && lenientP.StartsWith "Ok") "Fired"
 
 // ---------------------------------------------------------------------------
 //  Phase 152 — KEY ORDER, differentially.
@@ -638,28 +611,13 @@ let private getPropRelated (getProp: GetProp) (name: string) (a: JVal) (b: JVal)
 
     WireDecode.outcome_perm (toO (getProp name a)) (toO (getProp name b))
 
-type private ShuffleTally =
-    {
-        Diffs: string list
-        /// Documents the filter admitted (duplicate-free at every depth).
-        Admitted: int
-        /// Shuffles that actually MOVED a member — without these the family re-runs Phase 135's.
-        Moved: int
-        /// Values the node decoder ACCEPTED, across all shuffles.
-        Accepted: int
-        /// Values it refused. Both arms must be reached, or the agreement certifies one of them.
-        Refused: int
-        /// Pairs the extracted relation did NOT relate — a defect in the shuffle, not in the tree.
-        Unrelated: int
-    }
-
-let private emptyShuffleTally =
-    { Diffs = []
-      Admitted = 0
-      Moved = 0
-      Accepted = 0
-      Refused = 0
-      Unrelated = 0 }
+/// The shuffle tally: the documents the filter admitted (duplicate-free at every depth); the
+/// shuffles that actually MOVED a member — without these the family re-runs Phase 135's; the values
+/// the node decoder ACCEPTED and refused across all shuffles (both arms must be reached, or the
+/// agreement certifies one of them); and the pairs the extracted relation did NOT relate — a defect
+/// in the shuffle, not in the tree.
+let private shuffleTally =
+    Tally.empty [ "Admitted"; "Moved"; "Accepted"; "Refused"; "Unrelated" ]
 
 /// One document, `trials` shuffles of it. `getProp` is `Decode.getProp` in every real run and the
 /// positional instrument only in the go-red case.
@@ -669,94 +627,82 @@ let private shuffleProbe
     (trials: int)
     (seed: int)
     (el: JVal)
-    (tally: ShuffleTally)
-    : ShuffleTally =
+    (tally: Tally)
+    : Tally =
     if not (keysUniqueDeep el) then
         tally
     else
         let baseline = orderFreeAnswers getProp el
-        let mutable r = ConfRng.ofSeed seed
 
-        let mutable t =
-            { tally with
-                Admitted = tally.Admitted + 1 }
-
-        for i in 1..trials do
+        let step (i: int) (r: ConfRng.T) (t: Tally) =
             let shuffled, r' = shuffleDeep el r
-            r <- r'
-
-            if shuffled <> el then
-                t <- { t with Moved = t.Moved + 1 }
 
             // 1. the shuffle is an instance of the relation the lemma is about
-            if not (relatedByModel el shuffled) then
-                t <-
-                    { t with
-                        Unrelated = t.Unrelated + 1
-                        Diffs =
-                            t.Diffs
-                            @ [ sprintf
-                                    "%s/%d: the extracted member_perm does NOT relate the document to its shuffle\n  original: %s\n  shuffled: %s"
-                                    label
-                                    i
-                                    (Json.render el)
-                                    (Json.render shuffled) ] }
+            let related = relatedByModel el shuffled
+
+            let t =
+                t
+                |> Tally.bumpIf (shuffled <> el) "Moved"
+                |> Tally.bumpIf (not related) "Unrelated"
+                |> Differential.check related (fun () ->
+                    sprintf
+                        "%s/%d: the extracted member_perm does NOT relate the document to its shuffle\n  original: %s\n  shuffled: %s"
+                        label
+                        i
+                        (Json.render el)
+                        (Json.render shuffled))
 
             // 2. production answers the same on the shuffle as on the original
-            let answers = orderFreeAnswers getProp shuffled
+            let t =
+                t
+                |> Differential.over
+                    (List.zip baseline (orderFreeAnswers getProp shuffled))
+                    (fun ((name, before), (_, after)) t ->
+                        t
+                        |> Differential.check (before = after) (fun () ->
+                            sprintf
+                                "%s/%d: %s MOVED under a member reordering\n  original: %s -> %s\n  shuffled: %s -> %s"
+                                label
+                                i
+                                name
+                                (Json.render el)
+                                before
+                                (Json.render shuffled)
+                                after))
+                |> Differential.over [ "kind"; "id"; "value"; "items"; "tags"; "on"; "no-such-member" ] (fun name t ->
+                    t
+                    |> Differential.check (getPropRelated getProp name el shuffled) (fun () ->
+                        sprintf
+                            "%s/%d: getProp %s answers an UNRELATED subtree under a member reordering\n  original: %s\n  shuffled: %s"
+                            label
+                            i
+                            name
+                            (Json.render el)
+                            (Json.render shuffled)))
 
-            for idx in 0 .. baseline.Length - 1 do
-                let name, before = baseline[idx]
-                let _, after = answers[idx]
+            let t =
+                match decodeRefWith getProp shuffled with
+                | Ok _ -> Tally.bump "Accepted" t
+                | Error _ -> Tally.bump "Refused" t
 
-                if before <> after then
-                    t <-
-                        { t with
-                            Diffs =
-                                t.Diffs
-                                @ [ sprintf
-                                        "%s/%d: %s MOVED under a member reordering\n  original: %s -> %s\n  shuffled: %s -> %s"
-                                        label
-                                        i
-                                        name
-                                        (Json.render el)
-                                        before
-                                        (Json.render shuffled)
-                                        after ] }
+            r', t
 
-            for name in [ "kind"; "id"; "value"; "items"; "tags"; "on"; "no-such-member" ] do
-                if not (getPropRelated getProp name el shuffled) then
-                    t <-
-                        { t with
-                            Diffs =
-                                t.Diffs
-                                @ [ sprintf
-                                        "%s/%d: getProp %s answers an UNRELATED subtree under a member reordering\n  original: %s\n  shuffled: %s"
-                                        label
-                                        i
-                                        name
-                                        (Json.render el)
-                                        (Json.render shuffled) ] }
-
-            match decodeRefWith getProp shuffled with
-            | Ok _ -> t <- { t with Accepted = t.Accepted + 1 }
-            | Error _ -> t <- { t with Refused = t.Refused + 1 }
-
-        t
+        tally
+        |> Tally.bump "Admitted"
+        |> Differential.seeded trials (ConfRng.ofSeed seed) step
 
 /// The tally's own vacuity guards: a run that admitted nothing, or that never actually moved a
 /// member, proves nothing whatever else it reports. Which arms of the node decoder a pool reaches
 /// is a property of that pool, so each case asserts its own.
-let private expectShuffleAgreement (label: string) (t: ShuffleTally) =
-    match t.Diffs with
-    | d :: _ -> failtestf "%s: a member reordering CHANGED a decode answer\n%s" label d
-    | [] ->
-        Expect.isGreaterThan t.Admitted 0 (sprintf "%s: no document passed the duplicate-free filter" label)
+let private expectShuffleAgreement (label: string) (t: Tally) =
+    Differential.expectAgrees (label + ": a member reordering CHANGED a decode answer") t
 
-        Expect.isGreaterThan
-            t.Moved
-            0
-            (sprintf "%s: no shuffle actually moved a member — the family re-ran the unshuffled probes" label)
+    Expect.isGreaterThan (Tally.count "Admitted" t) 0 (sprintf "%s: no document passed the duplicate-free filter" label)
+
+    Expect.isGreaterThan
+        (Tally.count "Moved" t)
+        0
+        (sprintf "%s: no shuffle actually moved a member — the family re-ran the unshuffled probes" label)
 
 [<Tests>]
 let tests =
@@ -782,7 +728,7 @@ let tests =
                           match Json.parse (File.ReadAllText path) with
                           | Error e -> failtestf "%s: not JSON (%s)" name e
                           | Ok v -> runProbes toModel name v acc)
-                      emptyTally
+                      probeTally
                   |> expectProbeAgreement "nodes/ fixtures"
 
           testCase "the decode oracle agrees with Wire.Decode over every ops/ fixture"
@@ -802,42 +748,32 @@ let tests =
                           match Json.parse (File.ReadAllText path) with
                           | Error e -> failtestf "%s: not JSON (%s)" name e
                           | Ok v -> runProbes toModel name v acc)
-                      emptyTally
+                      probeTally
                   |> expectProbeAgreement "ops/ fixtures"
 
           testCase "the decode oracle agrees with Wire.Decode over a generated JVal sample"
           <| fun _ ->
-              let mutable rng = ConfRng.ofSeed 8100
-              let mutable tally = emptyTally
-
-              for i in 1..400 do
-                  let v, r' = genJ 0 rng
-                  rng <- r'
-                  tally <- runProbes toModel (sprintf "generated %d" i) v tally
-
-              expectProbeAgreement "generated JVal sample" tally
+              probeTally
+              |> Differential.seeded 400 (ConfRng.ofSeed 8100) (fun i r t ->
+                  let v, r' = genJ 0 r
+                  r', runProbes toModel (sprintf "generated %d" i) v t)
+              |> expectProbeAgreement "generated JVal sample"
 
           testCase "the model's node decoder inverts its encoder, on both sides"
           <| fun _ ->
               // `decode_encode_roundtrip` is proved on the model; this is that theorem's
               // instance on the EXTRACTED code, run beside the same decoder written from the
               // shipped combinators. The two together are what tie the proof to production.
-              let mutable rng = ConfRng.ofSeed 6100
-              let mutable decoded = 0
+              let t =
+                  Tally.empty [ "Decoded" ]
+                  |> Differential.seeded 150 (ConfRng.ofSeed 6100) (fun _ r t ->
+                      let n, r' = genRef 0 r
+                      let el = encodeRef n
+                      Expect.equal (decodeRef el) (Ok n) "production decodes its own encoding"
+                      r', t |> refProbe el |> Tally.bump "Decoded")
 
-              for _ in 1..150 do
-                  let n, r' = genRef 0 rng
-                  rng <- r'
-                  let el = encodeRef n
-
-                  match refDiff el with
-                  | Some d -> failtest d
-                  | None -> ()
-
-                  Expect.equal (decodeRef el) (Ok n) "production decodes its own encoding"
-                  decoded <- decoded + 1
-
-              Expect.isGreaterThan decoded 0 "the round-trip sample is non-empty"
+              Differential.expectAgrees "the node decoders, round trip" t
+              Expect.isGreaterThan (Tally.count "Decoded" t) 0 "the round-trip sample is non-empty"
 
           testCase "the model's node decoder agrees with production on documents it REFUSES"
           <| fun _ ->
@@ -846,37 +782,30 @@ let tests =
               // documents in a vocabulary this decoder does not know), then a generated sample
               // whose key alphabet is the reference vocabulary's own, so the near-misses — right
               // tag, wrong member type — are reached as well as the obvious rejects.
-              let mutable refused = 0
+              let check (el: JVal) (t: Tally) =
+                  t |> refProbe el |> Tally.bumpIf (Result.isError (decodeRef el)) "Refused"
 
-              let check (el: JVal) =
-                  match refDiff el with
-                  | Some d -> failtest d
-                  | None ->
-                      match decodeRef el with
-                      | Error _ -> refused <- refused + 1
-                      | Ok _ -> ()
+              let corpus =
+                  match SiblingCorpus.resolve "nodes" with
+                  | SiblingCorpus.NotAsked why -> skiptest why
+                  | SiblingCorpus.Absent why -> failtest why
+                  | SiblingCorpus.Found root ->
+                      Tally.empty [ "Refused" ]
+                      |> Differential.over
+                          (Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort)
+                          (fun path t ->
+                              match Json.parse (File.ReadAllText path) with
+                              | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
+                              | Ok v -> t |> Differential.over (everyValue v) check)
 
-              match SiblingCorpus.resolve "nodes" with
-              | SiblingCorpus.NotAsked why -> skiptest why
-              | SiblingCorpus.Absent why -> failtest why
-              | SiblingCorpus.Found root ->
-                  for path in Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort do
-                      match Json.parse (File.ReadAllText path) with
-                      | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
-                      | Ok v ->
-                          for el in everyValue v do
-                              check el
+              let t =
+                  corpus
+                  |> Differential.seeded 400 (ConfRng.ofSeed 6200) (fun _ r t ->
+                      let v, r' = genJ 0 r
+                      r', t |> Differential.over (everyValue v) check)
 
-              let mutable rng = ConfRng.ofSeed 6200
-
-              for _ in 1..400 do
-                  let v, r' = genJ 0 rng
-                  rng <- r'
-
-                  for el in everyValue v do
-                      check el
-
-              Expect.isGreaterThan refused 0 "documents were refused, so the message comparison ran"
+              Differential.expectAgrees "the node decoders, on refused documents" t
+              Expect.isGreaterThan (Tally.count "Refused" t) 0 "documents were refused, so the message comparison ran"
 
           testCase "the model's null-policy reader agrees with the parser under BOTH policies"
           <| fun _ ->
@@ -893,37 +822,27 @@ let tests =
                     WireDecode.NObj [ "a", WireDecode.NObj [ "b", WireDecode.NNull ] ]
                     WireDecode.NObj [ "a", WireDecode.NArr [ WireDecode.NNull ] ] ]
 
-              let mutable t =
-                  { Diffs = []
-                    StrictOk = 0
-                    StrictErr = 0
-                    Fired = 0 }
+              let t =
+                  policyTally
+                  |> Differential.over fixtures policyProbe
+                  |> Differential.seeded 400 (ConfRng.ofSeed 7100) (fun _ r t ->
+                      let d, r' = genN 0 r
+                      r', policyProbe d t)
 
-              for d in fixtures do
-                  t <- policyProbe d t
+              Differential.expectAgrees "the read-policy oracle and the parser" t
+              Expect.isGreaterThan (Tally.count "StrictOk" t) 0 "some documents were accepted"
+              Expect.isGreaterThan (Tally.count "StrictErr" t) 0 "some documents were refused"
 
-              let mutable rng = ConfRng.ofSeed 7100
-
-              for _ in 1..400 do
-                  let d, r' = genN 0 rng
-                  rng <- r'
-                  t <- policyProbe d t
-
-              match t.Diffs with
-              | d :: _ -> failtestf "the read-policy oracle and the parser DISAGREE\n%s" d
-              | [] ->
-                  Expect.isGreaterThan t.StrictOk 0 "some documents were accepted"
-                  Expect.isGreaterThan t.StrictErr 0 "some documents were refused"
-                  Expect.isGreaterThan t.Fired 0 "the policy FIRED — strict refused where tolerant accepted"
+              Expect.isGreaterThan (Tally.count "Fired" t) 0 "the policy FIRED — strict refused where tolerant accepted"
 
           testCase "a decode oracle handed a blind bridge DISAGREES with Wire.Decode"
           <| fun _ ->
               // The teeth. The blind bridge reads every wire integer as a float, so the oracle is
               // asked about a different value from the one production was asked about: `asInt`
               // must lose. A green report above is therefore a comparison that CAN fail.
-              let tally = runProbes toModelBlind "blind" (JObj [ "n", JInt 7 ]) emptyTally
+              let tally = runProbes toModelBlind "blind" (JObj [ "n", JInt 7 ]) probeTally
 
-              match tally.Disagreements with
+              match Tally.disagreements tally with
               | [] ->
                   failtest
                       "a blind bridge reads every integer as a float, so asInt must disagree — this comparison cannot lose"
@@ -933,15 +852,11 @@ let tests =
                       (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head ds))
 
                   // … and it loses over the generated sample too, not only on a hand-made value.
-                  let mutable rng = ConfRng.ofSeed 9100
-                  let mutable swept = emptyTally
-
-                  for _ in 1..60 do
-                      let v, r' = genJ 0 rng
-                      rng <- r'
-                      swept <- runProbes toModelBlind "blind" v swept
-
-                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well"
+                  probeTally
+                  |> Differential.seeded 60 (ConfRng.ofSeed 9100) (fun _ r t ->
+                      let v, r' = genJ 0 r
+                      r', runProbes toModelBlind "blind" v t)
+                  |> Differential.expectLoses "the blind bridge, over the generated sample as well"
 
           // ---- Phase 152: the decode surface under a MEMBER REORDERING ----
 
@@ -958,42 +873,34 @@ let tests =
                   Expect.isGreaterThan files.Length 50 "the nodes/ family carries a real corpus"
 
                   let tally =
-                      files
-                      |> Array.fold
-                          (fun acc path ->
-                              let name = Path.GetFileNameWithoutExtension path
+                      shuffleTally
+                      |> Differential.over files (fun path t ->
+                          let name = Path.GetFileNameWithoutExtension path
 
-                              match Json.parse (File.ReadAllText path) with
-                              | Error e -> failtestf "%s: not JSON (%s)" name e
-                              | Ok v ->
-                                  everyValue v
-                                  |> List.fold (fun a el -> shuffleProbe getProp name 4 15201 el a) acc)
-                          emptyShuffleTally
+                          match Json.parse (File.ReadAllText path) with
+                          | Error e -> failtestf "%s: not JSON (%s)" name e
+                          | Ok v -> t |> Differential.over (everyValue v) (shuffleProbe getProp name 4 15201))
 
                   expectShuffleAgreement "nodes/ fixtures, shuffled" tally
 
                   Expect.isGreaterThan
-                      tally.Refused
+                      (Tally.count "Refused" tally)
                       0
                       "the reference decoder refused — the corpus is in a vocabulary it does not know, so this is its arm"
 
                   // … and the oracle still agrees with production on the shuffled documents,
                   // which is the Phase 135 comparison over inputs no fixture contains.
-                  let probes =
-                      files
-                      |> Array.fold
-                          (fun acc path ->
-                              match Json.parse (File.ReadAllText path) with
-                              | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
-                              | Ok v ->
-                                  if keysUniqueDeep v then
-                                      let shuffled, _ = shuffleDeep v (ConfRng.ofSeed 15202)
-                                      runProbes toModel (Path.GetFileNameWithoutExtension path) shuffled acc
-                                  else
-                                      acc)
-                          emptyTally
-
-                  expectProbeAgreement "nodes/ fixtures, shuffled" probes
+                  probeTally
+                  |> Differential.over files (fun path t ->
+                      match Json.parse (File.ReadAllText path) with
+                      | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
+                      | Ok v ->
+                          if keysUniqueDeep v then
+                              let shuffled, _ = shuffleDeep v (ConfRng.ofSeed 15202)
+                              runProbes toModel (Path.GetFileNameWithoutExtension path) shuffled t
+                          else
+                              t)
+                  |> expectProbeAgreement "nodes/ fixtures, shuffled"
 
           testCase "every combinator answers the same on every shuffle of every ops/ fixture"
           <| fun _ ->
@@ -1004,17 +911,13 @@ let tests =
                   let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort
                   Expect.isGreaterThan files.Length 8 "the ops/ family carries a real corpus"
 
-                  files
-                  |> Array.fold
-                      (fun acc path ->
-                          let name = Path.GetFileNameWithoutExtension path
+                  shuffleTally
+                  |> Differential.over files (fun path t ->
+                      let name = Path.GetFileNameWithoutExtension path
 
-                          match Json.parse (File.ReadAllText path) with
-                          | Error e -> failtestf "%s: not JSON (%s)" name e
-                          | Ok v ->
-                              everyValue v
-                              |> List.fold (fun a el -> shuffleProbe getProp name 4 15203 el a) acc)
-                      emptyShuffleTally
+                      match Json.parse (File.ReadAllText path) with
+                      | Error e -> failtestf "%s: not JSON (%s)" name e
+                      | Ok v -> t |> Differential.over (everyValue v) (shuffleProbe getProp name 4 15203))
                   |> expectShuffleAgreement "ops/ fixtures, shuffled"
 
           testCase "the node decoder returns the SAME TREE on every shuffle — §20's one answer"
@@ -1023,41 +926,49 @@ let tests =
               // reference vocabulary, encoded, then reordered at every depth. `decode_node`'s
               // result carries no members of its own, so the lemma claims literal equality and
               // this is where that is measured.
-              let mutable rng = ConfRng.ofSeed 15204
-              let mutable tally = emptyShuffleTally
-              let mutable exact = 0
+              let exact = ref 0
 
-              for i in 1..150 do
-                  let n, r' = genRef 0 rng
-                  rng <- r'
-                  let el = encodeRef n
-                  tally <- shuffleProbe getProp (sprintf "ref %d" i) 4 (15300 + i) el tally
+              let tally =
+                  shuffleTally
+                  |> Differential.seeded 150 (ConfRng.ofSeed 15204) (fun i r t ->
+                      let n, r' = genRef 0 r
+                      let el = encodeRef n
+                      let t = shuffleProbe getProp (sprintf "ref %d" i) 4 (15300 + i) el t
 
-                  // … and the tree it returns is the node that was encoded, not merely a stable
-                  // answer: a decoder that answered `Error` consistently would pass the above.
-                  let shuffled, r'' = shuffleDeep el rng
-                  rng <- r''
-                  Expect.equal (decodeRef shuffled) (Ok n) "the reordered encoding decodes to the same node"
-                  exact <- exact + 1
+                      // … and the tree it returns is the node that was encoded, not merely a stable
+                      // answer: a decoder that answered `Error` consistently would pass the above.
+                      let shuffled, r'' = shuffleDeep el r'
+                      Expect.equal (decodeRef shuffled) (Ok n) "the reordered encoding decodes to the same node"
+                      exact.Value <- exact.Value + 1
+                      r'', t)
 
               expectShuffleAgreement "reference vocabulary, shuffled" tally
 
-              Expect.isGreaterThan tally.Accepted 0 "the node decoder ACCEPTED — this pool is its accept arm"
-              Expect.isGreaterThan exact 0 "the round-trip-under-shuffle sample is non-empty"
+              Expect.isGreaterThan
+                  (Tally.count "Accepted" tally)
+                  0
+                  "the node decoder ACCEPTED — this pool is its accept arm"
+
+              Expect.isGreaterThan exact.Value 0 "the round-trip-under-shuffle sample is non-empty"
 
               // The refusal arm under a shuffle, where the MESSAGE is the whole comparison.
-              let mutable rng2 = ConfRng.ofSeed 15205
-              let mutable refusals = emptyShuffleTally
+              let refusals =
+                  shuffleTally
+                  |> Differential.seeded 300 (ConfRng.ofSeed 15205) (fun i r t ->
+                      let v, r' = genJ 0 r
 
-              for i in 1..300 do
-                  let v, r' = genJ 0 rng2
-                  rng2 <- r'
-
-                  for el in everyValue v do
-                      refusals <- shuffleProbe getProp (sprintf "generated %d" i) 3 (15400 + i) el refusals
+                      r',
+                      t
+                      |> Differential.over
+                          (everyValue v)
+                          (shuffleProbe getProp (sprintf "generated %d" i) 3 (15400 + i)))
 
               expectShuffleAgreement "generated documents, shuffled" refusals
-              Expect.isGreaterThan refusals.Refused 0 "the node decoder REFUSED — the message comparison ran"
+
+              Expect.isGreaterThan
+                  (Tally.count "Refused" refusals)
+                  0
+                  "the node decoder REFUSED — the message comparison ran"
 
           testCase "a decoder that reads the FIRST member rather than the named one LOSES on a shuffle"
           <| fun _ ->
@@ -1065,31 +976,27 @@ let tests =
               // the first member of an object instead of the one asked for. On the canonically
               // ordered corpus it is very nearly right, and every Phase 135 pool would pass it —
               // which is precisely why this family exists. Under a reordering it must lose.
-              let mutable rng = ConfRng.ofSeed 15206
-              let mutable tally = emptyShuffleTally
-
-              for i in 1..120 do
-                  let n, r' = genRef 0 rng
-                  rng <- r'
-                  tally <- shuffleProbe getPropByPosition (sprintf "positional %d" i) 4 (15500 + i) (encodeRef n) tally
+              let tally =
+                  shuffleTally
+                  |> Differential.seeded 120 (ConfRng.ofSeed 15206) (fun i r t ->
+                      let n, r' = genRef 0 r
+                      r', shuffleProbe getPropByPosition (sprintf "positional %d" i) 4 (15500 + i) (encodeRef n) t)
 
               Expect.isGreaterThan
-                  tally.Moved
+                  (Tally.count "Moved" tally)
                   0
                   "the go-red run actually moved members — otherwise it proves nothing about order"
 
-              match tally.Diffs with
-              | [] ->
-                  failtest
-                      "a positional getProp reads whichever member came first, so a reordering MUST change its answer — this comparison cannot lose"
-              | ds ->
-                  Expect.isTrue
-                      (ds |> List.exists (fun d -> d.Contains "MOVED under a member reordering"))
-                      (sprintf "the disagreement is an answer that moved with the order — got:\n%s" (List.head ds))
+              Differential.expectLoses "a positional getProp, under a reordering" tally
+              let ds = Tally.disagreements tally
 
-                  // … and the SHUFFLE ITSELF is not what broke: every pair it drew is one the
-                  // extracted relation relates, so the loss is the decoder's and not the probe's.
-                  Expect.equal
-                      tally.Unrelated
-                      0
-                      "every drawn pair is related by the extracted member_perm — the go-red measures the decoder, not a bad shuffle" ]
+              Expect.isTrue
+                  (ds |> List.exists (fun d -> d.Contains "MOVED under a member reordering"))
+                  (sprintf "the disagreement is an answer that moved with the order — got:\n%s" (List.head ds))
+
+              // … and the SHUFFLE ITSELF is not what broke: every pair it drew is one the
+              // extracted relation relates, so the loss is the decoder's and not the probe's.
+              Expect.equal
+                  (Tally.count "Unrelated" tally)
+                  0
+                  "every drawn pair is related by the extracted member_perm — the go-red measures the decoder, not a bad shuffle" ]

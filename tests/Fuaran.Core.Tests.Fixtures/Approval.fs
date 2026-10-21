@@ -287,9 +287,6 @@ module Files =
     [<Literal>]
     let Readme = "README"
 
-    [<Literal>]
-    let DocCoverage = "doc-coverage"
-
     /// The generated index block at the head of `DECISIONS.md` (DecisionsTests).
     [<Literal>]
     let Decisions = "DECISIONS"

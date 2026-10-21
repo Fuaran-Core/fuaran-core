@@ -13,14 +13,13 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 **The ladder, counted:** 377 claims — 272 proved across 36 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
-**No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
-`unscheduled`; none names a phase that will close it, and the count above is therefore a statement about
-what is proved today, not about what is planned. The reason is a boundary, not a gap: this repository's
-roadmap lives outside it and cannot be read from here, so a list of open phases kept in this tree would be
-a copy that nothing could hold to its source. `tests/Fuaran.Core.Tests/open-phases.json` declares itself
-inert for that reason, and Clause 2 below FAILS any row that makes a scheduling claim while it is
-(see "The scheduled half is vacuous on today's data"). The first row to carry a phase needs a writer for
-that list on the roadmap side before it can pass, and that is the point at which one is asked for.
+**No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
+`unscheduled`, and the ladder refuses any other `closes`, a phase included; the count above is therefore a
+statement about what is proved today, not about what is planned. The reason is a boundary, not a gap: this
+repository's roadmap lives outside it and cannot be read from here, so a list of open phases kept in this
+tree would be a copy that nothing could hold to its source. Phase 537 deleted the inert list that stood in
+for one, and the clause half that read it; a scheduled `closes` returns with a writer for that list, not
+before.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -734,9 +733,9 @@ place together with the contract it implies.
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
-  handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
-  `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 26 rows.
+  handed rather than models. Nothing a domain does closes one. Each names a **`closes`**:
+  `permanent` where nothing could close it, and `unscheduled` where something could and nobody has
+  (no schedule is kept here, so a phase is not a value). 26 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -906,7 +905,7 @@ other three). It reads JSON this directory already keeps and runs no prover, and
 whatever the verdict:
 
 ```
-proofs: exhaustive (11 packages modelled, 6 excluded; 27 assumed: 18 permanent, 5 domain-discharged, 1 domain-declared, 3 unscheduled, 0 scheduled)
+proofs: exhaustive (11 packages modelled, 6 excluded; 27 assumed: 18 permanent, 5 domain-discharged, 1 domain-declared, 3 unscheduled)
 ```
 
 Three clauses stand behind it.
@@ -979,21 +978,17 @@ say in a new field what each row's class already says.
 So the clause is about the ACCOUNT rather than the field. Every `assumed` row is accounted for by
 its class: a `premise` is closed by nothing and that is what the class means; a
 `domain-obligation` is discharged at a domain's own witness by the law it names; a `model-bridge`
-names `closes`, and where that is a phase the phase must be OPEN. The predicate's own line reports
+names `closes`, `permanent` or `unscheduled`. The predicate's own line reports
 the four buckets separately for the reason the contract section argues at length above — rounding
 `unscheduled` into `permanent` asserts an impossibility, and `permanent` is the most expensive
 token in this directory to get wrong.
 
-**The scheduled half is vacuous on today's data, and says so.** No row carries a phase-form
-`closes`; every bridge is `permanent` or `unscheduled`. It is not vacuous as code — the go-reds
-exercise both the shipped-phase arm and the no-oracle arm — and the oracle is worth naming: the
-roadmap store for this repository's own side is not in this repository and cannot be, so the
-family reads `tests/Fuaran.Core.Tests/open-phases.json`, a committed file that holds either the ids of the open
-phases or a declaration, with the reason, that no list is kept (it is declared inert today). It
-reads no environment variable, so public CI runs the clause exactly as a contributor does. Where a
-row makes a scheduling claim and the file is inert, the clause FAILS. A check that reads as green
-without its instrument is worse than an absent one, and
-the first row to carry a phase is the row that will find out.
+**There is no scheduled half (Phase 537).** A `closes` naming a phase would be a claim about this
+repository's roadmap, which is not in this repository and cannot be, so nothing here could check it.
+The clause once held such a claim to a committed list of open phases, declared inert because no
+writer filled it, and failed any scheduling claim while it was; no row ever made one. Phase 537
+deleted the list, its reader and the arm, and a phase-form `closes` is now outside the closed set,
+refused by the ladder and by this clause alike. The scheduled half returns with a writer for the list.
 
 ### Clause 4 — every public operation is mapped (Phase 335)
 
@@ -3367,7 +3362,7 @@ capture stops exhausted, never answered live), and **`capture_value_tamper_detec
 BUNDLED premise (`cap_value_injective`): §6b's decomposition of the record envelope was not repeated
 for the capture envelope. The label vocabulary and the escaper are parameters, as the hash is.
 
-The bridge is `tests/Fuaran.Core.Tests/ProofOracleCompactedTests.fs` (`compacted-stream-differential`,
+The bridge is `tests/Fuaran.Core.Tests/ProofOracle.CompactedTests.fs` (`compacted-stream-differential`,
 `capture-journal-differential`): every `(n, k)` pair of a seeded stream pool in both snapshot modes,
 a starved snapshot so the prefix refusal is met, append after compaction at every boundary, the key
 index at every boundary, and recorded, tampered, replayed and truncated capture journals. Before it

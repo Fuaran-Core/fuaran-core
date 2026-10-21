@@ -376,11 +376,20 @@
       "members": [
         "Families.adequacyTokenOf",
         "Families.refusalTokenOf",
-        "Families.toJsonOf",
+        "Families.toJsonOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projections and renderings of the law-family roster, over a composition of rosters; this repository ships one, so they are reached through the single-roster export and held to the tree by the roster tests and the generated `docs/conformance-families.*` approval.",
+      "through": "Families.toJsonWith",
+      "standIn": "tests/Fuaran.Core.Tests.Fixtures/KitRoster.fs"
+    },
+    {
+      "members": [
         "Families.toMarkdownOf"
       ],
       "class": "measured-elsewhere",
-      "reason": "Projections and renderings of the law-family roster; held to the tree by the roster tests and the generated `docs/conformance-families.*` approval.",
+      "reason": "The roster's markdown rendering over a composition of rosters; this repository ships one, so it is reached through the single-roster rendering and held by the generated `docs/conformance-families.*` approval.",
+      "through": "Families.toMarkdownWith",
       "standIn": "tests/Fuaran.Core.Tests.Fixtures/KitRoster.fs"
     },
     {
@@ -389,7 +398,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Renders an opt-in reason token into the roster exports; measured through the generated export approval.",
-      "through": "Families.toJsonOf",
+      "through": "Families.toJsonWith",
       "standIn": "tests/Fuaran.Core.Tests.Fixtures/KitRoster.fs"
     },
     {
