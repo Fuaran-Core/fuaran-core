@@ -197,12 +197,17 @@ jobs:
           $version = $env:TAG.TrimStart('v')
           $out = "${{ runner.temp }}/oracle"
           $lines = foreach ($rid in 'linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64') {
-              pwsh ./tools/Fuaran.Core.Oracle.Cli/publish-oracle.ps1 -Rid $rid -OutDir $out
+              # Its build output goes to the log, never into the manifest lines this loop collects.
+              pwsh ./tools/Fuaran.Core.Oracle.Cli/publish-oracle.ps1 -Rid $rid -OutDir $out | Out-Host
               if ($LASTEXITCODE -ne 0) { throw "publish-oracle.ps1 failed for $rid" }
               $name = "fuaran-core-oracle-$version-$rid" + $(if ($rid -like 'win-*') { '.exe' } else { '' })
               $sha = (Get-FileHash (Join-Path $out $name) -Algorithm SHA256).Hash.ToLowerInvariant()
               "$sha  $name"
           }
+          # The manifest is exactly one sha256sum line per binary, or nothing is attached (v0.40.1 shipped one
+          # that carried the build output too).
+          if ($lines.Count -ne 4) { throw "the manifest would name $($lines.Count) lines, not 4 binaries" }
+          foreach ($line in $lines) { if ($line -notmatch '^[0-9a-f]{64}  \S+$') { throw "a manifest line is malformed: $line" } }
           # sha256sum's format, LF-terminated, so `sha256sum -c` reads it as it stands.
           [System.IO.File]::WriteAllText((Join-Path $out "fuaran-core-oracle-$version.sha256"), (($lines -join "`n") + "`n"))
           Get-Content (Join-Path $out "fuaran-core-oracle-$version.sha256")
