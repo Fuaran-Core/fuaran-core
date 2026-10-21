@@ -177,6 +177,15 @@ each one against the manifest.
   gh release delete-asset v<Version> fuaran-core-oracle-<Version>-linux-x64 --yes   # one per asset named in the refusal
   ```
 
+**The first release, `v0.40.1` (publish run [39640035761](https://github.com/Fuaran-Core/fuaran-core/actions/runs/39640035761)).**
+`oracle-build` and all four `oracle-smoke` legs were green, and `oracle-release` attached the four binaries and the
+manifest. Its final check then refused, correctly: the attached manifest had 36 lines, not 4, because the build loop had
+collected `publish-oracle.ps1`'s build output into the manifest lines. The four `sha256  name` lines it carried were
+right, and each was checked against its released binary. On 2026-10-21 the manifest asset was replaced by hand with
+exactly those four lines (sha256 `1e4363e08b210e40b72fe67c7de010b415ed8555bb1c8e164817268faac60f68`), and the public url
+was confirmed to serve it. The build now sends that output to the log and refuses a manifest that is not four
+well-formed lines before anything is attached (the `0.40.2` ledger). This was the first time the release jobs' refusals
+ran against a real release, and the one that fired caught a real defect.
 **The protocol version is not the package version.** A response names the protocol (`1.0`). The
 oracle's own version is the release's `<Version>`, which `--version` and `oracle.describe` report.
 A release whose models moved, but whose protocol did not, keeps the protocol version.
