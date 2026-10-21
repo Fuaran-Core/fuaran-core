@@ -12031,7 +12031,7 @@ full-scale vocabulary here, which is the route this entry rejected on its own te
 
 ## 2026-08-18 — D13: the compute vocabulary's closed sets, and what is deliberately absent (Phase 101)
 
-**Status:** Moved-to-compute
+**Status:** Moved-to-compute — Partly superseded: the Pow/Log line, by fuaran-core-compute D43 (Phase 557, 2026-10-21)
 
 A demand-side census of the transform algebra (enumerate the intents a declarative pipeline must
 express, then check each is EXPRESSIBLE — rather than waiting for a failure to harvest) found the
