@@ -25,7 +25,7 @@ module internal CodecLaws =
     [<Literal>]
     let private mutationOutcome = "mutation outcome"
 
-    /// Sound is the soundness Phase 436's theorem 22 proves of Core's own blocks: the refusal
+    /// Sound is the soundness `proofs/DecodeLayer.fst` proves of Core's own blocks (Phase 436): the refusal
     /// resolves in the document it was raised over, and it is not `InvalidJson`, which a reader of a
     /// parsed document never has cause to raise and which stops resolving one member down.
     let private sound (doc: JVal) (e: DecodeError) : bool =
