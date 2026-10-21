@@ -1,7 +1,7 @@
 {
   "kind": "proofs",
   "subject": "fixture",
-  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: a `model-bridge`'s `closes` is neither a `fuaran-core#NNN` phase nor one of the two literals — prose in a field a tool reads.",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: a `model-bridge`'s `closes` is not one of the two literals (`permanent`, `unscheduled`) — prose in a field a tool reads.",
   "claims": [
     {
       "id": "fixture-theorem",
