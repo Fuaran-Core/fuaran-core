@@ -73,7 +73,7 @@ let tests =
                   (admitsFor (Only [ Files.Decisions ]) Docs Files.Decisions)
                   "one of a switch's several projections is addressable on its own"
 
-              Expect.isFalse (admitsFor (Only [ Files.Decisions ]) Docs Files.DocCoverage) "and leaves the others alone"
+              Expect.isFalse (admitsFor (Only [ Files.Decisions ]) Docs Files.LedgerIndex) "and leaves the others alone"
 
           testCase "a filter that matches nothing is red by name, never a quiet no-op"
           <| fun _ ->
