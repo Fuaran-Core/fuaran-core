@@ -29,7 +29,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if (-not $SkipFormatCheck) {
     $global:LASTEXITCODE = 0
     # `samples` is covered too: the adoption sample is code a reader copies (Phase 294).
-    dotnet fantomas --check src tests samples
+    dotnet fantomas --check src tests tools samples
     if ($LASTEXITCODE -ne 0) {
         Write-Host '==== verify: fantomas format-check FAILED (run ./run.ps1 to format)' -ForegroundColor Red
         exit $LASTEXITCODE

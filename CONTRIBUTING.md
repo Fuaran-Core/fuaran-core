@@ -111,7 +111,7 @@ of the headings.
 
 ## Coding standards
 
-- **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests samples`) before every
+- **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests tools samples`) before every
   commit; `./verify.ps1` fails on unformatted code.
 - **Totality — no exceptions in the public surface.** Failures are typed values (`Result`, a
   `Rejection`, or a named `*Error` envelope), never a thrown exception. A recoverable envelope must
