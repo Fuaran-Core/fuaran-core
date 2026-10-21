@@ -4,10 +4,12 @@ module Fuaran.Core.Tests.ProofOracle.RelationTests
 // (`proofs/oracle/Relation.fs`) run beside production, THREE ways. Production's `Relation`
 // (Phase 552) is held to the extracted PASS — `components`, `cycles`, `cyclesAmong`, `sort`,
 // `reachable`, `inverse`, `terminals`, `nodes` and `successors`, item for item — and both are held
-// to the extracted SPECIFICATION the model states concretely over the edge list and does not prove
-// of the pass (`mutual`, `deps_first`, `cycles_among_spec`, `terminals_spec`; see the
-// `relation-components-are-sccs` row): that is the sampled half of Tarjan's correctness, and it is
-// measured here on every drawn relation rather than assumed.
+// to the extracted SPECIFICATION the model states concretely over the edge list (`mutual`,
+// `deps_first`, `cycles_among_spec`, `terminals_spec`). Since Phase 556 the pass is PROVED to meet
+// that specification (the `relation-components-are-sccs`, `relation-components-deps-first`,
+// `relation-cycles-among-spec` and `relation-terminals-spec` rows), so the third way samples no
+// theorem: it guards the extraction and production — that the F# the model extracts to, and the
+// F# production runs, still answer as the proved model does on every drawn relation.
 // The bridges more than one model reads are in `ProofOracle.Bridges.fs`.
 
 open Expecto

@@ -1177,9 +1177,11 @@ let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (t
    What this section models is the CHECKER production holds `sort`'s result to — a function the
    model can state exactly — and it proves that an order the checker accepts discharges the one
    premise the `_over` agreement theorems take of the walked order. Since Phase 553 `sort` is in
-   the model too (section 9) and that premise is a theorem of it; the checker stays, because its
-   third clause — dependencies-first — is what `Relation.fst` states and does not prove, and the
-   differential holds `sort`'s result to it on every graph it draws.
+   the model too (section 9) and that premise is a theorem of it; since Phase 556 its third
+   clause — dependencies-first — is a theorem of `Relation.fst` too (`components_deps_first`, the
+   `relation-components-deps-first` row). The checker stays as the statement production holds
+   `sort`'s result to, and the differential still holds `sort`'s result to it on every graph it
+   draws: that guards the extraction and production, not the proof.
 
    The checker's third clause — every read of an `Order` id that the map holds appears earlier, or
    lies in a cycle — is what makes the walk's values MEAN something (an acyclic read is computed
@@ -1257,9 +1259,10 @@ let evalfromwith_agrees_certified (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:
       `evalfromwith_agrees` below carry none. `sort_same_set`: `Order` and the cycles' members
       together are exactly the map's keys. Those are `validTopo`'s first two clauses.
 
-      WHAT IS NOT CLAIMED. The checker's third clause — every read of an `Order` id that the map
-      holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst`
-      states (`deps_first`) and does not prove; the differential holds `sort` to it.
+      The checker's third clause — every read of an `Order` id that the map holds appears
+      earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states
+      (`deps_first`) and, since Phase 556, proves of the pass (`components_deps_first`); the
+      differential holds `sort` to it as before, guarding the extraction and production.
    ====================================================================================== *)
 
 (* F#: `reads |> Set.filter (fun d -> Map.containsKey d deps)`. *)

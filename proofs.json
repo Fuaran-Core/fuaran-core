@@ -3249,8 +3249,8 @@
       "id": "relation-components-partition",
       "level": "proved",
       "statement": "The components `Relation.components` emits PARTITION the nodes: no id in two of them, every node of the relation in one, nothing that is not a node, and no component empty — stated of the model's `pass`, Tarjan's algorithm written as the recursive visit production's explicit frame stack replays, over a state of association lists, with its seven-clause invariant (`inv`: the stack and the found components hold no id twice between them; visited is stack-or-found; a visited id is a node; every index is below `next`; a low-link is at most its index; every id on the stack has its low-link at or above the ROOT's index; no found component is empty) carried in the visit's `Pure` postconditions and the root loop proved to leave the stack empty.",
-      "boundary": "The relation is the PREPARED form — nodes in the list's order with their successor lists; the model sorts nothing — and the differential hands it `Relation.toMap`, so production's ascending visit is the model's visit. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). That a component is a mutual-reachability class, and that the components come dependencies-first, is NOT this row: see `relation-components-are-sccs`.",
-      "claim": "The components `Relation.components` emits PARTITION the nodes: no id in two of them, every node of the relation in one, nothing that is not a node, and no component empty — stated of the model's `pass`, Tarjan's algorithm written as the recursive visit production's explicit frame stack replays, over a state of association lists, with its seven-clause invariant (`inv`: the stack and the found components hold no id twice between them; visited is stack-or-found; a visited id is a node; every index is below `next`; a low-link is at most its index; every id on the stack has its low-link at or above the ROOT's index; no found component is empty) carried in the visit's `Pure` postconditions and the root loop proved to leave the stack empty. The relation is the PREPARED form — nodes in the list's order with their successor lists; the model sorts nothing — and the differential hands it `Relation.toMap`, so production's ascending visit is the model's visit. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). That a component is a mutual-reachability class, and that the components come dependencies-first, is NOT this row: see `relation-components-are-sccs`.",
+      "boundary": "The relation is the PREPARED form — nodes in the list's order with their successor lists; the model sorts nothing — and the differential hands it `Relation.toMap`, so production's ascending visit is the model's visit. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). That a component is a mutual-reachability class is `relation-components-are-sccs`, and that the components come dependencies-first is `relation-components-deps-first` — both proved over the same invariant.",
+      "claim": "The components `Relation.components` emits PARTITION the nodes: no id in two of them, every node of the relation in one, nothing that is not a node, and no component empty — stated of the model's `pass`, Tarjan's algorithm written as the recursive visit production's explicit frame stack replays, over a state of association lists, with its seven-clause invariant (`inv`: the stack and the found components hold no id twice between them; visited is stack-or-found; a visited id is a node; every index is below `next`; a low-link is at most its index; every id on the stack has its low-link at or above the ROOT's index; no found component is empty) carried in the visit's `Pure` postconditions and the root loop proved to leave the stack empty. The relation is the PREPARED form — nodes in the list's order with their successor lists; the model sorts nothing — and the differential hands it `Relation.toMap`, so production's ascending visit is the model's visit. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). That a component is a mutual-reachability class is `relation-components-are-sccs`, and that the components come dependencies-first is `relation-components-deps-first` — both proved over the same invariant.",
       "phase": "fuaran-core#553",
       "evidence": {
         "theorem": "components_partition",
@@ -3275,8 +3275,8 @@
       "id": "relation-sort-partition",
       "level": "proved",
       "statement": "`Relation.sort` reads each component once — a singleton with no self-edge into `Order`, every other component into `Cycles` — so `Order` holds no id twice (`sort_order_distinct`) and `Order` with the cycles' members is exactly the node set, each once: the first two clauses of `Propagation.validTopo` as theorems of the pass, and the one premise `Propagation.fst`'s agreement theorems take of the walked order, discharged.",
-      "boundary": "Over the prepared form, as `relation-components-partition`. The checker's third clause — dependencies-first — is `relation-components-are-sccs`'s, sampled.",
-      "claim": "`Relation.sort` reads each component once — a singleton with no self-edge into `Order`, every other component into `Cycles` — so `Order` holds no id twice (`sort_order_distinct`) and `Order` with the cycles' members is exactly the node set, each once: the first two clauses of `Propagation.validTopo` as theorems of the pass, and the one premise `Propagation.fst`'s agreement theorems take of the walked order, discharged. Over the prepared form, as `relation-components-partition`. The checker's third clause — dependencies-first — is `relation-components-are-sccs`'s, sampled.",
+      "boundary": "Over the prepared form, as `relation-components-partition`. The checker's third clause — dependencies-first — is `relation-components-deps-first`, proved.",
+      "claim": "`Relation.sort` reads each component once — a singleton with no self-edge into `Order`, every other component into `Cycles` — so `Order` holds no id twice (`sort_order_distinct`) and `Order` with the cycles' members is exactly the node set, each once: the first two clauses of `Propagation.validTopo` as theorems of the pass, and the one premise `Propagation.fst`'s agreement theorems take of the walked order, discharged. Over the prepared form, as `relation-components-partition`. The checker's third clause — dependencies-first — is `relation-components-deps-first`, proved.",
       "phase": "fuaran-core#553",
       "evidence": {
         "theorem": "sort_partition",
@@ -3336,29 +3336,127 @@
     },
     {
       "id": "relation-components-are-sccs",
-      "level": "tested",
-      "statement": "THE SPECIFICATION OF THE PASS, stated concretely in the model over the edge list and held on every drawn relation: two nodes share a component exactly when each reaches the other (`mutual`); the components come dependencies-first — every successor of a member lies in its own component or an earlier one (`deps_first`); `cyclesAmong` is exactly the nodes that reach themselves by one edge or more (`cycles_among_spec`); and `terminals` is its chain definition — the sinks a node reaches, or `None` when it reaches a cycle, a name that is no node ending at itself (`terminals_spec`). Each is a function the model defines from `reachable`, so the statement is checkable and the differential checks it THREE ways: production's answers against the extracted pass item for item, and both against the extracted specification.",
-      "boundary": "Sampled, not proved. The step from Tarjan's pass to these statements is Tarjan's correctness theorem — the low-link invariant that a popped stack segment is exactly one strongly-connected component, and the DFS finish-order argument that components are emitted dependencies-first — which the model states and does not prove; what IS proved of the pass is `relation-components-partition` and `relation-sort-partition`, which no agreement theorem needs more than. Closable by proving it over `visit`'s invariant; until then the row stands on the 400 seeded relations and the dense diamond, and on the go-red: dropping the on-stack low-link update in the extracted pass turned 767 comparisons red across the 400 relations and 4 on the diamond (recorded in DECISIONS.md D209).",
-      "claim": "THE SPECIFICATION OF THE PASS, stated concretely in the model over the edge list and held on every drawn relation: two nodes share a component exactly when each reaches the other (`mutual`); the components come dependencies-first — every successor of a member lies in its own component or an earlier one (`deps_first`); `cyclesAmong` is exactly the nodes that reach themselves by one edge or more (`cycles_among_spec`); and `terminals` is its chain definition — the sinks a node reaches, or `None` when it reaches a cycle, a name that is no node ending at itself (`terminals_spec`). Each is a function the model defines from `reachable`, so the statement is checkable and the differential checks it THREE ways: production's answers against the extracted pass item for item, and both against the extracted specification. Sampled, not proved. The step from Tarjan's pass to these statements is Tarjan's correctness theorem — the low-link invariant that a popped stack segment is exactly one strongly-connected component, and the DFS finish-order argument that components are emitted dependencies-first — which the model states and does not prove; what IS proved of the pass is `relation-components-partition` and `relation-sort-partition`, which no agreement theorem needs more than. Closable by proving it over `visit`'s invariant; until then the row stands on the 400 seeded relations and the dense diamond, and on the go-red: dropping the on-stack low-link update in the extracted pass turned 767 comparisons red across the 400 relations and 4 on the diamond (recorded in DECISIONS.md D209).",
-      "phase": "fuaran-core#553",
+      "level": "proved",
+      "statement": "TARJAN'S CORRECTNESS, THE CLASS HALF. Every component `Relation.components` emits is a mutual-reachability class: two nodes share a component exactly when each reaches the other by zero edges or more (`mutual`) — the members reach one another (`components_are_sccs`, first clause), whatever a member is mutually reachable with is a member (second clause), and for a node the two readings coincide through the component the pass holds it in (`same_component_iff`). Proved over `visit`'s invariant, strengthened with four clauses — the stack sorted by index (`stack_sorted`); a low-link WITNESS for every id on the stack, an id on the stack at the index its low-link holds that it reaches (`low_wit`); the components found dependencies-first (`comps_ok`); every component found a class (`sccs_ok`) — and a FRAME invariant carried between a frame's successors (`frame_ok`: every id above the frame on the stack is a finished descendant that did not pop, with its low-link at or above the frame's, reachable from the frame, every edge out of it processed; every successor consumed is a processed edge). At a root's pop the segment is exactly the class (`pop_class`): each member reaches the root along its low-link witnesses, which stay at or above the root because the root's low-link is its own index (`climbs`); and whatever the root reaches lies in the segment or in a component found, where nothing reaches the root.",
+      "boundary": "Within the model, over the prepared form, and conditional on nothing: reachability is `reachable`, concrete over the edge list, and no theorem takes a parameter. The correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`), which `relation-differential` keeps holding three ways on every drawn relation — the differential guards the extraction and production, not the proof.",
+      "claim": "TARJAN'S CORRECTNESS, THE CLASS HALF. Every component `Relation.components` emits is a mutual-reachability class: two nodes share a component exactly when each reaches the other by zero edges or more (`mutual`) — the members reach one another (`components_are_sccs`, first clause), whatever a member is mutually reachable with is a member (second clause), and for a node the two readings coincide through the component the pass holds it in (`same_component_iff`). Proved over `visit`'s invariant, strengthened with four clauses — the stack sorted by index (`stack_sorted`); a low-link WITNESS for every id on the stack, an id on the stack at the index its low-link holds that it reaches (`low_wit`); the components found dependencies-first (`comps_ok`); every component found a class (`sccs_ok`) — and a FRAME invariant carried between a frame's successors (`frame_ok`: every id above the frame on the stack is a finished descendant that did not pop, with its low-link at or above the frame's, reachable from the frame, every edge out of it processed; every successor consumed is a processed edge). At a root's pop the segment is exactly the class (`pop_class`): each member reaches the root along its low-link witnesses, which stay at or above the root because the root's low-link is its own index (`climbs`); and whatever the root reaches lies in the segment or in a component found, where nothing reaches the root. Within the model, over the prepared form, and conditional on nothing: reachability is `reachable`, concrete over the edge list, and no theorem takes a parameter. The correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`), which `relation-differential` keeps holding three ways on every drawn relation — the differential guards the extraction and production, not the proof.",
+      "phase": "fuaran-core#556",
       "evidence": {
-        "family": "Proofs.Oracle",
-        "cases": [
-          "the relation oracle agrees with Relation.components, cycles, cyclesAmong, sort, reachable, inverse, terminals, nodes and successors over seeded random relations, and production's pass meets the extracted specification — mutual reachability, dependencies-first, the self-reaching nodes and the chain ends",
-          "the relation oracle answers the dense diamond as production does, with and without its back edge"
-        ],
-        "host": "tests/Fuaran.Core.Tests/ProofOracle.RelationTests.fs",
+        "theorem": "components_are_sccs",
         "model": "proofs/Relation.fst",
-        "artifact": "proofs/oracle/Relation.fs",
-        "seeds": [
-          "553"
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "same_component_iff",
+          "pop_class",
+          "climbs",
+          "pop_edges",
+          "inv",
+          "frame_ok",
+          "above_ok",
+          "done_ok",
+          "frame_member",
+          "low_wit",
+          "sccs_ok",
+          "stack_sorted",
+          "frame_child",
+          "frame_onstack",
+          "frame_skip",
+          "inv_pop",
+          "inv_set_low",
+          "inv_enter",
+          "visit",
+          "roots"
         ],
         "operations": [
           "Relation.components",
           "Relation.cycles",
-          "Relation.cyclesAmong",
-          "Relation.terminals",
+          "Relation.nodes"
+        ]
+      }
+    },
+    {
+      "id": "relation-components-deps-first",
+      "level": "proved",
+      "statement": "TARJAN'S CORRECTNESS, THE ORDER HALF. The components come DEPENDENCIES-FIRST: every successor of a member lies in its own component or in one emitted earlier — the checker `deps_first`, which the differential held the pass's order to, as a theorem of the pass (`components_deps_first`). It is clause (j) of the invariant (`comps_ok`), read in emission order (`comps_ok_deps_first`): at a root's pop every edge out of the segment lands in the segment or in a component already found, because a target still on the stack under the root would have pulled the root's low-link under its own index (`pop_edges`). `Propagation.validTopo`'s third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — follows for the computed order, so the certificate's three clauses are theorems of `sort`.",
+      "boundary": "Within the model, over the prepared form, and conditional on nothing: reachability is `reachable`, concrete over the edge list, and no theorem takes a parameter. The correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`), which `relation-differential` keeps holding three ways on every drawn relation — the differential guards the extraction and production, not the proof.",
+      "claim": "TARJAN'S CORRECTNESS, THE ORDER HALF. The components come DEPENDENCIES-FIRST: every successor of a member lies in its own component or in one emitted earlier — the checker `deps_first`, which the differential held the pass's order to, as a theorem of the pass (`components_deps_first`). It is clause (j) of the invariant (`comps_ok`), read in emission order (`comps_ok_deps_first`): at a root's pop every edge out of the segment lands in the segment or in a component already found, because a target still on the stack under the root would have pulled the root's low-link under its own index (`pop_edges`). `Propagation.validTopo`'s third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — follows for the computed order, so the certificate's three clauses are theorems of `sort`. Within the model, over the prepared form, and conditional on nothing: reachability is `reachable`, concrete over the edge list, and no theorem takes a parameter. The correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`), which `relation-differential` keeps holding three ways on every drawn relation — the differential guards the extraction and production, not the proof.",
+      "phase": "fuaran-core#556",
+      "evidence": {
+        "theorem": "components_deps_first",
+        "model": "proofs/Relation.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "comps_ok_deps_first",
+          "deps_first_snoc",
+          "comps_ok",
+          "comps_ok_closed",
+          "pop_edges",
+          "inv_pop",
+          "visit",
+          "roots"
+        ],
+        "operations": [
+          "Relation.components",
           "Relation.sort"
+        ]
+      }
+    },
+    {
+      "id": "relation-cycles-among-spec",
+      "level": "proved",
+      "statement": "`Relation.cyclesAmong` is EXACTLY the nodes that reach themselves by one edge or more — `cycles_among_spec`, the self-reaching nodes by the closure's definition — each once (`cycles_among_meets_spec`): a member of a cycle component is on a cycle, by its self-edge or through a second member it is mutually reachable with (`cycle_member_on_cycle`); and a node on a cycle sits in a cycle component, since a singleton is reached again from itself only through a successor mutually reachable with it, which the class then holds (`on_cycle_component`).",
+      "boundary": "As a set, each node once: the list `cyclesAmong` answers is in the pass's pop order and the specification's in node order, and the differential compares the two as sets. Within the model, as `relation-components-are-sccs`.",
+      "claim": "`Relation.cyclesAmong` is EXACTLY the nodes that reach themselves by one edge or more — `cycles_among_spec`, the self-reaching nodes by the closure's definition — each once (`cycles_among_meets_spec`): a member of a cycle component is on a cycle, by its self-edge or through a second member it is mutually reachable with (`cycle_member_on_cycle`); and a node on a cycle sits in a cycle component, since a singleton is reached again from itself only through a successor mutually reachable with it, which the class then holds (`on_cycle_component`). As a set, each node once: the list `cyclesAmong` answers is in the pass's pop order and the specification's in node order, and the differential compares the two as sets. Within the model, as `relation-components-are-sccs`.",
+      "phase": "fuaran-core#556",
+      "evidence": {
+        "theorem": "cycles_among_meets_spec",
+        "model": "proofs/Relation.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "cycle_member_on_cycle",
+          "on_cycle_component",
+          "mem_cyclic_of",
+          "comp_of",
+          "reach_split",
+          "reach_plus_char",
+          "components_are_sccs",
+          "components_partition",
+          "sort_partition"
+        ],
+        "operations": [
+          "Relation.cyclesAmong",
+          "Relation.cycles"
+        ]
+      }
+    },
+    {
+      "id": "relation-terminals-spec",
+      "level": "proved",
+      "statement": "`Relation.terminals` is its chain definition, `terminals_spec`: for every name, the sinks the name reaches, or `None` when it reaches a cycle, a name that is no node ending at itself (`terminals_meets_spec`). The loop over the components in emission order is proved by its invariant (`answer_all_ok`): with every component found so far answered as the specification answers it, the next is too — a cycle component is `None` for each member, every one on a cycle; a singleton with no successors is its own sink; and a singleton with successors joins their ends (`singleton_answer`: `None` exactly when a successor's end is, else the union of the sinks each reaches), every successor of it answered before it, dependencies-first.",
+      "boundary": "As a set per answer: the specification lists the sinks in closure order and the pass unions them in component order, and the differential compares each `Some` as a set. Within the model, as `relation-components-are-sccs`.",
+      "claim": "`Relation.terminals` is its chain definition, `terminals_spec`: for every name, the sinks the name reaches, or `None` when it reaches a cycle, a name that is no node ending at itself (`terminals_meets_spec`). The loop over the components in emission order is proved by its invariant (`answer_all_ok`): with every component found so far answered as the specification answers it, the next is too — a cycle component is `None` for each member, every one on a cycle; a singleton with no successors is its own sink; and a singleton with successors joins their ends (`singleton_answer`: `None` exactly when a successor's end is, else the union of the sinks each reaches), every successor of it answered before it, dependencies-first. As a set per answer: the specification lists the sinks in closure order and the pass unions them in component order, and the differential compares each `Some` as a set. Within the model, as `relation-components-are-sccs`.",
+      "phase": "fuaran-core#556",
+      "evidence": {
+        "theorem": "terminals_meets_spec",
+        "model": "proofs/Relation.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "answer_all_ok",
+          "singleton_answer",
+          "singleton_none",
+          "singleton_some",
+          "join_ends_none",
+          "join_ends_some",
+          "bind_all_mem",
+          "bind_all_other",
+          "deps_first_prefix",
+          "reach_sink",
+          "not_node_no_succ",
+          "components_deps_first",
+          "components_are_sccs"
+        ],
+        "operations": [
+          "Relation.terminals"
         ]
       }
     },
@@ -3565,8 +3663,8 @@
       "id": "propagation-sort-computed",
       "level": "proved",
       "statement": "THE ORDER BRIDGE, CLOSED. `Propagation.sort` is in the model: `Relation.sort` over the map with its dangling reads removed (`known`), read into `TopoResult` as production reads `Relation.Topo`. Its `Order` holds no id twice (`sort_distinct`, off `Relation.sort_order_distinct`) and `Order` with the cycles' members is exactly the map's keys (`sort_same_set`, off `Relation.sort_partition`) — `validTopo`'s first two clauses as theorems — so the agreement theorems hold at the computed order with no order premise, where the order used to be a parameter and the fact an assumed row (`propagation-order-distinct`, retired).",
-      "boundary": "The checker's third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states (`deps_first`) and does not prove (`relation-components-are-sccs`); the differential holds `sort` to `validTopo` on every generated graph as before, and to the extracted `sort` item for item. That `Relation.ofMap`'s ascending preparation is the list order the differential hands the model is the bridge, sampled there.",
-      "claim": "THE ORDER BRIDGE, CLOSED. `Propagation.sort` is in the model: `Relation.sort` over the map with its dangling reads removed (`known`), read into `TopoResult` as production reads `Relation.Topo`. Its `Order` holds no id twice (`sort_distinct`, off `Relation.sort_order_distinct`) and `Order` with the cycles' members is exactly the map's keys (`sort_same_set`, off `Relation.sort_partition`) — `validTopo`'s first two clauses as theorems — so the agreement theorems hold at the computed order with no order premise, where the order used to be a parameter and the fact an assumed row (`propagation-order-distinct`, retired). The checker's third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states (`deps_first`) and does not prove (`relation-components-are-sccs`); the differential holds `sort` to `validTopo` on every generated graph as before, and to the extracted `sort` item for item. That `Relation.ofMap`'s ascending preparation is the list order the differential hands the model is the bridge, sampled there.",
+      "boundary": "The checker's third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states (`deps_first`) and proves of the pass (`relation-components-deps-first`), so every clause of `validTopo` is a theorem of the computed order; the differential still holds `sort` to `validTopo` on every generated graph, and to the extracted `sort` item for item. That `Relation.ofMap`'s ascending preparation is the list order the differential hands the model is the bridge, sampled there.",
+      "claim": "THE ORDER BRIDGE, CLOSED. `Propagation.sort` is in the model: `Relation.sort` over the map with its dangling reads removed (`known`), read into `TopoResult` as production reads `Relation.Topo`. Its `Order` holds no id twice (`sort_distinct`, off `Relation.sort_order_distinct`) and `Order` with the cycles' members is exactly the map's keys (`sort_same_set`, off `Relation.sort_partition`) — `validTopo`'s first two clauses as theorems — so the agreement theorems hold at the computed order with no order premise, where the order used to be a parameter and the fact an assumed row (`propagation-order-distinct`, retired). The checker's third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states (`deps_first`) and proves of the pass (`relation-components-deps-first`), so every clause of `validTopo` is a theorem of the computed order; the differential still holds `sort` to `validTopo` on every generated graph, and to the extracted `sort` item for item. That `Relation.ofMap`'s ascending preparation is the list order the differential hands the model is the bridge, sampled there.",
       "phase": "fuaran-core#553",
       "evidence": {
         "theorem": "sort_distinct",

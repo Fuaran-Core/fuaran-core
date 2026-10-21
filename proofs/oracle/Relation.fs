@@ -433,7 +433,10 @@ if (ListAlgebra.mem w st.stack) then begin
      (
 
 let st1 = (set_low st v (min (low_of st v) (idx_of st w)))
-in (visit_succs r st1 v rest))
+in (
+
+let st2 = (visit_succs r st1 v rest)
+in st2))
      end else begin
      (visit_succs r st v rest)
      end
