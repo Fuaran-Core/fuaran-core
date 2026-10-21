@@ -859,6 +859,57 @@ let private templatePath =
 let private skeletonPath = Path.Combine(repoRoot, "proofs", "Skeleton.fst")
 let private treeOpsPath = Path.Combine(repoRoot, "proofs", "TreeOps.fst")
 
+let private proofsDir = Path.Combine(repoRoot, "proofs")
+
+/// The files `proofs/kit/asset.json` declares, as (path under proofs/, archive path).
+let private kitAssetFiles () : (string * string) list =
+    use doc =
+        JsonDocument.Parse(File.ReadAllText(Path.Combine(proofsDir, "kit", "asset.json")))
+
+    [ for f in doc.RootElement.GetProperty("files").EnumerateArray() ->
+          f.GetProperty("path").GetString(), f.GetProperty("as").GetString() ]
+
+/// `copies.json`'s committed `proofsKit.sha256`.
+let private committedKitSha () : string =
+    use doc =
+        JsonDocument.Parse(File.ReadAllText(Path.Combine(repoRoot, "copies.json")))
+
+    doc.RootElement.GetProperty("proofsKit").GetProperty("sha256").GetString()
+
+/// The sha256 `proofs/kit/build-kit-asset.ps1` prints for the kit under `dir`, built into a fresh
+/// scratch directory — the one builder the publish workflow and an adopter's offline path also run.
+let private buildKitAsset (dir: string) : string =
+    let out =
+        Path.Combine(Path.GetTempPath(), "kit-asset-" + Guid.NewGuid().ToString "N")
+
+    let builder = Path.Combine(proofsDir, "kit", "build-kit-asset.ps1")
+
+    try
+        match
+            ChildProcess.argv
+                "pwsh"
+                [ "-NoProfile"
+                  "-NonInteractive"
+                  "-File"
+                  builder
+                  "-ProofsDir"
+                  dir
+                  "-OutDir"
+                  out
+                  "-Version"
+                  "0.0.0" ]
+            |> ChildProcess.run
+        with
+        | Error why -> failtestf "the kit builder could not run: %s" why
+        | Ok o when o.Exit <> 0 -> failtestf "the kit builder exited %d: %s%s" o.Exit o.Stdout o.Stderr
+        | Ok o ->
+            let m = Regex.Match(o.Stdout, "sha256 ([0-9a-f]{64})")
+            Expect.isTrue m.Success (sprintf "the builder printed a sha256: %s" o.Stdout)
+            m.Groups[1].Value
+    finally
+        if Directory.Exists out then
+            Directory.Delete(out, true)
+
 let private expectOk (r: Result<'a, string>) (what: string) : 'a =
     match r with
     | Ok v -> v
@@ -889,10 +940,16 @@ let proofsKitTemplateTests =
 
               Expect.stringContains body "{{DIAMOND}} ();" "the obligation's discharge is fixed text"
 
+              // Phase 536: the composite has no `requires` — the lane-set premise it was cut with is
+              // dropped, which strengthens the theorem, and nothing may quietly put it back.
+              Expect.isFalse
+                  (body.Contains "requires lanes_apply")
+                  "the fold-confluence composite carries no lane-set premise"
+
               Expect.stringContains
                   body
-                  "requires lanes_apply {{APPLY}} ls1 s0"
-                  "what remains in the requires is fixed text"
+                  "  : Lemma (ensures outcome_equiv ({{FOLD}} s0 ls1) ({{FOLD}} s0 ls2))"
+                  "the composite's statement is fixed text with no requires"
 
           testCase "Skeleton.fst is the template's first instance — reproduced byte for byte after hole substitution"
           <| fun _ ->
@@ -969,7 +1026,46 @@ let proofsKitTemplateTests =
 
               match templateBody (template + "\n" + templateMarker + "\n") with
               | Ok _ -> failtest "a template with two markers was accepted"
-              | Error e -> Expect.stringContains e "2 times" "the refusal counts the marker" ]
+              | Error e -> Expect.stringContains e "2 times" "the refusal counts the marker"
+
+          // Phase 536 — the kit reaches an adopter as ONE release asset pinned by sha256; this
+          // repository commits the sha, and these hold it to what the tree builds.
+          testCase "the kit asset this tree builds is reproducible, and its sha256 is the one copies.json commits"
+          <| fun _ ->
+              let first = buildKitAsset proofsDir
+              let second = buildKitAsset proofsDir
+              Expect.equal first second "two builds of one tree are the same bytes"
+
+              Expect.equal
+                  first
+                  (committedKitSha ())
+                  "copies.json proofsKit.sha256 is this tree's kit (build-kit-asset.ps1 -Update, in the same commit)"
+
+          testCase "go-red: a planted edit to one kit file moves the asset's sha256"
+          <| fun _ ->
+              let scratch =
+                  Path.Combine(Path.GetTempPath(), "kit-asset-go-red-" + Guid.NewGuid().ToString "N")
+
+              try
+                  for (path, _) in kitAssetFiles () do
+                      let target = Path.Combine(scratch, path)
+                      Directory.CreateDirectory(Path.GetDirectoryName target) |> ignore
+                      File.Copy(Path.Combine(proofsDir, path), target)
+
+                  Expect.equal
+                      (buildKitAsset scratch)
+                      (committedKitSha ())
+                      "the copied tree builds the committed sha (the control)"
+
+                  File.AppendAllText(Path.Combine(scratch, "kit", "templates", "check.ps1"), "# planted" + "\n")
+
+                  Expect.notEqual
+                      (buildKitAsset scratch)
+                      (committedKitSha ())
+                      "one planted line in one kit file moves the sha"
+              finally
+                  if Directory.Exists scratch then
+                      Directory.Delete(scratch, true) ]
 
 // ---- the family ------------------------------------------------------------------------------
 
@@ -1250,6 +1346,8 @@ let proofsConeTests =
                     "proofs/kit/LADDER.md"
                     "proofs/kit/templates/check.ps1"
                     "proofs/kit/check-proof-leg.tests.ps1"
+                    "proofs/kit/asset.json"
+                    "proofs/kit/build-kit-asset.ps1"
                     "proofs/coverage-exclusions.json"
                     "proofs/last-strict.json"
                     "proofs/oracle/Prims.fs"

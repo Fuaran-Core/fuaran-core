@@ -8,7 +8,8 @@
 # module list, so the list stays where a reader and a sibling session expect to find it.
 #
 # EVERY MODULE in -Modules goes through the same three steps, and each step can fail on its own.
-#   1. CHECK  — <ProofsDir>/<Module>.fst is verified by the PINNED F*/Z3 (-PinFile) with every SMT
+#   1. CHECK  — <ProofsDir>/<Module>.fst (or a read-only kit model under -ModelDirs, Phase 536,
+#               which is never copied beside it) is verified by the PINNED F*/Z3 (-PinFile) with every SMT
 #               query proved -Quake times over varying seeds and every escape hatch (assume /
 #               admit) reported as an error. -Runs N repeats the whole check N times from a cold
 #               cache — CI asks for 3, which is exit criterion 1 made literal. A run checks EVERY
@@ -251,7 +252,17 @@ param(
     [switch] $GuardOnly,
     # Phase 522 — where the leg writes its RUN VERDICT (the header's "THE RUN VERDICT"), on every
     # exit, green or red. Omitted, nothing is written.
-    [string] $SummaryFile
+    [string] $SummaryFile,
+    # Phase 536 — directories of READ-ONLY models the roster may name beside the caller's own: an
+    # adopter's materialised kit asset (`models/`). Every prover invocation is given each as an
+    # `--include`, a module's source is found in -ProofsDir first and then here, and a module found in
+    # BOTH is refused (a model of the kit's name in the adopter's tree is a fork of the kit's theorem).
+    [string[]] $ModelDirs = @(),
+    # Phase 536 — the RUNTIME FLOOR the oracle compiles against, as the kit asset ships it (`oracle/`).
+    # Every `*.fs` there must be byte-identical (LF-normalised) to the file of the same name in
+    # -OracleDir: the adopter commits the floor beside its extractions, and this holds it to the kit.
+    # Under -Extract a drifted floor file is rewritten from here instead. Omitted, nothing is compared.
+    [string] $FloorDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -272,6 +283,23 @@ if (-not $PinFile) { $PinFile = Join-Path $ProofsDir 'fstar-pin.json' }
 if (-not $BudgetFile) { $BudgetFile = Join-Path $ProofsDir 'modules.json' }
 if (-not $OracleDir) { $OracleDir = Join-Path $ProofsDir 'oracle' }
 if (-not $WorkDir) { $WorkDir = Join-Path $ProofsDir 'obj' }
+$ModelDirs = @($ModelDirs | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
+if ($FloorDir) { $FloorDir = [System.IO.Path]::GetFullPath($FloorDir) }
+# Every prover invocation's include path (Phase 536): empty unless the caller names model directories.
+$includeArgs = @($ModelDirs | ForEach-Object { '--include', $_ })
+
+# Where a module's source is (Phase 536): the caller's own directory first, then each -ModelDirs entry.
+# A name in neither falls back to the caller's directory, so the prover's own missing-file diagnostic
+# is what the run reports, exactly as before -ModelDirs existed.
+function Resolve-ModelSource([string] $module) {
+    $own = Join-Path $ProofsDir "$module.fst"
+    if (Test-Path $own) { return $own }
+    foreach ($dir in $ModelDirs) {
+        $candidate = Join-Path $dir "$module.fst"
+        if (Test-Path $candidate) { return $candidate }
+    }
+    $own
+}
 
 # The budget file's own name, so that every message about it names the file the caller declared
 # rather than a name baked in here.
@@ -1185,6 +1213,24 @@ function Get-Median([double[]] $values) {
     return ([double]$sorted[$n / 2 - 1] + [double]$sorted[$n / 2]) / 2
 }
 
+# ---- 2d. the read-only models are not shadowed (Phase 536) -----------------------------------------
+#
+# A module the caller's directory AND a -ModelDirs entry both hold is two theorems under one name, and
+# the one in the caller's tree is the copy: the kit's models are opened read-only from the asset, never
+# copied beside an adopter's own. Static, so it is refused before the prover is resolved to run.
+
+if ($ModelDirs.Count -gt 0) {
+    $shadowed = @($Modules | Where-Object {
+            $module = $_
+            (Test-Path (Join-Path $ProofsDir "$module.fst")) -and @($ModelDirs | Where-Object { Test-Path (Join-Path $_ "$module.fst") }).Count -gt 0
+        })
+    if ($shadowed.Count -gt 0) {
+        Fail ("$($shadowed -join ', ') is both a model in $ProofsDir and a read-only kit model under -ModelDirs ($($ModelDirs -join ', ')): " +
+            'a kit model is opened from the asset, never copied. Delete the copy, or rename a model of your own that is not the kit''s.')
+    }
+    Write-Host "==== proofs: read-only models from $($ModelDirs -join ', ') — $(@($Modules | Where-Object { -not (Test-Path (Join-Path $ProofsDir "$_.fst")) }).Count) of $($Modules.Count) module(s) resolved there" -ForegroundColor Cyan
+}
+
 # ---- 2c. twin evaluation's coverage (Phase 309) ------------------------------------------------------
 #
 # Static, and therefore before the prover runs: an extracted model with no fixtures is a refusal that
@@ -1197,7 +1243,7 @@ if ($Twins) {
     $extractedModels = @($Modules | Where-Object { $ProofOnly -notcontains $_ })
     $untwinned = [System.Collections.Generic.List[string]]::new()
     foreach ($module in $extractedModels) {
-        $source = Join-Path $ProofsDir "$module.fst"
+        $source = Resolve-ModelSource $module
         $text = if (Test-Path $source) { Get-Content $source -Raw } else { '' }
         $declares = $text -match '(?m)^let\s+twins\s*:'
         $asserts = $text -match 'assert_norm\s*\(\s*twins_hold\s+twins\s*==\s*true\s*\)'
@@ -1371,9 +1417,9 @@ for ($run = 1; $run -le $Runs; $run++) {
             Assert-CacheProvenance $cacheState $module $run (-not $isRetry)
             if ($BeforeInvocation -and -not $isRetry) { & $BeforeInvocation $module $run $cache }
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            $checked = Invoke-Prover @(
-                '--z3rlimit', $ZRlimit, '--quake', $Quake, '--report_assumes', 'error',
-                '--cache_checked_modules', '--cache_dir', $cache, "$module.fst"
+            $checked = Invoke-Prover (@(
+                    '--z3rlimit', $ZRlimit, '--quake', $Quake, '--report_assumes', 'error',
+                    '--cache_checked_modules', '--cache_dir', $cache) + $includeArgs + @(Resolve-ModelSource $module)
             ) (Join-Path $logsDir "$module$suffix.check.log")
             $sw.Stop()
             # Whatever this invocation wrote — verified, refuted or aborted — is this run's own.
@@ -1540,9 +1586,9 @@ foreach ($module in $Modules) {
         continue
     }
 
-    $extracted = Invoke-Prover @(
-        '--cache_checked_modules', '--cache_dir', $cache, '--codegen', 'FSharp',
-        '--extract', $module, '--odir', $out, "$module.fst"
+    $extracted = Invoke-Prover (@(
+            '--cache_checked_modules', '--cache_dir', $cache, '--codegen', 'FSharp',
+            '--extract', $module, '--odir', $out) + $includeArgs + @(Resolve-ModelSource $module)
     ) (Join-Path $logsDir "$module.extract.log")
 
     $fresh = Join-Path $out "$module.fs"
@@ -1624,6 +1670,33 @@ foreach ($module in $Modules) {
     }
     else {
         Write-Host "==== proofs: oracle/$module.fs is byte-identical to a fresh extraction" -ForegroundColor Green
+    }
+}
+
+# ---- 4a. the runtime floor is the kit's (Phase 536) -----------------------------------------------
+#
+# The oracle project compiles the floor (`Prims.fs`, `FStar_Pervasives_Native.fs`) from inside the
+# oracle directory, so an adopter commits it there — and a committed floor that is not the kit's is a
+# fork of the runtime every extraction is held against. Each `*.fs` the kit asset's floor carries is
+# compared LF-normalised with the committed file of that name; -Extract rewrites a drifted one.
+
+if ($FloorDir) {
+    if (-not (Test-Path $FloorDir -PathType Container)) { Fail "the runtime floor directory '$FloorDir' (-FloorDir) does not exist" }
+    foreach ($floor in @(Get-ChildItem $FloorDir -File -Filter '*.fs' | Sort-Object Name)) {
+        $committedFloor = Join-Path $OracleDir $floor.Name
+        $kitText = (Get-Content $floor.FullName -Raw).Replace("`r`n", "`n")
+        $ownText = if (Test-Path $committedFloor) { (Get-Content $committedFloor -Raw).Replace("`r`n", "`n") } else { $null }
+        if ($ownText -eq $kitText) {
+            Write-Host "==== proofs: oracle/$($floor.Name) is the kit's runtime floor, byte for byte" -ForegroundColor Green
+        }
+        elseif ($Extract) {
+            [System.IO.File]::WriteAllText($committedFloor, $kitText, [System.Text.UTF8Encoding]::new($false))
+            Write-Host "==== proofs: wrote the kit's runtime floor to oracle/$($floor.Name) — commit it" -ForegroundColor Yellow
+        }
+        else {
+            Fail ("oracle/$($floor.Name) is not the kit's runtime floor ($($floor.FullName))$(if ($null -eq $ownText) { ': it is missing' }). " +
+                'The floor ships with the kit asset; re-run with -Extract to write it, then commit it.')
+        }
     }
 }
 

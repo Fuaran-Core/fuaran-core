@@ -27,6 +27,16 @@ name: publish-packages
 #      and asks nuget.org's v3 flat container for every id at <Version>, failing the job and naming
 #      each id the registry does not serve. `--skip-duplicate` keeps re-runs idempotent; the probe is
 #      what says whether a re-run after a partial push actually completed the roster.
+#
+# Phase 536 — a publish also attaches THE PROOF KIT'S RELEASE ASSET:
+#   5. the `proofs-kit` job builds `proofs-kit-<Version>.tar` with `proofs/kit/build-kit-asset.ps1`
+#      (reproducible: its sha256 is a function of the kit's bytes), REFUSES to go on when that sha is
+#      not `copies.json`'s committed `proofsKit.sha256`, and attaches the asset to the `v<Version>`
+#      GitHub release, creating the release when the tag has none. An asset already attached is
+#      downloaded and compared instead of replaced: the same bytes pass, different bytes fail the job.
+#      It then downloads the asset from its public url and checks the sha once more, so what an
+#      adopter's pin fetches is what was verified. Tag-only, like the rest of this workflow, and the
+#      only job granted `contents: write`.
 # RELEASING.md is the operator's page: the tag-and-publish mechanics, the Trusted Publishing policy
 # this job's login depends on, and what a 401 at the login step means.
 on:
@@ -99,6 +109,60 @@ jobs:
           FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./proofs/check.ps1 -Runs 3
+
+  # The kit asset (item 5 above). After the proof leg, so a kit whose leg is red is never attached.
+  proofs-kit:
+    needs: [tag, proofs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the kit asset and hold it to copies.json proofsKit.sha256
+        shell: pwsh
+        run: pwsh ./proofs/kit/build-kit-asset.ps1 -Check -OutDir "${{ runner.temp }}/kit-asset"
+      - name: Attach it to the release for the tag, never replacing different bytes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $asset = "proofs-kit-$version.tar"
+          $built = Join-Path "${{ runner.temp }}/kit-asset" $asset
+          $sha = (Get-Content copies.json -Raw | ConvertFrom-Json).proofsKit.sha256
+          gh release view $env:TAG --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create $env:TAG --verify-tag --title $env:TAG --notes "Fuaran.Core $version. The proof kit for this release is $asset, sha256 $sha (proofs/kit/README.md, Pinning the kit)."
+              if ($LASTEXITCODE -ne 0) { throw "could not create the release for $($env:TAG)" }
+          }
+          $attached = @(gh release view $env:TAG --json assets --jq '.assets[].name')
+          if ($attached -contains $asset) {
+              $existing = Join-Path "${{ runner.temp }}" "attached-$asset"
+              gh release download $env:TAG --pattern $asset --output $existing --clobber
+              $existingSha = (Get-FileHash $existing -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($existingSha -ne $sha) { throw "$asset is already attached to $($env:TAG) with sha256 $existingSha, not the committed $sha. Nothing was replaced." }
+              Write-Host "$asset is already attached with the committed sha256 $sha"
+          }
+          else {
+              gh release upload $env:TAG $built
+              if ($LASTEXITCODE -ne 0) { throw "could not attach $asset to $($env:TAG)" }
+          }
+      - name: Fetch the asset from its public url and check the sha once more
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $url = "https://github.com/${{ github.repository }}/releases/download/$($env:TAG)/proofs-kit-$version.tar"
+          $sha = (Get-Content copies.json -Raw | ConvertFrom-Json).proofsKit.sha256
+          $fetched = Join-Path "${{ runner.temp }}" 'fetched-kit.tar'
+          Invoke-WebRequest -Uri $url -OutFile $fetched -UseBasicParsing
+          $fetchedSha = (Get-FileHash $fetched -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($fetchedSha -ne $sha) { throw "$url serves sha256 $fetchedSha, not the committed $sha" }
+          Write-Host "$url serves the committed sha256 $sha"
 
   publish:
     needs: [tag, proofs]

@@ -36,8 +36,11 @@
 # green leg, when the prover is by construction present.
 [CmdletBinding()]
 param(
-    # The adopter's proofs directory: where the pin, and the prover `check.ps1` installed, live.
+    # The adopter's proofs directory: where the prover `check.ps1` installed lives.
     [string] $ProofsDir,
+    # The pinned prover declaration. Defaults to <ProofsDir>/fstar-pin.json; an adopter running the kit
+    # from its release asset passes the asset's own (Phase 536).
+    [string] $PinFile,
     # The leg under test. Defaults to the engine beside this file; pointing it at an older copy is
     # how the go-red half of the acceptance is demonstrated.
     [string] $Kit,
@@ -53,7 +56,7 @@ if (-not $Kit) { $Kit = Join-Path $PSScriptRoot 'check-proof-leg.ps1' }
 $Kit = [System.IO.Path]::GetFullPath($Kit)
 if (-not $WorkDir) { $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "check-proof-leg-tests-$PID" }
 
-$pinFile = Join-Path $ProofsDir 'fstar-pin.json'
+$pinFile = if ($PinFile) { [System.IO.Path]::GetFullPath($PinFile) } else { Join-Path $ProofsDir 'fstar-pin.json' }
 $pinnedVersion = (Get-Content $pinFile -Raw | ConvertFrom-Json).fstar.TrimStart('v')
 
 $script:failures = [System.Collections.Generic.List[string]]::new()
@@ -705,6 +708,43 @@ $c6 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); S
 Assert-That 'C. DECLARATION — under -Strict a module with no budget is red' ($c6.Exit -ne 0 -and -not $c6.Green -and [bool](@($c6.Lines -match 'budget declaration is incomplete').Count)) "exit $($c6.Exit): $(Show-Tail $c6)"
 $c7 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.empty.json') })
 Assert-That 'C. DECLARATION — and without -Strict the same leg is green, with the finding printed' ($c7.Exit -eq 0 -and $c7.Green -and [bool](@($c7.Lines -match 'declares no budget for it').Count)) "exit $($c7.Exit): $(Show-Tail $c7)"
+
+# ---- K. THE KIT ASSET'S MODELS AND FLOOR (Phase 536) ---------------------------------------------
+#
+# An adopter runs the leg from the materialised release asset: the kit's models are READ-ONLY under
+# -ModelDirs and the runtime floor is the asset's, held to the adopter's committed copy by -FloorDir.
+# K1 is the control (a model of the caller's own opens a kit model that is NOT beside it, and both
+# verify); K2 refuses a kit model copied beside the caller's; K3/K4 hold the floor both ways.
+
+$kitModels = Join-Path $WorkDir 'kit-models'
+$kitFloor = Join-Path $WorkDir 'kit-floor'
+$kitOracle = Join-Path $WorkDir 'kit-oracle'
+New-Item -ItemType Directory -Force $kitModels, $kitFloor, $kitOracle | Out-Null
+Set-Content (Join-Path $kitModels 'KitShared.fst') "module KitShared`n`nlet two : nat = 2`n"
+Set-Content (Join-Path $scratch 'LegUsesKit.fst') "module LegUsesKit`n`nopen KitShared`n`nlet three : nat = two + 1`n"
+$floorText = "module Prims`n`ntype string = System.String`n"
+Set-Content (Join-Path $kitFloor 'Prims.fs') $floorText -NoNewline
+Set-Content (Join-Path $kitOracle 'Prims.fs') $floorText -NoNewline
+$kitBase = $base + @{ Modules = @('KitShared', 'LegUsesKit'); ProofOnly = @('KitShared', 'LegUsesKit'); ModelDirs = @($kitModels) }
+
+$k1 = Invoke-Leg $kitBase
+Assert-That 'K1. KIT MODELS CONTROL — a model opening a read-only kit model under -ModelDirs, never copied beside it, verifies: exit 0' (
+    $k1.Exit -eq 0 -and $k1.Green -and [bool](@($k1.Lines -match 'read-only models from .* 1 of 2 module\(s\) resolved there').Count)) "exit $($k1.Exit): $(Show-Tail $k1)"
+
+Copy-Item (Join-Path $kitModels 'KitShared.fst') (Join-Path $scratch 'KitShared.fst')
+$k2 = Invoke-Leg $kitBase
+Remove-Item (Join-Path $scratch 'KitShared.fst') -Force
+Assert-That 'K2. KIT MODEL SHADOWED — the same kit model copied beside the caller''s is refused, before any prover runs' (
+    $k2.Exit -ne 0 -and -not $k2.Green -and [bool](@($k2.Lines -match 'KitShared is both a model in .* and a read-only kit model').Count)) "exit $($k2.Exit): $(Show-Tail $k2)"
+
+$k3 = Invoke-Leg ($kitBase + @{ OracleDir = $kitOracle; FloorDir = $kitFloor })
+Assert-That 'K3. FLOOR CONTROL — a committed runtime floor byte-identical to the kit''s holds: exit 0' (
+    $k3.Exit -eq 0 -and $k3.Green -and [bool](@($k3.Lines -match 'oracle/Prims\.fs is the kit''s runtime floor').Count)) "exit $($k3.Exit): $(Show-Tail $k3)"
+
+Set-Content (Join-Path $kitOracle 'Prims.fs') ($floorText + "let forked = 1`n") -NoNewline
+$k4 = Invoke-Leg ($kitBase + @{ OracleDir = $kitOracle; FloorDir = $kitFloor })
+Assert-That 'K4. FLOOR FORKED — a committed runtime floor that is not the kit''s is refused' (
+    $k4.Exit -ne 0 -and -not $k4.Green -and [bool](@($k4.Lines -match 'oracle/Prims\.fs is not the kit''s runtime floor').Count)) "exit $($k4.Exit): $(Show-Tail $k4)"
 
 Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 

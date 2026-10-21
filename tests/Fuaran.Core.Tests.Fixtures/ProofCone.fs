@@ -211,6 +211,8 @@ let classifyConePath (roster: string list) (shared: Set<string>) (path: string) 
         || List.contains
             p
             [ "proofs/kit/measure-relocation-halts.ps1"
+              "proofs/kit/build-kit-asset.ps1"
+              "proofs/kit/asset.json"
               "proofs/coverage-exclusions.json"
               coneBaselinePath ]
     then

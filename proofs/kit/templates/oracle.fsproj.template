@@ -29,9 +29,9 @@
     <OtherFlags>$(OtherFlags) --strict-indentation-</OtherFlags>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The hand-written runtime floor, copied from the kit. NOT generated and NOT diffed by the
-         leg: the leg holds the GENERATED files to a fresh extraction, and these two are the floor
-         they stand on. `Prims.fs` closes the gap for the names F*'s F# backend emits from `Prims`;
+    <!-- The hand-written runtime floor, as the kit asset ships it (`-Extract` writes it here). NOT
+         generated: the leg holds the GENERATED files to a fresh extraction, and holds these two to
+         the pinned asset's bytes (Phase 536), because they are the floor the extractions stand on. `Prims.fs` closes the gap for the names F*'s F# backend emits from `Prims`;
          `FStar_Pervasives_Native.fs` does the same for F*'s `option` and the pair projections. A
          model that reaches for another library type means adding to this floor. -->
     <Compile Include="Prims.fs" />

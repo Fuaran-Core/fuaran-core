@@ -210,6 +210,28 @@ The family certifies the three outcomes, that a refusal runs no body, and that y
 exactly what the registry refuses — and it reports itself starved, not green, if your generator never
 reaches one of settled, pending or refused. Then dispatch through the very path you certified.
 
+## 5. If you want the theorems, not only the laws: pin the proof kit
+
+The law families above SAMPLE a property at your witness; the proof kit lets you PROVE one — fold
+confluence at your own algebra, with exactly one obligation (`independence_diamond` at your footprint
+and apply) — and check it on a pinned F\* prover in your own gate. The kit is not a package and not a
+set of files to copy (Phase 536). It is one release asset, `proofs-kit-<version>.tar`, attached to
+this repository's `v<version>` release; you pin it by sha256 in `proofs/proofs-kit.json`:
+
+```json
+{ "kind": "proofsKitPin", "kit": "0.40.0", "asset": "proofs-kit-0.40.0.tar",
+  "url": "https://github.com/Fuaran-Core/fuaran-core/releases/download/v0.40.0/proofs-kit-0.40.0.tar",
+  "sha256": "<copies.json proofsKit.sha256 at that tag>" }
+```
+
+Your `proofs/check.ps1` (from the asset's `kit/templates/check.ps1`) verifies the asset's sha256
+before anything runs and refuses any other bytes, then runs the engine from it with the asset's prover
+pin, its runtime floor and its models, which you open read-only and never copy. Offline, build the
+asset from a checkout of this repository (`pwsh proofs/kit/build-kit-asset.ps1`) and pass it with
+`-KitAsset`; the sha is still verified. Moving to a newer kit is moving the pin, and the release notes
+say what a kit change asks of you. The whole procedure is [`proofs/kit/README.md`](../proofs/kit/README.md),
+"Adopting it" and "Importing a theorem".
+
 ## The caveats the first adoption surfaced (read these before you start)
 
 - **F1 — `ReplaceChildren` is partial on leaves.** Your leaf kinds (`Paragraph`, `Cell`, …) can't

@@ -69,14 +69,15 @@ let skeleton_fold_confluence_halt s0 ls1 ls2 p =
   fold_confluence_halt wapply op_fp s0 ls1 ls2 p
 
 (* THE THEOREM. `DagFold.fold_confluence_total`'s one hypothesis, the domain's diamond, is
-   discharged by `TreeOps.op_independence_diamond`, and the total theorem asks nothing of the lane set.
-   The `requires` still names `lanes_apply` — every lane applies cleanly from the base state, the
-   lane set `FoldConfluence.foldOnce`'s generators produce — because that is the statement this
-   instance has carried since it was cut; the proof below does not use it. *)
+   discharged by `TreeOps.op_independence_diamond`, and the total theorem asks nothing of the lane set:
+   no `requires` at all. Until Phase 536 it still named `lanes_apply` (every lane applies cleanly from
+   the base state), the statement this instance was cut with; Phase 534 moved the proof onto the total
+   theorem, which never used it, and dropping an unused premise STRENGTHENS the statement — every lane
+   set `FoldConfluence.foldOnce`'s generators produce, a rejecting lane included, folds to the same outcome
+   under every arrival order. *)
 val skeleton_fold_confluence
   (s0:tree) (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
-  : Lemma (requires lanes_apply wapply ls1 s0)
-          (ensures outcome_equiv (skeleton_fold s0 ls1) (skeleton_fold s0 ls2))
+  : Lemma (ensures outcome_equiv (skeleton_fold s0 ls1) (skeleton_fold s0 ls2))
 
 let skeleton_fold_confluence s0 ls1 ls2 p =
   op_independence_diamond ();

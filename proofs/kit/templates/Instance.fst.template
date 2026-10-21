@@ -57,14 +57,12 @@
                          instance without one has nothing that goes red if its alphabet is quietly
                          narrowed. Prose and code; no trailing newline.
 
-   WHAT REMAINS IN THE `requires`, AND IS NOT A HOLE. `lanes_apply {{APPLY}} ls1 s0` — that every
-   lane of the set in hand applies cleanly from the base state. It is a statement about the lane
-   set, not a promise about the domain, and it is the `lanes-apply` row of the ladder, sampled by
-   `Conformance.concurrencyLaws` at the instance's witness exactly as it is at this repository's.
-   Since Phase 534 the instance is discharged by `fold_confluence_total`, which drops that premise
-   (the fold tests that every lane applies before it composes anything), so the proof does not use
-   it; it stays in the statement because it is the statement every instance was cut with, and
-   `fold_confluence`, the generic theorem that carried it, is retired.
+   NOTHING REMAINS IN THE `requires` (Phase 536). The composite is `fold_confluence_total` at the
+   domain, which needs only the diamond: the fold tests that every lane applies from the base before it
+   composes anything, so a rejecting lane is refused under every arrival order rather than assumed
+   away. Instances cut before Phase 536 carried `requires lanes_apply {{APPLY}} ls1 s0`, a premise the
+   proof had not used since Phase 534; re-instantiating from this template drops it, which is a
+   STRONGER theorem under the same name, and a caller that discharged the premise needs to do nothing.
 
    WHAT THIS TEMPLATE DOES NOT GIVE. The apply-engine preservation theorems (`Preservation.fst`),
    the diff theorems (`TreeDiff.fst`) and the tree algebra's own diamond (`TreeOps.fst`) are stated
@@ -109,14 +107,15 @@ let {{FOLD}}_confluence_halt s0 ls1 ls2 p =
   fold_confluence_halt {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p
 
 (* THE THEOREM. `DagFold.fold_confluence_total`'s one hypothesis, the domain's diamond, is
-   discharged by `{{DOMAIN}}.{{DIAMOND}}`, and the total theorem asks nothing of the lane set.
-   The `requires` still names `lanes_apply` — every lane applies cleanly from the base state, the
-   lane set `{{PROD_FOLD}}`'s generators produce — because that is the statement this
-   instance has carried since it was cut; the proof below does not use it. *)
+   discharged by `{{DOMAIN}}.{{DIAMOND}}`, and the total theorem asks nothing of the lane set:
+   no `requires` at all. Until Phase 536 it still named `lanes_apply` (every lane applies cleanly from
+   the base state), the statement this instance was cut with; Phase 534 moved the proof onto the total
+   theorem, which never used it, and dropping an unused premise STRENGTHENS the statement — every lane
+   set `{{PROD_FOLD}}`'s generators produce, a rejecting lane included, folds to the same outcome
+   under every arrival order. *)
 val {{FOLD}}_confluence
   (s0:{{STATE}}) (ls1 ls2:list (list {{OP}})) (p:perm (list {{OP}}) ls1 ls2)
-  : Lemma (requires lanes_apply {{APPLY}} ls1 s0)
-          (ensures outcome_equiv ({{FOLD}} s0 ls1) ({{FOLD}} s0 ls2))
+  : Lemma (ensures outcome_equiv ({{FOLD}} s0 ls1) ({{FOLD}} s0 ls2))
 
 let {{FOLD}}_confluence s0 ls1 ls2 p =
   {{DIAMOND}} ();

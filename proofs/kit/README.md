@@ -11,55 +11,54 @@ will be behind the day the fourth moves**, because F\* releases weekly.
 
 This directory is that design, written once. This repository consumes it **in place**: its
 `proofs/check.ps1` is a thin caller that declares what this repository has and hands it to
-`check-proof-leg.ps1`. Another repository adopts it by **copying** the files listed below and
-declaring each copy in its own `copies.json`, so the workspace copy registry names a copy that has
-drifted from this one before anybody meets a red gate they did not cause.
+`check-proof-leg.ps1`. Another repository adopts it as **one versioned release asset**,
+`proofs-kit-<version>.tar`, attached to this repository's `v<version>` release and pinned by sha256
+in the adopter's own `proofs/proofs-kit.json` — the shape `fstar-pin.json` already gives the prover.
+The adopter's `check.ps1` verifies the asset before anything runs and runs the engine from it.
 
-**What it deliberately is not:** a package, a module, or a runtime dependency. An adopting
-repository builds nothing new, references nothing new, and restores nothing new. It is files copied
-by declaration and checked for drift — which is the only shape that works across repositories whose
-languages, solutions and release cadences have nothing in common.
+**What it deliberately is: scripts and templates by versioned asset, models never copied** (Phase
+536, `DECISIONS.md` D206). This line used to read "a package, a module, or a runtime dependency …
+files copied by declaration and checked for drift". That was true of the engine and false of what
+travelled with it: the runtime floor grows as models reach further into F\*'s library, a copied model
+is a fork of a theorem, and two adopters' per-file copies were mostly stale within a month. So the
+kit is not a package — nothing is built, referenced or restored — but it IS a release: an adopter runs
+the kit this repository tagged, byte for byte, and moves to a newer one as a deliberate act whose
+release notes say what moved. `asset.json` beside this file is the asset's contents.
 
-**Since Phase 175 the kit also ships the theorems.** A leg that can check a model, handed to a
-repository with nothing to check, is a leg that repository must re-model against — and fold
-confluence at its own witness is exactly what three named adopters want. So the copy set now carries
-the models under `../`: the generic theorems (`DagFold`, `Chain`, `WireCanon`, `WireDecode`,
-`JsonParse`, `Limits`), the reference instance a domain instantiates against (`TreeOps`, `Skeleton`,
+**The kit also ships the theorems** (Phase 175), and since Phase 536 an adopter opens them
+**read-only from the asset** and never copies one: the shared modules every model opens (`Twin`,
+`ListAlgebra`), the generic theorems (`DagFold`, `DagClosure`, `Chain`, `WireCanon`, `WireDecode`,
+`JsonParse`, `Limits`), the reference instance on the skeleton tree (`TreeOps`, `Skeleton`,
 `Preservation`, `TreeDiff`), and `templates/Instance.fst.template`, which makes fold confluence at a
 domain's own algebra a fill-in-the-holes act with exactly one hole that is an obligation. See
 "Importing a theorem" below.
 
 ## What is here
 
-| File | What it is | Copied? |
+| File | What it is | An adopter |
 |---|---|---|
-| `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | copy verbatim |
-| `templates/check.ps1` | The thin caller. Three declarations to edit at the top; nothing below them is per-repository. | copy and edit |
-| `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copy, rename and edit |
-| `templates/modules.json` | The cost declaration: the budget rule, the cached-read threshold, the contention threshold, and one worked entry. | copy and edit |
+| `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | runs it from the asset |
+| `templates/check.ps1` | The thin caller. Two declarations to edit at the top; nothing below them is per-repository — including the lower half that resolves, verifies and unpacks the pinned asset. | copies once, edits |
+| `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copies once, renames, edits |
+| `templates/modules.json` | The cost declaration: the budget rule, the cached-read threshold, the contention threshold, and one worked entry. | copies once, edits |
 | `LADDER.md` | **The ladder's schema**: every field of `proofs.json`, which are required, what each level's evidence is, and how names are matched. The page the template is written against, and the one any tool reading a ladder reads it by. | read |
-| `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. Written against `LADDER.md`. | copy and edit |
-| `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the pin file — which is the whole mechanism by which a pin bump reaches CI with no second edit. | copy and edit |
-| `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | copy and instantiate |
-| `extraction-post-pass.ps1` | **The extraction post-pass** (Phase 169): two functions, dot-sourced by the engine's EXTRACT stage, that re-indent a mutual type group's `and` to the column F\# expects and touch nothing else. See "The extraction post-pass" below. | copy verbatim |
-| `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | copy verbatim |
-| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | copy verbatim |
-| `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | copy verbatim |
+| `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. Written against `LADDER.md`. | copies once, edits |
+| `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the kit pin — which is the whole mechanism by which a kit or prover bump reaches CI with no second edit. | copies once, edits |
+| `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | instantiates |
+| `extraction-post-pass.ps1` | **The extraction post-pass** (Phase 169): two functions, dot-sourced by the engine's EXTRACT stage, that re-indent a mutual type group's `and` to the column F\# expects and touch nothing else. See "The extraction post-pass" below. | runs it from the asset |
+| `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | runs it from the asset |
+| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | runs it from the asset |
+| `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | runs it from the asset |
+| `asset.json` | **The asset's contents** (Phase 536): every file the release asset carries, where it sits in the archive, and its role. The builder reads it and nothing else. | reads it |
+| `build-kit-asset.ps1` | **The builder** (Phase 536): the archive, reproducibly — fixed order, epoch timestamps, mode 0644, owner 0:0, LF, uncompressed ustar — so its sha256 is a function of the kit's bytes alone. `-Check` holds the build to `copies.json`'s `proofsKit.sha256`; `-Update` rewrites it. The suite, the publish workflow and an adopter's offline path all call it. | builds an offline asset with it |
 
-The rest of what an adopter needs is **not duplicated here**, deliberately, and lives where it is
-actually used:
+The asset also carries what used to be copied beside the kit, from `../`:
 
-| File | Where | Why not a copy in the kit |
+| In the asset | From | What an adopter does with it |
 |---|---|---|
-| `../fstar-pin.json` | `proofs/fstar-pin.json` | This is the live pin — the one this repository's leg reads and its CI caches on. A copy of it inside the kit would be a second number in the same repository, and a second number is exactly the problem the kit exists to remove. |
-| `../oracle/Prims.fs` | `proofs/oracle/Prims.fs` | The hand-written runtime floor grows as models reach for more of F\*'s library, so the live one is always the current one. A kit copy could only ever be behind it. |
-| `../oracle/FStar_Pervasives_Native.fs` | `proofs/oracle/FStar_Pervasives_Native.fs` | The same. |
-| `../<Model>.fst` — the ten models `copies.json` `$sources` names | `proofs/*.fst` | The models are the live ones the leg checks and the oracle is extracted from. A kit copy would be a second model beside the first, in the same repository, with nothing holding them equal — the sources ARE `proofs/*.fst`, and the registry names each one. Which theorem a model carries and which obligations it asks a domain for is on its `$sources` entry, one per file. |
-
-So the copy set is: everything in this directory, **plus** those three files and the ten models from
-`../`. An adopter copies what it needs and declares what it copies; `copies.json` `$sources` at this
-repository's root is that set written out, one entry per file, and an adopter's record is the entry
-with its own path filled in.
+| `fstar-pin.json` | `proofs/fstar-pin.json` | Nothing: its `check.ps1` hands it to the engine. The kit version determines the prover, so a host's leg runs the prover this repository's leg ran. |
+| `oracle/Prims.fs`, `oracle/FStar_Pervasives_Native.fs` | `proofs/oracle/` | **Commits** them in its own oracle directory (an oracle project compiles nothing outside it, Phase 399) — and the engine holds the committed files to the asset's bytes (`-FloorDir`), red on any difference, rewritten under `-Extract`. A floor is never a fork. |
+| `models/<Model>.fst` | `proofs/<Model>.fst` | **Opens** them: the engine checks them read-only from the asset (`-ModelDirs`), extracts the ones its roster extracts into its own oracle like any model, and refuses a kit model's name found in the adopter's own tree. |
 
 ## The three verdict classes (Phase 166)
 
@@ -292,40 +291,39 @@ plant one inside a full leg and show it fails after extraction and before the ho
 
 ## Adopting it
 
-1. **Copy `proofs/kit/` wholesale** into `<repo>/proofs/kit/`, and the three files above into
-   `<repo>/proofs/fstar-pin.json` and `<repo>/proofs/oracle/`.
-2. **`templates/check.ps1` → `<repo>/proofs/check.ps1`.** Edit the three declarations: the models,
-   the host families, and where the host project lives. Delete the `templates/` copy from your
-   repository if you prefer — it is a starting point, not a dependency.
+1. **Pin the asset.** Write `<repo>/proofs/proofs-kit.json` — the release you adopt, its asset, its
+   url and its sha256 (the shape is under "Pinning the kit" below).
+2. **`templates/check.ps1` → `<repo>/proofs/check.ps1`.** Edit the two declarations: the host
+   families and where the host project lives. Everything below them — resolving and verifying the
+   asset, running the engine from it with the asset's pin, models and floor — is the template's.
 3. **`templates/oracle.fsproj.template` → `<repo>/proofs/oracle/<Your>.Proofs.Oracle.fsproj`**, and
    add it to your solution. Keep `IsPackable` false: nothing extracted from a model belongs in a
-   shipped assembly.
-4. **`templates/modules.json` → `<repo>/proofs/modules.json`.** One entry per model. Seed the
-   numbers from real runs, per the rules the file carries; do not invent them, and do not seed from
-   a convenient half of the data.
+   shipped assembly. Run the leg once with `-Extract` to write the runtime floor beside it.
+4. **`templates/modules.json` → `<repo>/proofs/modules.json`.** One entry per model, the kit models
+   you open included. Seed the numbers from real runs, per the rules the file carries; do not invent
+   them, and do not seed from a convenient half of the data.
 5. **`templates/proofs.json` → `<repo>/proofs.json`** (the repository root). Write the ladder, and
    then write the host family that holds it to your tree — the kit ships the leg that runs that
    family, not the family itself, because what a row must be held to is a property of your tree.
-6. **`templates/ci-proofs-job.yml` →** your workflow. Keep the cache key hashing the pin file.
-7. **Gitignore `proofs/.fstar/` and `proofs/obj/`.** The prover install and the checked-module cache
-   are not source.
+6. **`templates/ci-proofs-job.yml` →** your workflow. Keep the cache key hashing the kit pin.
+7. **Gitignore `proofs/.fstar/`, `proofs/.kit/` and `proofs/obj/`.** The prover install, the
+   materialised asset and the checked-module cache are not source.
 8. **Write your first model**, run `pwsh ./proofs/check.ps1`, and commit the oracle it extracts.
-9. **Declare your copies** (below). Until you do, nothing says when this kit has moved under you.
+9. **Declare no copy.** Nothing of the kit belongs in your `copies.json`: the templates are yours
+   once copied, and the rest is the asset, verified by sha on every run.
 
 ## Importing a theorem (Phase 175)
 
 An adopter that wants a theorem rather than only a leg — fold confluence at its own witness, which is
 what the three named adopters want — does three things, and the leg above is what checks
-the third. Nothing in it is a package or a reference; it is the same copy-by-declaration, with a
-template where the leg had a caller.
+the third. Nothing in it is a package, a reference or a copy: the models are opened from the pinned
+asset, with a template where the leg had a caller.
 
-1. **Copy by declaration.** From `$sources`, copy the generic model the theorem lives in — for fold
-   confluence that is `../DagFold.fst`, which opens nothing and is the one file every instance
-   needs — and the reference instance you will instantiate against, `../TreeOps.fst` and
-   `../Skeleton.fst`, into `<repo>/proofs/`. Append one `records` entry per file to your
-   `copies.json`, `check: fingerprint`, `regen` as the `$sources` entry says. Each model is now a
-   named copy the sweep watches, so a theorem that moves here is a finding there before it is a red
-   gate you did not cause.
+1. **Open, do not copy.** The generic model the theorem lives in — for fold confluence that is
+   `DagFold`, the one model every instance needs — and the reference instance you will instantiate
+   against (`TreeOps`, `Skeleton`) are in the asset under `models/`. Add each to your roster; the
+   engine checks it read-only from the asset. A theorem that moves here reaches you as a release,
+   named in its notes, when you move your pin — never as a stale copy you did not know you had.
 2. **Write the instance.** `templates/Instance.fst.template` → `<repo>/proofs/<Instance>.fst`. The
    contract is the preamble's three rules: drop everything through the
    `(* ==== END OF PREAMBLE ==== *)` line, replace every `{{HOLE}}` — the same hole takes the same
@@ -354,12 +352,12 @@ template where the leg had a caller.
    **What the template does not give.** The apply-engine preservation theorems (`../Preservation.fst`),
    the diff's (`../TreeDiff.fst`) and the tree algebra's own diamond (`../TreeOps.fst`) are stated
    ABOUT the skeleton-op tree algebra, not generically over a domain. A domain whose state IS that
-   tree under those operations inherits all of them by copying the files and declaring the copies —
-   it instantiates nothing. A domain with its own algebra models its own apply, and `{{DIAMOND}}` is
+   tree under those operations inherits all of them by opening the asset's models — it instantiates
+   nothing and copies nothing. A domain with its own algebra models its own apply, and `{{DIAMOND}}` is
    the theorem it proves about it before the template applies; `../Preservation.fst` is the shape to
    model preservation against, not a template for it.
-3. **Check.** Copy the shared `Twin.fst` and `ListAlgebra.fst` beside `DagFold.fst`, and add all of
-   them, your domain module and the instance to the roster in `<repo>/proofs/modules.json`, in
+3. **Check.** Add the shared `Twin` and `ListAlgebra` (which `DagFold` opens), your domain module and
+   the instance to the roster in `<repo>/proofs/modules.json`, in
    dependency order (a model follows what it opens), one entry each with its `kind`, its `opens` and
    its budget, `pwsh ./proofs/check.ps1`, and commit the oracle it extracts. The leg
    checks the instance from a cold cache like any other model and diffs its extraction like any
@@ -370,47 +368,53 @@ template where the leg had a caller.
 `evidence.model` naming your instance file. The obligation you discharged is a `proved` row at YOUR
 domain, `evidence.theorem` your `DIAMOND` lemma in your domain module: this repository's ladder
 carries `independence-diamond` as `assumed` / `domain-obligation` because the fold theorem is
-generic, and at an instance it is what `tree-independence-diamond` is here. `lanes-apply` stays an
-`assumed` / `domain-obligation` row, `dischargedBy: Conformance.concurrencyLaws`, because it is a
-statement about a lane set in hand and no instance proves it. A guarded `APPLY` carries an
+generic, and at an instance it is what `tree-independence-diamond` is here. No lane-set row: since
+Phase 536 the composite has no `requires`, so an instance cut before it, whose ladder carried
+`lanes-apply` as an `assumed` / `domain-obligation` row, re-instantiates and retires that row — the
+theorem under the same name is now stronger. A guarded `APPLY` carries an
 `assumed` / `domain-obligation` row for its input invariant, `dischargedBy: Conformance.opAlgebra`,
 as `tree-algebra-well-formed-states` does here. And every `model-bridge` and `premise` row this
-ladder carries about a model you copied is a row you inherit — a copy of `../Chain.fst` is a copy of
-`content-id-determines-content`. The kit ships the leg that runs your ladder family; what each row is
+ladder carries about a kit model you open is a row you inherit — opening `Chain` inherits
+`content-id-determines-content`. A `proved` row about a kit model names it by its archive path,
+`evidence.model: "kit:models/<Model>.fst"`: the model is not in your tree, so your ladder family holds
+the row to your roster always, and to the model's text when `FUARAN_PROOFS_KIT_DIR` names the verified
+asset — which the caller template sets for the leg's host step, so the leg's run of the family is the
+one that reads the theorem. The kit ships the leg that runs your ladder family; what each row is
 held to is a property of your tree, and the family is yours to write.
 
-## The pin moves in one place
+## Pinning the kit (Phase 536)
 
-The pinned release is `proofs/fstar-pin.json` in **this** repository. An adopting repository's copy
-is a copy, and the copy registry is what says when it is behind:
+The kit an adopter runs is named by ONE file in the adopter, `proofs/proofs-kit.json`, in the
+`fstar-pin.json` shape:
 
 ```json
 {
-  "kind": "copies",
-  "producer": "<your-repo>",
-  "records": [
-    {
-      "source": "proofs/fstar-pin.json",
-      "consumers": ["<workspace-relative path to YOUR copy>"],
-      "check": "bytes",
-      "regen": "copy it from the kit's repository"
-    }
-  ]
+  "kind": "proofsKitPin",
+  "kit": "0.40.0",
+  "asset": "proofs-kit-0.40.0.tar",
+  "url": "https://github.com/Fuaran-Core/fuaran-core/releases/download/v0.40.0/proofs-kit-0.40.0.tar",
+  "sha256": "<the 64 hex digits this repository's copies.json commits as proofsKit.sha256>"
 }
 ```
 
-Two details of that shape are easy to get wrong, and both are the registry's, not the kit's:
-`source` resolves relative to **the declaring file's own directory** (so a repository stays clonable
-standalone), and each `consumers` entry resolves relative to **the workspace root** (because it
-names a file in a different repository). `check` is `bytes` or `fingerprint` — `fingerprint`
-normalises line endings and trailing whitespace, which is what you want for a text file two
-platforms will check out differently, and `bytes` is what you want for anything where a byte is a
-byte. An unrecognised value is refused rather than defaulted. A model's record is the same shape with
-`source: proofs/DagFold.fst` and `check: fingerprint`; the `$sources` entry is the record with the
-`consumers` path left for you to fill.
+`check.ps1` (the template's lower half) reads it before anything else runs: it downloads the asset
+from `url` into `proofs/.kit/` — or takes the local file `-KitAsset <path>` (or the
+`FUARAN_PROOFS_KIT_ASSET` environment variable) names — computes its sha256, **refuses on the spot**
+when it is not the pin's, naming the source and both hashes, unpacks it fresh, and runs the engine from
+it with the asset's `fstar-pin.json`, models and floor. The local file is the OFFLINE path and nothing
+else: build the asset from a checkout of this repository
+(`pwsh proofs/kit/build-kit-asset.ps1 -OutDir <dir>`) and pass the file; the sha is verified all the
+same, so an override can only ever be the pinned kit, delivered another way.
 
-The sweep is warn-first and offline: it names a drifted copy and the command that regenerates it,
-and it never edits anything.
+Where the sha comes from: this repository commits it, in `copies.json` `proofsKit.sha256`. The
+`Proofs.Kit` family builds the asset and fails when the build disagrees (a kit file moved without the
+committed sha moving with it — `build-kit-asset.ps1 -Update`, in the same commit), and the publish
+workflow refuses to upload, on a `v*` tag, an asset whose sha is not that one. The version names the
+file and is not inside it, so a release that moves no kit file carries the same sha as the last.
+
+Moving the pin is the adopter's deliberate act: a new `kit`, `asset`, `url` and `sha256`, a cold run
+of the leg, and whatever the release notes say a kit change asks of an adopter (a template moving, a
+theorem strengthened). Nothing goes stale in between, because nothing is a copy.
 
 **The pin's mirror (Phase 399).** An entry may carry a `mirror` beside its `url`: the same asset at a
 second address. The kit tries `url`, then `mirror`. A source that cannot serve the archive is
@@ -445,9 +449,8 @@ The refusal tests hold every arm's record to the leg's exit code. Pass it from y
 
 ## What this kit does not solve
 
-A copy is still a copy. The registry tells you a copy has drifted; it does not pull the change
-through, and it cannot tell you whether the drift matters. That is the trade this shape was chosen
-for: it buys an adopting repository a proof leg for the cost of a `cp`, with no package, no
-reference and no coupled release — and it pays for that by making the sync a named, visible act
-instead of an automatic one. A repository that wants the automatic version wants a package, and a
-package is a different decision with a different cost.
+A pin is still a pin. The asset tells an adopter exactly which kit it runs; it does not move the
+adopter to a newer one, and it cannot say whether a newer one matters to it — that is what the
+release notes are for. The trade: an adopter gets a proof leg for the cost of one pinned file, with
+no package, no reference and no per-file copies to drift, and pays for it by making the upgrade a
+named, visible act instead of an automatic one.
