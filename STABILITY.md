@@ -1457,17 +1457,6 @@ lanes were a fixed two ops each, a shape that essentially never has mutually-ind
 over a six-node tree; its lane length is now drawn, which restores a mixture of both outcome classes
 at every lane count.
 
-## The oracle protocol (Phase 482)
-
-`fuaran-core-oracle`, the extracted proof models served over JSON lines
-([`docs/oracle-protocol.md`](docs/oracle-protocol.md)), is a released artefact and not a package
-surface. It ships as per-platform binaries on the `v<Version>` release, with no nuget.org id
-(DECISIONS.md D208). Its contract carries its own version, `<major>.<minor>`, in every response,
-and that version moves by the protocol's rule, not this page's. A new function moves the minor. Any
-change to an existing function's input, answer cases or meaning moves the major. A release changes
-the protocol version only when it changes the protocol, and nothing in a package's public surface
-or wire bytes depends on it.
-
 ## Where sections moved
 
 Until Phase 397 this document was the contract and every release's entry in one file. The entries

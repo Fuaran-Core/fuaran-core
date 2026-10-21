@@ -233,7 +233,7 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 
 **Status:** Live
 
-**Recorded by Phase 482. `tools/Fuaran.Core.Oracle.Cli/` (new: `Json.fs`, `Marshal.fs`, `Protocol.fs`, `Program.fs`, `publish-oracle.ps1`), `Fuaran.Core.slnx`, `docs/oracle-protocol.md` (new), the `oracle-build`, `oracle-smoke` and `oracle-release` jobs of `publish-packages.yml`, the `oracle-smoke` job of `ci.yml`, `RELEASING.md` ("The oracle binaries"), `STABILITY.md` ("The oracle protocol"), `tests/Fuaran.Core.Tests/OracleCliTests.fs` (new), `tests/oracle-smoke.py` (new), `ChildProcess.withStdin`. No package surface moves.**
+**Recorded by Phase 482. `tools/Fuaran.Core.Oracle.Cli/` (new: `Json.fs`, `Marshal.fs`, `Protocol.fs`, `Program.fs`, `publish-oracle.ps1`), `Fuaran.Core.slnx`, `docs/oracle-protocol.md` (new), the `oracle-build`, `oracle-smoke` and `oracle-release` jobs of `publish-packages.yml`, the `oracle-smoke` job of `ci.yml`, `RELEASING.md` ("The oracle binaries"), `tests/Fuaran.Core.Tests/OracleCliTests.fs` (new), `tests/oracle-smoke.py` (new), `ChildProcess.withStdin`. No package surface moves. `STABILITY.md` is unchanged: the protocol carries its own version and its rule lives in `docs/oracle-protocol.md`, "Versioning", and the contract sits at its D130 line ceiling.**
 
 *The question.* A port's own fuzzer finds the inputs no vector chose, and until now it had nothing to compare them with but itself. The extracted models are the obvious second opinion, but they are F#. A Rust, Go or Python harness can reach them only through a process.
 
