@@ -3,44 +3,9 @@
    500): `footprint_in_sound` and `footprint_in_refines`, over the model `TreeOps.fst` section 24
    gives of `Ops.footprintIn`.
 
-   WHAT IS PROVED.
-
-     `footprint_in_refines`: every pair of operations the pure footprint (`TreeOps.op_fp`) calls
-     independent, the base-aware one (`TreeOps.op_fp_in t`) calls independent, at every tree. So a
-     consumer that moves from `Ops.footprint` to `Ops.footprintIn` — from `Dag.reconcileMany` to
-     `reconcileManyIn`, from `Arbitration.arbitrate` to `arbitrateIn` — loses no fold and no
-     accepted proposal. The proof is section 8's elimination run the other way: a pure-independent
-     pair either has no relocating side, where the base-aware footprint IS the pure one, or has
-     one, where the other side is inert and its base-aware footprint is empty.
-
-     `footprint_in_sound`: for every pair of operations — every skeleton op, `MoveNode` included,
-     and every batch of them — whose base-aware footprints `independent` declares disjoint, and
-     every well-formed tree at which both apply, each applies after the other and the two orders
-     reach the same tree: `TreeOps.wstep`, the shape `tree_independence_diamond` has. Unlike the
-     pure diamond, no pair here is closed without looking at the tree: the base-aware footprint
-     frees exactly the pairs the unknown-parent clause used to refuse, so each of them is a
-     commutation on the tree. Section 4 proves the IN-PLACE fragment (inserts, reorders,
-     rewrites), section 5 lifts it along a batch's script as section 20 of `TreeOps.fst` lifts the
-     pure diamond, sections 6 to 8 add the REMOVE pairs - a removal commutes with a removal at
-     another parent, with an insert and a reorder elsewhere and with any rewrite, and leaves every
-     id outside the destroyed subtree in place, found at the same node, under the same parent -
-     and restate the lift over everything but a move (`no_move`), and sections 9 to 11 add the
-     MOVE pairs and restate the lift over every operation. A move is two edits with a cycle check
-     between them, and its base-aware footprint reads the destination's ancestors for that check:
-     the five pairs it forms (with a rewrite, an insert, a reorder, a removal and a move) stand on
-     each edit distributing over the graft at another parent, on the path to a node being kept by
-     every edit that does not relocate it, and on what a move leaves in place - every id, every
-     other node found at the same node with the move applied inside it, every parent but the
-     target's. The lift carries ONE fact the pure lift did not need, because the pure footprint is
-     a function of the op alone: that an operation's base-aware footprint is STABLE under the
-     application of an operation it is independent of (`wstep_in`, `footprint_in_stable`), so what
-     the fold read at the base is what holds at every state the fold reaches.
-
-   WHAT IS NOT PROVED HERE. Nothing of the two theorems is left to the oracle: the `no_move`
-   predicate of section 8 survives only as the name of the intermediate theorems
-   (`footprint_in_sound_no_move`), as `in_place` does for sections 4 and 5. What stays outside
-   is what every theorem of the pack leaves outside — the tree is the witness view, ids are keys,
-   and the correspondence to production is the differential's and the extractor's.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Everything is over `TreeOps`'s definitions, opened; `Preservation` is cited
    qualified for the id-uniqueness invariant at intermediate states, as `Arbitrate.fst` cites it.

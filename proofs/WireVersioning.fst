@@ -29,7 +29,7 @@
 
    WHAT THIS DELIBERATELY IS NOT. It is not a change to the policy, and it is not a claim that
    the policy is COMPLETE. A row of §15.4's table this module cannot support is a finding for the
-   specification's owners, recorded in `proofs/README.md`'s theorem section and raised there —
+   specification's owners, recorded on this model's ladder rows and raised there —
    never a quiet rewrite of `classify` to make a theorem go through.
 
    ONE SUCH ROW WAS NAMED HERE AND IS NO LONGER ONE (Phase 200). The optional-field row was

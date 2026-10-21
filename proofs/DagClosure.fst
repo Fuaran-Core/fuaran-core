@@ -413,7 +413,7 @@ let between_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string
     nodes_for_ids d (rev c)
 #pop-options
 
-(* … and therefore `Dag.betweenOps` returns the lane's ops. This is the claim the README's ladder
+(* … and therefore `Dag.betweenOps` returns the lane's ops. This is the claim the ladder
    moves from level 2 to level 1 for the linear-lane shape. *)
 #push-options "--z3rlimit 100"
 let between_ops_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
@@ -3810,7 +3810,7 @@ let off_cycle_in_witness (#op:eqtype) (d:dag op) (fuel:list (node op)) (q:string
 let common_anc (#op:eqtype) (d:dag op) (fuel:list (node op)) (left right x:string) : Tot bool =
   mem x (ancestors_of d fuel left) && mem x (ancestors_of d fuel right)
 
-(* What THEOREM 5 (`DagPrimitives.merge_base_now_maximal`) stands on: the maximum of the common
+(* What `DagPrimitives.merge_base_now_maximal` stands on: the maximum of the common
    set by the key is a common ancestor no other common ancestor descends from, and an empty common
    set is exactly two disjoint histories. *)
 #push-options "--z3rlimit 100"
@@ -4023,7 +4023,7 @@ let rec map_map_nodes (#op:eqtype) (d:dag op) (ls:list (list string))
     | [] -> ()
     | ids :: t -> ops_of_is_map (nodes_for d ids); map_map_nodes d t
 
-(* THEOREM 4. `conflictsOfHeads` is the pairwise sweep `reconcileMany` refuses with, node for op:
+(* `conflictsOfHeads` is the pairwise sweep `reconcileMany` refuses with, node for op:
    renaming each reported node to its op gives EXACTLY the `LanesInterfere` report, conflict for
    conflict and in order — so it is empty exactly when that sweep is. *)
 let conflicts_of_heads_is_the_sweep (#op:eqtype) (fp:op -> footprint) (d:dag op)
@@ -4218,7 +4218,7 @@ let rec reach_build_valid (#op:eqtype) (d:dag op) (r:list rslot) (ord:list strin
     | [] -> ()
     | id :: t -> reach_step_valid d r id; reach_build_valid d (reach_step d r id) t
 
-(* ---- 20.3 THEOREM 3: the index answers what the walk answers ---- *)
+(* ---- 20.3 the index answers what the walk answers ---- *)
 
 let reach_agrees (#op:eqtype) (d:dag op) (r:list rslot) (fuel:list (node op)) (anc dsc:string)
   : Lemma (requires reach_valid d r /\ walk_ok d fuel dsc)

@@ -12,13 +12,9 @@
        hash), and `OpStream.firstChainBreak` / `verifyChain` walk it checking the sequence, the
        prev-link, and the record's own recomputed hash.
 
-   WHAT IS PROVED. Two results per shape, and a characterisation each is a corollary of:
-
-     - `intact_verifies` / `intact_chain_verifies` — a DAG grown by `append`/`merge` alone whose
-       every named parent was present when it was named, and a chain grown by `append` alone, have
-       no break at all.
-     - `tamper_detected` / `chain_tamper_detected` — changing ONE node's op, actor or parent
-       multiset, or ONE record's seq, actor or op, while leaving its ADDRESS as it was, is found.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    THE ASSUMPTIONS, and narrowing them is the point of Phase 145. Both detection theorems take
    their injectivity **as an explicit parameter** — a lemma the caller supplies, not an `assume`
@@ -3534,7 +3530,7 @@ let replay_answers_head
       that verifies everything falsifies it, and the differential measures that. The shipped kit
       samples it at a host's sink already — `Conformance.attestationLaws`' prefix arm and its two
       rehashed-forgery arms are exactly "one attestation, two heads" — though the claims ladder
-      does not yet name that law as this row's discharge; `proofs/README.md` says why.
+      does not yet name that law as this row's discharge; the `signature-binds-one-head` row says why.
 
    ONE BOUNDARY IS A FINDING rather than a modelling choice, and it is section 7's finding again.
    `OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an

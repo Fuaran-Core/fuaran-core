@@ -31,47 +31,9 @@
    arithmetic query in this file is LINEAR, which is why the module discharges at the leg's own
    rlimit with no options scoped anywhere.
 
-   WHAT IS PROVED, over every text:
-
-     - CANONICAL FORM. `canonical_idempotent` — what `tryCanonical` writes it reads back to the
-       same text, through `parts_normal` (every record `parts` returns is NORMAL: no leading
-       zero on the integer digits, no trailing zero on the fraction, no sign on zero) and
-       `render_parts` (`parts (render p) == Some p` for every normal `p`).
-       `same_number_iff_canonical` — D72 K3: two accepted texts denote one number if and only if
-       their canonical forms are one text; the core is `normal_injective`, a normal record is
-       DETERMINED by its numerator at the common scale. `zero_unique` — zero has exactly one
-       canonical text, whatever sign, zeros or point it was written with.
-     - ORDER. `compare_denotes` — `compare` answers the sign of the difference of the numbers
-       denoted, read at the common scale; so it is a total order (`compare_antisymmetric`,
-       `compare_transitive`) that answers 0 exactly where the canonical forms agree
-       (`compare_zero_iff_canonical`), and `1.50` and `1.5` compare equal because they denote
-       one number.
-     - SUM. `add_denotes` — the sum is the sum: `add a b` renders a normal record at or below
-       the common scale whose numerator there is the sum of the two numerators, through the
-       carry (`add_lsb_value`), the borrow (`sub_lsb_value`, discarded only where it is zero)
-       and the two trims. `add_canonical` — it always answers canonical text. And because one
-       number has one canonical text, the laws are corollaries rather than separate proofs:
-       `add_commutative`, `add_associative` (through a three-way common scale) and
-       `add_zero_identity` (adding zero canonicalises and does nothing else).
-     - REFUSAL. `parts_iff_grammar` — the accepted set is EXACTLY the grammar D72 K4 states,
-       `-?[0-9]+(\.[0-9]+)?`, written as a recogniser that shares nothing with `parts`; and
-       `refusal_exact` — `tryCanonical`, `compare` and `add` each answer `None` exactly off it.
-
-   THE FINDINGS. None. Every clause of the shipped module was modelled as written and every
-   theorem the phase asked for holds of it; the two places a finding was looked for and not
-   found are recorded so they are not looked for again. The sign of zero: `parts` drops the
-   minus on a zero magnitude in BOTH arms (`-0` and `-0.00` alike), and `add` drops it again on a
-   cancelled sum, so `zero_unique` holds with no clause added. The discarded borrow:
-   `subMagnitudes` throws away the borrow its last step leaves, which is a defect in general and
-   is not one here, because production reaches it only past the `CompareOrdinal` that orders the
-   magnitudes, and `sub_magnitudes_mag` is stated — and needed — over exactly that premise.
-
-   WHAT IS NOT CLAIMED. `tryToFloat`. Anything about a .NET string beyond the symbol reading the
-   differential's bridge performs — that `'0'..'9'` are ten consecutive code units and that
-   `string` on a digit writes the character the model's `of_digits` stands for; both are host
-   facts the `Proofs.Oracle` differential holds, not premises stated here. Anything about the
-   column layer's USE of this module (`Column.aggregate`, the token, the capture key), which the
-   models beside this one state in their own terms.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart. Sections 0–4 extract and are the
    oracle the differential runs beside production; sections 5–10 are the specification and the

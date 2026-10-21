@@ -1699,7 +1699,7 @@ let tests =
               // `RequiredParamsNull`, apart from `RequiredParamsUnbound` (left out) — the model proves
               // the exact characterisation (`required_is_non_null`) and what the all-Null set gets
               // (`all_null_refusal_exact`), and this case pins the CLOSURE on production.
-              // The ladder row is `query-required-is-non-null`; the README's theorem 12 argues it.
+              // The ladder row `query-required-is-non-null` states it.
               let q: Query =
                   { Id = "q-f"
                     Params =

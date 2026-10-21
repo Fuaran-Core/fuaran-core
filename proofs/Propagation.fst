@@ -30,70 +30,9 @@
    `dependencyMap`, `cycleThrough`, `touchedBy` and `dirtyFromOp` are outside the model: they
    build a dependency map or a change set from a tree, and the theorems start from both.
 
-   WHAT IS PROVED, over any dependency map, any change set, any value type and any TOTAL evaluator
-   (a `Tot` function here; production does not catch an evaluator that throws — Phase 308):
-
-     - `dirty_sound` — the dirty set holds every changed id and every id DOWNSTREAM of one: for
-       any read path `c <- n1 <- ... <- n` starting at a changed `c`, `n` is dirty. It is read
-       off `dirty_closed` (the set contains the change and is closed under "reads"), and
-       `dirty_least` says it is the LEAST such set — any set that contains the change and is
-       closed under "reads" contains it — which is what "minimal" means in the production doc
-       comment. `grow` is a total function HERE, which production's loop is only by argument:
-       its termination measure (the ids of the dependents map not yet accumulated, then the
-       frontier) is checked by the prover.
-     - `evalfrom_agrees` — `evalFrom ev1 prior changed deps` equals `eval ev1 deps`: the whole
-       `Result`, the values in the same order, the cyclic groups, and on a failing evaluator the
-       SAME `EvalNodeFailed` at the same node. **It NO LONGER carries a declared-reads premise**
-       (Phase 209): the driver builds the resolver FROM the node's declared reads (`lookups`), so
-       two result maps that agree on those reads hand the evaluator the same argument and it
-       answers alike (`lookups_eq`, `resolver_eq`) — where Phase 186 had to assume that of every
-       domain evaluator as `local`, now deleted. What remains is the contract production still
-       cannot enforce: `prior` is what `eval ev0` returned over the SAME dependency map, or fewer
-       of its values (`prior_of` — a hole is recomputed); `changed` names every node whose
-       evaluator differs between `ev0` and `ev1` (`agree_off`) and every node whose READS differ
-       (`touches_off`, the same premise's other half); and the walked order holds no id twice.
-       NOT among them: that the order is a dependency order. Agreement holds over ANY
-       duplicate-free order — dependency order is what makes the values mean something, not what
-       makes the two paths agree.
-     - `undeclared_refused` (Phase 209) — a node that reads outside its declaration is refused as
-       DATA: a walk whose first node reads an id `deps` does not declare for it returns
-       `EvalUndeclaredRead` naming the node and the read, under every evaluator alike and whatever
-       the reuse policy would do elsewhere, because the check reads the declaration and the
-       observed reads and never the evaluator. `eval_refuses_undeclared` and
-       `evalfrom_refuses_undeclared` are the two drivers' readings — `evalFrom`'s under the
-       hypothesis that it RECOMPUTES that node (dirty, or absent from `prior`), which is
-       production's own guard through `reuse_is_guard`.
-     - `ok_implies_declared` / `eval_ok_declared` (Phase 209) — a FULL evaluation that succeeded
-       checked every node on the walked order, so no node read outside its declaration. This is
-       the sentence that makes `evalfrom_agrees`' `prior` premise carry the enforcement: a `prior`
-       that came from `eval` over the same `deps` cannot have come from an evaluator that reads
-       undeclared, because that `eval` refused instead of returning one.
-     - `evalfrom_minimal` — a node outside the dirty set AND present in `prior` is not
-       re-evaluated: `evalFrom`'s result is the same under any two evaluators that agree on the
-       dirty ids and on the ids `prior` does not hold, which is what "is not evaluated" means
-       for a pure function without instrumenting one. `walk_invoked` is the instrumented
-       reading — the ids the walk hands to the evaluator, in order — and `invoked_only_stale`
-       says each is dirty or absent from `prior`. The qualifier is the production contract,
-       not a weakness of the proof: a node absent from `prior` is ALWAYS recomputed.
-     - `evalfrom_unknown_refused` — a changed id the dependency map does not hold makes
-       `evalFrom` the typed `EvalUnknownChange`, naming exactly the unknown ids, under every
-       evaluator alike: nothing is evaluated.
-     - Section 7 (Phase 317), the PULL dual: `needed_for_least` (the needed set is the least
-       read-closed superset of the targets), `eval_for_agrees` / `eval_for_with_agrees`
-       (demand-driven evaluation equals `eval` on the needed set whenever `eval` succeeds) and
-       `eval_for_invokes_needed` (nothing outside the needed set is evaluated).
-
-   WHAT IS NOT CLAIMED. Anything about `sort` beyond the one hypothesis above — that `Order` is
-   a dependency order, that `Cycles` are the strongly connected groups. That the `read_witness`
-   is the evaluator's real read set: production instruments its resolver and records the ids it
-   was ASKED for, and no pure model can observe a call that a pure function makes, so the
-   parameter is taken on trust (`propagation-read-witness`, a `permanent` bridge — the semantic
-   dependency set a pure model COULD define is not the same set, since an evaluator may ask for
-   an id and ignore the answer, and production refuses on the asking). The two premises that
-   remain the domain's: `agree_off` with `touches_off` (the change set is complete, about results
-   and about reads) and `prior_of` (`propagation-change-set-and-prior`). The ORDER of a set:
-   production's `Set` and `Map` sort by id, the model holds both as lists, and every theorem
-   about a set is about membership.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
    `Capability.fst`. The module is SELF-CONTAINED — it opens no other model, only the shared

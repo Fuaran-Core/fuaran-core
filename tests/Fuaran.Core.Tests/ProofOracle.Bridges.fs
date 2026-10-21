@@ -665,7 +665,7 @@ let drawnUpdatesAndBatches
 //  so a breach and the model's cap refusal render as ONE line, and every other answer as before.
 //
 //  Everything above this line begins at a `JVal` that already exists, which is exactly the
-//  boundary Phase 135's theorem 1 drew. What runs here is the model of the recursive-descent
+//  boundary the `WireDecode` model (Phase 135) drew. What runs here is the model of the recursive-descent
 //  parser itself, over the same TEXT production reads: the corpus fixtures as raw bytes, a
 //  near-miss table that reaches every classified failure, and generated deep, wide and random
 //  inputs.
@@ -1463,7 +1463,7 @@ let rec canonOfModel (v: WireCanon.jval<int, float>) : JVal =
 /// `float_str` is `Double.ToString("R", InvariantCulture)` DIRECTLY and not `FloatLayout.canonical`,
 /// so the `-0` collapse and the three non-finite tokens stay the MODEL's clauses to get right
 /// rather than being handed to it — that is the difference between a comparison and a tautology.
-/// The digits themselves are .NET's, per the opaque-numeral boundary theorems 1 and 4 also draw.
+/// The digits themselves are .NET's, per the opaque-numeral boundary the `WireDecode` and `JsonParse` models also draw.
 ///
 /// `tok_read` is the numeral READ-BACK the model does not compute: production's own parser over
 /// the token the model scanned. `tok_read_ok`, the one premise the theorems carry, is exactly the

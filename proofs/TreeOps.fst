@@ -10,31 +10,9 @@
    shows — its kind tag — so an in-place rewrite is modelled as a rewrite of the kind, children
    kept, which is everything the shipped op can do that the algebra can see.
 
-   WHAT IS PROVED. `tree_independence_diamond`: for every pair of ops whose footprints
-   `Ops.independent` declares disjoint, and every WELL-FORMED tree at which both apply, each
-   applies after the other and the two orders reach the same tree. That is exactly
-   `DagFold.independence_diamond` at this domain, and `Skeleton.fst` composes the two into
-   `skeleton_fold_confluence` — fold confluence for `SkeletonOp` with no domain hypothesis left.
-
-   The proof is not fifteen bespoke cases. It is three facts:
-
-     1. `relocating_forces_inert` — the pinned over-approximation does most of the work. A
-        `RemoveNode` or a `MoveNode` writes an UNKNOWN parent, and `Ops.independent` refuses
-        independence between an unknown-parent write and ANY structural write. Every skeleton op
-        except a structure-free `Batch` writes structure, so a remove or a move is independent
-        only of an op that does nothing at all. NINE of the fifteen unordered pairs are closed
-        by this lemma alone, and the tree is never looked at. Phase 250's `UpdateNode` carries an
-        unknown-parent write too — REQUIRED, not cautious: an update of `x` and a remove of an
-        ancestor of `x` share no address the script can name and do not commute — so all six of
-        the pairs it adds close the same way (`update_is_relocating`).
-     2. `diamond_sym` — the diamond's conclusion is symmetric in the pair, so the remaining
-        ordered cases halve.
-     3. Three concrete commutation equalities on the tree — insert/insert, insert/reorder,
-        reorder/reorder — plus the lift of the leaf diamond along a `Batch`'s script (section 20,
-        Phase 162), in the shape `DagFold.replay_diamond` already uses at lane granularity. The
-        alphabet is therefore the WHOLE of `SkeletonOp`, `Batch` included and nested to any
-        depth; Phase 133 shipped this module with that one shape open and `covered` naming it,
-        and Phase 162 closed it.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHY WELL-FORMEDNESS. `Tree.tryFind` and `Tree.parentOf` resolve an id to the FIRST node in
    preorder, and `ReorderChildren` validates against the children of the node they resolve to.
@@ -313,7 +291,7 @@ let rec same_multiset (xs ys:list string) : Tot bool (decreases xs) =
 
        F#: one scan over `Tree.ids w node` in preorder, seeded from `Tree.ids w root`, naming the
        FIRST id already seen. The seen set is a `Set<string>` there and a list read under `mem`
-       here, which is the pack's standing list-for-set reading (README, "sets are lists"); the
+       here, which is the pack's standing list-for-set reading (the `sets-are-lists` row); the
        decision is membership only, so nothing the comparison observes is lost.
 
        Before Phase 137 the check read the inserted node's own id alone. Section 13 keeps that

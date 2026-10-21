@@ -105,9 +105,8 @@ $modules = @($roster | ForEach-Object { $_.module })
 # kinds. The per-kind lemma shape that reaches that scale SHIPPED as Phase 168 — one lemma per
 # constructor, one per presence pattern — and Phase 182 made the presence split LINEAR in the
 # conditional members after the adopter measured 168's own 2^k, in the lemma COUNT this time, at
-# 71,722 lemmas in a 114 MB script. The measurements that motivated both, and the model-side
-# exponential that neither fixes, are kept in `proofs/README.md`'s theorem 1 section under its own
-# heading.
+# 71,722 lemmas in a 114 MB script. What the generated models cost today, and the boundary that
+# remains, is the `vocabulary-generated-model` row in `../proofs.json`.
 
 # Phase 150 — the generated modules are CHECKED but not EXTRACTED, and why an exemption exists at all.
 #

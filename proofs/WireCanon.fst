@@ -6,7 +6,7 @@
    `Json.escape` (WIRE_FORMAT §2 rule 6), `FloatLayout.canonical` (rule 5, including the `-0`
    collapse and the three non-finite tokens), and `Canonical.write Rendering.CrossHost` (rules 2, 3, 5, 6, 7 and the
    omitted-key corollary of rule 4). Beside it, a READER for exactly the grammar `render` emits —
-   not `Json.parse`, which theorem 4 already models, but the left inverse whose existence IS the
+   not `Json.parse`, which `JsonParse.fst` already models, but the left inverse whose existence IS the
    canonical form's converse.
 
    WHY THE PHASE EXISTS. §2 promises the twelve rules make the encoding DETERMINISTIC: structurally
@@ -16,7 +16,9 @@
    hash equality as value equality, and Phase 145 leaves `op_codec_injective` a parameter precisely
    because a codec built on `Canonical.write Rendering.CrossHost` inherits injectivity only if `Canonical.write Rendering.CrossHost` has it.
 
-   WHAT IS PROVED, AND THE FINDING THAT SHAPES IT.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    THE SHARD ASKED FOR `render_injective` UNCONDITIONALLY — `render a == render b ==> a == b` — AND
    THAT STATEMENT IS FALSE OF THE SHIPPED ENCODER, FOUR WAYS. Each is proved here as a refutation
@@ -80,7 +82,7 @@
 
    WHAT IS NOT MODELLED, AND WHY — the theorem's boundary.
 
-     - THE NUMERIC PAYLOADS ARE OPAQUE, as they are in theorem 1 and theorem 4. `jval` is
+     - THE NUMERIC PAYLOADS ARE OPAQUE, as they are in `WireDecode.fst` and `JsonParse.fst`. `jval` is
        parametric in the int and float carriers and the layout is a record of parameters
        (`int_str`, `float_str`, `fclass`, `is_zero`), because the F# extraction carries no floats
        and F*'s `int` is unbounded where .NET's `JInt` is Int32 (README, finding 2). What the model
@@ -95,7 +97,7 @@
        What is proved is that a canonical form follows FROM a total order, which is the half a
        model can settle.
 
-     - A CHARACTER IS A CONSTRUCTOR, exactly as in theorem 4, and for the same reason. `CPlain`
+     - A CHARACTER IS A CONSTRUCTOR, exactly as in `JsonParse.fst`, and for the same reason. `CPlain`
        carries the character verbatim, so two different ordinary characters are never identified;
        what the model needs to distinguish are the three classes rule 6 names (`"`, `\`, the
        controls) and the characters a numeric or literal token can carry. The bridge's faithfulness
@@ -116,16 +118,6 @@
        `Utf8.fst`'s model of the encoder, on the values whose strings have code points — which is
        what the guard of section 13 now also asks, and what `JsonParse.fst` proves of everything
        the parser returns.
-
-   A FINDING ABOUT THE SHIPPED CODE, recorded because refutation 1 is the only one of the four that
-   is not a documented design choice: `Json.render` has a guarded companion, `Json.tryRender`, which
-   names a non-finite float as a typed `Error` "instead of producing un-parseable wire". `Canon` has
-   no such companion. A non-finite float reaching `Canonical.write Rendering.CrossHost` is not un-parseable — it is worse
-   than that, because it silently becomes a STRING, and a digest over it collides with the digest
-   over the string a reader would decode it back to. Nothing in `Canon` refuses it. That is an
-   observation about an unguarded path and not a counterexample to any shipped claim, so it is
-   recorded here and in the README's ladder rather than repaired in this phase: a repair is a
-   refusal-class change to a shipped encoder and belongs to a phase chartered for it.
 
    THAT PHASE WAS 165, and the repair is section 13: `Canonical.tryWrite Rendering.CrossHost`, a guarded entry point
    BESIDE `render`, whose bytes did not move. Everything above stays true of `render` itself — a
@@ -148,7 +140,7 @@ open Twin
 open ListAlgebra
 
 (* The reader is a mutual group whose termination rides refinements in the return types, which is
-   the shape theorem 4's parser has and the shape this directory's cost note names as expensive
+   the shape `JsonParse.fst`'s parser has and the shape this directory's cost note names as expensive
    under the default SMT context. Scoped here rather than in `check.ps1`'s flags, for the reason
    `TreeOps.fst` gives at the same line: pruning changes which facts a query can see, so a module
    that has not been checked under it must not be switched to it as a side effect of another
@@ -272,7 +264,7 @@ let rec bridged_all (s: list ch) : Tot bool =
 (* ======================================================================================
    2. The value model (F#: `JVal` in JVal.fs).
 
-      Parametric in the two numeric carriers, as theorem 1's is and for the same reason; strings
+      Parametric in the two numeric carriers, as `WireDecode.fst`'s is and for the same reason; strings
       and keys are character lists, because rule 6 and rule 2 are both statements about characters.
    ====================================================================================== *)
 
@@ -364,7 +356,7 @@ type wire (num flt: eqtype) = {
   (* F#: `System.String.CompareOrdinal(a, b) <= 0`. Rule 2's comparator. *)
   key_le    : list ch -> list ch -> bool;
   (* The numeral READ-BACK, which the model does not compute: given a numeric token, the value the
-     wire denotes. A parameter for the reason `float_read` is one in theorem 4 — the numeral is
+     wire denotes. A parameter for the reason `float_read` is one in `JsonParse.fst` — the numeral is
      .NET's to compute, and the differential compares it there. *)
   tok_read  : list ch -> outcome (jval num flt);
   (* F#: `Json.isWellFormedUtf16` (Phase 306) — is this string well-formed UTF-16? A parameter
@@ -541,7 +533,7 @@ and normalise_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jva
 (* ======================================================================================
    6. The reader — a LEFT INVERSE for exactly the grammar `render` emits.
 
-      This is deliberately NOT `Json.parse`: theorem 4 models that parser, with its depth
+      This is deliberately NOT `Json.parse`: `JsonParse.fst` models that parser, with its depth
       counter, its twelve error classes and its two numeric guards, and re-modelling it here
       would prove the same thing twice at several times the prover cost. What injectivity needs
       is far smaller — a reader that recovers a value from a rendering, in any trailing context.
@@ -2080,7 +2072,7 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
                 Rendered (render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)])))) = ()
 
 (* ======================================================================================
-   14. THE BRIDGE — section 6's reader and theorem 4's parser agree on the grammar
+   14. THE BRIDGE — section 6's reader and `JsonParse.fst`'s parser agree on the grammar
        `render` emits (Phase 170).
 
        WHAT THIS SECTION IS FOR. Section 6's reader is a left inverse for exactly the grammar
@@ -2101,7 +2093,7 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
        letters, the hex digits). `pc` is the correspondence, one clause per class, and it is
        total in both directions' sense: every `WireCanon.ch` denotes a character, and `pc` sends
        it to the constructor `JsonParse` holds for that character. The two value models differ
-       too — theorem 4's parser returns a numeral's TOKEN where the encoder's model holds an
+       too — `JsonParse.fst`'s parser returns a numeral's TOKEN where the encoder's model holds an
        opaque carrier, and a decoded string as a list of `och` where the encoder holds the
        characters — so `pv` is the corresponding translation of a value.
 
@@ -2114,7 +2106,7 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
        assumed row.
 
        THE ONE PREMISE, AND WHY IT IS FORCED. Both models declare the numerals OPAQUE: this one
-       takes the two layouts and the read-back as parameters (`tok_read_ok`), and theorem 4 takes
+       takes the two layouts and the read-back as parameters (`tok_read_ok`), and `JsonParse.fst` takes
        `System.Double.TryParse`'s verdict as `float_read`. A bridge between two opaque parameters
        cannot do better than relate them, so `numerals_bridge` says the parser's number path
        accepts each layout as the token the encoder emitted, on the constructor rule 5 chose. It
@@ -2274,9 +2266,9 @@ let parse_string_reads_quoted (s rest: list ch)
 
 (* ---- 14.3 the value correspondence ---- *)
 
-(* The `JVal` theorem 4's parser returns for a value this one rendered. Three clauses differ
+(* The `JVal` `JsonParse.fst`'s parser returns for a value this one rendered. Three clauses differ
    from an identity, and each is a modelling decision the other phase already took: a numeral
-   comes back as its TOKEN (theorem 4 does not compute a numeral's value, so what it holds is
+   comes back as its TOKEN (`JsonParse.fst` does not compute a numeral's value, so what it holds is
    the characters production handed to `Int32.TryParse` / `Double.TryParse`), a string comes back
    as the `och` list `parseString` builds, and an object's members carry their keys in the same
    decoded form. *)
@@ -2305,7 +2297,7 @@ and pkvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt
 
 (* ---- 14.4 the depth budget, and the trailing contexts the grammar produces ---- *)
 
-(* Theorem 4's parser carries WIRE_FORMAT §21.1's nesting cap as an exhausted `list unit` budget,
+(* `JsonParse.fst`'s parser carries WIRE_FORMAT §21.1's nesting cap as an exhausted `list unit` budget,
    one element per descent (finding 2: F*'s integers do not survive the extraction). This
    encoder's reader has no such cap — section 6 says why — so the bridge has to say what budget
    suffices, and `fits` is that: one element for each container on the path to every leaf. It is
@@ -2356,7 +2348,7 @@ let rec sort_preserves_fits (#num #flt: eqtype) (w: wire num flt) (b: list unit)
 
 (* ---- 14.4b distinct member names (Phase 462) ---- *)
 
-(* Since Phase 462 theorem 4's parser refuses an object that carries a member name twice
+(* Since Phase 462 `JsonParse.fst`'s parser refuses an object that carries a member name twice
    (`JP.has_key` on the accumulated members, `DuplicateMember`), where section 6's reader reads
    exactly what `render` emits, a repeated key included. So the bridge carries one hypothesis
    the sections before it did not: every object in the value has distinct member names, read in
@@ -2567,7 +2559,7 @@ let render_kvs_head (#num #flt: eqtype) (w: wire num flt)
 (* ---- 14.7 THE BRIDGE, proved ---- *)
 
 (* The mutual induction, mirroring section 9's exactly — same three statements, same measure,
-   same trailing-context quantification — against theorem 4's parser instead of section 6's
+   same trailing-context quantification — against `JsonParse.fst`'s parser instead of section 6's
    reader. The two accumulator-carrying loops (`parse_items`, `parse_members`) are stated over an
    ARBITRARY accumulator, which is what makes the step reuse the statement: production's
    `rev (v :: acc)` is `rev_app acc [v]`, and the recursive arm's `rev_app (v :: acc) xs` is
@@ -2683,11 +2675,11 @@ and budget_covers_fdepth (#num #flt: eqtype) (b: list unit)
 
 (* ---- 14.9 the two theorems ---- *)
 
-(* THE TWO READERS AGREE ON EVERYTHING `render` EMITS. Section 6's reader and theorem 4's parser,
+(* THE TWO READERS AGREE ON EVERYTHING `render` EMITS. Section 6's reader and `JsonParse.fst`'s parser,
    given the same bytes and any trailing context the grammar produces, accept — neither refuses —
    and return the SAME value and the SAME remainder, up to the correspondence between the two
-   models' types. This is the lemma the two phases left unwritten: theorem 7 proved a reader
-   exists and inverts the encoder, theorem 4 proved production's parser total and classified, and
+   models' types. This is the lemma the two phases left unwritten: section 6 proved a reader
+   exists and inverts the encoder, `JsonParse.fst` proved production's parser total and classified, and
    nothing said they were reading the same language.
 
    It holds under BOTH null policies, which is the half that is easy to miss: the parser's
@@ -2725,7 +2717,7 @@ let parse_render_roundtrip (#num #flt: eqtype) (w: wire num flt)
   app_nil (render w v);
   parse_reads_render w fr cap (JP.EraseMemberNull? pol) b v []
 
-(* THE POLICY IS UNOBSERVABLE ON CANONICAL OUTPUT — theorem 1's `NullPolicy` fork, which lives in
+(* THE POLICY IS UNOBSERVABLE ON CANONICAL OUTPUT — the parser's `NullPolicy` fork, which lives in
    the member loop and nowhere else, never fires on bytes this encoder produced. A corollary of
    the two theorems above rather than a third one, and worth stating because the two policies are
    what a caller of `Json.read` chooses between (`ReadOptions.Null`). *)

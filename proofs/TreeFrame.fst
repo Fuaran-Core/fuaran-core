@@ -25,48 +25,9 @@
    the reading loses nothing — an id whose parent or sibling order differs has a written parent.
    The definition is over the model's own tree and takes no parameter.
 
-   WHAT IS PROVED.
-
-     - `apply_frame` / `batch_frame` — THE FRAME. For every op (a `Batch` at any depth by the fold
-       `fp_all` is defined by) and every well-formed tree at which it applies, every written id is
-       an address the footprint NAMES (`named_writes`: structure, content, unknown-parent and
-       slot-node writes) or one of the two tree facts an unknown-parent write stands for and the
-       script cannot name, resolved at the tree the op lands on (`unnamed`): the SOURCE PARENT of a
-       removed or moved node, and the SUBTREE a removal destroys.
-     - `named_frame` — the pure-footprint corollary: an op whose footprint carries no
-       unknown-parent write writes ONLY at addresses its footprint names. No tree is read.
-     - `pure_frame_fails_for_a_remove`, `pure_frame_fails_for_a_move` — and for a relocating op the
-       pure form is FALSE, with the witnesses: a removal destroys a descendant its footprint does
-       not name and rewrites a parent it does not name, and a move rewrites its source parent.
-       These are `Ops.footprint`'s two pinned over-approximations, machine-checked as the boundary
-       of `named_frame` rather than left as prose; `unnamed_is_resolved` says the unnamed writes
-       are exactly those two facts about an id the footprint does carry as an unknown-parent write.
-     - `targets_cover_written` — every id an applied op writes is in `targets_of`, or is the parent,
-       in the tree the op was applied to, of an id that is. This is the statement of the cover law,
-       with content added; the second disjunct is the source parent, which `WriteGate.targetsOf`
-       documents as the one written id it does not name.
-     - `gated_apply_respects_lock` — when `apply_gated` succeeds, every locked id is exactly as it
-       was: `find_in l` answers the same before and after, so a locked node the tree held is still
-       there with its WHOLE SUBTREE unchanged, and a locked id it did not hold was not created.
-       `nothing_under_a_lock_is_written` is its reading at each id under a lock. A locked id inside
-       a destroyed subtree is the absent-after case, and it cannot happen.
-
-   WHAT IS NOT CLAIMED, and two boundaries that are proved instead of promised.
-
-     - That `WriteGate.targetsOf`, `decide` and `applyGated` compute what these models compute: the
-       module is checked and not extracted, and `Conformance.writeGateLaws` is what holds
-       production to the statements proved here. `decide_one` decides the VERDICT (allowed, locked
-       or not writable); which of several offending targets production names first is its `Set`
-       order, and the model's lists carry no order on ids.
-     - `lock_does_not_pin_sibling_place` — a lock protects the locked node's own entry, not its
-       index under an unlocked parent: reordering that parent is allowed and moves it.
-     - `allow_list_does_not_cover_the_source_parent` — under an ALLOW-LIST the source-parent
-       exception is not harmless as it is for a lock: removing an allowed node rewrites the child
-       list of a parent the list does not cover. No allow-list theorem is stated for that reason.
-     - Slot writes: no skeleton op writes a slot, so `nodes f.slot_writes` is empty for every
-       footprint `op_fp` produces; the clause is carried because `targetsOfOne` carries it.
-     - Ill-formed trees (an id twice), keyed positions and container capability, exactly as
-       `TreeOps.fst`'s header says of `apply`.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    Apache-2.0, like everything beside it.
 *)
