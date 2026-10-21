@@ -24,6 +24,12 @@ named beside them, and a leg whose prerequisite is absent is **skipped by name**
 The skipped legs are counted and named on the gate's last line, so a green run says how much of the
 suite it did not read.
 
+An older clone may hold `src/Fuaran.Core.Lease/`, `src/Fuaran.Core.DataFrame/`, `src/Fuaran.Core.Column.Ops/`,
+`src/Fuaran.Core.DataFrame.CSharp/`, `src/Fuaran.Core.DataFrame.Conformance/`, `tests/fable-smoke/` and
+`tests/Fuaran.Core.DataFrame.CSharp.Proof/` with nothing in them but ignored `bin/` and `obj/` output: the
+residue of strands that left this repository. No tracked file lives there, and `git clean -X` removes them
+safely (it removes every ignored file, the prover cache under `proofs/.fstar/` included).
+
 Every leg that reads tags reads the release tags **in HEAD's history** (`git tag --list --merged HEAD`),
 through one reader. So a baseline-class report on a branch cut before the newest tag says "since the
 newest tag in this branch's history", not "since the newest tag anywhere". A tag your branch does not
@@ -132,17 +138,13 @@ update `STABILITY.md` when it touches a stability-critical surface. What each ve
 recorded in the release ledger, `docs/releases/<version>.md`: a change that ships appends its entry
 to the standing draft slot's file there (`STABILITY.md`, "Versioning policy").
 
-## Developer Certificate of Origin (DCO)
+## Licensing of contributions
 
-Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/).
-Sign off every commit with `git commit -s`, certifying you wrote the change (or otherwise have the
-right to submit it) under the project's Apache-2.0 license:
-
-```
-Signed-off-by: Your Name <you@example.com>
-```
+There is no sign-off requirement. The licence basis is Apache-2.0's own inbound=outbound rule: under
+section 5 of the [licence](LICENSE), a contribution you intentionally submit for inclusion is licensed
+under the Apache License, Version 2.0, without any additional terms or conditions, unless you state
+otherwise. Nothing beyond that is asked of a commit (DECISIONS.md D207).
 
 ## Pull requests
 
-Keep PRs focused and describe what changed and why. Make sure `./verify.ps1` passes. By contributing
-you agree that your contribution is licensed under the Apache License, Version 2.0.
+Keep PRs focused and describe what changed and why. Make sure `./verify.ps1` passes.

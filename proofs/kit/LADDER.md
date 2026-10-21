@@ -41,7 +41,7 @@ registry reads the two fields it is made of.
 | `subject` | required | The repository's own name. It keys every row a registry reports (`subject:id`), so it is a NAME, not a description — scope prose goes in a `$`-annotation. |
 | `claims` | required | The rows. `[]` for a repository that declares none. |
 | `version` | optional | The schema version, `1`. Absent means `1`. Additive changes to this page do not move it. |
-| `$…` | optional | Annotations (`$comment`, `$levels`, `$scope`, …). Never read by any tool. |
+| `$…` | optional | Annotations (`$note`, `$levels`, `$scope`, …). Never read by any tool. |
 
 ## A claim
 
