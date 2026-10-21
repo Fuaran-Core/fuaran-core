@@ -282,6 +282,22 @@ foreach ($plant in $plants) {
     Assert-That "I. GUARD — $($plant.What) is refused, naming the line" ($i.Exit -ne 0 -and $named -and $i.Text.Contains('NOT INDEPENDENT')) "exit $($i.Exit): $($i.Text)"
 }
 
+# The FLOOR may open a System namespace and name its types unqualified (Phase 536): accepted only when
+# the head RESOLVES to a type in a namespace the file opens. The control holds; the same head without
+# the open, and a production head beside the open, are each refused.
+Reset-GuardOracle
+Edit-GuardFile 'Prims.fs' "module Prims`n" "module Prims`n`nopen System.Numerics`nlet big (t: string) = BigInteger.Parse t`n"
+$i = Invoke-Guard
+Assert-That 'I. GUARD FLOOR CONTROL — a runtime floor opening System.Numerics and naming BigInteger unqualified holds: exit 0' ($i.Exit -eq 0) "exit $($i.Exit): $($i.Text)"
+Reset-GuardOracle
+Edit-GuardFile 'Prims.fs' "module Prims`n" "module Prims`n`nlet big (t: string) = BigInteger.Parse t`n"
+$i = Invoke-Guard
+Assert-That 'I. GUARD — a floor naming BigInteger with no open that resolves it is refused, naming the line' ($i.Exit -ne 0 -and [bool](@($i.Lines -match "Prims\.fs:3: names 'BigInteger'").Count)) "exit $($i.Exit): $($i.Text)"
+Reset-GuardOracle
+Edit-GuardFile 'Prims.fs' "module Prims`n" "module Prims`n`nopen System.Numerics`nlet leak (s: string) = Fuaran.Core.Canon.render s`n"
+$i = Invoke-Guard
+Assert-That 'I. GUARD — a floor that opens System.Numerics and names a production module is still refused' ($i.Exit -ne 0 -and [bool](@($i.Lines -match "Prims\.fs:4: names 'Fuaran'").Count)) "exit $($i.Exit): $($i.Text)"
+
 # A reference INHERITED from a Directory.Build.props above the oracle counts as much as one written in
 # the project: the guard reads the project as MSBuild evaluates it.
 Reset-GuardOracle

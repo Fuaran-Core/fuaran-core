@@ -265,7 +265,8 @@ the project name:
 > item outside the oracle directory, and an oracle source that `open`s, abbreviates or qualifies a
 > name whose first segment is not `Prims`, an `FStar` module or one of the oracle's own modules (the
 > hand-written runtime floor may also name `System` and `Microsoft.FSharp`, which is what it defines
-> the primitives as). Each refusal names the file, the line and the text. Production is opened by
+> the primitives as, and a type of a `System` or `Microsoft.FSharp` namespace it opens, unqualified,
+> when the name resolves to a type there). Each refusal names the file, the line and the text. Production is opened by
 > the test host alone.
 
 Why it is here. Chakraborty et al., *Towards Neural Synthesis for SMT-Assisted Proof-Oriented

@@ -697,6 +697,19 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
         $raw = (Get-Content -LiteralPath $source.FullName -Raw).Replace("`r`n", "`n")
         $code = (Get-FSharpCode $raw) -split "`n"
         $rawLines = $raw -split "`n"
+        # A FLOOR file may open a System or Microsoft.FSharp namespace and name its types unqualified
+        # (`open System.Numerics` ... `BigInteger.Parse`). Such a head is accepted only when it resolves
+        # to a type in one of the namespaces this file opens (Phase 536, found by the first adopter
+        # whose floor was not this repository's): resolved, not assumed, so `Fuaran.X` stays refused.
+        $floorOpens = @(if ($floor) {
+                foreach ($codeLine in $code) {
+                    $o = $openPattern.Match($codeLine)
+                    if ($o.Success) {
+                        $ns = ($o.Groups[1].Value + $o.Groups[2].Value) -replace '\s', ''
+                        if ($ns -eq 'System' -or $ns.StartsWith('System.') -or $ns.StartsWith('Microsoft.FSharp')) { $ns }
+                    }
+                }
+            })
         for ($k = 0; $k -lt $code.Count; $k++) {
             $line = $code[$k]
             if ($line.Trim() -eq '') { continue }
@@ -719,6 +732,7 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
                 elseif ($bare -cmatch '^[a-z_]') { continue }
                 elseif ($bare -eq 'Prims' -or $bare -cmatch '^FStar($|_)' -or $own.Contains($bare)) { continue }
                 elseif ($floor -and ($bare -eq 'System' -or $path -eq 'Microsoft.FSharp' -or $path.StartsWith('Microsoft.FSharp.'))) { continue }
+                elseif ($floor -and @($floorOpens | Where-Object { "$_.$bare" -as [type] }).Count -gt 0) { continue }
                 else { $why = "names '$bare', which is not Prims, an FStar module or a module of the oracle's own$(if ($floor) { ', nor the runtime floor''s System / Microsoft.FSharp' })" }
                 $findings.Add("$($source.Name):$($k + 1): $why`: $($rawLines[$k].Trim())")
             }
