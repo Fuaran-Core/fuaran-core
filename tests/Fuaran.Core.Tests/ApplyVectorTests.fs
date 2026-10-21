@@ -253,18 +253,19 @@ let tests =
                           ApplyVectorExport.familyDirName
                           (Path.GetFileName ownVectors))
 
-                  // The manifest is SHARED: a sibling producer's family (the wire specification's `limitsApply`)
-                  // sits beside this one in the corpus copy, so only this family's row is this
-                  // producer's to keep fresh — the row line, as `render apply` writes and preserves it.
+                  // The manifest is SHARED: other producers' families (`limitsApply`, `duplicateIdsApply`,
+                  // `styleNormaliseApply`) sit beside this one in the corpus, so only this family's
+                  // row is this producer's to keep fresh — the row line, as `render apply` writes and
+                  // preserves it. This leg is the manifest's whole freshness check: the projection
+                  // registry declares it `rowIn`, not a `copies` record (D211), because the corpus
+                  // file is no copy of this repository's.
                   let copyManifest, ownManifest =
                       ApplyVectorExport.manifestPath root, ApplyVectorExport.manifestPath owned
 
                   requireBoth copyManifest ownManifest
 
                   let ownRow (path: string) =
-                      File.ReadAllText(path).Replace("\r\n", "\n").Split('\n')
-                      |> Array.tryFind (fun l -> l.StartsWith("    { \"id\": \"" + ApplyVectorExport.familyId + "\""))
-                      |> Option.map (fun l -> l.TrimEnd().TrimEnd(','))
+                      ApplyVectorExport.rowOf (File.ReadAllText path)
 
                   match ownRow copyManifest, ownRow ownManifest with
                   | None, _ ->

@@ -544,14 +544,15 @@ module ApplyVectorExport =
     let manifestPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, manifestFileName)
 
-    /// Write both artefacts with LF endings, whatever the host platform — the corpus is
-    /// byte-compared by several hosts on three operating systems.
     let private rowPrefix = "    { \"id\": "
 
-    /// This family's one manifest row, as `renderManifest` spells it.
-    let private ownRowLine () : string =
-        renderManifest().Split('\n')
-        |> Array.find (fun l -> l.StartsWith(rowPrefix + Canonical.write Rendering.CrossHost (JStr familyId)))
+    /// This family's row in a manifest's text, its trailing comma dropped; `None` when the manifest
+    /// carries none. The corpus manifest is a SHARED index (D211): this row is the part of it this
+    /// repository owns, and the part the corpus-freshness leg holds to the committed manifest's.
+    let rowOf (manifest: string) : string option =
+        manifest.Replace("\r\n", "\n").Split('\n')
+        |> Array.tryFind (fun l -> l.StartsWith(rowPrefix + Canonical.write Rendering.CrossHost (JStr familyId)))
+        |> Option.map (fun l -> l.TrimEnd().TrimEnd(','))
 
     /// The manifest beside a corpus copy is SHARED: a sibling producer's family (the wire specification's
     /// `limitsApply`, since 2026-10-07) sits beside this one, so the copy's manifest is never
@@ -576,11 +577,13 @@ module ApplyVectorExport =
 
             let own = renderManifest().Split('\n')
             let headerEnd = own |> Array.findIndex (fun l -> l.Trim() = "\"families\": [")
-            let rows = ownRowLine().TrimEnd(',') :: foreign
+            let rows = Option.get (rowOf (renderManifest ())) :: foreign
             let last = rows.Length - 1
             let body = rows |> List.mapi (fun i r -> if i = last then r else r + ",")
             Ok(String.concat "\n" (Array.toList own[..headerEnd] @ body @ [ "  ]"; "}"; "" ]))
 
+    /// Write both artefacts with LF endings, whatever the host platform — the corpus is
+    /// byte-compared by several hosts on three operating systems.
     let write (corpusDir: string) : unit =
         Directory.CreateDirectory(familyDir corpusDir) |> ignore
         File.WriteAllText(vectorsPath corpusDir, renderVectors ())

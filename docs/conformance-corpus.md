@@ -156,7 +156,9 @@ One table, one writer, one manifest schema, one freshness reading:
   (`conformance/`, or `docs/` for the roster's two artefacts), every file it writes with the text it
   renders, and — only where writing is more than writing those texts — its own writer: `laws` restamps
   the corpus's shared `laws/manifest.json` rows (Phase 394), and `apply` merges its row into the corpus's
-  shared `apply/manifest.json` beside other producers' rows.
+  shared `apply/manifest.json` beside other producers' rows. A row names those merged files
+  (`SharedIndexes`); the projection registry declares them `rowIn`, never as whole-file `copies` (D211), and
+  each family's corpus-freshness leg holds the rows this repository owns.
 - **The writer** is `CorpusFile.render`, public in `Fuaran.Core.Conformance` since `0.40.1` (D210; D171 kept it internal
   until a second producer was ready to adopt it): a header member per line, then one
   array member with an item per line, LF endings and a trailing newline. Every key, string and number,

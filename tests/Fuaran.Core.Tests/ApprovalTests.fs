@@ -426,12 +426,15 @@ let internal switches = [ Api; Wire; Readme; Docs; Regen ]
 /// What is wrong with the registry against the tree: a row's file missing (a template row's
 /// directory holding no file of its shape), a holder that is no test module, a verb the runner
 /// does not have, a runner verb no row names, a switch that is not one of the five, a handle that is
-/// no row's stem, or a fixed stem with no handle.
+/// no row's stem, a fixed stem with no handle, a shared index declared as a whole-file copy, or a
+/// `rowIn` on a file its exporter writes whole (D211). `shared` is the repository-relative paths the
+/// exporter table's writers MERGE into (`Exporter.SharedIndexes`).
 let internal registryFaults
     (exists: string -> bool)
     (templateHits: string -> int)
     (verbs: string list)
     (handles: string list)
+    (shared: string list)
     (rows: Projection list)
     : string list =
 
@@ -463,6 +466,23 @@ let internal registryFaults
               yield sprintf "%s names the switch `%s`, which Approval.fs does not read" r.Path s
           | _ -> ()
 
+          // D211 — a file the exporter merges into is a SHARED index: the corpus file holds other
+          // producers' rows, so it is never a copy of this one, and a fingerprint record of it reads
+          // stale forever (and its regeneration, run as a copy, would delete their rows).
+          let isShared = List.contains r.Path shared
+
+          if isShared && not r.Copies.IsEmpty then
+              yield
+                  sprintf
+                      "%s is a shared index its exporter merges this repository's rows into, so no copy of it is a copy of this file: declare it under `rowIn`, not `copies`"
+                      r.Path
+
+          if not isShared && not r.RowIn.IsEmpty then
+              yield
+                  sprintf
+                      "%s declares `rowIn`, but its exporter writes it whole: a whole file is declared under `copies`"
+                      r.Path
+
       for v in verbs do
           if not (rows |> List.exists (fun r -> r.Render = Some v)) then
               yield sprintf "the tool's `render %s` writes files no registry row names" v
@@ -477,6 +497,15 @@ let internal registryFaults
 
 let private repoText (rel: string) =
     File.ReadAllText(Repo.file rel).Replace("\r\n", "\n")
+
+/// The shared indexes the exporter table's writers merge into, at their committed home, as
+/// repository-relative forward-slashed paths (nothing is measured to list them).
+let private sharedIndexes () : string list =
+    let root = Repo.root ()
+
+    [ for e in Exporters.tableWith (fun () -> []) do
+          for path in e.SharedIndexes(e.Root()) do
+              Path.GetRelativePath(root, path).Replace('\\', '/') ]
 
 /// How many files under the template's directory have its shape.
 let private templateHits (template: string) =
@@ -503,13 +532,15 @@ let private sampleRows =
         Copies =
           [ { Repo = "x/corpus"
               Path = "laws/a-laws.json" } ]
+        RowIn = []
         VersionStamped = true }
       { Path = "conformance/apply/manifest.json"
         Render = Some "apply"
         Switch = None
         Stem = None
         HeldBy = "ApplyVectorTests"
-        Copies =
+        Copies = []
+        RowIn =
           [ { Repo = "x/corpus"
               Path = "apply/manifest.json" } ]
         VersionStamped = false }
@@ -519,6 +550,7 @@ let private sampleRows =
         Stem = Some "Gen"
         HeldBy = "IdlSpikeTests"
         Copies = []
+        RowIn = []
         VersionStamped = false }
       { Path = "api/{package}.txt"
         Render = None
@@ -526,6 +558,7 @@ let private sampleRows =
         Stem = Some PackageHole
         HeldBy = "PublicSurfaceTests"
         Copies = []
+        RowIn = []
         VersionStamped = false } ]
 
 [<Tests>]
@@ -546,6 +579,7 @@ let projectionTests =
                           templateHits
                           Renders.names
                           (handles ())
+                          (sharedIndexes ())
                           registry.Value
 
                   Expect.isEmpty
@@ -599,6 +633,8 @@ let projectionTests =
                   "is not `<repo>:<path>`"
 
               reds """{"path":"a.json","heldBy":"T","copies":["r:a.json"]}""" "no verb to regenerate it with"
+              reds """{"path":"a.json","heldBy":"T","rowIn":["r:a.json"]}""" "no verb to merge its row with"
+              reds """{"path":"a.json","heldBy":"T","render":"apply","rowIn":["r/a.json"]}""" "is not `<repo>:<path>`"
               reds """{"path":"a.json","heldBy":"T","render":"laws","versionStamped":true}""" "declares no copy"
 
               match parseRegistry """{"rows":[{"path":"a","heldBy":"T"},{"path":"a","heldBy":"U"}]}""" with
@@ -623,11 +659,15 @@ let projectionTests =
               (fun _ ->
                   let program = [ "laws"; "apply" ]
 
-                  let ok = registryFaults (fun _ -> true) (fun _ -> 1) program [ "Gen" ] sampleRows
+                  let shared = [ "conformance/apply/manifest.json" ]
+
+                  let ok =
+                      registryFaults (fun _ -> true) (fun _ -> 1) program [ "Gen" ] shared sampleRows
+
                   Expect.isEmpty ok "the sample registry is green against a tree that has it"
 
                   let faults exists hits program handles rows =
-                      registryFaults exists hits program handles rows |> String.concat "\n"
+                      registryFaults exists hits program handles shared rows |> String.concat "\n"
 
                   Expect.stringContains
                       (faults (fun p -> p <> "tests/X/Gen.fs") (fun _ -> 1) program [ "Gen" ] sampleRows)
@@ -662,7 +702,38 @@ let projectionTests =
                   Expect.stringContains
                       (faults (fun _ -> true) (fun _ -> 1) program [] sampleRows)
                       "the stem `Gen` has no handle"
-                      "a fixed stem no site can name is red")
+                      "a fixed stem no site can name is red"
+
+                  // D211 — the merged manifest declared as a whole-file copy: the shape `copies.json`
+                  // carried until then, which the workspace copy sweep read STALE forever.
+                  let asCopy =
+                      sampleRows
+                      |> List.map (fun r ->
+                          if r.Path = "conformance/apply/manifest.json" then
+                              { r with Copies = r.RowIn; RowIn = [] }
+                          else
+                              r)
+
+                  Expect.stringContains
+                      (faults (fun _ -> true) (fun _ -> 1) program [ "Gen" ] asCopy)
+                      "conformance/apply/manifest.json is a shared index its exporter merges this repository's rows into"
+                      "a shared index declared under `copies` is red"
+
+                  let wholeAsRow =
+                      sampleRows
+                      |> List.map (fun r ->
+                          if r.Path = "conformance/laws/a-laws.json" then
+                              { r with
+                                  Copies = []
+                                  RowIn = r.Copies
+                                  VersionStamped = false }
+                          else
+                              r)
+
+                  Expect.stringContains
+                      (faults (fun _ -> true) (fun _ -> 1) program [ "Gen" ] wholeAsRow)
+                      "conformance/laws/a-laws.json declares `rowIn`, but its exporter writes it whole"
+                      "a whole file declared under `rowIn` is red")
 
           testCase "go-red: the renders follow the rows" (fun _ ->
               Expect.equal
@@ -682,12 +753,16 @@ let projectionTests =
                   "only the version-stamped row is a derived file, its copy in the one spelling"
 
               let records = recordsBlock sampleRows |> String.concat "\n"
-              Expect.stringContains records "\"x/corpus/apply/manifest.json\"" "a copy record names the workspace path"
+              Expect.stringContains records "\"x/corpus/laws/a-laws.json\"" "a copy record names the workspace path"
 
               Expect.stringContains
                   records
-                  "render apply <the corpus checkout>\""
+                  "render laws <the corpus checkout>\""
                   "and the verb, with the checkout it writes into"
+
+              Expect.isFalse
+                  (records.Contains "apply/manifest.json")
+                  "a shared index (`rowIn`) is no copy record: the registry would read it stale forever (D211)"
 
               Expect.equal
                   (spliceMember

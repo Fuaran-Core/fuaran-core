@@ -81,7 +81,12 @@ type Projection =
         Stem: string option
         /// The test module (file name without `.fs`) whose family reds when it drifts.
         HeldBy: string
+        /// Whole-file copies other repositories carry of it, held by fingerprint.
         Copies: Copy list
+        /// Shared indexes in other repositories that carry THIS file's rows beside rows other
+        /// producers own (D211): the file there is not a copy of this one, so it is no `copies`
+        /// record; the rows this repository owns are held by the row's family instead.
+        RowIn: Copy list
         /// The version ledger reads it as a derived file stamped with the version.
         VersionStamped: bool
     }
@@ -113,7 +118,15 @@ let parseCopy (s: string) : Result<Copy, string> =
     | _ -> Error(sprintf "`%s` is not `<repo>:<path>`" s)
 
 let private known =
-    set [ "path"; "render"; "switch"; "stem"; "heldBy"; "copies"; "versionStamped" ]
+    set
+        [ "path"
+          "render"
+          "switch"
+          "stem"
+          "heldBy"
+          "copies"
+          "rowIn"
+          "versionStamped" ]
 
 let private str (e: JsonElement) (name: string) =
     match e.TryGetProperty name with
@@ -132,18 +145,21 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
             |> Seq.map (sprintf "%s: unknown member `%s`" at)
             |> Seq.toList
 
-        let copies =
-            match e.TryGetProperty "copies" with
+        let copiesIn (name: string) =
+            match e.TryGetProperty name with
             | true, c when c.ValueKind = JsonValueKind.Array ->
                 c.EnumerateArray()
                 |> Seq.map (fun x ->
                     if x.ValueKind = JsonValueKind.String then
                         parseCopy (x.GetString())
                     else
-                        Error "a copy is not a string")
+                        Error(sprintf "a `%s` entry is not a string" name))
                 |> Seq.toList
-            | true, _ -> [ Error "`copies` is not an array" ]
+            | true, _ -> [ Error(sprintf "`%s` is not an array" name) ]
             | _ -> []
+
+        let copies = copiesIn "copies"
+        let rowIn = copiesIn "rowIn"
 
         let row =
             { Path = str e "path" |> Option.defaultValue ""
@@ -152,6 +168,7 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
               Stem = str e "stem"
               HeldBy = str e "heldBy" |> Option.defaultValue ""
               Copies = copies |> List.choose Result.toOption
+              RowIn = rowIn |> List.choose Result.toOption
               VersionStamped =
                 match e.TryGetProperty "versionStamped" with
                 | true, v -> v.ValueKind = JsonValueKind.True
@@ -159,7 +176,7 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
 
         let faults =
             unknown
-            @ (copies
+            @ (copies @ rowIn
                |> List.choose (function
                    | Error why -> Some(sprintf "%s: %s" at why)
                    | Ok _ -> None))
@@ -178,14 +195,17 @@ let private parseRow (at: string) (e: JsonElement) : Result<Projection, string l
                 if row.VersionStamped && row.Copies.IsEmpty then
                     yield sprintf "%s (%s) is version-stamped and declares no copy" at row.Path
                 if not row.Copies.IsEmpty && row.Render.IsNone then
-                    yield sprintf "%s (%s) declares a copy and no verb to regenerate it with" at row.Path ]
+                    yield sprintf "%s (%s) declares a copy and no verb to regenerate it with" at row.Path
+                if not row.RowIn.IsEmpty && row.Render.IsNone then
+                    yield sprintf "%s (%s) declares a shared index and no verb to merge its row with" at row.Path ]
 
         if faults.IsEmpty then Ok row else Error faults
 
 /// The registry's rows from its text, or every reason it is not well formed: an unknown member, a
 /// missing path or holder, a switch without its stem (or the reverse), a template path without a
-/// template stem (or the reverse), a `render` that is not a family name, a copy not in the one spelling, a
-/// version-stamped row with no copy, or two rows with one path.
+/// template stem (or the reverse), a `render` that is not a family name, a copy or shared index not in the
+/// one spelling, a version-stamped row with no copy, a copy or shared index with no verb, or two rows with
+/// one path.
 let parseRegistry (json: string) : Result<Projection list, string list> =
     try
         use doc = JsonDocument.Parse json

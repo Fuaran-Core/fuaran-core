@@ -42,6 +42,11 @@ type Exporter =
         /// A writer that does more than write `Files` (a restamp, a merge into a shared manifest);
         /// `None` writes each file as rendered.
         Write: (string -> unit) option
+        /// The SHARED indexes under a directory: files `Write` merges this family's rows into beside
+        /// rows other producers own, rather than writing whole. A corpus copy of one is therefore not
+        /// a copy of this repository's file, and the projection registry may declare only the ROW
+        /// this repository owns in it (`rowIn`), never the file (`copies`) — DECISIONS.md D211.
+        SharedIndexes: string -> string list
         /// How the committed files are held to their render.
         Freshness: Freshness
     }
@@ -55,6 +60,9 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
         Root = OwnedConformance.root
         Files = LawVectorExport.emitted
         Write = Some LawVectorExport.write
+        // The corpus's `laws/manifest.json` indexes compute's families too; `write` restamps only
+        // the rows of the families written here (Phase 394).
+        SharedIndexes = fun dir -> [ LawVectorExport.manifestPath dir ]
         Freshness = Bytes }
       { Family = "apply"
         Root = OwnedConformance.root
@@ -65,6 +73,9 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               ApplyVectorExport.renderVectors
               ApplyVectorExport.renderManifest
         Write = Some ApplyVectorExport.write
+        // The corpus's `apply/manifest.json` carries other producers' families beside this one;
+        // `write` merges this family's row and keeps theirs (`ApplyVectorExport.mergeManifest`).
+        SharedIndexes = fun dir -> [ ApplyVectorExport.manifestPath dir ]
         Freshness = Bytes }
       { Family = "refusals"
         Root = OwnedConformance.root
@@ -79,6 +90,7 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               // Phase 551 — the seam-refusal family, beside the codec refusals in the same index.
               @ [ RefusalCorpus.seamPath dir, RefusalCorpus.renderSeam () ]
         Write = None
+        SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "decode"
         Root = OwnedConformance.root
@@ -89,16 +101,19 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               DecodeRejectCorpus.render
               DecodeRejectCorpus.renderManifest
         Write = None
+        SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "escape"
         Root = OwnedConformance.root
         Files = fun dir -> [ EscapeCorpus.path dir, EscapeCorpus.render () ]
         Write = None
+        SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "encoding"
         Root = OwnedConformance.root
         Files = fun dir -> [ EncodingCorpus.path dir, EncodingCorpus.render () ]
         Write = None
+        SharedIndexes = fun _ -> []
         Freshness = Bytes }
       // The roster's two generated artefacts (Phase 184): `docs/`, not `conformance/`, and held by
       // fingerprint as they always were. The measured `cases` column is one reference run per call.
@@ -111,6 +126,7 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               [ FamiliesExport.markdownPath dir, KitRoster.toMarkdownWith measured
                 FamiliesExport.jsonPath dir, KitRoster.toJsonWith measured ]
         Write = None
+        SharedIndexes = fun _ -> []
         Freshness = Fingerprint } ]
 
 /// The row for a family name.
