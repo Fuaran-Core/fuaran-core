@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 386 claims — 281 proved across 37 models, 63 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 387 claims — 282 proved across 37 models, 63 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -388,8 +388,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
-| `Fuaran.Core.Wire` | 141 | 64 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1284 | 317 | 419 | 38 | 15 | 0 | 3 | 492 |
+| `Fuaran.Core.Wire` | 144 | 67 | 11 | 3 | 4 | 0 | 0 | 59 |
+| **Total** | 1287 | 320 | 419 | 38 | 15 | 0 | 3 | 492 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -1800,7 +1800,10 @@ clause for clause: `skipWs`, `expect`, `parseString` with its eight short escape
 `parseNumber` with the JSON number grammar (`Json.isJsonNumber`, also since Phase 306) and the
 Int32 and int53 token guards behind it, `parseLiteral`, and the mutual `parseValue` /
 `parseObject` / `parseArray` with the explicit depth counter — including the `EraseMemberNull`
-fork, which lives in the member loop and nowhere else. The entry point's trailing-input check is
+fork, which lives in the member loop and nowhere else. Since Phase 467 the TOKEN surface of
+`Reader` is modelled too (section 14): `peek`, the kind of the value due unread; `read_null`,
+the literal read on the host's rule; and the canonical reading over them, proved to be the
+strict parse. The entry point's trailing-input check is
 modelled too, because `TrailingCharacters` is the one classified failure the parser does NOT
 raise through its internal exception. Since Phase 465 the descent also takes a LIMITS record
 (F#: `JsonLimits`, through `Json.read`'s `ReadOptions`): a string-length bound counted in code points
@@ -1809,7 +1812,7 @@ item or member is read, and the document-byte bound checked before anything is �
 the depth cap is, and each refused as `LimitExceeded`, a kind the descent carries internally
 and that NEITHER entry point reports as malformed JSON (section 13).
 
-**Proved** (15)
+**Proved** (16)
 
 - <a id="row-parser-null-absorption"></a>**`parser-null-absorption`** — `null_absorption_is_erasure` · fuaran-core#190
 
@@ -1868,6 +1871,14 @@ and that NEITHER entry point reports as malformed JSON (section 13).
   THE LIMITED ENTRY POINT AT NO BOUND IS THE PARSER: for every document, policy and depth budget, `parse_limited` at `unbounded` and a true byte verdict answers exactly what `parse` answers — the same value, or the same kind, message and position. Both run the one descent, which takes a `lims` record (string, items and members bounds, each `Unbounded` or a budget spent as the depth cap is); `bounds_confined`, carried in every descent signature, is what lets the type-checker see that at `unbounded` the descent raises no breach, so `parse` keeps its thirteen kinds and every pre-existing entry point (production: `Json.read` under a record of `JsonLimits.depthOnly`, and every reader over it — `Json.parse`, `Decoder.parse`, `Reader.read`) answers every document as `parse` does.
 
   _Boundary:_ Holds only at `unbounded` with a true byte verdict, and with one difference: the depth cap's `MaxDepthExceeded`, which `parse_limited` lifts to `RLimit LDepth` at the same suffix. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).
+
+- <a id="row-reader-rebuilds-the-parse"></a>**`reader-rebuilds-the-parse`** — `reader_rebuilds_the_parse` · fuaran-core#467
+
+  THE TOKEN READER REBUILDS THE PARSE. `Reader` answers the KIND of the value due without reading it (`Reader.peek`, F#: `JsonToken`), says where it stands (`Reader.path`) and reads a `null` token on the host's own rule (`Reader.readNull`), so a wire host whose null answer depends on the position decodes through Core's reader alone. The canonical reading over that surface — a container walked through `Reader.members` / `Reader.items` (the scanner's own loops), every other token read through `Reader.value` (the scanner's own `parseValue` at that position), a null among them answered by the strict policy — is modelled as `rebuild_value` and its group, and `read_rebuilt` (production: `Reader.read` with that reading) equals `parse_limited` under `RejectNull` on EVERY input: for every document, limits record, byte verdict and depth budget, the same value, or the same kind, message and position, or the same breach at the same suffix. The corollary `reader_rebuilds_every_accepted_document` is the phase's own statement: on every document the strict parse accepts — null-free by that acceptance — the reader's tokens rebuild exactly the value `parse` returns. `no_token_no_value` ties the dispatch to the grammar: where `peek` answers no token, `parse_value` refuses. A host reading that specialises the canonical one (reading a null on its rule where the canonical reading hands it to the policy) therefore departs from the parse at the nulls it admits and nowhere else.
+
+  _With:_ `rebuild_is_parse_value`, `reader_rebuilds_every_accepted_document`, `no_token_no_value`.
+
+  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`): `JsonReaderTests.fs` holds production's `rebuilt` reading to `Decoder.parse` refusal for refusal over the parser corpus, the benchmark corpora and the generated pool, and evaluates the theorem on the extracted `read_rebuilt` beside the extracted `parse_limited`. NOT modelled: the path a host reads at a null (`Reader.path`, like the breach's path in section 13), and the re-scan `Reader.read` runs after a shape mismatch, which admits the nulls the reading read — both are held by the differential. The reading is modelled under the strict policy only: under `EraseMemberNull` the member loop erases a member null before any reading sees it (`parser-null-absorption`), and the token surface changes nothing there.
 
 - <a id="row-parser-limit-never-reported-as-malformed"></a>**`parser-limit-never-reported-as-malformed`** — `limit_never_reported_as_malformed` · fuaran-core#465
 

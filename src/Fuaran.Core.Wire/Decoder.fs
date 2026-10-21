@@ -406,7 +406,11 @@ module Decoder =
 type Reader internal (scan: Json.Scanner) =
     let mutable due = true
     let mutable depth = 0
+    // The positions of the `null` tokens the reading read on its own rule (`Reader.readNull`,
+    // Phase 467), in reading order — what the re-scan after a shape mismatch admits.
+    let admitted = ResizeArray<int>()
     member internal _.Scan = scan
+    member internal _.Admitted = admitted
 
     member internal _.Due
         with get () = due
@@ -429,6 +433,11 @@ type Reader internal (scan: Json.Scanner) =
 /// `DecodeError.ofJsonRefusal` of that refusal, whatever the reading asked for, and a document it
 /// accepts is refused only with `WrongKind` AT THE PATH of the value that is not the shape asked
 /// for. A reading that succeeds returns what typing `Json.read`'s tree the same way would.
+///
+/// Since Phase 467 it also has a TOKEN surface — `peek`, `path` and `readNull` — through which a
+/// reading meets a `null` token where it stands and answers it by its own rule, the one thing a
+/// `NullPolicy` cannot say; a host whose value type carries a null reads its whole tree through
+/// the surface and `Json.read`'s grammar, under its own limits, with no parser of its own.
 [<RequireQualifiedAccess>]
 module Reader =
     /// Internal signal for a shape mismatch: the path to the value, the shape expected there, and
@@ -477,6 +486,49 @@ module Reader =
     let value (r: Reader) : JVal =
         take r
         r.Scan.Value r.Depth
+
+    // ---- the token surface (Phase 467) ----
+    //
+    // Three functions, and a host reads a document with position-dependent null rules through
+    // them and the readings above alone: `peek` says what kind of value is due, unread; `path` says
+    // where it stands; `readNull` reads a `null` token on the host's own rule. A host that meets
+    // `JsonToken.Null` chooses, by the path, between `readNull` (admit it here) and a refusal at
+    // that path; every other token is read by the readings above, so the scalars, the arrays and
+    // the objects are exactly what `Json.read` builds and the grammar stays the parser's own. The
+    // read's `NullPolicy` governs the readings that build `JVal` (`value`, the typed arrays) and the
+    // erasure `members` performs under `EraseMemberNull`; a token read is the host's decision and
+    // consults no policy, which is the whole point of it. The canonical reading — every token read
+    // back into the `JVal` `Json.read` builds — is proved to be the parse (`proofs/JsonParse.fst`,
+    // `reader_rebuilds_the_parse`).
+
+    /// The kind of the value due, from its first significant character, without reading it. Where
+    /// no value is due this is a programming error (`InvalidOperationException`); where no value
+    /// can start — the end of input, a character outside the grammar — the grammar's refusal is
+    /// raised exactly as `value` would raise it, so a document `Json.read` refuses is refused with
+    /// its refusal here too.
+    let peek (r: Reader) : JsonToken =
+        if not r.Due then
+            invalidOp "Reader.peek: no value is due (a reading reads exactly one value)"
+
+        r.Scan.Token()
+
+    /// The decode path to the value due, root first — the member keys and item indices the reader is
+    /// inside (Phase 467: the position a host's null rule is chosen by, and the path its refusal
+    /// names). Computed on request, so a host that never asks pays nothing for it.
+    let path (r: Reader) : PathSegment list = r.Scan.Path
+
+    /// The `null` token where one is due, read on the host's rule: it is consumed and nothing is
+    /// built, whatever the read's `NullPolicy`. Any other token is a mismatch at this value's path
+    /// (`WrongKind`, expecting `null`), and a near miss (`nul`) the literal's own refusal.
+    let readNull (r: Reader) : unit =
+        take r
+        let s = r.Scan
+
+        if s.ValueStart() <> 'n' then
+            mismatch s s.Pos "null"
+
+        r.Admitted.Add s.Pos
+        s.Null()
 
     /// An array of strings, into a `string[]`.
     let strings (r: Reader) : string[] =
@@ -571,8 +623,11 @@ module Reader =
             with
             | ReadMismatch(path, expected, at) ->
                 // A refusal anywhere in the document outranks a shape mismatch, so a document
-                // `Json.read` refuses is refused with its refusal whatever was asked.
-                match Json.read options input with
+                // `Json.read` refuses is refused with its refusal whatever was asked — less the
+                // nulls the reading read on its own rule (`readNull`), which are values to it; a
+                // null the reading never reached is answered by the read's policy, as every
+                // value past a mismatch is.
+                match Json.readAdmitting options (r.Admitted.ToArray()) input with
                 | Error refusal -> Error(DecodeError.ofJsonRefusal refusal)
                 | Ok _ ->
                     let found = "the value at position " + string at

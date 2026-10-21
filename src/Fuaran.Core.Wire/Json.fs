@@ -220,6 +220,27 @@ module ReadOptions =
     /// reaches for. A bare or array-element `null` is still refused by name.
     let tolerantOfNull: ReadOptions = { strict with Null = EraseMemberNull }
 
+/// The kind of the value due at a reader's cursor, read from its first significant character
+/// without consuming it (Phase 467: `Reader.peek`). One case per kind of JSON value, the `null`
+/// token among them — the one value `JVal` cannot carry, which a host reading by token therefore
+/// meets BEFORE any policy answers it, at the position it stands (`Reader.path`). A character no
+/// value starts with, and the end of input, are the grammar's refusals, raised rather than answered.
+[<RequireQualifiedAccess>]
+type JsonToken =
+    /// The `null` token. `Reader.value` answers it by the read's `NullPolicy`; `Reader.readNull`
+    /// reads it on the host's own rule.
+    | Null
+    /// `true` or `false`.
+    | Bool
+    /// A number token (`JInt` or `JFloat` once read).
+    | Number
+    /// A string.
+    | String
+    /// An array (`[`).
+    | Array
+    /// An object (`{`).
+    | Object
+
 /// The three reasons a value has no canonical rendering of its own (Phases 12, 306, 462; one
 /// classification since Phase 520). Each is a value whose bytes would be another value's, or text
 /// `parse` refuses, so every guarded writer refuses it rather than writing it.
@@ -724,7 +745,7 @@ module Json =
     /// the `Depth` breach), so every reader reports one refusal the one way (Phase 519). Under
     /// `JsonLimits.depthOnly` none of the three other bounds can fire.
     [<Sealed>]
-    type internal Scanner(policy: NullPolicy, limits: JsonLimits, input: string) =
+    type internal Scanner(policy: NullPolicy, limits: JsonLimits, input: string, admitted: int[]) =
         let tolerateMemberNull =
             match policy with
             | RejectNull -> false
@@ -1126,6 +1147,14 @@ module Json =
             | '[' -> parseArray depth
             | 't' -> parseLiteral "true" (JBool true)
             | 'f' -> parseLiteral "false" (JBool false)
+            | 'n' when Array.contains i admitted ->
+                // A null a `Reader` reading already read on its own rule (`Reader.readNull`, Phase
+                // 467), at this exact position: this is the re-scan `Reader.read` runs after a
+                // shape mismatch to find the document's own refusal, and a null the host admitted
+                // is not one. The literal is consumed and stands in as a value — what it stands
+                // in as is never read, since the re-scan's tree is discarded and only its refusal
+                // is kept — and every null the reading did NOT reach is still the policy's.
+                parseLiteral "null" (JBool true)
             | 'n' ->
                 // Under `EraseMemberNull` a member-position null never reaches here — `parseObject`
                 // absorbs it before calling `parseValue` — so a null arriving at this arm under the
@@ -1159,6 +1188,31 @@ module Json =
             arrayLoop depth (fun () -> items.Add(parseValue (depth + 1)))
             JArr(List.ofSeq items)
 
+        // The kind of the value due, from its first significant character, unconsumed (Phase 467):
+        // the dispatch `parseValue` makes, answered instead of taken. The two positions no value
+        // starts at are the grammar's refusals, raised exactly as `parseValue` raises them.
+        let token () : JsonToken =
+            match valueStart () with
+            | '"' -> JsonToken.String
+            | '{' -> JsonToken.Object
+            | '[' -> JsonToken.Array
+            | 't'
+            | 'f' -> JsonToken.Bool
+            | 'n' -> JsonToken.Null
+            | c when c = '-' || (c >= '0' && c <= '9') -> JsonToken.Number
+            | c -> fail UnexpectedChar ("unexpected character '" + string c + "'")
+
+        // The `null` token where a value is due (Phase 467): consumed on the HOST's rule, so no
+        // policy is consulted; a near miss (`nul`) is the literal's own refusal, as `parseLiteral`
+        // names it.
+        let nullToken () : unit =
+            valueStart () |> ignore
+
+            if i + 4 <= n && input.Substring(i, 4) = "null" then
+                i <- i + 4
+            else
+                fail ExpectedToken "expected 'null'"
+
         // The whole document: one value, then nothing but whitespace — the grammar's refusals
         // raised, the trailing-input one constructed.
         let document () : Result<JVal, JsonError> =
@@ -1173,6 +1227,9 @@ module Json =
             else
                 Ok v
 
+        /// The scanner every read runs: no null is admitted but by `policy`.
+        new(policy: NullPolicy, limits: JsonLimits, input: string) = Scanner(policy, limits, input, Array.empty)
+
         member _.Length = n
         member _.Pos = i
         member _.SkipWs() = skipWs ()
@@ -1182,6 +1239,8 @@ module Json =
         member _.NumberIsInt = numIsInt
         member _.NumberInt = numInt
         member _.Value(depth: int) : JVal = parseValue depth
+        member _.Token() : JsonToken = token ()
+        member _.Null() : unit = nullToken ()
         member _.Array(depth: int, item: unit -> unit) : unit = arrayLoop depth item
         member _.Object(depth: int, onMember: string -> unit) : unit = objectLoop depth onMember
 
@@ -1269,6 +1328,16 @@ module Json =
         match documentBytesBreach options.Limits input with
         | Some breach -> Error breach
         | None -> Scanner(options.Null, options.Limits, input).Document()
+
+    /// `read` with the `null` tokens at `admitted` (0-based positions of their `n`) admitted as
+    /// values whatever `options.Null` says — the re-scan `Reader.read` runs after a shape mismatch,
+    /// to find the document's own refusal without refusing a null the reading read on its rule
+    /// (`Reader.readNull`, Phase 467). Its value is never read: a `JBool true` stands in for each
+    /// admitted null.
+    let internal readAdmitting (options: ReadOptions) (admitted: int[]) (input: string) : Result<JVal, JsonRefusal> =
+        match documentBytesBreach options.Limits input with
+        | Some breach -> Error breach
+        | None -> Scanner(options.Null, options.Limits, input, admitted).Document()
 
     /// Render a `JsonError` as the byte-identical legacy string (`"not valid JSON: <msg> at
     /// position <pos>"`) that `parse` has always returned. Internal since Phase 310: the typed

@@ -501,6 +501,16 @@ Three rules sit beside the rows:
 - **Row 7 is where Core is stricter than a wire may be.** A wire that admits a non-finite number at
   its syntax layer (the UI wire's section 20.2 row 7 does) states that one divergence beside its
   citation; a wire that inherits Core's answer states nothing.
+- **A `null` is a token, and its answer is the host's by position (Phase 467).** `JVal` carries no
+  null, and a wire may answer one differently by where it stands (the UI wire reads a null as
+  absence at its read-compat slots and refuses it at the null's own path elsewhere), which no
+  `NullPolicy` can say. So `Reader.peek` names the `null` token where it stands, `Reader.path` says
+  where, and `Reader.readNull` reads it on the host's rule, consulting no policy — the host decodes
+  through Core's reader alone, and the two policies stay what they are for the readings that build
+  `JVal`. The canonical reading over the tokens — every token read back into the `JVal` `Json.read`
+  builds — is proved to be the strict parse on every input (`proofs/JsonParse.fst`,
+  `reader_rebuilds_the_parse`), so a host's reading departs from the parse at the nulls it admits
+  and nowhere else.
 
 ### The limits
 

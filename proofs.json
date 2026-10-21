@@ -1632,6 +1632,29 @@
       }
     },
     {
+      "id": "reader-rebuilds-the-parse",
+      "level": "proved",
+      "statement": "THE TOKEN READER REBUILDS THE PARSE. `Reader` answers the KIND of the value due without reading it (`Reader.peek`, F#: `JsonToken`), says where it stands (`Reader.path`) and reads a `null` token on the host's own rule (`Reader.readNull`), so a wire host whose null answer depends on the position decodes through Core's reader alone. The canonical reading over that surface — a container walked through `Reader.members` / `Reader.items` (the scanner's own loops), every other token read through `Reader.value` (the scanner's own `parseValue` at that position), a null among them answered by the strict policy — is modelled as `rebuild_value` and its group, and `read_rebuilt` (production: `Reader.read` with that reading) equals `parse_limited` under `RejectNull` on EVERY input: for every document, limits record, byte verdict and depth budget, the same value, or the same kind, message and position, or the same breach at the same suffix. The corollary `reader_rebuilds_every_accepted_document` is the phase's own statement: on every document the strict parse accepts — null-free by that acceptance — the reader's tokens rebuild exactly the value `parse` returns. `no_token_no_value` ties the dispatch to the grammar: where `peek` answers no token, `parse_value` refuses. A host reading that specialises the canonical one (reading a null on its rule where the canonical reading hands it to the policy) therefore departs from the parse at the nulls it admits and nowhere else.",
+      "boundary": "Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`): `JsonReaderTests.fs` holds production's `rebuilt` reading to `Decoder.parse` refusal for refusal over the parser corpus, the benchmark corpora and the generated pool, and evaluates the theorem on the extracted `read_rebuilt` beside the extracted `parse_limited`. NOT modelled: the path a host reads at a null (`Reader.path`, like the breach's path in section 13), and the re-scan `Reader.read` runs after a shape mismatch, which admits the nulls the reading read — both are held by the differential. The reading is modelled under the strict policy only: under `EraseMemberNull` the member loop erases a member null before any reading sees it (`parser-null-absorption`), and the token surface changes nothing there.",
+      "claim": "THE TOKEN READER REBUILDS THE PARSE. `Reader` answers the KIND of the value due without reading it (`Reader.peek`, F#: `JsonToken`), says where it stands (`Reader.path`) and reads a `null` token on the host's own rule (`Reader.readNull`), so a wire host whose null answer depends on the position decodes through Core's reader alone. The canonical reading over that surface — a container walked through `Reader.members` / `Reader.items` (the scanner's own loops), every other token read through `Reader.value` (the scanner's own `parseValue` at that position), a null among them answered by the strict policy — is modelled as `rebuild_value` and its group, and `read_rebuilt` (production: `Reader.read` with that reading) equals `parse_limited` under `RejectNull` on EVERY input: for every document, limits record, byte verdict and depth budget, the same value, or the same kind, message and position, or the same breach at the same suffix. The corollary `reader_rebuilds_every_accepted_document` is the phase's own statement: on every document the strict parse accepts — null-free by that acceptance — the reader's tokens rebuild exactly the value `parse` returns. `no_token_no_value` ties the dispatch to the grammar: where `peek` answers no token, `parse_value` refuses. A host reading that specialises the canonical one (reading a null on its rule where the canonical reading hands it to the policy) therefore departs from the parse at the nulls it admits and nowhere else. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`): `JsonReaderTests.fs` holds production's `rebuilt` reading to `Decoder.parse` refusal for refusal over the parser corpus, the benchmark corpora and the generated pool, and evaluates the theorem on the extracted `read_rebuilt` beside the extracted `parse_limited`. NOT modelled: the path a host reads at a null (`Reader.path`, like the breach's path in section 13), and the re-scan `Reader.read` runs after a shape mismatch, which admits the nulls the reading read — both are held by the differential. The reading is modelled under the strict policy only: under `EraseMemberNull` the member loop erases a member null before any reading sees it (`parser-null-absorption`), and the token surface changes nothing there.",
+      "phase": "fuaran-core#467",
+      "evidence": {
+        "theorem": "reader_rebuilds_the_parse",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "rebuild_is_parse_value",
+          "reader_rebuilds_every_accepted_document",
+          "no_token_no_value"
+        ],
+        "operations": [
+          "Reader.peek",
+          "Reader.path",
+          "Reader.readNull"
+        ]
+      }
+    },
+    {
       "id": "parser-limit-never-reported-as-malformed",
       "level": "proved",
       "statement": "A LIMIT BREACH IS NEVER MALFORMED JSON: whatever bounds are set and whatever the byte verdict, a refusal `parse_limited` reports as `RErr` carries one of the thirteen kinds `parse` reports — never the descent's internal `LimitExceeded` — and a breach is the distinct `RLimit` constructor, lifted from the descent before it is reported. Beside it, `bytes_checked_before_the_descent`: a false byte verdict is `RLimit LBytes` at the start of the input, before a character is read.",

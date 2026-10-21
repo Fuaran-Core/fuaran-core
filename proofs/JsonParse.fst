@@ -9,7 +9,10 @@
    `parseNumber` with the JSON number grammar (`Json.isJsonNumber`, also since Phase 306) and the
    Int32 and int53 token guards behind it, `parseLiteral`, and the mutual `parseValue` /
    `parseObject` / `parseArray` with the explicit depth counter — including the `EraseMemberNull`
-   fork, which lives in the member loop and nowhere else. The entry point's trailing-input check is
+   fork, which lives in the member loop and nowhere else. Since Phase 467 the TOKEN surface of
+   `Reader` is modelled too (section 14): `peek`, the kind of the value due unread; `read_null`,
+   the literal read on the host's rule; and the canonical reading over them, proved to be the
+   strict parse. The entry point's trailing-input check is
    modelled too, because `TrailingCharacters` is the one classified failure the parser does NOT
    raise through its internal exception. Since Phase 465 the descent also takes a LIMITS record
    (F#: `JsonLimits`, through `Json.read`'s `ReadOptions`): a string-length bound counted in code points
@@ -2575,9 +2578,335 @@ let limits_exhibited (_: unit)
         == RLimit LBytes [COther "%"])
 
 (* ======================================================================================
+   14. THE TOKEN READER (Phase 467) — `Reader.peek`, `Reader.readNull`, and the canonical
+       reading over them proved to BE the parse.
+
+      Production's `Reader` (src/Fuaran.Core.Wire/Decoder.fs) reads a document through the
+      scanner `Json.read` runs; since Phase 467 it also answers the KIND of the value due without
+      reading it (`Reader.peek`, F#: `JsonToken`) and reads a `null` token on the host's own rule
+      (`Reader.readNull`), so a wire host whose null answer depends on WHERE the null stands reads
+      with Core's reader alone. What is modelled here is the token dispatch (`peek_at`, the match
+      `parseValue` makes, answered instead of taken), the null read (`read_null`, the literal
+      consumed with no policy consulted), and the CANONICAL reading over the token surface — the
+      one every host's reading specialises: a container is walked through the scanner's own
+      member and item loops (production: `Reader.members` / `Reader.items` run `objectLoop` /
+      `arrayLoop`), a scalar is read through `Reader.value` (production: `parseValue` at that
+      position), and a null is left to `Reader.value` too, which answers it by the policy. That
+      reading admits exactly the strict grammar's language, and the theorem is that it IS the
+      strict parse: `read_rebuilt` equals `parse_limited` under `RejectNull` on EVERY input — the
+      same value, or the same kind, message and position, or the same breach — not merely on the
+      null-free ones, which fall out as the corollary `reader_rebuilds_every_accepted_document`.
+
+      What is NOT modelled: the path a host reads at a null (`Reader.path`; the breach's path is
+      outside this model too, section 13) and the re-scan after a shape mismatch, which admits
+      the nulls the host read — both are checked by the differential (`JsonReaderTests.fs`).
+   ====================================================================================== *)
+
+(* F#: `JsonToken`. *)
+type tok =
+  | TNull
+  | TBool
+  | TNumber
+  | TString
+  | TArray
+  | TObject
+
+(* F#: `Scanner.Token` at a value position (`w`, whitespace already skipped) — the first
+   character's kind, unconsumed. `None` where no value can start: the end of input, or a character
+   outside the grammar — which production raises as the grammar's refusal, and which the canonical
+   reading below hands to `parse_value`, which names it. The refinement is what the reading's
+   dispatch reads: a container token stands exactly where a container starts. *)
+let peek_at (w: list ch)
+  : Tot (o: option tok { (o == Some TObject <==> (Cons? w /\ CLBrace? (Cons?.hd w))) /\
+                         (o == Some TArray <==> (Cons? w /\ CLBrack? (Cons?.hd w))) }) =
+  match w with
+  | CQuote :: _ -> Some TString
+  | CLBrace :: _ -> Some TObject
+  | CLBrack :: _ -> Some TArray
+  | CLt :: _ -> Some TBool
+  | CLf :: _ -> Some TBool
+  | CLn :: _ -> Some TNull
+  | c :: _ -> if c = CMinus || is_digit c then Some TNumber else None
+  | [] -> None
+
+(* F#: `Reader.peek` — the token at the cursor, whitespace skipped first. *)
+let peek (s: list ch) : Tot (option tok) = peek_at (skip_ws s)
+
+(* F#: `Scanner.Null` (`Reader.readNull`) — the four characters of the literal consumed on the
+   HOST's rule, no policy consulted; a near miss (`nul`) is the literal's own refusal at the value
+   position, as `parseLiteral` names it. *)
+let read_null (s: list ch) : Tot (pres unit) =
+  let w = skip_ws s in
+  match w with
+  | CLn :: CLu :: CLl :: CLl :: t -> POk () t
+  | _ -> PErr ExpectedToken (msg_expect_lit "null") w
+
+(* A token is due exactly where `parse_value` can read one: where `peek` answers `None` the
+   descent refuses, by the grammar. *)
+let no_token_no_value
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures None? (peek s) ==> PErr? (parse_value float_read cap lim tol b s))
+  = ()
+
+(* THE CANONICAL READING over the token surface, under the strict policy. One function per member
+   of the parser's group, in the group's own termination order, with the parser's own refinements:
+   `rebuild_value` dispatches on the token, a container through the loops below, everything else
+   (a scalar, a null, no value) through `parse_value` AT THAT POSITION — which is what
+   `Reader.value` runs — and the two loops are `objectLoop` / `arrayLoop` with the host's reading
+   where `parseValue` stood. F#: `rebuilt` in `tests/Fuaran.Core.Tests/JsonReaderTests.fs`, the
+   reading the differential holds production to. *)
+let rec rebuild_value
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit) (s: list ch)
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen s) /\ depth_confined r /\
+                        bounds_confined lim r })
+        (decreases %[llen s; 2])
+  =
+  let w = skip_ws s in
+  match peek_at w with
+  | Some TObject -> rebuild_object float_read cap lim b w
+  | Some TArray -> rebuild_array float_read cap lim b w
+  | _ -> parse_value float_read cap lim false b s
+
+and rebuild_object
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (w: list ch { starts_container w })
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r /\
+                        bounds_confined lim r })
+        (decreases %[llen w; 1])
+  =
+  match b with
+  | [] -> PErr MaxDepthExceeded (msg_depth cap) w
+  | _ :: b' ->
+    (match expect CLBrace w with
+     | PErr k m a -> PErr k m a
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrace :: t2 -> POk (JObj []) t2
+        | _ ->
+          (match rebuild_members float_read cap lim b' [] t1 with
+           | PErr k m a -> PErr k m a
+           | POk fs r -> POk (JObj fs) r)))
+
+and rebuild_array
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (w: list ch { starts_container w })
+  : Tot (r: pres jval { (POk? r ==> llen (POk?.rest r) < llen w) /\ depth_confined r /\
+                        bounds_confined lim r })
+        (decreases %[llen w; 1])
+  =
+  match b with
+  | [] -> PErr MaxDepthExceeded (msg_depth cap) w
+  | _ :: b' ->
+    (match expect CLBrack w with
+     | PErr k m a -> PErr k m a
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrack :: t2 -> POk (JArr []) t2
+        | _ ->
+          (match rebuild_items float_read cap lim b' [] t1 with
+           | PErr k m a -> PErr k m a
+           | POk xs r -> POk (JArr xs) r)))
+
+(* F#: `Reader.members` — `objectLoop` with the host's reading of each value. The strict loop
+   has no erasure fork: every member's value is read, a null among them answered by
+   `rebuild_value`'s own dispatch. *)
+and rebuild_members
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Tot (r: pres (list (list och & jval)) { (POk? r ==> llen (POk?.rest r) <= llen s) /\
+                                            depth_confined r /\ bounds_confined lim r })
+        (decreases %[llen s; 0])
+  =
+  let w = skip_ws s in
+  if spent lim.lmembers acc then PErr (LimitExceeded LMembers) msg_limit w
+  else
+  match parse_string lim.lstr w with
+  | PErr k m a -> PErr k m a
+  | POk key t ->
+    let t1 = skip_ws t in
+    (match expect CColon t1 with
+     | PErr k m a -> PErr k m a
+     | POk _ t2 ->
+       let t3 = skip_ws t2 in
+       (match rebuild_value float_read cap lim b t3 with
+        | PErr k m a -> PErr k m a
+        | POk v t4 ->
+          if has_key key acc then PErr DuplicateMember msg_duplicate w
+          else
+            let t5 = skip_ws t4 in
+            (match t5 with
+             | CComma :: t6 -> rebuild_members float_read cap lim b ((key, v) :: acc) t6
+             | CRBrace :: t6 -> POk (rev ((key, v) :: acc)) t6
+             | _ -> PErr ExpectedToken "expected ',' or '}'" t5)))
+
+(* F#: `Reader.items` — `arrayLoop` with the host's reading of each item. *)
+and rebuild_items
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (acc: list jval) (s: list ch)
+  : Tot (r: pres (list jval) { (POk? r ==> llen (POk?.rest r) <= llen s) /\ depth_confined r /\
+                               bounds_confined lim r })
+        (decreases %[llen s; 3])
+  =
+  if spent lim.litems acc then PErr (LimitExceeded LItems) msg_limit s
+  else
+  match rebuild_value float_read cap lim b s with
+  | PErr k m a -> PErr k m a
+  | POk v t ->
+    let t1 = skip_ws t in
+    (match t1 with
+     | CComma :: t2 -> rebuild_items float_read cap lim b (v :: acc) t2
+     | CRBrack :: t2 -> POk (rev (v :: acc)) t2
+     | _ -> PErr ExpectedToken "expected ',' or ']'" t1)
+
+(* F#: `Reader.read` with the canonical reading — the byte verdict, the reading, the trailing-input
+   test, and every breach lifted exactly as `parse_limited` lifts it. *)
+let read_rebuilt
+  (float_read: list ch -> freadv) (cap: string) (b: list unit) (lim: lims) (bytes_ok: bool)
+  (s: list ch)
+  : Tot jresult =
+  if not bytes_ok then RLimit LBytes s
+  else
+    match rebuild_value float_read cap lim b s with
+    | PErr MaxDepthExceeded _ a -> RLimit LDepth a
+    | PErr (LimitExceeded l) _ a -> RLimit l a
+    | PErr k m a -> RErr k m a
+    | POk v r ->
+      let r1 = skip_ws r in
+      if Nil? r1 then ROk v else RErr TrailingCharacters "trailing characters" r1
+
+(* ---- THEOREM — the canonical reading IS the strict parse ---- *)
+
+(* One lemma per member of the group, in the group's own termination order, following the
+   descent as section 11's induction does. The token dispatch is the only place the two differ in
+   shape, and `peek_at`'s refinement is what closes it: a container token stands exactly where
+   `parse_value` dispatches to the container, and everywhere else the reading IS `parse_value`. *)
+[@@ noextract_to "FSharp"]
+let rec rebuild_is_parse_value
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit) (s: list ch)
+  : Lemma (ensures rebuild_value float_read cap lim b s == parse_value float_read cap lim false b s)
+          (decreases %[llen s; 2]) =
+  let w = skip_ws s in
+  match w with
+  | CLBrace :: _ -> rebuild_is_parse_object float_read cap lim b w
+  | CLBrack :: _ -> rebuild_is_parse_array float_read cap lim b w
+  | _ -> ()
+
+and rebuild_is_parse_object
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures rebuild_object float_read cap lim b w == parse_object float_read cap lim false b w)
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrace w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrace :: _ -> ()
+        | _ -> rebuild_is_parse_members float_read cap lim b' [] t1))
+
+and rebuild_is_parse_array
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures rebuild_array float_read cap lim b w == parse_array float_read cap lim false b w)
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrack w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrack :: _ -> ()
+        | _ -> rebuild_is_parse_items float_read cap lim b' [] t1))
+
+and rebuild_is_parse_members
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Lemma (ensures rebuild_members float_read cap lim b acc s ==
+                   parse_members float_read cap lim false b acc s)
+          (decreases %[llen s; 0]) =
+  let w = skip_ws s in
+  if spent lim.lmembers acc then ()
+  else
+  match parse_string lim.lstr w with
+  | PErr _ _ _ -> ()
+  | POk key t ->
+    let t1 = skip_ws t in
+    (match expect CColon t1 with
+     | PErr _ _ _ -> ()
+     | POk _ t2 ->
+       let t3 = skip_ws t2 in
+       rebuild_is_parse_value float_read cap lim b t3;
+       (match parse_value float_read cap lim false b t3 with
+        | PErr _ _ _ -> ()
+        | POk v t4 ->
+          if has_key key acc then ()
+          else
+            let t5 = skip_ws t4 in
+            (match t5 with
+             | CComma :: t6 -> rebuild_is_parse_members float_read cap lim b ((key, v) :: acc) t6
+             | _ -> ())))
+
+and rebuild_is_parse_items
+  (float_read: list ch -> freadv) (cap: string) (lim: lims) (b: list unit)
+  (acc: list jval) (s: list ch)
+  : Lemma (ensures rebuild_items float_read cap lim b acc s == parse_items float_read cap lim false b acc s)
+          (decreases %[llen s; 3]) =
+  rebuild_is_parse_value float_read cap lim b s;
+  (match parse_value float_read cap lim false b s with
+   | PErr _ _ _ -> ()
+   | POk v t ->
+     let t1 = skip_ws t in
+     (match t1 with
+      | CComma :: t2 -> rebuild_is_parse_items float_read cap lim b (v :: acc) t2
+      | _ -> ()))
+
+(* THE READER REBUILDS THE PARSE. For every document, every limits record, every byte verdict and
+   every depth budget, the canonical reading over the token surface answers exactly what the
+   strict limited parse answers — the same value, the same kind, message and position, or the same
+   breach at the same suffix. Production: `Reader.read` with the `rebuilt` reading is `Json.read`
+   under `RejectNull`, and so every host reading that specialises it (reading a null on its own
+   rule where `rebuilt` hands it to the policy) departs from the parse at the nulls it admits and
+   nowhere else. *)
+[@@ noextract_to "FSharp"]
+let reader_rebuilds_the_parse
+  (float_read: list ch -> freadv) (cap: string) (b: list unit) (lim: lims) (bytes_ok: bool)
+  (s: list ch)
+  : Lemma (ensures read_rebuilt float_read cap b lim bytes_ok s ==
+                   parse_limited float_read cap RejectNull b lim bytes_ok s) =
+  rebuild_is_parse_value float_read cap lim b s
+
+(* The corollary in the shape the phase names: on every document the strict parse ACCEPTS — a
+   null-free one, since the strict policy refuses every null — the reader's tokens rebuild
+   exactly the value `parse` returns. *)
+[@@ noextract_to "FSharp"]
+let reader_rebuilds_every_accepted_document
+  (float_read: list ch -> freadv) (cap: string) (b: list unit) (s: list ch)
+  : Lemma (ensures (let p = parse float_read cap RejectNull b s in
+                    ROk? p ==> read_rebuilt float_read cap b unbounded true s == p)) =
+  limited_at_no_bound_is_the_parser float_read cap RejectNull b s;
+  reader_rebuilds_the_parse float_read cap b unbounded true s
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
+
+(* `{"a":[1,{"b":"c"}]}` — a document the token reading walks through every arm. *)
+let nested_doc: list ch =
+  [ CLBrace; CQuote; CLa; CQuote; CColon; CLBrack; CD1; CComma; CLBrace; CQuote; CLb; CQuote;
+    CColon; CQuote; CLc; CQuote; CRBrace; CRBrack; CRBrace ]
+
+(* The reading accepts it — a top-level boolean, because a discriminator inside the twins list
+   extracts to a multi-line match F#'s parser refuses in that position. *)
+let rebuilt_nested_accepts: bool =
+  ROk? (read_rebuilt (fun _ -> FFinite) "c" [ (); (); () ] unbounded true nested_doc)
 
 let twins : list twin = [
   { tname = "a-negative-fraction-is-a-number";
@@ -2606,6 +2935,17 @@ let twins : list twin = [
   { tname = "parse-limited-at-no-bound-reads-what-parse-reads";
     tholds = (fun () ->
       parse_limited (fun _ -> FFinite) "c" RejectNull [] unbounded true [ CLt; CLr; CLu; CLe ]
-      = ROk (JBool true)) } ]
+      = ROk (JBool true)) };
+  { tname = "peek-names-a-null-without-reading-it";
+    tholds = (fun () -> peek [ CSpace; CLn; CLu; CLl; CLl ] = Some TNull) };
+  { tname = "read-null-refuses-a-near-miss-as-the-literal";
+    tholds = (fun () ->
+      read_null [ CLn; CLu; CLl ] = PErr ExpectedToken (msg_expect_lit "null") [ CLn; CLu; CLl ]) };
+  { tname = "the-rebuilt-reading-reads-what-parse-limited-reads";
+    tholds = (fun () ->
+      read_rebuilt (fun _ -> FFinite) "c" [ (); (); () ] unbounded true nested_doc
+      = parse_limited (fun _ -> FFinite) "c" RejectNull [ (); (); () ] unbounded true nested_doc) };
+  { tname = "the-rebuilt-reading-accepts-a-nested-document";
+    tholds = (fun () -> rebuilt_nested_accepts = true) } ]
 
 let _ = assert_norm (twins_hold twins == true)

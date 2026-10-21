@@ -2519,8 +2519,308 @@ let only_members : Prims.list<unit>  ->  lims = (fun ( m  :  Prims.list<unit> ) 
 
 let bad3 : Prims.list<ch> = (CLBrack)::(CQuote)::(CQuote)::(CComma)::(CQuote)::(CQuote)::(CComma)::(COther ("%"))::(CRBrack)::[]
 
+type tok =
+| TNull
+| TBool
+| TNumber
+| TString
+| TArray
+| TObject
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "a-negative-fraction-is-a-number"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({Twin.tname = "a-leading-zero-then-digit-is-not"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({Twin.tname = "parse-string-stops-at-the-quote"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({Twin.tname = "parse-reads-true"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({Twin.tname = "parse-refuses-trailing-characters"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::({Twin.tname = "parse-refuses-a-repeated-member"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::[]) dup_doc) (RErr (DuplicateMember, msg_duplicate, (CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]))))})::({Twin.tname = "parse-string-refuses-a-raw-control"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CTab)::(CQuote)::[])) (PErr (BadEscape, (msg_ctrl CTab), (CTab)::(CQuote)::[]))))})::({Twin.tname = "parse-limited-refuses-the-third-item-before-reading-it"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::[]) (only_items ((())::(())::[])) true bad3) (RLimit (LItems, (COther ("%"))::(CRBrack)::[]))))})::({Twin.tname = "parse-limited-at-no-bound-reads-what-parse-reads"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] unbounded true ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::[]
+
+let uu___is_TNull : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TNull -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_TBool : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TBool -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_TNumber : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TNumber -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_TString : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TString -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_TArray : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TArray -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_TObject : tok  ->  Prims.bool = (fun ( projectee  :  tok ) -> (match (projectee) with
+| TObject -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let peek_at : Prims.list<ch>  ->  FStar_Pervasives_Native.option<tok> = (fun ( w  :  Prims.list<ch> ) -> (match (w) with
+| (CQuote)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TString)
+     end
+| (CLBrace)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TObject)
+     end
+| (CLBrack)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TArray)
+     end
+| (CLt)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TBool)
+     end
+| (CLf)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TBool)
+     end
+| (CLn)::uu___ -> begin
+     FStar_Pervasives_Native.Some (TNull)
+     end
+| (c)::uu___ -> begin
+      
+if ((Prims.op_Equals c CMinus) || (is_digit c)) then begin
+     FStar_Pervasives_Native.Some (TNumber)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let peek : Prims.list<ch>  ->  FStar_Pervasives_Native.option<tok> = (fun ( s  :  Prims.list<ch> ) -> (peek_at (skip_ws s)))
+
+
+let read_null : Prims.list<ch>  ->  pres<unit> = (fun ( s  :  Prims.list<ch> ) -> (
+
+let w = (skip_ws s)
+in (match (w) with
+| (CLn)::(CLu)::(CLl)::(CLl)::t -> begin
+     POk ((), t)
+     end
+| uu___ -> begin
+     PErr (ExpectedToken, (msg_expect_lit "null"), w)
+     end)))
+
+
+let rec rebuild_value : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  lims  ->  Prims.list<unit>  ->  Prims.list<ch>  ->  pres<jval> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( lim  :  lims ) ( b  :  Prims.list<unit> ) ( s  :  Prims.list<ch> ) -> (
+
+let w = (skip_ws s)
+in (match ((peek_at w)) with
+| FStar_Pervasives_Native.Some (TObject) -> begin
+     (rebuild_object float_read cap lim b w)
+     end
+| FStar_Pervasives_Native.Some (TArray) -> begin
+     (rebuild_array float_read cap lim b w)
+     end
+| uu___ -> begin
+     (parse_value float_read cap lim false b s)
+     end)))
+and rebuild_object : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  lims  ->  Prims.list<unit>  ->  Prims.list<ch>  ->  pres<jval> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( lim  :  lims ) ( b  :  Prims.list<unit> ) ( w  :  Prims.list<ch> ) -> (match (b) with
+| [] -> begin
+     PErr (MaxDepthExceeded, (msg_depth cap), w)
+     end
+| (uu___)::b' -> begin
+     (match ((expect CLBrace w)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (uu___1, t) -> begin
+     (
+
+let t1 = (skip_ws t)
+in (match (t1) with
+| (CRBrace)::t2 -> begin
+     POk (JObj ([]), t2)
+     end
+| uu___2 -> begin
+     (match ((rebuild_members float_read cap lim b' [] t1)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (fs, r) -> begin
+     POk (JObj (fs), r)
+     end)
+     end))
+     end)
+     end))
+and rebuild_array : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  lims  ->  Prims.list<unit>  ->  Prims.list<ch>  ->  pres<jval> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( lim  :  lims ) ( b  :  Prims.list<unit> ) ( w  :  Prims.list<ch> ) -> (match (b) with
+| [] -> begin
+     PErr (MaxDepthExceeded, (msg_depth cap), w)
+     end
+| (uu___)::b' -> begin
+     (match ((expect CLBrack w)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (uu___1, t) -> begin
+     (
+
+let t1 = (skip_ws t)
+in (match (t1) with
+| (CRBrack)::t2 -> begin
+     POk (JArr ([]), t2)
+     end
+| uu___2 -> begin
+     (match ((rebuild_items float_read cap lim b' [] t1)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (xs, r) -> begin
+     POk (JArr (xs), r)
+     end)
+     end))
+     end)
+     end))
+and rebuild_members : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  lims  ->  Prims.list<unit>  ->  Prims.list<(Prims.list<och> * jval)>  ->  Prims.list<ch>  ->  pres<Prims.list<(Prims.list<och> * jval)>> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( lim  :  lims ) ( b  :  Prims.list<unit> ) ( acc  :  Prims.list<(Prims.list<och> * jval)> ) ( s  :  Prims.list<ch> ) -> (
+
+let w = (skip_ws s)
+in  
+if (spent lim.lmembers acc) then begin
+     PErr (LimitExceeded (LMembers), msg_limit, w)
+     end else begin
+     (match ((parse_string lim.lstr w)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (key, t) -> begin
+     (
+
+let t1 = (skip_ws t)
+in (match ((expect CColon t1)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (uu___, t2) -> begin
+     (
+
+let t3 = (skip_ws t2)
+in (match ((rebuild_value float_read cap lim b t3)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (v, t4) -> begin
+      
+if (has_key key acc) then begin
+     PErr (DuplicateMember, msg_duplicate, w)
+     end else begin
+     (
+
+let t5 = (skip_ws t4)
+in (match (t5) with
+| (CComma)::t6 -> begin
+     (rebuild_members float_read cap lim b ((((key), (v)))::acc) t6)
+     end
+| (CRBrace)::t6 -> begin
+     POk ((rev ((((key), (v)))::acc)), t6)
+     end
+| uu___1 -> begin
+     PErr (ExpectedToken, "expected \',\' or \'}\'", t5)
+     end))
+     end
+     end))
+     end))
+     end)
+     end))
+and rebuild_items : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  lims  ->  Prims.list<unit>  ->  Prims.list<jval>  ->  Prims.list<ch>  ->  pres<Prims.list<jval>> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( lim  :  lims ) ( b  :  Prims.list<unit> ) ( acc  :  Prims.list<jval> ) ( s  :  Prims.list<ch> ) ->  
+if (spent lim.litems acc) then begin
+     PErr (LimitExceeded (LItems), msg_limit, s)
+     end else begin
+     (match ((rebuild_value float_read cap lim b s)) with
+| PErr (k, m, a) -> begin
+     PErr (k, m, a)
+     end
+| POk (v, t) -> begin
+     (
+
+let t1 = (skip_ws t)
+in (match (t1) with
+| (CComma)::t2 -> begin
+     (rebuild_items float_read cap lim b ((v)::acc) t2)
+     end
+| (CRBrack)::t2 -> begin
+     POk ((rev ((v)::acc)), t2)
+     end
+| uu___ -> begin
+     PErr (ExpectedToken, "expected \',\' or \']\'", t1)
+     end))
+     end)
+     end)
+
+
+let read_rebuilt : (Prims.list<ch>  ->  freadv)  ->  Prims.string  ->  Prims.list<unit>  ->  lims  ->  Prims.bool  ->  Prims.list<ch>  ->  jresult = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( cap  :  Prims.string ) ( b  :  Prims.list<unit> ) ( lim  :  lims ) ( bytes_ok  :  Prims.bool ) ( s  :  Prims.list<ch> ) ->  
+if (not (bytes_ok)) then begin
+     RLimit (LBytes, s)
+     end else begin
+     (match ((rebuild_value float_read cap lim b s)) with
+| PErr (MaxDepthExceeded, uu___, a) -> begin
+     RLimit (LDepth, a)
+     end
+| PErr (LimitExceeded (l), uu___, a) -> begin
+     RLimit (l, a)
+     end
+| PErr (k, m, a) -> begin
+     RErr (k, m, a)
+     end
+| POk (v, r) -> begin
+     (
+
+let r1 = (skip_ws r)
+in  
+if (match (r1) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) then begin
+     ROk (v)
+     end else begin
+     RErr (TrailingCharacters, "trailing characters", r1)
+     end)
+     end)
+     end)
+
+
+let nested_doc : Prims.list<ch> = (CLBrace)::(CQuote)::(CLa)::(CQuote)::(CColon)::(CLBrack)::(CD1)::(CComma)::(CLBrace)::(CQuote)::(CLb)::(CQuote)::(CColon)::(CQuote)::(CLc)::(CQuote)::(CRBrace)::(CRBrack)::(CRBrace)::[]
+
+
+let rebuilt_nested_accepts : Prims.bool = (match ((read_rebuilt (fun ( uu___  :  Prims.list<ch> ) -> FFinite) "c" ((())::(())::(())::[]) unbounded true nested_doc)) with
+| ROk (v) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+
+
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "a-negative-fraction-is-a-number"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({Twin.tname = "a-leading-zero-then-digit-is-not"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({Twin.tname = "parse-string-stops-at-the-quote"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({Twin.tname = "parse-reads-true"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({Twin.tname = "parse-refuses-trailing-characters"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::({Twin.tname = "parse-refuses-a-repeated-member"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::[]) dup_doc) (RErr (DuplicateMember, msg_duplicate, (CQuote)::(CLa)::(CQuote)::(CColon)::(CD0)::(CRBrace)::[]))))})::({Twin.tname = "parse-string-refuses-a-raw-control"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string Unbounded ((CQuote)::(CTab)::(CQuote)::[])) (PErr (BadEscape, (msg_ctrl CTab), (CTab)::(CQuote)::[]))))})::({Twin.tname = "parse-limited-refuses-the-third-item-before-reading-it"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::[]) (only_items ((())::(())::[])) true bad3) (RLimit (LItems, (COther ("%"))::(CRBrack)::[]))))})::({Twin.tname = "parse-limited-at-no-bound-reads-what-parse-reads"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] unbounded true ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({Twin.tname = "peek-names-a-null-without-reading-it"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (peek ((CSpace)::(CLn)::(CLu)::(CLl)::(CLl)::[])) (FStar_Pervasives_Native.Some (TNull))))})::({Twin.tname = "read-null-refuses-a-near-miss-as-the-literal"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_null ((CLn)::(CLu)::(CLl)::[])) (PErr (ExpectedToken, (msg_expect_lit "null"), (CLn)::(CLu)::(CLl)::[]))))})::({Twin.tname = "the-rebuilt-reading-reads-what-parse-limited-reads"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read_rebuilt (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" ((())::(())::(())::[]) unbounded true nested_doc) (parse_limited (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull ((())::(())::(())::[]) unbounded true nested_doc)))})::({Twin.tname = "the-rebuilt-reading-accepts-a-nested-document"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals rebuilt_nested_accepts true))})::[]
 
 
 

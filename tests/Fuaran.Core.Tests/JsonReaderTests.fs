@@ -21,6 +21,7 @@ module Fuaran.Core.Tests.JsonReaderTests
 
 open Expecto
 open Fuaran.Core
+open Fuaran.Core.Tests.ProofOracle.Bridges
 
 let private inv = System.Globalization.CultureInfo.InvariantCulture
 
@@ -139,8 +140,30 @@ let private renderState (fs: (string * Member) list) =
            | Other v -> Json.render v))
     |> String.concat ";"
 
+/// Phase 467 — the canonical reading over the TOKEN surface: every value is read back, by its
+/// kind, into the `JVal` `Json.read` builds. Containers are walked through `items` / `members`,
+/// scalars read through `value`, and a `null` token is left to `value` — which answers it by the
+/// read's policy, so this reading admits exactly the strict grammar's language. The proved
+/// statement is that it IS the parse (`proofs/JsonParse.fst`, `reader_rebuilds_the_parse`); the
+/// differential below holds production to it over every pool.
+let rec private rebuilt (r: Reader) : JVal =
+    match Reader.peek r with
+    | JsonToken.Array ->
+        let acc = ResizeArray<JVal>()
+        Reader.items (fun r -> acc.Add(rebuilt r)) r
+        JArr(List.ofSeq acc)
+    | JsonToken.Object ->
+        let acc = ResizeArray<string * JVal>()
+        Reader.members (fun k r -> acc.Add((k, rebuilt r))) r
+        JObj(List.ofSeq acc)
+    | JsonToken.Null
+    | JsonToken.Bool
+    | JsonToken.Number
+    | JsonToken.String -> Reader.value r
+
 let private readings: Reading list =
     [ reading "value" Reader.value Some Json.render
+      reading "rebuilt" rebuilt Some Json.render
       reading "strings" Reader.strings (arrayOf asStr) renderStrings
       reading "floats" Reader.floats (arrayOf asNum) renderFloats
       reading "ints" Reader.ints (arrayOf asInt) renderInts
@@ -390,7 +413,8 @@ let tests =
                   Expect.isGreaterThan ok 50 (sprintf "%s: accepted documents in the pool" r.Name)
                   Expect.isGreaterThan malformed 1000 (sprintf "%s: refused documents in the pool" r.Name)
 
-                  if r.Name <> "value" then
+                  // `value` and the token rebuild read every value, so neither can mismatch.
+                  if r.Name <> "value" && r.Name <> "rebuilt" then
                       Expect.isGreaterThan mismatch 50 (sprintf "%s: mismatched documents in the pool" r.Name)
           }
 
@@ -398,6 +422,44 @@ let tests =
               for r in readings |> List.filter (fun r -> r.Name = "value" || r.Name = "strings") do
                   let diffs, (_, _, malformed) = compare r.Name (r.Reader >> shifted) r.Spec pool
                   Expect.equal diffs.Length malformed (sprintf "%s: every refusal is seen moved" r.Name)
+          }
+
+          test
+              "the extracted reader model rebuilds what the extracted parse reads, over the pool — the theorem, evaluated" {
+              // `reader_rebuilds_the_parse` (proofs/JsonParse.fst) run on the EXTRACTED code: the
+              // oracle's `read_rebuilt` beside its `parse_limited` under the strict policy, so the
+              // extractor premise is sampled at the theorem rather than only at the twins.
+              let cap = 512
+              let b = JsonParseDiff.budget cap
+              let lims = JsonParseDiff.modelLims (JsonLimits.depthOnly cap)
+              let fr = JsonParseDiff.floatRead
+              let mutable accepted = 0
+              let mutable refused = 0
+
+              for input in
+                  corpusInputs
+                  @ benchInputs
+                  @ (generatedInputs |> List.chunkBySize 4 |> List.map List.head) do
+                  let chs = JsonParseDiff.toChs input
+                  let r = JsonParse.read_rebuilt fr (string cap) b lims true chs
+                  let p = JsonParse.parse_limited fr (string cap) JsonParse.RejectNull b lims true chs
+                  Expect.equal r p input
+
+                  match p with
+                  | JsonParse.ROk _ -> accepted <- accepted + 1
+                  | _ -> refused <- refused + 1
+
+              Expect.isGreaterThan accepted 50 "accepted documents"
+              Expect.isGreaterThan refused 1000 "refused documents"
+
+              // The comparison can lose: the reading is the STRICT parse, so the tolerant parse —
+              // which erases a member null the reading hands to the strict policy — disagrees.
+              let doc = JsonParseDiff.toChs "{\"a\":null,\"b\":1}"
+
+              Expect.notEqual
+                  (JsonParse.read_rebuilt fr (string cap) b lims true doc)
+                  (JsonParse.parse_limited fr (string cap) JsonParse.EraseMemberNull b lims true doc)
+                  "the tolerant parse erases what the strict reading refuses"
           }
 
           test "the typed readings of the benchmark corpora equal typing parse's tree" {
@@ -553,6 +615,328 @@ let tests =
 // Phase 465 — the LIMITED parse (`Json.read` under a limits record since Phase 519): held to the
 // strict read where no bound but the cap can be reached, and to its record at every bound. The bounds are enforced on the way down, so each test below
 // pins where a breach is raised (the path and the position) as well as that it is.
+
+// ---- the token surface (Phase 467) ----
+
+/// A host's own refusal, raised from inside a reading and caught around `Reader.read`: the shape a
+/// wire host with position-dependent null rules gives a null it does not admit.
+exception private HostRefusal of DecodeError
+
+/// A host tree with a null of its own — what a wire host whose value type carries null builds.
+type private Host =
+    | HNull
+    | HVal of JVal
+    | HArr of Host list
+    | HObj of (string * Host) list
+
+let rec private renderHost (h: Host) : string =
+    match h with
+    | HNull -> "null"
+    | HVal v -> Json.render v
+    | HArr xs -> "[" + (xs |> List.map renderHost |> String.concat ",") + "]"
+    | HObj fs ->
+        "{"
+        + (fs
+           |> List.map (fun (k, v) -> Json.render (JStr k) + ":" + renderHost v)
+           |> String.concat ",")
+        + "}"
+
+/// The host reading: `admit path` decides, at a null, whether it is read (`HNull`) or refused at
+/// its own path — the one rule a position-free parse cannot carry, written in ten lines over the
+/// token surface. Everything else is the reading `rebuilt` makes.
+let rec private hostRead (admit: PathSegment list -> bool) (r: Reader) : Host =
+    match Reader.peek r with
+    | JsonToken.Null ->
+        let path = Reader.path r
+
+        if admit path then
+            Reader.readNull r
+            HNull
+        else
+            raise (
+                HostRefusal(DecodeError.within path (DecodeError.make DecodeCode.WrongKind "a value, not null" "null"))
+            )
+    | JsonToken.Array ->
+        let acc = ResizeArray<Host>()
+        Reader.items (fun r -> acc.Add(hostRead admit r)) r
+        HArr(List.ofSeq acc)
+    | JsonToken.Object ->
+        let acc = ResizeArray<string * Host>()
+        Reader.members (fun k r -> acc.Add((k, hostRead admit r))) r
+        HObj(List.ofSeq acc)
+    | JsonToken.Bool
+    | JsonToken.Number
+    | JsonToken.String -> HVal(Reader.value r)
+
+let private hostDecode
+    (options: ReadOptions)
+    (admit: PathSegment list -> bool)
+    (input: string)
+    : Result<Host, DecodeError> =
+    try
+        Reader.read options (hostRead admit) input
+    with HostRefusal e ->
+        Error e
+
+let private admitAll (_: PathSegment list) = true
+let private admitNone (_: PathSegment list) = false
+
+let private codeOf (r: Result<'a, DecodeError>) =
+    match r with
+    | Ok _ -> "ok"
+    | Error e -> sprintf "%A at %s: %s" e.Code (DecodePath.render e.Path) e.Message
+
+/// The corpus's null fixtures (`reject/*null*`, `lenient/*null*`), or the reason the leg did not run.
+let private nullFixtures (family: string) : (string * string) list =
+    match SiblingCorpus.resolve family with
+    | SiblingCorpus.Found root ->
+        System.IO.Directory.GetFiles(System.IO.Path.Combine(root, family), "*null*.json")
+        |> Array.filter (fun p -> not (p.EndsWith ".expected.json"))
+        |> Array.sort
+        |> Array.toList
+        |> List.map (fun p -> System.IO.Path.GetFileNameWithoutExtension p, System.IO.File.ReadAllText p)
+    | SiblingCorpus.NotAsked why -> skiptest why
+    | SiblingCorpus.Absent why -> failtest why
+
+[<Tests>]
+let tokens =
+    testList
+        "JsonReader.tokens"
+        [ test "peek names every kind of value without reading it, and the value is still due" {
+              let kinds =
+                  [ "null", JsonToken.Null
+                    "true", JsonToken.Bool
+                    "false", JsonToken.Bool
+                    "-1.5e3", JsonToken.Number
+                    "0", JsonToken.Number
+                    "\"s\"", JsonToken.String
+                    "[]", JsonToken.Array
+                    "{}", JsonToken.Object ]
+
+              for input, expected in kinds do
+                  let seen = ResizeArray<JsonToken>()
+
+                  let outcome =
+                      read
+                          (fun r ->
+                              seen.Add(Reader.peek r)
+                              seen.Add(Reader.peek r)
+
+                              if expected = JsonToken.Null then
+                                  Reader.readNull r
+                                  None
+                              else
+                                  Some(Reader.value r))
+                          (" " + input + " ")
+
+                  Expect.equal (List.ofSeq seen) [ expected; expected ] input
+                  Expect.isOk outcome input
+
+                  if expected <> JsonToken.Null then
+                      Expect.equal outcome (Decoder.parse ReadOptions.strict input |> Result.map Some) input
+          }
+
+          test "peek raises the grammar's refusal where no value can start, and a misuse where none is due" {
+              Expect.equal
+                  (read Reader.peek "@")
+                  (Decoder.parse ReadOptions.strict "@" |> Result.map (fun _ -> JsonToken.Null))
+                  "a character no value starts with is the parser's UnexpectedChar"
+
+              Expect.equal
+                  (read Reader.peek "   ")
+                  (Decoder.parse ReadOptions.strict "   " |> Result.map (fun _ -> JsonToken.Null))
+                  "the end of input is the parser's UnexpectedEndOfInput"
+
+              Expect.throwsT<System.InvalidOperationException>
+                  (fun () ->
+                      read
+                          (fun r ->
+                              Reader.value r |> ignore
+                              Reader.peek r)
+                          "1"
+                      |> ignore)
+                  "a peek after the value is read is a programming error"
+          }
+
+          test
+              "readNull reads the null token on the host's rule under either policy, and refuses a near miss as the literal's own" {
+              for options in [ ReadOptions.strict; ReadOptions.tolerantOfNull ] do
+                  Expect.equal (Reader.read options Reader.readNull "null") (Ok()) "a bare null is read"
+
+                  Expect.equal
+                      (Reader.read options (hostRead admitAll) "[null, 1, null]"
+                       |> Result.map renderHost)
+                      (Ok "[null,1,null]")
+                      "array-item nulls are read"
+
+              match read Reader.readNull "nul" with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.InvalidJson "a near miss is the grammar's refusal"
+                  Expect.stringContains e.Message "expected 'null'" "named as the literal's"
+              | Ok() -> failtest "nul read as null"
+
+              match read Reader.readNull "1" with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.WrongKind "another value is a mismatch"
+                  Expect.equal e.Expected "null" "expecting null"
+              | Ok() -> failtest "1 read as null"
+          }
+
+          test "path is the null's own, root first, through members and items" {
+              let paths = ResizeArray<PathSegment list>()
+
+              let outcome =
+                  read
+                      (hostRead (fun p ->
+                          paths.Add p
+                          true))
+                      "{\"a\":[0,{\"b\":null}],\"c\":null}"
+
+              Expect.isOk outcome "read"
+
+              Expect.equal
+                  (List.ofSeq paths)
+                  [ [ PathSegment.Key "a"; PathSegment.Index 1; PathSegment.Key "b" ]
+                    [ PathSegment.Key "c" ] ]
+                  "the two nulls, where they stand"
+          }
+
+          test "a host refuses a null at its own path and admits another by position — the rule no policy carries" {
+              let input = "{\"a\":null,\"b\":null}"
+              let admitA p = p = [ PathSegment.Key "a" ]
+
+              match hostDecode ReadOptions.strict admitA input with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.WrongKind "refused as a wrong kind"
+                  Expect.equal e.Path [ PathSegment.Key "b" ] "at the null's own path"
+              | Ok h -> failtestf "admitted %s" (renderHost h)
+
+              Expect.equal
+                  (hostDecode ReadOptions.strict admitAll input |> Result.map renderHost)
+                  (Ok "{\"a\":null,\"b\":null}")
+                  "admitted everywhere, the nulls are the host's"
+
+              // Neither policy can say this: strict refuses the document whole, at the root, and
+              // tolerant erases both. Even the all-refusing host refuses at the null's own path.
+              match Decoder.parse ReadOptions.strict input with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.InvalidJson "strict refuses the document"
+                  Expect.equal e.Path [] "at the root"
+              | Ok v -> failtestf "accepted %s" (Json.render v)
+
+              match hostDecode ReadOptions.strict admitNone input with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.WrongKind "the all-refusing host refuses the value"
+                  Expect.equal e.Path [ PathSegment.Key "a" ] "at the first null's own path"
+              | Ok h -> failtestf "admitted %s" (renderHost h)
+
+              Expect.equal
+                  (Decoder.parse ReadOptions.tolerantOfNull input |> Result.map Json.render)
+                  (Ok "{}")
+                  "tolerant erases, so no refusal can name $.b"
+          }
+
+          test
+              "under EraseMemberNull the members reading erases a member null before the host sees it; a root or item null is the host's" {
+              let seen = ResizeArray<string>()
+
+              let outcome =
+                  Reader.read
+                      ReadOptions.tolerantOfNull
+                      (fun r ->
+                          Reader.members
+                              (fun k r ->
+                                  seen.Add k
+                                  Reader.value r |> ignore)
+                              r)
+                      "{\"a\":null,\"b\":1}"
+
+              Expect.isOk outcome "read"
+              Expect.equal (List.ofSeq seen) [ "b" ] "the erased member never reaches the host"
+
+              Expect.equal
+                  (hostDecode ReadOptions.tolerantOfNull admitAll "[null,{\"a\":null}]"
+                   |> Result.map renderHost)
+                  (Ok "[null,{}]")
+                  "the item null is read by the host, the member null erased by the policy"
+          }
+
+          test
+              "after a mismatch, a null the reading read is a value to the re-scan; one it never reached is the policy's" {
+              // The document's own refusal outranks a mismatch (Phase 519) — less the nulls the host
+              // read on its rule. A refusal of a null the host ADMITTED would be a refusal nobody asked for.
+              let readThenMismatch (r: Reader) =
+                  Reader.members
+                      (fun k r ->
+                          if k = "a" then
+                              Reader.readNull r
+                          else
+                              Reader.strings r |> ignore)
+                      r
+
+              match read readThenMismatch "{\"a\":null,\"b\":1}" with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.WrongKind "the mismatch stands"
+                  Expect.equal e.Path [ PathSegment.Key "b" ] "at the mismatch"
+              | Ok() -> failtest "accepted"
+
+              // A null past the mismatch was never reached: the read's policy answers it.
+              match read (fun r -> Reader.strings r |> ignore) "[1, null]" with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.InvalidJson "the strict policy's refusal"
+                  Expect.stringContains e.Message "null" "of the null"
+              | Ok() -> failtest "accepted"
+
+              // The grammar's refusal still outranks everything, past an admitted null too.
+              match read readThenMismatch "{\"a\":null,\"b\":[1,}" with
+              | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "the grammar's refusal"
+              | Ok() -> failtest "accepted"
+          }
+
+          test
+              "the UI wire corpus's null fixtures: refused at the null's own path where the fixture refuses, read where it admits" {
+              // The adoption probe (fuaran-core#467): the seven `reject/*null*` fixtures require a
+              // refusal AT THE NULL'S PATH, which neither policy can give (strict refuses at the root,
+              // tolerant erases and accepts); the two `lenient/*null*` fixtures must be accepted.
+              let rejected = nullFixtures "reject"
+              let lenient = nullFixtures "lenient"
+              Expect.equal rejected.Length 7 "the seven reject fixtures"
+              Expect.equal lenient.Length 2 "the two lenient fixtures"
+
+              let refusedAt =
+                  [ for name, input in rejected ->
+                        match hostDecode ReadOptions.strict admitNone input with
+                        | Error e when e.Code = DecodeCode.WrongKind -> name, DecodePath.render e.Path
+                        | other -> failtestf "%s: %s" name (codeOf other) ]
+
+              for name, path in refusedAt do
+                  Expect.notEqual path (DecodePath.render []) (name + ": the path is the null's, never the root")
+
+              let pathOf (name: string) =
+                  List.tryFind (fun (n, _) -> n = name) refusedAt |> Option.map snd
+
+              Expect.equal
+                  (pathOf "reject-image-srcset-null")
+                  (Some(DecodePath.render [ PathSegment.Key "kind"; PathSegment.Key "srcSet" ]))
+                  "srcSet"
+
+              Expect.equal
+                  (pathOf "reject-null-action-notify-payload")
+                  (Some(
+                      DecodePath.render [ PathSegment.Key "kind"; PathSegment.Key "onClick"; PathSegment.Key "payload" ]
+                  ))
+                  "payload"
+
+              for name, input in lenient do
+                  Expect.isOk (hostDecode ReadOptions.strict admitAll input) (name + ": admitted by the host's rule")
+                  Expect.isError (Decoder.parse ReadOptions.strict input) (name + ": refused by the strict policy")
+
+              // What the tolerant policy gets wrong, measured: it admits the document the fixture refuses.
+              let srcSet =
+                  rejected |> List.find (fun (n, _) -> n = "reject-image-srcset-null") |> snd
+
+              Expect.isOk (Decoder.parse ReadOptions.tolerantOfNull srcSet) "EraseMemberNull erases the refused null"
+          } ]
 
 let private wide: JsonLimits =
     { MaxDepth = 512
