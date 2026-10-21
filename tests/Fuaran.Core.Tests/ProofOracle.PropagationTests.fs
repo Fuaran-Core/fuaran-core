@@ -20,13 +20,15 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 // ------------------------------------------------------------------------------------------
 // Phase 186 — the INCREMENTAL PROMISE. `proofs/Propagation.fst` models
 // `Fuaran.Core.Propagation`'s dirty set (`dependents`, `dirtyFromChangedIds`) and its
-// driver (`eval`, `evalFrom`) clause for clause, over an abstract node evaluator and with
-// `sort`'s result handed in; `proofs/oracle/Propagation.fs` is that model extracted. This runs
+// driver (`eval`, `evalFrom`) clause for clause, over an abstract node evaluator — and, since
+// Phase 553, over the order it COMPUTES (`sort`, `Relation.sort` over the map with its dangling
+// reads removed; the walk over a GIVEN order is the `_over` family); `proofs/oracle/Propagation.fs`
+// is that model extracted. This runs
 // it BESIDE production over generated dependency maps — acyclic ones, the generator
 // `Conformance.propagationEvalLaws` and `dirtyPropagationLaws` use, WIDENED with back edges
 // (cycles), dangling reads, multi-id change sets, unknown ids, failing evaluators and priors
-// with a hole in them — and holds production's `sort` to the one fact the agreement theorem
-// assumes of it: `Order` holds no id twice.
+// with a hole in them — and holds production's `sort` to the extracted `sort`, item for item
+// (`Order` holding no id twice is the theorem `sort_distinct` since Phase 553).
 //
 // Phase 209 — the model gained the RESTRICTED resolver and its `EvalUndeclaredRead` refusal, so
 // every model call now carries a `read_witness`: the ids the evaluator actually reads at a node, as
@@ -206,7 +208,6 @@ let private propProbe
 
     let mdeps = bridge deps
     let topo = Propagation.sort deps
-    let mtopo = topoToModel topo
     // The witness is `propSpec`'s own reads, derived from PRODUCTION's map — never from the bridge.
     // Under the go-red bridge that is the point: the evaluator still reads the edge the bridge
     // dropped, so the model sees an undeclared read there and refuses where production does not.
@@ -215,7 +216,16 @@ let private propProbe
     let where =
         sprintf "trial %d deps=%A changed=%A" i (Map.toList deps) (Set.toList changed)
 
-    // (0) the bridge the agreement theorem assumes: `sort`'s Order holds no id twice
+    // (0) the order: production's `sort` is the EXTRACTED `sort` (Phase 553 — `Relation.sort` over
+    // the map with its dangling reads removed, computed in the model), `Order` and `Cycles` item for
+    // item; and `Order` holds no id twice, which is now the theorem `sort_distinct`.
+    let msort = ModelProp.sort mdeps
+
+    t <-
+        t
+        |> Differential.check (topo.Order = msort.order && topo.Cycles = msort.cycles) (fun () ->
+            sprintf "%s: sort production=%A model=%A" where (topo.Order, topo.Cycles) (msort.order, msort.cycles))
+
     let orderDistinct = (List.distinct topo.Order = topo.Order)
 
     t <-
@@ -251,7 +261,7 @@ let private propProbe
     let spec0 = propSpec base0 deps
     let spec1 = propSpec base1 deps
     let prodPrior = Propagation.eval (propProdEvaluator spec0 (ResizeArray())) deps
-    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mreads mdeps mtopo
+    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mreads mdeps
 
     t <-
         t
@@ -284,13 +294,7 @@ let private propProbe
             Propagation.evalFrom (propProdEvaluator spec1 prodInvoked) priorValues changed deps
 
         let modelIncr =
-            ModelProp.eval_from
-                (propModelEvaluator spec1)
-                mreads
-                (Map.toList priorValues)
-                (Set.toList changed)
-                mdeps
-                mtopo
+            ModelProp.eval_from (propModelEvaluator spec1) mreads (Map.toList priorValues) (Set.toList changed) mdeps
 
         t <-
             t
@@ -301,13 +305,7 @@ let private propProbe
                 modelIncr
 
         let modelInvoked =
-            ModelProp.walk_invoked
-                (propModelEvaluator spec1)
-                mreads
-                (Map.toList priorValues)
-                (Set.toList changed)
-                mdeps
-                mtopo
+            ModelProp.walk_invoked (propModelEvaluator spec1) mreads (Map.toList priorValues) (Set.toList changed) mdeps
 
         t <-
             t
@@ -325,7 +323,7 @@ let private propProbe
                 outcome
                 (fun _ _ -> sprintf "%s: eval after the change disagrees" where)
                 prodFull
-                (ModelProp.eval (propModelEvaluator spec1) mreads mdeps mtopo)
+                (ModelProp.eval (propModelEvaluator spec1) mreads mdeps)
 
         match prodIncr with
         | Error(Propagation.PropagationError.EvalUnknownChange _) ->
@@ -400,7 +398,7 @@ let private propProbe
         Propagation.evalFor (propProdEvaluator spec1 pullInvoked) targets deps
 
     let modelPull =
-        ModelProp.eval_for (propModelEvaluator spec1) mreads (Set.toList targets) mdeps mtopo
+        ModelProp.eval_for (propModelEvaluator spec1) mreads (Set.toList targets) mdeps
 
     t <-
         t
@@ -411,7 +409,7 @@ let private propProbe
             modelPull
 
     let modelPullInvoked =
-        ModelProp.walk_for_invoked (propModelEvaluator spec1) mreads (Set.toList targets) mdeps mtopo
+        ModelProp.walk_for_invoked (propModelEvaluator spec1) mreads (Set.toList targets) mdeps
 
     t <-
         t
@@ -427,7 +425,7 @@ let private propProbe
         Propagation.evalForWith (fun resolve _ id -> spec1 resolve id) targets deps
 
     let modelPullWith =
-        ModelProp.eval_for_with (ModelProp.lift (propModelEvaluator spec1)) mreads (Set.toList targets) mdeps mtopo
+        ModelProp.eval_for_with (ModelProp.lift (propModelEvaluator spec1)) mreads (Set.toList targets) mdeps
 
     t <-
         t
@@ -664,15 +662,8 @@ let tests =
               // the driver's, and the model carries it rather than modelling a driver production no
               // longer has.
               let modelRun (deps: Map<string, Set<string>>) (p: Map<string, int>) (chg: string list) =
-                  let mtopo = topoToModel (Propagation.sort deps)
 
-                  ModelProp.eval_from
-                      (propModelEvaluator (spec 2))
-                      specReads
-                      (Map.toList p)
-                      chg
-                      (depsToModel deps)
-                      mtopo
+                  ModelProp.eval_from (propModelEvaluator (spec 2)) specReads (Map.toList p) chg (depsToModel deps)
                   |> modelOutcomeRender
 
               Expect.equal
@@ -870,14 +861,13 @@ let tests =
                           | Error m, _ -> ModelProp.Error m
 
                   let mdeps = depsToModel deps
-                  let mtopo = topoToModel (Propagation.sort deps)
                   let mreads = declaredReads deps
 
                   let where =
                       sprintf "trial %d deps=%A changed=%A" i (Map.toList deps) (Set.toList changed)
 
                   let full0 = Propagation.evalWith (prodWith base0 (ResizeArray())) deps
-                  let mfull0 = ModelProp.eval_with (modelWith base0) mreads mdeps mtopo
+                  let mfull0 = ModelProp.eval_with (modelWith base0) mreads mdeps
 
                   let t =
                       t
@@ -900,7 +890,6 @@ let tests =
                                   (Map.toList out0.Values)
                                   (Set.toList changed)
                                   mdeps
-                                  mtopo
 
                           let full1 = Propagation.evalWith (prodWith base1 (ResizeArray())) deps
 

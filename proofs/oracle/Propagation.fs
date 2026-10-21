@@ -34,65 +34,10 @@ let __proj__Error__item___0 = (fun ( projectee  :  outcome<'a, 'e> ) -> (match (
      end))
 
 
-let rec assoc = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
-| [] -> begin
-     FStar_Pervasives_Native.None
-     end
-| ((k', v))::t -> begin
-      
-if (Prims.op_Equals k k') then begin
-     FStar_Pervasives_Native.Some (v)
-     end else begin
-     (assoc k t)
-     end
-     end))
-
-
-let rec has_key = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
-| [] -> begin
-     false
-     end
-| ((k', uu___))::t -> begin
-     ((Prims.op_Equals k k') || (has_key k t))
-     end))
-
-
-let rec subset : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (match (a) with
-| [] -> begin
-     true
-     end
-| (h)::t -> begin
-     ((ListAlgebra.mem h b) && (subset t b))
-     end))
-
-
-let union : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> (ListAlgebra.app a (ListAlgebra.diff b a)))
-
-
-let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
-| [] -> begin
-     []
-     end
-| (h)::t -> begin
-      
-if (ListAlgebra.mem h t) then begin
-     (dedup t)
-     end else begin
-     (h)::(dedup t)
-     end
-     end))
-
-
 type dmap = Prims.list<(Prims.string * Prims.list<Prims.string>)>
 
 
-let reads_of : dmap  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( id  :  Prims.string ) -> (match ((assoc id deps)) with
-| FStar_Pervasives_Native.Some (rs) -> begin
-     rs
-     end
-| FStar_Pervasives_Native.None -> begin
-     []
-     end))
+let reads_of : dmap  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( id  :  Prims.string ) -> (Relation.succ_of deps id))
 
 
 let rec edge : dmap  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( deps  :  dmap ) ( n  :  Prims.string ) ( r  :  Prims.string ) -> (match (deps) with
@@ -150,23 +95,17 @@ let rec group_from : Prims.list<Prims.string>  ->  Prims.list<(Prims.string * Pr
      []
      end
 | (k)::t -> begin
-     (((k), ((dedup (seconds_for k ps)))))::(group_from t ps)
+     (((k), ((Relation.dedup (seconds_for k ps)))))::(group_from t ps)
      end))
 
 
 let dependents : dmap  ->  dmap = (fun ( deps  :  dmap ) -> (
 
 let ps = (pairs deps)
-in (group_from (dedup (firsts ps)) ps)))
+in (group_from (Relation.dedup (firsts ps)) ps)))
 
 
-let dependents_of : dmap  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( node  :  Prims.string ) -> (match ((assoc node d)) with
-| FStar_Pervasives_Native.Some (ds) -> begin
-     ds
-     end
-| FStar_Pervasives_Native.None -> begin
-     []
-     end))
+let dependents_of : dmap  ->  Prims.string  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( node  :  Prims.string ) -> (Relation.succ_of d node))
 
 
 let rec mem_pair : Prims.string  ->  Prims.string  ->  Prims.list<(Prims.string * Prims.string)>  ->  Prims.bool = (fun ( r  :  Prims.string ) ( n  :  Prims.string ) ( ps  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (ps) with
@@ -178,55 +117,7 @@ let rec mem_pair : Prims.string  ->  Prims.string  ->  Prims.list<(Prims.string 
      end))
 
 
-let rec next_of : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( s  :  Prims.list<Prims.string> ) -> (match (frontier) with
-| [] -> begin
-     s
-     end
-| (node)::t -> begin
-     (next_of d t (match ((assoc node d)) with
-| FStar_Pervasives_Native.Some (ds) -> begin
-     (union s ds)
-     end
-| FStar_Pervasives_Native.None -> begin
-     s
-     end))
-     end))
-
-
-let rec any_dep : dmap  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (match (frontier) with
-| [] -> begin
-     false
-     end
-| (node)::t -> begin
-     ((ListAlgebra.mem x (dependents_of d node)) || (any_dep d t x))
-     end))
-
-
-let rec range : dmap  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) -> (match (d) with
-| [] -> begin
-     []
-     end
-| ((uu___, vs))::t -> begin
-     (ListAlgebra.app vs (range t))
-     end))
-
-
-let rec grow : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) ( frontier  :  Prims.list<Prims.string> ) ( acc  :  Prims.list<Prims.string> ) -> (match (frontier) with
-| [] -> begin
-     acc
-     end
-| (uu___)::uu___1 -> begin
-     (
-
-let next = (next_of d frontier [])
-in (
-
-let fresh = (ListAlgebra.diff next acc)
-in (grow d fresh (union acc fresh))))
-     end))
-
-
-let dirty_from_changed_ids : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( changed  :  Prims.list<Prims.string> ) -> (grow (dependents deps) changed changed))
+let dirty_from_changed_ids : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( changed  :  Prims.list<Prims.string> ) -> (Relation.reachable (dependents deps) changed))
 
 
 let rec downstream : dmap  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( deps  :  dmap ) ( c  :  Prims.string ) ( path  :  Prims.list<Prims.string> ) -> (match (path) with
@@ -340,7 +231,7 @@ let __proj__Mkeval_outcome__item__cyclic = (fun ( projectee  :  eval_outcome<'v>
 type evaluator<'v> = (Prims.string  ->  FStar_Pervasives_Native.option<'v>)  ->  Prims.string  ->  outcome<'v, Prims.string>
 
 
-let resolve_in = (fun ( results  :  Prims.list<(Prims.string * 'v)> ) ( k  :  Prims.string ) -> (assoc k results))
+let resolve_in = (fun ( results  :  Prims.list<(Prims.string * 'v)> ) ( k  :  Prims.string ) -> (Relation.assoc k results))
 
 
 let rec lookups = (fun ( rs  :  Prims.list<Prims.string> ) ( results  :  Prims.list<(Prims.string * 'v)> ) -> (match (rs) with
@@ -348,7 +239,7 @@ let rec lookups = (fun ( rs  :  Prims.list<Prims.string> ) ( results  :  Prims.l
      []
      end
 | (r)::t -> begin
-     (match ((assoc r results)) with
+     (match ((Relation.assoc r results)) with
 | FStar_Pervasives_Native.Some (x) -> begin
      (((r), (x)))::(lookups t results)
      end
@@ -385,7 +276,7 @@ let reuse = (fun ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prim
 if (recompute id) then begin
      FStar_Pervasives_Native.None
      end else begin
-     (assoc id prior)
+     (Relation.assoc id prior)
      end)
 
 
@@ -419,7 +310,7 @@ let rec go = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( deps  
 let walk = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( topo  :  topo_result ) -> (go ev touches deps recompute prior topo.cycles [] topo.order))
 
 
-let eval = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk ev touches deps always [] topo))
+let eval_over = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk ev touches deps always [] topo))
 
 
 let rec unknown_of : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( changed  :  Prims.list<Prims.string> ) -> (match (changed) with
@@ -428,7 +319,7 @@ let rec unknown_of : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.st
      end
 | (c)::t -> begin
       
-if (has_key c deps) then begin
+if (Relation.has_key c deps) then begin
      (unknown_of deps t)
      end else begin
      (c)::(unknown_of deps t)
@@ -436,7 +327,7 @@ if (has_key c deps) then begin
      end))
 
 
-let eval_from = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
+let eval_from_over = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
 | (uu___)::uu___1 -> begin
      Error (EvalUnknownChange ((unknown_of deps changed)))
      end
@@ -472,7 +363,7 @@ let rec go_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) 
      end))
 
 
-let walk_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
+let walk_invoked_over = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
 | (uu___)::uu___1 -> begin
      []
      end
@@ -502,7 +393,7 @@ let rec go_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness
      Error (EvalUndeclaredRead (id, r))
      end
 | FStar_Pervasives_Native.None -> begin
-     (match ((evw (resolve_in (lookups (reads_of deps id) results)) (assoc id prior) id)) with
+     (match ((evw (resolve_in (lookups (reads_of deps id) results)) (Relation.assoc id prior) id)) with
 | Ok (x) -> begin
      (go_with evw touches deps recompute prior cycles ((((id), (x)))::results) rest)
      end
@@ -520,10 +411,10 @@ let rec go_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness
 let walk_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( topo  :  topo_result ) -> (go_with evw touches deps recompute prior topo.cycles [] topo.order))
 
 
-let eval_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] topo))
+let eval_with_over = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] topo))
 
 
-let eval_from_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
+let eval_from_with_over = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
 | (uu___)::uu___1 -> begin
      Error (EvalUnknownChange ((unknown_of deps changed)))
      end
@@ -532,7 +423,7 @@ let eval_from_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witn
      end))
 
 
-let needed_for : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( targets  :  Prims.list<Prims.string> ) -> (grow deps targets targets))
+let needed_for : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( targets  :  Prims.list<Prims.string> ) -> (Relation.reachable deps targets))
 
 
 let rec keep : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( s  :  Prims.list<Prims.string> ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
@@ -589,34 +480,13 @@ if (ListAlgebra.mem k s) then begin
      end))
 
 
-let eval_for_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] (restrict_topo (needed_for deps targets) topo)))
+let eval_for_with_over = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] (restrict_topo (needed_for deps targets) topo)))
 
 
-let eval_for = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (eval_for_with (lift ev) touches targets deps topo))
+let eval_for_over = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (eval_for_with_over (lift ev) touches targets deps topo))
 
 
-let walk_for_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)))
-
-
-let rec concat_all : Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( gs  :  Prims.list<Prims.list<Prims.string>> ) -> (match (gs) with
-| [] -> begin
-     []
-     end
-| (g)::r -> begin
-     (ListAlgebra.app g (concat_all r))
-     end))
-
-
-let rec keys : dmap  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) -> (match (d) with
-| [] -> begin
-     []
-     end
-| ((k, uu___))::r -> begin
-     (k)::(keys r)
-     end))
-
-
-let same_set : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> ((subset a b) && (subset b a)))
+let walk_for_invoked_over = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)))
 
 
 let rec reads_ok : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( deps  :  dmap ) ( cyc  :  Prims.list<Prims.string> ) ( seen  :  Prims.list<Prims.string> ) ( rs  :  Prims.list<Prims.string> ) -> (match (rs) with
@@ -624,7 +494,7 @@ let rec reads_ok : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.stri
      true
      end
 | (r)::rest -> begin
-     ((((not ((has_key r deps))) || (ListAlgebra.mem r seen)) || (ListAlgebra.mem r cyc)) && (reads_ok deps cyc seen rest))
+     ((((not ((Relation.has_key r deps))) || (ListAlgebra.mem r seen)) || (ListAlgebra.mem r cyc)) && (reads_ok deps cyc seen rest))
      end))
 
 
@@ -639,17 +509,73 @@ let rec ordered : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.strin
 
 let valid_topo : dmap  ->  topo_result  ->  Prims.bool = (fun ( deps  :  dmap ) ( topo  :  topo_result ) -> (
 
-let cyc = (concat_all topo.cycles)
+let cyc = (Relation.concat topo.cycles)
 in (
 
 let all = (ListAlgebra.app topo.order cyc)
-in (((ListAlgebra.distinct all) && (same_set all (keys deps))) && (ordered deps cyc [] topo.order)))))
+in (((ListAlgebra.distinct all) && (Relation.same_set all (Relation.keys deps))) && (ordered deps cyc [] topo.order)))))
+
+
+let rec known_reads : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( rs  :  Prims.list<Prims.string> ) -> (match (rs) with
+| [] -> begin
+     []
+     end
+| (r)::t -> begin
+      
+if (Relation.has_key r deps) then begin
+     (r)::(known_reads deps t)
+     end else begin
+     (known_reads deps t)
+     end
+     end))
+
+
+let rec known_of : dmap  ->  dmap  ->  dmap = (fun ( deps  :  dmap ) ( all  :  dmap ) -> (match (deps) with
+| [] -> begin
+     []
+     end
+| ((k, rs))::t -> begin
+     (((k), ((known_reads all rs))))::(known_of t all)
+     end))
+
+
+let known : dmap  ->  dmap = (fun ( deps  :  dmap ) -> (known_of deps deps))
+
+
+let sort : dmap  ->  topo_result = (fun ( deps  :  dmap ) -> (
+
+let t = (Relation.sort (known deps))
+in {order = t.torder; cycles = t.tcycles}))
+
+
+let eval = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) -> (eval_over ev touches deps (sort deps)))
+
+
+let eval_from = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (eval_from_over ev touches prior changed deps (sort deps)))
+
+
+let walk_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (walk_invoked_over ev touches prior changed deps (sort deps)))
+
+
+let eval_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) -> (eval_with_over evw touches deps (sort deps)))
+
+
+let eval_from_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (eval_from_with_over evw touches prior changed deps (sort deps)))
+
+
+let eval_for_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (eval_for_with_over evw touches targets deps (sort deps)))
+
+
+let eval_for = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (eval_for_over ev touches targets deps (sort deps)))
+
+
+let walk_for_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) -> (walk_for_invoked_over ev touches targets deps (sort deps)))
 
 
 let twin_deps : dmap = ((("b"), (("a")::[])))::((("c"), (("b")::[])))::[]
 
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "dependents-inverts-the-edges"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({Twin.tname = "dirty-set-is-the-downstream-closure"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({Twin.tname = "an-edge-has-a-direction"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::({Twin.tname = "the-certificate-accepts-a-dependency-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("b")::("c")::[]; cycles = []}) true))})::({Twin.tname = "the-certificate-refuses-a-reader-before-its-read"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("c")::("b")::[]; cycles = []}) false))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "dependents-inverts-the-edges"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({Twin.tname = "dirty-set-is-the-downstream-closure"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({Twin.tname = "an-edge-has-a-direction"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::({Twin.tname = "the-certificate-accepts-a-dependency-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("b")::("c")::[]; cycles = []}) true))})::({Twin.tname = "the-certificate-refuses-a-reader-before-its-read"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("c")::("b")::[]; cycles = []}) false))})::({Twin.tname = "sort-computes-the-dependency-order-and-drops-a-dangling-read"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (sort twin_deps) {order = ("b")::("c")::[]; cycles = []}) && (Prims.op_Equals (known twin_deps) (((("b"), ([])))::((("c"), (("b")::[])))::[]))))})::[]
 
 
 

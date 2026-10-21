@@ -32,6 +32,7 @@ open ListAlgebra
 open DagFold
 open TreeOps
 module P = Propagation
+module R = Relation
 
 #set-options "--ext context_pruning"
 
@@ -101,7 +102,7 @@ and touched_all (t:tree) (os:list op) : Tot (list string) (decreases os) =
 
 (* F#: the `kids` and `reads` comparisons inside `changedForOp`'s `local`. The reads are a `Set`
    there, so they are compared as sets here. *)
-let same_reads (a b:list string) : Tot bool = P.subset a b && P.subset b a
+let same_reads (a b:list string) : Tot bool = R.subset a b && R.subset b a
 
 (* F#: one row of `local` — is this post-edit id a seed? *)
 let differs (rd:tree -> list string) (o:op) (pre post:tree) (x:string) : Tot bool =
@@ -478,22 +479,22 @@ let dirty_from_op_complete (rd:tree -> list string) (o:op) (pre post:tree) (x r:
    writes name a moved node's target whether or not its content, children or reads differ — so
    this is minimality over the seeds, not over the moved set, and is stated so. *)
 let dirty_from_op_least (rd:tree -> list string) (o:op) (pre post:tree) (s:list string)
-  : Lemma (requires apply o pre == Ok post /\ P.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
-          (ensures P.subset (dirty_from_op rd pre o) s) =
+  : Lemma (requires apply o pre == Ok post /\ R.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
+          (ensures R.subset (dirty_from_op rd pre o) s) =
   P.dirty_least (deps_of rd pre) (seeds rd o pre post) s
 
 (* THEOREM — changed_for_op_least. The same bound for the change set. *)
 let changed_for_op_least (rd:tree -> list string) (o:op) (pre post:tree) (s:list string)
-  : Lemma (requires apply o pre == Ok post /\ P.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
-          (ensures P.subset (changed_for_op rd pre post o) s) =
+  : Lemma (requires apply o pre == Ok post /\ R.subset (seeds rd o pre post) s /\ P.closed (deps_of rd pre) s)
+          (ensures R.subset (changed_for_op rd pre post o) s) =
   let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
   P.dirty_least (deps_of rd pre) (seeds rd o pre post) s;
   let aux (y:string) : Lemma (mem y (changed_for_op rd pre post o) ==> mem y s) =
     mem_filt (survives post) d y;
-    if mem y d then P.subset_mem d s y else ()
+    if mem y d then R.subset_mem d s y else ()
   in
   FStar.Classical.forall_intro aux;
-  P.subset_intro (changed_for_op rd pre post o) s
+  R.subset_intro (changed_for_op rd pre post o) s
 
 (* ======================================================================================
    6. The composition with incremental evaluation (Phase 456).
@@ -535,7 +536,7 @@ let declared (rd:tree -> list string) (t:tree) (x:string) : Tot (list string) = 
 (* ---- the map holds every id of the tree ---- *)
 
 let rec has_key_app (#a:Type) (x:string) (l m:list (string & a))
-  : Lemma (ensures P.has_key x (app l m) == (P.has_key x l || P.has_key x m)) (decreases l) =
+  : Lemma (ensures R.has_key x (app l m) == (R.has_key x l || R.has_key x m)) (decreases l) =
   match l with
   | [] -> ()
   | _ :: t -> has_key_app x t m
@@ -547,11 +548,11 @@ let rec deps_of_list_app (rd:tree -> list string) (l m:list tree)
   | _ :: t -> deps_of_list_app rd t m
 
 let rec deps_of_key (rd:tree -> list string) (t:tree) (x:string)
-  : Lemma (requires has_id x t) (ensures P.has_key x (deps_of rd t)) (decreases t) =
+  : Lemma (requires has_id x t) (ensures R.has_key x (deps_of rd t)) (decreases t) =
   match t with
   | TNode i _ cs -> if i = x then () else deps_of_key_all rd cs x
 and deps_of_key_all (rd:tree -> list string) (ts:list tree) (x:string)
-  : Lemma (requires mem x (ids_all ts)) (ensures P.has_key x (deps_of_list rd (nodes_all ts))) (decreases ts) =
+  : Lemma (requires mem x (ids_all ts)) (ensures R.has_key x (deps_of_list rd (nodes_all ts))) (decreases ts) =
   match ts with
   | [] -> ()
   | t :: r ->
@@ -588,7 +589,7 @@ let structural_agree_on (#v:Type) (g:node_eval v) (rd:tree -> list string) (o:op
 let declared_checks_on (rd:tree -> list string) (pre post:tree) (changed ids:list string)
   : Lemma (ensures P.checks_on (deps_of rd post) (declared rd pre) (declared rd post) changed ids) =
   let aux (x:string) : Lemma (None? (P.first_undeclared (deps_of rd post) x (declared rd post x))) =
-    P.subset_intro (declared rd post x) (P.reads_of (deps_of rd post) x);
+    R.subset_intro (declared rd post x) (P.reads_of (deps_of rd post) x);
     P.first_undeclared_of_declared (deps_of rd post) x (declared rd post x)
   in
   FStar.Classical.forall_intro aux
@@ -599,7 +600,7 @@ let changed_for_op_known (rd:tree -> list string) (o:op) (pre post:tree)
           (ensures Nil? (P.unknown_of (deps_of rd post) (changed_for_op rd pre post o))) =
   let c = changed_for_op rd pre post o in
   let d = P.dirty_from_changed_ids (deps_of rd pre) (seeds rd o pre post) in
-  let aux (y:string) : Lemma (mem y c ==> P.has_key y (deps_of rd post)) =
+  let aux (y:string) : Lemma (mem y c ==> R.has_key y (deps_of rd post)) =
     mem_filt (survives post) d y;
     if mem y c then deps_of_key rd post y else ()
   in
@@ -614,11 +615,11 @@ let evalfrom_agrees_for_op (#v:Type) (g:node_eval v) (rd:tree -> list string) (o
                            (topo:P.topo_result) (out0:P.eval_outcome v) (prior:list (string & v))
   : Lemma (requires wf pre /\ apply o pre == Ok post /\
                     (forall (x:string). mem x topo.order ==> has_id x post) /\ distinct topo.order /\
-                    P.eval (structural g pre) (declared rd pre) (deps_of rd post) topo == P.Ok out0 /\
+                    P.eval_over (structural g pre) (declared rd pre) (deps_of rd post) topo == P.Ok out0 /\
                     P.prior_of prior out0.values)
-          (ensures P.eval_from (structural g post) (declared rd post) prior (changed_for_op rd pre post o)
+          (ensures P.eval_from_over (structural g post) (declared rd post) prior (changed_for_op rd pre post o)
                                (deps_of rd post) topo
-                   == P.eval (structural g post) (declared rd post) (deps_of rd post) topo) =
+                   == P.eval_over (structural g post) (declared rd post) (deps_of rd post) topo) =
   let c = changed_for_op rd pre post o in
   structural_agree_on g rd o pre post topo.order;
   declared_checks_on rd pre post c topo.order;

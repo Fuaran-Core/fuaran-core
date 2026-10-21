@@ -63,6 +63,7 @@
     <Compile Include="Unit.fs" />
     <Compile Include="Temporal.fs" />
     <Compile Include="WireColumn.fs" />
+    <Compile Include="Relation.fs" />
     <Compile Include="Propagation.fs" />
     <Compile Include="Capability.fs" />
     <Compile Include="Query.fs" />

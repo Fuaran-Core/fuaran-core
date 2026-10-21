@@ -62,6 +62,7 @@ module Capability
 
 open Twin
 open ListAlgebra
+open Relation
 open Propagation
 
 (* ======================================================================================

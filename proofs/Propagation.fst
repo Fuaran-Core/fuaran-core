@@ -13,16 +13,20 @@
        reference evaluator `eval`, and the incremental `evalFrom` with its unknown-change guard —
        including the RESTRICTED resolver and its `EvalUndeclaredRead` refusal (Phase 209).
 
-   THREE things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a
+   TWO things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a
    parameter, Phase 176 the pipeline evaluator and Phase 177 the witness. The NODE EVALUATOR
    (`evalNode : (string -> 'v option) -> string -> Result<'v, string>`) is a function over an
    abstract value type: Core owns no evaluator, and nothing here says what a domain computes.
-   The ORDER the driver walks is a `topo_result` handed in where production computes
-   `sort deps`: `sort` is Tarjan's algorithm over mutable dictionaries, the model does not
-   restate it, and the ONE fact about its output the agreement theorem needs — `Order` holds no
-   id twice — is a hypothesis of that theorem, a ladder row (`propagation-order-distinct`), and
-   a check the differential makes on every generated graph, cyclic ones included.
-   And the READS THE EVALUATOR ACTUALLY MAKES are a `read_witness` handed in where production
+   The ORDER the driver walks is COMPUTED, as production computes it (Phase 553): `sort deps`
+   is `Relation.sort` over the map with its dangling reads removed — `Relation.fst`'s functional
+   Tarjan pass — read into a `topo_result` as production reads `Relation.Topo` into
+   `TopoResult`. The one fact about it the agreement theorems need, that `Order` holds no id
+   twice, is a THEOREM (`sort_distinct`, off `Relation.sort_order_distinct`), so `evalfrom_agrees`
+   and `evalfromwith_agrees` carry no order premise; the walk over an ARBITRARY order is kept
+   beside them as `eval_over` and the `_over` family, because that is the stronger statement and
+   the certificate section (8) is stated over it. Until this phase the order was the model's third
+   parameter and that fact a ladder row's assumption.
+   The READS THE EVALUATOR ACTUALLY MAKES are a `read_witness` handed in where production
    OBSERVES them: production's resolver is instrumented and records the ids it was asked for, an
    effect a `Tot` function cannot have, so the model takes the observation as given exactly as it
    takes the order. That parameter is what lets the model carry Phase 209's refusal instead of
@@ -35,10 +39,12 @@
    renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
-   `Capability.fst`. The module is SELF-CONTAINED — it opens no other model, only the shared
-   `Twin` and `ListAlgebra`, restates `outcome` and the list helpers it needs, and extracts beside
-   the other models into the same oracle assembly. Every walk a lemma has to
-   name is a NAMED function (`always`, `in_set`, `resolve_in`), never a lambda written twice.
+   `Capability.fst`. The module opens ONE other model, `Relation` (Phase 553): the list helpers
+   (`assoc`, `subset`, `union`, …), the closure `reachable` that both the dirty set and the needed
+   set are, and the sort are that module's, as production's are `Fuaran.Core.Relation`'s. It
+   restates only `outcome`, and extracts beside the other models into the same oracle assembly.
+   Every walk a lemma has to name is a NAMED function (`always`, `in_set`, `resolve_in`), never a
+   lambda written twice.
 
    Apache-2.0, like everything beside it.
 *)
@@ -46,78 +52,16 @@ module Propagation
 
 open Twin
 open ListAlgebra
+open Relation
 
 (* ======================================================================================
-   0. The list helpers, self-contained, each naming the FSharp.Core function it stands for.
+   0. `Result`, the one helper not `Relation.fst`'s.
    ====================================================================================== *)
 
 (* F#: `Result<'a, 'e>`. *)
 type outcome (a e:Type) =
   | Ok    : a -> outcome a e
   | Error : e -> outcome a e
-
-(* F#: `Map.tryFind`, a finite map read as its association list. *)
-let rec assoc (#a:Type) (k:string) (l:list (string & a)) : Tot (option a) =
-  match l with
-  | [] -> None
-  | (k', v) :: t -> if k = k' then Some v else assoc k t
-
-(* F#: `Map.containsKey`. *)
-let rec has_key (#a:Type) (k:string) (l:list (string & a)) : Tot bool =
-  match l with
-  | [] -> false
-  | (k', _) :: t -> k = k' || has_key k t
-
-(* F#: `Set.isSubset`. *)
-let rec subset (a b:list string) : Tot bool =
-  match a with
-  | [] -> true
-  | h :: t -> mem h b && subset t b
-
-(* F#: `Set.union a b`, read as membership: `a`, then what `b` adds. *)
-let union (a b:list string) : Tot (list string) = app a (diff b a)
-
-(* A set holds an id once: `Set.ofList`. Keeps the LAST occurrence; the order is not meaning. *)
-let rec dedup (l:list string) : Tot (list string) =
-  match l with
-  | [] -> []
-  | h :: t -> if mem h t then dedup t else h :: dedup t
-
-let rec app_nil (#a:Type) (l:list a) : Lemma (app l [] == l) =
-  match l with
-  | [] -> ()
-  | _ :: t -> app_nil t
-
-let rec mem_app (x:string) (l m:list string) : Lemma (mem x (app l m) == (mem x l || mem x m)) =
-  match l with
-  | [] -> ()
-  | _ :: t -> mem_app x t m
-
-let rec mem_diff (x:string) (a b:list string) : Lemma (mem x (diff a b) == (mem x a && not (mem x b))) =
-  match a with
-  | [] -> ()
-  | _ :: t -> mem_diff x t b
-
-let mem_union (x:string) (a b:list string) : Lemma (mem x (union a b) == (mem x a || mem x b)) =
-  mem_app x a (diff b a);
-  mem_diff x b a
-
-let rec mem_dedup (x:string) (l:list string) : Lemma (mem x (dedup l) == mem x l) =
-  match l with
-  | [] -> ()
-  | _ :: t -> mem_dedup x t
-
-let rec subset_mem (a b:list string) (x:string)
-  : Lemma (requires subset a b /\ mem x a) (ensures mem x b) =
-  match a with
-  | [] -> ()
-  | h :: t -> if x = h then () else subset_mem t b x
-
-let rec subset_intro (a b:list string)
-  : Lemma (requires (forall (x:string). mem x a ==> mem x b)) (ensures subset a b) =
-  match a with
-  | [] -> ()
-  | _ :: t -> subset_intro t b
 
 (* ======================================================================================
    1. The dependency map and its inversion.
@@ -126,11 +70,9 @@ let rec subset_intro (a b:list string)
 (* F#: `Map<string, Set<string>>` — each id and the ids it READS — as its association list. *)
 type dmap = list (string & list string)
 
-(* The ids `id` reads: `Map.tryFind id deps`, an absent id reading nothing. *)
-let reads_of (deps:dmap) (id:string) : Tot (list string) =
-  match assoc id deps with
-  | Some rs -> rs
-  | None -> []
+(* The ids `id` reads: `Map.tryFind id deps`, an absent id reading nothing — `Relation.succ_of`,
+   named for the direction it is read in here. *)
+let reads_of (deps:dmap) (id:string) : Tot (list string) = succ_of deps id
 
 (* `n` READS `r`: some entry of the map is `n`'s and holds `r`. The relation every theorem
    about the dirty set is stated over. *)
@@ -180,11 +122,9 @@ let dependents (deps:dmap) : Tot dmap =
   let ps = pairs deps in
   group_from (dedup (firsts ps)) ps
 
-(* `Map.tryFind node deps'`, an absent id having no dependents. *)
-let dependents_of (d:dmap) (node:string) : Tot (list string) =
-  match assoc node d with
-  | Some ds -> ds
-  | None -> []
+(* `Map.tryFind node deps'`, an absent id having no dependents — `Relation.succ_of` again, over
+   the inverted map. *)
+let dependents_of (d:dmap) (node:string) : Tot (list string) = succ_of d node
 
 let rec mem_pair (r n:string) (ps:list (string & string)) : Tot bool =
   match ps with
@@ -244,151 +184,27 @@ let dependents_edge (deps:dmap) (r n:string)
    2. The dirty set.
    ====================================================================================== *)
 
-(* F#: `(Set.empty, frontier) ||> Set.fold (fun s node -> match Map.tryFind node deps' with
-   | Some ds -> Set.union s ds | None -> s)` — every dependent of a frontier id. *)
-let rec next_of (d:dmap) (frontier:list string) (s:list string) : Tot (list string) (decreases frontier) =
-  match frontier with
-  | [] -> s
-  | node :: t ->
-    next_of d t (match assoc node d with
-                 | Some ds -> union s ds
-                 | None -> s)
-
-(* `x` is a dependent of SOME frontier id — the fold above, read as membership. *)
-let rec any_dep (d:dmap) (frontier:list string) (x:string) : Tot bool =
-  match frontier with
-  | [] -> false
-  | node :: t -> mem x (dependents_of d node) || any_dep d t x
-
-let rec next_mem (d:dmap) (frontier s:list string) (x:string)
-  : Lemma (ensures mem x (next_of d frontier s) == (mem x s || any_dep d frontier x)) (decreases frontier) =
-  match frontier with
-  | [] -> ()
-  | node :: t ->
-    (match assoc node d with
-     | Some ds -> mem_union x s ds; next_mem d t (union s ds) x
-     | None -> next_mem d t s x)
-
-let rec any_dep_intro (d:dmap) (frontier:list string) (r x:string)
-  : Lemma (requires mem r frontier /\ mem x (dependents_of d r)) (ensures any_dep d frontier x) =
-  match frontier with
-  | [] -> ()
-  | node :: t -> if r = node then () else any_dep_intro d t r x
-
-(* Every id a dependents map can ever contribute: the measure `grow` terminates by. *)
-let rec range (d:dmap) : Tot (list string) =
-  match d with
-  | [] -> []
-  | (_, vs) :: t -> app vs (range t)
-
-let rec dependents_in_range (d:dmap) (node x:string)
-  : Lemma (requires mem x (dependents_of d node)) (ensures mem x (range d)) =
-  match d with
-  | [] -> ()
-  | (k, vs) :: t ->
-    mem_app x vs (range t);
-    if node = k then () else dependents_in_range t node x
-
-let rec any_dep_in_range (d:dmap) (frontier:list string) (x:string)
-  : Lemma (requires any_dep d frontier x) (ensures mem x (range d)) =
-  match frontier with
-  | [] -> ()
-  | node :: t ->
-    if mem x (dependents_of d node) then dependents_in_range d node x else any_dep_in_range d t x
-
-let rec diff_mono (rng a a':list string)
-  : Lemma (requires (forall (y:string). mem y a ==> mem y a')) (ensures len (diff rng a') <= len (diff rng a)) =
-  match rng with
-  | [] -> ()
-  | _ :: t -> diff_mono t a a'
-
-let rec diff_shrink (rng a a':list string) (x:string)
-  : Lemma (requires (forall (y:string). mem y a ==> mem y a') /\ mem x rng /\ not (mem x a) /\ mem x a')
-          (ensures len (diff rng a') < len (diff rng a)) =
-  match rng with
-  | [] -> ()
-  | h :: t -> if h = x then diff_mono t a a' else diff_shrink t a a' x
-
-(* WHY THE LOOP STOPS. A round that finds nothing fresh leaves the accumulator alone and hands
-   on an empty frontier; a round that finds something strictly shrinks the ids of the map not
-   yet accumulated. Production's `grow` carries this argument in a doc comment; here it is the
-   function's termination proof. *)
-let grow_measure (d:dmap) (frontier acc:list string)
-  : Lemma (ensures (let fresh = diff (next_of d frontier []) acc in
-                    (Nil? fresh ==> union acc fresh == acc) /\
-                    (Cons? fresh ==> len (diff (range d) (union acc fresh)) < len (diff (range d) acc)))) =
-  let next = next_of d frontier [] in
-  let fresh = diff next acc in
-  match fresh with
-  | [] -> app_nil acc
-  | x :: _ ->
-    mem_diff x next acc;
-    next_mem d frontier [] x;
-    any_dep_in_range d frontier x;
-    let aux (y:string) : Lemma (mem y acc ==> mem y (union acc fresh)) = mem_union y acc fresh in
-    FStar.Classical.forall_intro aux;
-    mem_union x acc fresh;
-    diff_shrink (range d) acc (union acc fresh) x
-
-(* F#: the private `grow` inside `dirtyFromChangedIds`. *)
-let rec grow (d:dmap) (frontier acc:list string)
-  : Tot (list string) (decreases %[len (diff (range d) acc); len frontier]) =
-  match frontier with
-  | [] -> acc
-  | _ :: _ ->
-    let next = next_of d frontier [] in
-    let fresh = diff next acc in
-    grow_measure d frontier acc;
-    grow d fresh (union acc fresh)
-
-(* F#: `dirtyFromChangedIds`. *)
+(* F#: `dirtyFromChangedIds` — `Relation.reachable (Relation.ofMap deps |> Relation.inverse)
+   changed`: the closure over the dependents map (Phase 552). *)
 let dirty_from_changed_ids (deps:dmap) (changed:list string) : Tot (list string) =
-  grow (dependents deps) changed changed
+  reachable (dependents deps) changed
 
 (* A set closed under "reads": whoever reads a member is a member. *)
 let closed (deps:dmap) (s:list string) : Tot prop =
   forall (n r:string). mem r s /\ edge deps n r ==> mem n s
 
-(* The loop invariant: closed already, except at the frontier still to be expanded. *)
-let closed_except (deps:dmap) (acc frontier:list string) : Tot prop =
-  forall (n r:string). mem r acc /\ not (mem r frontier) /\ edge deps n r ==> mem n acc
-
-let grow_step_closed (deps:dmap) (frontier acc:list string) (n r:string)
-  : Lemma (requires closed_except deps acc frontier)
-          (ensures (let fresh = diff (next_of (dependents deps) frontier []) acc in
-                    mem r (union acc fresh) /\ not (mem r fresh) /\ edge deps n r ==> mem n (union acc fresh))) =
-  let d = dependents deps in
-  let next = next_of d frontier [] in
-  let fresh = diff next acc in
-  mem_union r acc fresh;
-  mem_union n acc fresh;
-  mem_diff n next acc;
-  next_mem d frontier [] n;
-  dependents_edge deps r n;
-  if mem r frontier && edge deps n r then any_dep_intro d frontier r n else ()
-
-let rec grow_closed (deps:dmap) (frontier acc:list string)
-  : Lemma (requires closed_except deps acc frontier)
-          (ensures closed deps (grow (dependents deps) frontier acc) /\
-                   (forall (x:string). mem x acc ==> mem x (grow (dependents deps) frontier acc)))
-          (decreases %[len (diff (range (dependents deps)) acc); len frontier]) =
-  match frontier with
-  | [] -> ()
-  | _ :: _ ->
-    let d = dependents deps in
-    let fresh = diff (next_of d frontier []) acc in
-    grow_measure d frontier acc;
-    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 (grow_step_closed deps frontier acc));
-    let aux (x:string) : Lemma (mem x acc ==> mem x (union acc fresh)) = mem_union x acc fresh in
-    FStar.Classical.forall_intro aux;
-    grow_closed deps fresh (union acc fresh)
+(* Closed under "reads" is closed under the dependents map: `dependents_edge`, read as sets. *)
+let closed_is_closed_by (deps:dmap) (s:list string)
+  : Lemma (closed deps s <==> closed_by (dependents deps) s) =
+  let e (r n:string) : Lemma (mem n (succ_of (dependents deps) r) == edge deps n r) = dependents_edge deps r n in
+  FStar.Classical.forall_intro_2 e
 
 (* The dirty set CONTAINS the change and is CLOSED under "reads". *)
 let dirty_closed (deps:dmap) (changed:list string)
   : Lemma (subset changed (dirty_from_changed_ids deps changed) /\
            closed deps (dirty_from_changed_ids deps changed)) =
-  grow_closed deps changed changed;
-  subset_intro changed (dirty_from_changed_ids deps changed)
+  reachable_closed (dependents deps) changed;
+  closed_is_closed_by deps (dirty_from_changed_ids deps changed)
 
 (* A read path out of `c`: the first id reads `c`, each next id reads the one before it. *)
 let rec downstream (deps:dmap) (c:string) (path:list string) : Tot bool (decreases path) =
@@ -418,52 +234,13 @@ let dirty_sound (deps:dmap) (changed:list string) (c:string) (path:list string)
   subset_mem changed (dirty_from_changed_ids deps changed) c;
   closed_downstream deps (dirty_from_changed_ids deps changed) c path
 
-let next_within (deps:dmap) (frontier s acc:list string) (x:string)
-  : Lemma (requires closed deps s /\ (forall (y:string). mem y frontier ==> mem y s) /\
-                    mem x (next_of (dependents deps) frontier acc) /\ not (mem x acc))
-          (ensures mem x s) =
-  let d = dependents deps in
-  next_mem d frontier acc x;
-  let rec walk (f:list string)
-    : Lemma (requires (forall (y:string). mem y f ==> mem y s) /\ any_dep d f x) (ensures mem x s) =
-    match f with
-    | [] -> ()
-    | node :: t -> if mem x (dependents_of d node) then dependents_edge deps node x else walk t
-  in
-  walk frontier
-
-let rec grow_within (deps:dmap) (frontier acc s:list string)
-  : Lemma (requires closed deps s /\ (forall (y:string). mem y frontier ==> mem y s) /\
-                    (forall (y:string). mem y acc ==> mem y s))
-          (ensures (forall (y:string). mem y (grow (dependents deps) frontier acc) ==> mem y s))
-          (decreases %[len (diff (range (dependents deps)) acc); len frontier]) =
-  match frontier with
-  | [] -> ()
-  | _ :: _ ->
-    let d = dependents deps in
-    let next = next_of d frontier [] in
-    let fresh = diff next acc in
-    grow_measure d frontier acc;
-    let fresh_in (y:string) : Lemma (mem y fresh ==> mem y s) =
-      mem_diff y next acc;
-      if mem y fresh then next_within deps frontier s [] y else ()
-    in
-    FStar.Classical.forall_intro fresh_in;
-    let acc_in (y:string) : Lemma (mem y (union acc fresh) ==> mem y s) = mem_union y acc fresh in
-    FStar.Classical.forall_intro acc_in;
-    grow_within deps fresh (union acc fresh) s
-
 (* THEOREM — dirty_least. The dirty set is MINIMAL: any set that holds the change and is closed
    under "reads" holds all of it. An id not reverse-reachable from a change is never dirty. *)
 let dirty_least (deps:dmap) (changed s:list string)
   : Lemma (requires subset changed s /\ closed deps s)
           (ensures subset (dirty_from_changed_ids deps changed) s) =
-  let aux (y:string) : Lemma (mem y changed ==> mem y s) =
-    if mem y changed then subset_mem changed s y else ()
-  in
-  FStar.Classical.forall_intro aux;
-  grow_within deps changed changed s;
-  subset_intro (dirty_from_changed_ids deps changed) s
+  closed_is_closed_by deps s;
+  reachable_least (dependents deps) changed s
 
 (* ======================================================================================
    3. The driver.
@@ -573,7 +350,7 @@ let walk (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (recomput
   go ev touches deps recompute prior topo.cycles [] topo.order
 
 (* F#: `eval` — `walk evalNode (fun _ -> true) Map.empty deps`. *)
-let eval (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (topo:topo_result)
+let eval_over (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
   walk ev touches deps always [] topo
 
@@ -584,7 +361,7 @@ let rec unknown_of (deps:dmap) (changed:list string) : Tot (list string) =
   | c :: t -> if has_key c deps then unknown_of deps t else c :: unknown_of deps t
 
 (* F#: `evalFrom`. *)
-let eval_from (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
+let eval_from_over (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
               (changed:list string) (deps:dmap) (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
   match unknown_of deps changed with
@@ -613,7 +390,7 @@ let rec go_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
      | Some p -> go_invoked ev touches deps recompute prior ((id, p) :: results) rest)
 
 (* What `evalFrom` evaluates: nothing on an unknown change, else the walk's invocations. *)
-let walk_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
+let walk_invoked_over (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
                  (changed:list string) (deps:dmap) (topo:topo_result)
   : Tot (list string) =
   match unknown_of deps changed with
@@ -813,7 +590,7 @@ let rec go_agree (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap
                         ((id, v0) :: r0) ((id, v0) :: r1) t
              end)))
 
-(* THEOREM — evalfrom_agrees. Incremental evaluation over the dirty set equals full evaluation,
+(* THEOREM — evalfrom_agrees_over. Incremental evaluation over the dirty set equals full evaluation,
    as a whole `Result`: the same values in the same order, the same cyclic groups, and under a
    failing evaluator the same `EvalNodeFailed` at the same node. `out0` is what the OLD full
    evaluation returned over the same order, `prior` its values or fewer (`prior_of`), and `ev1`
@@ -823,20 +600,20 @@ let evalfrom_agrees_on (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (dep
                        (topo:topo_result) (out0:eval_outcome v) (prior:list (string & v))
   : Lemma (requires agree_on ev0 ev1 changed topo.order /\ checks_on deps t0 t1 changed topo.order /\
                     distinct topo.order /\
-                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
+                    Nil? (unknown_of deps changed) /\ eval_over ev0 t0 deps topo == Ok out0 /\
                     prior_of prior out0.values)
-          (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
+          (ensures eval_from_over ev1 t1 prior changed deps topo == eval_over ev1 t1 deps topo) =
   dirty_closed deps changed;
   go_agree ev0 ev1 t0 t1 deps changed (dirty_from_changed_ids deps changed) topo.cycles out0 prior
            [] [] topo.order
 
-let evalfrom_agrees (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
+let evalfrom_agrees_over (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
                     (changed:list string)
                     (topo:topo_result) (out0:eval_outcome v) (prior:list (string & v))
   : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\ distinct topo.order /\
-                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
+                    Nil? (unknown_of deps changed) /\ eval_over ev0 t0 deps topo == Ok out0 /\
                     prior_of prior out0.values)
-          (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
+          (ensures eval_from_over ev1 t1 prior changed deps topo == eval_over ev1 t1 deps topo) =
   agree_off_on ev0 ev1 changed topo.order;
   touches_off_checks deps t0 t1 changed topo.order;
   evalfrom_agrees_on ev0 ev1 t0 t1 deps changed topo out0 prior
@@ -844,9 +621,9 @@ let evalfrom_agrees (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:d
 let evalfrom_agrees_exact (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
                           (changed:list string) (topo:topo_result) (out0:eval_outcome v)
   : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\ distinct topo.order /\
-                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0)
-          (ensures eval_from ev1 t1 out0.values changed deps topo == eval ev1 t1 deps topo) =
-  evalfrom_agrees ev0 ev1 t0 t1 deps changed topo out0 out0.values
+                    Nil? (unknown_of deps changed) /\ eval_over ev0 t0 deps topo == Ok out0)
+          (ensures eval_from_over ev1 t1 out0.values changed deps topo == eval_over ev1 t1 deps topo) =
+  evalfrom_agrees_over ev0 ev1 t0 t1 deps changed topo out0 out0.values
 
 (* ======================================================================================
    5b. The declared-reads refusal (Phase 209) — the premise `evalfrom_agrees` no longer carries,
@@ -871,7 +648,7 @@ let undeclared_refused (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:d
 let eval_refuses_undeclared (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
                             (topo:topo_result) (id r:string) (rest:list string)
   : Lemma (requires topo.order == id :: rest /\ first_undeclared deps id (touches id) == Some r)
-          (ensures eval ev touches deps topo == Error (EvalUndeclaredRead id r)) = ()
+          (ensures eval_over ev touches deps topo == Error (EvalUndeclaredRead id r)) = ()
 
 (* The incremental evaluator's reading, with the one qualifier production's doc comment states: the
    refusal is observed where the node is RECOMPUTED — dirty, or absent from `prior`. A violating
@@ -884,7 +661,7 @@ let evalfrom_refuses_undeclared (#v:Type) (ev:evaluator v) (touches:read_witness
   : Lemma (requires topo.order == id :: rest /\ Nil? (unknown_of deps changed) /\
                     first_undeclared deps id (touches id) == Some r /\
                     (mem id (dirty_from_changed_ids deps changed) \/ not (has_key id prior)))
-          (ensures eval_from ev touches prior changed deps topo == Error (EvalUndeclaredRead id r)) =
+          (ensures eval_from_over ev touches prior changed deps topo == Error (EvalUndeclaredRead id r)) =
   reuse_is_guard (in_set (dirty_from_changed_ids deps changed)) prior id
 
 (* THEOREM — ok_implies_declared. A full walk that returned `Ok` checked every node on the order, so
@@ -908,7 +685,7 @@ let rec ok_implies_declared (#v:Type) (ev:evaluator v) (touches:read_witness) (d
 
 let eval_ok_declared (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
                      (topo:topo_result) (out:eval_outcome v) (id:string)
-  : Lemma (requires eval ev touches deps topo == Ok out /\ mem id topo.order)
+  : Lemma (requires eval_over ev touches deps topo == Ok out /\ mem id topo.order)
           (ensures first_undeclared deps id (touches id) == None) =
   ok_implies_declared ev touches deps topo.cycles [] topo.order out id
 
@@ -955,8 +732,8 @@ let rec go_minimal (#v:Type) (ev ev':evaluator v) (touches:read_witness) (deps:d
 let evalfrom_minimal (#v:Type) (ev ev':evaluator v) (touches:read_witness) (prior:list (string & v))
                      (changed:list string) (deps:dmap) (topo:topo_result)
   : Lemma (requires agree_on_stale ev ev' (dirty_from_changed_ids deps changed) prior)
-          (ensures eval_from ev touches prior changed deps topo ==
-                   eval_from ev' touches prior changed deps topo) =
+          (ensures eval_from_over ev touches prior changed deps topo ==
+                   eval_from_over ev' touches prior changed deps topo) =
   match unknown_of deps changed with
   | _ :: _ -> ()
   | [] ->
@@ -987,7 +764,7 @@ let rec go_invoked_stale (#v:Type) (ev:evaluator v) (touches:read_witness) (deps
    among them, which is why the fact is stated over `go_invoked` and not over the values. *)
 let invoked_only_stale (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
                        (changed:list string) (deps:dmap) (topo:topo_result) (k:string)
-  : Lemma (requires mem k (walk_invoked ev touches prior changed deps topo))
+  : Lemma (requires mem k (walk_invoked_over ev touches prior changed deps topo))
           (ensures mem k topo.order /\
                    (mem k (dirty_from_changed_ids deps changed) || not (has_key k prior))) =
   match unknown_of deps changed with
@@ -1009,9 +786,9 @@ let evalfrom_unknown_refused (#v:Type) (ev ev':evaluator v) (t t':read_witness)
                              (prior:list (string & v)) (changed:list string)
                              (deps:dmap) (topo:topo_result) (c:string)
   : Lemma (requires mem c changed /\ not (has_key c deps))
-          (ensures eval_from ev t prior changed deps topo == Error (EvalUnknownChange (unknown_of deps changed)) /\
-                   eval_from ev' t' prior changed deps topo == eval_from ev t prior changed deps topo /\
-                   walk_invoked ev t prior changed deps topo == [] /\
+          (ensures eval_from_over ev t prior changed deps topo == Error (EvalUnknownChange (unknown_of deps changed)) /\
+                   eval_from_over ev' t' prior changed deps topo == eval_from_over ev t prior changed deps topo /\
+                   walk_invoked_over ev t prior changed deps topo == [] /\
                    mem c (unknown_of deps changed)) =
   unknown_exact deps changed c
 
@@ -1072,12 +849,12 @@ let walk_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap
   go_with evw touches deps recompute prior topo.cycles [] topo.order
 
 (* F#: `evalWith` — `walkWith evalNode (fun _ -> true) Map.empty deps`. *)
-let eval_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap) (topo:topo_result)
+let eval_with_over (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap) (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
   walk_with evw touches deps always [] topo
 
 (* F#: `evalFromWith` — `evalFrom`'s guard, then the prior-aware walk over the dirty set. *)
-let eval_from_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (prior:list (string & v))
+let eval_from_with_over (#v:Type) (evw:evaluator_with v) (touches:read_witness) (prior:list (string & v))
                    (changed:list string) (deps:dmap) (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
   match unknown_of deps changed with
@@ -1169,32 +946,32 @@ let rec prior_blind_empty (#v:Type) (evw:evaluator_with v) (touches:read_witness
 (* `evalWith` is `eval` of the prior-blind reading. *)
 let eval_with_is_blind (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
                        (topo:topo_result)
-  : Lemma (ensures eval_with evw touches deps topo == eval (blind evw) touches deps topo) =
+  : Lemma (ensures eval_with_over evw touches deps topo == eval_over (blind evw) touches deps topo) =
   prior_blind_empty evw touches deps always [] topo.order;
   go_with_blind evw touches deps always [] topo.cycles [] topo.order
 
 (* The two prior-blind entry points are the shared walk at `lift`: the refactor changed nothing. *)
 let eval_is_walk_with (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (topo:topo_result)
-  : Lemma (ensures eval_with (lift ev) touches deps topo == eval ev touches deps topo) =
+  : Lemma (ensures eval_with_over (lift ev) touches deps topo == eval_over ev touches deps topo) =
   go_with_lift ev touches deps always [] topo.cycles [] topo.order
 
-(* THEOREM — evalfromwith_agrees. `evalFromWith` over the dirty set equals `evalWith`, under
+(* THEOREM — evalfromwith_agrees_over. `evalFromWith` over the dirty set equals `evalWith`, under
    `evalfrom_agrees`' premises for the prior-blind readings of the old and the new evaluator
    (`evw0`, which produced `out0`, and `evw1`, the evaluator after the change) and the one premise
    the prior adds, `prior_blind_along` along the incremental walk. *)
-let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness) (deps:dmap)
+let evalfromwith_agrees_over (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness) (deps:dmap)
                         (changed:list string) (topo:topo_result) (out0:eval_outcome v)
                         (prior:list (string & v))
   : Lemma (requires agree_off (blind evw0) (blind evw1) changed /\ touches_off t0 t1 changed /\
                     distinct topo.order /\ Nil? (unknown_of deps changed) /\
-                    eval_with evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
+                    eval_with_over evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
                     prior_blind_along evw1 t1 deps (in_set (dirty_from_changed_ids deps changed))
                                       prior [] topo.order)
-          (ensures eval_from_with evw1 t1 prior changed deps topo == eval_with evw1 t1 deps topo) =
+          (ensures eval_from_with_over evw1 t1 prior changed deps topo == eval_with_over evw1 t1 deps topo) =
   eval_with_is_blind evw0 t0 deps topo;
   eval_with_is_blind evw1 t1 deps topo;
   go_with_blind evw1 t1 deps (in_set (dirty_from_changed_ids deps changed)) prior topo.cycles [] topo.order;
-  evalfrom_agrees (blind evw0) (blind evw1) t0 t1 deps changed topo out0 prior
+  evalfrom_agrees_over (blind evw0) (blind evw1) t0 t1 deps changed topo out0 prior
 
 (* ======================================================================================
    7. Pull: the needed set and demand-driven evaluation (Phase 317).
@@ -1202,14 +979,15 @@ let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witne
       F#: `neededFor`, `evalFor` / `evalForWith`, and the private `closureOver` /
       `restrictTopo` / `walkTopo` they run on. The DIRTY set closes a change set FORWARD over
       the dependents map; the NEEDED set closes a target set BACKWARD over the dependency map
-      itself — the same loop, `grow`, handed the other map. Production now shares that loop
-      (`closureOver`) exactly as the model always did.
+      itself — the same loop, `Relation.reachable`, handed the other map, as production's
+      `Relation.reachable` is handed the inverse for one and the map for the other (Phase 552).
 
       WHAT IS PROVED, over any dependency map and target set:
         - `needed_closed` / `needed_for_least` — the needed set holds the targets, is closed
           under "is read by a member" (every read of a member is a member), and is the LEAST
-          such set. Stated over `grow` at an ARBITRARY edge map (`closed_by`), so they are the
-          dirty set's `dirty_closed` / `dirty_least` read in the other direction.
+          such set. `Relation.reachable_closed` / `reachable_least` at the dependency map
+          (`closed_by`), so they are the dirty set's `dirty_closed` / `dirty_least` read in the
+          other direction.
         - `eval_for_agrees` — when the full evaluation `eval` succeeds, the demand-driven one
           over the SAME order restricted to the needed set succeeds with exactly its values on
           the needed set and exactly its cyclic groups that meet it. Its one premise is that the
@@ -1226,99 +1004,24 @@ let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witne
       does not — which is what pulling is for.
    ====================================================================================== *)
 
-(* A set closed under an edge map: every out-edge of a member lands on a member. Over the
-   dependency map that is "every read of a member is a member"; `closed` above is the same
-   relation over the dependents map, stated through `edge`. *)
-let closed_by (d:dmap) (s:list string) : Tot prop =
-  forall (n x:string). mem n s /\ mem x (dependents_of d n) ==> mem x s
-
-(* The loop invariant, for an arbitrary edge map: closed already, except at the frontier. *)
-let closed_by_except (d:dmap) (acc frontier:list string) : Tot prop =
-  forall (n x:string). mem n acc /\ not (mem n frontier) /\ mem x (dependents_of d n) ==> mem x acc
-
-let grow_step_closed_by (d:dmap) (frontier acc:list string) (n x:string)
-  : Lemma (requires closed_by_except d acc frontier)
-          (ensures (let fresh = diff (next_of d frontier []) acc in
-                    mem n (union acc fresh) /\ not (mem n fresh) /\ mem x (dependents_of d n) ==>
-                    mem x (union acc fresh))) =
-  let next = next_of d frontier [] in
-  let fresh = diff next acc in
-  mem_union n acc fresh;
-  mem_union x acc fresh;
-  mem_diff n next acc;
-  mem_diff x next acc;
-  next_mem d frontier [] x;
-  if mem n frontier && mem x (dependents_of d n) then any_dep_intro d frontier n x else ()
-
-let rec grow_closed_by (d:dmap) (frontier acc:list string)
-  : Lemma (requires closed_by_except d acc frontier)
-          (ensures closed_by d (grow d frontier acc) /\
-                   (forall (x:string). mem x acc ==> mem x (grow d frontier acc)))
-          (decreases %[len (diff (range d) acc); len frontier]) =
-  match frontier with
-  | [] -> ()
-  | _ :: _ ->
-    let fresh = diff (next_of d frontier []) acc in
-    grow_measure d frontier acc;
-    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 (grow_step_closed_by d frontier acc));
-    let aux (x:string) : Lemma (mem x acc ==> mem x (union acc fresh)) = mem_union x acc fresh in
-    FStar.Classical.forall_intro aux;
-    grow_closed_by d fresh (union acc fresh)
-
-let next_within_by (d:dmap) (frontier s acc:list string) (x:string)
-  : Lemma (requires closed_by d s /\ (forall (y:string). mem y frontier ==> mem y s) /\
-                    mem x (next_of d frontier acc) /\ not (mem x acc))
-          (ensures mem x s) =
-  next_mem d frontier acc x;
-  let rec walk (f:list string)
-    : Lemma (requires (forall (y:string). mem y f ==> mem y s) /\ any_dep d f x) (ensures mem x s) =
-    match f with
-    | [] -> ()
-    | node :: t -> if mem x (dependents_of d node) then () else walk t
-  in
-  walk frontier
-
-let rec grow_within_by (d:dmap) (frontier acc s:list string)
-  : Lemma (requires closed_by d s /\ (forall (y:string). mem y frontier ==> mem y s) /\
-                    (forall (y:string). mem y acc ==> mem y s))
-          (ensures (forall (y:string). mem y (grow d frontier acc) ==> mem y s))
-          (decreases %[len (diff (range d) acc); len frontier]) =
-  match frontier with
-  | [] -> ()
-  | _ :: _ ->
-    let next = next_of d frontier [] in
-    let fresh = diff next acc in
-    grow_measure d frontier acc;
-    let fresh_in (y:string) : Lemma (mem y fresh ==> mem y s) =
-      mem_diff y next acc;
-      if mem y fresh then next_within_by d frontier s [] y else ()
-    in
-    FStar.Classical.forall_intro fresh_in;
-    let acc_in (y:string) : Lemma (mem y (union acc fresh) ==> mem y s) = mem_union y acc fresh in
-    FStar.Classical.forall_intro acc_in;
-    grow_within_by d fresh (union acc fresh) s
-
-(* F#: `neededFor` — `closureOver deps targets`: the frontier loop over the dependency map. *)
+(* F#: `neededFor` — `Relation.reachable (Relation.ofMap deps) targets`: the closure over the
+   dependency map itself (Phase 552). `closed_by` — every out-edge of a member lands on a member
+   — is `Relation.fst`'s; over the dependency map that is "every read of a member is a member",
+   and `closed` above is the same relation over the dependents map, stated through `edge`. *)
 let needed_for (deps:dmap) (targets:list string) : Tot (list string) =
-  grow deps targets targets
+  reachable deps targets
 
 (* The needed set HOLDS the targets and is CLOSED under reads. *)
 let needed_closed (deps:dmap) (targets:list string)
   : Lemma (subset targets (needed_for deps targets) /\ closed_by deps (needed_for deps targets)) =
-  grow_closed_by deps targets targets;
-  subset_intro targets (needed_for deps targets)
+  reachable_closed deps targets
 
 (* THEOREM — needed_for_least. The needed set is the least set that holds the targets and is
    closed under reads: an id no target reads, directly or through another, is never needed. *)
 let needed_for_least (deps:dmap) (targets s:list string)
   : Lemma (requires subset targets s /\ closed_by deps s)
           (ensures subset (needed_for deps targets) s) =
-  let aux (y:string) : Lemma (mem y targets ==> mem y s) =
-    if mem y targets then subset_mem targets s y else ()
-  in
-  FStar.Classical.forall_intro aux;
-  grow_within_by deps targets targets s;
-  subset_intro (needed_for deps targets) s
+  reachable_least deps targets s
 
 (* F#: `List.filter (fun id -> Set.contains id needed)` over `Order`. *)
 let rec keep (s:list string) (l:list string) : Tot (list string) =
@@ -1349,19 +1052,19 @@ let rec keep_values (#v:Type) (s:list string) (l:list (string & v)) : Tot (list 
   | (k, x) :: t -> if mem k s then (k, x) :: keep_values s t else keep_values s t
 
 (* F#: `evalForWith` — the prior-aware walk, handed no prior, over the restricted order. *)
-let eval_for_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
+let eval_for_with_over (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
                   (deps:dmap) (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
   walk_with evw touches deps always [] (restrict_topo (needed_for deps targets) topo)
 
 (* F#: `evalFor` — `evalForWith` over the evaluator that ignores its prior. *)
-let eval_for (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string) (deps:dmap)
+let eval_for_over (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string) (deps:dmap)
              (topo:topo_result)
   : Tot (outcome (eval_outcome v) propagation_error) =
-  eval_for_with (lift ev) touches targets deps topo
+  eval_for_with_over (lift ev) touches targets deps topo
 
 (* What `evalFor` evaluates: the walk's invocations over the restricted order. *)
-let walk_for_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
+let walk_for_invoked_over (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
                      (deps:dmap) (topo:topo_result)
   : Tot (list string) =
   go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)
@@ -1412,9 +1115,9 @@ let rec go_restrict (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap
    succeeds with its values on the needed set and its cyclic groups that meet the needed set. *)
 let eval_for_agrees (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
                     (deps:dmap) (topo:topo_result) (out:eval_outcome v)
-  : Lemma (requires eval ev touches deps topo == Ok out)
+  : Lemma (requires eval_over ev touches deps topo == Ok out)
           (ensures (let s = needed_for deps targets in
-                    eval_for ev touches targets deps topo ==
+                    eval_for_over ev touches targets deps topo ==
                       Ok ({ values = keep_values s out.values; cyclic = keep_groups s topo.cycles }))) =
   let s = needed_for deps targets in
   needed_closed deps targets;
@@ -1425,9 +1128,9 @@ let eval_for_agrees (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:l
    prior, so it is the prior-blind reading's demand-driven walk, and that reading's agreement. *)
 let eval_for_with_agrees (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
                          (deps:dmap) (topo:topo_result) (out:eval_outcome v)
-  : Lemma (requires eval_with evw touches deps topo == Ok out)
+  : Lemma (requires eval_with_over evw touches deps topo == Ok out)
           (ensures (let s = needed_for deps targets in
-                    eval_for_with evw touches targets deps topo ==
+                    eval_for_with_over evw touches targets deps topo ==
                       Ok ({ values = keep_values s out.values; cyclic = keep_groups s topo.cycles }))) =
   let s = needed_for deps targets in
   eval_with_is_blind evw touches deps topo;
@@ -1463,7 +1166,7 @@ let rec mem_keep (s l:list string) (x:string) : Lemma (mem x (keep s l) ==> mem 
    needed: nothing outside the needed set is evaluated. *)
 let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
                             (deps:dmap) (topo:topo_result) (x:string)
-  : Lemma (ensures mem x (walk_for_invoked ev touches targets deps topo) ==> mem x (needed_for deps targets)) =
+  : Lemma (ensures mem x (walk_for_invoked_over ev touches targets deps topo) ==> mem x (needed_for deps targets)) =
   let s = needed_for deps targets in
   go_invoked_within ev touches deps always [] [] (keep s topo.order) x;
   mem_keep s topo.order x
@@ -1471,12 +1174,12 @@ let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (t
 (* ======================================================================================
    8. The order by CERTIFICATE (Phase 308) — `Propagation.validTopo`, clause for clause.
 
-   `sort` stays outside the model: it is Tarjan's algorithm over mutable dictionaries and a stack.
-   What this section models is the CHECKER production holds its result to — a function the model
-   can state exactly — and it proves that an order the checker accepts discharges the one premise
-   the agreement theorems take of the walked order. So the order bridge narrows from "Tarjan's
-   output holds no id twice", which nothing proved, to "Tarjan's output passes `validTopo`", which
-   the differential checks on every graph it draws, with the checker's own meaning proved here.
+   What this section models is the CHECKER production holds `sort`'s result to — a function the
+   model can state exactly — and it proves that an order the checker accepts discharges the one
+   premise the `_over` agreement theorems take of the walked order. Since Phase 553 `sort` is in
+   the model too (section 9) and that premise is a theorem of it; the checker stays, because its
+   third clause — dependencies-first — is what `Relation.fst` states and does not prove, and the
+   differential holds `sort`'s result to it on every graph it draws.
 
    The checker's third clause — every read of an `Order` id that the map holds appears earlier, or
    lies in a cycle — is what makes the walk's values MEAN something (an acyclic read is computed
@@ -1484,21 +1187,6 @@ let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (t
    order, as section 5 says. It is modelled so the extracted checker is production's, clause for
    clause, and the differential can hold the two to each other.
    ====================================================================================== *)
-
-(* F#: `topo.Cycles |> List.concat`. *)
-let rec concat_all (gs:list (list string)) : Tot (list string) =
-  match gs with
-  | [] -> []
-  | g :: r -> app g (concat_all r)
-
-(* F#: `deps |> Map.toList |> List.map fst`. *)
-let rec keys (d:dmap) : Tot (list string) =
-  match d with
-  | [] -> []
-  | (k, _) :: r -> k :: keys r
-
-(* F#: `Set.ofList all <> keys`, negated — two lists hold the same ids. *)
-let same_set (a b:list string) : Tot bool = subset a b && subset b a
 
 (* F#: the `Set.forall` over one node's reads — each is not held by the map, already walked, or
    cyclic. *)
@@ -1516,21 +1204,15 @@ let rec ordered (deps:dmap) (cyc seen order:list string) : Tot bool (decreases o
 (* F#: `Propagation.validTopo`. The F# measures distinctness as `List.distinct` keeping the length,
    which is `distinct` here. *)
 let valid_topo (deps:dmap) (topo:topo_result) : Tot bool =
-  let cyc = concat_all topo.cycles in
+  let cyc = concat topo.cycles in
   let all = app topo.order cyc in
   distinct all && same_set all (keys deps) && ordered deps cyc [] topo.order
-
-let rec distinct_app_left (a b:list string)
-  : Lemma (requires distinct (app a b)) (ensures distinct a) (decreases a) =
-  match a with
-  | [] -> ()
-  | h :: t -> mem_app h t b; distinct_app_left t b
 
 (* THEOREM — valid_topo_distinct. An order the checker accepts holds no id twice: the premise
    `evalfrom_agrees`, `evalfromwith_agrees` and the pull theorems take of the walked order. *)
 let valid_topo_distinct (deps:dmap) (topo:topo_result)
   : Lemma (requires valid_topo deps topo) (ensures distinct topo.order) =
-  distinct_app_left topo.order (concat_all topo.cycles)
+  distinct_app_left topo.order (concat topo.cycles)
 
 (* THEOREM — evalfrom_agrees_certified. The agreement theorem with its order premise replaced by
    the certificate: whatever produced the order, if `validTopo` accepts it the incremental walk
@@ -1539,11 +1221,11 @@ let evalfrom_agrees_certified (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witnes
                               (changed:list string) (topo:topo_result) (out0:eval_outcome v)
                               (prior:list (string & v))
   : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\ valid_topo deps topo /\
-                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
+                    Nil? (unknown_of deps changed) /\ eval_over ev0 t0 deps topo == Ok out0 /\
                     prior_of prior out0.values)
-          (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
+          (ensures eval_from_over ev1 t1 prior changed deps topo == eval_over ev1 t1 deps topo) =
   valid_topo_distinct deps topo;
-  evalfrom_agrees ev0 ev1 t0 t1 deps changed topo out0 prior
+  evalfrom_agrees_over ev0 ev1 t0 t1 deps changed topo out0 prior
 
 (* THEOREM — evalfromwith_agrees_certified. The prior-aware reading, the same substitution. *)
 let evalfromwith_agrees_certified (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness)
@@ -1551,12 +1233,183 @@ let evalfromwith_agrees_certified (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:
                                   (out0:eval_outcome v) (prior:list (string & v))
   : Lemma (requires agree_off (blind evw0) (blind evw1) changed /\ touches_off t0 t1 changed /\
                     valid_topo deps topo /\ Nil? (unknown_of deps changed) /\
-                    eval_with evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
+                    eval_with_over evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
                     prior_blind_along evw1 t1 deps (in_set (dirty_from_changed_ids deps changed))
                                       prior [] topo.order)
-          (ensures eval_from_with evw1 t1 prior changed deps topo == eval_with evw1 t1 deps topo) =
+          (ensures eval_from_with_over evw1 t1 prior changed deps topo == eval_with_over evw1 t1 deps topo) =
   valid_topo_distinct deps topo;
-  evalfromwith_agrees evw0 evw1 t0 t1 deps changed topo out0 prior
+  evalfromwith_agrees_over evw0 evw1 t0 t1 deps changed topo out0 prior
+
+
+(* ======================================================================================
+   9. The order, COMPUTED (Phase 553) — `Propagation.sort`, clause for clause, and the driver's
+      entry points at production's signature.
+
+      F#: `sort deps = Relation.ofMap known |> Relation.sort`, `known` the map with every read
+      the map does not hold removed ("they were never nodes: an edge to an id the map does not
+      hold is a validator defect, not a cycle", D205), read into `TopoResult`. `Relation.ofMap`
+      prepares the keys ascending with their reads ascending; the model's `Relation.sort` visits
+      the list as given, and the differential hands it the same ascending form, so the two orders
+      are one order (`Proofs.Oracle`, the certificate case).
+
+      WHAT IS PROVED. `sort_distinct`: `Order` holds no id twice — the premise every `_over`
+      agreement theorem took of the walked order, now a theorem, so `evalfrom_agrees` and
+      `evalfromwith_agrees` below carry none. `sort_same_set`: `Order` and the cycles' members
+      together are exactly the map's keys. Those are `validTopo`'s first two clauses.
+
+      WHAT IS NOT CLAIMED. The checker's third clause — every read of an `Order` id that the map
+      holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst`
+      states (`deps_first`) and does not prove; the differential holds `sort` to it.
+   ====================================================================================== *)
+
+(* F#: `reads |> Set.filter (fun d -> Map.containsKey d deps)`. *)
+let rec known_reads (deps:dmap) (rs:list string) : Tot (list string) =
+  match rs with
+  | [] -> []
+  | r :: t -> if has_key r deps then r :: known_reads deps t else known_reads deps t
+
+(* F#: `deps |> Map.map (fun _ reads -> ...)` — every entry's reads filtered against `all`. *)
+let rec known_of (deps all:dmap) : Tot dmap =
+  match deps with
+  | [] -> []
+  | (k, rs) :: t -> (k, known_reads all rs) :: known_of t all
+
+(* F#: `known`. *)
+let known (deps:dmap) : Tot dmap = known_of deps deps
+
+(* F#: `Propagation.sort`. *)
+let sort (deps:dmap) : Tot topo_result =
+  let t = Relation.sort (known deps) in
+  { order = t.torder; cycles = t.tcycles }
+
+(* THEOREM — sort_distinct. `Order` holds no id twice: `Relation.sort_order_distinct` at the
+   known map. The premise `propagation-order-distinct` assumed until Phase 553. *)
+let sort_distinct (deps:dmap) : Lemma (distinct (sort deps).order) =
+  sort_order_distinct (known deps)
+
+let rec keys_known_of (deps all:dmap) : Lemma (keys (known_of deps all) == keys deps) =
+  match deps with
+  | [] -> ()
+  | _ :: t -> keys_known_of t all
+
+let rec known_reads_held (all:dmap) (rs:list string) (x:string)
+  : Lemma (requires mem x (known_reads all rs)) (ensures has_key x all) =
+  match rs with
+  | [] -> ()
+  | r :: t -> if x = r && has_key r all then () else known_reads_held all t x
+
+let rec range_known_of (deps all:dmap) (x:string)
+  : Lemma (requires mem x (range (known_of deps all))) (ensures has_key x all) =
+  match deps with
+  | [] -> ()
+  | (k, rs) :: t ->
+    mem_app x (known_reads all rs) (range (known_of t all));
+    if mem x (known_reads all rs) then known_reads_held all rs x else range_known_of t all x
+
+(* The known map's nodes are the map's keys: a read it keeps is a key, and the keys are kept. *)
+let nodes_known (deps:dmap) : Lemma (same_set (nodes (known deps)) (keys deps)) =
+  let k = known deps in
+  keys_known_of deps deps;
+  let a1 (x:string) : Lemma (mem x (nodes k) ==> mem x (keys deps)) =
+    mem_nub x (app (keys k) (range k));
+    mem_app x (keys k) (range k);
+    if mem x (range k) then begin range_known_of deps deps x; has_key_keys x deps end
+  in
+  let a2 (x:string) : Lemma (mem x (keys deps) ==> mem x (nodes k)) =
+    mem_nub x (app (keys k) (range k));
+    mem_app x (keys k) (range k)
+  in
+  FStar.Classical.forall_intro a1;
+  FStar.Classical.forall_intro a2;
+  subset_intro (nodes k) (keys deps);
+  subset_intro (keys deps) (nodes k)
+
+(* THEOREM — sort_same_set. `Order` and the cycles' members, together, are exactly the map's
+   keys, each once: `validTopo`'s second clause, off `Relation.sort_partition`. *)
+let sort_same_set (deps:dmap)
+  : Lemma (same_set (app (sort deps).order (concat (sort deps).cycles)) (keys deps)) =
+  let k = known deps in
+  sort_partition k;
+  nodes_known deps;
+  let all = app (sort deps).order (concat (sort deps).cycles) in
+  let a1 (x:string) : Lemma (mem x all ==> mem x (keys deps)) =
+    if mem x all then begin subset_mem all (nodes k) x; subset_mem (nodes k) (keys deps) x end
+  in
+  let a2 (x:string) : Lemma (mem x (keys deps) ==> mem x all) =
+    if mem x (keys deps) then begin subset_mem (keys deps) (nodes k) x; subset_mem (nodes k) all x end
+  in
+  FStar.Classical.forall_intro a1;
+  FStar.Classical.forall_intro a2;
+  subset_intro all (keys deps);
+  subset_intro (keys deps) all
+
+(* F#: `eval` — the walk over `sort deps`. *)
+let eval (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_over ev touches deps (sort deps)
+
+(* F#: `evalFrom`. *)
+let eval_from (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
+              (changed:list string) (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_from_over ev touches prior changed deps (sort deps)
+
+(* What `evalFrom` evaluates, in order. *)
+let walk_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (prior:list (string & v))
+                 (changed:list string) (deps:dmap)
+  : Tot (list string) =
+  walk_invoked_over ev touches prior changed deps (sort deps)
+
+(* F#: `evalWith`. *)
+let eval_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_with_over evw touches deps (sort deps)
+
+(* F#: `evalFromWith`. *)
+let eval_from_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (prior:list (string & v))
+                   (changed:list string) (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_from_with_over evw touches prior changed deps (sort deps)
+
+(* F#: `evalForWith`. *)
+let eval_for_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
+                  (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_for_with_over evw touches targets deps (sort deps)
+
+(* F#: `evalFor`. *)
+let eval_for (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string) (deps:dmap)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_for_over ev touches targets deps (sort deps)
+
+(* What `evalFor` evaluates. *)
+let walk_for_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
+                     (deps:dmap)
+  : Tot (list string) =
+  walk_for_invoked_over ev touches targets deps (sort deps)
+
+(* THEOREM — evalfrom_agrees. `evalFrom` over the dirty set equals `eval`, under the evaluator
+   contract alone: the order premise `evalfrom_agrees_over` takes is `sort_distinct`. *)
+let evalfrom_agrees (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
+                    (changed:list string) (out0:eval_outcome v) (prior:list (string & v))
+  : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\
+                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps == Ok out0 /\
+                    prior_of prior out0.values)
+          (ensures eval_from ev1 t1 prior changed deps == eval ev1 t1 deps) =
+  sort_distinct deps;
+  evalfrom_agrees_over ev0 ev1 t0 t1 deps changed (sort deps) out0 prior
+
+(* THEOREM — evalfromwith_agrees. The prior-aware reading, the same discharge. *)
+let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness) (deps:dmap)
+                        (changed:list string) (out0:eval_outcome v) (prior:list (string & v))
+  : Lemma (requires agree_off (blind evw0) (blind evw1) changed /\ touches_off t0 t1 changed /\
+                    Nil? (unknown_of deps changed) /\ eval_with evw0 t0 deps == Ok out0 /\
+                    prior_of prior out0.values /\
+                    prior_blind_along evw1 t1 deps (in_set (dirty_from_changed_ids deps changed))
+                                      prior [] (sort deps).order)
+          (ensures eval_from_with evw1 t1 prior changed deps == eval_with evw1 t1 deps) =
+  sort_distinct deps;
+  evalfromwith_agrees_over evw0 evw1 t0 t1 deps changed (sort deps) out0 prior
 
 (* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
@@ -1575,6 +1428,9 @@ let twins : list twin = [
   { tname = "the-certificate-accepts-a-dependency-order";
     tholds = (fun () -> valid_topo twin_deps ({ order = [ "b"; "c" ]; cycles = [] }) = true) };
   { tname = "the-certificate-refuses-a-reader-before-its-read";
-    tholds = (fun () -> valid_topo twin_deps ({ order = [ "c"; "b" ]; cycles = [] }) = false) } ]
+    tholds = (fun () -> valid_topo twin_deps ({ order = [ "c"; "b" ]; cycles = [] }) = false) };
+  { tname = "sort-computes-the-dependency-order-and-drops-a-dangling-read";
+    tholds = (fun () -> sort twin_deps = ({ order = [ "b"; "c" ]; cycles = [] }) &&
+                     known twin_deps = [ ("b", []); ("c", [ "b" ]) ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)

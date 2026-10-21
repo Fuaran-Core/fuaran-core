@@ -3063,7 +3063,7 @@ let subsumes : feed_readers  ->  readers  ->  value_space  ->  value_space  ->  
      (all_len_in rd rl rh xs)
      end
 | (Enum (rs), Enum (xs)) -> begin
-     (Propagation.subset xs rs)
+     (Relation.subset xs rs)
      end
 | (AnyString, a) -> begin
      (not ((match (a) with
@@ -3593,7 +3593,7 @@ let rec ordered : Prims.list<Prims.string>  ->  Prims.list<pipeline_node>  ->  P
      true
      end
 | (n)::rest -> begin
-     (((not ((ListAlgebra.mem (node_id n) earlier))) && (Propagation.subset (upstreams n) earlier)) && (ordered (ListAlgebra.app earlier (((node_id n))::[])) rest))
+     (((not ((ListAlgebra.mem (node_id n) earlier))) && (Relation.subset (upstreams n) earlier)) && (ordered (ListAlgebra.app earlier (((node_id n))::[])) rest))
      end))
 
 type jval =

@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 377 claims — 272 proved across 36 models, 62 tested, 41 assumed (9 `domain-obligation`, 26 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 383 claims — 277 proved across 37 models, 64 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -59,7 +59,7 @@ grouped by model, are "The models" below.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 41 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 40 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -75,7 +75,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**:
   `permanent` where nothing could close it, and `unscheduled` where something could and nobody has
-  (no schedule is kept here, so a phase is not a value). 26 rows.
+  (no schedule is kept here, so a phase is not a value). 25 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -115,7 +115,6 @@ the `Proofs.Ladder` family holds them); edit the ladder, never these.
 | `canon-character-bridge` | `model-bridge` | `permanent` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
 | `capability-key-renderers-abstract` | `model-bridge` | `permanent` |
-| `propagation-order-distinct` | `model-bridge` | `unscheduled` |
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLawsAt` |
 | `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationPriorLawsAt` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
@@ -382,15 +381,15 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.OpStream.Dag` | 87 | 38 | 26 | 0 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Ops` | 56 | 21 | 12 | 14 | 0 | 0 | 0 | 9 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
-| `Fuaran.Core.Propagation` | 27 | 7 | 6 | 0 | 0 | 0 | 0 | 14 |
+| `Fuaran.Core.Propagation` | 27 | 8 | 5 | 0 | 0 | 0 | 0 | 14 |
 | `Fuaran.Core.Query` | 57 | 23 | 19 | 0 | 0 | 0 | 0 | 15 |
-| `Fuaran.Core.Relation` | 11 | 0 | 0 | 0 | 0 | 0 | 0 | 11 |
+| `Fuaran.Core.Relation` | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Text` | 30 | 5 | 2 | 1 | 2 | 0 | 0 | 20 |
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Wire` | 141 | 64 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1280 | 305 | 420 | 38 | 15 | 0 | 3 | 499 |
+| **Total** | 1280 | 317 | 419 | 38 | 15 | 0 | 3 | 488 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -2852,9 +2851,82 @@ this module's theorems compose with those, and where they stop.
 
 **Inherited through the models it opens:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
+### `Relation`
+
+[`Relation.fst`](Relation.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`.
+
+> Relation — questions over a FINITE relation, answered once and totally: `Fuaran.Core.Relation`
+> (fuaran-core Phase 552) modelled clause for clause, its specification stated concretely over a
+> finite edge list, and what Tarjan's pass is proved to emit — the piece `Propagation.fst` took as
+> a PARAMETER until Phase 553 (fuaran-core Phase 553).
+
+**What is modelled.** `src/Fuaran.Core.Relation/Relation.fs` — the PREPARED relation and every
+question asked of it:
+
+- the relation itself: `succ_of` (`Relation.successors`), `nodes` (`Relation.nodes`),
+`inverse` (`Relation.inverse`);
+- the PASS: Tarjan's strongly-connected-components pass (`pass`), written as the recursive
+visit production's explicit frame stack replays "exactly — successors in ascending order, a
+child's low-link folded into its parent's when the child's frame finishes, a component
+emitted when its root's frame does" (its doc comment), so the components, their order and
+the order of each one's members are the F#'s, item for item; and what reads it:
+`components`, `cycles`, `cycles_among`, `sort` (`Relation.sort`, a `topo`) and `terminals`;
+- the CLOSURE: `reachable` (`Relation.reachable`) — the frontier loop `grow`, which
+`Propagation.fst` carried as the private `grow` of `dirtyFromChangedIds` until this phase and
+now opens from here, as production's `Propagation` delegates both closures to
+`Relation.reachable` (Phase 552).
+
+**Proved** (4)
+
+- <a id="row-relation-components-partition"></a>**`relation-components-partition`** — `components_partition` · fuaran-core#553
+
+  The components `Relation.components` emits PARTITION the nodes: no id in two of them, every node of the relation in one, nothing that is not a node, and no component empty — stated of the model's `pass`, Tarjan's algorithm written as the recursive visit production's explicit frame stack replays, over a state of association lists, with its seven-clause invariant (`inv`: the stack and the found components hold no id twice between them; visited is stack-or-found; a visited id is a node; every index is below `next`; a low-link is at most its index; every id on the stack has its low-link at or above the ROOT's index; no found component is empty) carried in the visit's `Pure` postconditions and the root loop proved to leave the stack empty.
+
+  _With:_ `visit`, `roots`, `inv`, `inv_enter`, `inv_set_low`, `inv_pop`, `distinct_move`.
+
+  _Boundary:_ The relation is the PREPARED form — nodes in the list's order with their successor lists; the model sorts nothing — and the differential hands it `Relation.toMap`, so production's ascending visit is the model's visit. Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). That a component is a mutual-reachability class, and that the components come dependencies-first, is NOT this row: see `relation-components-are-sccs`.
+
+- <a id="row-relation-sort-partition"></a>**`relation-sort-partition`** — `sort_partition` · fuaran-core#553
+
+  `Relation.sort` reads each component once — a singleton with no self-edge into `Order`, every other component into `Cycles` — so `Order` holds no id twice (`sort_order_distinct`) and `Order` with the cycles' members is exactly the node set, each once: the first two clauses of `Propagation.validTopo` as theorems of the pass, and the one premise `Propagation.fst`'s agreement theorems take of the walked order, discharged.
+
+  _With:_ `sort_order_distinct`, `sort_reads_each_mem`, `sort_reads_each_distinct`, `components_partition`.
+
+  _Boundary:_ Over the prepared form, as `relation-components-partition`. The checker's third clause — dependencies-first — is `relation-components-are-sccs`'s, sampled.
+
+- <a id="row-relation-reachable-least"></a>**`relation-reachable-least`** — `reachable_least` · fuaran-core#553
+
+  `Relation.reachable` is the LEAST closed superset of its sources: it holds them, every successor of a member is a member (`reachable_closed`), and any set with both properties holds all of it — so a node no source reaches is never in it. The frontier loop is the one `Propagation.fst` carried as the private `grow` of `dirtyFromChangedIds` and `neededFor`, now opened from here as production's `Propagation` delegates both closures to `Relation.reachable`; `dirty_least` and `needed_for_least` are its instances at the dependents map and the dependency map.
+
+  _With:_ `reachable_closed`, `grow`, `grow_measure`, `grow_closed_by`, `grow_within_by`.
+
+  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). Membership only: the list the loop answers is in frontier order, and the differential compares it as a set.
+
+- <a id="row-relation-inverse-edge"></a>**`relation-inverse-edge`** — `inverse_edge` · fuaran-core#553
+
+  `Relation.inverse` turns every edge round and adds none: `a` is a successor of `b` in the inverse exactly when `b` is a successor of `a` in the relation, over the nodes; a name that is no node has no successors in either.
+
+  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). The order of each node's predecessors is the node list's, which the differential compares as a set.
+
+**Tested** (2)
+
+- <a id="row-relation-components-are-sccs"></a>**`relation-components-are-sccs`** — `Proofs.Oracle`, 2 cases · fuaran-core#553
+
+  THE SPECIFICATION OF THE PASS, stated concretely in the model over the edge list and held on every drawn relation: two nodes share a component exactly when each reaches the other (`mutual`); the components come dependencies-first — every successor of a member lies in its own component or an earlier one (`deps_first`); `cyclesAmong` is exactly the nodes that reach themselves by one edge or more (`cycles_among_spec`); and `terminals` is its chain definition — the sinks a node reaches, or `None` when it reaches a cycle, a name that is no node ending at itself (`terminals_spec`). Each is a function the model defines from `reachable`, so the statement is checkable and the differential checks it THREE ways: production's answers against the extracted pass item for item, and both against the extracted specification.
+
+  _Boundary:_ Sampled, not proved. The step from Tarjan's pass to these statements is Tarjan's correctness theorem — the low-link invariant that a popped stack segment is exactly one strongly-connected component, and the DFS finish-order argument that components are emitted dependencies-first — which the model states and does not prove; what IS proved of the pass is `relation-components-partition` and `relation-sort-partition`, which no agreement theorem needs more than. Closable by proving it over `visit`'s invariant; until then the row stands on the 400 seeded relations and the dense diamond, and on the go-red: dropping the on-stack low-link update in the extracted pass turned 767 comparisons red across the 400 relations and 4 on the diamond (recorded in DECISIONS.md D208).
+
+- <a id="row-relation-differential"></a>**`relation-differential`** — `Proofs.Oracle`, 3 cases · fuaran-core#553
+
+  The extracted model agrees with the shipped `Relation.components`, `cycles`, `cyclesAmong`, `sort`, `reachable`, `inverse`, `terminals`, `nodes` and `successors` — the pass's order among components and each component's member order included, so the sort and the components are compared item for item — over 400 seeded random relations (one to fourteen keyed nodes, successors outside the keys, repeated successors, self-edges; the closure from one to three drawn sources, one draw in eight an outside name; every node's chain end and an outside name's), and over the dense diamond (40 layers, 4 wide) with and without its back edge. The bridge is `Relation.toMap` read as ascending keys with ascending successor lists, the form the model's list-order visit is production's ascending visit over. The go-red hands the model a bridge that loses every node's last successor and requires the components to differ, in the agreement's own pass.
+
+  _Boundary:_ Agreement is over the pools drawn, never over all inputs. The 200,000-node chain and ring `RelationTests` hold production to are not drawn here: the model's association lists make it quadratic, and the regression they guard — the explicit frame stack against the call stack — is production's, held by that family.
+
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
+
 ### `Propagation`
 
-[`Propagation.fst`](Propagation.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`.
+[`Propagation.fst`](Propagation.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `Relation`.
 
 > Propagation — incremental evaluation agrees with full evaluation: the compute strand's
 > promise, `Fuaran.Core.Propagation`, modelled clause for clause and proved
@@ -2870,16 +2942,20 @@ private frontier loop `grow` (its alias `staleSet` left at `1.0.0`, Phase 391);
 reference evaluator `eval`, and the incremental `evalFrom` with its unknown-change guard —
 including the RESTRICTED resolver and its `EvalUndeclaredRead` refusal (Phase 209).
 
-THREE things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a
+TWO things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a
 parameter, Phase 176 the pipeline evaluator and Phase 177 the witness. The NODE EVALUATOR
 (`evalNode : (string -> 'v option) -> string -> Result<'v, string>`) is a function over an
 abstract value type: Core owns no evaluator, and nothing here says what a domain computes.
-The ORDER the driver walks is a `topo_result` handed in where production computes
-`sort deps`: `sort` is Tarjan's algorithm over mutable dictionaries, the model does not
-restate it, and the ONE fact about its output the agreement theorem needs — `Order` holds no
-id twice — is a hypothesis of that theorem, a ladder row (`propagation-order-distinct`), and
-a check the differential makes on every generated graph, cyclic ones included.
-And the READS THE EVALUATOR ACTUALLY MAKES are a `read_witness` handed in where production
+The ORDER the driver walks is COMPUTED, as production computes it (Phase 553): `sort deps`
+is `Relation.sort` over the map with its dangling reads removed — `Relation.fst`'s functional
+Tarjan pass — read into a `topo_result` as production reads `Relation.Topo` into
+`TopoResult`. The one fact about it the agreement theorems need, that `Order` holds no id
+twice, is a THEOREM (`sort_distinct`, off `Relation.sort_order_distinct`), so `evalfrom_agrees`
+and `evalfromwith_agrees` carry no order premise; the walk over an ARBITRARY order is kept
+beside them as `eval_over` and the `_over` family, because that is the stronger statement and
+the certificate section (8) is stated over it. Until this phase the order was the model's third
+parameter and that fact a ladder row's assumption.
+The READS THE EVALUATOR ACTUALLY MAKES are a `read_witness` handed in where production
 OBSERVES them: production's resolver is instrumented and records the ids it was asked for, an
 effect a `Tot` function cannot have, so the model takes the observation as given exactly as it
 takes the order. That parameter is what lets the model carry Phase 209's refusal instead of
@@ -2887,7 +2963,7 @@ modelling a driver production no longer has (`propagation-read-witness`).
 `dependencyMap`, `cycleThrough`, `touchedBy` and `dirtyFromOp` are outside the model: they
 build a dependency map or a change set from a tree, and the theorems start from both.
 
-**Proved** (13)
+**Proved** (14)
 
 - <a id="row-propagation-dirty-sound"></a>**`propagation-dirty-sound`** — `dirty_sound` · fuaran-core#186
 
@@ -2905,15 +2981,17 @@ build a dependency map or a change set from a tree, and the theorems start from 
 
   Incremental evaluation agrees with full evaluation. `evalFrom ev1 prior changed deps` equals `eval ev1 deps` as a whole `Result` — the same values in the same order, the same cyclic groups, and under a failing evaluator the SAME `EvalNodeFailed` at the same node — for any value type, any dependency map and any TOTAL evaluator, one that returns, `Ok` or `Error`, at every node it is handed. No declared-reads premise is needed: the driver builds the resolver FROM the node's declared reads, so two result maps that agree on those reads hand the evaluator the same argument and it answers alike (`lookups_eq`, `resolver_eq`). Agreement holds over ANY duplicate-free order; `evalfrom_agrees_exact` is the reading with no hole.
 
-  _With:_ `go_agree`.
+  _With:_ `evalfrom_agrees_over`, `go_agree`, `sort_distinct`.
 
-  _Boundary:_ An evaluator that throws is outside the model, whose evaluator is a total function, and the driver does not catch (`propagation-evaluator-total`). The premises: `prior` holds the values `eval ev0` returned over the same map, or fewer (`prior_of` — a hole is recomputed, as production says); `changed` names every id on which `ev1` differs from `ev0` (`agree_off`) and every id whose READS differ (`touches_off`, the same premise's other half, load-bearing only at a clean node the incremental walk reuses without checking), and every changed id is known; and the walked order holds no id twice. These are `propagation-change-set-and-prior` and `propagation-order-distinct`. NOT among the premises: that the order is a dependency order — a dependency order is what makes the values mean something, not what makes the two paths agree. The duplicate-free premise is load-bearing, measured by deleting it: without it the prover refuses `go_agree` at the step that reads a prior value back, because an id walked twice has its prior written at its first occurrence, where the full walk writes a value computed from fewer resolved reads.
+  _Boundary:_ Stated at the order `sort` computes: the walk over an ARBITRARY duplicate-free order is `evalfrom_agrees_over`, the stronger statement, which this row's theorem instantiates at `sort deps` with `sort_distinct` discharging the order premise. An evaluator that throws is outside the model, whose evaluator is a total function, and the driver does not catch (`propagation-evaluator-total`). The premises: `prior` holds the values `eval ev0` returned over the same map, or fewer (`prior_of` — a hole is recomputed, as production says); `changed` names every id on which `ev1` differs from `ev0` (`agree_off`) and every id whose READS differ (`touches_off`, the same premise's other half, load-bearing only at a clean node the incremental walk reuses without checking), and every changed id is known; and the walked order holds no id twice. These are `propagation-change-set-and-prior` and `propagation-order-distinct`. NOT among the premises: that the order is a dependency order — a dependency order is what makes the values mean something, not what makes the two paths agree. The duplicate-free premise is load-bearing, measured by deleting it: without it the prover refuses `go_agree` at the step that reads a prior value back, because an id walked twice has its prior written at its first occurrence, where the full walk writes a value computed from fewer resolved reads.
 
 - <a id="row-propagation-evalfromwith-agrees"></a>**`propagation-evalfromwith-agrees`** — `evalfromwith_agrees` · fuaran-core#250
 
   The agreement theorem, restated for the prior-aware driver. `evalFromWith ev1 prior changed deps` equals `evalWith ev1 deps` as a whole `Result`. The shared walk is a lemma too: `eval_is_walk_with` shows `eval` and `evalFrom` are the prior-aware walk at an evaluator that ignores its prior, so every theorem about them stands unchanged.
 
-  _Boundary:_ Under `evalfrom_agrees`' premises taken at the evaluators' PRIOR-BLIND readings (the evaluator handed `None`), with none of them weakened, and exactly one more: `prior_blind_along` — the evaluator's answer does not depend on the prior it is handed, at every node the incremental walk recomputes, under the resolver the walk hands it there. Stated along the walk rather than for every resolver, because an evaluator whose prior carries reuse state keyed to the inputs it was built from is entitled to trust it beside the resolver the walk builds and nowhere else.
+  _With:_ `evalfromwith_agrees_over`, `sort_distinct`.
+
+  _Boundary:_ Stated at the order `sort` computes, through `evalfromwith_agrees_over` and `sort_distinct`, as `propagation-evalfrom-agrees`. Under `evalfrom_agrees`' premises taken at the evaluators' PRIOR-BLIND readings (the evaluator handed `None`), with none of them weakened, and exactly one more: `prior_blind_along` — the evaluator's answer does not depend on the prior it is handed, at every node the incremental walk recomputes, under the resolver the walk hands it there. Stated along the walk rather than for every resolver, because an evaluator whose prior carries reuse state keyed to the inputs it was built from is entitled to trust it beside the resolver the walk builds and nowhere else.
 
 - <a id="row-propagation-evalfrom-minimal"></a>**`propagation-evalfrom-minimal`** — `evalfrom_minimal` · fuaran-core#186
 
@@ -2921,13 +2999,13 @@ build a dependency map or a change set from a tree, and the theorems start from 
 
   _With:_ `reuse_is_guard`.
 
-  _Boundary:_ The unqualified statement — "a node outside the dirty set is not re-evaluated" — is FALSE, by production's own contract: an id absent from `prior` is always recomputed, dirty or not, and the differential exhibits it. The model does not transcribe production's guard (`recompute id || not (Map.containsKey id prior)`) and its `Map.find` separately: a partial `find` under a refinement extracts to an incomplete match, so the two are read as ONE total function, `reuse`, and `reuse_is_guard` proves it is `None` exactly when the guard holds.
+  _Boundary:_ The unqualified statement — "a node outside the dirty set is not re-evaluated" — is FALSE, by production's own contract: an id absent from `prior` is always recomputed, dirty or not, and the differential exhibits it. The model does not transcribe production's guard (`recompute id || not (Map.containsKey id prior)`) and its `Map.find` separately: a partial `find` under a refinement extracts to an incomplete match, so the two are read as ONE total function, `reuse`, and `reuse_is_guard` proves it is `None` exactly when the guard holds. Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
 
 - <a id="row-propagation-unknown-change-refused"></a>**`propagation-unknown-change-refused`** — `evalfrom_unknown_refused` · fuaran-core#186
 
   A changed id the dependency map does not hold makes `evalFrom` the typed `EvalUnknownChange`, naming exactly the unknown ids (`unknown_exact`: changed, and absent from the map), under every evaluator alike, with nothing evaluated (`walk_invoked` is empty).
 
-  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).
+  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
 
 - <a id="row-propagation-needed-least"></a>**`propagation-needed-least`** — `needed_for_least` · fuaran-core#317
 
@@ -2939,51 +3017,59 @@ build a dependency map or a change set from a tree, and the theorems start from 
 
   Demand-driven evaluation agrees with full evaluation on what it evaluates. When `eval ev deps` succeeds, `evalFor ev targets deps` succeeds with exactly its values on `neededFor deps targets` and exactly its cyclic groups that meet that set — for any value type, any dependency map, any target set and any evaluator, over ANY order handed to both, assuming nothing about `sort`. The one premise of the step lemma (`go_restrict`) is that the restriction set is closed under reads, which `needed_closed` discharges, so the theorem as stated carries no premise beyond `eval`'s success.
 
-  _Boundary:_ Conditional on `eval`'s success. The converse is deliberately NOT claimed: a node that fails outside the needed set is never reached, so the pull can succeed where the full evaluation fails.
+  _Boundary:_ Conditional on `eval`'s success. The converse is deliberately NOT claimed: a node that fails outside the needed set is never reached, so the pull can succeed where the full evaluation fails. Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
 
 - <a id="row-propagation-evalforwith-agrees"></a>**`propagation-evalforwith-agrees`** — `eval_for_with_agrees` · fuaran-core#317
 
   The same agreement for the prior-aware pair: when `evalWith evw deps` succeeds, `evalForWith evw targets deps` succeeds with its values on the needed set and its cyclic groups that meet it. `evalForWith` hands no prior, so it is the prior-blind reading's demand-driven walk (`prior_blind_empty`, `go_with_blind`) and needs none of `evalfromwith_agrees`' extra premise.
 
-  _Boundary:_ Conditional on `evalWith`'s success; within the model, with the correspondence to production the differential's and the extractor's (premise `extractor-and-compiler-trusted`).
+  _Boundary:_ Conditional on `evalWith`'s success; within the model, with the correspondence to production the differential's and the extractor's (premise `extractor-and-compiler-trusted`). Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
 
 - <a id="row-propagation-evalfor-invokes-needed"></a>**`propagation-evalfor-invokes-needed`** — `eval_for_invokes_needed` · fuaran-core#317
 
   Nothing outside the needed set is evaluated: every id the demand-driven walk hands the evaluator (`walk_for_invoked`, the instrumented reading the differential holds to production's own recorder) is in `neededFor deps targets`.
 
-  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).
+  _Boundary:_ Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`). Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
+
+- <a id="row-propagation-sort-computed"></a>**`propagation-sort-computed`** — `sort_distinct` · fuaran-core#553
+
+  THE ORDER BRIDGE, CLOSED. `Propagation.sort` is in the model: `Relation.sort` over the map with its dangling reads removed (`known`), read into `TopoResult` as production reads `Relation.Topo`. Its `Order` holds no id twice (`sort_distinct`, off `Relation.sort_order_distinct`) and `Order` with the cycles' members is exactly the map's keys (`sort_same_set`, off `Relation.sort_partition`) — `validTopo`'s first two clauses as theorems — so the agreement theorems hold at the computed order with no order premise, where the order used to be a parameter and the fact an assumed row (`propagation-order-distinct`, retired).
+
+  _With:_ `sort`, `known`, `sort_same_set`, `nodes_known`.
+
+  _Boundary:_ The checker's third clause — every read of an `Order` id the map holds appears earlier, or lies in a cycle — is dependencies-first, which `Relation.fst` states (`deps_first`) and does not prove (`relation-components-are-sccs`); the differential holds `sort` to `validTopo` on every generated graph as before, and to the extracted `sort` item for item. That `Relation.ofMap`'s ascending preparation is the list order the differential hands the model is the bridge, sampled there.
 
 - <a id="row-propagation-evaluator-contract"></a>**`propagation-evaluator-contract`** — `undeclared_refused` · fuaran-core#209
 
   THE EVALUATOR CONTRACT'S FIRST CLAUSE is a property of the driver: `evalfrom_agrees` needs an evaluator that reads other nodes ONLY through the reads its dependency map declares, and the driver enforces it — the resolver `evalNode` is handed is restricted to `deps[id]`, and an evaluation that reads outside it ends with the typed `EvalUndeclaredRead` naming the node and the first id it read outside its declaration, declared LAST in `PropagationError`, since a case's declaration order is its tag number. Proved of the model's identically restricted driver: `undeclared_refused` (a walk whose first node reads undeclared refuses with that node and that read, under every evaluator alike and whatever the reuse policy, given the node is recomputed there), with `eval_refuses_undeclared` and `evalfrom_refuses_undeclared` as the two drivers' readings, and `ok_implies_declared` / `eval_ok_declared` as the sentence that makes the `prior` premise carry the enforcement — a full evaluation that SUCCEEDED checked every node on the order, so there is no successful `eval` of a non-conforming evaluator to take a `prior` from.
 
-  _Boundary:_ `evalFrom` invokes the evaluator only where it recomputes, so a violating node that is clean AND present in `prior` is reused and not re-invoked — which is `evalfrom_minimal` and not a hole, by the sentence above; this is the one thing a reader must not over-read. Restricted to the FIRST node of the order because a violator further along is reached only if the evaluator did not fail before it, which is a fact about the evaluator; the unknown-change refusal, which precedes all evaluation, has no such qualifier. The contract's other two clauses are not discharged here: they are `propagation-change-set-and-prior`. Beside the proof, `Conformance.propagationEvalLaws` samples the refusal on the shipped driver with its leaks BUILT rather than drawn, two per iteration (one reading a real node of the graph, one reading an id the map does not hold), so a short run cannot go vacuous.
+  _Boundary:_ `evalFrom` invokes the evaluator only where it recomputes, so a violating node that is clean AND present in `prior` is reused and not re-invoked — which is `evalfrom_minimal` and not a hole, by the sentence above; this is the one thing a reader must not over-read. Restricted to the FIRST node of the order because a violator further along is reached only if the evaluator did not fail before it, which is a fact about the evaluator; the unknown-change refusal, which precedes all evaluation, has no such qualifier. The contract's other two clauses are not discharged here: they are `propagation-change-set-and-prior`. Beside the proof, `Conformance.propagationEvalLaws` samples the refusal on the shipped driver with its leaks BUILT rather than drawn, two per iteration (one reading a real node of the graph, one reading an id the map does not hold), so a short run cannot go vacuous. Stated over the walk at an ARBITRARY order (the `_over` family); `eval`, `evalFrom`, `evalFor` and their prior-aware readings are that walk at `sort deps`, so the theorem holds of them by instantiation.
 
 - <a id="row-propagation-topo-certificate"></a>**`propagation-topo-certificate`** — `valid_topo_distinct` · fuaran-core#308
 
   An order the certificate accepts holds no id twice. `valid_topo` is `Propagation.validTopo` clause for clause — `Order` and the cycles' members together distinct, holding exactly the ids the map holds, and every read of an `Order` id that the map holds appearing earlier or lying in a cycle — and `valid_topo_distinct` proves that acceptance implies the one premise the agreement theorems take of the walked order. `evalfrom_agrees_certified` and `evalfromwith_agrees_certified` are the two agreement theorems with the order premise replaced by the certificate.
 
-  _Boundary:_ The third clause is what makes the walk's values mean something (an acyclic read is computed before its reader); no theorem needs it, since agreement holds over any duplicate-free order, and it is modelled so the extracted checker is production's. Acceptance does NOT say that `Cycles` are the strongly connected components, or that they are cycles at all: an order that puts every id in one cyclic group passes the checker (clauses 1 and 2 hold and clause 3 is vacuous over an empty `Order`). Nothing is claimed of `sort`'s groups.
+  _Boundary:_ The third clause is what makes the walk's values mean something (an acyclic read is computed before its reader); no theorem needs it, since agreement holds over any duplicate-free order, and it is modelled so the extracted checker is production's. Acceptance does NOT say that `Cycles` are the strongly connected components, or that they are cycles at all: an order that puts every id in one cyclic group passes the checker (clauses 1 and 2 hold and clause 3 is vacuous over an empty `Order`). Nothing is claimed of `sort`'s groups. `sort` is in the model and its first two clauses are theorems of it (`sort_distinct`, `sort_same_set`, row `propagation-sort-computed`); the checker stays for its third, dependencies-first, which `Relation.fst` states and does not prove.
 
 - <a id="row-propagation-evalfrom-certified"></a>**`propagation-evalfrom-certified`** — `evalfrom_agrees_certified` · fuaran-core#308
 
   `evalfrom_agrees` with its order premise replaced by the certificate: whatever produced the order, if `validTopo` accepts it, `evalFrom` over the dirty set equals `eval`. The order half of `evalFrom`'s contract is then a property of a checker production ships.
 
-  _Boundary:_ Under the change-set and prior premises unchanged. Tarjan's algorithm, which produces the order, is not restated in the model (`propagation-order-distinct`).
+  _Boundary:_ Under the change-set and prior premises unchanged. Tarjan's algorithm, which produces the order, is not restated in the model (`propagation-order-distinct`). Stated over `eval_over` / `eval_from_over`, the walk at a given order, which is what a certificate is about; `evalfrom_agrees` is the same theorem at the computed order.
 
 **Tested** (1)
 
 - <a id="row-propagation-differential"></a>**`propagation-differential`** — `Proofs.Oracle`, 5 cases · fuaran-core#209
 
-  The extracted model agrees with the shipped `Propagation.dependents`, `dirtyFromChangedIds`, `eval` and `evalFrom`, and with `neededFor`, `evalFor` and `evalForWith` with the ids `evalFor` evaluates, over a drawn target set of one or two ids (one trial in eight naming an id the map does not hold), with `evalFor` held to `eval` on the needed set on the shipped driver — over generated dependency maps — the acyclic generator of `Conformance.propagationEvalLaws` and `dirtyPropagationLaws`, WIDENED with back edges (cycles), dangling reads, change sets of one to three ids, an unknown id, a failing evaluator and a `prior` with a hole in it — on the dependents map, the dirty set, the whole `Result` of both evaluators, and, per `evalFrom`, the ids the evaluator was handed IN ORDER (production's own recorder against the model's `walk_invoked`). Every generated graph also holds production's `sort` to the one fact the agreement theorem assumes of it (`Order` holds no id twice), and every trial whose change is known holds the shipped `evalFrom` to the shipped `eval`. Every model call carries the `read_witness` the restricted resolver is checked against, derived from the SAME map the toy evaluator folds over so the two cannot drift; the go-red hands the model a deps bridge that loses a read edge and requires it to lose on the dirty set and on `evalFrom`'s result, and because the witness still names the read the bridge dropped, the model refuses it as undeclared where production does not. A third case instantiates the theorems on the shipped driver as the regression test for the undeclared-read refusal: an evaluator reading a node it did not declare, with both drivers refusing the same node and read, the model agreeing in the same words, and the one place the refusal is not observable (a violating node clean and present in `prior`) asserted rather than assumed. Two more cases sit beside it: the certificate case (production's `sort` passes production's `validTopo` on every generated graph, and the extracted `valid_topo` agrees with production's on the sorted order and on four perturbations of it) and the prior-aware case (`evalWith` and `evalFromWith` are the extracted `eval_with` and `eval_from_with` over generated maps and a prior-consulting evaluator, and `evalFromWith` over `evalWith`'s prior equals `evalWith` — the bridge `evalfromwith_agrees` needs).
+  The extracted model agrees with the shipped `Propagation.dependents`, `dirtyFromChangedIds`, `eval` and `evalFrom`, and with `neededFor`, `evalFor` and `evalForWith` with the ids `evalFor` evaluates, over a drawn target set of one or two ids (one trial in eight naming an id the map does not hold), with `evalFor` held to `eval` on the needed set on the shipped driver — over generated dependency maps — the acyclic generator of `Conformance.propagationEvalLaws` and `dirtyPropagationLaws`, WIDENED with back edges (cycles), dangling reads, change sets of one to three ids, an unknown id, a failing evaluator and a `prior` with a hole in it — on the dependents map, the dirty set, the whole `Result` of both evaluators, and, per `evalFrom`, the ids the evaluator was handed IN ORDER (production's own recorder against the model's `walk_invoked`). Every generated graph holds production's `sort` to the extracted `sort`, `Order` and `Cycles` item for item, and every trial whose change is known holds the shipped `evalFrom` to the shipped `eval`. Every model call carries the `read_witness` the restricted resolver is checked against, derived from the SAME map the toy evaluator folds over so the two cannot drift; the go-red hands the model a deps bridge that loses a read edge and requires it to lose on the dirty set and on `evalFrom`'s result, and because the witness still names the read the bridge dropped, the model refuses it as undeclared where production does not. A third case instantiates the theorems on the shipped driver as the regression test for the undeclared-read refusal: an evaluator reading a node it did not declare, with both drivers refusing the same node and read, the model agreeing in the same words, and the one place the refusal is not observable (a violating node clean and present in `prior`) asserted rather than assumed. Two more cases sit beside it: the certificate case (production's `sort` passes production's `validTopo` on every generated graph, and the extracted `valid_topo` agrees with production's on the sorted order and on four perturbations of it) and the prior-aware case (`evalWith` and `evalFromWith` are the extracted `eval_with` and `eval_from_with` over generated maps and a prior-consulting evaluator, and `evalFromWith` over `evalWith`'s prior equals `evalWith` — the bridge `evalfromwith_agrees` needs).
 
   _Boundary:_ Agreement is over the pools drawn, never over all inputs. Each widening carries an adequacy guard: cyclic graphs, dangling reads, dirty and clean nodes, reuses, clean ids recomputed for a hole, evaluator failures, unknown changes and partial target sets must each arise, and the same seed must reproduce the tally, so a run that draws none of them fails rather than passing vacuously.
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`propagation-order-distinct`](#row-propagation-order-distinct) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
 
 ### `Capability`
 
-[`Capability.fst`](Capability.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `Propagation`.
+[`Capability.fst`](Capability.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `Relation`, `Propagation`.
 
 > Capability — default-deny dispatch and the three function laws as theorems: the seam every
 > AI-driven edit crosses, `Fuaran.Core.Function`, modelled clause for clause and proved
@@ -3246,11 +3332,11 @@ type.
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed).
 
-**Inherited through the models it opens:** [`propagation-order-distinct`](#row-propagation-order-distinct) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
+**Inherited through the models it opens:** [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
 
 ### `Query`
 
-[`Query.fst`](Query.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `Propagation`, `Capability`.
+[`Query.fst`](Query.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `Relation`, `Propagation`, `Capability`.
 
 > Query — the data-acquisition seam, the sibling of the capability seam: `Fuaran.Core.Query`'s
 > default-deny registry, its parameter validation, its host-supplied resolver and its capture
@@ -3409,7 +3495,7 @@ never reads it.
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`query-renderers-abstract`](#row-query-renderers-abstract) (assumed), [`query-codec-column-premises`](#row-query-codec-column-premises) (assumed).
 
-**Inherited through the models it opens:** [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`propagation-order-distinct`](#row-propagation-order-distinct) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
+**Inherited through the models it opens:** [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
 
 ### `Arbitrate`
 
@@ -3676,7 +3762,7 @@ dispatch — a `Batch` is normalised inside first and dropped when empty. The sc
 
 ### `PropagationOps`
 
-[`PropagationOps.fst`](PropagationOps.fst) — checked only; its production side cannot be run beside an extraction (`check.ps1` says why). Opens `DagFold`, `TreeOps`, `Propagation`.
+[`PropagationOps.fst`](PropagationOps.fst) — checked only; its production side cannot be run beside an extraction (`check.ps1` says why). Opens `DagFold`, `TreeOps`, `Relation`, `Propagation`.
 
 > PropagationOps — the change set of a structural edit is COMPLETE: `Propagation.changedForOp`
 > joined with `Ops.apply` (fuaran-core Phase 308).
@@ -3741,7 +3827,7 @@ PARAMETER (`rd`, F#: the caller's `readsOf`), any function of the node and its s
 
 **Rests on, or is bounded by:** [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-ops-model-bridge`](#row-propagation-ops-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`propagation-order-distinct`](#row-propagation-order-distinct) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `TreeFrame`
 
@@ -4111,7 +4197,7 @@ under fuel), `after`, the uncovered-node refusal, the side parents and the band.
 
 The rows no model section carries. An `assumed` row is classed in the contract table above; a model section links each one its rows rest on.
 
-**Assumed** (41)
+**Assumed** (40)
 
 - <a id="row-independence-diamond"></a>**`independence-diamond`** — `domain-obligation` · discharged by `Conformance.footprintLawsAt` · fuaran-core#132
 
@@ -4256,14 +4342,6 @@ The rows no model section carries. An `assumed` row is classed in the contract t
   _Assumes:_ the hash, the address comparator and the field escaper behind Capability.invocationKey are host functions the model takes as parameters; the escaper is assumed to be esc-then-terminator over a symbol reading of strings where a theorem needs it.
 
   _Boundary:_ The escaper clause is measured on the shipped function by the round trip through an independently written decoder over adversarial fields, with a bare separator as its go-red — sampled, not proved. Nothing is claimed about the hash. Permanent: a model of the escaper is a model of `String.Replace` over UTF-16 code units, and F\*'s `string` is primitive.
-
-- <a id="row-propagation-order-distinct"></a>**`propagation-order-distinct`** — `model-bridge` · closes: `unscheduled` · fuaran-core#186
-
-  THE ORDER BRIDGE, NARROWED BY A CERTIFICATE. The model takes `sort deps` as a PARAMETER: production's `sort` is Tarjan's algorithm over mutable dictionaries and a stack, and the model does not restate it. The one fact about its output the agreement theorems need — `Order` holds no id twice — is proved through a CHECKER: `Propagation.validTopo` (Order distinct; Order and the cycles' members partition the map's ids; every read of an Order id the map holds appears earlier or lies in a cycle) is modelled clause for clause as `valid_topo`, an order it accepts is PROVED duplicate-free (`valid_topo_distinct`, row `propagation-topo-certificate`), and the agreement theorem holds of any order it accepts whatever produced it (`evalfrom_agrees_certified`). What is assumed is that Tarjan's output PASSES the certificate.
-
-  _Assumes:_ Propagation.sort returns a TopoResult that Propagation.validTopo accepts — sampled on every graph the propagation differential draws; what acceptance implies is proved (valid_topo_distinct).
-
-  _Boundary:_ That assumption is sampled, not proved: the Proofs.Oracle family runs production's `sort` through production's `validTopo` and the extracted `valid_topo` on every generated graph, cyclic and dangling ones included, and holds the two checkers to each other on four perturbations of each order, every one refused somewhere. `sort`'s hot path does not run the checker (an operator ruling: a failed runtime check would have to be reported as something, and reporting it as a cycle verdict would be a wrong answer delivered as data). Closable: a functional model of Tarjan's algorithm proved to emit a certified result is a phase nobody has taken.
 
 - <a id="row-propagation-change-set-and-prior"></a>**`propagation-change-set-and-prior`** — `domain-obligation` · discharged by `Conformance.propagationEvaluatorLawsAt` · fuaran-core#209
 

@@ -153,6 +153,7 @@
     <Compile Include="ProofOracle.PreservationTests.fs" />
     <Compile Include="ProofOracle.PropagationTests.fs" />
     <Compile Include="ProofOracle.QueryTests.fs" />
+    <Compile Include="ProofOracle.RelationTests.fs" />
     <Compile Include="ProofOracle.TemporalTests.fs" />
     <Compile Include="ProofOracle.TreeDiffTests.fs" />
     <Compile Include="ProofOracle.TreeOpsTests.fs" />
