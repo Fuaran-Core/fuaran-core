@@ -28,102 +28,9 @@
    crosses as an opaque carrier. And a declaration's `Source` is an opaque carrier too: the seam
    never reads it.
 
-   WHAT IS PROVED, over any registry, any renderers and any resolver:
-
-     - `unregistered_refused` — `QueryRegistry.dispatch` of an id the registry does not hold is
-       the typed `NoSuchQuery id known`, and the result is the SAME under every resolver, which
-       is what "runs no resolver" means for a pure function.
-     - `validate_before_resolve` — an argument set `validateParams` rejects makes `invoke` return
-       that rejection for every resolver alike, and through the registry too
-       (`dispatch_validates_first`); a settled, pending or `ExecutionFailed` result is reachable
-       only past an accepted validation (`resolver_runs_only_validated`); the envelope has no
-       fourth outcome (`invoke_never_ok_failed`, `dispatch_never_ok_failed`); and validation is
-       characterised EXACTLY: it accepts precisely the sets whose every binding addresses a
-       declared param with a `Null` or an in-type cell, that bind every required name, and (Phase
-       226) that bind none of them only to `Null` (`validate_params_exact`), and each refusal is
-       truthful (`refusal_is_truthful`, `unbound_required_truthful`, `null_required_truthful`).
-     - `enumerate_is_registry` — an id is enumerable exactly when `tryFind` resolves it, and
-       `dispatch` raises `NoSuchQuery` exactly off the enumeration (`no_such_iff_unregistered`);
-       `register` refuses a held id, extends by one entry otherwise, and keeps ids distinct.
-     - `invocation_key_deterministic` — the capture key reads the declaration through its `Id`,
-       its `Where` and its `OrderBy` (Phase 398; through its `Id` alone before) and the arguments
-       through their name-sorted canonical form alone: two declarations sharing an id, a filter
-       and an order, and two argument lists binding the same names to the same cells in ANY
-       order, key identically (`invocation_key_reads_id_and_shape` is the half with no premise).
-       That the key reads no resolver answer and no clock is its TYPE — it is handed neither —
-       and is said here rather than dressed as a lemma. `invocation_key_unshaped` is the
-       compatibility claim: a declaration whose filter and order are empty keys exactly as the
-       pre-398 key did, `Id ^ "#" ^ hash (canonical args)`, so every journal keyed before stays
-       readable.
-     - (Phase 316) `register_refuses_duplicate_params` — the registry refuses a declaration naming
-       a parameter twice, so every query a registry built by `register` holds has distinct names
-       (`register_keeps_params_distinct`) and `all_null_refusal_exact`'s premise is DISCHARGED for
-       every registered query (`registered_all_null_refusal_exact`) rather than assumed;
-       `invocation_key_page_injective` — the PAGE key's pre-image is injective over the pair
-       (argument set, page token), so distinct tokens give distinct pre-images and the first page
-       keys exactly as `invocationKey` (`invocation_key_page_none`); `dispatch_page_is_dispatch`
-       carries every dispatch theorem to the paged verb; and the lifecycle — `unregister` undoes a
-       registration (`unregister_register`), refuses an id not held (`unregister_refuses_unheld`),
-       `restrict` keeps exactly the ids kept (`restrict_members`), and `union` refuses a shared id
-       and otherwise holds exactly the ids of both (`union_members`).
-     - `invocation_key_injective` (Phase 225; over the shape since Phase 398) — the capture key's
-       pre-image is INJECTIVE: two (filter, order, argument list) triples with one pre-image have
-       the same filter, the same order, and one name-sorted argument list holding the same
-       bindings, so declarations differing in filter or order, and distinct argument sets, have
-       distinct pre-images; `invocation_key_page_injective` extends it to the page token. It is
-       proved over a reading of a string as its symbols (`symbols_faithful`, the reading
-       `Chain.fst` takes) and states what it needs of the host functions in `key_premises`
-       (section 8b) — and, since Phase 430, over argument lists whose timestamp cells carry the
-       unit their text names (`units_named`, section 8b): the key writes a timestamp's text alone,
-       as production does, and a cell's unit is production's `Cell.typeOf` reading of that text.
-     - (Phase 398) the admission: `register` refuses a declaration whose filter names an
-       undeclared column, applies `contains` to a column that is not a string, compares with a
-       `Null` or with a literal of another type than its column's, or whose order names an
-       undeclared column or one column twice — after the id and the repeated-parameter checks,
-       first fault first (`register_refuses_shape`), and admits exactly the declarations with no
-       such fault (`register_extends`).
-
-   THE FINDINGS read off the model, each proved and asserted on the shipped seam — and both
-   now CLOSED:
-
-     - `all_null_accepted` was the first, until Phase 226 closed it: EVERY declaration, whatever
-       it marks required, accepted the argument set binding each param to `Null`, because the
-       only required-params step asked whether the NAME was a key of the argument map. `Required`
-       now means a VALUE: a third step refuses, as the distinct `RequiredParamsNull`, a required
-       param that is present but bound only to `Null` (`null_required`), so a caller can tell
-       "present but null" from "missing" (`RequiredParamsUnbound`). `required_is_non_null`
-       (section 9) is the positive statement that replaced the finding — acceptance is exactly
-       well-typed bindings plus every required name bound to a value (`has_value`) — and
-       `all_null_refusal_exact` pins what the all-`Null` set now gets: refused as
-       `RequiredParamsNull`, naming every required param, whenever there is one.
-     - `key_collision` was the second, until Phase 225 closed it: the canonical string joined
-       `name=cellKey` pairs with NO separator, so two distinct accepted argument sets could share
-       it. The lemma is gone because it is no longer true; `invocation_key_injective` is what
-       replaced it, and the two exhibits it was stated on (`collision_one`, `collision_two`) stay
-       below so the shipped seam's closure case can name them.
-
-   WHAT IS NOT CLAIMED. Anything about a resolver. Anything about the five renderers beyond the
-   total-order premise `invocation_key_deterministic` states for the comparator and the
-   `key_premises` `invocation_key_injective` states (`query-renderers-abstract`) — in particular
-   nothing about whether two distinct pre-images hash apart, and nothing about the canonical
-   JSON the shape fields carry beyond `key_premises`' injectivity of `render_where` /
-   `render_order` (production's `Canonical.write Rendering.CrossHost` over the predicate and order-key documents,
-   measured on the shipped codec by the declaration round trip in `ProofOracleTests`). The
-   admission's LITERAL-CARRIABILITY clause — `Table.validate`'s refusal of a non-finite float or
-   of decimal, date or timestamp text that is not canonical, answered `IllFormedLiteral` with its
-   reason — is the column layer's grammar (`DecimalText.fst`, `WireColumn.fst`) and is not
-   restated here: the model takes a present, well-typed literal as carried, and the oracle draws
-   carried literals only. The resolver's two Phase 398 refusals (`PredicateNotHonoured` /
-   `OrderNotHonoured`) belong to the typed resolver, which this model does not carry, as it
-   carries neither the policy gate's refusals nor `UnreadableArgs`. The ORDER `enumerate` returns — production's `Map` sorts by id,
-   the model holds the map as a list, and the theorem is about membership. `QueryCodec` until Phase 455; since then section 19 models it, and
-   what it leaves out is its strict read policy and the column codec it is handed (a parameter).
-
-   (Phase 455) THE CODEC, section 19: `QueryCodec`'s declaration, result-page, async-result and
-   query-error pairs round trip EXACTLY (`query_roundtrip`, `result_roundtrip`,
-   `deferred_result_roundtrip`, `query_error_roundtrip`) over a column-codec parameter, and every
-   refusal their readers answer RESOLVES in the document read (`query_refusals_resolve` and its
-   siblings).
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart. Sections 1 to 18 are SELF-CONTAINED
    like `Capability.fst` — they open nothing, restating `outcome`, `deferred` and the list helpers
@@ -349,8 +256,8 @@ noeq type renderers = {
   hash:         string -> string;
   name_le:      string -> string -> bool;
   field:        string -> string;
-  (* Phase 398 — F#: `Canonical.write Rendering.CrossHost (JArr (where |> List.map QueryShape.predicateJson))` and the
-     same over `QueryShape.sortKeyJson`: the canonical text of a filter and of an order. *)
+  (* Phase 398 — F#: `Canonical.write Rendering.CrossHost (JArr (where |> List.map QuerySeamCodec.encodeColumnPredicate))` and the
+     same over `QuerySeamCodec.encodeSortKey`: the canonical text of a filter and of an order. *)
   render_where: list predicate -> string;
   render_order: list sort_key -> string
 }
@@ -448,7 +355,7 @@ let invocation_key (rn:renderers) (q:query) (a:arguments) : Tot string =
    ====================================================================================== *)
 
 (* F#: `q.Params |> List.tryFind (fun p -> p.Name = name)`. Named rather than a closure, per
-   theorem 10's authoring lesson: one function where the F# has one lambda. *)
+   `Capability.fst`'s authoring lesson: one function where the F# has one lambda. *)
 let rec find_param (name:string) (ps:list query_param) : Tot (option query_param) =
   match ps with
   | [] -> None
@@ -1938,7 +1845,7 @@ let column_tag (t:column_type) : Tot string =
   | TimestampType Nanoseconds -> "timestamp_ns"
   | DecimalType -> "decimal"
 
-(* F#: `ColumnType.all |> List.map (fun t -> ColumnType.tag t, t)` looked up — `QueryShape.colTypeOf`'s
+(* F#: `ColumnType.all |> List.map (fun t -> ColumnType.tag t, t)` looked up — `QueryWire.columnTypeOf`'s
    table. *)
 let column_of_tag (s:string) : Tot (option column_type) =
   if s = "int" then Some IntType
@@ -1955,8 +1862,8 @@ let column_of_tag (s:string) : Tot (option column_type) =
 
 let column_tag_roundtrip (t:column_type) : Lemma (column_of_tag (column_tag t) == Some t) = ()
 
-(* F#: `QueryShape.tagged` — a string from a closed set; a miss is `UnknownTag`, raised at the value
-   by `andThen` (Phase 453). *)
+(* F#: `Decoder.oneOf` — a string from a closed set; a miss is `UnknownTag`, raised at the value
+   (Phase 453). *)
 let tagged_of (#a:Type) (look:string -> option a) : C.decoder a =
   fun el ->
     match C.d_str el with
@@ -1966,7 +1873,7 @@ let tagged_of (#a:Type) (look:string -> option a) : C.decoder a =
 let tagged_sound (#a:Type) (look:string -> option a) : Lemma (C.sound (tagged_of look)) =
   C.sound_intro (tagged_of look) (fun x -> ())
 
-(* F#: `QueryShape.colTypeOf`. *)
+(* F#: `QueryWire.columnTypeOf`. *)
 let col_type_of_j : C.decoder column_type = tagged_of column_of_tag
 
 (* F#: `EffectCodec.hostTag` / `hostDecoder`, over this model's effect class. *)
@@ -2059,8 +1966,8 @@ let param_of_j : C.decoder query_param =
          (C.both (C.field "type" col_type_of_j) (C.field "required" C.d_bool) (fun t r -> (t, r)))
          (fun n (tr:(column_type & bool)) -> { p_name = n; p_type = fst tr; p_required = snd tr })
 
-(* ---- a predicate and an order key: `QueryShape.predicateJson` / `predicateDecoder`,
-        `sortKeyJson` / `sortKeyDecoder` ---- *)
+(* ---- a predicate and an order key: `QuerySeamCodec.encodeColumnPredicate` /
+        `decodeColumnPredicate`, `encodeSortKey` / `decodeSortKey` (derived since Phase 551) ---- *)
 
 let predicate_tag (p:predicate) : Tot string =
   match p with
@@ -2073,7 +1980,7 @@ let predicate_tag (p:predicate) : Tot string =
   | IsNull _ -> "isNull"
   | IsNotNull _ -> "isNotNull"
 
-(* F#: `QueryShape.predicateJson` — a comparison's literal written at its own type
+(* F#: `QuerySeamCodec.encodeColumnPredicate` — a comparison's literal written at its own type
    (`Cell.typeOf v |> Option.defaultValue StringType`) by the column codec. *)
 let predicate_json (#r:Type) (cc:column_codec r) (p:predicate) : Tot C.jval =
   let col = predicate_column p in
@@ -2111,7 +2018,7 @@ let predicate_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder pre
    ("isNull", C.d_map IsNull (C.field "column" C.d_str));
    ("isNotNull", C.d_map IsNotNull (C.field "column" C.d_str))]
 
-(* F#: `QueryShape.predicateDecoder`. *)
+(* F#: `QuerySeamCodec.decodeColumnPredicate`. *)
 let predicate_of_j (#r:Type) (cc:column_codec r) : C.decoder predicate = C.tag_dispatch (predicate_cases cc)
 
 let direction_tag (d:sort_direction) : Tot string =
@@ -2625,7 +2532,7 @@ let s_f (name:string) : C.decoder string = C.field name C.d_str
 let sl_f (name:string) : C.decoder (list string) = C.field name (C.d_list C.d_str)
 let ty_f (name:string) : C.decoder column_type = C.field name col_type_of_j
 
-(* F#: `QueryShape.tags` looked up — `predicateNotApplicable`'s `predicate` member. *)
+(* F#: `QueryWire.predicateTags` looked up — `predicateNotApplicable`'s `predicate` member. *)
 let predicate_tag_of (s:string) : Tot (option string) =
   if s = "equalTo" || s = "greaterThan" || s = "atLeast" || s = "lessThan" || s = "atMost" ||
      s = "contains" || s = "isNull" || s = "isNotNull" then Some s else None

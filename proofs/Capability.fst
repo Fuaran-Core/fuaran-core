@@ -46,100 +46,12 @@
    spells (`node_body`, `spell`) are parameters as `invoke`'s body is; a handler is an abstract
    type.
 
-   WHAT IS PROVED, over any witness, any readers, any registry and any host body:
-
-     - `unregistered_refused` — `CapabilityRegistry.dispatch` of an id the registry does not hold is the
-       typed refusal `NoSuchCapability id known`, and the result is the SAME for every host body,
-       which is what "runs no handler" means without instrumenting one.
-     - `validate_before_invoke` — an argument set `validateArgs` rejects makes `invoke` return
-       that rejection for every body alike; a `BodyFailed` or an accepted result is reachable only
-       through an accepted validation (`body_runs_only_validated`); an accepted invocation carries
-       the body's `Ready` or `Pending` and NOTHING else, so the envelope's fourth outcome
-       `Ok (Failed _)` is unreachable at the seam and through the registry alike
-       (`invoke_never_ok_failed`, `dispatch_never_ok_failed` — Phase 210); and what validation says is
-       characterised: the refusal is one of its own four, an accepted set addresses declared
-       holes only and binds every required one (`validate_args_sound`), and an `ArgOutOfSpace`
-       names a value the space really refuses (`refusal_is_truthful`). And since Phase 229 the
-       converse of Phase 177's finding: `slot_hole_invocable_in_space` — `signature` enters every
-       `SlotHole` with the tree space `SlotTree` (`slot_entry_shape`), and an argument set that
-       binds a slot to a wire tree of its kind, with every other argument in its space and every
-       required entry bound, is ACCEPTED (`validate_args_complete`), while a tree of the wrong kind
-       is the typed `ArgOutOfSpace` naming the constraint (`slot_wrong_kind_refused`) and a scalar
-       is `UninvocableArg` (`slot_scalar_uninvocable`). A capability over a slotted artifact is
-       invocable. What Phase 177 proved survives about the one entry shape `signature` no longer
-       makes — a REQUIRED entry with NO space refuses every argument list
-       (`spaceless_required_uninvocable`).
-     - `enumerate_is_registry` — an id is enumerable exactly when it is dispatchable: there is
-       no entry `enumerate` hides and none `dispatch` reaches past it (`no_such_iff_unregistered`).
-       `register` refuses a held id and extends by exactly one entry otherwise, and a registry
-       built by it holds distinct ids (`register_keeps_distinct`).
-     - `totality_law` — law 1. `isTotal` over the derived signature agrees with the guard
-       `apply` / `curry` run; when the guard fires the refusal is `NonTotal` at the first
-       unbounded repeat and the witness's `Bind` is never consulted (`rejected_never_bound` — the
-       result is the same under any `Bind` at all), which is "rejected, never run".
-     - `hygiene_law` — law 2. Hole NAMES are inert: renaming every hole leaves `apply`, `curry`
-       and `compose` unchanged, because the walk keys on the absolute address and nothing else.
-       An argument at an undeclared address is refused by name before any binding
-       (`undeclared_address_refused`), and binding a hole leaves a same-named hole at another
-       address exactly as it was — removing that hole from the declaration changes nothing
-       (`same_name_no_capture`).
-     - `effect_law` — law 3. `composedEffect` is the componentwise join, the join is a
-       commutative, associative, idempotent least upper bound with `pureDeterministic` as its
-       identity, and `covers` is the order it is least for. `audit_effect_join` carries that to
-       the audit: the observed effect covers every node's declared class, an `Ok` audit says the
-       root covers every descendant, and an `Error` audit exhibits a descendant it does not.
-     - `invocation_key_injective` (Phase 225) — the capture key's pre-image is INJECTIVE: two
-       argument lists with one address-sorted canonical string are one sorted list and hold the
-       same bindings, so distinct argument sets have distinct pre-images whatever their values
-       contain. Proved over a reading of a string as its symbols (`symbols_faithful`, the one
-       `Chain.fst` takes) and an escaper premise (`field_faithful`), named in `key_premises`.
-     - `bind_handlers_exact` (Phase 354) — what `bindHandlers` computes: the handlers are accepted
-       exactly when every key is a declared action hole's address and every action hole has a
-       handler its ceiling covers, and the table is the handlers given (`bind_handlers_complete`
-       is the converse); each refusal says what is refused and why, naming the first offender in
-       the order the check walks. `bind_handlers_order_independent` — the whole result is a
-       function of the bindings, never of the order the handlers arrive in.
-     - `typecheck_topological` (Phase 354) — an accepted pipeline's declaration order is a
-       topological order of its edges, and of two declarations of the same nodes each in such an
-       order `typeCheck` accepts both or neither. `pipeline_refused_never_evaluated` and
-       `pipeline_illtyped_iff_refused` — an evaluator answers `EvalIllTyped` exactly when the
-       check refuses, and then no body runs. `pipeline_evalfrom_agrees` — `evalFrom` over a prior
-       evaluation, under a body that agrees with the prior one off the change set, equals `eval`.
-     - `pipeline_edge_iff`, `pipeline_dirty_sound`, `pipeline_dirty_least` (Phase 544) — the pipeline's
-       dirty set is `Propagation.fst`'s closure INSTANTIATED at its `FromNode` edges, not a second
-       model of it: the dependency map `deps_of` has exactly the pipeline's edges, and the closure's
-       soundness and leastness are read at the pipeline — the second was NOT CLAIMED before.
-     - `signature_roundtrip`, `capability_roundtrip`, `node_roundtrip` (Phase 354) — decode after
-       encode, EXACTLY, for every value: the identity on the well-formed ones
-       (`…_roundtrip_identity`), a named refusal or a normal form on the others; and every
-       document a reader accepts is a well-formed value that reads back as itself
-       (`…_decoded_wf`).
-     - (Phase 455, section 18) the codec's other three pairs — the typed invocation, the async
-       envelope and the twelve-case refusal — round trip EXACTLY (`invocation_roundtrip`,
-       `deferred_roundtrip`, `invoke_error_roundtrip`), and every refusal any `CapabilityCodec`
-       reader answers RESOLVES in the document it read (`invocation_refusals_resolve`,
-       `deferred_refusals_resolve`, `invoke_error_refusals_resolve`,
-       `capability_refusals_resolve`). The codec is not built from the `Codec` blocks, so these
-       are proved directly, over this module's restatement of `DecodeError.resolvesIn`.
-
-   WHAT IS NOT CLAIMED. Anything about a domain's `Bind` — that a bound hole is cleared, that a
-   slot's inner tree is where `compose` put it — which is the witness contract
-   (`lawful-abstract-witness`). Anything about the two lexical parsers or a float range beyond
-   the envelope the readers premise states (`capability-scalar-readers-abstract`). The ORDER
-   `CapabilityRegistry.enumerate` returns — production's `Map` sorts by id, the model holds a finite map
-   as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
-   HASH apart (a claim about FNV-1a). The `FunctionRegistry` and `ContentPack` surfaces, and
-   `applyMemo`. Of the surfaces Phase 354 modelled: a handler's MESSAGE typing, which lives in the
-   host language; the pipeline's capture key `nodeInvocationKey`; the BYTES of any codec — `Canonical.write Rendering.CrossHost` and `Json.parse` are
-   `WireCanon.fst`'s and `JsonParse.fst`'s — the `Strict` read policy, the invocation, `Deferred`
-   and `InvokeError` codecs, and a refusal's sentence. And NOT that a reader refuses whatever its
-   writer never produces: the readers are lenient — an extra member and another member order are
-   both read — so what is proved is that everything a reader ACCEPTS is a well-formed value, which
-   is the claim that is true. (The descriptor spelling of a space was read too until Phase 405,
-   which refuses it: a value space has one reader spelling, `"$type"`.)
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
-   `ColumnOps.fst`. The module opens ONE other model, `Propagation` (Phase 544): the pipeline's dirty
+   `Propagation.fst`. The module opens ONE other model, `Propagation` (Phase 544): the pipeline's dirty
    set is that module's closure instantiated at the pipeline's edges, and the set helpers that closure
    needs are read from it rather than restated. It restates `outcome` and the list helpers its own
    sections need, and extracts beside the other models into the same oracle assembly.
@@ -4798,9 +4710,12 @@ let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invoc
    18. THE SEAM CODEC, WHOLE (Phase 455) — `CapabilityCodec`'s three remaining pairs, clause for
        clause at the `JVal` as section 16 models the first: the typed INVOCATION
        (`encodeInvocationJson` / `invocationOf`, the repeated-address refusal raised through `at`),
-       the async ENVELOPE (`deferredJson` / `deferredOf`, the payload codec a parameter) and the
-       typed REFUSAL (`invokeErrorJson` / `invokeErrorOf`, all twelve `InvokeError` cases as
-       `gated_error`, with `faultJson` / `faultOf` inside). Then the two properties for every pair:
+       the async ENVELOPE (`CapabilitySeamCodec.encodeDeferred` / `decodeDeferred`, the payload codec
+       a parameter) and the typed REFUSAL (`CapabilitySeamCodec.encodeInvokeError` /
+       `decodeInvokeError`, all twelve `InvokeError` cases as `gated_error`, with
+       `encodeDeclarationFault` / `decodeDeclarationFault` inside). The last two pairs are derived from
+       their IDL declaration since Phase 551 (D200), where they were hand codecs in `CapabilityCodec`;
+       the documents and refusals are the same. Then the two properties for every pair:
        decode after encode, EXACTLY (`invocation_roundtrip`, `deferred_roundtrip`,
        `invoke_error_roundtrip`), and every refusal a reader answers RESOLVES in the document it read
        (`invocation_refusals_resolve`, `deferred_refusals_resolve`,
@@ -4810,7 +4725,7 @@ let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invoc
        PREMISE CHECKED FIRST. The codec is NOT built from the `Codec` blocks Phase 436 proved
        (`record`, `field`, `union`, …): every reader is written over `JVal` with the typed decode
        layer's combinators (`Decoder.field`, `optField`, `list`, `bind`, `map`, `at`, `fail`,
-       `tagDispatchWith`). So 436's composed round trip does not apply as a corollary, and both
+       `tagDispatchWith`; the derived pairs, their generated equivalents). So 436's composed round trip does not apply as a corollary, and both
        properties are proved here directly. The refusal law is `DecodeError.resolvesIn`, restated
        over this module's `jval` as `resolves_in` — the module is self-contained (header) — with the
        transport lemma `ok_at_under` and one soundness lemma per combinator, `DecodeLayer.fst`'s
@@ -5330,27 +5245,27 @@ let invocation_refusals_resolve () : Lemma (sound invocation_of_j) =
     | Error _ -> ()
     | Ok (cid, args) -> distinct_go_sound cid args [] 0 args; sound_elim (distinct_go cid args [] 0 args) x)
 
-(* ---- the async envelope: `deferredJson` / `deferredOf` ---- *)
+(* ---- the async envelope: `CapabilitySeamCodec.encodeDeferred` / `decodeDeferred` ---- *)
 
-(* F#: `CapabilityCodec.deferredJson`, the payload writer a parameter. *)
+(* F#: `CapabilitySeamCodec.encodeDeferred`, the payload writer a parameter. *)
 let deferred_json (#a:Type) (enc:a -> jval) (d:deferred a) : Tot jval =
   match d with
   | Pending -> JObj [("$type", JStr "pending")]
   | Ready v -> JObj [("$type", JStr "ready"); ("value", enc v)]
   | Failed m -> JObj [("$type", JStr "failed"); ("message", JStr m)]
 
-(* F#: the typed envelope reader under `deferredOf`, the payload reader a parameter. *)
+(* F#: `CapabilitySeamCodec.decodeDeferred`, the payload reader a parameter. *)
 let deferred_dec (#a:Type) (p:decoder a) : decoder (deferred a) =
   tag_dispatch [("pending", d_succeed Pending);
             ("ready", d_map Ready (field "value" p));
             ("failed", d_map Failed (field "message" d_str))]
 
-(* F#: `deferredOf`'s `payload` — the caller's sentence-answering reader, its refusal raised
+(* F#: `CapabilityCodec.payloadOf` — the caller's sentence-answering reader, its refusal raised
    `OutOfRange` at the payload. *)
 let payload_of (#a:Type) (dec:jval -> outcome a string) : decoder a =
   fun v -> match dec v with Ok x -> Ok x | Error _ -> Error (refuse OutOfRange)
 
-(* F#: `CapabilityCodec.deferredOf` (its sentence dropped). *)
+(* F#: `CapabilityCodec.decodeDeferred`'s reader, `decodeDeferred (payloadOf …)` (its sentence dropped). *)
 let deferred_of_j (#a:Type) (dec:jval -> outcome a string) : decoder (deferred a) = deferred_dec (payload_of dec)
 
 (* THE ENVELOPE ROUND TRIP (Phase 455), `deferred_roundtrip`: for any payload codec that reads back
@@ -5380,9 +5295,9 @@ let deferred_refusals_resolve (#a:Type) (dec:jval -> outcome a string) : Lemma (
   sound_intro (payload_of dec) (fun x -> ());
   deferred_dec_sound (payload_of dec)
 
-(* ---- the typed refusal: `invokeErrorJson` / `invokeErrorOf` ---- *)
+(* ---- the typed refusal: `CapabilitySeamCodec.encodeInvokeError` / `decodeInvokeError` ---- *)
 
-(* F#: `CapabilityCodec.faultJson`. *)
+(* F#: `CapabilitySeamCodec.encodeDeclarationFault`. *)
 let fault_json (f:decl_fault) : Tot jval =
   match f with
   | EmptySpace addr sp -> JObj [("$type", JStr "emptySpace"); ("addr", JStr addr); ("space", space_json sp)]
@@ -5390,10 +5305,10 @@ let fault_json (f:decl_fault) : Tot jval =
   | DuplicateHoleAddr addr -> JObj [("$type", JStr "duplicateHoleAddr"); ("addr", JStr addr)]
   | HoleUnderSlot node -> JObj [("$type", JStr "holeUnderSlot"); ("node", JStr node)]
 
-(* F#: the codec's `str name` — `Decoder.field name Decoder.str`. *)
+(* F#: a required string member — the derived reader's `dReq name fs dStr`. *)
 let str_f (name:string) : decoder string = field name d_str
 
-(* F#: the codec's `strList name` — `Decoder.field name (Decoder.list Decoder.str)`. *)
+(* F#: a required string-list member — the derived reader's `dReq name fs (dList dStr)`. *)
 let str_list_f (name:string) : decoder (list string) = field name (d_list d_str)
 
 let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
@@ -5402,7 +5317,7 @@ let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
    ("duplicateHoleAddr", d_map DuplicateHoleAddr (str_f "addr"));
    ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"))]
 
-(* F#: `CapabilityCodec.faultOf`. *)
+(* F#: `CapabilitySeamCodec.decodeDeclarationFault`. *)
 let fault_of_j (cr:codec_readers) : decoder decl_fault = tag_dispatch (fault_cases cr)
 
 (* F#: `InvokeError`, all twelve cases: the ten this model's `invoke_error` carries, under
@@ -5450,8 +5365,8 @@ let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) 
          (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra)));
    ("approvalRequired", d_map GApprovalRequired (str_f "policy"))]
 
-(* F#: `CapabilityCodec.invokeErrorOf` (its sentence dropped). `str "addr" |> Decoder.bind (fun
-   addr -> both …)` reads its three members in the order the nested `both` does. *)
+(* F#: `CapabilitySeamCodec.decodeInvokeError` (the sentence `CapabilityCodec.decodeInvokeError` adds
+   dropped). Each case reads its members in declaration order, the order the nested `both` does. *)
 let invoke_error_of_j (cr:codec_readers) : decoder gated_error = tag_dispatch (invoke_error_cases cr)
 
 let fault_roundtrip (cr:codec_readers) (f:decl_fault) : Lemma (fault_of_j cr (fault_json f) == Ok f) =

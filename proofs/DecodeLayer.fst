@@ -39,45 +39,9 @@
      - The codec's text layer (`Codec.write`, `Codec.read`, `Codec.corpus`), which is
        `Canonical`'s, modelled by `WireCanon.fst`.
 
-   WHAT IS PROVED. The three theorems Phase 436 states, each as a PRESERVATION law — every block
-   built from parts that have the property has it — which is what "generic in what they build"
-   means: a codec a domain composes from these blocks is covered by induction on how it was
-   composed, whatever the decoded type.
-     1. COMPOSED ROUND TRIP (section 8). `rt c`: whatever `write` answers `Ok j` for reads back
-        through `read_all j` as the value written. Every block preserves it, under the premises
-        a domain owes for the parts it supplies (named in `../proofs.json`): `map`'s `there`
-        inverts `back`, `refine`'s `check` admits every `back`-image, a record's constructor
-        applied to its getters is the value, and a union case's `inject` inverts its `project`.
-        The build-time refusals are what make it hold: `build`, `enum` and `union` answer `Ok`
-        only for declarations whose names, spellings and tags do not repeat and whose cases do
-        not declare the discriminator, and the theorem uses exactly those facts.
-     2. DECODER TOTALITY (section 7). Every block is a `Tot` function of the `jval` — no
-        exception path and no divergence, `at` terminating on its path and every list walker on
-        its list — and the COLLECTING reader of every codec built from the blocks answers a value
-        or a NON-EMPTY list of refusals, so `Codec.decoder`'s third arm ("a collecting decoder
-        answered no defect and no value") is unreachable: the strict reader answers `Ok` exactly
-        when the collecting one does and otherwise its first defect (`strict_reader_total`).
-     3. REFUSAL PATHS RESOLVE (sections 5-6). Every refusal a block answers over a value `x`
-        satisfies `DecodeError.resolvesIn x` — a `MissingField` names a member of a resolving
-        object that does not carry it, every other code a value the input holds — and is not
-        `InvalidJson`, the parser's code, which names only a root and so cannot survive a step
-        (`refusal_paths_resolve`). The transport lemma `ok_at_under` is the content: a refusal
-        that resolves at the value a step reaches resolves, one step longer, at the value the
-        step started from.
-
-   WHAT IS NOT CLAIMED, AND WHAT WAS REFUTED (section 9). The reader handed to `Codec.make` /
-   `ofDecoder` is the CALLER's, and its refusals are only as good as the caller makes them: the
-   theorems carry "the reader handed to `make` is sound" as a hypothesis, the
-   `decode-layer-refusal-premises` row. Phase 436 refuted Theorem 3 as the shard first read it at
-   two blocks, and both are closed in PRODUCTION rather than assumed in the model:
-     - `Decoder.fail` took every code, and at the empty path a `MissingField` names no member and
-       an `InvalidJson` stops resolving one step down. Since Phase 443 it takes a `RootDecodeCode`,
-       which carries neither, so `fail_sound` holds for every code it accepts with no premise
-       (`root_missing_never_resolves`, `root_invalid_json_stops_resolving`).
-     - `Decoder.andThen` raised its function's refusal untouched, path and all. Since Phase 453 the
-       function refuses with a `RootDecodeCode`, raised at the value as `fail` raises it, so
-       `and_then_sound` holds for every function with no premise
-       (`and_then_needs_root_refusals` states the shape it no longer takes).
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Helpers are
    defined here rather than taken from `FStar.List.Tot` so that the extracted oracle depends on

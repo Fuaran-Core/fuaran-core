@@ -313,7 +313,7 @@ let private errorProbes
           yield "resolvesIn " + name, string (DecodeError.resolvesIn el e), string (M.resolves_in m me) ]
 
 /// The decoder tally: the probes asked of both sides, the production refusals held to
-/// `resolvesIn`, the codes they reached, and the refusals that do not resolve (theorem 3's
+/// `resolvesIn`, the codes they reached, and the refusals that do not resolve (`DecodeLayer.fst`'s theorem 3's
 /// statement, production only).
 let private decoderTally =
     Tally.empty [ "Probes"; "Refusals" ]

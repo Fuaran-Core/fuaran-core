@@ -54,32 +54,9 @@
      - THE ROUND TRIP (`round_trip`). For every table `validate` accepts,
        `decode_json (encode_json (Embedded t)) == Good (Embedded (normal_table t))`.
 
-   THE LITERAL ROUND TRIP IS FALSE, AND THE THEOREM SAYS WHAT IS TRUE INSTEAD. `decode (encode t)
-   = Ok t` does not hold of the shipped codec, three ways, each proved in section 8 as a refutation
-   rather than described:
-
-     1. `literal_round_trip_fails_on_a_widened_float` — an `Int` cell in a `FloatType` column is a
-        cell `validate` accepts (`ColumnType.widens`), is written as a JSON float, and is read
-        back as a `Float`. The value is the same number; the `Cell` is a different case.
-     2. `literal_round_trip_fails_on_a_widened_decimal` — the same for a `DecimalType` column: the
-        `Int` is written as the string of its digits and read back as a `Decimal`.
-     3. `literal_round_trip_fails_on_column_order` — `validate` checks that the schema's names and
-        the columns' names are the same SET; it never checks that they are in the same ORDER. The
-        encoder walks the schema and the decoder rebuilds in schema order, so a table whose
-        `Columns` list is in another order comes back reordered.
-
-   So the right-hand side is a NORMAL FORM: `normal_table` puts the columns in schema order and
-   widens each `Int` into its column's type. It is what decode produces, it is a fixed point
-   (`normal_table_is_idempotent`), and from the first decode on the round trip IS the literal one
-   (`round_trip_is_exact_on_a_normal_table`, `second_round_trip_is_exact`). A `Ref` source
-   round-trips exactly and unconditionally (`ref_round_trip`).
-
-   AND THE LITERAL FORM IS TRUE OF EVERYTHING THE DECODER PRODUCES. Every table `decode_json`
-   answers, for any document, is already its own normal form (`decoded_table_is_normal`), so a
-   DECODED value round-trips exactly (`decoded_round_trip_is_exact`). That is the check a corpus
-   runner makes of a round-trip case — decode the document, then round-trip what came back — and
-   it is why a sampled law that only ever builds tables in schema order with no cell to widen
-   passes while asserting the literal form: it is sampling inside the normal form.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT DECODE ACCEPTS THAT ENCODE NEVER WRITES. The converse direction — `encode (decode d) = d` —
    is not claimed and is false; section 8 exhibits why, because each is a fact about the shipped

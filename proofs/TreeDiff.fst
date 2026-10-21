@@ -9,75 +9,12 @@
    restated, exactly as `Preservation.fst` opens them; this module extracts beside both into the
    same oracle assembly.
 
-   WHAT IS PROVED, over any two trees:
-
-     - `diff_total` / `diff_refusals_exact` — `toOps` reaches exactly one outcome on every input,
-       and WHICH: it refuses exactly when the two roots carry different ids or either tree repeats
-       an id, in that precedence, and on nothing else. The converse half is the sentence the phase
-       exists for, stated as `diff_ok_on_any_wf_pair`: for ANY two well-formed trees sharing a root
-       id a script is produced, not only for a pair one of which was derived from the other by
-       applying operations — which is the only pair `Conformance.diffLaws` ever samples.
-     - `diff_emission_order` — the emitted script is `inserts ++ moves ++ removes ++ reorders`, four
-       homogeneous blocks in that order. This is the argument the source comment carries in prose
-       ("added nodes go in as leaf shells, every survivor is then reattached, removed regions are
-       deleted **last**"), mechanised: it is a property of the four passes, and every applicability
-       argument about the script rests on it.
-     - the four block characterisations, each the clause of that argument its pass supplies:
-       `diff_inserts_are_new_leaf_shells` (a graft is CHILDLESS and its id is one `before` does not
-       carry, and the parent named is that node's after-parent),
-       `diff_moves_are_survivor_reattachments` (a move names a survivor whose before-parent is not
-       the destination, and the destination HOLDS it in `after`), `diff_removes_only_dead` —
-       survivor preservation, which `Conformance.diffLaws` samples and this proves — and
-       `diff_reorders_state_the_after_order`.
-     - `diff_contained_diff` / `diff_contained_locates` / `diff_contained_at_total_is_plain` /
-       `diff_applicable_contained` — the container-aware mirror, and the last is the one the
-       phase's fourth task asks for: every parent address an emitted operation carries resolves, in
-       `after`, to a node that HOLDS the addressed child and that `canHold` accepts. That is a
-       statement about the ADDRESSES, in `after`; it is NOT "the script cannot be refused for
-       containment at any step", which this header claimed until Phase 305 and which is FALSE —
-       the script runs against `before`'s kinds, and the structural diff carries no content, so a
-       survivor that is a leaf in `before` and a container in `after` refuses the inserts under it
-       (section 12, `contained_script_refused_at_before_kinds`, the exact pair the second-pass
-       review measured at 41% of drawn pairs). The content-aware `Diff.toOpsContainedWith` is the
-       form that applies under the predicate it checked; its run theorem is section 13's
-       `diff_applicable_contained_run` (Phase 305, when the phase was re-opened to finish): the two
-       update blocks modelled, section 10's induction REUSED at the recoloured tree rather than
-       restated, the contained engine shown to agree with the plain one at every structural step.
-
-     - the POSITIONAL facts (section 9, Phase 162), over `TreeOps.preorder_parent_first`: an
-       insert's parent precedes its own node in `after`'s preorder — the source comment's
-       "top-down", mechanised — a move's destination precedes the moved node, and therefore a
-       move's destination is NOT inside the moved subtree in `after`, which is the consequence
-       Phase 141 named when it deferred the two theorems below.
-
-     - THE RECONSTRUCTION (section 10, Phase 167), which is what the two facts above were for:
-       `diff_applicable` — every emitted step is ACCEPTED in sequence by `apply`, against the tree
-       IN HAND at that step — and `diff_reconstructs` — `apply_all (to_ops b a) b == Ok a`, the
-       tree and not a tree like it. Phase 141 deferred both as 141.t1 and Phase 162, having proved
-       the positional lemma and found the gap had changed shape rather than closed, re-deferred
-       them as 162.t3; section 10 is the invariant both deferrals named, one per pass, about how
-       much of `after`'s structure each PREFIX of the script has built. `diff_reconstructs` holds
-       under `kinds_agree` and `diff_applicable` under nothing extra, and the hypothesis is proved
-       NECESSARY rather than assumed — see `kinds_agree_is_necessary`, and section 10's header for
-       why the unrestricted form is false rather than merely unproved.
-
-   WHAT IS NOT CLAIMED. `Diff.toOpsMoved` (fuaran-core#63) — not shipped, so there is no function
-   to model clause for clause, and section 10's four `_run` lemmas are stated over `toOps`' four
-   passes by name; a second emission strategy would inherit `tree_ext` and `Preservation.fst`
-   section 11 but not the induction. `Ops.normalize`, containment LEGALITY and rejection PAYLOADS,
-   as the README's theorem 6 ladder records. What is proved here is everything the four passes
-   guarantee about the SCRIPT, about `after`, and now about applying it; what the differential
-   still measures over independently generated pairs is that the SHIPPED engine does the same,
-   which is a claim about production and not about the model.
-
-   WHY `TreeDiff` AND NOT `Diff`. The same reason `TreeOps.fst` models `Ops.fs` and is not called
-   `Ops`: the extracted oracle is a top-level F# module, and the differential host opens
-   `Fuaran.Core`, so a model named for the production module it mirrors would put two `Diff`s in one
-   scope. D35 (Phase 147) records what that costs — a name shared by two things in scope resolves by
-   accident of open order and reads as a defect somewhere else entirely.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `DagFold.fst`, `TreeOps.fst`
-   and `Preservation.fst`. Sets are lists read under `mem` (the README's standing reading), and
+   and `Preservation.fst`. Sets are lists read under `mem` (the `sets-are-lists` row), and
    F#'s `Map.ofList` is modelled as a LAST-WINS association lookup, which is what `Map.ofList` does
    with a repeated key — the same fidelity `TreeOps.pick_last` keeps for the `Map.ofList` inside
    `validateReorder`.
@@ -894,7 +831,7 @@ let diff_applicable_contained (ch:tree -> bool) (b a:tree) (o:op)
       k operations run on it. Relating the two is the induction that remains, and it needs an
       invariant about how much of `after`'s structure each prefix of the script has already built.
       Both claims are carried at level 2 by the differential over independently generated pairs
-      exactly as Phase 141 left them; the README's theorem 6 carries the boundary and the price.
+      exactly as Phase 141 left them; this model's ladder rows carry the boundary and the price.
       The facts below are the after-tree half, and stating them separately is what makes the
       remaining half a named induction rather than an unexamined gap.
    ====================================================================================== *)
@@ -3848,7 +3785,7 @@ and subtree_digests_injective (h:string -> string) (cf:list string -> string) (e
 
 (* ---- F#: `Tree.Digests.diff`, over the id lists of the two trees ----
 
-   A key is `mem` of an id list (the README's standing reading); `own_at` is the map lookup
+   A key is `mem` of an id list (the `sets-are-lists` row); `own_at` is the map lookup
    `Own[k]`. The four predicates are named so each `keep` carries the same function term the
    lemmas below instantiate. *)
 let own_at (h:string -> string) (cf:list string -> string) (enc:tree -> string) (x:string) (t:tree)

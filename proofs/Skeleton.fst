@@ -10,10 +10,9 @@
    is the composition, and it is deliberately thin: there is no new argument here, only the
    instantiation, which is the point — the two halves were designed to meet.
 
-   WHAT THE COMPOSITE SAYS. For the skeleton ops over any tree the witness can show `Ops`, folded
-   through `Ops.apply` and `Ops.footprint`: the same lanes reach the same tree however they
-   arrive, a lane set that cannot fold halts with the same canonical report however it arrives,
-   and none folds under one order and halts under another. No hypothesis about the domain remains.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IT IS ABOUT, EXACTLY — ONE boundary now, stated in `TreeOps` and not hidden here. The
    algebra is `TreeOps.wapply`, which is `Ops.apply` declining a step that would leave the tree

@@ -1,7 +1,7 @@
 (*
    JsonParse — an F* model of Fuaran.Core's recursive-descent JSON PARSER, with the two guards and
    the error classification as machine-checked theorems (fuaran-core Phase 146 — the boundary
-   Phase 135's theorem 1 named and left open).
+   the `WireDecode` model (Phase 135) named and left open).
 
    WHAT IS MODELLED. `Fuaran.Core.Json.read` at no bound but the cap (src/Fuaran.Core.Wire/Json.fs),
    clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes, the
@@ -18,40 +18,9 @@
    the depth cap is, and each refused as `LimitExceeded`, a kind the descent carries internally
    and that NEITHER entry point reports as malformed JSON (section 13).
 
-   WHAT IS PROVED.
-     - `parse_total` — the parser reaches exactly one outcome on every input: an accepted value or
-       a CLASSIFIED refusal, never both and never neither. That it is `Tot` at all is the content:
-       F* admits a recursive definition only once it has shown it terminates on every input, and a
-       recursive-descent parser over a mutable index has no syntactic reason to.
-     - `depth_bound_exact` — on the canonical nesting family, the parse succeeds exactly when the
-       budget is at least the nesting, at every depth and for every suffix; with
-       `depth_error_only_at_a_container` (carried in the parsers' RETURN TYPES) saying the error
-       kind is never invented anywhere else, and `depth_bound_scalars_unaffected` saying an
-       exhausted budget still accepts a scalar.
-     - `int53_guard_exact` — every integer token the parser ACCEPTS is int53-safe by value, whether
-       it landed on `JInt` or on `JFloat`, OR (since Phase 253) is the canonical float layout of the
-       double it reads as — the one integer-shaped spelling past 2^53 a Core document carries, and
-       `canonical_layout_past_int53_is_read` says such a token is read; the guard as production
-       spells it is SOUND (it never admits an unsafe integer that is not such a layout) and
-       CONSERVATIVE (`int53_guard_conservative` exhibits a safe value it refuses). See the finding
-       below: "exact" is not available, and claiming it would be false.
-     - `error_kind_exhaustive` — the twelve `JsonErrorKind` cases are confined to the layers that
-       raise them (again in the return types, so the confinement is checked at every call site
-       rather than asserted once) and every one of the twelve is REACHABLE, by a witness input.
-       A classification with a dead case is not exhaustive, it is merely closed.
-     - `number_grammar_is_checked_first` / `int53_guard_exact_on_the_grammar` — Phase 306, section
-       8: a token outside the JSON number grammar is a malformed number before either guard reads
-       it, and ON the grammar the int53 guard is exact. See the finding below, which this closes.
-     - `parse_accepts_only_well_formed_strings` — Phase 306, section 12: every string and every
-       member key in a value the parser returns is well-formed UTF-16.
-     - `limited_at_no_bound_is_the_parser`, `limit_never_reported_as_malformed`,
-       `string_bound_exact`, `items_bound_exact` — Phase 465, section 13: the limited entry point
-       at no bound answers exactly what `parse` answers (a depth breach lifted to `RLimit LDepth`),
-       a breach is a `RLimit` and never a `RErr`, and on the canonical string and array families
-       the two linear bounds are exact at every length and every bound. The members bound, the
-       byte bound, and a breach outranking a later malformed item are exhibited
-       (`limits_exhibited`); the CONFINEMENT of each breach to a bound that is actually set rides
-       the return types (`bounds_confined`), which is what lets `parse` keep its thirteen kinds.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IS NOT MODELLED, AND WHY — the theorem's boundary.
 
@@ -92,24 +61,6 @@
        characters production handed to `Int32.TryParse` / `Double.TryParse`. Which CONSTRUCTOR is
        chosen is the guard under test and is modelled exactly; the numeral's value is .NET's to
        compute, and the differential compares it there.
-
-   A FINDING, AS IT STOOD UNTIL PHASE 299 — AND NOW CLOSED. What follows was true of the parser
-   this model was first written against. Phase 299 held `parseNumber` to the JSON number grammar,
-   which has no leading zero, and Phase 306 restated the model: a padded token is refused BY THE
-   GRAMMAR before the guard reads it, so over the tokens the parser reads the guard IS exact
-   (`int53_guard_exact_on_the_grammar`). The paragraph is kept because `int53_guard_conservative`
-   is still a lemma — it is a fact about the predicate now, not about the parser — and because the
-   reasoning is what a reader needs to see why the grammar closes it.
-
-   The finding, recorded here because the phase's own task list assumed otherwise: THE INT53 GUARD
-   WAS NOT EXACT, AND COULD NOT BE, BECAUSE THE PARSER DID NOT REJECT LEADING ZEROS. Json.fs justifies
-   comparing the digit string lexically with "JSON forbids leading zeros, so for equal length that
-   IS the numeric order" — but `parseNumber`'s digit loop accepts `007`, and for a token `Int32`
-   refuses, padding lengthens the string without changing the value. So `0009007199254740992` — 19
-   characters, value exactly 2^53, comfortably safe — is refused as `MalformedNumber`. The error
-   only ever runs that way: a padded reading is numerically smaller than an unpadded one of the
-   same length, so no padding can make an unsafe integer look safe. `int53_guard_sound` and
-   `int53_guard_conservative` are those two sentences, proved.
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it, and error
    MESSAGES are reproduced verbatim rather than classified, because the differential compares them:
@@ -502,7 +453,7 @@ let int32_fits (neg: bool) (d: list ch) : Tot bool =
    4. The scanners (F#: `skipWs`, `expect`, `parseString`, `parseNumber`).
 
       Each carries its consumption in its RETURN TYPE — the termination argument for section 5,
-      and the confinement of the error kinds it can raise, which is half of theorem 4.
+      and the confinement of the error kinds it can raise, which is half of `error_kind_exhaustive`.
    ====================================================================================== *)
 
 (* The kinds `parseString` can raise. Every other kind arising inside a string would be a defect
@@ -986,7 +937,7 @@ and parse_items
 
 (* F#: the scanner's `document` (`Json.read`) — the value, then `skipWs`, then the leftover test.
    `TrailingCharacters` is the one classified failure NOT raised through `JsonParseError`: it is
-   constructed here, from the leftover, which is why theorem 4 is stated about this entry point
+   constructed here, from the leftover, which is why this model's theorems are stated about this entry point
    rather than about the raise sites. Runs the descent at NO bound (`unbounded`) — every
    pre-existing entry point does, and `bounds_confined` is what makes the `RErr k` arm below carry
    one of the thirteen kinds and never `LimitExceeded`. *)

@@ -482,26 +482,20 @@ let proofsLadderTests =
                   (Set.ofList classOrder)
                   "every class in the closed set is carried by at least one row, so obligation-law and bridge-closes both bite"
 
-          testCase
-              "proofs/README.md's counts and contract table are the ladder's projection (CORE_APPROVE_LADDER=1 regenerates them)"
+          testCase "proofs/README.md is the render of the ladder, the roster and the model headers"
           <| fun _ ->
-              // Phase 309 — generated, not hand-kept. Red here means the README's summary block,
-              // contract rows or contract counts are not what `proofs.json` renders to; with
-              // CORE_APPROVE_LADDER=1 the family writes the rendering instead (commit the result).
-              let ladderText = File.ReadAllText ladderPath
+              // Phase 309 generated the counts and the contract table; Phase 533 makes the whole of
+              // the README's claims a render (`ProofReadme.render`): the summary, the contract table,
+              // the operation table and every model section. The tool's `render proofs-readme` is the
+              // file's one writer; this holds the committed file to it and writes nothing.
               let readmeText = File.ReadAllText proofsReadmePath
 
-              Approval.validate Approval.Ladder
-
-              match regenerateReadme ladderText readmeText with
+              match ProofReadme.renderLive () with
               | Error why -> failtestf "the README's generated blocks could not be located: %s" why
-              | Ok expected when expected = readmeText -> ()
-              | Ok expected when Approval.admits Approval.Ladder Approval.Ladders.Summary ->
-                  Approval.write Approval.Ladder Approval.Ladders.Summary proofsReadmePath expected
-                  |> ignore
+              | Ok expected when expected = readmeText.Replace("\r\n", "\n") -> ()
               | Ok expected ->
                   let a = readmeText.Replace("\r\n", "\n").Split('\n')
-                  let b = expected.Replace("\r\n", "\n").Split('\n')
+                  let b = expected.Split('\n')
 
                   let firstDiff =
                       Seq.zip a b
@@ -509,10 +503,11 @@ let proofsLadderTests =
                       |> Option.defaultValue (min a.Length b.Length)
 
                   failtestf
-                      "proofs/README.md is not the ladder's projection — first differing line %d:\n  committed: %s\n  generated: %s\nRe-run with CORE_APPROVE_LADDER=1 and commit the README."
+                      "proofs/README.md is not the render — first differing line %d:\n  committed: %s\n  rendered:  %s\nRe-render with `%s` and commit the README."
                       (firstDiff + 1)
                       (if firstDiff < a.Length then a[firstDiff] else "<end>")
                       (if firstDiff < b.Length then b[firstDiff] else "<end>")
+                      (Tool.render ProofReadme.Family)
 
           testCase "the committed proofs.json and proofs/README.md's contract table agree, row for row"
           <| fun _ ->

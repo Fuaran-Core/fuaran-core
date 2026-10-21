@@ -84,7 +84,7 @@ module FStarTarget =
     /// IDL over types the model already carries enters the proof vocabulary at the next
     /// regeneration and re-proves itself, and one that brings a new object of its own is NAMED
     /// in the emitted header with the reason. Widening it is a measured decision, not an edit —
-    /// see `proofs/README.md`, theorem 1's cost note.
+    /// see the `vocabulary-generated-model` row of Fuaran.Core's `proofs.json`.
     ///
     /// A kind is in exactly when it is expressible and [[beyondEnvelope]] answers it empty.
     let proofKinds (idl: Idl) : string list = FStarModel.proofKinds idl

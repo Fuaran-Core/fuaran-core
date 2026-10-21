@@ -12,21 +12,9 @@
    `Preservation`'s; two trees that agree node for node are the same tree by
    `TreeDiff.tree_ext`, which is why that module is cited rather than restated here.
 
-   WHAT IS PROVED. The doc comment of `Ops.normalize` makes three promises, and the theorems are
-   their names:
-
-     normalize_preserves      wf t /\ Ok? (apply_all s t)  ==>  apply_all (normalize s) t == apply_all s t
-     normalize_idempotent     normalize (normalize s) == normalize s
-     normalize_never_longer   len (normalize s) <= len s
-
-   The first is the defining law `Conformance.normalizeLaws` samples. It is stated for an
-   APPLYABLE script at a WELL-FORMED tree, and both hypotheses are the function's own: the doc
-   comment says "normalise after validating, not before", because cancelling an insert/remove
-   pair can turn a refused script into an accepted one (so the law cannot be an equality of
-   outcomes); and three of the six collapses — a move superseded by a move, a reorder by a
-   reorder, a rewrite erased by a remove — are sound only because the node they address occurs
-   ONCE, which is `wf` (section 1 of `TreeOps.fst`; the assumed row
-   `tree-algebra-well-formed-states`). The second and third are unconditional.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW. Soundness is one invariant over the stack — "the stack, read bottom-up, takes the tree
    to the state the processed prefix reached" — carried through `push` by SIX pair lemmas, one

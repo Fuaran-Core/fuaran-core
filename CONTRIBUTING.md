@@ -66,7 +66,6 @@ rendered from the registry (`CORE_APPROVE_DOCS=CONTRIBUTING` rewrites it):
 |---|---|---|
 | `CORE_APPROVE_API` | `api/<package>.txt` | a package id |
 | `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
-| `CORE_APPROVE_LADDER` | `proofs/README.md` | `ladder` or `operations` |
 | `CORE_APPROVE_README` | `README.md` | `README` |
 | `CORE_APPROVE_DOCS` | `DECISIONS.md`, `docs/releases/README.md`, `.fantomasignore`, `version-derives.json`, `copies.json`, `CONTRIBUTING.md`, `conformance/idl/idl.schema.json` | `DECISIONS`, `ledger-index`, `fantomasignore`, `version-derives`, `copies`, `CONTRIBUTING` or `idl-schema` |
 | `FUARAN_REGEN` | `tests/Fuaran.Core.Tests/MiniGenerated.fs`, `tests/Fuaran.Core.Tests/DocGenerated.fs`, `tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs`, `tests/Fuaran.Core.Tests/DeriveGenerated.fs`, `tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs`, `src/Fuaran.Core.Function/CapabilitySeamCodec.fs`, `src/Fuaran.Core.Function/PipelineSeamCodec.fs`, `src/Fuaran.Core.Query/QuerySeamCodec.fs`, `src/Fuaran.Core.Column/FieldChangeSeamCodec.fs`, `src/Fuaran.Core.AiSurface/RejectionSeamCodec.fs`, `tests/Fuaran.Core.Tests/snapshots/spike.json` | `MiniGenerated`, `DocGenerated`, `DocAnnotatedGenerated`, `DeriveGenerated`, `SpecDecodersGenerated`, `CapabilitySeamCodec`, `PipelineSeamCodec`, `QuerySeamCodec`, `FieldChangeSeamCodec`, `RejectionSeamCodec` or `spike` |

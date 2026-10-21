@@ -17,7 +17,7 @@ let tests =
     testList
         "Proofs.Oracle"
         [
-          // ---- the PARSER (Phase 146) — the boundary theorem 1 named ----
+          // ---- the PARSER (Phase 146) — the boundary the `WireDecode` model named ----
 
           testCase "the parser oracle agrees with production over the near-miss table"
           <| fun _ ->

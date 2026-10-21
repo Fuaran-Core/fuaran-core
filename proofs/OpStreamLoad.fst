@@ -63,28 +63,9 @@
        without escapes, which the differential's generators keep; a refusal's PATH is rendered from
        the decoded spelling on both sides.
 
-   WHAT IS PROVED — the three theorems Phase 454 states:
-     1. TOTALITY (section 9). Every scanner and load is a `Tot` function: no exception path and no
-        divergence, every walk terminating on the suffix it consumes. Production raises
-        `JsonlScanFault` deep in the scan and catches it at `parseLine` / `checkRaw` / `unquote` /
-        `stringsField` / `actorField`; the model has no exception, so every `fail` is a returned
-        `SErr` and the boundaries that catch it are the ones that turn it into a `fault`. That
-        production raises nothing on the generated inputs is the differential's.
-     2. FAULTS LOCATE (section 10). A fault `scanRecords` answers names a line that exists in the
-        input — one the scan did not skip as blank — and is the fault that line's parse or decode
-        answered (`scan_fault_locates`); its position lies within that line (`parse_fault_in_line`,
-        for the scanner's own faults). Every `Undecodable` site of a load names a line that exists,
-        whose record the witness refused with the site's reason, by the hash the line carries
-        (`site_names_its_op`). No fault is produced for a line the writer wrote
-        (`record_line_parses`, which theorem 3 spends).
-     3. ROUND TRIP (section 11). Loading what `tryToJsonl` wrote yields the records that were
-        written — every record, in order, with its chain fields — so `verify` over the loaded
-        stream is `verify` over the original: `fromJsonlWithSnapshots` answers them with no
-        snapshot, `fromJsonl` answers them, and `fromJsonlVerified` answers them or the break the
-        chain walk reports of the ORIGINAL records (`round_trip`, `verified_round_trip`). Under
-        two premises a domain owes (named in `../proofs.json`): its witness reads back what it
-        writes (`witness_rt`), and its records are well formed (`records_wf`: an actor that names
-        somebody, strings a writer can spell, a sequence in Int32 — which `OpStream.append` keeps).
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    HOW TO READ A POSITION. Production's positions are indices into the line; the model's scanner
    walks suffixes, and a fault carries the suffix it refused AT (`SErr why at`), so the position

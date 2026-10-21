@@ -8,20 +8,9 @@
    `Dag.conflicts` checks them, then either HALTED with the conflict report and nothing applied,
    or composed in arrival order and REPLAYED through the domain reducer from the base state.
 
-   WHAT IS PROVED. `fold_confluence_total`: for any two arrival orders of the same lane set — any
-   two lists related by the inductive permutation relation `perm` — the outcomes are equivalent:
-   the same folded state, the same canonical halt report (as an unordered set of shape × address ×
-   unordered op pair, which is the canonical form `FoldConfluence.canonicalConflictReport`
-   renders), or the same set of rejecting lanes. The one DOMAIN hypothesis is the diamond
-   (`independence_diamond`): ops whose footprints `independent` declares disjoint and which BOTH
-   APPLY at a state each apply after the other and reach the same state. That is exactly what
-   Phase 78/80 certify for the tree algebra and what the Phase 100 pack certifies for a domain's
-   own witness — nothing here proves it, everything in the fold half rests on it, and
-   `ProofOracleTests.fs` measures it on the reference witness. Nothing is asked of the lane set:
-   `fold_once` replays every lane on its own from the base before it composes anything (Phase
-   300), so the `lanes_apply` premise Phase 131's statement carried is discharged by the fold
-   itself. The HALT half (`fold_confluence_halt`) asks for nothing at all: it is a property of the
-   footprints alone. The README states the whole boundary in the claims-ladder form.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    WHAT IS NOT MODELLED HERE. The DAG itself — content-addressed node ids, `betweenOps`, the
    topological order that recovers each lane's delta from a real `Dag.T`. This module starts where

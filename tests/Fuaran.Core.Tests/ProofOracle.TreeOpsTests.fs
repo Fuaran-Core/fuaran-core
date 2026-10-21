@@ -21,7 +21,7 @@ let private ok (r: Result<'a, string>) : 'a =
     | Error d -> failwithf "a well-formed tree indexes, but %s repeats" d
 
 /// Membership is the meaning on both sides: production carries `Set<string>`, the model carries
-/// lists read as sets (proofs/README.md, "sets are lists").
+/// lists read as sets (the `sets-are-lists` row of `proofs.json`).
 let private asSet (xs: string list) = xs |> List.distinct |> List.sort
 
 let private slotKey (n: string, s: string) = n + "\u0000" + s
@@ -314,7 +314,8 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
                         tally |> agrees "an index lookup" t x prod model |> Tally.bumpIf deep "Deep"
 
                     if wf then
-                        // Theorem 1 at production and at the model: the index is the walk it caches.
+                        // `TreeOps.fst` section 23's theorem 1 at production and at the model:
+                        // the index is the walk it caches.
                         let walk =
                             (Tree.tryFind nodew idw x t |> Option.map toModelTree,
                              Tree.parentOf nodew idw x t |> Option.map toModelTree,
@@ -336,7 +337,7 @@ let private indexDifferential (fresh: TreeOps.tree -> TreeOps.ix_index -> bool) 
                         tally)
                 tally
 
-    // Theorems 2 and 3: every ordered pair, the tree an index was built from included.
+    // Section 23's theorems 2 and 3: every ordered pair, the tree an index was built from included.
     let perBuilt (t0: RNode) (tally: Tally) =
         match Tree.Index.build nodew idw t0 with
         | Error _ -> tally
@@ -892,7 +893,7 @@ let tests =
 
           testCase "the extracted Tree.Index model is production's index over the generated pool, and is the walk"
           <| fun _ ->
-              // Theorem 1 (`index_agrees`), 2 (`freshness_tracks_change`) and 3 (`fresh_on_build`,
+              // Section 23's theorem 1 (`index_agrees`), 2 (`freshness_tracks_change`) and 3 (`fresh_on_build`,
               // `try_build_exact`) on the extracted model beside production: every lookup at every id
               // of every tree, an absent id included; over a well-formed tree, production's index,
               // production's walk and the model's walk all agree; `isFreshFor` over every ordered

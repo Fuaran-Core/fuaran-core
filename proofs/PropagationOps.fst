@@ -20,46 +20,9 @@
    its kind tag, exactly as `TreeOps.fst` reads `UpdateNode`. The reads a node declares are a
    PARAMETER (`rd`, F#: the caller's `readsOf`), any function of the node and its subtree.
 
-   WHAT IS PROVED.
-
-     - `changed_for_op_complete` — for an op `apply` accepts on a well-formed tree, every surviving
-       node that is NEW, whose content (kind) differs, whose child ids differ or whose declared reads
-       differ, and every surviving node that declared a read of an id the edit REMOVED, is in the
-       change set. `Batch` included, at any depth: the diff compares the two ends, and the one
-       clause that needs the op — that content moves ONLY where the op content-writes — is proved
-       over `apply` itself (`kind_kept`), threading a batch through every intermediate tree.
-
-     That is the premise `evalfrom_agrees` takes of a change set (`agree_off` / `touches_off`) for
-   every evaluator that is a function of a node's own content, its child ids and its resolved
-   declared reads: such an evaluator moves only at a node whose content, children or reads moved,
-   or whose read now resolves differently — a removed read (named here), or a read whose value moved
-   (reached by `evalFrom`'s own closure over the post-edit graph, `dirty_sound`).
-
-     - `dirty_from_op_complete` (Phase 456) — `Propagation.dirtyFromOp`, the unrestricted closure
-       over the same seeds (the post-edit tree computed by `apply`; `touchedBy` alone where `apply`
-       refuses), names every survivor the edit moved, every removed id and every pre-edit reader
-       of one; `changed_for_op_is_dirty_from_op`, the change set is its restriction to the
-       survivors; `dirty_from_op_least` / `changed_for_op_least`, both are the least closed set
-       over the seeds.
-     - `evalfrom_agrees_for_op` (Phase 456) — the composition with `Propagation.fst`'s
-       `evalfrom_agrees`: for the STRUCTURAL class of evaluator (section 6), both premises are
-       discharged and incremental evaluation from `changedForOp` over the post-edit map equals full
-       evaluation of the post-edit tree, in the one-map shape that theorem has.
-
-   WHAT IS NOT CLAIMED. That an evaluator a domain runs is in that class: one that reads a node's
-   whole subtree without declaring the reads is not, and is what declared reads are for. That the
-   seeds are exactly the moved set: `touched_by` and the content writes over-approximate it by
-   design, and minimality is stated over the seeds. That a prior from a walk over the PRE-edit map
-   carries across an edit that moves the map: the composition inherits `evalfrom_agrees`'s one-map
-   shape, and the step it would need — a full evaluation's values do not depend on which certified
-   order produced them — is stated nowhere here (section 6's header). That the
-   content the domain's encoder distinguishes is the kind tag — the witness shows the core nothing
-   else, and `Ops.apply` rewrites content nowhere but at an `UpdateNode` target or an inserted
-   subtree, which the footprint names. That `post` is `apply`'s result for an op some OTHER engine
-   accepted: the theorem is about `Ops.apply`, and a domain engine (contained, keyed) that accepts
-   an op lands on the tree `apply` lands on whenever `apply` accepts it too. Over an ill-formed tree
-   (an id twice) the statement is not made: `find` resolves to the first occurrence there, and the
-   two ends can disagree about which node an id means.
+   WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
+   whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
+   renders them in this model's section.
 
    Apache-2.0, like everything beside it.
 *)
