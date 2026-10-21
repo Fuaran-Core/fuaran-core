@@ -84,7 +84,7 @@ let tests =
                   "an unknown generated-module stem is refused at its own site"
 
               Expect.throws
-                  (fun () -> admitsFor (Only [ "elsewhere" ]) Docs Files.DocCoverage |> ignore)
+                  (fun () -> admitsFor (Only [ "elsewhere" ]) Docs Files.Decisions |> ignore)
                   "so is a stem a single-file switch does not govern"
 
               Expect.equal

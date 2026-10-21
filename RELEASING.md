@@ -1,12 +1,11 @@
 # Releasing Fuaran.Core
 
 This page is the operator's half of a release: what the tag sets off, the Trusted Publishing policy
-the publish job logs in through, and what to do when a step is red. It deliberately does **not**
-restate the release sequence. That sequence (re-stamp the corpus, pack a candidate, run the
-receiving gate, write the release record, tag and push atomically) is a gate output, and it lives in
-exactly one place: [`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy), held there
-by the `Release ledger` test family (DECISIONS.md D123). Do that sequence first; this page starts at
-its last step, the `git push --atomic origin main v<v>`.
+the publish job logs in through, and what to do when a step is red. The release SEQUENCE is stated in
+exactly one place, [`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy), held there by
+the `Release ledger` test family (DECISIONS.md D123), and it is the CONTRACT a release honours, not a
+procedure this page repeats. The release act itself is performed by tooling outside this repository,
+whose preflight re-reads the packed public surfaces before it records the release. This page starts where the contract ends, at the pushed `v<v>` tag.
 
 The registry is [nuget.org](https://www.nuget.org/packages?q=Fuaran.Core), and every package
 publishes from [`.github/workflows/publish-packages.yml`](.github/workflows/publish-packages.yml).

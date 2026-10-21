@@ -21,30 +21,33 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 // model's theorem is about the encoder the model describes; this is what says the shipped encoder
 // computes those bytes.
 
+/// The encoder tally: the strings compared, the ill-formed among them, and the well-formed strings
+/// a go-red encoder lost on.
+let private utf8Tally = Tally.empty [ "Strings"; "IllFormed"; "WellFormedLost" ]
+
+let private describe (x: string) =
+    x |> Seq.map (fun c -> (int c).ToString "X4") |> String.concat " "
+
 /// The unguarded encoder against the platform's replacing encoder, and the guarded one against the
-/// platform's strict encoder, on one string. Returns the disagreements.
-let private utf8Probe (s: string) : string list =
-    let describe (x: string) =
-        x |> Seq.map (fun c -> (int c).ToString "X4") |> String.concat " "
-
-    let unguarded =
-        if Hash.utf8Bytes s = System.Text.Encoding.UTF8.GetBytes s then
-            []
-        else
-            [ sprintf "utf8Bytes [%s] is not the platform's bytes" (describe s) ]
-
-    let guarded =
+/// platform's strict encoder, on one string, into the tally.
+let private utf8Probe (s: string) (t: Tally) : Tally =
+    let guardedAgrees =
         match Hash.tryUtf8Bytes s, strictlyEncodable s with
-        | Result.Ok bytes, true when bytes = strictUtf8.GetBytes s -> []
-        | Result.Error bad, false when bad.Index < s.Length && int s[bad.Index] = bad.Unit -> []
-        | got, strict ->
-            [ sprintf
-                  "tryUtf8Bytes [%s] = %A where the strict encoder %s"
-                  (describe s)
-                  got
-                  (if strict then "encodes" else "refuses") ]
+        | Result.Ok bytes, true when bytes = strictUtf8.GetBytes s -> true
+        | Result.Error bad, false when bad.Index < s.Length && int s[bad.Index] = bad.Unit -> true
+        | _ -> false
 
-    unguarded @ guarded
+    t
+    |> Tally.bump "Strings"
+    |> Tally.bumpIf (not (strictlyEncodable s)) "IllFormed"
+    |> Differential.check (Hash.utf8Bytes s = System.Text.Encoding.UTF8.GetBytes s) (fun () ->
+        sprintf "utf8Bytes [%s] is not the platform's bytes" (describe s))
+    |> Differential.check guardedAgrees (fun () ->
+        sprintf
+            "tryUtf8Bytes [%s] = %A where the strict encoder %s"
+            (describe s)
+            (Hash.tryUtf8Bytes s)
+            (if strictlyEncodable s then "encodes" else "refuses"))
 
 /// The encoder as it stood before Phase 290 — the go-red instrument: a high surrogate consumes the
 /// NEXT unit as its low half without checking that it is one.
@@ -87,32 +90,17 @@ let tests =
           testCase
               "Hash.utf8Bytes is the platform encoder's bytes over every code unit and every surrogate boundary pair"
           <| fun _ ->
-              let bad = ResizeArray<string>()
-              let mutable strings = 0
-              let mutable illFormed = 0
-
-              let probe (s: string) =
-                  strings <- strings + 1
-
-                  if not (strictlyEncodable s) then
-                      illFormed <- illFormed + 1
-
-                  bad.AddRange(utf8Probe s)
-
               // Every code unit, alone.
-              for u in 0..0xFFFF do
-                  probe (units16 [ u ])
+              let units = [ for u in 0..0xFFFF -> units16 [ u ] ]
 
               // Every high surrogate against the units that bound the low range and a non-surrogate
               // each side of it; and every low surrogate after a high one, an ordinary unit and
               // nothing — the pairs, the near-pairs and the reversed pairs.
-              for hi in 0xD800..0xDBFF do
-                  for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] do
-                      probe (units16 [ hi; next ])
-
-              for lo in 0xDC00..0xDFFF do
-                  for before in [ 0xD800; 0xDBFF; 0x41 ] do
-                      probe (units16 [ before; lo ])
+              let pairs =
+                  [ for hi in 0xD800..0xDBFF do
+                        for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] -> units16 [ hi; next ] ]
+                  @ [ for lo in 0xDC00..0xDFFF do
+                          for before in [ 0xD800; 0xDBFF; 0x41 ] -> units16 [ before; lo ] ]
 
               // And a seeded sample of longer strings over the boundary units.
               let boundary =
@@ -131,22 +119,27 @@ let tests =
                      0xFFFD
                      0xFFFF |]
 
-              let mutable st = 3062u
+              // the LCG the sample has always drawn from, threaded through the harness's loop
+              let sample (_: int) (st0: uint32) (t: Tally) =
+                  let mutable st = st0
 
-              let pick (n: int) =
-                  st <- (st * 1664525u) + 1013904223u
-                  int (st >>> 1) % n
+                  let pick (n: int) =
+                      st <- (st * 1664525u) + 1013904223u
+                      int (st >>> 1) % n
 
-              for _ in 1..20000 do
-                  probe (units16 [ for _ in 0 .. pick 6 -> boundary[pick boundary.Length] ])
+                  let s = units16 [ for _ in 0 .. pick 6 -> boundary[pick boundary.Length] ]
+                  st, utf8Probe s t
 
-              Expect.isEmpty
-                  bad
-                  (sprintf
-                      "the encoder disagreed with the platform on %d string(s). First 5:\n%s"
-                      bad.Count
-                      (bad |> Seq.truncate 5 |> String.concat "\n"))
+              let t =
+                  utf8Tally
+                  |> Differential.over units utf8Probe
+                  |> Differential.over pairs utf8Probe
+                  |> Differential.seeded 20000 3062u sample
 
+              Differential.expectAgrees "the encoder against the platform" t
+
+              let strings = Tally.count "Strings" t
+              let illFormed = Tally.count "IllFormed" t
               Expect.isGreaterThan strings 90000 (sprintf "strings compared (%d)" strings)
 
               Expect.isGreaterThan
@@ -165,18 +158,25 @@ let tests =
                   (System.Text.Encoding.UTF8.GetBytes(units16 [ 0xD800; 0xDC00 ]))
                   "the unchecked reading gives the ill-formed pair the bytes of a well-formed astral character"
 
-              let mutable lost = 0
-              let mutable wellFormedLost = 0
+              let t =
+                  utf8Tally
+                  |> Differential.over
+                      [ for hi in 0xD800..0xDBFF do
+                            for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] -> units16 [ hi; next ] ]
+                      (fun s t ->
+                          let agrees = utf8ReadingAnUncheckedLowHalf s = System.Text.Encoding.UTF8.GetBytes s
 
-              for hi in 0xD800..0xDBFF do
-                  for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] do
-                      let s = units16 [ hi; next ]
+                          t
+                          |> Tally.bump "Strings"
+                          |> Tally.bumpIf (not agrees && strictlyEncodable s) "WellFormedLost"
+                          |> Differential.check agrees (fun () ->
+                              sprintf "the unchecked reading of [%s] is not the platform's bytes" (describe s)))
 
-                      if utf8ReadingAnUncheckedLowHalf s <> System.Text.Encoding.UTF8.GetBytes s then
-                          lost <- lost + 1
+              Differential.expectLoses "an encoder that reads an unchecked low half" t
 
-                          if strictlyEncodable s then
-                              wellFormedLost <- wellFormedLost + 1
+              Expect.equal
+                  (List.length (Tally.disagreements t))
+                  (1024 * 3)
+                  "it loses on every high surrogate followed by a non-low unit"
 
-              Expect.equal lost (1024 * 3) "it loses on every high surrogate followed by a non-low unit"
-              Expect.equal wellFormedLost 0 "and on no well-formed pair" ]
+              Expect.equal (Tally.count "WellFormedLost" t) 0 "and on no well-formed pair" ]

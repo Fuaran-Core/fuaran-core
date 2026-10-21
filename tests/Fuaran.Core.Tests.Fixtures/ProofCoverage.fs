@@ -47,10 +47,6 @@ type CoverageInputs =
         /// The law names a `law-tested-by-design` entry may cite — the shipped kit's declared
         /// roster, for the same reason `Proofs.Ladder` reads it there.
         Laws: Set<string>
-        /// The phase ids that are OPEN on this side, from `tests/Fuaran.Core.Tests/open-phases.json`. `None` is the
-        /// file's declared-inert form — "no list is kept" — which is a finding for any row that makes
-        /// a scheduling claim and inert for every row that does not.
-        OpenPhases: Set<string> option
         /// The contract section of `proofs/README.md`, whose prose counts are held to the ladder.
         ContractText: string
     }
@@ -69,7 +65,6 @@ type CoverageTally =
         DomainDeclared: int
         Permanent: int
         Unscheduled: int
-        Scheduled: int
     }
 
 let internal finding (subject: string) (clause: string) (detail: string) =
@@ -260,32 +255,13 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
             match strMember row "closes" with
             | Some "permanent" -> [], Some "permanent"
             | Some "unscheduled" -> [], Some "unscheduled"
-            | Some c when phaseForm.IsMatch c ->
-                let n = phaseForm.Match(c).Groups[1].Value
-
-                match inputs.OpenPhases with
-                | None ->
-                    [ finding
-                          id
-                          "closes-open"
-                          (sprintf
-                              "schedules `closes: %s` and tests/Fuaran.Core.Tests/open-phases.json declares no list of open phases — record the open phases there; a scheduling claim nothing can check must not read as green"
-                              c) ],
-                    Some "scheduled"
-                | Some openSet when Set.contains n openSet -> [], Some "scheduled"
-                | Some _ ->
-                    [ finding
-                          id
-                          "closes-open"
-                          (sprintf
-                              "schedules `closes: %s`, which is not an OPEN phase on this side — a row scheduled against a shipped or unknown phase is an assumption nobody is going to close"
-                              c) ],
-                    Some "scheduled"
             | Some c ->
                 [ finding
                       id
                       "assumed-accounted"
-                      (sprintf "`closes` '%s' is neither a phase nor `permanent` / `unscheduled`" c) ],
+                      (sprintf
+                          "`closes` '%s' is neither `permanent` nor `unscheduled` — no schedule is kept here, so a phase is not a value (proofs/README.md)"
+                          c) ],
                 None
             | None ->
                 [ finding
@@ -401,8 +377,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
           DomainDischarged = countAccount "domain-discharged"
           DomainDeclared = countAccount "domain-declared"
           Permanent = countAccount "permanent"
-          Unscheduled = countAccount "unscheduled"
-          Scheduled = countAccount "scheduled" }
+          Unscheduled = countAccount "unscheduled" }
 
     modelFindings
     @ uncovered
@@ -421,7 +396,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
 /// length.
 let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
     sprintf
-        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled, %d scheduled)"
+        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled)"
         (if exhaustive then "exhaustive" else "NOT exhaustive")
         t.Modelled
         t.Excluded
@@ -430,7 +405,6 @@ let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
         t.DomainDischarged
         t.DomainDeclared
         t.Unscheduled
-        t.Scheduled
 
 // ---------------------------------------------------------------------------
 //  The real inputs

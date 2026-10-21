@@ -69,7 +69,10 @@ let suiteForm =
 /// change did lives in that change's record.
 let internal historyForm = Regex(@"\bPhases?\s+[0-9]", RegexOptions.Compiled)
 
-/// The two literals a `model-bridge`'s `closes` may carry beside a `fuaran-core#NNN` phase.
+/// The closed set a `model-bridge`'s `closes` is drawn from. A phase is not a member: this
+/// repository keeps no schedule, because its roadmap lives outside it and cannot be read from here
+/// (Phase 537, which deleted the scheduled half of the coverage clause until a writer for a list of
+/// open phases exists).
 /// `unscheduled` is a value rather than a rounding to `permanent` on purpose: two of this
 /// repository's bridges CAN be closed and nobody has taken the work, and recording those as
 /// `permanent` would assert an impossibility the README's own prose contradicts.
@@ -440,16 +443,14 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                     [ finding
                                           id
                                           "bridge-closes"
-                                          (sprintf
-                                              "a `model-bridge` carries no `closes` (a `fuaran-core#NNN` phase, or one of %s)"
-                                              renderedCloses) ]
-                                | Some cl when List.contains cl closesLiterals || phaseForm.IsMatch cl -> []
+                                          (sprintf "a `model-bridge` carries no `closes` (one of %s)" renderedCloses) ]
+                                | Some cl when List.contains cl closesLiterals -> []
                                 | Some cl ->
                                     [ finding
                                           id
                                           "bridge-closes"
                                           (sprintf
-                                              "`closes` '%s' is neither a `fuaran-core#NNN` phase nor one of %s"
+                                              "`closes` '%s' is not one of %s — no schedule is kept here, so a phase is not a value"
                                               cl
                                               renderedCloses) ]
 

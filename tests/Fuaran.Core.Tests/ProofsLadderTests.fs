@@ -30,8 +30,8 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   obligation-law          (174) a `domain-obligation` names `dischargedBy: Conformance.<law>`,
 //                           and `<law>` is one the shipped kit actually exports — an obligation
 //                           citing a law nobody can run is one a domain cannot discharge.
-//   bridge-closes           (174) a `model-bridge` names `closes`: a `fuaran-core#NNN` phase,
-//                           `permanent`, or `unscheduled`. A `premise` names neither field.
+//   bridge-closes           (174) a `model-bridge` names `closes`: `permanent` or `unscheduled`
+//                           (Phase 537: no schedule is kept, so a phase is refused). A `premise` names neither field.
 //   contract-agrees         (174) `proofs/README.md`'s "Core-to-domain proof contract" table is
 //                           the ladder's assumed rows, in order, with the same class and the same
 //                           third column.

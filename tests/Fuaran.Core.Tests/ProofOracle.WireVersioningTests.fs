@@ -47,37 +47,33 @@ let private ofModelEvolution (e: WireVersioning.evolution) : Versioning.Evolutio
     | WireVersioning.Breaking(removed, added) ->
         Versioning.Evolution.Breaking(removed |> List.map canonFromChs, added |> List.map canonFromChs)
 
-/// One classification, asked of production and of the model. The comparison is the WHOLE verdict
-/// — both lists, not merely the `Additive`/`Breaking` discriminator — because a classifier that
-/// named the right class and the wrong tags would leave a migration author with the wrong shim.
-let private versionProbe (label: string) (before: Set<string>) (after: Set<string>) (diffs: string list) =
-    let expected = Versioning.classify before after
+/// The classification's render pair: production's verdict, and the model's read back as
+/// production's type, both through `%A`.
+let private evolution: Differential<Versioning.Evolution, WireVersioning.evolution> =
+    Differential.pair (sprintf "%A") (ofModelEvolution >> sprintf "%A")
 
-    let got =
-        ofModelEvolution (WireVersioning.classify (toModelVocab before) (toModelVocab after))
-
-    if expected = got then
-        diffs
-    else
-        sprintf "%s: production classified\n  %A\nthe model classified\n  %A" label expected got
-        :: diffs
-
-/// The GO-RED instrument, and this family's counterpart to the canon family's reversed comparator:
-/// the model's OWN `classify_ignoring_removals`, a classifier that computes the additions and
-/// never looks for removals. It is not a strawman — it is what an author writes who reads §15.4's
-/// additive row and stops there, and it agrees with production on every purely additive change.
-/// A comparison that cannot separate it from the real thing is measuring nothing.
-let private versionProbeGoRed (label: string) (before: Set<string>) (after: Set<string>) (diffs: string list) =
-    let expected = Versioning.classify before after
-
-    let got =
-        ofModelEvolution (WireVersioning.classify_ignoring_removals (toModelVocab before) (toModelVocab after))
-
-    if expected = got then
-        diffs
-    else
-        sprintf "%s: production classified\n  %A\nthe broken model classified\n  %A" label expected got
-        :: diffs
+/// One classification, asked of production and of the model's `classify`. The comparison is the
+/// WHOLE verdict — both lists, not merely the `Additive`/`Breaking` discriminator — because a
+/// classifier that named the right class and the wrong tags would leave a migration author with the
+/// wrong shim.
+///
+/// `classify` is the model's `classify` in every real run. The GO-RED instrument, and this family's
+/// counterpart to the canon family's reversed comparator, is the model's OWN
+/// `classify_ignoring_removals`, a classifier that computes the additions and never looks for
+/// removals. It is not a strawman — it is what an author writes who reads §15.4's additive row and
+/// stops there, and it agrees with production on every purely additive change. A comparison that
+/// cannot separate it from the real thing is measuring nothing.
+let private versionProbe
+    (classify: WireCanon.ch list list -> WireCanon.ch list list -> WireVersioning.evolution)
+    (label: string, before: Set<string>, after: Set<string>)
+    (t: Tally)
+    : Tally =
+    t
+    |> Differential.compareWith
+        evolution
+        (fun p m -> sprintf "%s: production classified\n  %s\nthe model classified\n  %s" label p m)
+        (Versioning.classify before after)
+        (classify (toModelVocab before) (toModelVocab after))
 
 // ---- the IDL pairs ----------------------------------------------------------------------
 //
@@ -428,7 +424,7 @@ let private envelopeRejects () : Map<string, string * string> =
 /// `$profile` that does not parse names no capability set), and production's refusal must be the
 /// profile's. The model negotiates parsed profiles only, so there is nothing further to ask it.
 /// Any other refusal is a defect, as before.
-let private envelopeProbe (rejects: Map<string, string * string>) (label: string) (text: string) (diffs: string list) =
+let private envelopeProbe (rejects: Map<string, string * string>) (label: string) (text: string) (t: Tally) : Tally =
     match Versioning.parse text with
     | Result.Error m ->
         match Map.tryFind label rejects with
@@ -440,7 +436,7 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                  Versioning.EnvelopeRefusal.path m = [ PathSegment.Key "$profile" ]
              | Versioning.EnvelopeRefusal.Malformed _ -> false)
             ->
-            diffs
+            t
         | declared ->
             failtestf
                 "the envelope fixture %s did not parse: %s (the corpus declares it %s)"
@@ -463,19 +459,17 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
             | Versioning.Foreign a, WireVersioning.Foreign b -> toModelProfile a = b
             | _ -> false
 
-        let diffs =
-            if negAgrees then
-                diffs
-            else
-                sprintf "%s: production negotiated %A, the model negotiated %A" label expectedNeg gotNeg
-                :: diffs
+        let t =
+            t
+            |> Differential.check negAgrees (fun () ->
+                sprintf "%s: production negotiated %A, the model negotiated %A" label expectedNeg gotNeg)
 
         match expectedNeg with
         | Versioning.Foreign _ ->
             // A Foreign profile is refused at the envelope, so there is no tolerant decode to
             // compare. Recording that here rather than skipping the fixture is what keeps the
             // reject half of the family inside the comparison.
-            diffs
+            t
         | _ ->
             let expected =
                 Versioning.decodeTolerant envelopeTagOf (fun t -> envelopeVocab.Contains t) Result.Ok env.Payload
@@ -489,7 +483,7 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                     (canonToModel env.Payload)
 
             match expected, got with
-            | Result.Error m, WireCanon.Error m' when m = m' -> diffs
+            | Result.Error m, WireCanon.Error m' when m = m' -> t
             | Result.Ok d, WireCanon.Ok d' ->
                 let shapeAgrees =
                     match d, d' with
@@ -502,13 +496,6 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                             | _ -> false)
                     | _ -> false
 
-                let diffs =
-                    if shapeAgrees then
-                        diffs
-                    else
-                        sprintf "%s: production decoded %A, the model decoded a different shape" label d
-                        :: diffs
-
                 // §15.3 at the bytes. Production's own `Canonical.write Rendering.CrossHost` on both sides — the model's
                 // renderer is Phase 149's family's subject, and re-testing it here would be
                 // measuring that rather than preservation.
@@ -517,22 +504,23 @@ let private envelopeProbe (rejects: Map<string, string * string>) (label: string
                 let gotBytes =
                     Canonical.write Rendering.CrossHost (canonOfModel (WireVersioning.reencode id d'))
 
-                if
-                    expectedBytes = gotBytes
-                    && expectedBytes = Canonical.write Rendering.CrossHost env.Payload
-                then
-                    diffs
-                else
-                    sprintf
-                        "%s: preservation — production re-rendered\n  %s\nthe model re-rendered\n  %s\nthe payload was\n  %s"
-                        label
-                        expectedBytes
-                        gotBytes
-                        (Canonical.write Rendering.CrossHost env.Payload)
-                    :: diffs
+                t
+                |> Differential.check shapeAgrees (fun () ->
+                    sprintf "%s: production decoded %A, the model decoded a different shape" label d)
+                |> Differential.check
+                    (expectedBytes = gotBytes
+                     && expectedBytes = Canonical.write Rendering.CrossHost env.Payload)
+                    (fun () ->
+                        sprintf
+                            "%s: preservation — production re-rendered\n  %s\nthe model re-rendered\n  %s\nthe payload was\n  %s"
+                            label
+                            expectedBytes
+                            gotBytes
+                            (Canonical.write Rendering.CrossHost env.Payload))
             | _ ->
-                sprintf "%s: production and the model disagreed on whether the decode succeeded" label
-                :: diffs
+                Tally.disagree
+                    (sprintf "%s: production and the model disagreed on whether the decode succeeded" label)
+                    t
 
 [<Tests>]
 let tests =
@@ -545,13 +533,9 @@ let tests =
           <| fun _ ->
               let pairs = idlPairs ()
 
-              let diffs =
-                  pairs
-                  |> List.fold (fun acc (label, before, after) -> versionProbe label before after acc) []
-
-              Expect.isEmpty
-                  diffs
-                  (sprintf "the versioning oracle disagreed with production:\n%s" (renderCanonDiffs diffs))
+              Tally.empty []
+              |> Differential.over pairs (versionProbe WireVersioning.classify)
+              |> Differential.expectAgrees "the versioning oracle, idl.json pairs"
 
               // adequacy — the four rows §15.4 distinguishes must actually have been REACHED, and
               // each must land where the table says. A pass over four pairs that all classified
@@ -669,13 +653,10 @@ let tests =
               let fixtures = JsonParseDiff.corpusTexts "envelope"
               let rejects = envelopeRejects ()
 
-              let diffs =
-                  fixtures
-                  |> List.fold (fun acc (name, text) -> envelopeProbe rejects (sprintf "envelope/%s" name) text acc) []
-
-              Expect.isEmpty
-                  diffs
-                  (sprintf "the versioning oracle disagreed with production:\n%s" (renderCanonDiffs diffs))
+              Tally.empty []
+              |> Differential.over fixtures (fun (name, text) t ->
+                  envelopeProbe rejects (sprintf "envelope/%s" name) text t)
+              |> Differential.expectAgrees "the versioning oracle, envelope/"
 
               Expect.isGreaterThan
                   (List.length fixtures)
@@ -744,39 +725,53 @@ let tests =
                     Versioning.Evolution.Breaking([ "x" ], [ "y" ]),
                     WireVersioning.Breaking([ canonToChs "x" ], [ canonToChs "y" ]) ]
 
-              let mutable refused = 0
-              let mutable bumped = 0
+              let cases =
+                  [ for major in counters do
+                        for minor in counters do
+                            for (ev, modelEv) in evolutions do
+                                ({ Name = "core"
+                                   Major = major
+                                   Minor = minor }
+                                : Versioning.Capability),
+                                ev,
+                                modelEv ]
 
-              for major in counters do
-                  for minor in counters do
-                      let p: Versioning.Capability =
-                          { Name = "core"
-                            Major = major
-                            Minor = minor }
+              let t =
+                  Tally.empty [ "Refused"; "Bumped" ]
+                  |> Differential.over cases (fun (p, ev, modelEv) t ->
+                      let saturated = Versioning.bump p ev
 
-                      for (ev, modelEv) in evolutions do
+                      Expect.isTrue
+                          (saturated.Major >= 0 && saturated.Minor >= 0)
+                          (sprintf "bump %A %A stays a profile the wire can carry" p ev)
+
+                      let t =
                           match Versioning.tryBump p ev, WireVersioning.try_bump (toModelProfile p) modelEv with
                           | Result.Ok q, FStar_Pervasives_Native.Some q' ->
-                              bumped <- bumped + 1
-                              Expect.equal (toModelProfile q) q' (sprintf "tryBump %A %A" p ev)
-                          | Result.Error _, FStar_Pervasives_Native.None -> refused <- refused + 1
-                          | got, model -> failtestf "tryBump %A %A: production %A, the model %A" p ev got model
+                              t
+                              |> Tally.bump "Bumped"
+                              |> Differential.compare
+                                  Differential.structural
+                                  (sprintf "tryBump %A %A" p ev)
+                                  (toModelProfile q)
+                                  q'
+                          | Result.Error _, FStar_Pervasives_Native.None -> Tally.bump "Refused" t
+                          | got, model ->
+                              Tally.disagree (sprintf "tryBump %A %A: production %A, the model %A" p ev got model) t
 
-                          let saturated = Versioning.bump p ev
+                      t
+                      |> Differential.compare
+                          Differential.structural
+                          (sprintf "bump %A %A" p ev)
+                          (toModelProfile saturated)
+                          (WireVersioning.bump (toModelProfile p) modelEv))
 
-                          Expect.equal
-                              (toModelProfile saturated)
-                              (WireVersioning.bump (toModelProfile p) modelEv)
-                              (sprintf "bump %A %A" p ev)
-
-                          Expect.isTrue
-                              (saturated.Major >= 0 && saturated.Minor >= 0)
-                              (sprintf "bump %A %A stays a profile the wire can carry" p ev)
+              Differential.expectAgrees "tryBump and bump at the edge of the counter range" t
 
               // An additive step is refused at each of the four majors where the minor is at the
               // limit, a breaking one at each of the four minors where the major is: eight.
-              Expect.equal refused 8 "the refusals are exactly the edge"
-              Expect.equal bumped 40 "and every other step bumps"
+              Expect.equal (Tally.count "Refused" t) 8 "the refusals are exactly the edge"
+              Expect.equal (Tally.count "Bumped" t) 40 "and every other step bumps"
 
           testCase "a model whose classify IGNORES REMOVALS loses — the comparison can fail"
           <| fun _ ->
@@ -788,12 +783,14 @@ let tests =
               let pairs = idlPairs ()
 
               let diffs =
-                  pairs
-                  |> List.fold (fun acc (label, before, after) -> versionProbeGoRed label before after acc) []
+                  Tally.empty []
+                  |> Differential.over pairs (versionProbe WireVersioning.classify_ignoring_removals)
+                  |> fun t ->
+                      Differential.expectLoses
+                          "a classifier that never looks for removals, against Versioning.classify"
+                          t
 
-              Expect.isNonEmpty
-                  diffs
-                  "a classifier that never looks for removals MUST disagree with Versioning.classify"
+                      Tally.disagreements t
 
               Expect.isLessThan
                   (List.length diffs)
