@@ -481,7 +481,7 @@ noeq type witness (node:Type) = {
   node_id:   node -> string
 }
 
-(* F#: `Function.signature`'s local `entry`. *)
+(* F#: `SigEntry.ofHoleDecl` (Phase 487), the entry `Function.signature` maps over the holes. *)
 let entry_of (h:hole_decl) : Tot sig_entry =
   { s_addr = h.h_addr; s_name = h.h_name; s_kind = h.h_kind;
     s_required =
