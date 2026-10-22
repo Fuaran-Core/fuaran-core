@@ -981,17 +981,14 @@ domains must not make. This is a contract/scope clarification, not a behaviour c
 
 `Function.applyMemo` is sound only under two preconditions, now both enforced or certifiable:
 
-- **Effect honesty (Phase 53, enforced).** Memoisation gates on the **observed** effect
-  (`Function.observedEffect` — the widest effect walked over the whole subtree), not the declared root.
-  A function whose root declares `Pure`/`Deterministic` while a descendant leaks `Clock`/`Random`/
-  `ReadsHost` is bypassed (never cached/served), so the cache cannot serve a stale result for an
-  actually-impure function even when the root under-declares. `Conformance.memoSoundnessLawsAt` proves it.
+- **Effect honesty (Phase 53, enforced).** Memoisation gates on the **observed** effect (`Function.observedEffect` — the widest effect walked over the whole subtree), not the declared root. A function whose root declares `Pure`/`Deterministic` while a descendant leaks `Clock`/`Random`/`ReadsHost` is bypassed (never cached/served), so the cache cannot serve a stale result for an actually-impure function even when the root under-declares. `Conformance.memoSoundnessLawsAt` proves it.
 - **Encoder injectivity (Phase 56, caller precondition + certifiable).** The cache key is
   `Tree.encodeHash w.Tree encode node`; the caller-supplied `encode` MUST be injective over the node
   space, or two distinct trees collide and the cache serves the wrong one. Core cannot enforce this for an
   arbitrary host encoder, so it is a documented precondition (`applyMemo` / `Tree.encodeHash` doc-comments)
   that a domain certifies with `Conformance.encoderInjectivityLawsAt` (the "certify-your-codec" posture, like
   `Corpus.codecLaws`). It also makes `Tree.Index.isFreshFor` exact over content (Phase 447, D150).
+- **Retention (Phase 490, `0.40.3`, additive, DECISIONS.md D217).** `BoundedMemoCache<'Node>` (representation private; `Cache` is the portable `MemoCache`, `Capacity` the bound) with `BoundedMemo.empty` / `ofCache` / `count` / `byRecency` / `tryFind` / `add` / `noteBypass`, and `Function.applyMemoBounded` / `applyMemoComposedBounded`, which run `applyMemo`'s one body, so the gate, the key and the answer cannot differ. The policy is least-recently-used: a store and a serve use an entry, a bypass and a refusal use nothing, a store past the bound evicts the entry used longest ago, a negative capacity reads as zero, and `ofCache` reads carried entries as used first, in key order. The contract is that eviction changes cost, never a result, and that the retained set is the stated LRU set; `Conformance.memoLawsAt`'s sixth cell certifies both, so its `cases` cell in `docs/conformance-families.json` moves 1000 → 1200 for the downstream law registry. Changing the recency rule, the seeding order or the counting is breaking; `MemoCache`, `applyMemo` and `applyMemoComposed` are unchanged.
 
 ## Op-script footprint + independence (Phase 78)
 

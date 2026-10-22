@@ -47,8 +47,8 @@ let functionLawTests =
 
               Expect.equal
                   (List.length results)
-                  5
-                  "equals-direct + param-miss + effecting-bypass + replay-parity + separator-miss (Phase 290) laws reported"
+                  6
+                  "equals-direct + param-miss + effecting-bypass + replay-parity + separator-miss (Phase 290) + bounded-parity (Phase 490) laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

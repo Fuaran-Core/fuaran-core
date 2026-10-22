@@ -540,7 +540,12 @@ module internal FunctionLaws =
     ///  - **a value spelling the separator and the next binding misses** (Phase 290) — BUILT from the
     ///    drawn param-set: `{a = "X\u0001b=vY"}` against the cached `{a = "X"; b = "Y"}` must answer
     ///    exactly what `apply` answers and must not be a hit, so the memo key is known to be injective
-    ///    in the arguments rather than a bare join a value can forge.
+    ///    in the arguments rather than a bare join a value can forge;
+    ///  - **a bounded memo answers what the unbounded memo answers** (Phase 490) — over a drawn
+    ///    sequence of applications and a drawn capacity, `Function.applyMemoBounded` answers at every
+    ///    step exactly what `applyMemo` answers, hits exactly when the least-recently-used model still
+    ///    retains the key, and retains, in recency order, exactly the model's set (eviction changes
+    ///    cost, never a result).
     ///
     /// `'Node` needs equality (it compares result trees + replay states). Opt-in like `compositionLaws`
     /// — a domain that memoises application runs it alongside its base certification.
@@ -566,6 +571,10 @@ module internal FunctionLaws =
 
         let separatorMiss =
             LawKit.LawCell "a value spelling the separator and the next binding misses (the memo key is injective)"
+
+        let boundedParity =
+            LawKit.LawCell
+                "a bounded memo answers what the unbounded memo answers, and retains the least-recently-used set"
 
         LawKit.run runner iterations (fun rng _ at ->
             let s = rng.Draw draw
@@ -731,9 +740,94 @@ module internal FunctionLaws =
                              )
                      )
                  | other -> replayParity.Check(false, fun () -> at (sprintf "a replay errored: %A" other))
-             | Error e -> replayParity.Check(false, fun () -> at (sprintf "building the record session errored: %A" e))))
+             | Error e -> replayParity.Check(false, fun () -> at (sprintf "building the record session errored: %A" e)))
 
-        LawKit.results [ equalsDirect; paramMiss; effectingBypassed; replayParity; separatorMiss ]
+            // ---- 6. (Phase 490) a bounded memo answers what the unbounded memo answers ----
+            // A drawn sequence of applications over the sample — the two pure param-sets, the
+            // effecting function, and the pure function with no bindings (a refusal when it declares
+            // holes) — is threaded through an unbounded `MemoCache` and a `BoundedMemoCache` of a drawn
+            // capacity (0..3, so eviction is reached with the two pure keys). At every step the two
+            // answer the same, and the bounded memo hits exactly when the reference LRU model still
+            // holds the key; after the sequence its retained keys, in recency order, ARE the model's.
+            // A step's key is read off an unbounded memo it was applied to alone, so the model needs
+            // nothing internal: a bypass and a refusal store nothing and so have no key.
+            let keyOf args fn =
+                match Function.applyMemo w encode args fn Memo.empty with
+                | Ok(_, c) -> c.Entries |> Map.toList |> List.tryHead |> Option.map fst
+                | Error _ -> None
+
+            let menu =
+                [ s.Args, s.PureFn
+                  s.ArgsAlt, s.PureFn
+                  s.EffectingArgs, s.EffectingFn
+                  Map.empty, s.PureFn ]
+                |> List.map (fun (args, fn) -> args, fn, keyOf args fn)
+
+            let capacity = rng.IntBelow 4
+            let steps = List.init (1 + rng.IntBelow 8) (fun _ -> rng.Choose menu)
+
+            let rec run (ub: MemoCache<'Node>) (b: BoundedMemoCache<'Node>) (lru: string list) i =
+                function
+                | [] -> Ok(ub, b, lru)
+                | (args, fn, key) :: rest ->
+                    let expectHit = key |> Option.exists (fun k -> List.contains k lru)
+
+                    match Function.applyMemo w encode args fn ub, Function.applyMemoBounded w encode args fn b with
+                    | Ok(r1, ub'), Ok(r2, b') when r1 = r2 && (b'.Cache.Hits - b.Cache.Hits = 1) = expectHit ->
+                        let lru' =
+                            match key with
+                            | Some k -> k :: List.filter ((<>) k) lru |> List.truncate capacity
+                            | None -> lru
+
+                        run ub' b' lru' (i + 1) rest
+                    | Error e1, Error e2 when e1 = e2 -> run ub b lru (i + 1) rest
+                    | u, bd ->
+                        Error(
+                            sprintf
+                                "capacity %d, step %d: the unbounded memo answered %A, the bounded %A (a hit was %sexpected)"
+                                capacity
+                                i
+                                (Result.map fst u)
+                                (Result.map fst bd)
+                                (if expectHit then "" else "not ")
+                        )
+
+            (match run Memo.empty (BoundedMemo.empty capacity) [] 0 steps with
+             | Ok(ub, b, lru) ->
+                 let retained = b.Cache.Entries |> Map.toList |> List.map fst |> Set.ofList
+                 let distinct = steps |> List.choose (fun (_, _, k) -> k) |> List.distinct
+
+                 boundedParity.Check(
+                     BoundedMemo.byRecency b = List.rev lru
+                     && retained = Set.ofList lru
+                     && BoundedMemo.count b = List.length lru
+                     && b.Cache.Hits + b.Cache.Misses = ub.Hits + ub.Misses
+                     && b.Cache.Bypasses = ub.Bypasses
+                     && (List.length distinct > capacity || b.Cache = ub),
+                     fun () ->
+                         at (
+                             sprintf
+                                 "capacity %d: the bounded memo retained %A (by recency) where the LRU model holds %A, or its counters (hits %d, misses %d, bypasses %d) are not the unbounded memo's (hits %d, misses %d, bypasses %d)"
+                                 capacity
+                                 (BoundedMemo.byRecency b)
+                                 (List.rev lru)
+                                 b.Cache.Hits
+                                 b.Cache.Misses
+                                 b.Cache.Bypasses
+                                 ub.Hits
+                                 ub.Misses
+                                 ub.Bypasses
+                         )
+                 )
+             | Error why -> boundedParity.Check(false, fun () -> at why)))
+
+        LawKit.results
+            [ equalsDirect
+              paramMiss
+              effectingBypassed
+              replayParity
+              separatorMiss
+              boundedParity ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)

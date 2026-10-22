@@ -130,6 +130,13 @@ field Fuaran.Core.ValueSpace+Tags.FloatRange : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.IntRange : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.SlotTree : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.StringLen : System.Int32 (literal)
+method Fuaran.Core.BoundedMemo.add`1(System.String, !!0, Fuaran.Core.BoundedMemoCache`1<!!0>) : Fuaran.Core.BoundedMemoCache`1<!!0>
+method Fuaran.Core.BoundedMemo.byRecency`1(Fuaran.Core.BoundedMemoCache`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.BoundedMemo.count`1(Fuaran.Core.BoundedMemoCache`1<!!0>) : System.Int32
+method Fuaran.Core.BoundedMemo.empty`1(System.Int32) : Fuaran.Core.BoundedMemoCache`1<!!0>
+method Fuaran.Core.BoundedMemo.noteBypass`1(Fuaran.Core.BoundedMemoCache`1<!!0>) : Fuaran.Core.BoundedMemoCache`1<!!0>
+method Fuaran.Core.BoundedMemo.ofCache`1(System.Int32, Fuaran.Core.MemoCache`1<!!0>) : Fuaran.Core.BoundedMemoCache`1<!!0>
+method Fuaran.Core.BoundedMemo.tryFind`1(System.String, Fuaran.Core.BoundedMemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<!!0, Fuaran.Core.BoundedMemoCache`1<!!0>>>
 method Fuaran.Core.CapabilityCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferredWith`1(Fuaran.Core.ReadPolicy, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
@@ -212,6 +219,8 @@ method Fuaran.Core.Effect.join(Fuaran.Core.EffectClass, Fuaran.Core.EffectClass)
 method Fuaran.Core.Effect.tryDeterminismOfTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>>
 method Fuaran.Core.EffectCodec.hostTag(Fuaran.Core.HostEffect) : System.String
 method Fuaran.Core.EffectCodec.toJson(Fuaran.Core.EffectClass) : Fuaran.Core.JVal
+method Fuaran.Core.Function.applyMemoBounded`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.BoundedMemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.BoundedMemoCache`1<!!0>>, Fuaran.Core.ApplyError>
+method Fuaran.Core.Function.applyMemoComposedBounded`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MemoStep`1<!!0>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.BoundedMemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.BoundedMemoCache`1<!!0>>, Fuaran.Core.ApplyError>
 method Fuaran.Core.Function.applyMemoComposed`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MemoStep`1<!!0>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.MemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.MemoCache`1<!!0>>, Fuaran.Core.ApplyError>
 method Fuaran.Core.Function.applyMemo`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.MemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.MemoCache`1<!!0>>, Fuaran.Core.ApplyError>
 method Fuaran.Core.Function.apply`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.ApplyError>
@@ -306,6 +315,8 @@ method Fuaran.Core.Space.wellFormed(Fuaran.Core.ValueSpace) : Microsoft.FSharp.C
 method Fuaran.Core.SpaceCodec.decoder(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.ValueSpace, Fuaran.Core.DecodeError>
 method Fuaran.Core.SpaceCodec.descriptorJson(Fuaran.Core.ValueSpace) : Fuaran.Core.JVal
 method Fuaran.Core.SpaceCodec.toJson(Fuaran.Core.ValueSpace) : Fuaran.Core.JVal
+property Fuaran.Core.BoundedMemoCache`1.Cache : Fuaran.Core.MemoCache`1<!0> { get }
+property Fuaran.Core.BoundedMemoCache`1.Capacity : System.Int32 { get }
 property Fuaran.Core.Capability.Determinism : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
 property Fuaran.Core.CapabilityRegistryModule.empty : Fuaran.Core.CapabilityRegistry { get }
 property Fuaran.Core.Effect.clock : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
@@ -421,6 +432,8 @@ type Fuaran.Core.BindHandlerError+NotAnActionHole (type)
 type Fuaran.Core.BindHandlerError+RequiredActionsUnbound (type)
 type Fuaran.Core.BindHandlerError+Tags (type)
 type Fuaran.Core.BindHandlerError+UnknownActionAddr (type)
+type Fuaran.Core.BoundedMemo (module)
+type Fuaran.Core.BoundedMemoCache`1 (record)
 type Fuaran.Core.Capability (record)
 type Fuaran.Core.CapabilityCodec (module)
 type Fuaran.Core.CapabilityLookup (record)

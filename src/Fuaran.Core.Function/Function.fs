@@ -332,6 +332,145 @@ module Memo =
     let isMemoisable (e: EffectClass) : bool =
         e.Host = Pure && Set.isEmpty e.Determinism
 
+    /// A lookup that counts a `Hit` when the key is held; an absent key counts nowhere.
+    let internal hit (key: string) (c: MemoCache<'Node>) : ('Node * MemoCache<'Node>) option =
+        Map.tryFind key c.Entries
+        |> Option.map (fun t -> t, { c with Hits = c.Hits + 1 })
+
+    /// Store a computed result under its key, counting a `Miss`.
+    let internal store (key: string) (r: 'Node) (c: MemoCache<'Node>) : MemoCache<'Node> =
+        { c with
+            Entries = Map.add key r c.Entries
+            Misses = c.Misses + 1 }
+
+    /// Count a `Bypass`.
+    let internal bypass (c: MemoCache<'Node>) : MemoCache<'Node> = { c with Bypasses = c.Bypasses + 1 }
+
+/// A BOUNDED application memo (Phase 490): a `MemoCache` that retains at most `Capacity` entries and
+/// evicts the least-recently-used one when a store would exceed the bound. The eviction state lives
+/// in this record beside the cache, so a host memoising in a long-lived process keeps no recency
+/// stamps of its own, and threads it by value exactly as it threads a `MemoCache` (GP2).
+///
+/// **Recency.** An entry is USED when it is stored (`BoundedMemo.add`, an application's miss) and
+/// when it is served (`BoundedMemo.tryFind`, an application's hit). A bypassed or refused application
+/// uses nothing. When a store makes the cache hold more than `Capacity` entries, the entry used
+/// longest ago is evicted, until the bound holds again; storing a key the cache already holds
+/// replaces its result, uses it, and evicts nothing.
+///
+/// **Eviction changes cost, never a result.** `Function.applyMemoBounded` answers exactly what
+/// `Function.applyMemo` answers over an unbounded cache — a served entry is the stored result of the
+/// same `(function, param-set)` pre-image — and the only difference is that an evicted application
+/// is computed again (a `Miss`) where the unbounded cache would have served it (a `Hit`).
+/// `Conformance.memoLawsAt` certifies both halves: the answers, and the retained set as the stated
+/// LRU set.
+///
+/// **Cost.** A touch and an eviction are each `O(log n)` in the retained count — the order of the
+/// `Map` lookup that finds the entry, so the bound adds no asymptotic cost to a hit or a miss.
+///
+/// The representation is private: build one with `BoundedMemo.empty` or `BoundedMemo.ofCache`, and
+/// read the portable `MemoCache` (to persist, or to ship to another process) from `Cache`.
+type BoundedMemoCache<'Node> =
+    private
+        {
+            Memo: MemoCache<'Node>
+            Bound: int
+            /// The number of entries `Memo` holds (`Map.count` walks the map).
+            Size: int
+            /// The last use tick issued; ticks strictly increase, so two uses never tie.
+            Clock: int64
+            /// Each retained key's last-use tick.
+            Ticks: Map<string, int64>
+            /// The inverse of `Ticks`: its least key is the least-recently-used entry.
+            Order: Map<int64, string>
+        }
+
+    /// The retained entries and the counters, as the portable `MemoCache` record — what a host
+    /// persists. The recency is not part of it; `BoundedMemo.ofCache` re-seeds one.
+    member b.Cache: MemoCache<'Node> = b.Memo
+
+    /// The bound: the most entries the cache retains (zero retains nothing).
+    member b.Capacity: int = b.Bound
+
+/// The operations of a `BoundedMemoCache` (Phase 490). `tryFind`, `add` and `noteBypass` are what
+/// `Function.applyMemoBounded` threads; a host keyed on its own content addresses calls them
+/// directly, with the same counting `applyMemo` uses.
+module BoundedMemo =
+
+    let private touch (key: string) (b: BoundedMemoCache<'Node>) : BoundedMemoCache<'Node> =
+        let tick = b.Clock + 1L
+
+        let order =
+            match Map.tryFind key b.Ticks with
+            | Some old -> Map.remove old b.Order
+            | None -> b.Order
+
+        { b with
+            Clock = tick
+            Ticks = Map.add key tick b.Ticks
+            Order = Map.add tick key order }
+
+    let rec private evict (b: BoundedMemoCache<'Node>) : BoundedMemoCache<'Node> =
+        if b.Size <= b.Bound then
+            b
+        else
+            let tick, key = Map.minKeyValue b.Order
+
+            evict
+                { b with
+                    Memo =
+                        { b.Memo with
+                            Entries = Map.remove key b.Memo.Entries }
+                    Size = b.Size - 1
+                    Ticks = Map.remove key b.Ticks
+                    Order = Map.remove tick b.Order }
+
+    /// The empty bounded memo retaining at most `capacity` entries. A negative capacity is read as
+    /// zero: a cache that retains nothing, so every memoisable application computes (a `Miss`).
+    let empty (capacity: int) : BoundedMemoCache<'Node> =
+        { Memo = Memo.empty
+          Bound = max 0 capacity
+          Size = 0
+          Clock = 0L
+          Ticks = Map.empty
+          Order = Map.empty }
+
+    /// A bounded memo seeded from a portable `MemoCache` (a persisted snapshot, or another process's
+    /// cache), counters carried. The carried entries have no recency, so each is read as used before
+    /// anything this cache does, in key order; when they exceed `capacity`, the least keys go first.
+    let ofCache (capacity: int) (cache: MemoCache<'Node>) : BoundedMemoCache<'Node> =
+        let seeded =
+            (empty capacity, cache.Entries)
+            ||> Map.fold (fun b key _ -> touch key { b with Size = b.Size + 1 })
+
+        evict { seeded with Memo = cache }
+
+    /// The number of retained entries.
+    let count (b: BoundedMemoCache<'Node>) : int = b.Size
+
+    /// The retained keys, least-recently-used first — the order eviction takes them in.
+    let byRecency (b: BoundedMemoCache<'Node>) : string list = b.Order |> Map.toList |> List.map snd
+
+    /// Serve the entry held at `key`, counting a `Hit` and making it the most-recently-used; `None`
+    /// when the key is not retained (nothing counted, nothing used).
+    let tryFind (key: string) (b: BoundedMemoCache<'Node>) : ('Node * BoundedMemoCache<'Node>) option =
+        Memo.hit key b.Memo
+        |> Option.map (fun (t, m) -> t, touch key { b with Memo = m })
+
+    /// Store a computed result at `key`, counting a `Miss` and making it the most-recently-used; a
+    /// new key that takes the cache past its bound evicts the least-recently-used entry.
+    let add (key: string) (result: 'Node) (b: BoundedMemoCache<'Node>) : BoundedMemoCache<'Node> =
+        let size = if Map.containsKey key b.Ticks then b.Size else b.Size + 1
+
+        touch
+            key
+            { b with
+                Memo = Memo.store key result b.Memo
+                Size = size }
+        |> evict
+
+    /// Count a `Bypass`: an application computed directly because it is not memoisable.
+    let noteBypass (b: BoundedMemoCache<'Node>) : BoundedMemoCache<'Node> = { b with Memo = Memo.bypass b.Memo }
+
 /// The admission check over a signature's entries (Phase 307).
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Signature =
@@ -960,6 +1099,39 @@ module Function =
 
         Hash.canonicalFields [ Tree.encodePreimage w.Tree encode node; argCanon ]
 
+    /// The one memoised-application body (Phase 490), over the cache's three operations: serve a
+    /// held key (counting the hit), store a computed result (counting the miss), count a bypass.
+    /// `applyMemo` runs it over a `MemoCache`, `applyMemoBounded` over a `BoundedMemoCache`, so the
+    /// gate, the key and what is computed cannot differ between them.
+    let internal applyMemoVia
+        (hit: string -> 'Cache -> ('Node * 'Cache) option)
+        (store: string -> 'Node -> 'Cache -> 'Cache)
+        (bypass: 'Cache -> 'Cache)
+        (w: ArtifactWitness<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (args: Map<string, Arg<'Node>>)
+        (node: 'Node)
+        (cache: 'Cache)
+        : Result<'Node * 'Cache, ApplyError> =
+        // Phase 307: the gate is the join over the function AND every tree argument — a slot
+        // argument is part of the result, so an effect it carries is the result's effect, exactly as
+        // it is once `applyMemoComposed` has composed it in.
+        let gate =
+            (observedEffect w node, args)
+            ||> Map.fold (fun acc _ arg ->
+                match arg with
+                | SlotArg sub -> Effect.join acc (observedEffect w sub)
+                | ValueArg _ -> acc)
+
+        if not (Memo.isMemoisable gate) then
+            apply w args node |> Result.map (fun r -> r, bypass cache)
+        else
+            let key = memoKey w encode args node
+
+            match hit key cache with
+            | Some served -> Ok served
+            | None -> apply w args node |> Result.map (fun r -> r, store key r cache)
+
     /// Apply the artifact-function with a caller-supplied content-addressed memo (Phase 49 / 53). The
     /// memoisability gate keys on the **observed** effect (`observedEffect` — the widest effect actually
     /// present over the whole subtree, joined since Phase 307 with the observed effect of every
@@ -989,34 +1161,30 @@ module Function =
         (node: 'Node)
         (cache: MemoCache<'Node>)
         : Result<'Node * MemoCache<'Node>, ApplyError> =
-        // Phase 307: the gate is the join over the function AND every tree argument — a slot
-        // argument is part of the result, so an effect it carries is the result's effect, exactly as
-        // it is once `applyMemoComposed` has composed it in.
-        let gate =
-            (observedEffect w node, args)
-            ||> Map.fold (fun acc _ arg ->
-                match arg with
-                | SlotArg sub -> Effect.join acc (observedEffect w sub)
-                | ValueArg _ -> acc)
+        applyMemoVia Memo.hit Memo.store Memo.bypass w encode args node cache
 
-        if not (Memo.isMemoisable gate) then
-            apply w args node
-            |> Result.map (fun r ->
-                r,
-                { cache with
-                    Bypasses = cache.Bypasses + 1 })
-        else
-            let key = memoKey w encode args node
+    /// The one memoised-composition body (Phase 490), over a memoised application `step`:
+    /// `applyMemoComposed` runs it over `applyMemo`, `applyMemoComposedBounded` over
+    /// `applyMemoBounded`.
+    let internal applyMemoComposedVia
+        (step: Map<string, Arg<'Node>> -> 'Node -> 'Cache -> Result<'Node * 'Cache, ApplyError>)
+        (w: ArtifactWitness<'Node, 'Id>)
+        (inners: MemoStep<'Node> list)
+        (outerArgs: Map<string, Arg<'Node>>)
+        (outer: 'Node)
+        (cache: 'Cache)
+        : Result<'Node * 'Cache, ApplyError> =
+        let rec go (acc: 'Node) (c: 'Cache) =
+            function
+            | [] -> Ok(acc, c)
+            | inner :: rest ->
+                step inner.Args inner.Inner c
+                |> Result.bind (fun (innerResult, c') ->
+                    compose w inner.Slot innerResult acc
+                    |> Result.bind (fun composed -> go composed c' rest))
 
-            match Map.tryFind key cache.Entries with
-            | Some hit -> Ok(hit, { cache with Hits = cache.Hits + 1 })
-            | None ->
-                apply w args node
-                |> Result.map (fun r ->
-                    r,
-                    { cache with
-                        Entries = Map.add key r cache.Entries
-                        Misses = cache.Misses + 1 })
+        go outer cache inners
+        |> Result.bind (fun (composedOuter, c') -> step outerArgs composedOuter c')
 
     /// Apply a COMPOSED function with subtree-level memo (Phase 49) — the "single-hole edit re-derives
     /// only the affected path" property. Each `MemoStep` (its `Slot`, `Inner` and `Args`) is applied through
@@ -1035,14 +1203,32 @@ module Function =
         (outer: 'Node)
         (cache: MemoCache<'Node>)
         : Result<'Node * MemoCache<'Node>, ApplyError> =
-        let rec go (acc: 'Node) (c: MemoCache<'Node>) =
-            function
-            | [] -> Ok(acc, c)
-            | step :: rest ->
-                applyMemo w encode step.Args step.Inner c
-                |> Result.bind (fun (innerResult, c') ->
-                    compose w step.Slot innerResult acc
-                    |> Result.bind (fun composed -> go composed c' rest))
+        applyMemoComposedVia (applyMemo w encode) w inners outerArgs outer cache
 
-        go outer cache inners
-        |> Result.bind (fun (composedOuter, c') -> applyMemo w encode outerArgs composedOuter c')
+    /// `applyMemo` over a BOUNDED memo (Phase 490): the same gate, the same key and the same answer
+    /// — the one body both run — with the cache's retention left to `BoundedMemoCache`'s LRU bound. A
+    /// hit uses its entry; a miss stores the result and, past the bound, evicts the
+    /// least-recently-used entry; a bypass and a refusal use nothing. Eviction changes cost, never a
+    /// result: an evicted application is computed again, a `Miss` where the unbounded memo would have
+    /// served a `Hit` (`Conformance.memoLawsAt` certifies it). The same per-witness and
+    /// injective-`encode` preconditions as `applyMemo` hold.
+    let applyMemoBounded
+        (w: ArtifactWitness<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (args: Map<string, Arg<'Node>>)
+        (node: 'Node)
+        (cache: BoundedMemoCache<'Node>)
+        : Result<'Node * BoundedMemoCache<'Node>, ApplyError> =
+        applyMemoVia BoundedMemo.tryFind BoundedMemo.add BoundedMemo.noteBypass w encode args node cache
+
+    /// `applyMemoComposed` over a BOUNDED memo (Phase 490): each inner and the outer are applied
+    /// through `applyMemoBounded`, in the order `applyMemoComposed` applies them.
+    let applyMemoComposedBounded
+        (w: ArtifactWitness<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (inners: MemoStep<'Node> list)
+        (outerArgs: Map<string, Arg<'Node>>)
+        (outer: 'Node)
+        (cache: BoundedMemoCache<'Node>)
+        : Result<'Node * BoundedMemoCache<'Node>, ApplyError> =
+        applyMemoComposedVia (applyMemoBounded w encode) w inners outerArgs outer cache

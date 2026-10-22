@@ -393,7 +393,7 @@ module Families =
           ("Conformance.memoLawsAt", [ Takes.ArtifactWitness ], capability, []),
           Unconditional "each iteration forces a miss then a hit, and an effecting bypass, by construction",
           none "every Error arm only fails a law",
-          "Function.applyMemo Memo.empty"
+          "Function.applyMemo Memo.empty Function.applyMemoBounded BoundedMemo.empty BoundedMemo.tryFind BoundedMemo.add BoundedMemo.noteBypass BoundedMemo.byRecency BoundedMemo.count"
           ("Conformance.memoSoundnessLawsAt", [ Takes.ArtifactWitness ], capability, []),
           Unconditional "each iteration applies the caller-supplied under-declared function twice",
           none "an Error only fails a law; the cache bypass is not a refusal",

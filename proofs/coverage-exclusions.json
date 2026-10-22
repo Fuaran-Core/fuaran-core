@@ -664,6 +664,7 @@
     {
       "members": [
         "Function.applyMemoComposed",
+        "Function.applyMemoComposedBounded",
         "Function.composedEffect",
         "Function.isClosed",
         "Function.isTotal",
@@ -731,6 +732,14 @@
       "class": "measured-elsewhere",
       "reason": "Renders invoke errors for a reader; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "BoundedMemo.ofCache"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Seeds a bounded memo from a portable snapshot: carried entries read as used first, in key order, the bound applied. Example-tested beside the bounded-memo law, which `Conformance.memoLawsAt` runs from an empty bounded memo (Phase 490).",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
       "members": [

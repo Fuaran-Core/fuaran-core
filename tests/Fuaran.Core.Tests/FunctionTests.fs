@@ -809,6 +809,148 @@ let private fullArgs count =
           "tpl/c", ValueArg count
           "tpl/s", SlotArg(RNode.leaf "p" "para" "hi") ]
 
+/// The key `applyMemo` stores an application under, read off a memo it was applied to alone.
+let private memoKeyOf args fn =
+    match Function.applyMemo artw encNode args fn Memo.empty with
+    | Ok(_, c) -> c.Entries |> Map.toList |> List.exactlyOne |> fst
+    | Error e -> failtestf "unexpected %A" e
+
+/// Thread `applyMemoBounded` over a list of param-sets for the reference `template ()`.
+let private applyAllBounded (b: BoundedMemoCache<RNode>) (argSets: Map<string, Arg<RNode>> list) =
+    (b, argSets)
+    ||> List.fold (fun b args ->
+        match Function.applyMemoBounded artw encNode args (template ()) b with
+        | Ok(r, b') ->
+            Expect.equal
+                (Ok r)
+                (Function.apply artw args (template ()))
+                "a bounded application answers what apply does"
+
+            b'
+        | Error e -> failtestf "unexpected %A" e)
+
+/// Thread `applyMemo` over a list of param-sets for the reference `template ()`.
+let private applyAllUnbounded (argSets: Map<string, Arg<RNode>> list) =
+    (Memo.empty, argSets)
+    ||> List.fold (fun c args ->
+        match Function.applyMemo artw encNode args (template ()) c with
+        | Ok(_, c') -> c'
+        | Error e -> failtestf "unexpected %A" e)
+
+[<Tests>]
+let boundedMemoTests =
+    testList
+        "Function.memo.bounded"
+        [ testCase "applyMemoBounded: past the bound the least-recently-used entry is evicted; a hit refreshes"
+          <| fun _ ->
+              let a, b, c = fullArgs "1", fullArgs "2", fullArgs "3"
+
+              let ka, kb, kc =
+                  memoKeyOf a (template ()), memoKeyOf b (template ()), memoKeyOf c (template ())
+
+              let m = applyAllBounded (BoundedMemo.empty 2) [ a; b; a; c ]
+              Expect.equal (BoundedMemo.byRecency m) [ ka; kc ] "b, used longest ago, was evicted; a's hit kept it"
+              Expect.equal (BoundedMemo.count m) 2 "the bound holds"
+              Expect.equal (m.Cache.Hits, m.Cache.Misses) (1, 3) "one hit (a), three misses (a, b, c)"
+              let m' = applyAllBounded m [ b ]
+              Expect.equal m'.Cache.Misses 4 "the evicted application is computed again: a miss"
+              Expect.equal (BoundedMemo.byRecency m') [ kc; kb ] "b's re-store evicts a, now the least recent"
+
+          testCase "applyMemoBounded: a bound at least the working set behaves exactly as the unbounded memo"
+          <| fun _ ->
+              let sets = [ fullArgs "1"; fullArgs "2"; fullArgs "1"; fullArgs "2"; fullArgs "3" ]
+              let bounded = applyAllBounded (BoundedMemo.empty 3) sets
+              Expect.equal bounded.Cache (applyAllUnbounded sets) "the same entries and the same counters"
+
+          testCase "applyMemoBounded: capacity zero retains nothing (a negative capacity reads as zero)"
+          <| fun _ ->
+              for cap in [ 0; -3 ] do
+                  let m = applyAllBounded (BoundedMemo.empty cap) [ fullArgs "1"; fullArgs "1" ]
+                  Expect.equal m.Capacity 0 "the bound"
+                  Expect.equal (BoundedMemo.count m) 0 "nothing retained"
+                  Expect.equal (m.Cache.Hits, m.Cache.Misses) (0, 2) "every memoisable application computes"
+
+          testCase "applyMemoBounded: a bypassed or refused application uses nothing"
+          <| fun _ ->
+              let effFn =
+                  { template () with
+                      Eff =
+                          { Host = Pure
+                            Determinism = Effect.clock } }
+
+              let a, b = fullArgs "1", fullArgs "2"
+              let m = applyAllBounded (BoundedMemo.empty 2) [ a; b ]
+              let before = BoundedMemo.byRecency m
+
+              match Function.applyMemoBounded artw encNode a effFn m with
+              | Ok(_, m1) ->
+                  Expect.equal (BoundedMemo.byRecency m1) before "a bypass moves no recency"
+                  Expect.equal m1.Cache.Bypasses 1 "the bypass is counted"
+
+                  match Function.applyMemoBounded artw encNode Map.empty (template ()) m1 with
+                  | Error _ -> ()
+                  | Ok _ -> failtest "expected a refusal for unbound holes"
+              | Error e -> failtestf "unexpected %A" e
+
+          testCase "BoundedMemo.ofCache: carried entries are least recent, in key order, and the bound holds"
+          <| fun _ ->
+              let snapshot = applyAllUnbounded [ fullArgs "1"; fullArgs "2"; fullArgs "3" ]
+              let keys = snapshot.Entries |> Map.toList |> List.map fst
+              let m = BoundedMemo.ofCache 2 snapshot
+              Expect.equal (BoundedMemo.byRecency m) (List.skip 1 keys) "the least key went first"
+              Expect.equal m.Cache.Misses snapshot.Misses "the counters are carried"
+
+              Expect.equal
+                  (BoundedMemo.ofCache 8 snapshot).Cache
+                  snapshot
+                  "under the bound the snapshot is carried whole"
+
+          testCase "BoundedMemo.tryFind / add: a host keyed on its own addresses threads the same bound"
+          <| fun _ ->
+              let leaf v = RNode.leaf "p" "para" v
+
+              let m =
+                  BoundedMemo.empty 2
+                  |> BoundedMemo.add "x" (leaf "1")
+                  |> BoundedMemo.add "y" (leaf "2")
+
+              match BoundedMemo.tryFind "x" m with
+              | Some(t, m1) ->
+                  Expect.equal t (leaf "1") "the stored result is served"
+                  let m2 = m1 |> BoundedMemo.add "x" (leaf "1b")
+                  Expect.equal (BoundedMemo.byRecency m2) [ "y"; "x" ] "re-storing a held key evicts nothing"
+                  let m3 = m2 |> BoundedMemo.add "z" (leaf "3")
+                  Expect.equal (BoundedMemo.byRecency m3) [ "x"; "z" ] "a new key past the bound evicts y"
+                  Expect.isNone (BoundedMemo.tryFind "y" m3) "an evicted key is not served"
+                  Expect.equal (m3.Cache.Hits, m3.Cache.Misses) (1, 4) "the same counting applyMemo uses"
+              | None -> failtest "a stored key was not served"
+
+          testCase "applyMemoComposedBounded answers what applyMemoComposed answers"
+          <| fun _ ->
+              let innerFn () =
+                  RNode.node "in" "para" [ RNode.hole "iv" "field" "x" (ValueHole AnyString) ]
+
+              let inners v =
+                  [ { Slot = "tpl/s"
+                      Inner = innerFn ()
+                      Args = Map.ofList [ "in/iv", ValueArg v ] } ]
+
+              let outerArgs = Map.ofList [ "tpl/t", ValueArg "Hi"; "tpl/c", ValueArg "3" ]
+
+              let run v (c, b) =
+                  match
+                      Function.applyMemoComposed artw encNode (inners v) outerArgs (template ()) c,
+                      Function.applyMemoComposedBounded artw encNode (inners v) outerArgs (template ()) b
+                  with
+                  | Ok(r1, c'), Ok(r2, b') ->
+                      Expect.equal r2 r1 "the same composed tree"
+                      c', b'
+                  | other -> failtestf "unexpected %A" other
+
+              let c, b = (Memo.empty, BoundedMemo.empty 1) |> run "a" |> run "b" |> run "a"
+              Expect.equal (BoundedMemo.count b) 1 "the bound holds across a composition"
+              Expect.isGreaterThan b.Cache.Misses c.Misses "eviction costs re-derivations, never a different tree" ]
+
 [<Tests>]
 let memoTests =
     testList
