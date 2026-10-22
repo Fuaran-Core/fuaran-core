@@ -10,6 +10,23 @@ whose preflight re-reads the packed public surfaces before it records the releas
 The registry is [nuget.org](https://www.nuget.org/packages?q=Fuaran.Core), and every package
 publishes from [`.github/workflows/publish-packages.yml`](.github/workflows/publish-packages.yml).
 
+## Opening a slot
+
+A version slot opens with one command, from this repository's root, against a checkout of the shared corpus
+(DECISIONS.md D218):
+
+```powershell
+dotnet run --project tools/Fuaran.Core.Tools -- open-slot <version> --class <breaking|additive|internal> --opened-by "Phase <n>" --corpus <corpus checkout>
+```
+
+It moves `<Version>`, re-stamps the law files' `kitVersion`, commits in the corpus checkout exactly the declared
+copies it re-stamps and their shared index rows, moves `copies.json`'s corpus pin to that commit, and opens
+`docs/releases/<version>.md` headed DRAFT with its rendered index. It refuses, writing nothing, when the version is
+not the one the class opens over the newest tag, when a DRAFT slot already stands, or when either checkout is not
+in a state the act can account for; each refusal names its cause. It then prints the two steps that remain, in
+order: push the corpus commit, then commit and push this repository's files, which it lists. Do not open a slot by
+hand: the `0.40.2` slot was, without its corpus half, and `main` stayed red until that half landed separately.
+
 ## What the tag sets off
 
 Pushing a `v*` tag starts `publish-packages`. The jobs run in the order below, and each one starts

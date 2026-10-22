@@ -39,9 +39,15 @@ type Exporter =
         Root: unit -> string
         /// Every file the family writes under a directory, with the text it renders.
         Files: string -> (string * string) list
-        /// A writer that does more than write `Files` (a restamp, a merge into a shared manifest);
+        /// The same files rendered with an explicit version stamp, for a family whose files carry
+        /// one (`laws`, its `kitVersion`): opening a version slot stamps the version it opens, which
+        /// is not the version the kit was built at (Phase 560). `None` for a family whose bytes
+        /// carry no version, so its render is the same at every version.
+        FilesAt: (string -> string -> (string * string) list) option
+        /// A writer that does more than write the files it is handed (a restamp, a merge into a
+        /// shared manifest), given the target directory and exactly the files to write there;
         /// `None` writes each file as rendered.
-        Write: (string -> unit) option
+        Write: (string -> (string * string) list -> unit) option
         /// The SHARED indexes under a directory: files `Write` merges this family's rows into beside
         /// rows other producers own, rather than writing whole. A corpus copy of one is therefore not
         /// a copy of this repository's file, and the projection registry may declare only the ROW
@@ -59,7 +65,8 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
     [ { Family = "laws"
         Root = OwnedConformance.root
         Files = LawVectorExport.emitted
-        Write = Some LawVectorExport.write
+        FilesAt = Some LawVectorExport.emittedAt
+        Write = Some LawVectorExport.writeFiles
         // The corpus's `laws/manifest.json` indexes compute's families too; `write` restamps only
         // the rows of the families written here (Phase 394).
         SharedIndexes = fun dir -> [ LawVectorExport.manifestPath dir ]
@@ -72,7 +79,19 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               ApplyVectorExport.manifestPath
               ApplyVectorExport.renderVectors
               ApplyVectorExport.renderManifest
-        Write = Some ApplyVectorExport.write
+        FilesAt = None
+        // The apply writer writes its vectors and merges its manifest row as ONE act, so it is
+        // handed both of its files or none: the corpus declares both (a copy and a `rowIn`), and a
+        // registry that stopped declaring one is refused here rather than half-honoured.
+        Write =
+          Some(fun dir files ->
+              if List.length files <> 2 then
+                  failwithf
+                      "render apply: %d of its 2 files are declared under '%s'; it writes both or neither — nothing was written"
+                      (List.length files)
+                      dir
+
+              ApplyVectorExport.write dir)
         // The corpus's `apply/manifest.json` carries other producers' families beside this one;
         // `write` merges this family's row and keeps theirs (`ApplyVectorExport.mergeManifest`).
         SharedIndexes = fun dir -> [ ApplyVectorExport.manifestPath dir ]
@@ -89,6 +108,7 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
                   dir
               // Phase 551 — the seam-refusal family, beside the codec refusals in the same index.
               @ [ RefusalCorpus.seamPath dir, RefusalCorpus.renderSeam () ]
+        FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
@@ -100,18 +120,21 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
               DecodeRejectCorpus.manifestPath
               DecodeRejectCorpus.render
               DecodeRejectCorpus.renderManifest
+        FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "escape"
         Root = OwnedConformance.root
         Files = fun dir -> [ EscapeCorpus.path dir, EscapeCorpus.render () ]
+        FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "encoding"
         Root = OwnedConformance.root
         Files = fun dir -> [ EncodingCorpus.path dir, EncodingCorpus.render () ]
+        FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
@@ -125,6 +148,7 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
 
               [ FamiliesExport.markdownPath dir, KitRoster.toMarkdownWith measured
                 FamiliesExport.jsonPath dir, KitRoster.toJsonWith measured ]
+        FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Fingerprint } ]
@@ -133,21 +157,87 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
 let tryFind (table: Exporter list) (family: string) : Exporter option =
     table |> List.tryFind (fun e -> e.Family = family)
 
-/// Write a row's files under `dir` (its own `Root` when none is named), returning the paths written.
-/// Every file is written with LF endings whatever the platform: the corpus is byte-compared by hosts
-/// on three operating systems.
-let write (e: Exporter) (dir: string option) : string list =
-    let dir = defaultArg dir (e.Root())
-    let files = e.Files dir
+/// Where a row's files are written (Phase 560).
+type Target =
+    /// The family's home in this repository (its `Root`): it gets every file the family emits.
+    | Own of dir: string
+    /// Any other directory — a checkout of the shared corpus. It gets only the files the projection
+    /// registry declares there for this family: its whole-file `copies`, the shared indexes its rows
+    /// are merged into (`rowIn`, and the row's own `SharedIndexes`, which a file this repository does
+    /// not carry, such as the corpus's `laws/manifest.json`, can only be declared by). A file the
+    /// family emits and no record declares never lands outside this repository: `render laws <corpus>`
+    /// wrote `laws/canonical-form-laws.json` into every corpus checkout until this phase.
+    | Elsewhere of dir: string
+
+let private fullPath (p: string) = Path.GetFullPath(p).TrimEnd('/', '\\')
+
+/// The target `dir` names for a row: its own home when none is named or `dir` IS that home.
+let targetOf (e: Exporter) (dir: string option) : Target =
+    match dir with
+    | None -> Own(e.Root())
+    | Some d when System.String.Equals(fullPath d, fullPath (e.Root()), System.StringComparison.OrdinalIgnoreCase) ->
+        Own d
+    | Some d -> Elsewhere d
+
+/// The paths, relative to a checkout and forward-slashed, the registry `rows` declare for `e`'s
+/// family there: every copy and every `rowIn` of a row the family renders.
+let declared (rows: Approval.Projection list) (e: Exporter) : Set<string> =
+    rows
+    |> List.filter (fun r -> r.Render = Some e.Family)
+    |> List.collect (fun r -> r.Copies @ r.RowIn)
+    |> List.map _.Path
+    |> Set.ofList
+
+/// The files a write to `target` lands, with the text each gets: everything the row renders at its
+/// own home, only what `rows` declares anywhere else. `stamp` renders at an explicit version where
+/// the row's files carry one.
+let filesFor (rows: Approval.Projection list) (stamp: string option) (e: Exporter) (target: Target) =
+    let dir =
+        match target with
+        | Own d
+        | Elsewhere d -> d
+
+    let rendered =
+        match stamp, e.FilesAt with
+        | Some s, Some at -> at s dir
+        | _ -> e.Files dir
+
+    match target with
+    | Own _ -> rendered
+    | Elsewhere _ ->
+        let keep = declared rows e
+        let shared = e.SharedIndexes dir |> List.map fullPath |> Set.ofList
+
+        let relative (p: string) =
+            Path.GetRelativePath(dir, p).Replace('\\', '/')
+
+        rendered
+        |> List.filter (fun (p, _) -> keep.Contains(relative p) || shared.Contains(fullPath p))
+
+/// Write a row's files to `target` as `filesFor` selects them, returning the paths written. Every
+/// file is written with LF endings whatever the platform: the corpus is byte-compared by hosts on
+/// three operating systems.
+let writeTo (rows: Approval.Projection list) (stamp: string option) (e: Exporter) (target: Target) : string list =
+    let dir =
+        match target with
+        | Own d
+        | Elsewhere d -> d
+
+    let files = filesFor rows stamp e target
 
     match e.Write with
-    | Some write -> write dir
+    | Some write -> write dir files
     | None ->
         for path, text in files do
             Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
             File.WriteAllText(path, text)
 
     files |> List.map fst
+
+/// Write a row's files under `dir` (its own `Root` when none is named), against the committed
+/// projection registry, at this kit's own version: `render <family> [<dir>]`.
+let write (e: Exporter) (dir: string option) : string list =
+    writeTo Approval.registry.Value None e (targetOf e dir)
 
 /// The ONE freshness reading of a row's committed files: one finding per file that is absent or
 /// differs from what the row renders, naming the first line that differs and the command that

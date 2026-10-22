@@ -3,6 +3,8 @@ module Fuaran.Core.Tests.ExportersTests
 // The exporter table's family (Phase 508): every committed file is what its row renders. The table
 // itself is in the fixtures library (`Exporters`), which the tool renders through; this file holds it.
 
+open System
+open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Exporters
@@ -76,4 +78,88 @@ let tests =
               testCase "every family is one row, named once"
               <| fun _ ->
                   let names = table |> List.map _.Family
-                  Expect.equal (List.distinct names) names "no family has two rows" ]
+                  Expect.equal (List.distinct names) names "no family has two rows"
+
+          // Phase 560 — outside this repository a family writes only what the registry declares there.
+          yield
+              testCase
+                  "render <family> <dir> writes only the declared copies and shared indexes; Core's own home gets every file"
+              <| fun _ ->
+                  let rows = Approval.registry.Value
+                  let laws = table |> List.find (fun e -> e.Family = "laws")
+
+                  let scratch =
+                      Path.Combine(Path.GetTempPath(), "fuaran-core-560-render-" + Guid.NewGuid().ToString("N"))
+
+                  let names (paths: string list) =
+                      paths |> List.map Path.GetFileName |> List.sort
+
+                  try
+                      let corpus = Path.Combine(scratch, "corpus")
+                      let home = Path.Combine(scratch, "home")
+
+                      Expect.equal (targetOf laws (Some(laws.Root()))) (Own(laws.Root())) "naming the home is the home"
+
+                      let written = writeTo rows None laws (Elsewhere corpus)
+
+                      let declaredNames =
+                          declared rows laws |> Set.toList |> List.map Path.GetFileName |> List.sort
+
+                      Expect.equal (names written) declaredNames "the declared copies, and nothing else, are written"
+
+                      Expect.equal
+                          (Directory.GetFiles(Path.Combine(corpus, "laws")) |> Array.toList |> names)
+                          declaredNames
+                          "and nothing else lands on disk (no canonical-form-laws.json)"
+
+                      let all = writeTo rows None laws (Own home)
+
+                      Expect.equal
+                          (names all)
+                          (laws.Files home |> List.map fst |> names)
+                          "the home gets every file the row emits"
+
+                      Expect.contains
+                          (names all)
+                          CanonicalFormVectorExport.fileName
+                          "including the file no corpus declares"
+
+                      // go-red: a copy the registry stops declaring stops landing.
+                      let without =
+                          rows
+                          |> List.map (fun r ->
+                              if r.Path.EndsWith "field-laws.json" then
+                                  { r with Copies = [] }
+                              else
+                                  r)
+
+                      let narrowed =
+                          writeTo without None laws (Elsewhere(Path.Combine(scratch, "narrow")))
+
+                      Expect.isFalse
+                          (names narrowed |> List.contains "field-laws.json")
+                          "an undeclared copy is not written"
+
+                      Expect.equal narrowed.Length (written.Length - 1) "and only it is dropped"
+
+                      // go-red: the apply writer writes its two files together or refuses.
+                      let apply = table |> List.find (fun e -> e.Family = "apply")
+
+                      let noVectors =
+                          rows
+                          |> List.map (fun r ->
+                              if r.Path.EndsWith "skeleton-apply.json" then
+                                  { r with Copies = [] }
+                              else
+                                  r)
+
+                      Expect.throwsC
+                          (fun () ->
+                              writeTo noVectors None apply (Elsewhere(Path.Combine(scratch, "apply")))
+                              |> ignore)
+                          (fun ex -> Expect.stringContains ex.Message "writes both or neither" "named")
+
+                      Expect.isFalse (Directory.Exists(Path.Combine(scratch, "apply"))) "and nothing was written"
+                  finally
+                      if Directory.Exists scratch then
+                          Directory.Delete(scratch, true) ]

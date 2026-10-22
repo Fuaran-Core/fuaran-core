@@ -828,12 +828,17 @@ module LawVectorExport =
     let canonicalFormPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, CanonicalFormVectorExport.fileName)
 
-    let emitted (corpusDir: string) : (string * string) list =
-        [ capabilityPath corpusDir, Capabilities.render ()
-          decimalPath corpusDir, Decimals.render ()
-          fieldPath corpusDir, Fields.render ()
-          propagationPath corpusDir, PropagationVectorExport.renderAt (kitVersion ())
-          canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt (kitVersion ()) ]
+    /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
+    /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
+    let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
+        [ capabilityPath corpusDir, Capabilities.renderAt stamp
+          decimalPath corpusDir, Decimals.renderAt stamp
+          fieldPath corpusDir, Fields.renderAt stamp
+          propagationPath corpusDir, PropagationVectorExport.renderAt stamp
+          canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp ]
+
+    /// Every law file under `corpusDir`, stamped with this kit's own version.
+    let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir
 
     // -----------------------------------------------------------------------
     //  Phase 394 — the corpus `laws/manifest.json` rows beside the files
@@ -1077,32 +1082,32 @@ module LawVectorExport =
                     | [] -> [ sprintf "laws/%s carries no row for `%s`" manifestFileName id ]
                     | many -> [ sprintf "laws/%s carries %d rows for `%s`" manifestFileName many.Length id ])
 
-    /// The rows `write` restamps, derived from the text it is about to write — the same bytes, so
-    /// a row can never name a file other than the one beside it.
-    let private writtenRows (corpusDir: string) : (string * (string * JVal) list) list =
-        let texts = emitted corpusDir
-
+    /// The rows `writeFiles` restamps: one per manifest family among `files`, derived from the text
+    /// about to be written — the same bytes, so a row can never name a file other than the one beside
+    /// it. A family whose file is not handed keeps its row as it stands.
+    let private writtenRows (files: (string * string) list) : (string * (string * JVal) list) list =
         manifestRows
-        |> List.map (fun (id, fileName) ->
-            let text =
-                texts |> List.find (fun (path, _) -> Path.GetFileName path = fileName) |> snd
+        |> List.choose (fun (id, fileName) ->
+            files
+            |> List.tryFind (fun (path, _) -> Path.GetFileName path = fileName)
+            |> Option.map (fun (_, text) ->
+                match derivedMembers text with
+                | Ok members -> id, members
+                | Error e -> failwithf "the %s this kit renders did not read back: %s" fileName e))
 
-            match derivedMembers text with
-            | Ok members -> id, members
-            | Error e -> failwithf "the %s this kit renders did not read back: %s" fileName e)
-
-    /// Write the vectors with LF endings, whatever the host platform — the corpus is byte-compared
-    /// by several hosts on three operating systems — and, where a family `manifest.json` sits
-    /// beside them (the corpus; this repository's `conformance/laws/` carries none), restamp the
-    /// rows of the families written here in the same act (Phase 394). A manifest that cannot be
-    /// restamped fails the command BEFORE any file is written, so the files and their rows never
-    /// part company.
-    let write (corpusDir: string) : unit =
+    /// Write `files` (law files under `corpusDir`, as `emittedAt` renders them) with LF endings,
+    /// whatever the host platform — the corpus is byte-compared by several hosts on three operating
+    /// systems — and, where a family `manifest.json` sits beside them (the corpus; this repository's
+    /// `conformance/laws/` carries none), restamp the rows of the families written in the same act
+    /// (Phase 394). A manifest that cannot be restamped fails the command BEFORE any file is written,
+    /// so the files and their rows never part company. Only the files handed are written (Phase 560:
+    /// a corpus checkout receives only the copies it declares).
+    let writeFiles (corpusDir: string) (files: (string * string) list) : unit =
         let manifest = manifestPath corpusDir
 
         let restamped =
             if File.Exists manifest then
-                match restampManifest (File.ReadAllText manifest) (writtenRows corpusDir) with
+                match restampManifest (File.ReadAllText manifest) (writtenRows files) with
                 | Ok text -> Some text
                 | Error why -> failwithf "%s (%s) — nothing was written" why manifest
             else
@@ -1110,7 +1115,7 @@ module LawVectorExport =
 
         Directory.CreateDirectory(familyDir corpusDir) |> ignore
 
-        for path, text in emitted corpusDir do
+        for path, text in files do
             File.WriteAllText(path, text)
 
         match restamped with

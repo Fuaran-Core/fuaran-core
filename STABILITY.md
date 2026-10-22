@@ -49,7 +49,8 @@ document that recorded them, and say so rather than writing an entry after the f
 is held to at most 1,500 lines, so a release's entry cannot drift back into it.
 
 **A version's entries go in its ledger file.** Opening a draft slot creates `docs/releases/<v>.md`
-headed `## <v> — DRAFT` and its re-rendered index in the same commit; every change that rides the slot
+headed `## <v> — DRAFT` and its re-rendered index in the same commit as the `<Version>` move, its stamps and
+the corpus pin; the tool's `open-slot` does all of it in one act ([`RELEASING.md`](RELEASING.md), D218). Every change that rides the slot
 appends a self-contained `###` entry there. A change to the contract itself — a new surface class, a
 new stability-critical surface, a moved posture — is edited here, and its slot's entry says so.
 

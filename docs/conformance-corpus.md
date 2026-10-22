@@ -137,7 +137,8 @@ names it. Nothing moved OUT of the corpus.
 dotnet run --project tools/Fuaran.Core.Tools -- render laws
 dotnet run --project tools/Fuaran.Core.Tools -- render apply
 
-# the corpus copy — the same exporter, pointed at a corpus checkout
+# the corpus copy — the same exporter, pointed at a corpus checkout; outside this repository it writes
+# only the copies and shared index rows the projection registry declares there (Phase 560)
 dotnet run --project tools/Fuaran.Core.Tools -- render laws <corpus dir>
 dotnet run --project tools/Fuaran.Core.Tools -- render apply <corpus dir>
 ```
@@ -227,14 +228,25 @@ a reason unrelated to its content.
 The stamp is DERIVED, so **every** move of `<Version>` — a cut, a draft advance, anything — restales
 the corpus copy, in a repository this gate cannot write to. Three times on 2026-09-21 a session
 moved the version, got a green local gate, and reddened `main` on the next push from a run belonging
-to somebody else. Phase 216 moved the discovery; the sequence it discovers is this:
+to somebody else. Phase 216 moved the discovery, and the `0.40.2` slot was opened without steps 2 to 4
+on 2026-10-21. Since Phase 560 (DECISIONS.md D218) a slot opens in ONE act, which performs the whole
+sequence or refuses before writing anything:
+
+```powershell
+dotnet run --project tools/Fuaran.Core.Tools -- open-slot <version> --class <breaking|additive|internal> --opened-by "Phase <n>" --corpus ../Fuaran-UI/wire-format-fixtures
+```
+
+It renders the stamps at the version it opens, writes into the corpus checkout only the declared copies and
+the `laws/manifest.json` rows, commits them there by name, moves the pin to that commit, and opens the
+DRAFT ledger file; it prints the corpus push and this repository's commit, the corpus first. The sequence
+it performs, which is still the contract for any other move of `<Version>`, is this:
 
 ```powershell
 # 1. move <Version> in Directory.Build.props, then re-emit the source of truth
 dotnet run --project tools/Fuaran.Core.Tools -- render laws
 
 # 2. re-stamp the corpus copy (and, since Phase 394, its laws/manifest.json rows) with the same
-#    exporter, pointed at the corpus checkout
+#    exporter, pointed at the corpus checkout; since Phase 560 it writes only the declared copies there
 dotnet run --project tools/Fuaran.Core.Tools -- render laws ../Fuaran-UI/wire-format-fixtures
 
 # 3. commit and push the CORPUS first — it is a separate, public repository

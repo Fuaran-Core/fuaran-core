@@ -308,6 +308,8 @@
          readers and ChildProcess.fs for the tags; ReadmeClaimsTests.fs and GateProbeTagTests.fs below read it. -->
     <Compile Include="Ledger.fs" />
     <Compile Include="LedgerTests.fs" />
+    <Compile Include="OpenSlot.fs" />
+    <Compile Include="OpenSlotTests.fs" />
     <!-- Phase 183 — the committed public-surface baseline per package: the renderer over IL
          metadata, the baseline diff, and the classifier that tells a record/union/interface
          widening from ordinary additive growth. Reads PackageRosterTests.fs above for the ONE
