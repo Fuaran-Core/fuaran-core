@@ -401,7 +401,12 @@ module internal IntegrityLaws =
     ///    are still caught by `verifyAttestation`: the forgery moved the head, and the signature covers
     ///    only the original one. This is exactly what attestation adds over a bare hash chain — and it
     ///    holds under a *cryptographic* `HashFn` too (run the kit with the keyed / wide stand-in), since
-    ///    a re-hashed forgery cannot be re-signed without the host key.
+    ///    a re-hashed forgery cannot be re-signed without the host key;
+    ///  - **the attestation descriptor** (Phase 491) — a claim sealed at the anchor of a drawn segment
+    ///    describes that segment, re-seals identically from its claim and changes its seal with its
+    ///    claim, and its attestation verifies (`verifyDescriptor`); it is refused over a segment the
+    ///    walker refuses, a rehashed forgery (the head moved), a shortened segment (the range), a
+    ///    relabelled claim (the seal), and an attestation of another party's descriptor.
     ///
     /// Under the `noAttestation` default every branch is **vacuous** (`Sign ⇒ None ⇒` nothing to verify
     /// or falsify), and since Phase 196 the family's signing-outcome guard reports that run RED rather
@@ -443,6 +448,16 @@ module internal IntegrityLaws =
                 "attestation catches a rehashed actor-re-attribution (attribution is inside the hash)",
                 coveredBy
             )
+        // Phase 491 — the attestation descriptor (DECISIONS.md D187.7): a claim sealed at the anchor of
+        // a drawn segment of the chain. Both cells run whatever the sink; their signing arms run only
+        // where it signs, which the guard's `signed` count already measures.
+        let descriptorSeal =
+            LawKit.LawCell
+                "an attestation descriptor describes its segment and re-seals identically (a changed claim changes its seal; its attestation verifies)"
+
+        let descriptorRefused =
+            LawKit.LawCell
+                "a descriptor is refused over a segment the walker refuses, a rehashed forgery, a moved range, a tampered claim or another seal's signature"
         // Phase 196 — the two arms whose evidence is DRAWN rather than built. Four of the five
         // laws below run only where the sink actually signed, and `Attestation.noAttestation` signs
         // nothing: under it this family reports five greens over zero exercised cases, which is
@@ -458,6 +473,9 @@ module internal IntegrityLaws =
         // prefix) is gated on the two prefixes having different heads, which a run of empty chains
         // never builds; it is counted beside the other three.
         let mutable prefixMoved = 0
+        // Phase 491 — the descriptor's refusal of a tampered segment is built only when the drawn
+        // segment holds a record and the drawn replacement op encodes differently.
+        let mutable segmentTampered = 0
 
         LawKit.run runner iterations (fun rng _ at ->
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
@@ -507,6 +525,140 @@ module internal IntegrityLaws =
              | Ok s when s = state -> replayEq.Saw()
              | other ->
                  replayEq.Check(false, fun () -> at (sprintf "replay of the attested log ≠ live state (got %A)" other)))
+
+            // the attestation descriptor (Phase 491) over the segment `recs[from .. upto - 1]`, hung
+            // from the anchor the record before it leaves (the genesis anchor at sequence zero).
+            let stream = OpStream.canonical hashFn sw
+            let shape = ChainShape.records StreamConfig.canonical sw.Encode
+            let from = rng.IntBelow(len + 1)
+            let upto = from + rng.IntBelow(len - from + 1)
+
+            let anchor =
+                { Seq = from
+                  PrevHash =
+                    if from = 0 then
+                        StreamConfig.canonical.Genesis
+                    else
+                        (List.item (from - 1) recs).Hash }
+
+            let segment = recs |> List.skip from |> List.take (upto - from)
+
+            let claim =
+                { StreamId = "stream-" + string (rng.IntBelow 3)
+                  Head = ChainShape.tip shape anchor segment
+                  Party = rng.Choose [ Human "alice"; Agent("m", "v", "bot") ]
+                  Algorithm = "test-alg-v1"
+                  SignedAt = int64 (rng.IntBelow 1000000)
+                  KeyId = "key-" + string (rng.IntBelow 2)
+                  Evidence = List.init (rng.IntBelow 3) (fun i -> "claim-" + string i, rng.Choose [ "pass"; "fail" ]) }
+
+            let d = AttestationDescriptor.seal stream anchor claim
+
+            descriptorSeal.Check(
+                AttestationDescriptor.firstFault stream d segment = None,
+                fun () -> at "a descriptor did not describe the segment it was sealed over"
+            )
+
+            descriptorSeal.Check(
+                AttestationDescriptor.seal stream d.Anchor d.State = d,
+                fun () -> at "re-sealing a descriptor's claim at its anchor minted another descriptor"
+            )
+
+            let changed =
+                { claim with
+                    Evidence = claim.Evidence @ [ "claim-x", "pass" ] }
+
+            descriptorSeal.Check(
+                AttestationDescriptor.encode changed <> AttestationDescriptor.encode claim
+                && (AttestationDescriptor.seal stream anchor changed).Seal <> d.Seal,
+                fun () -> at "a changed claim kept its encoding or its seal"
+            )
+
+            let isFault (pick: DescriptorFault -> bool) (r: DescriptorFault option) = r |> Option.exists pick
+
+            let relabelled =
+                { d with
+                    State =
+                        { d.State with
+                            StreamId = d.State.StreamId + "'" } }
+
+            descriptorRefused.Check(
+                AttestationDescriptor.firstFault stream relabelled segment
+                |> isFault (function
+                    | DescriptorFault.Broken(SnapshotBreak.SnapshotHash _) -> true
+                    | _ -> false),
+                fun () -> at "a descriptor whose claim was relabelled kept its seal"
+            )
+
+            (match List.rev segment with
+             | [] -> ()
+             | _ :: shorter ->
+                 descriptorRefused.Check(
+                     AttestationDescriptor.firstFault stream d (List.rev shorter)
+                     |> isFault (function
+                         | DescriptorFault.RangeMismatch _ -> true
+                         | _ -> false),
+                     fun () -> at "a descriptor described a segment shorter than its range"
+                 )
+
+                 let i = rng.IntBelow(List.length segment)
+                 let orig = List.item i segment
+
+                 match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode orig.Op <> sw.Encode o) with
+                 | None -> ()
+                 | Some op ->
+                     segmentTampered <- segmentTampered + 1
+                     let swap j (r: OpRecord<'Op>) = if j = i then { r with Op = op } else r
+
+                     descriptorRefused.Check(
+                         AttestationDescriptor.firstFault stream d (List.mapi swap segment)
+                         |> isFault (function
+                             | DescriptorFault.Broken(SnapshotBreak.Tail _) -> true
+                             | _ -> false),
+                         fun () -> at "a descriptor described a segment the walker refuses"
+                     )
+
+                     let forged =
+                         reforgeCanonical hashFn sw.Encode (recs |> List.mapi (fun j r -> swap (j - from) r))
+                         |> List.skip from
+                         |> List.take (upto - from)
+
+                     descriptorRefused.Check(
+                         AttestationDescriptor.firstFault stream d forged
+                         |> isFault (function
+                             | DescriptorFault.HeadMismatch _ -> true
+                             | _ -> false),
+                         fun () -> at "a descriptor described a rehashed forgery of its segment"
+                     ))
+
+            // signing: the claim names the key the sink signs with, so the descriptor is re-sealed
+            // under the key the sink reports before it is signed.
+            (match Attestation.ofDescriptor sink d with
+             | None -> ()
+             | Some probe ->
+                 let dk = AttestationDescriptor.seal stream anchor { claim with KeyId = probe.KeyId }
+
+                 match Attestation.ofDescriptor sink dk with
+                 | None -> ()
+                 | Some att ->
+                     descriptorSeal.Check(
+                         Attestation.verifyDescriptor sink stream att dk segment = Ok(),
+                         fun () -> at "a signed descriptor failed verifyDescriptor over its own segment"
+                     )
+
+                     let other =
+                         AttestationDescriptor.seal
+                             stream
+                             anchor
+                             { dk.State with
+                                 Party = Human(Actor.id dk.State.Party + "'") }
+
+                     descriptorRefused.Check(
+                         (match Attestation.verifyDescriptor sink stream att other segment with
+                          | Error(AttestationFault.NotThisSeal _) -> true
+                          | _ -> false),
+                         fun () -> at "an attestation of one party's descriptor verified as another's"
+                     ))
 
             // falsification — only when the sink actually signs (vacuous under noAttestation).
             match recs, Attestation.attestHead sink StreamConfig.canonical recs with
@@ -560,7 +712,14 @@ module internal IntegrityLaws =
                     fun () -> at "a rehashed actor-re-attribution passed verifyAttestation"
                 ))
 
-        LawKit.results [ roundTrip; prefix; replayEq; opTamper; actorTamper ]
+        LawKit.results
+            [ roundTrip
+              prefix
+              replayEq
+              opTamper
+              actorTamper
+              descriptorSeal
+              descriptorRefused ]
         // Phase 196. A sink that never signs leaves four of the five laws above asserting
         // nothing, and every one of them still reports green — so the guard is the only thing
         // that can tell a certified attestation seam from an unexercised one. Running this
@@ -574,7 +733,8 @@ module internal IntegrityLaws =
                 [ "signed", signed
                   "falsified", falsified
                   "op-tampered", opTampered
-                  "prefix-moved", prefixMoved ] ]
+                  "prefix-moved", prefixMoved
+                  "segment-tampered", segmentTampered ] ]
 
     /// The `noAttestation` vacuity laws (Phase 60) — the default no-op sink issues no attestation
     /// (`attestHead noAttestation ⇒ None`) and verifies nothing (`verifyAttestation noAttestation _ ⇒

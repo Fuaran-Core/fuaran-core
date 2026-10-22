@@ -143,8 +143,8 @@ let integrityLawTests =
 
               Expect.equal
                   (List.length results)
-                  6
-                  "round-trip + prefix + replay + op-tamper + actor-tamper laws, and the Phase 196 signing-outcome guard"
+                  8
+                  "round-trip + prefix + replay + op-tamper + actor-tamper + the two Phase 491 descriptor laws, and the Phase 196 signing-outcome guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -184,7 +184,7 @@ let integrityLawTests =
               Expect.isTrue
                   (results |> List.filter (guardOf >> not) |> List.forall _.Passed)
                   (sprintf
-                      "the five subject laws still hold over nothing: %A"
+                      "the seven subject laws still hold, the signing ones over nothing: %A"
                       (results |> List.filter (fun r -> not r.Passed)))
 
               let guard = results |> List.filter guardOf
@@ -193,7 +193,7 @@ let integrityLawTests =
 
               Expect.isFalse
                   (guard |> List.forall _.Passed)
-                  "and it is RED — a sink that never signs leaves four of the five laws asserting nothing"
+                  "and it is RED — a sink that never signs leaves four of the laws, and the descriptor laws' signing arms, asserting nothing"
 
               Expect.isTrue
                   (guard

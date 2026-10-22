@@ -315,3 +315,223 @@ let tests =
               Expect.isFalse
                   (Dag.verifyDag (OpStream.canonical h sw) tampered)
                   "re-attribution breaks every node's content id" ]
+
+// ---- Phase 491 — the attestation descriptor (DECISIONS.md D187.7) ----
+
+/// The canonical stream the descriptor tests seal and verify under.
+let private stream = OpStream.canonical h sw
+
+/// The anchor a segment starting at `at` hangs from: the genesis anchor at zero, else the boundary
+/// the record before it leaves.
+let private anchorAt (recs: OpRecord<CounterOp> list) (at: int) : Anchor =
+    if at = 0 then
+        Anchor.genesis StreamConfig.canonical
+    else
+        { Seq = at
+          PrevHash = recs[at - 1].Hash }
+
+/// A claim over `segment` hung from `anchor`, by `party`, naming the test sink's key.
+let private claimOver (anchor: Anchor) (segment: OpRecord<CounterOp> list) (party: Actor) : AttestationClaim =
+    { StreamId = "orders"
+      Head = ChainShape.tip (ChainShape.records StreamConfig.canonical sw.Encode) anchor segment
+      Party = party
+      Algorithm = "test-alg-v1"
+      SignedAt = 1767225600L
+      KeyId = "test-key"
+      Evidence = [ "chain-intact", "pass"; "replay-equal", "pass" ] }
+
+let private recordsOf () =
+    match build () with
+    | Ok(_, recs) -> recs
+    | Error e -> failtestf "build failed: %A" e
+
+[<Tests>]
+let descriptorTests =
+    testList
+        "Provenance.AttestationDescriptor"
+        [ testCase "a descriptor over a mid-stream segment describes it, signs, and verifies"
+          <| fun _ ->
+              let recs = recordsOf ()
+              let anchor = anchorAt recs 1
+              let segment = recs |> List.skip 1
+              let d = AttestationDescriptor.seal stream anchor (claimOver anchor segment bot)
+
+              Expect.equal d.Mode SnapshotMode.Strict "a descriptor is sealed strict"
+              Expect.equal d.State.Head.Seq 3 "the head is one past the segment's last record"
+              Expect.equal d.State.Head.PrevHash recs[2].Hash "and names its hash"
+              Expect.isNone (AttestationDescriptor.firstFault stream d segment) "it describes its segment"
+
+              let sink = testSink "kms-secret"
+              let att = Attestation.ofDescriptor sink d |> Option.get
+              Expect.equal att.Head d.Seal "the sink signs the seal"
+
+              Expect.equal
+                  (Attestation.verifyDescriptor sink stream att d segment)
+                  (Ok())
+                  "the attestation verifies over the segment"
+
+          testCase "the claim's encoding and the seal's pre-image are pinned"
+          <| fun _ ->
+              let claim =
+                  { StreamId = "s\"1"
+                    Head = { Seq = 2; PrevHash = "abc" }
+                    Party = Human "alice"
+                    Algorithm = "alg"
+                    SignedAt = 1767225600L
+                    KeyId = "k"
+                    Evidence = [ "c1", "pass" ] }
+
+              let encoded =
+                  "{\"stream\":\"s\\\"1\",\"head\":{\"seq\":2,\"prevHash\":\"abc\"},\"party\":"
+                  + Actor.encode (Human "alice")
+                  + ",\"algorithm\":\"alg\",\"signedAt\":1767225600,\"keyId\":\"k\",\"evidence\":[[\"c1\",\"pass\"]]}"
+
+              Expect.equal (AttestationDescriptor.encode claim) encoded "the canonical encoding"
+
+              let anchor = { Seq = 1; PrevHash = "prev" }
+              let d = AttestationDescriptor.seal stream anchor claim
+
+              Expect.equal
+                  d.Seal
+                  (h "prev" ("{\"attestation\":1,\"seq\":1,\"claim\":" + encoded + "}"))
+                  "the seal is the chain hash of the pre-image at the anchor"
+
+              Expect.equal (AttestationDescriptor.seal stream d.Anchor d.State) d "re-sealing the claim reproduces it"
+
+          testCase "the encoding is injective where a naive join is not, and its pre-image is apart from a snapshot's"
+          <| fun _ ->
+              let recs = recordsOf ()
+              let anchor = anchorAt recs 0
+              let claim = claimOver anchor recs alice
+
+              let a =
+                  { claim with
+                      Evidence = [ "a\",\"b", "c" ] }
+
+              let b =
+                  { claim with
+                      Evidence = [ "a", "b\",\"c" ] }
+
+              Expect.notEqual
+                  (AttestationDescriptor.encode a)
+                  (AttestationDescriptor.encode b)
+                  "evidence spelling a separator is still its own value"
+
+              let snapshotSeal =
+                  (Sealed.seal SnapshotMode.Strict h AttestationDescriptor.encode anchor claim).Seal
+
+              Expect.notEqual
+                  (AttestationDescriptor.seal stream anchor claim).Seal
+                  snapshotSeal
+                  "a descriptor's seal is not the seal of a snapshot holding the same claim"
+
+          testCase "an empty segment is described by a descriptor whose head is its anchor"
+          <| fun _ ->
+              let recs = recordsOf ()
+              let anchor = anchorAt recs 3
+              let d = AttestationDescriptor.seal stream anchor (claimOver anchor [] alice)
+              Expect.equal d.State.Head anchor "the tip of nothing is the anchor"
+              Expect.isNone (AttestationDescriptor.firstFault stream d []) "it describes the empty segment"
+
+              Expect.equal
+                  (AttestationDescriptor.firstFault stream d [ recs[2] ])
+                  (Some(
+                      DescriptorFault.Broken(
+                          SnapshotBreak.Tail
+                              { Index = 0
+                                Reason = ChainBreakReason.SequenceMismatch
+                                Expected = "3"
+                                Got = "2" }
+                      )
+                  ))
+                  "a record from below the anchor is refused by the walker"
+
+          testCase "each refusal is named, in the order the checks run"
+          <| fun _ ->
+              let recs = recordsOf ()
+              let anchor = anchorAt recs 1
+              let segment = recs |> List.skip 1
+              let d = AttestationDescriptor.seal stream anchor (claimOver anchor segment bot)
+              let fault = AttestationDescriptor.firstFault stream
+
+              Expect.equal
+                  (fault { d with Mode = SnapshotMode.ChainOnly } segment)
+                  (Some DescriptorFault.NotStrict)
+                  "a chain-only descriptor would not bind its claim"
+
+              match
+                  fault
+                      { d with
+                          State = { d.State with Party = alice } }
+                      segment
+              with
+              | Some(DescriptorFault.Broken(SnapshotBreak.SnapshotHash(expected, got))) ->
+                  Expect.equal got d.Seal "the carried seal is reported"
+                  Expect.notEqual expected d.Seal "beside the one the edited claim recomputes to"
+              | other -> failtestf "a re-attributed claim must break the seal, got %A" other
+
+              let tampered =
+                  segment |> List.mapi (fun i r -> if i = 1 then { r with Op = Inc 99 } else r)
+
+              match fault d tampered with
+              | Some(DescriptorFault.Broken(SnapshotBreak.Tail b)) ->
+                  Expect.equal b.Index 1 "the walker names the tampered record by its place in the segment"
+                  Expect.equal b.Reason ChainBreakReason.HashMismatch "by its hash"
+              | other -> failtestf "a segment the walker refuses must be refused, got %A" other
+
+              Expect.equal
+                  (fault d (List.take 1 segment))
+                  (Some(DescriptorFault.RangeMismatch(3, 2)))
+                  "a shortened segment moves the range"
+
+              // the forgery a bare hash chain re-accepts: the last op replaced and the chain re-minted
+              let reminted =
+                  (Ok(0, OpStream.empty), [ alice, Inc 5; bot, Inc 3; alice, Inc 99 ])
+                  ||> List.fold (fun acc (actor, op) ->
+                      acc |> Result.bind (fun (st, rs) -> OpStream.append stream actor op st rs))
+                  |> function
+                      | Ok(_, rs) -> rs |> List.skip 1
+                      | Error e -> failtestf "re-mint failed: %A" e
+
+              Expect.equal
+                  (fault d reminted)
+                  (Some(DescriptorFault.HeadMismatch(recs[2].Hash, reminted[1].Hash)))
+                  "a re-minted forgery walks cleanly and is refused by its head"
+
+          testCase "an attestation is refused for another seal, another key, or a signature the sink refuses"
+          <| fun _ ->
+              let recs = recordsOf ()
+              let anchor = anchorAt recs 0
+              let d = AttestationDescriptor.seal stream anchor (claimOver anchor recs alice)
+              let sink = testSink "kms-secret"
+              let att = Attestation.ofDescriptor sink d |> Option.get
+              let verify = Attestation.verifyDescriptor sink stream
+
+              let byBot = AttestationDescriptor.seal stream anchor { d.State with Party = bot }
+
+              Expect.equal
+                  (verify att byBot recs)
+                  (Error(AttestationFault.NotThisSeal(d.Seal, byBot.Seal)))
+                  "one party's attestation is not another's"
+
+              let otherKey =
+                  AttestationDescriptor.seal stream anchor { d.State with KeyId = "other-key" }
+
+              let attOther = Attestation.ofDescriptor sink otherKey |> Option.get
+
+              Expect.equal
+                  (verify attOther otherKey recs)
+                  (Error(AttestationFault.KeyMismatch("other-key", "test-key")))
+                  "a signature under another key than the claim names is refused"
+
+              Expect.equal
+                  (Attestation.verifyDescriptor (testSink "another-secret") stream att d recs)
+                  (Error AttestationFault.SignatureRefused)
+                  "the sink is asked last, and its refusal is named"
+
+              Expect.equal
+                  (verify att d (List.take 2 recs))
+                  (Error(AttestationFault.Descriptor(DescriptorFault.RangeMismatch(3, 2))))
+                  "a descriptor that does not describe the records is refused before the sink is asked"
+
+              Expect.isNone (Attestation.ofDescriptor Attestation.noAttestation d) "the no-op sink signs nothing" ]

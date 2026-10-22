@@ -65,6 +65,72 @@ type IAttestationSink =
     /// not check out (or for the no-op sink, which never issued one).
     abstract member Verify: attestation: Attestation -> head: string -> bool
 
+/// What a signed claim over a segment of a chain is ABOUT (Phase 491) — the claim an
+/// `AttestationDescriptor` seals at the segment's anchor. Every field is op-agnostic: the stream the
+/// segment belongs to, where it ends, who vouches for it, under which algorithm and key, when, and
+/// the evidence verdicts it carries. Where it STARTS is the descriptor's `Anchor`, so the segment a
+/// claim covers is the records at sequences `Anchor.Seq .. Head.Seq - 1`.
+type AttestationClaim =
+    {
+        /// The stream the segment belongs to. A chain's pre-image does not name its stream, so the
+        /// claim does: an attested segment cannot be relabelled into another stream.
+        StreamId: string
+        /// The segment's tip (`ChainShape.tip`): `Seq` one past its last record and `PrevHash` that
+        /// record's hash — the head the claim attests. At the anchor itself for an empty segment.
+        Head: Anchor
+        /// The party vouching for the segment — Phase 311's subject, bound into the seal.
+        Party: Actor
+        /// The registered id of the signature algorithm the attestation is made under. Opaque to
+        /// Core: a verifier dispatches on it.
+        Algorithm: string
+        /// When the party signed, in whole seconds since the Unix epoch, as the signer asserts it.
+        /// Core reads no clock: the signer supplies it.
+        SignedAt: int64
+        /// The signing key's name — where a verifier finds the verifying key. An attestation of the
+        /// descriptor is accepted only under this key (`Attestation.verifyDescriptor`).
+        KeyId: string
+        /// The evidence the claim carries: each a claim id and its verdict, in the signer's order.
+        /// Opaque to Core, and bound into the seal as it stands.
+        Evidence: (string * string) list
+    }
+
+/// An attestation descriptor (Phase 491; DECISIONS.md D187.7): the claim sealed at the anchor of the
+/// segment it covers, by the one seal rule a snapshot and a DAG checkpoint are sealed by. A domain
+/// builds the claim, seals it (`AttestationDescriptor.seal`), and has the seal signed
+/// (`Attestation.ofDescriptor`); a verifier recomputes the seal, walks the segment from the anchor,
+/// and checks the head and the range (`AttestationDescriptor.firstFault`) before the signature
+/// (`Attestation.verifyDescriptor`). It is always sealed `Strict`: the seal covers the whole claim.
+type AttestationDescriptor = Sealed<AttestationClaim>
+
+/// Why a descriptor does not describe the segment it is offered (Phase 491), in the order the checks
+/// run: the mode, the seal, the segment's chain, its range, its head.
+[<RequireQualifiedAccess>]
+type DescriptorFault =
+    /// The descriptor is not sealed `Strict`, so its seal would not cover its claim.
+    | NotStrict
+    /// The seal does not recompute over the claim (`SnapshotBreak.SnapshotHash`, the segment not
+    /// walked), or the segment does not walk from the descriptor's anchor (`SnapshotBreak.Tail`,
+    /// indexed by position in the segment).
+    | Broken of SnapshotBreak
+    /// The segment ends at another sequence than the claim's head: `claimed` is `Head.Seq`, `actual`
+    /// the segment's tip.
+    | RangeMismatch of claimed: int * actual: int
+    /// The segment's last hash is not the head the claim attests.
+    | HeadMismatch of claimed: string * actual: string
+
+/// Why an attestation of a descriptor was refused (Phase 491, `Attestation.verifyDescriptor`), in the
+/// order the checks run: the descriptor, what was signed, the key, the signature.
+[<RequireQualifiedAccess>]
+type AttestationFault =
+    /// The descriptor does not describe the segment.
+    | Descriptor of DescriptorFault
+    /// The attestation signs another value than the descriptor's seal.
+    | NotThisSeal of signed: string * seal: string
+    /// The attestation was made under another key than the claim names.
+    | KeyMismatch of claimed: string * signedBy: string
+    /// The sink does not accept the signature over the seal.
+    | SignatureRefused
+
 /// Why STRICT replay refused a request (Phase 301, `EffectCapture.replayEffectStrict`). The lenient
 /// `replayEffect` falls back to the live source when the journal is exhausted, so a journal whose
 /// tail was cut off still replays — with live values leaking in and no signal. The strict form names
@@ -746,6 +812,86 @@ module KeyedCapture =
                   PrevHash = prevHash
                   Hash = hash }))
 
+/// The attestation descriptor's verbs (Phase 491; DECISIONS.md D187.7): its canonical encoding, its
+/// seal, and the check that it describes a segment. The seal is `Sealed`'s one sealing step over the
+/// descriptor's pre-image, and the check is `Sealed`'s one seal-then-tail verifier with the head and
+/// range read off the walked segment's tip, so a descriptor is sealed and verified as a snapshot is.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module AttestationDescriptor =
+
+    /// The claim's canonical encoding: a JSON object with its members in a fixed order — `stream`,
+    /// `head` (`{"seq":…,"prevHash":…}`), `party` (`Actor.encode`), `algorithm`, `signedAt`, `keyId`
+    /// and `evidence` (an array of `[claim id, verdict]` pairs, in order). Every string is spelled by
+    /// `JsonString.quote`, so the encoding is injective: two claims with one encoding are one claim.
+    let encode (claim: AttestationClaim) : string =
+        let q = JsonString.quote
+
+        "{\"stream\":"
+        + q claim.StreamId
+        + ",\"head\":{\"seq\":"
+        + string claim.Head.Seq
+        + ",\"prevHash\":"
+        + q claim.Head.PrevHash
+        + "},\"party\":"
+        + Actor.encode claim.Party
+        + ",\"algorithm\":"
+        + q claim.Algorithm
+        + ",\"signedAt\":"
+        + string claim.SignedAt
+        + ",\"keyId\":"
+        + q claim.KeyId
+        + ",\"evidence\":["
+        + (claim.Evidence
+           |> List.map (fun (id, verdict) -> "[" + q id + "," + q verdict + "]")
+           |> String.concat ",")
+        + "]}"
+
+    /// The seal's pre-image: `{"attestation":1,"seq":<anchor seq>,"claim":<encode>}`, sealed as
+    /// `hashFn anchor.PrevHash preimage`. `1` is the descriptor format's version. The leading member
+    /// keeps the pre-image apart from every other chained kind's (an op record's opens `{"seq"`, a
+    /// capture's `{"capture"`, a snapshot's `{"snapshot"`), so a descriptor's seal is never another
+    /// record's hash by the spelling of its pre-image.
+    let private preimage (d: AttestationDescriptor) : string =
+        "{\"attestation\":1,\"seq\":"
+        + string d.Anchor.Seq
+        + ",\"claim\":"
+        + encode d.State
+        + "}"
+
+    /// `claim` sealed at `anchor`, the anchor of the segment it covers, under the chain hash of `s`
+    /// — the stream the segment is verified against. The segment is not read: the claim's `Head` is
+    /// the signer's statement, and `firstFault` is what holds it to the records.
+    let seal (s: Stream<'Op, 'State, 'Rej>) (anchor: Anchor) (claim: AttestationClaim) : AttestationDescriptor =
+        Sealed.sealOver preimage SnapshotMode.Strict s.HashFn anchor claim
+
+    /// The first way `d` fails to describe `segment` — the records of `s` from the descriptor's
+    /// anchor: a non-`Strict` mode; the seal, recomputed under `s`; the segment's chain, walked from
+    /// the anchor by the one walker (a segment the walker refuses is refused); then the segment's tip
+    /// against the claim's head, its sequence (the range) before its hash. `None` when the descriptor
+    /// describes the segment exactly.
+    let firstFault
+        (s: Stream<'Op, 'State, 'Rej>)
+        (d: AttestationDescriptor)
+        (segment: OpRecord<'Op> list)
+        : DescriptorFault option =
+        if d.Mode <> SnapshotMode.Strict then
+            Some DescriptorFault.NotStrict
+        else
+            let shape = ChainShape.records s.Config s.Witness.Encode
+
+            match Sealed.firstBreakOver preimage s.HashFn shape d segment with
+            | Some b -> Some(DescriptorFault.Broken b)
+            | None ->
+                let tip = ChainShape.tip shape d.Anchor segment
+
+                if tip.Seq <> d.State.Head.Seq then
+                    Some(DescriptorFault.RangeMismatch(d.State.Head.Seq, tip.Seq))
+                elif tip.PrevHash <> d.State.Head.PrevHash then
+                    Some(DescriptorFault.HeadMismatch(d.State.Head.PrevHash, tip.PrevHash))
+                else
+                    None
+
 /// Attestation of a chain's head (Phase 320; the party-bound forms Phase 311; the public module since
 /// Phase 516): sign the head through a host's `IAttestationSink`, and re-verify a signature against the
 /// head a chain has now. Every verb that reads a head reads it under the config the chain was written
@@ -817,3 +963,33 @@ module Attestation =
         : bool =
         let subject = attestationSubject hashFn party (OpStream.head cfg records)
         attestation.Head = subject && sink.Verify attestation subject
+
+    /// Sign a descriptor (Phase 491): the sink signs its seal, which binds the whole claim — stream,
+    /// range, head, party, algorithm, time, key and evidence — to the anchor it hangs from. `None` from
+    /// the no-op sink. The claim's `KeyId` must name the key the sink signs with, or the attestation
+    /// is refused at `verifyDescriptor`.
+    let ofDescriptor (sink: IAttestationSink) (d: AttestationDescriptor) : Attestation option = sink.Sign d.Seal
+
+    /// Verify an attestation of a descriptor over `segment`, the records of `s` from the descriptor's
+    /// anchor (Phase 491): the descriptor describes the segment (`AttestationDescriptor.firstFault`),
+    /// the attestation signs exactly its seal, under the key its claim names, and the sink accepts the
+    /// signature there. The sink is asked last, so a descriptor that does not describe the records is
+    /// refused without it.
+    let verifyDescriptor
+        (sink: IAttestationSink)
+        (s: Stream<'Op, 'State, 'Rej>)
+        (attestation: Attestation)
+        (d: AttestationDescriptor)
+        (segment: OpRecord<'Op> list)
+        : Result<unit, AttestationFault> =
+        match AttestationDescriptor.firstFault s d segment with
+        | Some f -> Error(AttestationFault.Descriptor f)
+        | None ->
+            if attestation.Head <> d.Seal then
+                Error(AttestationFault.NotThisSeal(attestation.Head, d.Seal))
+            elif attestation.KeyId <> d.State.KeyId then
+                Error(AttestationFault.KeyMismatch(d.State.KeyId, attestation.KeyId))
+            elif not (sink.Verify attestation d.Seal) then
+                Error AttestationFault.SignatureRefused
+            else
+                Ok()

@@ -1382,6 +1382,18 @@
     },
     {
       "members": [
+        "AttestationDescriptor.encode",
+        "AttestationDescriptor.firstFault",
+        "AttestationDescriptor.seal",
+        "Attestation.ofDescriptor",
+        "Attestation.verifyDescriptor"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The attestation descriptor (Phase 491, DECISIONS.md D187.7): a claim sealed at a segment's anchor by the sealed state's one sealing step and checked by its one seal-then-tail verifier, so its seal and walk are `Sealed`'s and the chain walker's. `Conformance.attestationLawsAt` samples it at a host's sink (it describes its segment, re-seals identically, and is refused over a walker-refused segment, a rehashed forgery, a moved range, a relabelled claim and another seal's signature); the stand-in pins the encoding and the pre-image and names every refusal in order.",
+      "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
+    },
+    {
+      "members": [
         "OpStream.chainHashOf"
       ],
       "class": "measured-elsewhere",
