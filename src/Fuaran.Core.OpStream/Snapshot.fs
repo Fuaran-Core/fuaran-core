@@ -96,14 +96,47 @@ module Sealed =
             + "}"
         | SnapshotMode.ChainOnly -> "{\"snapshot\":true,\"seq\":" + string s.Anchor.Seq + ",\"stateHashed\":false}"
 
-    /// A sealed state as a one-record chain hung from its own anchor — so its seal is verified by the
-    /// one chain walker, as every other chained record is.
-    let private shape (stateEncode: 'State -> string) : ChainShape<Sealed<'State>> =
+    /// A sealed state as a one-record chain hung from its own anchor, its seal computed over
+    /// `preimage` — so its seal is verified by the one chain walker, as every other chained record
+    /// is. The snapshot pre-image (`payload`) is one; an attestation descriptor's (Phase 491,
+    /// `AttestationDescriptor`) is the other, so the two seal and verify by the same steps.
+    let private shapeOver (preimage: Sealed<'State> -> string) : ChainShape<Sealed<'State>> =
         { SeqOf = fun s -> s.Anchor.Seq
           PrevOf = fun s -> s.Anchor.PrevHash
           HashOf = fun s -> s.Seal
-          PayloadOf = payload stateEncode
+          PayloadOf = preimage
           Link = fun s _ seal -> { s with Seal = seal } }
+
+    /// `state` sealed at `anchor` by `mode`, over the pre-image `preimage` — the one sealing step.
+    let internal sealOver
+        (preimage: Sealed<'State> -> string)
+        (mode: SnapshotMode)
+        (hashFn: HashFn)
+        (anchor: Anchor)
+        (state: 'State)
+        : Sealed<'State> =
+        ChainShape.linkAt
+            (shapeOver preimage)
+            hashFn
+            anchor
+            { Anchor = anchor
+              State = state
+              Mode = mode
+              Seal = "" }
+
+    /// The one seal-then-tail verifier over the pre-image `preimage`: the seal first (the recomputed
+    /// seal and the carried one; the tail is not walked), then the first break in `tail` walked by
+    /// `tailShape` from the same anchor, indexed by position in the tail.
+    let internal firstBreakOver
+        (preimage: Sealed<'State> -> string)
+        (hashFn: HashFn)
+        (tailShape: ChainShape<'R>)
+        (sv: Sealed<'State>)
+        (tail: 'R list)
+        : SnapshotBreak option =
+        match ChainShape.walk (shapeOver preimage) hashFn sv.Anchor [ sv ] with
+        | Some b -> Some(SnapshotBreak.SnapshotHash(b.Expected, b.Got))
+        | None -> ChainShape.walk tailShape hashFn sv.Anchor tail |> Option.map SnapshotBreak.Tail
 
     /// `state` sealed at `anchor` by `mode` — the one sealing step a snapshot, a re-compaction and a
     /// DAG checkpoint share, so each mints the bytes the others do.
@@ -114,14 +147,7 @@ module Sealed =
         (anchor: Anchor)
         (state: 'State)
         : Sealed<'State> =
-        ChainShape.linkAt
-            (shape stateEncode)
-            hashFn
-            anchor
-            { Anchor = anchor
-              State = state
-              Mode = mode
-              Seal = "" }
+        sealOver (payload stateEncode) mode hashFn anchor state
 
     /// Where a sealed state and the tail above it fail to verify: the seal first
     /// (`SnapshotBreak.SnapshotHash`, the recomputed seal and the carried one; the tail is not walked),
@@ -134,9 +160,7 @@ module Sealed =
         (sv: Sealed<'State>)
         (tail: 'R list)
         : SnapshotBreak option =
-        match ChainShape.walk (shape stateEncode) hashFn sv.Anchor [ sv ] with
-        | Some b -> Some(SnapshotBreak.SnapshotHash(b.Expected, b.Got))
-        | None -> ChainShape.walk tailShape hashFn sv.Anchor tail |> Option.map SnapshotBreak.Tail
+        firstBreakOver (payload stateEncode) hashFn tailShape sv tail
 
     /// Resume replay from a sealed state: fold `tail` from `State`, refusing a tail whose first record
     /// is not at the anchor's sequence. The seal is not checked here — `firstBreak` is that act.

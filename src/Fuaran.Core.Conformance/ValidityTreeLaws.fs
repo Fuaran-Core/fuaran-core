@@ -821,6 +821,14 @@ module internal ValidityTreeLaws =
     /// deterministic, reads the introduced list as a set (a permutation encodes alike) and separates
     /// the three policies. Guarded on the gate arm: a registry the drawn edits never trip certifies
     /// the diff over empty sets.
+    ///
+    /// **The guided walk (Phase 489).** The registry's families, each stating a guidance for every
+    /// defect it reports and registered as `Validator.GuidedCheck`s, walk the candidate through
+    /// `Validator.Rules.runFindings`: read back as defects that walk is `runAllTagged` finding for
+    /// finding (so `canonicalCodes` is one string) and `Rules.run` is the same projection, and every
+    /// finding carries the guidance its family stated, remedy and alternatives intact; only a thrown
+    /// family's `RULE-FAULT` is unguided. A registry built outside `register` / `ofFamilies` that
+    /// holds an id twice is not a `Rules`, so that cell asks nothing of it.
     let introducedLaws
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -848,6 +856,27 @@ module internal ValidityTreeLaws =
         let encoding =
             LawKit.LawCell
                 "introduced: encodeVerdict is deterministic, order-free over the introduced list and separates the policies"
+
+        let guided =
+            LawKit.LawCell
+                "introduced: the guided walk is runAllTagged finding for finding, each finding keeping the guidance its family stated"
+
+        // the guidance a family states for one of its defects: the remedy and the alternatives read off
+        // the defect, so the walk that carries it can be held to it whatever the domain's rules are
+        let guidanceOf (d: Defect<'Id>) : RejectionGuidance =
+            { Message = "repair " + d.Code
+              Alternatives = [ d.Code; d.Message ] }
+
+        let guidedRules =
+            reg.Families
+            |> List.map (fun f ->
+                ({ RuleId = f.Id
+                   Run =
+                     fun root ->
+                         f.Run nodew root
+                         |> List.map (fun d -> Validator.Finding.guided (guidanceOf d) d) }
+                : Validator.GuidedCheck<'Node, 'Id>))
+            |> Validator.Rules.ofGuided
 
         let mutable introducedN = 0
         let mutable blockedN = 0
@@ -910,6 +939,31 @@ module internal ValidityTreeLaws =
                 fun () -> at "gate and verdict over introduced disagree"
             )
 
+            match guidedRules with
+            | Error _ -> ()
+            | Ok rules ->
+                let tagged = Validator.runAllTagged nodew reg candidate
+                let findings = Validator.Rules.runFindings rules candidate
+                let asDefects = findings |> List.map (fun (id, f) -> id, f.Defect)
+
+                let stated (id: string, f: Validator.Finding<'Id>) =
+                    match f.Guidance with
+                    | Some g -> g = guidanceOf f.Defect
+                    | None ->
+                        f.Defect.Code = Validator.FamilyFaultCode
+                        && f.Defect.Node = None
+                        && f.Defect.Family = id
+
+                guided.Check(
+                    asDefects = tagged
+                    && Validator.Rules.run rules candidate = tagged
+                    && Validator.canonicalCodes (List.map snd asDefects) = Validator.canonicalCodes (
+                        List.map snd tagged
+                    )
+                    && List.forall stated findings,
+                    fun () -> at (sprintf "the guided walk answered %A where runAllTagged answered %A" findings tagged)
+                )
+
             let enc = Validator.encodeVerdict idw
 
             encoding.Check(
@@ -923,5 +977,5 @@ module internal ValidityTreeLaws =
                 fun () -> at "encodeVerdict is not canonical over the verdicts"
             ))
 
-        LawKit.results [ self; exact; policies; composed; encoding ]
+        LawKit.results [ self; exact; policies; composed; encoding; guided ]
         @ [ LawKit.guard runner "gate arm" [ "introduced defect", introducedN; "blocked verdict", blockedN ] ]

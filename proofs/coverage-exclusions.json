@@ -699,6 +699,14 @@
     },
     {
       "members": [
+        "SigEntry.ofHoleDecl"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one hole-to-entry reading (Phase 487) that `Function.signature` maps over the witness's holes, so the ladder's `Function.signature` rows (the model's `entry_of`) reach it; the stand-in holds `signature` equal to the map of it over drawn hole lists of every kind and each rule it states.",
+      "standIn": "tests/Fuaran.Core.Tests/SigEntryTests.fs"
+    },
+    {
+      "members": [
         "DeclarationFault.describe"
       ],
       "class": "measured-elsewhere",
@@ -1374,6 +1382,18 @@
     },
     {
       "members": [
+        "AttestationDescriptor.encode",
+        "AttestationDescriptor.firstFault",
+        "AttestationDescriptor.seal",
+        "Attestation.ofDescriptor",
+        "Attestation.verifyDescriptor"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The attestation descriptor (Phase 491, DECISIONS.md D187.7): a claim sealed at a segment's anchor by the sealed state's one sealing step and checked by its one seal-then-tail verifier, so its seal and walk are `Sealed`'s and the chain walker's. `Conformance.attestationLawsAt` samples it at a host's sink (it describes its segment, re-seals identically, and is refused over a walker-refused segment, a rehashed forgery, a moved range, a relabelled claim and another seal's signature); the stand-in pins the encoding and the pre-image and names every refusal in order.",
+      "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
+    },
+    {
+      "members": [
         "OpStream.chainHashOf"
       ],
       "class": "measured-elsewhere",
@@ -1839,6 +1859,21 @@
       ],
       "class": "measured-elsewhere",
       "reason": "The generic rule framework (the package-level `content-free-seam` exclusion), Phase 521: the registration-ordered lattice and the one walk over a domain's own rules. The validator tests name each verb, its refusals and the walk's agreement with `runAllTagged` and `ColumnValidator.validateTagged`.",
+      "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
+    },
+    {
+      "members": [
+        "Validator.Finding.guided",
+        "Validator.Finding.ofDefect",
+        "Validator.Rules.ofGuided",
+        "Validator.Rules.registerGuided",
+        "Validator.Rules.replaceGuided",
+        "Validator.Rules.runFindings",
+        "Validator.Rules.tryFindGuided",
+        "Validator.asGuided"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion), Phase 489: a finding's recovery guidance beside its defect, and the guided rules the lattice and the one walk carry. `Conformance.introducedLaws` holds the guided walk to `runAllTagged` finding for finding with each stated guidance intact, and the validator tests name each verb, its refusals and the projections `run` and `tryFind`.",
       "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
     },
     {

@@ -546,3 +546,139 @@ let rulesTests =
                   [ ColumnValidator.UniqueCode, Some "k,n#1"
                     ColumnValidator.UniqueCode, Some "k,n#3" ]
                   "1.5 = 1.50, and a repeated all-absent key is a repeat" ]
+
+// ---- Phase 489: a finding carries the recovery its rule stated ----
+
+/// `wordRule` stating its recovery: the remedy names the word to drop, the alternatives the other
+/// words of the text.
+let private guidedWordRule (id: string) (word: string) : Validator.GuidedCheck<string, int> =
+    { RuleId = id
+      Run =
+        fun text ->
+            let words = text.Split ' ' |> Array.toList
+
+            (wordRule id word).Run text
+            |> List.map (
+                Validator.Finding.guided
+                    { Message = "drop the word " + word
+                      Alternatives = words |> List.filter ((<>) word) |> List.distinct }
+            ) }
+
+[<Tests>]
+let findingTests =
+    testList
+        "Validator.Finding (Phase 489)"
+        [ testCase "a guided rule's remedy and alternatives survive the walk, beside the defect run reports"
+          <| fun _ ->
+              let rs =
+                  Validator.Rules.ofGuided [ guidedWordRule "g" "x"; Validator.asGuided (wordRule "p" "y") ]
+                  |> orFail521
+
+              let findings = Validator.Rules.runFindings rs "x y z x"
+
+              Expect.equal
+                  (findings |> List.map (fun (id, f) -> id, f.Defect))
+                  (Validator.Rules.run rs "x y z x")
+                  "run is the guided walk read back as defects"
+
+              Expect.equal
+                  (findings
+                   |> List.map (fun (id, f) -> id, f.Defect.Node, f.Defect.Family, f.Guidance))
+                  [ "g",
+                    Some 0,
+                    "g",
+                    Some
+                        { Message = "drop the word x"
+                          Alternatives = [ "y"; "z" ] }
+                    "g",
+                    Some 3,
+                    "g",
+                    Some
+                        { Message = "drop the word x"
+                          Alternatives = [ "y"; "z" ] }
+                    "p", Some 1, "p", None ]
+                  "the guidance as stated, the plain check's defect unguided, every finding stamped"
+
+              Expect.equal
+                  (Validator.canonicalCodes (findings |> List.map (fun (_, f) -> f.Defect)))
+                  (Validator.canonicalCodes (Validator.Rules.run rs "x y z x" |> List.map snd))
+                  "one parity string"
+
+          testCase "a guided rule that throws is one unguided RULE-FAULT and the rules after it still run"
+          <| fun _ ->
+              let throwing: Validator.GuidedCheck<string, int> =
+                  { RuleId = "boom"
+                    Run = fun _ -> failwith "kaput" }
+
+              let rs = Validator.Rules.ofGuided [ throwing; guidedWordRule "a" "x" ] |> orFail521
+
+              match Validator.Rules.runFindings rs "x" with
+              | [ ("boom", fault); ("a", found) ] ->
+                  Expect.equal fault.Defect.Code Validator.FamilyFaultCode "the fault"
+                  Expect.equal fault.Defect.Family "boom" "stamped with the throwing rule"
+                  Expect.isNone fault.Guidance "a fault states no guidance"
+                  Expect.isSome found.Guidance "the next rule's guidance is kept"
+              | other -> failtestf "expected a fault then a finding, got %A" other
+
+          testCase "the lattice holds guided rules: refusals, position, and the guidance through every verb"
+          <| fun _ ->
+              let rs =
+                  Validator.Rules.ofChecks [ wordRule "a" "x"; wordRule "b" "y" ] |> orFail521
+
+              match Validator.Rules.registerGuided (guidedWordRule "a" "q") rs with
+              | Error(RegistrationError.DuplicateRule("a", [ "a"; "b" ])) -> ()
+              | other -> failtestf "expected DuplicateRule a, got %A" other
+
+              match Validator.Rules.ofGuided [ guidedWordRule "a" "x"; guidedWordRule "a" "y" ] with
+              | Error(RegistrationError.DuplicateRule("a", [ "a" ])) -> ()
+              | other -> failtestf "expected the repeat refused, got %A" other
+
+              match Validator.Rules.replaceGuided (guidedWordRule "z" "q") rs with
+              | Error(RegistrationError.UnknownRule("z", [ "a"; "b" ])) -> ()
+              | other -> failtestf "expected UnknownRule z, got %A" other
+
+              let swapped = Validator.Rules.replaceGuided (guidedWordRule "a" "x") rs |> orFail521
+              Expect.equal (Validator.Rules.enumerate swapped) [ "a"; "b" ] "position kept"
+
+              Expect.equal
+                  (Validator.Rules.runFindings swapped "x y"
+                   |> List.map (fun (id, f) -> id, f.Guidance |> Option.map _.Message))
+                  [ "a", Some "drop the word x"; "b", None ]
+                  "the swapped-in rule's guidance, the plain rule's none"
+
+              let kept =
+                  Validator.Rules.union swapped (Validator.Rules.ofGuided [ guidedWordRule "c" "y" ] |> orFail521)
+                  |> orFail521
+                  |> Validator.Rules.restrict (Set.ofList [ "a"; "c" ])
+
+              Expect.equal
+                  (Validator.Rules.runFindings kept "x y"
+                   |> List.map (fun (id, f) -> id, f.Guidance |> Option.map _.Message))
+                  [ "a", Some "drop the word x"; "c", Some "drop the word y" ]
+                  "union and restrict carry each rule's guidance"
+
+              let registered =
+                  Validator.Rules.registerGuided (guidedWordRule "c" "y") rs
+                  |> Result.bind (Validator.Rules.unregister "c")
+                  |> orFail521
+
+              Expect.equal (Validator.Rules.enumerate registered) [ "a"; "b" ] "unregister undoes registerGuided"
+
+          testCase "tryFind answers a rule's defects, tryFindGuided its guidance too"
+          <| fun _ ->
+              let rs =
+                  Validator.Rules.ofGuided [ guidedWordRule "g" "x"; Validator.asGuided (wordRule "p" "y") ]
+                  |> orFail521
+
+              let plain = Validator.Rules.tryFind "g" rs |> Option.get
+              let guided = Validator.Rules.tryFindGuided "g" rs |> Option.get
+              let lifted = Validator.Rules.tryFindGuided "p" rs |> Option.get
+
+              Expect.equal (plain.Run "x y") ((guidedWordRule "g" "x").Run "x y" |> List.map _.Defect) "the defects"
+
+              Expect.equal (guided.Run "x y") ((guidedWordRule "g" "x").Run "x y") "the findings, guidance and all"
+
+              Expect.equal
+                  (lifted.Run "x y")
+                  ((wordRule "p" "y").Run "x y" |> List.map Validator.Finding.ofDefect)
+                  "a plain check comes back unguided" ]

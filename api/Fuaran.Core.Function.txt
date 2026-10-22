@@ -294,6 +294,7 @@ method Fuaran.Core.SeamModule.unregister`3(System.String, Fuaran.Core.Seam`3<!!0
 method Fuaran.Core.SeamModule.withGate`3(Fuaran.Core.PolicyGate`2<!!0, !!1>, Fuaran.Core.Seam`3<!!0, !!1, !!2>) : Fuaran.Core.Seam`3<!!0, !!1, !!2>
 method Fuaran.Core.Seam`3.Equals(System.Object) : System.Boolean
 method Fuaran.Core.Seam`3.GetHashCode() : System.Int32
+method Fuaran.Core.SigEntryModule.ofHoleDecl(Fuaran.Core.HoleDecl) : Fuaran.Core.SigEntry
 method Fuaran.Core.SignatureModule.validate(Fuaran.Core.Signature) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.DeclarationFault>
 method Fuaran.Core.Space.canonical(Fuaran.Core.ValueSpace, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Space.describe(Fuaran.Core.ValueSpace) : System.String
@@ -543,6 +544,7 @@ type Fuaran.Core.SeamModule (module)
 type Fuaran.Core.SeamVocabulary`3 (record)
 type Fuaran.Core.Seam`3 (record)
 type Fuaran.Core.SigEntry (record)
+type Fuaran.Core.SigEntryModule (module)
 type Fuaran.Core.Signature (record)
 type Fuaran.Core.SignatureModule (module)
 type Fuaran.Core.SignatureQuery (record)
