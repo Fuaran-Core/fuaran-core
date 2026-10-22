@@ -36,6 +36,7 @@
     <Compile Include="ValidatorTests.fs" />
     <Compile Include="ObserverTests.fs" />
     <Compile Include="FunctionTests.fs" />
+    <Compile Include="SigEntryTests.fs" />
     <Compile Include="EffectAuditTests.fs" />
     <Compile Include="SchemaTests.fs" />
     <Compile Include="ConformanceTests.fs" />

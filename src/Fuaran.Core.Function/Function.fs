@@ -102,6 +102,35 @@ type SigEntry =
         | SlotHole c -> Some(SlotTree c)
         | ActionHole _ -> None
 
+/// The one reading of a declared hole as a signature entry (Phase 487).
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module SigEntry =
+
+    /// The signature entry of one declared hole — the mapping `Function.signature` maps over a
+    /// witness's holes, public so a consumer that needs ONE hole's entry reads Core's instead of
+    /// writing its own. Four rules:
+    ///
+    ///  - `Addr` is the hole's address and `Name` its label, both as declared;
+    ///  - `Kind` is the hole's kind, so `Space` (derived from it) is a value or repeat hole's space,
+    ///    the `SlotTree` of a slot's constraint, and `None` for an action hole;
+    ///  - `Required` is `true` for a value hole and a slot hole, which strict `apply` demands bound;
+    ///  - `Required` for a repeat hole is `Space.isCount` of its count space — a TOTAL repeat is
+    ///    demanded by strict `apply` (Phase 295), and one over any other space is non-total, refused
+    ///    `NonTotal` whatever is bound (Phase 307) — and `false` for an action hole, which is bound on
+    ///    the behaviour axis by `bindHandlers`, never by a data argument.
+    let ofHoleDecl (h: HoleDecl) : SigEntry =
+        let required =
+            match h.Kind with
+            | ValueHole _
+            | SlotHole _ -> true
+            | RepeatHole s -> Space.isCount s
+            | ActionHole _ -> false
+
+        { Addr = h.Addr
+          Name = h.Name
+          Kind = h.Kind
+          Required = required }
+
 /// The artifact's derived signature: which holes, what spaces, and its effect class.
 type Signature =
     {
@@ -335,32 +364,11 @@ module Signature =
 /// Calc's parameterised model both express their `apply` through these.
 module Function =
 
-    /// Derive the introspectable signature from a tree.
+    /// Derive the introspectable signature from a tree: one `SigEntry.ofHoleDecl` per declared hole,
+    /// in the witness's order, so a whole signature and a single hole's entry are one mapping.
     let signature (w: ArtifactWitness<'Node, 'Id>) (name: string) (node: 'Node) : Signature =
-        let entry (h: HoleDecl) =
-            let required =
-                match h.Kind with
-                // Phase 229: a slot's space is the wire tree of its constrained kind (`SigEntry.Space`),
-                // so a capability over a slotted artifact is invocable at the scalar seam.
-                | ValueHole _
-                | SlotHole _ -> true
-                // Phase 295: a TOTAL repeat is required, because strict `apply` demands it — the
-                // signature and the artifact protocol answer one question the same way. A repeat
-                // over anything but a count space (`Space.isCount`, Phase 307) is non-total: `apply`
-                // refuses it `NonTotal` whatever is bound, and `CapabilityRegistry.register` refuses
-                // a capability over one.
-                | RepeatHole s -> Space.isCount s
-                // An action hole is non-required on the *data* binding axis (no value/slot arg fills it);
-                // it is bound on the *behaviour* axis by `bindHandlers`, which enforces its own coverage.
-                | ActionHole _ -> false
-
-            { Addr = h.Addr
-              Name = h.Name
-              Kind = h.Kind
-              Required = required }
-
         { Name = name
-          Holes = w.Holes node |> List.map entry
+          Holes = w.Holes node |> List.map SigEntry.ofHoleDecl
           Effect = w.Effect node }
 
     /// Drop the given (already-bound) hole addresses from a signature (Phase 24) — for projecting a

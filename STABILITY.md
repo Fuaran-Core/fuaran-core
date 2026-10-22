@@ -382,7 +382,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   change to what either returns invalidates persisted data rather than breaking a compile.
   Which regime a call site is in is part of its meaning — a cache fingerprint quietly
   substituted for the crypto digest would still typecheck.
-- **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the artifact-function witness.
+- **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the artifact-function witness. The witness supplies the holes and Core owns their reading: `SigEntry.ofHoleDecl` (Phase 487, additive, the slot after `0.40.2`) is the one `HoleDecl` → `SigEntry` mapping and `Function.signature` maps it over `Holes`, so a change to a rule it states (`Required` for a repeat is `Space.isCount`) is breaking behavioural.
 - **`SkeletonOp` carries no ordinal** (`0.2.0`, 2026-07-26). `InsertChild` and `MoveNode` are
   `(parent, node)` and `(target, newParent)`; both **append**, and `ReorderChildren` states order by
   naming ids. Placing a node anywhere but last is `Batch [InsertChild …; ReorderChildren …]`.

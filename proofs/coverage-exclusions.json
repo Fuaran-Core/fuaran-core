@@ -699,6 +699,14 @@
     },
     {
       "members": [
+        "SigEntry.ofHoleDecl"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The one hole-to-entry reading (Phase 487) that `Function.signature` maps over the witness's holes, so the ladder's `Function.signature` rows (the model's `entry_of`) reach it; the stand-in holds `signature` equal to the map of it over drawn hole lists of every kind and each rule it states.",
+      "standIn": "tests/Fuaran.Core.Tests/SigEntryTests.fs"
+    },
+    {
+      "members": [
         "DeclarationFault.describe"
       ],
       "class": "measured-elsewhere",
