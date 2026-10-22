@@ -387,9 +387,9 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Text` | 30 | 5 | 2 | 1 | 2 | 0 | 0 | 20 |
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
-| `Fuaran.Core.Validator` | 56 | 0 | 25 | 3 | 0 | 0 | 0 | 28 |
+| `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 144 | 67 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1287 | 320 | 419 | 38 | 15 | 0 | 3 | 492 |
+| **Total** | 1295 | 320 | 419 | 38 | 15 | 0 | 3 | 500 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
