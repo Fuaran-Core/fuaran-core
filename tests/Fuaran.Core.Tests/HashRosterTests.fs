@@ -89,19 +89,25 @@ let private letLine =
     Regex(@"^(\s*)let\s+(?:rec\s+|private\s+|internal\s+|inline\s+)*([A-Za-z_]\w*)", RegexOptions.Compiled)
 
 /// The qualified name of the top-level definition enclosing line `i`: the nearest preceding
-/// `module` (at any indentation smaller than the call), then the nearest `let` at that module's
-/// member indentation, prefixed by every enclosing module outward.
+/// `module` that still encloses it, then the nearest `let` at that module's member indentation,
+/// prefixed by every enclosing module outward. A module encloses a line only while every non-blank
+/// line between them is indented deeper than the module (Phase 489): a nested module ends where its
+/// parent's members resume, so a call after it belongs to the parent.
 let private enclosingDefinition (lines: string[]) (i: int) : string option =
-    let rec modulesOutward (upto: int) (maxIndent: int) (acc: (int * string * int) list) =
-        // Collect (line, name, indent) of each enclosing module, innermost first.
+    let rec modulesOutward (upto: int) (shallowest: int) (acc: (int * string * int) list) =
+        // Collect (line, name, indent) of each enclosing module, innermost first. `shallowest` is the
+        // least indentation of a non-blank line from the candidate down to line `i`.
         let mutable j = upto
+        let mutable floor = shallowest
         let mutable found = None
 
         while found.IsNone && j >= 0 do
             let m = moduleLine.Match lines[j]
 
-            if m.Success && m.Groups[1].Value.Length < maxIndent then
+            if m.Success && m.Groups[1].Value.Length < floor then
                 found <- Some(j, m.Groups[2].Value, m.Groups[1].Value.Length)
+            elif lines[j].Trim() <> "" then
+                floor <- min floor (indentOf lines[j])
 
             j <- j - 1
 
@@ -111,7 +117,7 @@ let private enclosingDefinition (lines: string[]) (i: int) : string option =
 
     let callIndent = indentOf lines[i]
 
-    match modulesOutward (i - 1) (callIndent + 1) [] with
+    match modulesOutward (i - 1) callIndent [] with
     | [] -> None
     | modules ->
         // `modules` is outermost first; the innermost is the last.
@@ -324,4 +330,23 @@ let tests =
                      "            canonical" |]
 
               Expect.equal (enclosingDefinition sample 8) (Some "Outer.Inner.key") "nested module, local let"
-              Expect.equal (enclosingDefinition sample 2) (Some "Outer.unrelated") "top-level member" ]
+              Expect.equal (enclosingDefinition sample 2) (Some "Outer.unrelated") "top-level member"
+
+              // Phase 489 — a nested module ENDS where its parent's members resume: a call after it
+              // belongs to the parent's member, not to the closed module (`Validator.Finding` sits
+              // before `Validator.canonicalCodes`).
+              let closed =
+                  [| "module Outer ="
+                     ""
+                     "    module Closed ="
+                     ""
+                     "        let x = 1"
+                     ""
+                     "    // a banner at the parent's indentation"
+                     "    let later (xs: string list) : string ="
+                     "        xs |> Hash.canonicalFields" |]
+
+              Expect.equal
+                  (enclosingDefinition closed 8)
+                  (Some "Outer.later")
+                  "a closed nested module encloses nothing after it" ]

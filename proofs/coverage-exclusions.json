@@ -1851,6 +1851,21 @@
     },
     {
       "members": [
+        "Validator.Finding.guided",
+        "Validator.Finding.ofDefect",
+        "Validator.Rules.ofGuided",
+        "Validator.Rules.registerGuided",
+        "Validator.Rules.replaceGuided",
+        "Validator.Rules.runFindings",
+        "Validator.Rules.tryFindGuided",
+        "Validator.asGuided"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion), Phase 489: a finding's recovery guidance beside its defect, and the guided rules the lattice and the one walk carry. `Conformance.introducedLaws` holds the guided walk to `runAllTagged` finding for finding with each stated guidance intact, and the validator tests name each verb, its refusals and the projections `run` and `tryFind`.",
+      "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
+    },
+    {
+      "members": [
         "ColumnValidator.enumerate"
       ],
       "class": "trivial",

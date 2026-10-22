@@ -245,6 +245,39 @@ module Validator =
         { Id = id
           Run = fun w root -> Tree.preorder w root |> List.collect (rule w) }
 
+    // ---- Phase 489: a finding and its recovery guidance (DECISIONS.md D184.8) ----
+    // What a refused emitter needs beside the defect is what to do and what it could have said
+    // instead: the envelope's `RejectionGuidance`, the shape `Rejection.explain` and a policy's
+    // `Deny` already answer in. It rides BESIDE the defect, as `PackFinding` wraps one, never as a
+    // field of `Defect`: the defect is the parity surface (`canonicalCodes`, the gate's `(code,
+    // node)`), and guidance is advice that can be reworded without moving either.
+
+    /// A defect with the recovery guidance its rule stated (Phase 489): what a guided walk
+    /// (`Rules.runFindings`) answers, so a validator hands an agent the remedy and the alternatives
+    /// without a finding type of its own and without a lowering that loses them.
+    type Finding<'Id> =
+        {
+            /// The finding itself, stamped by the walk exactly as the defect walk stamps it.
+            Defect: Defect<'Id>
+            /// The repair, as the rule stated it: `Message` is the remedy — what the emitter should
+            /// do, `""` where the rule names none — and `Alternatives` what it could have written
+            /// instead (the enum's cases, the fields a kind admits), `[]` where it enumerates none.
+            /// `None` when the rule states no guidance; a thrown rule's `RULE-FAULT` is always `None`.
+            Guidance: RejectionGuidance option
+        }
+
+    /// Constructors for `Finding` (Phase 489).
+    [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+    module Finding =
+
+        /// `d` with no guidance — how every defect a `PackCheck` returns enters a guided walk.
+        let ofDefect (d: Defect<'Id>) : Finding<'Id> = { Defect = d; Guidance = None }
+
+        /// `d` with `guidance` — the remedy in its `Message` and the alternatives in its
+        /// `Alternatives`.
+        let guided (guidance: RejectionGuidance) (d: Defect<'Id>) : Finding<'Id> =
+            { Defect = d; Guidance = Some guidance }
+
     /// The stock code of a family that THREW instead of returning its findings (Phase 298).
     [<Literal>]
     let FamilyFaultCode = "RULE-FAULT"
@@ -252,25 +285,41 @@ module Validator =
     /// Run one rule body, total: its findings stamped with `family`, or — when it throws — one
     /// `Severity.Error` finding coded `RULE-FAULT` naming the family and the exception's message, so
     /// one broken rule never costs the findings of the others.
-    let internal runGuarded (family: string) (run: unit -> Defect<'Id> list) : Defect<'Id> list =
+    let internal runGuarded (family: string) (run: unit -> Finding<'Id> list) : Finding<'Id> list =
         try
-            run () |> List.map (Defect.inFamily family)
+            run ()
+            |> List.map (fun f ->
+                { f with
+                    Defect = Defect.inFamily family f.Defect })
         with ex ->
-            [ { Code = FamilyFaultCode
-                Severity = Severity.Error
-                Message = "rule '" + family + "' failed: " + ex.Message
-                Node = None
-                Family = family
-                Related = [] } ]
+            [ Finding.ofDefect
+                  { Code = FamilyFaultCode
+                    Severity = Severity.Error
+                    Message = "rule '" + family + "' failed: " + ex.Message
+                    Node = None
+                    Family = family
+                    Related = [] } ]
 
-    /// THE WALKER (Phase 521): every rule of `rules` over its subject, in rule order then each rule's
-    /// own order, each finding paired with the rule that produced it and stamped `stamp rule` in
-    /// `Family`; a rule that throws is one `RULE-FAULT` error and the rules after it still run.
-    /// `runAllTagged`, `Rules.run` and `runPack` are this one walk — over a family, a check and a
-    /// pack's check; until Phase 521 each, and `ColumnValidator.validateTagged`, was a walk of its own.
-    let internal walk (stamp: 'R -> string) (run: 'R -> Defect<'Id> list) (rules: 'R list) : ('R * Defect<'Id>) list =
+    /// THE WALKER (Phase 521; over findings since Phase 489): every rule of `rules` over its subject,
+    /// in rule order then each rule's own order, each finding paired with the rule that produced it,
+    /// its defect stamped `stamp rule` in `Family` and its guidance carried as the rule stated it; a
+    /// rule that throws is one `RULE-FAULT` error, unguided, and the rules after it still run.
+    /// `runAllTagged`, `Rules.run`, `Rules.runFindings` and `runPack` are this one walk — over a
+    /// family, a check and a pack's check; until Phase 521 each, and `ColumnValidator.validateTagged`,
+    /// was a walk of its own.
+    let internal walkFindings
+        (stamp: 'R -> string)
+        (run: 'R -> Finding<'Id> list)
+        (rules: 'R list)
+        : ('R * Finding<'Id>) list =
         rules
-        |> List.collect (fun r -> runGuarded (stamp r) (fun () -> run r) |> List.map (fun d -> r, d))
+        |> List.collect (fun r -> runGuarded (stamp r) (fun () -> run r) |> List.map (fun f -> r, f))
+
+    /// The walker over rules that state no guidance: `walkFindings` with each defect unguided, read
+    /// back as its defect — so a defect walk and a finding walk cannot disagree over a defect.
+    let internal walk (stamp: 'R -> string) (run: 'R -> Defect<'Id> list) (rules: 'R list) : ('R * Defect<'Id>) list =
+        walkFindings stamp (run >> List.map Finding.ofDefect) rules
+        |> List.map (fun (r, f) -> r, f.Defect)
 
     /// Run every registered family over the tree and pair each finding with the id of the family
     /// that produced it (Phase 298), in family order then each family's own order. Each finding's
@@ -530,6 +579,25 @@ module Validator =
         { RuleId = family.Id
           Run = family.Run w }
 
+    /// A rule that states the recovery of its findings (Phase 489): `PackCheck`'s shape with a body
+    /// answering `Finding`s, so the remedy and the alternatives are computed where the rule has the
+    /// context to compute them. A `Rules` registry holds it beside plain checks (`Rules.registerGuided`)
+    /// and `Rules.runFindings` hands its guidance back intact.
+    type GuidedCheck<'Subject, 'Id> =
+        {
+            /// The key the rule is registered under and stamped into each finding's `Family` as.
+            RuleId: string
+            /// The check. May throw: the walk turns a throw into one unguided `RULE-FAULT` finding and
+            /// runs the rules after it.
+            Run: 'Subject -> Finding<'Id> list
+        }
+
+    /// A plain check as a guided one stating no guidance (Phase 489): the same id, the same defects,
+    /// each `Finding.ofDefect`.
+    let asGuided (check: PackCheck<'Subject, 'Id>) : GuidedCheck<'Subject, 'Id> =
+        { RuleId = check.RuleId
+          Run = check.Run >> List.map Finding.ofDefect }
+
     // ---- Phase 521: `Rules` — the one rule registry, over any subject ----
     // `PackCheck` is the rule. `Rules` is a registry of them with the lifecycle every other registry
     // carries (the registration-ordered lattice above) and the one walker, so a rule over a column
@@ -540,18 +608,22 @@ module Validator =
     /// A registration-ordered registry of rules over one subject type, one rule per `RuleId` —
     /// opaque, so the one-rule-per-id invariant holds by construction: build it with `Rules.empty`,
     /// `Rules.register` or `Rules.ofChecks`, and read it with `Rules.enumerate` / `Rules.tryFind`.
+    ///
+    /// Since Phase 489 it holds guided rules too (`registerGuided`): a plain check is held as
+    /// `asGuided` of it, so one registry and one walk carry both, and `run` is `runFindings` read
+    /// back as defects.
     type Rules<'Subject, 'Id> =
         private
-            { Checks: PackCheck<'Subject, 'Id> list }
+            { Checks: GuidedCheck<'Subject, 'Id> list }
 
     /// The verbs over `Rules` (Phase 521): the registration-ordered lattice — the refusals of
     /// `Validator.register` and its lifecycle, in `RegistrationError` — and the one walker, `run`.
     [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
     module Rules =
 
-        let private checkId (c: PackCheck<'Subject, 'Id>) : string = c.RuleId
+        let private checkId (c: GuidedCheck<'Subject, 'Id>) : string = c.RuleId
 
-        let private holding (checks: PackCheck<'Subject, 'Id> list) : Rules<'Subject, 'Id> = { Checks = checks }
+        let private holding (checks: GuidedCheck<'Subject, 'Id> list) : Rules<'Subject, 'Id> = { Checks = checks }
 
         /// A registry holding no rule, so `run` over it finds nothing; the seed `ofChecks` folds from.
         let empty<'Subject, 'Id> : Rules<'Subject, 'Id> = { Checks = [] }
@@ -559,9 +631,26 @@ module Validator =
         /// The registered rule ids, in registration order — the order `run` runs them in.
         let enumerate (rules: Rules<'Subject, 'Id>) : string list = Ordered.ids checkId rules.Checks
 
-        /// The rule registered under `id`, if any.
-        let tryFind (id: string) (rules: Rules<'Subject, 'Id>) : PackCheck<'Subject, 'Id> option =
+        /// The rule registered under `id`, if any, with its guidance (Phase 489): a plain check comes
+        /// back as `asGuided` of it.
+        let tryFindGuided (id: string) (rules: Rules<'Subject, 'Id>) : GuidedCheck<'Subject, 'Id> option =
             rules.Checks |> List.tryFind (fun c -> c.RuleId = id)
+
+        /// The rule registered under `id`, if any, as a plain check: its defects. A guided rule's
+        /// guidance is read through `tryFindGuided` or `runFindings`.
+        let tryFind (id: string) (rules: Rules<'Subject, 'Id>) : PackCheck<'Subject, 'Id> option =
+            tryFindGuided id rules
+            |> Option.map (fun g ->
+                { RuleId = g.RuleId
+                  Run = g.Run >> List.map _.Defect })
+
+        /// Register the guided rule `check` after the rules held (Phase 489) — refused `DuplicateRule`
+        /// when its id is registered, naming every id held.
+        let registerGuided
+            (check: GuidedCheck<'Subject, 'Id>)
+            (rules: Rules<'Subject, 'Id>)
+            : Result<Rules<'Subject, 'Id>, RegistrationError> =
+            Ordered.register checkId check rules.Checks |> Result.map holding
 
         /// Register `check` after the rules held — refused `DuplicateRule` when its id is registered,
         /// naming every id held.
@@ -569,7 +658,7 @@ module Validator =
             (check: PackCheck<'Subject, 'Id>)
             (rules: Rules<'Subject, 'Id>)
             : Result<Rules<'Subject, 'Id>, RegistrationError> =
-            Ordered.register checkId check rules.Checks |> Result.map holding
+            registerGuided (asGuided check) rules
 
         /// Remove the rule registered under `id`, keeping the others in order — refused `UnknownRule`
         /// when it is not registered. Removing a rule just registered gives back the registry it was
@@ -581,6 +670,14 @@ module Validator =
         /// `UnknownRule` when the id is not registered.
         let replace
             (check: PackCheck<'Subject, 'Id>)
+            (rules: Rules<'Subject, 'Id>)
+            : Result<Rules<'Subject, 'Id>, RegistrationError> =
+            Ordered.replace checkId (asGuided check) rules.Checks |> Result.map holding
+
+        /// Swap the rule registered under `check.RuleId` for the guided rule `check`, in the same
+        /// position (Phase 489) — refused `UnknownRule` when the id is not registered.
+        let replaceGuided
+            (check: GuidedCheck<'Subject, 'Id>)
             (rules: Rules<'Subject, 'Id>)
             : Result<Rules<'Subject, 'Id>, RegistrationError> =
             Ordered.replace checkId check rules.Checks |> Result.map holding
@@ -600,15 +697,28 @@ module Validator =
 
         /// A registry holding `checks` in order, refusing the first repeated id.
         let ofChecks (checks: PackCheck<'Subject, 'Id> list) : Result<Rules<'Subject, 'Id>, RegistrationError> =
+            Ordered.ofList checkId (checks |> List.map asGuided) |> Result.map holding
+
+        /// A registry holding the guided rules `checks` in order, refusing the first repeated id
+        /// (Phase 489). A plain check joins the list as `asGuided` of it.
+        let ofGuided (checks: GuidedCheck<'Subject, 'Id> list) : Result<Rules<'Subject, 'Id>, RegistrationError> =
             Ordered.ofList checkId checks |> Result.map holding
+
+        /// THE WALK, with the guidance (Phase 489): every rule over `subject`, in registration order then
+        /// each rule's own order, each finding paired with its rule's id, its defect stamped with it in
+        /// `Family` and its guidance as the rule stated it — `None` for a plain check's defect and for a
+        /// thrown rule's `RULE-FAULT`, and the rules after a throw still run. `run` is this walk read
+        /// back as defects, so the two never disagree over a code, a node, a family or an order.
+        let runFindings (rules: Rules<'Subject, 'Id>) (subject: 'Subject) : (string * Finding<'Id>) list =
+            walkFindings checkId (fun c -> c.Run subject) rules.Checks
+            |> List.map (fun (c, f) -> c.RuleId, f)
 
         /// THE WALK over a registry: every rule over `subject`, in registration order then each rule's
         /// own order, each finding paired with its rule's id and stamped with it in `Family`; a rule
         /// that throws is one `RULE-FAULT` error and the rules after it still run. Deterministic: one
         /// `(rules, subject)` gives one finding list, so `canonicalCodes` over it is the parity string.
         let run (rules: Rules<'Subject, 'Id>) (subject: 'Subject) : (string * Defect<'Id>) list =
-            walk checkId (fun c -> c.Run subject) rules.Checks
-            |> List.map (fun (c, d) -> c.RuleId, d)
+            runFindings rules subject |> List.map (fun (id, f) -> id, f.Defect)
 
     // ---- Phase 313: the stock structural-integrity families ----
     // Two checks nearly every domain with a grammar or with cross-node references wrote for itself,
