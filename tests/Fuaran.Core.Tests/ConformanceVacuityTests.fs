@@ -883,11 +883,11 @@ let vacuityTests =
                       "these families certify nothing at this repository's own reference witness:\n%s"
                       (String.concat "\n" vacuous))
 
-          testCase "attestationLaws at `noAttestation` is VACUOUS — five green laws over zero cases"
+          testCase "attestationLaws at `noAttestation` is VACUOUS — green signing laws over zero signed cases"
           <| fun _ ->
               // The concrete instance the phase was filed for, and the go-red for everything
-              // above. `OpStream.attestHead noAttestation` is always `None`, so four of the five
-              // laws assert nothing — and every one of them reports green, which is exactly what a
+              // above. `OpStream.attestHead noAttestation` is always `None`, so four of the laws (and the
+              // descriptor laws' signing arms, Phase 491) assert nothing — and every one of them reports green, which is exactly what a
               // census cell used to render as "adopted".
               let results =
                   Conformance.attestationLawsAt
@@ -902,7 +902,7 @@ let vacuityTests =
 
               Expect.isTrue
                   (subject |> List.forall _.Passed)
-                  "the five subject laws are green under the no-op sink — which is the problem, not the fix"
+                  "the subject laws are green under the no-op sink — which is the problem, not the fix"
 
               let measured =
                   SampleAdequacy.cases

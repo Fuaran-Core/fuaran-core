@@ -9,6 +9,8 @@ attribute Fuaran.Core.ActorModule RequireQualifiedAccess
 attribute Fuaran.Core.AnchorModule RequireQualifiedAccess
 attribute Fuaran.Core.AppendOutcome`2 RequireQualifiedAccess
 attribute Fuaran.Core.AppendRejection`1 RequireQualifiedAccess
+attribute Fuaran.Core.AttestationDescriptorModule RequireQualifiedAccess
+attribute Fuaran.Core.AttestationFault RequireQualifiedAccess
 attribute Fuaran.Core.AttestationModule RequireQualifiedAccess
 attribute Fuaran.Core.AttributedModule RequireQualifiedAccess
 attribute Fuaran.Core.CapturePhase RequireQualifiedAccess
@@ -17,6 +19,7 @@ attribute Fuaran.Core.ChainBreakReason RequireQualifiedAccess
 attribute Fuaran.Core.ChainShapeModule RequireQualifiedAccess
 attribute Fuaran.Core.CompactedModule RequireQualifiedAccess
 attribute Fuaran.Core.CompactedOutcome`2 RequireQualifiedAccess
+attribute Fuaran.Core.DescriptorFault RequireQualifiedAccess
 attribute Fuaran.Core.EffectCaptureModule RequireQualifiedAccess
 attribute Fuaran.Core.Jsonl RequireQualifiedAccess
 attribute Fuaran.Core.JsonlFaultReason RequireQualifiedAccess
@@ -33,6 +36,7 @@ attribute Fuaran.Core.StreamConfigModule RequireQualifiedAccess
 attribute Fuaran.Core.StreamLoadFault`1 RequireQualifiedAccess
 ctor Fuaran.Core.Anchor..ctor(System.Int32, System.String)
 ctor Fuaran.Core.Attestation..ctor(System.String, System.String, System.String)
+ctor Fuaran.Core.AttestationClaim..ctor(System.String, Fuaran.Core.Anchor, Fuaran.Core.Actor, System.String, System.Int64, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
 ctor Fuaran.Core.Attributed`1..ctor(System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, System.String, !0)
 ctor Fuaran.Core.CapturedEffect`1..ctor(Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.KeyedCapture>)
 ctor Fuaran.Core.ChainBreak..ctor(System.Int32, Fuaran.Core.ChainBreakReason, System.String, System.String)
@@ -57,6 +61,10 @@ field Fuaran.Core.AppendOutcome`2+Tags.Appended : System.Int32 (literal)
 field Fuaran.Core.AppendOutcome`2+Tags.Duplicate : System.Int32 (literal)
 field Fuaran.Core.AppendRejection`1+Tags.Domain : System.Int32 (literal)
 field Fuaran.Core.AppendRejection`1+Tags.StaleHead : System.Int32 (literal)
+field Fuaran.Core.AttestationFault+Tags.Descriptor : System.Int32 (literal)
+field Fuaran.Core.AttestationFault+Tags.KeyMismatch : System.Int32 (literal)
+field Fuaran.Core.AttestationFault+Tags.NotThisSeal : System.Int32 (literal)
+field Fuaran.Core.AttestationFault+Tags.SignatureRefused : System.Int32 (literal)
 field Fuaran.Core.CapturePhase+Tags.Attempted : System.Int32 (literal)
 field Fuaran.Core.CapturePhase+Tags.Completed : System.Int32 (literal)
 field Fuaran.Core.CapturePhase+Tags.Refused : System.Int32 (literal)
@@ -71,6 +79,10 @@ field Fuaran.Core.ChainBreakReason+Tags.SequenceMismatch : System.Int32 (literal
 field Fuaran.Core.ChainBreakReason+Tags.Unrecognised : System.Int32 (literal)
 field Fuaran.Core.CompactedOutcome`2+Tags.Appended : System.Int32 (literal)
 field Fuaran.Core.CompactedOutcome`2+Tags.Duplicate : System.Int32 (literal)
+field Fuaran.Core.DescriptorFault+Tags.Broken : System.Int32 (literal)
+field Fuaran.Core.DescriptorFault+Tags.HeadMismatch : System.Int32 (literal)
+field Fuaran.Core.DescriptorFault+Tags.NotStrict : System.Int32 (literal)
+field Fuaran.Core.DescriptorFault+Tags.RangeMismatch : System.Int32 (literal)
 field Fuaran.Core.EffectCaptureModule.deterministicTag : System.String (literal)
 field Fuaran.Core.JsonlFaultReason+Tags.ActorInvalid : System.Int32 (literal)
 field Fuaran.Core.JsonlFaultReason+Tags.CheckpointChainOnly : System.Int32 (literal)
@@ -130,11 +142,16 @@ method Fuaran.Core.ActorModule.id(Fuaran.Core.Actor) : System.String
 method Fuaran.Core.ActorModule.ofLegacyString(System.String) : Fuaran.Core.Actor
 method Fuaran.Core.ActorModule.validate(Fuaran.Core.Actor) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Actor, Fuaran.Core.ActorInvalid>
 method Fuaran.Core.AnchorModule.genesis(Fuaran.Core.StreamConfig) : Fuaran.Core.Anchor
+method Fuaran.Core.AttestationDescriptorModule.encode(Fuaran.Core.AttestationClaim) : System.String
+method Fuaran.Core.AttestationDescriptorModule.firstFault`3(Fuaran.Core.Stream`3<!!0, !!1, !!2>, Fuaran.Core.Sealed`1<Fuaran.Core.AttestationClaim>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.DescriptorFault>
+method Fuaran.Core.AttestationDescriptorModule.seal`3(Fuaran.Core.Stream`3<!!0, !!1, !!2>, Fuaran.Core.Anchor, Fuaran.Core.AttestationClaim) : Fuaran.Core.Sealed`1<Fuaran.Core.AttestationClaim>
 method Fuaran.Core.AttestationModule.attestHeadAs`1(Fuaran.Core.IAttestationSink, Fuaran.Core.StreamConfig, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Actor, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Attestation>
 method Fuaran.Core.AttestationModule.attestHead`1(Fuaran.Core.IAttestationSink, Fuaran.Core.StreamConfig, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Attestation>
 method Fuaran.Core.AttestationModule.attestationSubject(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Actor, System.String) : System.String
+method Fuaran.Core.AttestationModule.ofDescriptor(Fuaran.Core.IAttestationSink, Fuaran.Core.Sealed`1<Fuaran.Core.AttestationClaim>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Attestation>
 method Fuaran.Core.AttestationModule.verifyAttestationAs`1(Fuaran.Core.IAttestationSink, Fuaran.Core.StreamConfig, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.Actor, Fuaran.Core.Attestation, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : System.Boolean
 method Fuaran.Core.AttestationModule.verifyAttestation`1(Fuaran.Core.IAttestationSink, Fuaran.Core.StreamConfig, Fuaran.Core.Attestation, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : System.Boolean
+method Fuaran.Core.AttestationModule.verifyDescriptor`3(Fuaran.Core.IAttestationSink, Fuaran.Core.Stream`3<!!0, !!1, !!2>, Fuaran.Core.Attestation, Fuaran.Core.Sealed`1<Fuaran.Core.AttestationClaim>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<!!0>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.AttestationFault>
 method Fuaran.Core.AttributedModule.byActor`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>>
 method Fuaran.Core.AttributedModule.bySession`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpRecord`1<Fuaran.Core.Attributed`1<!!0>>>>
 method Fuaran.Core.AttributedModule.decodeEnvelope`1(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Attributed`1<!!0>, System.String>
@@ -258,6 +275,13 @@ record-field Fuaran.Core.Anchor.Seq #0 : System.Int32
 record-field Fuaran.Core.Attestation.Head #0 : System.String
 record-field Fuaran.Core.Attestation.KeyId #1 : System.String
 record-field Fuaran.Core.Attestation.Signature #2 : System.String
+record-field Fuaran.Core.AttestationClaim.Algorithm #3 : System.String
+record-field Fuaran.Core.AttestationClaim.Evidence #6 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>
+record-field Fuaran.Core.AttestationClaim.Head #1 : Fuaran.Core.Anchor
+record-field Fuaran.Core.AttestationClaim.KeyId #5 : System.String
+record-field Fuaran.Core.AttestationClaim.Party #2 : Fuaran.Core.Actor
+record-field Fuaran.Core.AttestationClaim.SignedAt #4 : System.Int64
+record-field Fuaran.Core.AttestationClaim.StreamId #0 : System.String
 record-field Fuaran.Core.Attributed`1.Actor #0 : System.String
 record-field Fuaran.Core.Attributed`1.At #3 : System.String
 record-field Fuaran.Core.Attributed`1.Op #4 : !0
@@ -345,6 +369,13 @@ type Fuaran.Core.AppendRejection`1+Domain (type)
 type Fuaran.Core.AppendRejection`1+StaleHead (type)
 type Fuaran.Core.AppendRejection`1+Tags (type)
 type Fuaran.Core.Attestation (record)
+type Fuaran.Core.AttestationClaim (record)
+type Fuaran.Core.AttestationDescriptorModule (module)
+type Fuaran.Core.AttestationFault (union)
+type Fuaran.Core.AttestationFault+Descriptor (type)
+type Fuaran.Core.AttestationFault+KeyMismatch (type)
+type Fuaran.Core.AttestationFault+NotThisSeal (type)
+type Fuaran.Core.AttestationFault+Tags (type)
 type Fuaran.Core.AttestationModule (module)
 type Fuaran.Core.AttributedModule (module)
 type Fuaran.Core.Attributed`1 (record)
@@ -371,6 +402,11 @@ type Fuaran.Core.CompactedOutcome`2+Appended (type)
 type Fuaran.Core.CompactedOutcome`2+Duplicate (type)
 type Fuaran.Core.CompactedOutcome`2+Tags (type)
 type Fuaran.Core.Compacted`2 (record)
+type Fuaran.Core.DescriptorFault (union)
+type Fuaran.Core.DescriptorFault+Broken (type)
+type Fuaran.Core.DescriptorFault+HeadMismatch (type)
+type Fuaran.Core.DescriptorFault+RangeMismatch (type)
+type Fuaran.Core.DescriptorFault+Tags (type)
 type Fuaran.Core.EffectCapture (record)
 type Fuaran.Core.EffectCaptureModule (module)
 type Fuaran.Core.EntryRef (record)
@@ -451,6 +487,10 @@ union-case Fuaran.Core.AppendOutcome`2.NewAppended #0(state: !1, records: Micros
 union-case Fuaran.Core.AppendOutcome`2.NewDuplicate #1(existing: Fuaran.Core.EntryRef)
 union-case Fuaran.Core.AppendRejection`1.NewDomain #1(Item: !0)
 union-case Fuaran.Core.AppendRejection`1.NewStaleHead #0(expected: System.String, actual: System.String)
+union-case Fuaran.Core.AttestationFault.NewDescriptor #0(Item: Fuaran.Core.DescriptorFault)
+union-case Fuaran.Core.AttestationFault.NewKeyMismatch #2(claimed: System.String, signedBy: System.String)
+union-case Fuaran.Core.AttestationFault.NewNotThisSeal #1(signed: System.String, seal: System.String)
+union-case Fuaran.Core.AttestationFault.SignatureRefused #3()
 union-case Fuaran.Core.CapturePhase.Attempted #0()
 union-case Fuaran.Core.CapturePhase.Completed #1()
 union-case Fuaran.Core.CapturePhase.Refused #2()
@@ -465,6 +505,10 @@ union-case Fuaran.Core.ChainBreakReason.PrevHashLinkBroken #1()
 union-case Fuaran.Core.ChainBreakReason.SequenceMismatch #0()
 union-case Fuaran.Core.CompactedOutcome`2.NewAppended #0(state: !1, stream: Fuaran.Core.Compacted`2<!0, !1>, index: Fuaran.Core.KeyIndex)
 union-case Fuaran.Core.CompactedOutcome`2.NewDuplicate #1(existing: Fuaran.Core.EntryRef)
+union-case Fuaran.Core.DescriptorFault.NewBroken #1(Item: Fuaran.Core.SnapshotBreak)
+union-case Fuaran.Core.DescriptorFault.NewHeadMismatch #3(claimed: System.String, actual: System.String)
+union-case Fuaran.Core.DescriptorFault.NewRangeMismatch #2(claimed: System.Int32, actual: System.Int32)
+union-case Fuaran.Core.DescriptorFault.NotStrict #0()
 union-case Fuaran.Core.JsonlFaultReason.CheckpointChainOnly #24()
 union-case Fuaran.Core.JsonlFaultReason.CheckpointWithoutNode #23()
 union-case Fuaran.Core.JsonlFaultReason.ExpectedColon #3()

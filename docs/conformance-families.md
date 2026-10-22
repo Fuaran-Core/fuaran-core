@@ -49,7 +49,7 @@ from `Fuaran.Compute.Conformance` (DECISIONS.md D68, D66), whose own census list
 | `Conformance.aiSurfaceKitPolicyLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.aiSurfaceLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.arbitrationLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1800 | `guarded-reached` | `drawn` |
-| `Conformance.attestationLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — | 1000 | `guarded-reached` | `built` |
+| `Conformance.attestationLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — | 1400 | `guarded-reached` | `built` |
 | `Conformance.attributedLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `guarded-reached` | `drawn` |
 | `Conformance.canonicalFloatLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 2000 | `unconditional` | `none` |
 | `Conformance.capabilityLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 2000 | `unconditional` | `built` |
