@@ -479,6 +479,9 @@
     <Compile Include="PropagationVectorExportTests.fs" />
     <!-- Phase 532 - the fixtures library holds no test and the tool writes what the registry names. -->
     <Compile Include="FixturesTests.fs" />
+    <!-- Phase 561 - the post-push registry probe's classification over recorded index answers and
+         the v0.40.1 push records (registry-probe/). Appended (append-only). -->
+    <Compile Include="RegistryProbeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

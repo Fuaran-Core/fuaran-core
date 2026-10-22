@@ -1,0 +1,84 @@
+Pushing Fuaran.Core.Text.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 439ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Text.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Idl.Cli.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 285ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Idl.Cli.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Column.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 99ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Column.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Ops.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 90ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Ops.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.ContentAddress.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 88ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.ContentAddress.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Idl.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 104ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Idl.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Function.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 90ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Function.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.AiSurface.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 91ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.AiSurface.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Propagation.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 84ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Propagation.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Conformance.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 98ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Conformance.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Wire.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 88ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Wire.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Unit.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 90ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Unit.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Observer.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 88ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Observer.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Relation.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 91ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Relation.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Tree.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 88ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Tree.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Query.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 88ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Query.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Idl.Codegen.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 104ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Idl.Codegen.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Validator.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 90ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Validator.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.Projection.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 87ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.Projection.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.OpStream.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 90ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.OpStream.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.
+Pushing Fuaran.Core.OpStream.Dag.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Conflict https://www.nuget.org/api/v2/package/ 108ms
+Package '/home/runner/work/_temp/nupkgs/Fuaran.Core.OpStream.Dag.0.40.1.nupkg' already exists at feed 'https://www.nuget.org/api/v2/package'.

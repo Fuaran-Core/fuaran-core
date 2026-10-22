@@ -57,23 +57,36 @@ tell you which ids were new, so the probe settles it.
 **The registry probe** ([`.github/scripts/probe-registry.ps1`](.github/scripts/probe-registry.ps1))
 works out the packable roster from the project files. It uses the same derivation the suite holds
 the README package table to, and `PackageRosterTests` holds the two derivations to one set. The
-probe first refuses a packed set that differs from the roster. Then it reads nuget.org's v3 flat
-container (`https://api.nuget.org/v3-flatcontainer/<id>/index.json`) for every id until `<Version>`
-is listed. nuget.org indexes a push asynchronously, so the probe retries for up to fifteen minutes
-before it fails. When it fails it lists every id under one of two answers, and the two are never
+probe first refuses a packed set that differs from the roster. Then it reads the package push's own
+output, which the push step writes to `push-packages.log` as well as to the job log (Phase 561). An
+id no push line accepted (`Your package was pushed.`) or found already present (`--skip-duplicate`'s
+`already exists`) was not pushed, and the probe fails at once, before it asks the registry anything.
+Then it reads nuget.org's v3 flat container (`https://api.nuget.org/v3-flatcontainer/<id>/index.json`)
+for every id until `<Version>` is listed. nuget.org indexes a push asynchronously: on `v0.40.1` every
+push landed and the index took longer than fifteen minutes to list them. Because every id was pushed,
+the probe waits on a backed-off budget, 30 seconds doubling to five minutes, at most an hour in all.
+It prints that budget before the first pass, and on every pass it says the pushes landed and
+indexing is pending. When it fails it lists every id under one of these answers, and they are never
 merged:
 
-- **NOT SERVED.** The registry answered, and that version is not in its list. Either the push did
-  not land, or indexing is slower than the budget. Re-run the failed jobs. The pushes skip what is
-  already there and the probe asks again.
+- **NOT PUSHED.** No push line accepted the id or found it present. Waiting cannot fix it.
+- **PUSHED, INDEXING PENDING.** Every push landed, and the index still did not list these ids when
+  the hour ran out. The probe names each one with the push line that accepted it. Nothing needs
+  re-pushing.
+- **NOT SERVED.** A hand run's answer, which has no push record: the registry answered and that
+  version is not in its list. Either the push did not land or indexing is slow; a hand run cannot
+  tell which.
 - **COULD NOT ASK.** The request itself failed: the host was unreachable, the server returned a 5xx,
-  or the body could not be read. The probe learned nothing about those ids. Re-run once the registry
-  answers.
+  or the body could not be read. The probe learned nothing about those ids.
+
+`RegistryProbeTests` holds that classification over recorded answers: nuget.org's own index and 404
+bodies, a 5xx, and the `v0.40.1` push records of both attempts.
 
 You can run the same probe from any clone, with no workspace and no credential:
 
 ```powershell
 pwsh ./.github/scripts/probe-registry.ps1 -Version 0.36.0   # exit 0 only when every id is served
+pwsh ./.github/scripts/probe-registry.ps1 -Version 0.36.0 -Attempts 1 -IntervalSeconds 0   # ask once
 pwsh ./.github/scripts/probe-registry.ps1 -ListRoster       # the ids it would ask about
 ```
 
@@ -87,8 +100,18 @@ pwsh ./.github/scripts/probe-registry.ps1 -ListRoster       # the ids it would a
   `v0.35.2` was moved this way after its first publish failed on a README stamp.
 - **The push or the probe is red after packages reached the registry.** Never move the tag. nuget.org
   does not let a version be re-uploaded with different contents, so the published packages *are* that
-  version. Re-run to complete a partial push. If the published contents are wrong, the fix ships as
-  the next patch version.
+  version. If the published contents are wrong, the fix ships as the next patch version. What the
+  red needs depends on the probe's answer:
+  - **A push step, or the probe's NOT PUSHED, needs a re-run** of the failed jobs. The pushes skip
+    what is already there, push what is missing, and the probe asks again.
+  - **The probe's PUSHED, INDEXING PENDING needs only waiting.** Every package is on nuget.org, and the
+    index has not listed some of them after an hour. Check the ids on nuget.org later, or probe by
+    hand with `-Version`. When they are served, re-run the `publish` job so the run records green.
+    The re-run's pushes all report `already exists`, and its probe is usually green on the first pass.
+    An id still unlisted hours later is a question for nuget.org, such as a validation hold, not a
+    reason to move the tag.
+  - **The probe's COULD NOT ASK needs a re-run once the registry answers.** It says nothing about
+    whether those ids landed.
 
 ## Exercising the release gates
 

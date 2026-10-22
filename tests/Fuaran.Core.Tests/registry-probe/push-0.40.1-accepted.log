@@ -1,0 +1,168 @@
+Pushing Fuaran.Core.Ops.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 323ms
+Your package was pushed.
+Pushing Fuaran.Core.Ops.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 89ms
+Your package was pushed.
+Pushing Fuaran.Core.Text.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 221ms
+Your package was pushed.
+Pushing Fuaran.Core.Text.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 103ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.Cli.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 371ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.Cli.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 112ms
+Your package was pushed.
+Pushing Fuaran.Core.Column.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 226ms
+Your package was pushed.
+Pushing Fuaran.Core.Column.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 100ms
+Your package was pushed.
+Pushing Fuaran.Core.AiSurface.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 240ms
+Your package was pushed.
+Pushing Fuaran.Core.AiSurface.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 122ms
+Your package was pushed.
+Pushing Fuaran.Core.ContentAddress.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 208ms
+Your package was pushed.
+Pushing Fuaran.Core.ContentAddress.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 124ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 241ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 106ms
+Your package was pushed.
+Pushing Fuaran.Core.Function.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 267ms
+Your package was pushed.
+Pushing Fuaran.Core.Function.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 113ms
+Your package was pushed.
+Pushing Fuaran.Core.Unit.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 217ms
+Your package was pushed.
+Pushing Fuaran.Core.Unit.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 95ms
+Your package was pushed.
+Pushing Fuaran.Core.Propagation.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 219ms
+Your package was pushed.
+Pushing Fuaran.Core.Propagation.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 93ms
+Your package was pushed.
+Pushing Fuaran.Core.Conformance.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 276ms
+Your package was pushed.
+Pushing Fuaran.Core.Conformance.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 96ms
+Your package was pushed.
+Pushing Fuaran.Core.Wire.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 219ms
+Your package was pushed.
+Pushing Fuaran.Core.Wire.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 104ms
+Your package was pushed.
+Pushing Fuaran.Core.Query.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 210ms
+Your package was pushed.
+Pushing Fuaran.Core.Query.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 135ms
+Your package was pushed.
+Pushing Fuaran.Core.Observer.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 207ms
+Your package was pushed.
+Pushing Fuaran.Core.Observer.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 109ms
+Your package was pushed.
+Pushing Fuaran.Core.Relation.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 191ms
+Your package was pushed.
+Pushing Fuaran.Core.Relation.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 108ms
+Your package was pushed.
+Pushing Fuaran.Core.Tree.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 191ms
+Your package was pushed.
+Pushing Fuaran.Core.Tree.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 86ms
+Your package was pushed.
+Pushing Fuaran.Core.Validator.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 233ms
+Your package was pushed.
+Pushing Fuaran.Core.Validator.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 97ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.Codegen.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 208ms
+Your package was pushed.
+Pushing Fuaran.Core.Idl.Codegen.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 93ms
+Your package was pushed.
+Pushing Fuaran.Core.OpStream.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 217ms
+Your package was pushed.
+Pushing Fuaran.Core.OpStream.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 94ms
+Your package was pushed.
+Pushing Fuaran.Core.Projection.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 204ms
+Your package was pushed.
+Pushing Fuaran.Core.Projection.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 121ms
+Your package was pushed.
+Pushing Fuaran.Core.OpStream.Dag.0.40.1.nupkg to 'https://www.nuget.org/api/v2/package'...
+  PUT https://www.nuget.org/api/v2/package/
+  Created https://www.nuget.org/api/v2/package/ 223ms
+Your package was pushed.
+Pushing Fuaran.Core.OpStream.Dag.0.40.1.snupkg to 'https://www.nuget.org/api/v2/symbolpackage'...
+  PUT https://www.nuget.org/api/v2/symbolpackage/
+  Created https://www.nuget.org/api/v2/symbolpackage/ 111ms
+Your package was pushed.

@@ -26,7 +26,10 @@ name: publish-packages
 #      derivation the suite holds to the README table), refuses a packed set that differs from it,
 #      and asks nuget.org's v3 flat container for every id at <Version>, failing the job and naming
 #      each id the registry does not serve. `--skip-duplicate` keeps re-runs idempotent; the probe is
-#      what says whether a re-run after a partial push actually completed the roster.
+#      what says whether a re-run after a partial push actually completed the roster. Since Phase 561
+#      it reads the package push's own output (teed to push-packages.log): an id no push line
+#      accepted or found present is NOT PUSHED and fails at once, while ids that were all pushed are
+#      waited for on a backed-off budget (about an hour) before the job goes red over slow indexing.
 #
 # Phase 536 — a publish also attaches THE PROOF KIT'S RELEASE ASSET:
 #   5. the `proofs-kit` job builds `proofs-kit-<Version>.tar` with `proofs/kit/build-kit-asset.ps1`
@@ -378,12 +381,17 @@ jobs:
         id: nuget-login
         with:
           user: ajwillshire # the policy creator (a nuget.org profile name is public, not a secret)
+      # The push's own output is the probe's push record (Phase 561): `tee` keeps it in the job log and
+      # writes it where the probe reads it. `shell: bash` runs with `-o pipefail`, so a failed push
+      # still fails the step through the pipe.
       - name: Push to nuget.org
+        shell: bash
         run: >
           dotnet nuget push "${{ runner.temp }}/nupkgs/*.nupkg"
           --source https://api.nuget.org/v3/index.json
           --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           --skip-duplicate
+          2>&1 | tee "${{ runner.temp }}/push-packages.log"
       # The symbol packages (snupkg) travel beside the packages so a consumer can step into Core
       # from the registry's symbol server. A separate push: the glob above matches .nupkg only.
       - name: Push symbols to nuget.org
@@ -393,9 +401,10 @@ jobs:
           --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           --skip-duplicate
       # Phase 393 — what landed, asked of the registry rather than inferred from two green pushes.
-      # nuget.org indexes asynchronously; the probe retries on a bounded schedule and then fails
-      # naming every id it does not serve (re-running the workflow re-pushes with --skip-duplicate
-      # and probes again).
+      # Phase 561 — the push record separates an id that was not pushed (red at once: re-run) from
+      # one pushed and not indexed yet, which nuget.org does asynchronously: the probe waits that out
+      # on a backed-off budget it prints (about an hour), and fails only when it is spent, naming the
+      # pending ids and the push lines that accepted them (RELEASING.md, "When a job is red").
       - name: Probe nuget.org for every packed id at <Version>
         shell: pwsh
-        run: ./.github/scripts/probe-registry.ps1 -PackagesDir "${{ runner.temp }}/nupkgs"
+        run: ./.github/scripts/probe-registry.ps1 -PackagesDir "${{ runner.temp }}/nupkgs" -PushLog "${{ runner.temp }}/push-packages.log"
