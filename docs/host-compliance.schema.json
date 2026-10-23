@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Fuaran-Core/fuaran-core/blob/main/docs/host-compliance.schema.json",
+  "title": "hostCompliance",
+  "description": "A host's compliance declaration (fuaran-core Phase 484, DECISIONS.md D228): committed as `host-compliance.json` at the host's own root, it names, for rows of Core's claims ladder (proofs.json), the evidence the host offers. This schema is the SHAPE; whether the declaration is TRUE is Core's validator's question (`dotnet run --project tools/Fuaran.Core.Tools -- compliance <file>`, from the Core checkout `coreVersion` names), which reads the evidence map, the family manifests' adoption records and the host-premise rows. docs/host-compliance.md states every refusal and the verdict.",
+  "type": "object",
+  "required": ["kind", "host", "coreVersion", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "hostCompliance" },
+    "host": {
+      "description": "The host key, as the family manifests' adoption records key it (`fuaran-core-rs`).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "coreVersion": {
+      "description": "The Core version the declaration is judged by: the validator refuses a declaration naming any other version than the checkout running it.",
+      "type": "string"
+    },
+    "rows": {
+      "description": "One entry per ladder row the host declares. A row the evidence map offers anything for and the declaration omits reads `undeclared`, which withholds `compliant`; a row it offers nothing for may be omitted.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/row" }
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["row", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "row": { "description": "A `proofs.json` row id.", "type": "string" },
+        "evidence": {
+          "description": "At least one piece of evidence; `not-covered` stands alone.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "evidence": {
+      "description": "One piece of evidence. The class set is CLOSED: a further class joins only by a recorded decision amending this enumeration, the validator and the page together.",
+      "type": "object",
+      "required": ["class"],
+      "properties": {
+        "class": { "enum": ["vector-certified", "oracle-differential", "host-premise", "not-covered"] }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/vector-certified" },
+        { "$ref": "#/$defs/oracle-differential" },
+        { "$ref": "#/$defs/host-premise" },
+        { "$ref": "#/$defs/not-covered" }
+      ]
+    },
+    "vector-certified": {
+      "description": "The host's leg ran a vector family the evidence map offers for the row and asserted `cases` of its vectors: exactly the count the family manifest's adoption record carries for the host.",
+      "type": "object",
+      "required": ["class", "family", "cases"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "vector-certified" },
+        "family": { "type": "string" },
+        "cases": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    },
+    "oracle-differential": {
+      "description": "The host's own fuzzer drove the oracle process on `inputs` inputs from `seed`, asking `function` of `model` (the row's model), and found no disagreement.",
+      "type": "object",
+      "required": ["class", "model", "function", "inputs", "seed"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "oracle-differential" },
+        "model": { "type": "string" },
+        "function": { "type": "string" },
+        "inputs": { "type": "integer", "minimum": 1, "maximum": 9007199254740992 },
+        "seed": { "type": "string", "minLength": 1 }
+      }
+    },
+    "host-premise": {
+      "description": "The host discharged a `host-premise` row on its own runtime: its leg reproduced every vector of the row's probe, as the probe's adoption record carries.",
+      "type": "object",
+      "required": ["class", "probe", "cases"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "host-premise" },
+        "probe": { "type": "string" },
+        "cases": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    },
+    "not-covered": {
+      "description": "The host offers nothing for the row, and says why.",
+      "type": "object",
+      "required": ["class", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "not-covered" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

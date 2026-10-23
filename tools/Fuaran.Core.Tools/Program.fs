@@ -1,7 +1,7 @@
 module Fuaran.Core.Tools.Program
 
 // ============================================================================
-//  The tool (Phase 532). Four verbs:
+//  The tool (Phase 532). Five verbs:
 //
 //    render <family> [<dir>]   write one generated artefact family (`Renders.names`): the corpus
 //                              families into this repository's committed copies, or into <dir> where
@@ -23,6 +23,10 @@ module Fuaran.Core.Tools.Program
 //                              declared copies, the corpus pin naming it, and the DRAFT ledger file
 //                              with its index; or refuse, writing nothing. It prints the commit this
 //                              repository still needs, after the corpus push.
+//    compliance <host-compliance.json>
+//                              validate a host's compliance declaration against this checkout
+//                              (Phase 484, `HostCompliance.cli`): the verdict on stdout and exit 0,
+//                              every finding on stderr and exit 1, or exit 2 when it cannot run.
 //
 //  The test project used to be this tool: its runner carried a dozen flags whose exporters lived in
 //  test files, so running the suite and producing the corpus were one assembly's two jobs. The suite
@@ -38,6 +42,7 @@ let private usage () =
         "       proof-cone --since <tree> --out <file> | --modules <a,b,...> --out <file> | --record-strict --verdict <file> --out <file>"
 
     eprintfn "       proofs-inventory"
+    eprintfn "       compliance <%s>" HostCompliance.FileName
 
     eprintfn
         "       open-slot <version> --class <breaking|additive|internal> --opened-by <text> --corpus <dir> [--date <yyyy-mm-dd>]"
@@ -131,4 +136,5 @@ let main argv =
     | "proof-cone" :: rest -> ProofCone.coneCli rest
     | [ "proofs-inventory" ] -> inventory ()
     | "open-slot" :: version :: rest -> openSlot version rest
+    | "compliance" :: rest -> HostCompliance.cli stdout stderr (Repo.root ()) rest
     | _ -> usage ()

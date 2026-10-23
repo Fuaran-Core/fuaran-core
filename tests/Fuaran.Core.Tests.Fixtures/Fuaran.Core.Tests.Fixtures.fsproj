@@ -53,6 +53,7 @@
     <Compile Include="ProofLadder.fs" />
     <Compile Include="ProofCone.fs" />
     <Compile Include="ProofCoverage.fs" />
+    <Compile Include="HostCompliance.fs" />
     <Compile Include="ProofReadme.fs" />
     <Compile Include="OracleProject.fs" />
     <Compile Include="Renders.fs" />
