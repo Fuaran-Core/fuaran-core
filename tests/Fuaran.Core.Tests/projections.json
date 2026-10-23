@@ -235,6 +235,46 @@
       "heldBy": "ExportersTests"
     },
     {
+      "path": "conformance/chain/skeleton-chain.json",
+      "render": "chain",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/chain/manifest.json",
+      "render": "chain",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/dag/skeleton-dag.json",
+      "render": "dag",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/dag/manifest.json",
+      "render": "dag",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/merge/skeleton-merge.json",
+      "render": "merge",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/merge/manifest.json",
+      "render": "merge",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/diff/skeleton-diff.json",
+      "render": "diff",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/diff/manifest.json",
+      "render": "diff",
+      "heldBy": "ExportersTests"
+    },
+    {
       "path": "docs/conformance-families.md",
       "render": "families",
       "heldBy": "ExportersTests"
