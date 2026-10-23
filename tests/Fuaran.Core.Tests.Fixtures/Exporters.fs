@@ -153,6 +153,15 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
             Write = None
             SharedIndexes = fun _ -> []
             Freshness = Bytes }
+      // Phase 483 — the host-premise probes: one vector file per `host-premise` row and their
+      // self-enumerated manifest, held byte for byte.
+      { Family = "premises"
+        Root = OwnedConformance.root
+        Files = PremiseProbeExport.files
+        FilesAt = None
+        Write = None
+        SharedIndexes = fun _ -> []
+        Freshness = Bytes }
       // The roster's two generated artefacts (Phase 184): `docs/`, not `conformance/`, and held by
       // fingerprint as they always were. The measured `cases` column is one reference run per call.
       { Family = "families"

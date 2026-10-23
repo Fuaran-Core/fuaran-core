@@ -60,6 +60,7 @@ open System.IO
 open System.Text.Json
 open System.Text.RegularExpressions
 open Expecto
+open Fuaran.Core.Tests.ProofLadder
 open Fuaran.Core.Tests.ProofCoverage
 
 let private repoRoot = Snapshots.repoFile "."
@@ -144,18 +145,20 @@ let private fixtureLadder =
       "evidence": { "family": "Proofs.Oracle", "model": "proofs/MA.fst", "cases": [ "a case" ] } },
     { "id": "t3", "level": "assumed", "class": "premise", "phase": "fuaran-core#1" },
     { "id": "t4", "level": "assumed", "class": "domain-obligation", "dischargedBy": "Conformance.fixtureLaws", "phase": "fuaran-core#1" },
-    { "id": "t5", "level": "assumed", "class": "model-bridge", "closes": "permanent", "phase": "fuaran-core#1" }
+    { "id": "t5", "level": "assumed", "class": "model-bridge", "closes": "permanent", "phase": "fuaran-core#1" },
+    { "id": "t6", "level": "assumed", "class": "host-premise", "probe": "premiseFixture", "phase": "fuaran-core#1" }
   ]
 }
 """
 
 let private fixtureContract =
     """
-Every ladder ends at level 3, and the 3 assumed rows across these ladders are three kinds of thing.
+Every ladder ends at level 3, and the 4 assumed rows across these ladders are four kinds of thing.
 
 - **`domain-obligation`** — what you owe. 1 rows.
 - **`model-bridge`** — what this repository has not bridged. 1 rows.
 - **`premise`** — what nobody discharges. 1 rows.
+- **`host-premise`** — what each host answers on its own runtime. 1 rows.
 """
 
 let private fixtureBase =
@@ -335,7 +338,8 @@ let proofCoverageTests =
               Expect.isEmpty findings (sprintf "the baseline must be clean — got:\n%s" (String.concat "\n" findings))
               Expect.equal tally.Modelled 1 "one package modelled"
               Expect.equal tally.Excluded 1 "one package excluded"
-              Expect.equal tally.Assumed 3 "three assumed rows"
+              Expect.equal tally.Assumed 4 "four assumed rows"
+              Expect.equal tally.HostProbed 1 "one host premise, probed"
 
           // ---- THE PREDICATE, on this tree ----
 
@@ -487,6 +491,15 @@ let proofCoverageTests =
                   "assumed-accounted"
                   "t3"
 
+          testCase "go-red: assumed-accounted — a host premise with no probe"
+          <| fun _ ->
+              expectOneFinding
+                  "an unprobed host premise"
+                  fixtureBase
+                  (fixtureLadder.Replace("\"probe\": \"premiseFixture\", ", ""))
+                  "assumed-accounted"
+                  "t6"
+
           testCase "go-red: assumed-accounted — a model bridge with no closes"
           <| fun _ ->
               expectOneFinding
@@ -565,7 +578,7 @@ let proofCoverageTests =
               expectOneFinding
                   "a stale total"
                   { fixtureBase with
-                      ContractText = fixtureContract.Replace("the 3 assumed rows", "the 4 assumed rows") }
+                      ContractText = fixtureContract.Replace("the 4 assumed rows", "the 5 assumed rows") }
                   fixtureLadder
                   "contract-counts"
                   "assumed rows"
@@ -585,7 +598,7 @@ let proofCoverageTests =
               expectOneFinding
                   "a count nothing can find"
                   { fixtureBase with
-                      ContractText = fixtureContract.Replace("the 3 assumed rows", "the assumed rows") }
+                      ContractText = fixtureContract.Replace("the 4 assumed rows", "the assumed rows") }
                   fixtureLadder
                   "contract-counts"
                   "assumed rows"

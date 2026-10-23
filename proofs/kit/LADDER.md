@@ -55,9 +55,10 @@ registry reads the two fields it is made of.
 | `evidence` | required | An object whose shape the level decides (below). Every level carries one. |
 | `phase` | optional | The change that established the row. Optional on purpose: a repository written to a public standard may not cite a planning surface outside itself. Where it is present it is the row's ONE citation: how the row came to be is that change's record, never prose in `statement` or `boundary`. |
 | `repo` | optional | The workspace-relative repository the evidence lives in, when it is not this one — a row may legitimately rest on a theorem proved in a repository it consumes. |
-| `class` | `assumed` only | `domain-obligation` \| `model-bridge` \| `premise` (closed; see `../README.md`, "The Core-to-domain proof contract"). |
+| `class` | `assumed` only | `domain-obligation` \| `model-bridge` \| `premise` \| `host-premise` (closed; see `../README.md`, "The Core-to-domain proof contract"). A `host-premise` is what the models take from the runtime they run on, which another host's runtime may not give: each host discharges it for itself. |
 | `dischargedBy` | `assumed` only | On a `domain-obligation`: the conformance law whose green run discharges it (`Conformance.<law>`). |
 | `closes` | `assumed` only | What would retire the assumption: a change reference, `permanent`, or `unscheduled`. |
+| `probe` | `assumed` only | On a `host-premise`: the vector family a host reproduces to discharge it on its own runtime — a family id, its file under the repository's premise-probe directory (`conformance/premises/` here). Exactly one row names each probe. |
 
 Any other field (`mitigation`, `reason`, `note`, …) is commentary: allowed, and never read by a
 registry. A repository's own host family may read more of its rows than this page names — it may

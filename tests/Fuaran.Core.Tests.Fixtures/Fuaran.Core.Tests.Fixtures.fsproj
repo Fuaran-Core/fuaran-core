@@ -47,6 +47,7 @@
     <Compile Include="EscapeCorpus.fs" />
     <Compile Include="EncodingCorpus.fs" />
     <Compile Include="StructuralVectorExport.fs" />
+    <Compile Include="PremiseProbeExport.fs" />
     <Compile Include="FamiliesExport.fs" />
     <Compile Include="Exporters.fs" />
     <Compile Include="ProofLadder.fs" />

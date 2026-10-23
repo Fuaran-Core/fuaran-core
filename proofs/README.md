@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 387 claims — 282 proved across 37 models, 63 tested, 40 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 392 claims — 282 proved across 37 models, 63 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -48,7 +48,8 @@ closed, because a ladder that can grow a level can hide a demotion; `kit/LADDER.
 2. **Tested** — sampled agreement: an extracted model run beside production by `Proofs.Oracle`, or a law
    family over generated inputs. Agreement is over the pools drawn, never over all inputs.
 3. **Assumed** — stated, and classed in the contract table below: a `domain-obligation` a domain discharges,
-   a `model-bridge` between a model and the code, or a `premise` nothing discharges.
+   a `model-bridge` between a model and the code, a `premise` nothing discharges, or a `host-premise` each
+   host discharges on its own runtime by reproducing a probe.
 4. **Policy** — a documented choice, which no theorem addresses.
 
 "Formally verified" is spent on level 1 alone. A row says what it claims in `statement` and what it does not
@@ -64,9 +65,9 @@ rows offered neither, by model, as the worklist for new families.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 40 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 45 assumed rows across these ladders are four different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
-every `assumed` row, from a closed set of three, and this section is that classification in one
+every `assumed` row, from a closed set of four, and this section is that classification in one
 place together with the contract it implies.
 
 - **`domain-obligation` — what YOU owe, and what a green kit run discharges.** The hypotheses
@@ -85,9 +86,18 @@ place together with the contract it implies.
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
   on. 6 rows.
+- **`host-premise` — what the models take from the RUNTIME, and what each host answers for its
+  own.** A string that is a sequence of UTF-16 code units, float digits that are the shortest that
+  round-trip, integer width at the int53 guard, a SHA-256 that is FIPS 180-4, a stack that holds the
+  parser's bounded recursion: this implementation's runtime gives it each of them, and another
+  host's may not. Each row names a **`probe`**, a vector family under `../conformance/premises/`, and
+  a host discharges the premise on its own runtime by reproducing every vector of it — sampled, as
+  every level-3 discharge is. A domain discharges none of them. `../docs/host-premises.md` states
+  each in plain language, with what a Rust, Go or Python host does to answer it. 5 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
-and **can never discharge the other two**. A green kit run is evidence about your witness and about
+and **can never discharge the other three**; a host porting this kernel discharges the fourth, each
+row by its probe, and only for itself. A green kit run is evidence about your witness and about
 nothing else in this table — which is what makes it worth having, and what a reader must not
 over-read.
 
@@ -142,6 +152,11 @@ the `Proofs.Ladder` family holds them); edit the ladder, never these.
 | `index-node-is-its-record` | `model-bridge` | `permanent` |
 | `op-stream-load-premises` | `domain-obligation` | `Conformance.streamLaws` |
 | `op-stream-load-model-bridge` | `model-bridge` | `permanent` |
+| `host-string-model` | `host-premise` | `premiseStringModel` (probe) |
+| `host-float-digits` | `host-premise` | `premiseFloatDigits` (probe) |
+| `host-int53` | `host-premise` | `premiseInt53` (probe) |
+| `host-sha256` | `host-premise` | `premiseSha256` (probe) |
+| `host-recursion-depth` | `host-premise` | `premiseRecursionDepth` (probe) |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -4239,7 +4254,7 @@ under fuel), `after`, the uncovered-node refusal, the side parents and the band.
 
 The rows no model section carries. An `assumed` row is classed in the contract table above; a model section links each one its rows rest on.
 
-**Assumed** (40)
+**Assumed** (45)
 
 - <a id="row-independence-diamond"></a>**`independence-diamond`** — `domain-obligation` · discharged by `Conformance.footprintLawsAt` · fuaran-core#132
 
@@ -4560,6 +4575,46 @@ The rows no model section carries. An `assumed` row is classed in the contract t
   _Assumes:_ a decoded character's code unit, the host's whitespace, the host's quote of a loaded actor for the chain walk, the unary carriage of a sequence number outside the stream's indices, and the fused passes are as the model takes them.
 
   _Boundary:_ Each is sampled by `op-stream-load-differential` and none is proved. Two spellings of one character are two strings in the model where production reads one: a key spelled `"s\u0065q"` is not `seq` there, which the differential pins by name as the one divergence its pool exposes. For a sequence number outside the stream's indices the walk's verdict agrees but the break's `got` text does not (the differential compares a sequence-number mismatch by its index and reason). Which keys are the SAME follows from it: production compares keys after unescaping and the model compares their spellings, so a key spelled `a` and one spelled with the escape of `a` are one key to production's repeated-key refusal and two in the model; the two agree wherever keys are spelled without escapes, which the differential's generators keep, and a refusal's path is rendered from the decoded spelling on both sides. Production's explicit stack of open containers, and its one state machine whose depth-0 frame records its members' spans for `membersOf`, `stringsField` and `actorField`, are written as recursions with the same clauses (`members_loop` and `items_loop` beside `obj_members` / `arr_items`), because the spans that frame answers differ in type from a nested frame's `unit`.
+
+- <a id="row-host-string-model"></a>**`host-string-model`** — `host-premise` · fuaran-core#483
+
+  THE STRING MODEL. The models read a string as a sequence of UTF-16 code units in which only well-formed UTF-16 is text: `Utf8.fst`'s encoder and `JsonParse.fst`'s string reader refuse an unpaired surrogate (a high surrogate not followed at once by a low one, or a low one with no high one before it), raw or escaped, and every other string has code points and one UTF-8 encoding. This implementation's runtime gives that representation for free, because a .NET string IS a sequence of UTF-16 code units, so it is a premise of the host and not a theorem of the model. A host whose string is UTF-8, arbitrary bytes or code points answers it by mapping its representation onto code units and reproducing the probe `premiseStringModel`: the guarded encoder's bytes, or its refusal at the first unpaired unit, and the strict parser's answer to escaped surrogates in strings and member keys.
+
+  _Assumes:_ a host's string is, or maps onto, a sequence of UTF-16 code units in which an unpaired surrogate is refused where this implementation refuses it, and every well-formed string has the UTF-8 bytes this implementation gives it.
+
+  _Boundary:_ The probe samples the representation's MAPPING at the cases it names; it does not certify a host's string library on every input. How a host turns a document's BYTES into text is outside it: this package's readers take text, never bytes, so an ill-formed UTF-8 byte sequence, and its silent replacement by U+FFFD, is the host's reader's business, which docs/host-premises.md names for each host and no vector carries. Discharged per host, by that host's green run of the probe; nothing this repository runs discharges it for another host.
+
+- <a id="row-host-float-digits"></a>**`host-float-digits`** — `host-premise` · fuaran-core#483
+
+  THE FLOAT DIGITS. `WireCanon.fst` takes the float digit generator as a premise (`float_round_trips`): the canonical form's theorems hold for a writer whose digits read back to the same double. This implementation instantiates it with the runtime's shortest round-trip digits, laid out by the canonical float rule. A host instantiates it with its own generator, and the probe `premiseFloatDigits` holds that generator to this one: for every vector the host writes `bits` as exactly `canonical`, and reads `canonical` back to `bits`. The edges are named (both zeros, the subnormal and normal extremes, the largest finite, the layout's band edges near 1e-4 and 1e17, 2^53 and its neighbours) beside a seeded sample of four strata.
+
+  _Assumes:_ a host writes every finite double with the shortest decimal digits that read back to it, laid out by the canonical float rule, and reads that text back to the same double.
+
+  _Boundary:_ SHORTEST is what the digits are held to, and the probe is a sample: a generator that writes more digits than the shortest still round-trips and is refused by the vectors, which is the point, but one that agrees on every vector and diverges elsewhere is not caught. Non-finite values are not here: the guarded writer refuses them, which is a theorem's business and not a runtime's. Discharged per host, by that host's green run of the probe; nothing this repository runs discharges it for another host.
+
+- <a id="row-host-int53"></a>**`host-int53`** — `host-premise` · fuaran-core#483
+
+  INTEGER WIDTH AT THE INT53 GUARD. `JsonParse.fst` judges an integer token by its TEXT against 2^53, never by the double it rounds to, and reads the token's value through a parameter the host instantiates: a token in the 32-bit signed range is an integer, one beyond it and at most 2^53 in magnitude is the double it denotes exactly, and one past 2^53 is read only when it is that double's canonical float layout and is otherwise refused (`MalformedNumber`). The premise is that the host's number type holds every integer up to 2^53 exactly and that its reader tells 2^53 + 1 from 2^53. The probe `premiseInt53` is the token table, answered by the reference and by the parser model.
+
+  _Assumes:_ a host's number type holds every integer of magnitude at most 2^53 exactly, and its reader judges an integer token against 2^53 by the token's text.
+
+  _Boundary:_ The probe names the guard's edges (the 32-bit edges, 2^53 and its neighbours of either sign, canonical-layout tokens past 2^53, the 64-bit edges); it does not sample a host's whole integer range. A host may carry wider integers internally; what it may not do is read a token past 2^53 that is not a canonical float, or round one to a neighbour. Discharged per host, by that host's green run of the probe; nothing this repository runs discharges it for another host.
+
+- <a id="row-host-sha256"></a>**`host-sha256`** — `host-premise` · fuaran-core#483
+
+  SHA-256 IS FIPS 180-4. Wherever this package names SHA-256 (the crypto digest a chain or a DAG is minted under, `OpStream.sha256Hash`; `Hash.sha256Hex`; every digest a conformance vector records as SHA-256) it is SHA-256 over bytes. The models take the hash as a parameter, and a host supplies it. This implementation computes it with its own pure FIPS 180-4 code, held at export to the runtime's own SHA-256 on every vector, and the probe `premiseSha256` holds a host's to the same answers: the FIPS 180-4 messages, every byte value, a million `a`, and every length at the padding boundaries (55, 56, 57, 63, 64, 65, 119 and 120 bytes).
+
+  _Assumes:_ a host's SHA-256 is FIPS 180-4 SHA-256 on every input length.
+
+  _Boundary:_ Known answers, not a proof: a digest that agrees on every vector and diverges at some other length is not caught, which is why the lengths sit on the padding edges where an implementation defect shows. Collision resistance is not this row: it is `content-id-determines-content`, which nothing discharges. Discharged per host, by that host's green run of the probe; nothing this repository runs discharges it for another host.
+
+- <a id="row-host-recursion-depth"></a>**`host-recursion-depth`** — `host-premise` · fuaran-core#483
+
+  THE STACK HOLDS THE BOUNDED RECURSION. `JsonParse.fst` descends once per nesting level and spends a depth budget before each descent, so the bound is exact (`depth_bound_exact`): at the default cap of 512, a document nested 512 deep is read and one nested deeper is refused with the depth limit, however deep it goes. A theorem about a bounded recursion assumes the runtime has the stack to run it, and this implementation's has it at 512 levels. The probe `premiseRecursionDepth` holds a host to the same answers at the edges (511, 512 and 513 levels, arrays and objects) and far past them (100,000 levels, refused rather than overflowing).
+
+  _Assumes:_ a host's stack holds the parser's recursion at 512 nesting levels, and its parser refuses a deeper document by name before descending.
+
+  _Boundary:_ A run says nothing about a stack smaller than the one it ran on: a host discharges the premise by running the probe on the SMALLEST stack it supports (an embedded target's main stack, a worker thread's). A host whose stack cannot hold 512 levels does not lower the cap to pass; it reports the premise unanswered. Discharged per host, by that host's green run of the probe; nothing this repository runs discharges it for another host.
 
 **Policy** (2)
 

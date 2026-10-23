@@ -8,6 +8,7 @@ open System
 open System.IO
 open System.Text.Json
 open System.Text.RegularExpressions
+open Fuaran.Core.Tests.ProofLadder
 
 // ---------------------------------------------------------------------------
 //  The inputs the predicate is computed from
@@ -65,20 +66,13 @@ type CoverageTally =
         DomainDeclared: int
         Permanent: int
         Unscheduled: int
+        /// A `host-premise` (Phase 483): discharged per host, by that host's run of the row's probe,
+        /// so it is counted apart from what a domain discharges and from what nothing does.
+        HostProbed: int
     }
 
 let internal finding (subject: string) (clause: string) (detail: string) =
     sprintf "'%s' [%s]: %s" subject clause detail
-
-let internal strMember (el: JsonElement) (name: string) : string option =
-    match el.TryGetProperty name with
-    | true, v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
-    | _ -> None
-
-let internal objMember (el: JsonElement) (name: string) : JsonElement option =
-    match el.TryGetProperty name with
-    | true, v when v.ValueKind = JsonValueKind.Object -> Some v
-    | _ -> None
 
 /// `fuaran-core#NNN`, the one phase form this repository's ladder uses.
 let internal phaseForm =
@@ -269,7 +263,21 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
                       "assumed-accounted"
                       "is a `model-bridge` and names no `closes` — the bridge is unaccounted: nobody can tell a gap nothing could close from one nobody has taken" ],
                 None
-        | Some c -> [ finding id "assumed-accounted" (sprintf "class '%s' is outside the closed three" c) ], None
+        | Some "host-premise" ->
+            match strMember row "probe" with
+            | Some _ -> [], Some "host-probed"
+            | None ->
+                [ finding
+                      id
+                      "assumed-accounted"
+                      "is a `host-premise` and names no `probe` — a premise no host can show it answered is unaccounted" ],
+                None
+        | Some c ->
+            [ finding
+                  id
+                  "assumed-accounted"
+                  (sprintf "class '%s' is outside the closed set %s" c (String.concat " | " classOrder)) ],
+            None
 
     let accounts = assumedRows |> List.map accountOf
     let assumedFindings = accounts |> List.collect fst
@@ -365,7 +373,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
 
     let countFindings =
         countIn "assumed rows" @"the (\d+) assumed rows" (List.length assumedRows)
-        @ ([ "domain-obligation"; "model-bridge"; "premise" ]
+        @ (classOrder
            |> List.collect (fun cls ->
                countIn cls (sprintf @"\*\*`%s`.*?(\d+) rows\." (Regex.Escape cls)) (classCount cls)))
 
@@ -377,7 +385,8 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
           DomainDischarged = countAccount "domain-discharged"
           DomainDeclared = countAccount "domain-declared"
           Permanent = countAccount "permanent"
-          Unscheduled = countAccount "unscheduled" }
+          Unscheduled = countAccount "unscheduled"
+          HostProbed = countAccount "host-probed" }
 
     modelFindings
     @ uncovered
@@ -396,7 +405,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
 /// length.
 let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
     sprintf
-        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled)"
+        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled, %d host-probed)"
         (if exhaustive then "exhaustive" else "NOT exhaustive")
         t.Modelled
         t.Excluded
@@ -405,6 +414,7 @@ let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
         t.DomainDischarged
         t.DomainDeclared
         t.Unscheduled
+        t.HostProbed
 
 // ---------------------------------------------------------------------------
 //  The real inputs
@@ -939,6 +949,8 @@ module EvidenceMap =
             Families: FamilyOffer list
             /// The oracle's function names, in its table's order.
             Oracle: string list
+            /// The probe family a `host-premise` row names (Phase 483), or none.
+            Probe: string option
         }
 
         member r.Offered = not (List.isEmpty r.Families && List.isEmpty r.Oracle)
@@ -1023,7 +1035,7 @@ module EvidenceMap =
             | _ -> Ok None
         | Ok _ -> Ok None
 
-    let private ladderRows (ladderText: string) : (string * string * string option) list =
+    let private ladderRows (ladderText: string) : (string * string * string option * string option) list =
         use doc = JsonDocument.Parse ladderText
 
         match doc.RootElement.TryGetProperty "claims" with
@@ -1035,9 +1047,16 @@ module EvidenceMap =
                     |> Option.bind (fun e -> strMember e "model")
                     |> Option.map moduleOfPath
 
+                let probe =
+                    if strMember r "class" = Some "host-premise" then
+                        strMember r "probe"
+                    else
+                        None
+
                 strMember r "id" |> Option.defaultValue "<no id>",
                 strMember r "level" |> Option.defaultValue "<no level>",
-                model)
+                model,
+                probe)
             |> List.ofSeq
         | _ -> []
 
@@ -1058,7 +1077,7 @@ module EvidenceMap =
                 | Ok(Some f) -> Some f
                 | _ -> None)
 
-        let ladderModels = rows |> List.choose (fun (_, _, m) -> m) |> Set.ofList
+        let ladderModels = rows |> List.choose (fun (_, _, m, _) -> m) |> Set.ofList
 
         let findings =
             [ if List.isEmpty rows then
@@ -1087,16 +1106,34 @@ module EvidenceMap =
               for name, models in inputs.Oracle do
                   for m in models do
                       if not (ladderModels.Contains m) then
-                          yield sprintf "the oracle's `%s` asks `%s`, a model no ladder row states" name m ]
+                          yield sprintf "the oracle's `%s` asks `%s`, a model no ladder row states" name m
+
+              let familyIds = families |> List.map _.Family |> Set.ofList
+
+              for id, _, _, probe in rows do
+                  match probe with
+                  | Some p when not (familyIds.Contains p) ->
+                      yield sprintf "`%s` names the probe `%s`, which no vector file under conformance/ is" id p
+                  | _ -> () ]
 
         if not (List.isEmpty findings) then
             Error findings
         else
-            let offer (id, level, model) =
+            let offer (id, level, model, probe) =
                 let families, oracle =
-                    match model with
-                    | None -> [], []
-                    | Some m ->
+                    match model, probe with
+                    | None, Some p ->
+                        // A host premise is offered its probe, every case of it: a host reproducing
+                        // the family is the discharge (Phase 483).
+                        families
+                        |> List.filter (fun f -> f.Family = p)
+                        |> List.map (fun f ->
+                            { FamilyOffer.Family = f.Family
+                              File = f.File
+                              Cases = f.ByModel |> List.sumBy snd }),
+                        []
+                    | None, None -> [], []
+                    | Some m, _ ->
                         families
                         |> List.choose (fun f ->
                             f.ByModel
@@ -1113,7 +1150,8 @@ module EvidenceMap =
                   Level = level
                   Model = model
                   Families = families
-                  Oracle = oracle }
+                  Oracle = oracle
+                  Probe = probe }
 
             Ok
                 { Rows = rows |> List.map offer
@@ -1208,8 +1246,11 @@ module EvidenceMap =
 
         let byModel =
             offered
+            |> List.filter _.Model.IsSome
             |> List.groupBy (fun r -> r.Model |> Option.defaultValue "")
             |> List.sortWith ordinal
+
+        let byPremise = offered |> List.filter _.Probe.IsSome
 
         let groupLines (groups: (string * string list) list) =
             [ for model, ids in groups do
@@ -1277,6 +1318,26 @@ module EvidenceMap =
                        | os -> os |> List.map code |> String.concat ", ")
 
           yield ""
+          yield "## Offers, by host premise"
+          yield ""
+
+          yield
+              "A `host-premise` row names no model: it is offered the probe family it names, every case of it, and a host reproducing that family is the discharge ([host-premises.md](host-premises.md))."
+
+          yield ""
+          yield "| Row | Probe family (cases) |"
+          yield "|---|---|"
+
+          for r in byPremise do
+              yield
+                  sprintf
+                      "| %s | %s |"
+                      (code r.Id)
+                      (r.Families
+                       |> List.map (fun f -> sprintf "%s (%d)" (code f.Family) f.Cases)
+                       |> String.concat ", ")
+
+          yield ""
           yield "## Worklist: proved rows no host can offer evidence for"
           yield ""
           yield "Grouped by model. Each group is a candidate vector family or oracle function."
@@ -1286,7 +1347,7 @@ module EvidenceMap =
           yield ""
 
           yield
-              "A row naming no model (an `assumed` or `policy` row, or a law row) is answered by a premise, a policy or a law run, never by an offer here."
+              "A row naming no model (an `assumed` or `policy` row, or a law row) is answered by a premise, a policy or a law run, never by an offer here. The one exception is a `host-premise` row, which is offered the probe family it names (docs/host-premises.md)."
 
           for level in levels |> List.filter (fun l -> l <> "proved") do
               let groups = uncovered level m

@@ -251,6 +251,36 @@
       "heldBy": "ExportersTests"
     },
     {
+      "path": "conformance/premises/string-model.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/premises/float-digits.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/premises/int53.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/premises/sha256.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/premises/recursion-depth.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/premises/manifest.json",
+      "render": "premises",
+      "heldBy": "ExportersTests"
+    },
+    {
       "path": "conformance/chain/skeleton-chain.json",
       "render": "chain",
       "heldBy": "ExportersTests"

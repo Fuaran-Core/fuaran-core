@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-387 rows: 123 offered, 264 uncovered (proved 181, tested 41, assumed 40, policy 2).
+392 rows: 128 offered, 264 uncovered (proved 181, tested 41, assumed 40, policy 2).
 
 ## Offers, by model
 
@@ -23,11 +23,23 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 | `Chain` | 27 | — | `chain.verify` |
 | `DagFold` | 3 | — | `dag.fold` |
 | `DecimalText` | 12 | `decimal` (49) | — |
-| `JsonParse` | 17 | `codecRefusals` (56) | `json.parse`, `wire.decode` |
+| `JsonParse` | 17 | `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (56) | `json.parse`, `wire.decode` |
 | `Propagation` | 15 | `propagationLaws` (73) | — |
 | `TreeOps` | 19 | `skeletonApply` (25) | `tree.apply`, `dag.fold` |
 | `WireCanon` | 16 | — | `wire.render` |
 | `WireDecode` | 14 | — | `wire.decode` |
+
+## Offers, by host premise
+
+A `host-premise` row names no model: it is offered the probe family it names, every case of it, and a host reproducing that family is the discharge ([host-premises.md](host-premises.md)).
+
+| Row | Probe family (cases) |
+|---|---|
+| `host-string-model` | `premiseStringModel` (29) |
+| `host-float-digits` | `premiseFloatDigits` (163) |
+| `host-int53` | `premiseInt53` (29) |
+| `host-sha256` | `premiseSha256` (17) |
+| `host-recursion-depth` | `premiseRecursionDepth` (13) |
 
 ## Worklist: proved rows no host can offer evidence for
 
@@ -93,7 +105,7 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 ## Every other uncovered row
 
-A row naming no model (an `assumed` or `policy` row, or a law row) is answered by a premise, a policy or a law run, never by an offer here.
+A row naming no model (an `assumed` or `policy` row, or a law row) is answered by a premise, a policy or a law run, never by an offer here. The one exception is a `host-premise` row, which is offered the probe family it names (docs/host-premises.md).
 
 ### tested
 
@@ -159,4 +171,6 @@ Certified against the reference implementation alone, so a host passing one offe
 | `capabilityLaws` | [`conformance/laws/capability-laws.json`](../conformance/laws/capability-laws.json) | 72 |
 | `fieldLaws` | [`conformance/laws/field-laws.json`](../conformance/laws/field-laws.json) | 43 |
 | `skeletonMerge` | [`conformance/merge/skeleton-merge.json`](../conformance/merge/skeleton-merge.json) | 12 |
+| `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
+| `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |
 | `seamRefusals` | [`conformance/refusals/seam-refusals.json`](../conformance/refusals/seam-refusals.json) | 138 |
