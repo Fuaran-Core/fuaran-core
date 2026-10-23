@@ -136,6 +136,10 @@ type Change =
     /// Graded exactly as a kind's or a member's marking is ([[KindAnnotationsChanged]]):
     /// never a wire event, `Additive` on a first marking, `HostSurfaceOnly` otherwise.
     | TypeAnnotationsChanged of family: string * name: string * before: string * after: string
+    /// Phase 474 — a record's or a union's inline layout moved (an inline record, a presence-keyed
+    /// union's rules): the members move between the holder's object and an object of their own,
+    /// or a case is read from other keys — a wire break. `""` is the declaration's own object.
+    | TypeLayoutChanged of family: string * name: string * before: string * after: string
 
 /// A change's wire verdict — what an OLD document, or an old emitter, meets under the
 /// new vocabulary. Independent of the F# consequence reported beside it.

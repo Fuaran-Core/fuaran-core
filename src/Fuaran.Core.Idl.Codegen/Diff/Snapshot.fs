@@ -281,6 +281,18 @@ module internal DiffSnapshot =
                                 |> Map.ofList
                             | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields
+                  TypeLayouts =
+                    (arr "records" artifact
+                     |> List.choose (fun r ->
+                         match str "name" r, field "inline" r with
+                         | Some n, Some(JBool true) -> Some(("record", n), "inline")
+                         | _ -> None))
+                    @ (arr "unions" artifact
+                       |> List.choose (fun u ->
+                           match str "name" u, field "byPresence" u with
+                           | Some n, Some rules -> Some(("union", n), Canonical.write Rendering.CrossHost rules)
+                           | _ -> None))
+                    |> Map.ofList
                   TypeAnnotations =
                     [ "union", "unions"; "record", "records"; "enum", "enums" ]
                     |> List.collect (fun (family, key) ->

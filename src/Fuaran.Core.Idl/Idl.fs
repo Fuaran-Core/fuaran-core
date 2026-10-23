@@ -596,14 +596,62 @@ and IdlUnion =
         /// [[UnionTagRule.CaseName]] — every union declared before the rule existed — writes the
         /// case name itself, and the artifact omits it.
         TagRule: UnionTagRule
+        /// How a case is told apart on the wire (Phase 474): by the discriminator member (the
+        /// default — every union declared before the slot existed — and the artifact omits it), or
+        /// by WHICH MEMBERS ARE PRESENT ([[UnionDiscrimination.ByPresence]]).
+        Discrimination: UnionDiscrimination
     }
 
     /// The wire tag of the case named `caseName` — [[TagRule]] applied.
     member this.WireTagOf(caseName: string) : string = this.TagRule.Apply caseName
 
+    /// The presence rule of the case named `caseName`, when the union is presence-keyed (Phase 474).
+    member this.KeyedCase(caseName: string) : KeyedCase option =
+        match this.Discrimination with
+        | UnionDiscrimination.Tagged -> None
+        | UnionDiscrimination.ByPresence keyed -> keyed |> List.tryFind (fun k -> k.Case = caseName)
+
     /// The case whose WIRE tag is `wireTag`, if any.
     member this.CaseByWireTag(wireTag: string) : IdlUnionCase option =
         this.Cases |> List.tryFind (fun c -> this.WireTagOf c.Tag = wireTag)
+
+/// **How a union's case is told apart on the wire (Phase 474, DECISIONS.md D220).**
+and [<RequireQualifiedAccess>] UnionDiscrimination =
+    /// A `$type`-tagged object (or the declared transparent case written bare) — every union
+    /// declared before the slot existed.
+    | Tagged
+    /// **A presence-keyed union**: no discriminator; the case is the one whose KEY member is
+    /// present. Such a union is INLINE — its members are keys of the object that holds it (a kind,
+    /// an op, a record or a union case holding it as a field), so a wire that grew as flat sibling
+    /// members (`source` beside `staticRows`, `rowKey` beside `rowKeyField`) can be read as one
+    /// typed choice without moving a byte. One [[KeyedCase]] per case, in the union's case order.
+    ///
+    /// The reading, which every host performs identically:
+    /// - the candidates are the cases whose key is present; a candidate whose key another
+    ///   candidate SYNTHESISES is explained by it and drops out;
+    /// - no candidate: the union is absent (`None` at an `Optional` field; a `Required` field is
+    ///   refused `MissingField`, naming the first case's key);
+    /// - one candidate left: that case, and each member it synthesises must be present and equal
+    ///   (canonically) to its declared value — otherwise `OutOfRange` at that member;
+    /// - two or more left: the both-present refusal, `OutOfRange` at the SECOND one's key.
+    ///
+    /// The encoder writes the case's members and its synthesised members in the union's ROSTER
+    /// order (each member at its first appearance across the cases in declaration order).
+    | ByPresence of KeyedCase list
+
+/// One case's presence rule in a [[UnionDiscrimination.ByPresence]] union (Phase 474).
+and KeyedCase =
+    {
+        /// The host case name ([[IdlUnionCase.Tag]]).
+        Case: string
+        /// The member whose presence selects the case: one of the case's own `Required` wire members.
+        Key: string
+        /// Members the ENCODER writes beside the case's own, each another case's member at a fixed
+        /// value — a wire that always carried a placeholder beside this case's member (the UI grid's
+        /// `"source":{"$type":"Static","value":[]}` beside `staticRows`). The decoder requires each,
+        /// at exactly that value. `[]` for a case that writes only its own members.
+        Synthesised: (string * IdlValue) list
+    }
 
 /// A closed set of bare strings on the wire.
 ///
@@ -732,6 +780,15 @@ and IdlRecord =
         /// What is true ABOUT the record as a TYPE (Phase 542) — see [[IdlField.Annotations]].
         /// [[Annotations.Empty]] for a record that says nothing; the artifact then omits it.
         Annotations: Annotations
+        /// **An INLINE record (Phase 474, DECISIONS.md D220)**: its members are keys of the object
+        /// that holds it rather than an object of their own, so a flat run of members can be
+        /// grouped into a typed sub-record (`pageSize` + `pageStateKey` as `Paging`) without moving
+        /// a byte — and a union case whose one field is an inline record is a RECORD-PAYLOAD case,
+        /// its members beside the tag exactly as positional fields are. An inline record is held
+        /// only as a `Required` field of a kind, an op, a record or a union case; it is the host's
+        /// grouping and has no wire form of its own. `false` — every record declared before the
+        /// slot existed — and the artifact omits it.
+        Inline: bool
     }
 
 /// An authored value, checked and encoded against the IDL.

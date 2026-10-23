@@ -175,7 +175,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                 records.Add
                     { Name = name
                       Fields = fields shape
-                      Annotations = Annotations.Empty }
+                      Annotations = Annotations.Empty
+                      Inline = false }
 
                 TRecord name
             | Some "tagged" ->
@@ -194,7 +195,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
                       Name = name
                       Params = []
                       Cases = cases
-                      Annotations = Annotations.Empty }
+                      Annotations = Annotations.Empty
+                      Discrimination = UnionDiscrimination.Tagged }
 
                 TUnion(name, [])
             | Some "ref" ->

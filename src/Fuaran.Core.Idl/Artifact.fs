@@ -336,6 +336,27 @@ module Artifact =
               Default = UnionTagRule.CaseName
               Omits = (=) UnionTagRule.CaseName }
 
+        /// Phase 474 — a union told apart by its discriminator writes no `byPresence`.
+        let discrimination: Omission<UnionDiscrimination> =
+            { Owner = "a union"
+              Key = "byPresence"
+              Default = UnionDiscrimination.Tagged
+              Omits = (=) UnionDiscrimination.Tagged }
+
+        /// Phase 474 — a presence-keyed case that writes only its own members writes no `synthesised`.
+        let synthesised: Omission<(string * IdlValue) list> =
+            { Owner = "a presence-keyed case"
+              Key = "synthesised"
+              Default = []
+              Omits = List.isEmpty }
+
+        /// Phase 474 — a record that is its own object writes no `inline`.
+        let recordInline: Omission<bool> =
+            { Owner = "a record"
+              Key = "inline"
+              Default = false
+              Omits = not }
+
         /// Phase 550 — a host surface (a hosted slot's, a case codec's) whose decode answers a
         /// sentence writes no `refusal`.
         let hostedRefusal: Omission<HostedRefusal> =
@@ -365,7 +386,10 @@ module Artifact =
           Omit.fieldAliases.Owner, Omit.fieldAliases.Key
           Omit.enumAliases.Owner, Omit.enumAliases.Key
           Omit.tagRule.Owner, Omit.tagRule.Key
-          Omit.hostedRefusal.Owner, Omit.hostedRefusal.Key ]
+          Omit.hostedRefusal.Owner, Omit.hostedRefusal.Key
+          Omit.discrimination.Owner, Omit.discrimination.Key
+          Omit.synthesised.Owner, Omit.synthesised.Key
+          Omit.recordInline.Owner, Omit.recordInline.Key ]
 
     /// The member `o` declares, written away from its default and read as it when absent.
     let private omitting
@@ -903,6 +927,31 @@ module Artifact =
         |> Codec.build
         |> declared "union case"
 
+    /// Phase 474 — one case's presence rule in a presence-keyed union: the case, its key member and
+    /// the members its encoder synthesises (keyed by member name, each at its authored value).
+    let private keyedCase: Codec<KeyedCase> =
+        (Codec.record (fun case key synthesised ->
+            ({ Case = case
+               Key = key
+               Synthesised = synthesised }
+            : KeyedCase))
+        : CodecFields<KeyedCase, _>)
+        |> Codec.field "case" _.Case Codec.string
+        |> Codec.field "key" _.Key Codec.string
+        |> omitting Omit.synthesised _.Synthesised (Codec.entries idlValue)
+        |> Codec.build
+        |> declared "presence-keyed case"
+
+    /// Phase 474 — a union's discrimination as the artifact spells it: the presence rules of a
+    /// presence-keyed union, one per case in case order (a tagged union writes nothing).
+    let private byPresence: Codec<UnionDiscrimination> =
+        Codec.map
+            UnionDiscrimination.ByPresence
+            (function
+            | UnionDiscrimination.ByPresence keyed -> keyed
+            | UnionDiscrimination.Tagged -> [])
+            (Codec.list keyedCase)
+
     /// A union declaration, beside the `transparentCase` DERIVED for it. A transparent case
     /// encodes as a BARE value rather than a `$type`-tagged object, so a consumer that missed it
     /// would decode the union wrongly; it is derived from the vocabulary's declared
@@ -911,12 +960,13 @@ module Artifact =
     /// read back, so an artifact cannot claim a per-union transparency the declared policy does
     /// not state.
     let private union: Codec<IdlUnion * string option> =
-        (Codec.record (fun name ps cases transparent ann rule ->
+        (Codec.record (fun name ps cases transparent ann rule discrimination ->
             ({ Name = name
                Params = ps
                Cases = cases
                Annotations = ann
-               TagRule = rule }
+               TagRule = rule
+               Discrimination = discrimination }
             : IdlUnion),
             transparent)
         : CodecFields<IdlUnion * string option, _>)
@@ -929,6 +979,8 @@ module Artifact =
         |> annotated (fun (u, _) -> u.Annotations)
         // Phase 550 — the tag-naming rule, omitted at `caseName`.
         |> omitting Omit.tagRule (fun (u, _) -> u.TagRule) tagRule
+        // Phase 474 — the presence rules of a presence-keyed union, omitted for a tagged one.
+        |> omitting Omit.discrimination (fun (u, _) -> u.Discrimination) byPresence
         |> Codec.build
         |> declared "union"
 
@@ -1035,16 +1087,19 @@ module Artifact =
         Codec.narrow resolve spell entry
 
     let private record: Codec<IdlRecord> =
-        (Codec.record (fun name fs ann ->
+        (Codec.record (fun name fs ann isInline ->
             ({ Name = name
                Fields = fs
-               Annotations = ann }
+               Annotations = ann
+               Inline = isInline }
             : IdlRecord))
         : CodecFields<IdlRecord, _>)
         |> Codec.field "name" _.Name Codec.string
         |> Codec.field "fields" _.Fields fields
         // Phase 542 — the record's OWN annotations.
         |> annotated _.Annotations
+        // Phase 474 — an inline record's members are keys of the object holding it.
+        |> omitting Omit.recordInline _.Inline Codec.bool
         |> Codec.build
         |> declared "record"
 

@@ -51,7 +51,8 @@ let private union name ps cases : IdlUnion =
       Params = ps
       Cases = cases
       Annotations = Annotations.Empty
-      TagRule = UnionTagRule.LowerFirst }
+      TagRule = UnionTagRule.LowerFirst
+      Discrimination = UnionDiscrimination.Tagged }
 
 /// A slot (or a case) whose host codec answers a typed `DecodeError`.
 let private typed (fs: string) (enc: string) (dec: string) : HostedCodec =
@@ -179,7 +180,8 @@ let private pipelineIdl =
         []
         [ { Name = "CapabilityPipeline"
             Fields = [ req "nodes" (TList(TUnion("PipelineNode", []))) ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Inline = false } ]
         "$type"
 
 let pipeline: SeamModule =
@@ -253,7 +255,8 @@ let private queryIdl =
         [ Declare.enumWith "SortDirection" [ "Ascending", "ascending"; "Descending", "descending" ] ]
         [ { Name = "SortKey"
             Fields = [ req "column" TStr; req "direction" (TEnum "SortDirection") ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Inline = false } ]
         "$type"
 
 let query: SeamModule =

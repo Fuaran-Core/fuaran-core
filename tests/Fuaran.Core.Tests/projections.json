@@ -122,6 +122,12 @@
       "heldBy": "IdlSpecDecoderTests"
     },
     {
+      "path": "tests/Fuaran.Core.Tests/LayoutGenerated.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "LayoutGenerated",
+      "heldBy": "IdlLayoutTests"
+    },
+    {
       "path": "src/Fuaran.Core.Function/CapabilitySeamCodec.fs",
       "switch": "FUARAN_REGEN",
       "stem": "CapabilitySeamCodec",
@@ -232,6 +238,46 @@
     {
       "path": "conformance/encoding/encoding-profiles.json",
       "render": "encoding",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/chain/skeleton-chain.json",
+      "render": "chain",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/chain/manifest.json",
+      "render": "chain",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/dag/skeleton-dag.json",
+      "render": "dag",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/dag/manifest.json",
+      "render": "dag",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/merge/skeleton-merge.json",
+      "render": "merge",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/merge/manifest.json",
+      "render": "merge",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/diff/skeleton-diff.json",
+      "render": "diff",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/diff/manifest.json",
+      "render": "diff",
       "heldBy": "ExportersTests"
     },
     {

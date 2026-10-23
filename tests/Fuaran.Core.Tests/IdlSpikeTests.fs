@@ -909,7 +909,8 @@ module private SecondVocabulary =
                       Tag = "Borrowed"
                       Fields = [ field "lender" TStr Required ]
                       Annotations = Annotations.Empty } ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged } ]
           Enums =
             [ Declare.enumWith "Category" [ "Clothing", "clothing"; "Documents", "documents"; "FirstAid", "first-aid" ] ]
           Records =
@@ -917,7 +918,8 @@ module private SecondVocabulary =
                 Fields =
                   [ field "grams" TInt Required
                     field "approximate" TBool (OmitDefault(VBool false)) ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Inline = false } ]
           Defaults = []
           NodeFields = []
           Ops = []

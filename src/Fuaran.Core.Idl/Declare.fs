@@ -223,6 +223,303 @@ module Declare =
                                   (HostedFormat.name fmt))
                       | _ -> () ]
 
+    /// **Phase 474 (DECISIONS.md D220) — where an INLINE declaration may stand, and what it may declare.**
+    /// An inline record ([[IdlRecord.Inline]]) and a presence-keyed union ([[UnionDiscrimination.ByPresence]])
+    /// have no wire object of their own: their members are keys of the object holding them. So each is
+    /// only ever a field's OWN type, on a field of a kind, an op, a record that is not inline or a case
+    /// of a tagged union (never a list item, a map value, a type argument, a hosted wire form, the node
+    /// envelope or another inline declaration); an inline record is `Required` (a host grouping is
+    /// always there) and a presence-keyed union `Required` or `Optional` (no case's key present).
+    /// Members an inline declaration contributes take no alias and no presence condition, and no
+    /// member of the holding object may be spelled twice. A presence-keyed union names one rule per
+    /// case, in case order, whose key is a `Required` wire member of that case and no other case's
+    /// key; a synthesised member is another case's member at a value of its type, and a case whose
+    /// key is synthesised synthesises nothing (the reading would chain). Such a union takes no type
+    /// parameter, no tag rule, no transparent case and no case-level host codec — it has no tag.
+    /// Empty list ⇒ every inline declaration is well-placed and well-formed.
+    let layoutErrors (idl: Idl) : VocabularyFault list =
+        let keyedOf (t: IdlType) : IdlUnion option =
+            match WireForm.ofType idl t with
+            | WireForm.Union u when u.Decl.Discrimination <> UnionDiscrimination.Tagged -> Some u.Decl
+            | _ -> None
+
+        let inlineRecordOf (t: IdlType) : IdlRecord option =
+            match WireForm.ofType idl t with
+            | WireForm.Record r when r.Inline -> Some r
+            | _ -> None
+
+        let describe (t: IdlType) : string option =
+            match inlineRecordOf t, keyedOf t with
+            | Some r, _ -> Some(sprintf "inline record '%s'" r.Name)
+            | _, Some u -> Some(sprintf "presence-keyed union '%s'" u.Name)
+            | _ -> None
+
+        // Every type position NESTED in `t` — never `t` itself.
+        let rec nested (t: IdlType) : IdlType list =
+            match t with
+            | TList i
+            | TMap i -> i :: nested i
+            | TUnion(_, args) -> args @ (args |> List.collect nested)
+            | THosted { Wire = Some w } -> w :: nested w
+            | _ -> []
+
+        // The wire members an owner's fields put on its object, inline declarations expanded.
+        let members (fields: IdlField list) : string list =
+            [ for f in fields do
+                  if f.Opt <> HostOnly then
+                      match inlineRecordOf f.Type, keyedOf f.Type with
+                      | Some r, _ ->
+                          for g in r.Fields do
+                              if g.Opt <> HostOnly then
+                                  yield! WireForm.spellings g
+                      | _, Some u -> yield! WireForm.keyedRoster u
+                      | _ -> yield! WireForm.spellings f ]
+
+        // `admits`: whether this owner may hold an inline declaration; `within`: whether the owner IS
+        // an inline declaration's member list (its members take no alias and no condition).
+        let ownerErrors
+            (owner: string)
+            (at: PathSegment list)
+            (fieldAt: int -> PathSegment list)
+            (admits: bool)
+            (within: bool)
+            (reserved: string list)
+            (fields: IdlField list)
+            : VocabularyFault list =
+            [ for j, f in List.indexed fields do
+                  let path = fieldAt j
+                  let label = sprintf "%s, field '%s'" owner f.Name
+
+                  for n in nested f.Type do
+                      match describe n with
+                      | Some what ->
+                          fault
+                              (path @ [ key "type" ])
+                              (sprintf
+                                  "%s: %s is held inside another type — its members are keys of the object holding it, so it can only be a field's own type"
+                                  label
+                                  what)
+                      | None -> ()
+
+                  match describe f.Type with
+                  | Some what ->
+                      if not admits then
+                          fault
+                              (path @ [ key "type" ])
+                              (sprintf
+                                  "%s: %s cannot stand here — only on a field of a kind, an op, a record that is not inline or a case of a tagged union"
+                                  label
+                                  what)
+
+                      match inlineRecordOf f.Type, f.Opt with
+                      | Some _, Required
+                      | None, (Required | Optional) -> ()
+                      | Some _, _ ->
+                          fault
+                              (path @ [ key "optionality" ])
+                              (sprintf "%s: an %s is a host grouping that is always there, so it is Required" label what)
+                      | None, _ ->
+                          fault
+                              (path @ [ key "optionality" ])
+                              (sprintf
+                                  "%s: a %s is Required or Optional (absent when no case's key is present)"
+                                  label
+                                  what)
+
+                      if not (List.isEmpty f.Aliases) || f.Presence.IsSome then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: a field holding an %s has no member of its own, so it takes no alias and no presence condition"
+                                  label
+                                  what)
+                  | None -> ()
+
+                  if within && (not (List.isEmpty f.Aliases) || f.Presence.IsSome) then
+                      fault
+                          path
+                          (sprintf
+                              "%s: a member of an inline declaration takes no alias and no presence condition"
+                              label)
+
+                  match f.Presence with
+                  | Some(WhenPresent s | WhenAbsent s | WhenEquals(s, _)) ->
+                      match fields |> List.tryFind (fun g -> g.Name = s) with
+                      | Some g when (describe g.Type).IsSome ->
+                          fault
+                              (path @ [ key "presence" ])
+                              (sprintf "%s: the presence condition names '%s', which holds no member of its own" label s)
+                      | _ -> ()
+                  | None -> ()
+
+              let names = reserved @ members fields
+
+              for k, n in List.indexed names do
+                  if names |> List.take k |> List.contains n then
+                      fault
+                          at
+                          (sprintf
+                              "%s: the member '%s' is on its object twice once inline declarations are laid out"
+                              owner
+                              n) ]
+
+        let disc = idl.Wire.Discriminator
+
+        [ for i, k in List.indexed idl.Kinds do
+              yield!
+                  ownerErrors
+                      (sprintf "kind '%s'" k.Tag)
+                      [ key "kinds"; item i ]
+                      (kindField i)
+                      true
+                      false
+                      [ disc ]
+                      k.Fields
+
+          for i, o in List.indexed idl.Ops do
+              yield!
+                  ownerErrors (sprintf "op '%s'" o.Tag) [ key "ops"; item i ] (opField i) true false [ disc ] o.Fields
+
+          for i, r in List.indexed idl.Records do
+              yield!
+                  ownerErrors
+                      (sprintf "record '%s'" r.Name)
+                      [ key "records"; item i ]
+                      (recordField i)
+                      (not r.Inline)
+                      r.Inline
+                      []
+                      r.Fields
+
+          yield! ownerErrors "the node envelope" [ key "nodeFields" ] envelopeField false false [] idl.NodeFields
+
+          for i, u in List.indexed idl.Unions do
+              let at = [ key "unions"; item i ]
+              let owner = sprintf "union '%s'" u.Name
+              let transparent = TransparentUnion.tag idl.Harden u
+
+              match u.Discrimination with
+              | UnionDiscrimination.Tagged ->
+                  for c, case in List.indexed u.Cases do
+                      let isBare = transparent = Some case.Tag
+
+                      yield!
+                          ownerErrors
+                              (sprintf "union '%s' case '%s'" u.Name case.Tag)
+                              (at @ [ key "cases"; item c ])
+                              (caseField i c)
+                              (not isBare)
+                              false
+                              (if isBare then [] else [ disc ])
+                              case.Fields
+              | UnionDiscrimination.ByPresence keyed ->
+                  let path = at @ [ key "byPresence" ]
+
+                  for c, case in List.indexed u.Cases do
+                      yield!
+                          ownerErrors
+                              (sprintf "union '%s' case '%s'" u.Name case.Tag)
+                              (at @ [ key "cases"; item c ])
+                              (caseField i c)
+                              false
+                              true
+                              []
+                              case.Fields
+
+                  if not (List.isEmpty u.Params) then
+                      fault (at @ [ key "params" ]) (sprintf "%s: a presence-keyed union takes no type parameter" owner)
+
+                  if u.TagRule <> UnionTagRule.CaseName then
+                      fault
+                          (at @ [ key "tagRule" ])
+                          (sprintf "%s: a presence-keyed union has no tag, so no tag rule" owner)
+
+                  if transparent.IsSome then
+                      fault path (sprintf "%s: a presence-keyed union has no transparent case" owner)
+
+                  for c, case in List.indexed u.Cases do
+                      if case.Hosted.IsSome then
+                          fault
+                              (at @ [ key "cases"; item c; key "hosted" ])
+                              (sprintf
+                                  "%s: case '%s' of a presence-keyed union takes no case-level host codec"
+                                  owner
+                                  case.Tag)
+
+                  if (keyed |> List.map _.Case) <> (u.Cases |> List.map _.Tag) then
+                      fault
+                          path
+                          (sprintf "%s: a presence-keyed union names one rule per case, in the order of its cases" owner)
+
+                  let synthesisedKeys = keyed |> List.collect (fun o -> o.Synthesised |> List.map fst)
+
+                  for r, kc in List.indexed keyed do
+                      let rp = path @ [ item r ]
+                      let label = sprintf "%s, case '%s'" owner kc.Case
+
+                      match u.Cases |> List.tryFind (fun c -> c.Tag = kc.Case) with
+                      | None -> ()
+                      | Some case ->
+                          match case.Fields |> List.tryFind (fun f -> f.Name = kc.Key) with
+                          | Some { Opt = Required } -> ()
+                          | _ ->
+                              fault
+                                  (rp @ [ key "key" ])
+                                  (sprintf "%s: the key '%s' is not a Required member of the case" label kc.Key)
+
+                          if keyed |> List.take r |> List.exists (fun o -> o.Key = kc.Key) then
+                              fault
+                                  (rp @ [ key "key" ])
+                                  (sprintf "%s: the key '%s' selects another case too" label kc.Key)
+
+                          if not (List.isEmpty kc.Synthesised) && List.contains kc.Key synthesisedKeys then
+                              fault
+                                  (rp @ [ key "synthesised" ])
+                                  (sprintf
+                                      "%s: its key is synthesised by another case, so it synthesises nothing (the reading would chain)"
+                                      label)
+
+                          for s, (name, v) in List.indexed kc.Synthesised do
+                              let sp = rp @ [ key "synthesised"; key name ]
+
+                              if case.Fields |> List.exists (fun f -> f.Name = name) then
+                                  fault
+                                      sp
+                                      (sprintf "%s: the synthesised member '%s' is one of its own members" label name)
+                              elif kc.Synthesised |> List.take s |> List.exists (fun (n, _) -> n = name) then
+                                  fault sp (sprintf "%s: the synthesised member '%s' is declared twice" label name)
+                              else
+                                  match
+                                      u.Cases
+                                      |> List.tryPick (fun o ->
+                                          if o.Tag = case.Tag then
+                                              None
+                                          else
+                                              o.Fields |> List.tryFind (fun f -> f.Name = name))
+                                  with
+                                  | None ->
+                                      fault
+                                          sp
+                                          (sprintf
+                                              "%s: the synthesised member '%s' is no other case's member"
+                                              label
+                                              name)
+                                  | Some f when f.Opt = HostOnly ->
+                                      fault
+                                          sp
+                                          (sprintf "%s: the synthesised member '%s' is never on the wire" label name)
+                                  | Some f ->
+                                      match Encode.renderValue idl f.Type v with
+                                      | Ok _ -> ()
+                                      | Error m ->
+                                          fault
+                                              sp
+                                              (sprintf
+                                                  "%s: the synthesised value does not fit member '%s' (%s)"
+                                                  label
+                                                  name
+                                                  m) ]
+
     /// Well-formedness of the declared wire shape (Phases 108/109). Empty list ⇒
     /// well-formed. The discriminator shares an object with a tagged body's own
     /// fields in EVERY shape, and in [[NodeEnvelopeShape.FlatKind]] the node's
@@ -655,6 +952,7 @@ module Declare =
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl
           yield! hostedWireErrors idl
+          yield! layoutErrors idl
 
           // Phase 539 — an enum alias names a declared case, is single-line well-formed text, and is
           // no other spelling of the enum: a wire string or another alias would decode two ways.

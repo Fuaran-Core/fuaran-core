@@ -138,6 +138,21 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
+      // Phase 549 — the four structural families over the skeleton witness (`chain`, `dag`, `merge`,
+      // `diff`), one row each: a vector file and its self-enumerated manifest, held byte for byte.
+      for f in StructuralVectorExport.families do
+          { Family = f.Name
+            Root = OwnedConformance.root
+            Files =
+              twoFiles
+                  (StructuralVectorExport.vectorsPath f)
+                  (StructuralVectorExport.manifestPath f)
+                  (fun () -> StructuralVectorExport.renderVectors f)
+                  (fun () -> StructuralVectorExport.renderManifest f)
+            FilesAt = None
+            Write = None
+            SharedIndexes = fun _ -> []
+            Freshness = Bytes }
       // The roster's two generated artefacts (Phase 184): `docs/`, not `conformance/`, and held by
       // fingerprint as they always were. The measured `cases` column is one reference run per call.
       { Family = "families"

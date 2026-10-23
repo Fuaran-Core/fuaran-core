@@ -26,6 +26,12 @@ conformance/
   decode/decode-rejects.json   the decode error contract: every decode code at the path it names, and the syntax rows at the shape reader (`render decode`, since Phase 310)
   decode/manifest.json         the decode family's own index + per-host adoption (`render decode`)
   escape/string-escape.json   the string-escape table as the lines a host diffs (`render escape`, since Phase 349; no corpus copy yet)
+  encoding/encoding-profiles.json the encoding-profile table as the lines a host diffs (`render encoding`, since Phase 360; no corpus copy yet)
+  chain/skeleton-chain.json    the chain over opaque payloads: append and walk (`render chain`, since Phase 549; no corpus copy yet)
+  dag/skeleton-dag.json        the op-DAG over skeleton ops: ids, refusals, order, ranks, the fold, the integrity walk (`render dag`, since Phase 549)
+  merge/skeleton-merge.json    the common base and the N-lane reconcile over skeleton ops (`render merge`, since Phase 549)
+  diff/skeleton-diff.json      the content-aware skeleton diff: script and classification (`render diff`, since Phase 549)
+  chain|dag|merge|diff/manifest.json  each structural family's own index + per-host adoption (`render <family>`)
 ```
 
 ### Which law sets Core emits — all of them, and the UI tier emits none
@@ -145,7 +151,8 @@ dotnet run --project tools/Fuaran.Core.Tools -- render apply <corpus dir>
 
 Since Phase 508 every family is one row of ONE exporter table (`tests/Fuaran.Core.Tests.Fixtures/Exporters.fs`),
 and since Phase 532 the one writer is the tool (`tools/Fuaran.Core.Tools`), not the test runner: the
-verb is `render <family>` — `laws`, `apply`, `refusals`, `decode`, `escape`, `encoding` or `families`.
+verb is `render <family>` — `laws`, `apply`, `refusals`, `decode`, `escape`, `encoding`, `chain`, `dag`,
+`merge`, `diff` or `families`.
 `copies.json`, `version-derives.json` and the projection registry quote that form, rendered from one
 spelling (`Tool.fs`); the suite holds the committed files and writes none of them.
 
@@ -667,7 +674,56 @@ What a port with no UI tier certifies against is the Core-owned share, which is 
 | the linear chain pre-image, per actor | `escape/string-escape.json` |
 | an actor as folded into a chain payload and a DAG node id, per encoding profile | `encoding/encoding-profiles.json` |
 | skeleton ops over a witness with no domain payload | `apply/skeleton-apply.json` |
+| the chain walk over opaque payloads | `chain/skeleton-chain.json` (Phase 549) |
+| the DAG's ids, write refusals, order, ranks, fold and integrity walk | `dag/skeleton-dag.json` (Phase 549) |
+| the common base and the N-lane reconcile | `merge/skeleton-merge.json` (Phase 549) |
+| the content-aware skeleton diff | `diff/skeleton-diff.json` (Phase 549) |
 
-A family that certifies a chain walk, a DAG fold, a merge or a skeleton diff end to end over the
-skeleton witness does not exist yet. It would be a new family with its own row in the exporter table,
-not a copy of the UI corpus's four.
+The last four are new families over the skeleton witness, each its own row of the exporter table, not
+copies of the UI corpus's four; the next section is their contract.
+
+## The structural families over the skeleton witness (Phase 549)
+
+Four fixed vector sets, written by `render chain`, `render dag`, `render merge` and `render diff`, each a
+vector file and its own self-enumerated `manifest.json` (the one manifest schema; `fuaran` adopted, the
+four language hosts `proposed`). They exist so that a spine with no UI tier certifies Core's chain, DAG,
+merge and diff end to end from its first commit. The design is DECISIONS.md D221.
+
+**One witness, and one codec a host already has.** The ops are the skeleton ops in the `apply/` family's
+encoding, over its tree envelope (`{"children","id","kind"}`), applied by the apply engine with no
+policy. A host that has adopted `apply/` holds every codec the `dag`, `merge` and `diff` families need.
+The `chain` family needs none: its ops are OPAQUE strings the chain splices into the `{seq, actor, op}`
+pre-image unread, and an actor is its canonical text.
+
+**One profile.** `StreamConfig.canonical` and SHA-256 (`sha256(prevHash + "|" + payload)` for a chain
+record; `sha256(sorted parents joined by "," + "|" + actor + "|" + op)` for a DAG node), lower-case hex.
+
+**Every answer is a function of its vector's input, computed by calling Core.** Each vector carries an
+`id`, a `case`, a `description`, an `input` and an `expected`; every byte a host hashes (an op, an actor,
+a tree) is a JSON string holding its canonical text. The suite re-answers each committed vector from
+the file's own input (`StructuralVectorTests`), so an input that does not carry what its answer needs
+is red here before it is red at a host. There is no `kitVersion` stamp: a version move cannot redden
+these files.
+
+| Family | Cases | What a host reproduces |
+|---|---|---|
+| `skeletonChain` | `append`, `walk` | each record's seq, prevHash, payload and hash, and the tip; a walk's `intact` and tip, or its first `break` (index, reason, expected, got) |
+| `skeletonDag` | `build`, `verify` | each write's id or refusal (`appendOn`, `mergeAll`), the heads, the whole-DAG drain order, the ranks, each head's replay and the whole DAG's (tree and hash, or the first rejecting node), and the integrity walk's first break |
+| `skeletonMerge` | `reconcile` | the common base, then `Dag.reconcileMany` under `Ops.footprint`: `merged` (script and tree), `interfere` (every conflict), `sharedRejected`, `lanesRejected` or `noBase` |
+| `skeletonDiff` | `diff` | `Diff.toOpsWith` and `Diff.changes` over the envelope: the script and the classification, or the refusal |
+
+Nodes in the DAG and merge answers are named by the LABEL of the write that first recorded them, so a
+host maps its own ids back through the per-write ids the same answer records.
+
+**What these families cannot catch — the falsifier, stated.** The skeleton witness has no slot and no
+keyed position, and its content is its kind. So a host defect in slot-granular conflict detection
+(`MergeConflictShape.SlotClash`), in the keyed diff, or in a content change that is not a kind change
+(`ChangeKind.Changed`) passes all four families; a domain family whose ops carry slots or content (the
+UI corpus's `merge-conformance/` and `diff/`) is what catches it. Nor can the `chain` family catch a host
+that canonicalises an op differently before hashing it, because it hands the op over as bytes: that is
+the op codec's question, which the `apply/` and the codec families answer. The suite's adequacy check
+names each of these unreachable outcomes, and the content-id collision a SHA-256 profile cannot reach.
+
+**No corpus copy yet.** Whether the shared corpus carries a copy is a fuaran-side act; until one is
+declared, the projection registry declares no `copies` for these files and `version-derives.json`
+carries no row for them (it renders only version-stamped files with a corpus copy).
