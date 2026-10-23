@@ -112,6 +112,16 @@
     },
     {
       "members": [
+        "Idl.Declare.layoutErrors",
+        "Idl.IdlUnion.KeyedCase"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 474 (D220): where an inline declaration may stand, and a presence-keyed case's rule, read by the encoder; the stand-in refuses each misplacement by name and holds the layout vocabulary and its flat twin to one wire across the interpreter and the generated module.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlLayoutTests.fs",
+      "through": "Encode.encode"
+    },
+    {
+      "members": [
         "Decoder.pair"
       ],
       "class": "measured-elsewhere",

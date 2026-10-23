@@ -98,6 +98,17 @@ type internal WireForm =
     /// A reference to a name the vocabulary does not declare.
     | Undeclared of Undeclared
 
+/// What a presence-keyed union's reading picks from an object's members (Phase 474) — see
+/// [[UnionDiscrimination.ByPresence]].
+[<RequireQualifiedAccess>]
+type internal KeyedPick =
+    /// No case's key is present.
+    | NoCase
+    /// One case is left once synthesised keys are explained.
+    | Picked of IdlUnionCase * KeyedCase
+    /// Two cases are left — the both-present refusal, at the SECOND one's key.
+    | BothPresent of first: string * second: string
+
 /// The lowering and the questions answered over it.
 [<RequireQualifiedAccess>]
 module internal WireForm =
@@ -325,14 +336,6 @@ module internal WireForm =
     // reader without the word strict in its name) reads past it.
     // -----------------------------------------------------------------------
 
-    /// The members an object holding `fields` may carry under a strict reading: `extra` (the
-    /// discriminator, a node's `id` and kind key — what the layout itself puts there), then every
-    /// spelling of every field that is on the wire. A host-only field is never on the wire, so its
-    /// name is undeclared there; a member whose presence condition fails is still declared.
-    let roster (extra: string list) (fields: IdlField list) : string list =
-        extra
-        @ (fields |> List.filter (fun f -> f.Opt <> HostOnly) |> List.collect spellings)
-
     /// The member `f` as the DECODER reads it from a wire object: under its [[spellings]], and absent when its presence condition fails — so a
     /// meaningless member decodes as its optionality's absence, exactly as if the document had not
     /// carried it.
@@ -340,3 +343,73 @@ module internal WireForm =
         match f.Presence with
         | Some c when not (holdsOnWire idl fields c members) -> None
         | _ -> memberAt f members |> Option.map snd
+
+    // -----------------------------------------------------------------------
+    // Phase 474 (DECISIONS.md D220) — the INLINE declarations: an inline record and a presence-keyed
+    // union put their members on the object that holds them. Answered here once, so the encoder, the
+    // decoder, the sampler and the generated hosts lay them out and read them alike.
+    // -----------------------------------------------------------------------
+
+    /// The inline record `t` names, when it names one.
+    let inlineRecord (idl: Idl) (t: IdlType) : IdlRecord option =
+        match ofType idl t with
+        | WireForm.Record r when r.Inline -> Some r
+        | _ -> None
+
+    /// The presence-keyed union `t` names, with its rules, when it names one.
+    let keyedUnion (idl: Idl) (t: IdlType) : (IdlUnion * KeyedCase list) option =
+        match ofType idl t with
+        | WireForm.Union { Decl = u } ->
+            match u.Discrimination with
+            | UnionDiscrimination.ByPresence keyed -> Some(u, keyed)
+            | UnionDiscrimination.Tagged -> None
+        | _ -> None
+
+    /// Whether `t` is an inline declaration — an inline record or a presence-keyed union.
+    let isInline (idl: Idl) (t: IdlType) : bool =
+        (inlineRecord idl t).IsSome || (keyedUnion idl t).IsSome
+
+    /// A presence-keyed union's ROSTER: every member any case writes, each at its first appearance
+    /// across the cases in declaration order — the order the encoder writes a case's members in.
+    let keyedRoster (u: IdlUnion) : string list =
+        u.Cases
+        |> List.collect (fun c -> c.Fields |> List.filter (fun f -> f.Opt <> HostOnly))
+        |> List.map _.Name
+        |> List.distinct
+
+    /// The case a presence-keyed union's reading picks from an object's members: the cases whose key
+    /// is present, less those whose key another such case synthesises.
+    let pickKeyed (u: IdlUnion) (keyed: KeyedCase list) (members: (string * JVal) list) : KeyedPick =
+        let has (k: string) =
+            members |> List.exists (fun (n, _) -> n = k)
+
+        let present = keyed |> List.filter (fun k -> has k.Key)
+
+        let explained (k: KeyedCase) =
+            present
+            |> List.exists (fun o -> o.Case <> k.Case && o.Synthesised |> List.exists (fun (n, _) -> n = k.Key))
+
+        match present |> List.filter (explained >> not) with
+        | [] -> KeyedPick.NoCase
+        | [ k ] ->
+            match u.Cases |> List.tryFind (fun c -> c.Tag = k.Case) with
+            | Some c -> KeyedPick.Picked(c, k)
+            | None -> KeyedPick.NoCase
+        | a :: b :: _ -> KeyedPick.BothPresent(a.Key, b.Key)
+
+    /// The members an object holding `fields` may carry under a strict reading: `extra` (the
+    /// discriminator, a node's `id` and kind key — what the layout itself puts there), then every
+    /// spelling of every field that is on the wire. A host-only field is never on the wire, so its
+    /// name is undeclared there; a member whose presence condition fails is still declared.
+    ///
+    /// Phase 474 — an inline record's members and a presence-keyed union's ([[keyedRoster]]) are the
+    /// holding object's, so they are on its roster where the field is declared.
+    let rec roster (idl: Idl) (extra: string list) (fields: IdlField list) : string list =
+        extra
+        @ (fields
+           |> List.filter (fun f -> f.Opt <> HostOnly)
+           |> List.collect (fun f ->
+               match inlineRecord idl f.Type, keyedUnion idl f.Type with
+               | Some r, _ -> roster idl [] r.Fields
+               | _, Some(u, _) -> keyedRoster u
+               | None, None -> spellings f))

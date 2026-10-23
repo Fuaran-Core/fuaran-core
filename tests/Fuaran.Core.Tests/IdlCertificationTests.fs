@@ -264,7 +264,8 @@ let private silentPaths: (string * Idl) list =
           Records =
               [ { Name = "Bag"
                   Fields = [ badMapField ]
-                  Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty
+                  Inline = false } ]
           Kinds = [ oneKind [ field "bag" (TRecord "Bag") Required ] ] }
       "union-case field",
       { probeIdl with
@@ -277,7 +278,8 @@ let private silentPaths: (string * Idl) list =
                         Tag = "Some"
                         Fields = [ badMapField ]
                         Annotations = Annotations.Empty } ]
-                  Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty
+                  Discrimination = UnionDiscrimination.Tagged } ]
           Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) Required ] ] }
       "kind-spec field",
       { probeIdl with
@@ -514,7 +516,8 @@ let valueCarryingDefaults =
                                     Tag = "Of"
                                     Fields = [ field "n" TInt Required ]
                                     Annotations = Annotations.Empty } ]
-                              Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty
+                              Discrimination = UnionDiscrimination.Tagged } ]
                       Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) (OmitDefault(VUnion("Of", []))) ] ] }
 
               Gen.fsharpModule "Phase124.Nullary" idl (probeTags idl)
@@ -677,7 +680,8 @@ let artifactRoundTrip =
                                           Presence = None
                                           Annotations = Annotations.Empty } ]
                                     Annotations = Annotations.Empty } ]
-                              Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty
+                              Discrimination = UnionDiscrimination.Tagged } ]
                       Harden =
                           { refIdl.Harden with
                               TransparentUnions = [ "Text", "Inline" ] }

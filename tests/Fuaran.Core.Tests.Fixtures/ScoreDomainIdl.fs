@@ -32,7 +32,8 @@ let private kind tag category fields : IdlKind =
 let private record name fields : IdlRecord =
     { Name = name
       Fields = fields
-      Annotations = Annotations.Empty }
+      Annotations = Annotations.Empty
+      Inline = false }
 
 let private children = req "children" (TList TNode)
 

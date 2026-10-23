@@ -102,9 +102,9 @@ module internal FSharpCodecOnly =
 
     // D129 — it reaches `Fuaran.Core.Idl`'s internal lowering, so no caller may inline it.
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
-    let private rosterLit (extra: string list) (fields: IdlField list) : string =
+    let private rosterLit (idl: Idl) (extra: string list) (fields: IdlField list) : string =
         "[ "
-        + (WireForm.roster extra fields
+        + (WireForm.roster idl extra fields
            |> List.map SourceLit.fsString
            |> String.concat "; ")
         + " ]"
@@ -118,7 +118,7 @@ module internal FSharpCodecOnly =
         sprintf
             "and private strict%s (j: JVal) : Result<unit, DecodeError> =\n    match j with\n    | JObj __fs -> Decoder.members %s j%s\n    | _ -> Ok()"
             r.Name
-            (rosterLit [] r.Fields)
+            (rosterLit idl [] r.Fields)
             (fieldWalks idl r.Fields)
 
     let private unionWalker (idl: Idl) (u: IdlUnion) : string =
@@ -130,7 +130,7 @@ module internal FSharpCodecOnly =
                 sprintf
                     "        | Some(_, JStr %s) -> Decoder.members %s j%s"
                     (SourceLit.fsString (u.WireTagOf c.Tag))
-                    (rosterLit [ disc ] c.Fields)
+                    (rosterLit idl [ disc ] c.Fields)
                     (fieldWalks idl c.Fields))
             |> String.concat "\n"
 
@@ -299,6 +299,11 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                 names |> List.tryFind (fun n -> not (request.HostTypes.ContainsKey n)),
                 fieldTypes |> List.tryFind (fun f -> nodeIn f.Type)
             with
+            | _ when not (List.isEmpty (Decl.inlineDeclarations decl)) ->
+                refuse
+                    (sprintf "a codec-only module reaching %s" (List.head (Decl.inlineDeclarations decl)))
+                    "a codec-only module prints over host-declared types, which lay out no inline declaration (Phase 474)"
+                    "generate the structural module, which lays it out"
             | Some n, _ ->
                 refuse
                     (sprintf "a codec-only module reaching '%s' with no host type" n)

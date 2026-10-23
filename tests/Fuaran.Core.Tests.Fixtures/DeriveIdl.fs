@@ -74,7 +74,8 @@ let deriveIdl: Idl =
                 case "Maybe" [ opt "inner" rule ]
                 case "Guarded" [ req "guard" (TRecord "Guard") ]
                 case "Named" [ req "rules" (TMap rule) ] ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged }
           { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Trigger"
             Params = []
@@ -86,24 +87,29 @@ let deriveIdl: Idl =
                       req "name" TStr
                       req "fire" (handler "string") ]
                 case "Manual" [ req "label" TStr ] ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged }
           { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Measure"
             Params = []
             Cases = [ case "Hours" [ req "amount" TFloat ]; case "Days" [ req "amount" TFloat ] ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged } ]
       Records =
         [ { Name = "Owner"
             Fields =
               [ opt "name" TStr
                 field "priority" (TEnum "Priority") (OmitDefault(VEnum "Normal")) ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Inline = false }
           { Name = "Branch"
             Fields = [ req "label" TStr; req "body" TNode ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Inline = false }
           { Name = "Guard"
             Fields = [ req "rule" rule; opt "note" TStr ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Inline = false } ]
       Kinds =
         [ kind
               "Section"

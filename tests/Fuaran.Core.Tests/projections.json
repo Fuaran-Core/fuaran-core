@@ -122,6 +122,12 @@
       "heldBy": "IdlSpecDecoderTests"
     },
     {
+      "path": "tests/Fuaran.Core.Tests/LayoutGenerated.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "LayoutGenerated",
+      "heldBy": "IdlLayoutTests"
+    },
+    {
       "path": "src/Fuaran.Core.Function/CapabilitySeamCodec.fs",
       "switch": "FUARAN_REGEN",
       "stem": "CapabilitySeamCodec",

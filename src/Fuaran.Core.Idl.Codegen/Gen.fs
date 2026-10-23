@@ -87,10 +87,27 @@ module Gen =
                 )
             )
 
+    /// Phase 474 (DECISIONS.md D220) — the TypeScript backend lays out no INLINE declaration (an
+    /// inline record or a presence-keyed union, whose members sit on the object holding it), so its
+    /// codec, its declarations and its value literals refuse a resolution that reaches one, naming
+    /// it, rather than print it as an object of its own — a shape no host writes.
+    let private tsLaysOut (d: Decl) : Result<Decl, CodegenError> =
+        match Decl.inlineDeclarations d with
+        | [] -> Ok d
+        | what :: _ ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    what,
+                    "GP5: a backend lays out a declaration's wire or refuses it by name, never prints another shape",
+                    "generate this vocabulary's codec with the F# backend, which lays it out"
+                )
+            )
+
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         tsCodecAdmits idl
-        |> Result.bind (fun () -> TypeScriptCodec.typescriptModule (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (fun () -> tsLaysOut (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind TypeScriptCodec.typescriptModule
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
     /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
@@ -105,16 +122,18 @@ module Gen =
         (kindTags: string list)
         : Result<string, CodegenError> =
         tsCodecAdmits idl
-        |> Result.bind (fun () ->
-            TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (fun () -> tsLaysOut (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        TypeScriptDeclarations.typescriptValue idl t v
+        tsLaysOut (Decl.declared idl)
+        |> Result.bind (fun _ -> TypeScriptDeclarations.typescriptValue idl t v)
 
     /// The TypeScript type declarations for the named kinds.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScriptDeclarations.typescriptDeclarations (Decl.resolve idl Map.empty kindTags)
+        tsLaysOut (Decl.resolve idl Map.empty kindTags)
+        |> Result.bind TypeScriptDeclarations.typescriptDeclarations
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
     /// `typescriptModuleDerived` exports under the same requests, so the derived module and its
@@ -127,7 +146,8 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        TypeScriptDerived.typescriptDeclarationsDerived derivations (Decl.resolve idl Map.empty kindTags)
+        tsLaysOut (Decl.resolve idl Map.empty kindTags)
+        |> Result.bind (TypeScriptDerived.typescriptDeclarationsDerived derivations)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.

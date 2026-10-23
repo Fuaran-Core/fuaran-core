@@ -234,6 +234,11 @@ type Snapshot =
         /// key, so every pre-542 artifact reads as it always did. A map beside the type maps
         /// for the reason [[KindAnnotations]] is one beside [[Kinds]].
         TypeAnnotations: Map<string * string, string>
+        /// Phase 474 — a record's or a union's INLINE layout, keyed `(family, name)` as
+        /// [[TypeAnnotations]] is: `"inline"` for an inline record, a presence-keyed union's
+        /// `byPresence` rules canonically rendered, and absent for a declaration that is its own
+        /// object (every revision before the slot existed, which so reads as it always did).
+        TypeLayouts: Map<string * string, string>
         /// `(kind, field) -> canonical value` — the smart-constructor defaults
         /// (`IdlDefault`), NOT the wire-visible `omitDefault` optionality.
         Defaults: Map<string * string, string>

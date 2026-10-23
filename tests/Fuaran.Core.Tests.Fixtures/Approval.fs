@@ -278,6 +278,10 @@ module Regenerated =
     [<Literal>]
     let SpecDecoders = "SpecDecodersGenerated"
 
+    /// Phase 474 — the inline declarations' module (`IdlLayoutTests`).
+    [<Literal>]
+    let Layout = "LayoutGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 

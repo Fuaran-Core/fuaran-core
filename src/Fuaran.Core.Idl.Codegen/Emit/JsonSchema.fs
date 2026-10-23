@@ -94,28 +94,55 @@ module internal JsonSchema =
     /// disagreeing with the spec rather than a projection of it. Forward
     /// compatibility is the point: an older host validating a newer producer's
     /// output must not fail on a key it has not learned yet.
-    let objectBody (fields: IdlField list) =
-        let wire = wireFields fields
+    ///
+    /// Phase 474 — an INLINE declaration's members are the holding object's own properties, laid
+    /// out where its field is declared: an inline record's wire members (required as declared), and
+    /// every member a presence-keyed union's cases write, in its roster order, each stated at the
+    /// type of the first case declaring it and REQUIRED only when every case writes it (a
+    /// `Required` union, its key or a synthesised member every other case carries). The schema
+    /// states which members may stand there; which case they spell is the decoder's reading.
+    let rec wireMembers (idl: Idl) (fields: IdlField list) : (string * JVal * bool) list =
+        [ for f in wireFields fields do
+              match Decl.inlineSlot idl f.Type with
+              | Some(InlineSlot.Record r) -> yield! wireMembers idl r.Fields
+              | Some(InlineSlot.Keyed(u, keyed)) ->
+                  let written (c: IdlUnionCase) =
+                      (c.Fields |> List.filter (fun g -> g.Opt = Required) |> List.map _.Name)
+                      @ (keyed
+                         |> List.tryFind (fun k -> k.Case = c.Tag)
+                         |> Option.map (fun k -> k.Synthesised |> List.map fst)
+                         |> Option.defaultValue [])
 
-        [ "required",
-          JArr(
-              wire
-              |> List.filter (fun f -> f.Opt = Required)
-              |> List.map (fun f -> JStr f.Name)
-          )
-          "properties", JObj(wire |> List.map (fun f -> f.Name, schemaOf f.Type)) ]
+                  for name in Decl.keyedRoster u do
+                      let declared =
+                          u.Cases
+                          |> List.pick (fun c -> c.Fields |> List.tryFind (fun g -> g.Name = name))
+
+                      let always =
+                          f.Opt = Required
+                          && u.Cases |> List.forall (fun c -> List.contains name (written c))
+
+                      yield name, schemaOf declared.Type, always
+              | None -> yield f.Name, schemaOf f.Type, f.Opt = Required ]
+
+    let objectBody (idl: Idl) (fields: IdlField list) =
+        let wire = wireMembers idl fields
+
+        [ "required", JArr(wire |> List.filter (fun (_, _, r) -> r) |> List.map (fun (n, _, _) -> JStr n))
+          "properties", JObj(wire |> List.map (fun (n, sch, _) -> n, sch)) ]
 
     /// An object schema with a discriminator const (for a kind / union case) + its
     /// fields — the key is the vocabulary's DECLARED discriminator (Phase 108).
-    let objectSchema (disc: string) (typeConst: string) (fields: IdlField list) : JVal =
-        let wire = wireFields fields
+    let objectSchema (idl: Idl) (disc: string) (typeConst: string) (fields: IdlField list) : JVal =
+        let wire = wireMembers idl fields
 
         let props =
             (disc, JObj [ "const", JStr typeConst ])
-            :: (wire |> List.map (fun f -> f.Name, schemaOf f.Type))
+            :: (wire |> List.map (fun (n, sch, _) -> n, sch))
 
         let required =
-            disc :: (wire |> List.filter (fun f -> f.Opt = Required) |> List.map _.Name)
+            disc
+            :: (wire |> List.filter (fun (_, _, r) -> r) |> List.map (fun (n, _, _) -> n))
 
         JObj
             [ "type", JStr "object"
@@ -125,8 +152,8 @@ module internal JsonSchema =
     /// A NON-discriminated object schema — a [[TRecord]] (`FormField`, `FilterSpec`,
     /// `TabHeader`, `ColumnErased`, …). No `$type` const: that is exactly what
     /// distinguishes a record from a union case on the wire.
-    let recordSchema (r: IdlRecord) : JVal =
-        JObj(("type", JStr "object") :: objectBody r.Fields)
+    let recordSchema (idl: Idl) (r: IdlRecord) : JVal =
+        JObj(("type", JStr "object") :: objectBody idl r.Fields)
 
     /// Emit a Draft 2020-12 JSON Schema for the whole IDL's canonical wire.
     ///
@@ -154,7 +181,7 @@ module internal JsonSchema =
 
             let tagged =
                 u.Cases
-                |> List.map (fun c -> objectSchema idl.Wire.Discriminator (u.WireTagOf c.Tag) (fieldsOf c))
+                |> List.map (fun c -> objectSchema idl idl.Wire.Discriminator (u.WireTagOf c.Tag) (fieldsOf c))
 
             // A transparent case is on the wire BARE — its single field's value with
             // no `$type` envelope (`TextSource.Literal`: `"x"`, not
@@ -182,10 +209,10 @@ module internal JsonSchema =
             Decl.instantiations idl
             |> Result.map (List.map (fun i -> unionDefWith i.Subst i.Name i.Union))
 
-        let recordDef (r: IdlRecord) = r.Name, recordSchema r
+        let recordDef (r: IdlRecord) = r.Name, recordSchema idl r
 
         let kindDef (k: IdlKind) =
-            k.Tag, objectSchema idl.Wire.Discriminator k.Tag k.Fields
+            k.Tag, objectSchema idl idl.Wire.Discriminator k.Tag k.Fields
 
         // Phase 511 — the node envelope from its layout: one object carrying `id`, the kind under
         // its key when the kind is nested, and the declared envelope members (Phase 690: optional by
@@ -228,7 +255,7 @@ module internal JsonSchema =
             JObj [ "oneOf", JArr(decl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ]
 
         let opDef (o: IdlKind) =
-            o.Tag, objectSchema idl.Wire.Discriminator o.Tag o.Fields
+            o.Tag, objectSchema idl idl.Wire.Discriminator o.Tag o.Fields
 
         /// The op alternation. Absent when the domain declares no ops, so an
         /// op-free IDL's schema is exactly what it was.
@@ -261,9 +288,13 @@ module internal JsonSchema =
         |> Result.map (fun genericDefs ->
             let defs =
                 (decl.Enums |> List.map enumDef)
-                @ (decl.Unions |> List.filter (fun u -> List.isEmpty u.Params) |> List.map unionDef)
+                // Phase 474 — an inline declaration has no object of its own, so no definition: its
+                // members are stated on every object holding it ([[wireMembers]]).
+                @ (decl.Unions
+                   |> List.filter (fun u -> List.isEmpty u.Params && not (Decl.isKeyed u))
+                   |> List.map unionDef)
                 @ genericDefs
-                @ (decl.Records |> List.map recordDef)
+                @ (decl.Records |> List.filter (fun r -> not r.Inline) |> List.map recordDef)
                 @ (decl.Kinds |> List.map kindDef)
                 @ [ nodeKindDef; nodeDef ]
                 @ treeOpDefs

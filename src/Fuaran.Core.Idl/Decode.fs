@@ -30,6 +30,18 @@ module Decode =
             (sprintf "%d type args for union '%s'" (List.length u.Decl.Params) u.Name)
             (sprintf "%d type args for union '%s'" (List.length u.Args) u.Name)
 
+    /// Phase 474 — the member a required presence-keyed union is refused `MissingField` at when no
+    /// case's key is present: its first case's key.
+    let private keyedFirst (keyed: KeyedCase list) : string =
+        match keyed with
+        | k :: _ -> k.Key
+        | [] -> ""
+
+    /// Phase 474 — what a presence-keyed union's both-present refusal says its position admits.
+    let private keyedExpected (keyed: KeyedCase list) : string =
+        "at most one of "
+        + (keyed |> List.map (fun k -> "'" + k.Key + "'") |> String.concat ", ")
+
     let rec private decodeValue (idl: Idl) (t: IdlType) (j: JVal) : Result<IdlValue, DecodeError> =
         // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
         // reads it.
@@ -60,6 +72,12 @@ module Decode =
             err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "enum '%s'" name)
         | WireForm.Undeclared(Undeclared.Union(name, _)), _ ->
             err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "union '%s'" name)
+        | WireForm.Union { Decl = { Discrimination = UnionDiscrimination.ByPresence keyed } as u }, JObj fs ->
+            // Phase 474 — read on its own, a presence-keyed union's members are this object's.
+            decodeKeyed idl u keyed fs
+            |> Result.bind (function
+                | Some v -> Ok v
+                | None -> Error(Decoder.missing (keyedFirst keyed)))
         | WireForm.Union u, JObj _ ->
             match u.Binding with
             | None -> arity u
@@ -163,6 +181,53 @@ module Decode =
                      | JObj fs -> decodeFields idl fields fs |> Result.map (fun flds -> VUnion(tag, flds))
                      | other -> Error(Decoder.wrongKind "object" other)))
 
+    /// Phase 474 — a presence-keyed union read from an object's members ([[WireForm.pickKeyed]]):
+    /// `None` when no case's key is present; the both-present refusal `OutOfRange` at the second
+    /// key left; otherwise the picked case's members, then each member it synthesises, which must be
+    /// present (`MissingField`) and canonically equal to its declared value (`OutOfRange` at it).
+    and private decodeKeyed
+        (idl: Idl)
+        (u: IdlUnion)
+        (keyed: KeyedCase list)
+        (fs: (string * JVal) list)
+        : Result<IdlValue option, DecodeError> =
+        match WireForm.pickKeyed u keyed fs with
+        | KeyedPick.NoCase -> Ok None
+        | KeyedPick.BothPresent(first, second) ->
+            err DecodeCode.OutOfRange (keyedExpected keyed) (sprintf "'%s' beside '%s'" second first)
+            |> under (PathSegment.Key second)
+        | KeyedPick.Picked(c, k) ->
+            decodeFields idl c.Fields fs
+            |> Result.bind (fun members ->
+                let rec check =
+                    function
+                    | [] -> Ok(Some(VUnion(c.Tag, members)))
+                    | (name: string, v: IdlValue) :: rest ->
+                        let declared =
+                            u.Cases
+                            |> List.tryPick (fun o -> o.Fields |> List.tryFind (fun f -> f.Name = name))
+                            |> Option.map (fun f -> Encode.valueJson idl f.Type v)
+
+                        match fs |> List.tryFind (fun (n, _) -> n = name), declared with
+                        | None, _ -> Error(Decoder.missing name)
+                        | Some(_, j), Some(Ok expected) when
+                            Canonical.write Rendering.CrossHost j = Canonical.write Rendering.CrossHost expected
+                            ->
+                            check rest
+                        | Some(_, j), Some(Ok expected) ->
+                            err
+                                DecodeCode.OutOfRange
+                                (Canonical.write Rendering.CrossHost expected)
+                                (Canonical.write Rendering.CrossHost j)
+                            |> under (PathSegment.Key name)
+                        | Some _, _ ->
+                            err
+                                DecodeCode.SchemaFault
+                                "a synthesised member a case declares"
+                                (sprintf "member '%s'" name)
+
+                check k.Synthesised)
+
     and private decodeFields
         (idl: Idl)
         (fields: IdlField list)
@@ -171,6 +236,23 @@ module Decode =
         let rec go acc =
             function
             | [] -> Ok(List.rev acc)
+            // Phase 474 — an inline record's members and a presence-keyed union's are this object's
+            // own, read from it where the field is declared; a refusal inside one is at its member.
+            | (f: IdlField) :: rest when f.Opt <> HostOnly && WireForm.isInline idl f.Type ->
+                let read =
+                    match WireForm.inlineRecord idl f.Type, WireForm.keyedUnion idl f.Type with
+                    | Some r, _ -> decodeFields idl r.Fields jfields |> Result.map (VRecord >> Some)
+                    | _, Some(u, keyed) -> decodeKeyed idl u keyed jfields
+                    | None, None -> Ok None
+
+                match read, f.Opt with
+                | Error e, _ -> Error e
+                | Ok(Some v), _ -> go ((f.Name, v) :: acc) rest
+                | Ok None, Required ->
+                    match WireForm.keyedUnion idl f.Type with
+                    | Some(_, keyed) -> Error(Decoder.missing (keyedFirst keyed))
+                    | None -> Error(Decoder.missing f.Name)
+                | Ok None, _ -> go acc rest
             | (f: IdlField) :: rest ->
                 // Phase 539 — the member is read under its spellings and dropped when its presence
                 // condition fails ([[WireForm.readMember]]), so it reaches the optionality rules below
@@ -242,6 +324,12 @@ module Decode =
 
         match WireForm.ofType idl t, j with
         | WireForm.Record r, JObj fs -> strictObject idl [] r.Fields j fs
+        | WireForm.Union { Decl = { Discrimination = UnionDiscrimination.ByPresence keyed } as u }, JObj fs ->
+            Decoder.members (WireForm.keyedRoster u) j
+            |> Result.bind (fun () ->
+                match WireForm.pickKeyed u keyed fs with
+                | KeyedPick.Picked(c, _) -> strictFields idl c.Fields fs
+                | _ -> Ok())
         | WireForm.Union u, JObj fs ->
             match u.Binding, Decoder.tryMember disc j with
             | Some binding, Some(JStr tag) ->
@@ -273,7 +361,7 @@ module Decode =
                     | Some(JObj kfs as kj) -> strictTagged idl kinds [] kj kfs |> under (PathSegment.Key "kind")
                     | _ -> Ok())
             // The flat object holds the tag, the id, the kind's fields and the envelope's at once.
-            | NodeEnvelopeShape.FlatKind -> strictTagged idl kinds ("id" :: WireForm.roster [] idl.NodeFields) j fs
+            | NodeEnvelopeShape.FlatKind -> strictTagged idl kinds ("id" :: WireForm.roster idl [] idl.NodeFields) j fs
         | WireForm.List inner, JArr xs ->
             xs
             |> List.indexed
@@ -314,19 +402,30 @@ module Decode =
         (j: JVal)
         (fs: (string * JVal) list)
         : Result<unit, DecodeError> =
-        Decoder.members (WireForm.roster extra fields) j
-        |> Result.bind (fun () ->
-            fields
-            |> List.filter (fun f -> f.Opt <> HostOnly)
-            |> List.fold
-                (fun acc f ->
-                    acc
-                    |> Result.bind (fun () ->
+        Decoder.members (WireForm.roster idl extra fields) j
+        |> Result.bind (fun () -> strictFields idl fields fs)
+
+    /// Each meaningful field's value, in declared order — an inline declaration's members read from
+    /// the same object (Phase 474), a presence-keyed union's from the case its reading picks.
+    and private strictFields (idl: Idl) (fields: IdlField list) (fs: (string * JVal) list) : Result<unit, DecodeError> =
+        fields
+        |> List.filter (fun f -> f.Opt <> HostOnly)
+        |> List.fold
+            (fun acc f ->
+                acc
+                |> Result.bind (fun () ->
+                    match WireForm.inlineRecord idl f.Type, WireForm.keyedUnion idl f.Type with
+                    | Some r, _ -> strictFields idl r.Fields fs
+                    | _, Some(u, keyed) ->
+                        match WireForm.pickKeyed u keyed fs with
+                        | KeyedPick.Picked(c, _) -> strictFields idl c.Fields fs
+                        | _ -> Ok()
+                    | None, None ->
                         // At the CANONICAL spelling, as every refusal inside a member is (Phase 539).
                         match WireForm.readMember idl fields f fs with
                         | Some v -> strictValue idl f.Type v |> under (PathSegment.Key f.Name)
                         | None -> Ok()))
-                (Ok()))
+            (Ok())
 
     /// [[valueDetailed]] under the STRICT-MEMBERS reading (Phase 550): an object the vocabulary
     /// declares that carries a member its declaration does not name is refused `UndeclaredMember` at

@@ -86,8 +86,11 @@ module Encode =
                             Error(sprintf "transparent union '%s' case '%s' missing field '%s'" u.Name tag single.Name)
                     | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" tag)
                 | _ ->
-                    encodeFields idl caseFields fields
-                    |> Result.map (typedWith idl.Wire.Discriminator tag)
+                    match u.Decl.KeyedCase c.Tag with
+                    | Some keyed -> encodeKeyed idl u.Decl keyed caseFields fields
+                    | None ->
+                        encodeFields idl caseFields fields
+                        |> Result.map (typedWith idl.Wire.Discriminator tag)
         | WireForm.Undeclared(Undeclared.Union(name, _)), VUnion _ -> Error(sprintf "unknown union '%s'" name)
         | WireForm.Unbound v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
         | WireForm.Sentinel(value, wire), v when v = value -> Ok(JStr wire)
@@ -149,6 +152,44 @@ module Encode =
         | _, VAbsent -> Error "absent value reached the encoder (should be omitted at the field level)"
         | _ -> Error(sprintf "authored value does not match IDL type %A" t)
 
+    /// Phase 474 — a presence-keyed case's members as an object: its own members and the members it
+    /// synthesises, in the union's roster order ([[WireForm.keyedRoster]]). The object is never on
+    /// the wire as such — [[encodeFields]] lays its members onto the object holding the union.
+    and private encodeKeyed
+        (idl: Idl)
+        (u: IdlUnion)
+        (keyed: KeyedCase)
+        (caseFields: IdlField list)
+        (authored: (string * IdlValue) list)
+        : Result<JVal, string> =
+        encodeFields idl caseFields authored
+        |> Result.bind (fun own ->
+            let synthesised =
+                keyed.Synthesised
+                |> List.map (fun (name, v) ->
+                    match
+                        u.Cases
+                        |> List.tryPick (fun c -> c.Fields |> List.tryFind (fun f -> f.Name = name))
+                    with
+                    | Some f -> encodeValue idl f.Type v |> Result.map (fun j -> name, j)
+                    | None -> Error(sprintf "union '%s' synthesises '%s', which no case declares" u.Name name))
+
+            match
+                synthesised
+                |> List.tryPick (fun r ->
+                    match r with
+                    | Error m -> Some m
+                    | Ok _ -> None)
+            with
+            | Some m -> Error m
+            | None ->
+                let all = own @ (synthesised |> List.choose Result.toOption)
+
+                WireForm.keyedRoster u
+                |> List.choose (fun n -> all |> List.tryFind (fun (k, _) -> k = n))
+                |> JObj
+                |> Ok)
+
     and private encodeFields
         (idl: Idl)
         (fields: IdlField list)
@@ -168,6 +209,13 @@ module Encode =
                 | (f: IdlField) :: rest ->
                     match provided f.Name authored, f.Opt with
                     | _, HostOnly -> go acc rest
+                    // Phase 474 — an inline record or a presence-keyed union: its members are this
+                    // object's, laid out where the field is declared.
+                    | Some v, _ when WireForm.isInline idl f.Type && v <> VAbsent ->
+                        match encodeValue idl f.Type v with
+                        | Ok(JObj members) -> go (List.rev members @ acc) rest
+                        | Ok _ -> Error(sprintf "inline field '%s' did not encode to members" f.Name)
+                        | Error m -> Error m
                     // Phase 539 — a member whose presence condition fails carries no meaning, so the
                     // canonical form omits it whatever it holds ([[WireForm.holdsAuthored]]).
                     | _, _ when
