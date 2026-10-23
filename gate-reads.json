@@ -1,0 +1,27 @@
+{
+  "kind": "gateReads",
+  "_": "What this repository's gate reads beyond the code-shaped default (sources, tests, proofs, build and project files, the gate scripts). A commit touching only files outside the union is gate-inert, and a green run may stand across it. `**` is here because the suite sweeps every tracked file for the publication vocabulary (PublicationBoundaryTests) and reads the tracked set's line endings (WorkingCopyEolTests): a document commit can turn the gate red, so nothing is inert while the sweep is part of the gate. The entries after it are what the rest of the suite opens, kept precise so the record can narrow the day the sweep leaves the gate. Checked, not trusted: tests/Fuaran.Core.Tests/GateReadsCensusTests.fs.",
+  "reads": [
+    "**",
+    ".github/**",
+    ".gitignore",
+    "CONTRIBUTING.md",
+    "DECISIONS.md",
+    "README.md",
+    "SECURITY.md",
+    "STABILITY.md",
+    "api/**",
+    "conformance/**",
+    "copies.json",
+    "docs/ADOPTION.md",
+    "docs/conformance-families.json",
+    "docs/conformance-families.md",
+    "docs/idl-stability-classes.md",
+    "docs/releases/**",
+    "docs/units.md",
+    "fable-exclusions.json",
+    "proofs.json",
+    "version-derives.json"
+  ],
+  "notRead": []
+}
