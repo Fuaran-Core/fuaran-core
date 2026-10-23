@@ -20,7 +20,9 @@ module EncodingCorpus =
             { Head =
                 [ "family", CorpusFile.str "encodingProfile"
                   "description", CorpusFile.str description
-                  "format", CorpusFile.str "name<TAB>v1<TAB>v2" ]
+                  "format", CorpusFile.str "name<TAB>v1<TAB>v2"
+                  // A line carries no member, so the stamp is the file's, for every line (Phase 478).
+                  "answeredBy", CorpusFile.answeredBy AnsweredBy.Reference ]
               Items = "lines"
               Rows = EncodingProfileVectors.lines () |> List.map CorpusFile.str }
 

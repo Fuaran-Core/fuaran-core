@@ -2,6 +2,7 @@
   "family": "encodingProfile",
   "description": "Encoding-profile vectors (Phase 360). A content-addressed store names the rendering its ids were computed under: v1 is the rendering of 0.30.0 through 0.32.0, which spells line feed, carriage return and tab as the short escapes; v2 is the rendering since 0.33.0, which spells every control character U+0000-U+001F as a lower-case backslash-u escape. Each entry of `lines` is one line of the table, three fields separated by one TAB (U+0009), no field carrying a TAB or a line break: for each value its name, its v1 rendering and its v2 rendering (the value is what either rendering parses to); then for each actor `actor: <name>`, its v1 and its v2 encoding as folded into a chain payload and a DAG node id; then the capture pre-image (effect read<TAB>line, determinism io<LF>wall, value \"v\") under each. The v1 column was measured against the published 0.30.0 binaries. A host that reproduces a store's ids under a declared profile renders the same column, byte for byte.",
   "format": "name<TAB>v1<TAB>v2",
+  "answeredBy": ["reference"],
   "lines": [
     "U+0000 in a string\u0009\"\\u0000\"\u0009\"\\u0000\"",
     "U+0001 in a string\u0009\"\\u0001\"\u0009\"\\u0001\"",

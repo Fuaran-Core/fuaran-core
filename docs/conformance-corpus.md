@@ -201,8 +201,8 @@ difference; the manifest schema stays internal, because only this repository wri
 (D210).
 
 A new family is one row. The four host-compliance phases that were parked behind this table land on it:
-fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on the
-rows it stamps, written by the same writer; #479 (the chain, DAG, merge and diff vector families) is
+fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on every
+vector the rows write, written by the same writer ([Who answered a vector](#answered-by)); #479 (the chain, DAG, merge and diff vector families) is
 rows; #481 (the limits vector family) is one row; and #484 (each host declares its compliance and Core
 validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaced
 the `adoption` member's value in `CorpusManifestRow`, in one place, for every manifest at once.
@@ -617,6 +617,55 @@ with its exporter, `render <family>`), a status outside the four, `adopted` with
 this repository's exporter (the manifest is emitted, never hand-edited): `HostAdoption.Measured(cases,
 AdoptionSource.Host(kitVersion, sha))`. The corpus's `apply/manifest.json` is a shared index (D211); this
 repository owns only the `skeletonApply` row there, and other producers' rows keep their own shape.
+
+## Who answered a vector (Phase 478) {#answered-by}
+
+A vector's answer is computed by calling the reference implementation, so a host certified on it
+agrees with THIS implementation. Where an extracted model (`proofs/oracle/<Model>.fs`, the F* module
+`proofs/<Model>.fst` extracted) asks the same question, the export also runs the model on the vector's
+input, maps the model's answer back into the reference's answer type, renders it with the exporter's
+one renderer, and compares the two renders. Every vector carries the result as `answeredBy`
+(DECISIONS.md D223):
+
+| `answeredBy` | Meaning |
+|---|---|
+| `["reference"]` | no extracted model asks this vector's question; the reference alone answered it |
+| `["reference", "model:<Model>"]` | the export evaluated the model on this input and it gave the same answer |
+
+**A disagreement fails the export.** `render <family>` stops, naming the vector, the model and the
+proof-ladder row (`proofs.json`) whose differential holds that model to the code, and writes nothing
+that claims an agreement the run did not see (`AnsweredBy.agree`). The suite renders every family and
+holds the committed files to the render, so a stamp in a committed file was earned by the render that
+wrote it.
+
+**Where the stamp sits.** On a vector written as an object (`laws/`, `apply/`, `refusals/`, `decode/`
+and the structural families) it is the vector's last member. A `lines` file (`escape/`, `encoding/`)
+has no member per line, so its stamp is a header member and speaks for every line; it reads `model:`
+only when the model answers every line.
+
+**What is model-stamped today** — the census `Proofs.Oracle` holds, so an exporter that stops asking
+its model is red:
+
+| File | Model | Ladder row | Vectors |
+|---|---|---|---|
+| `laws/propagation-laws.json` | `Propagation` | `propagation-differential` | 73 of 73 |
+| `laws/decimal-laws.json` | `DecimalText` | `decimal-text-differential` | 49 of 75 (`canonical`, `compare`, `add`) |
+| `apply/skeleton-apply.json` | `TreeOps` | `tree-differential` | 25 of 25 |
+| `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 56 of 101 (every `json` vector) |
+
+Every other vector is `["reference"]`. For some of them no model asks the question: an IDL's canonical
+form, the decimal `toFloat` and `aggregate` cases, a field's fingerprint, delta and compatibility, the
+wire-profile grammar, and the v1 encoding column. For others a model asks it but its exporter does not
+evaluate the model yet: the capability laws (`Capability`), the decimal and field codec cases
+(`WireColumn`), the `column` codec refusals (`WireColumn`), the seam readers'
+encode side (`Capability`, `Query`), the decode-layer refusals after the parse (`DecodeLayer`), the
+escape table (`WireCanon`), and the chain, DAG, merge and diff vectors (`Chain`, `DagClosure`,
+`DagFold`, `TreeDiff`). Those stay reference-only until their exporter evaluates the model. A stamp
+never says more than the run checked.
+
+**For a host** the stamp is data, read like the adoption record. A host ignores an unknown member of a
+vector today. A host that reports what it certified against can now say whether it agreed with the
+proved model or only with this implementation.
 
 ## The `apply/` family
 

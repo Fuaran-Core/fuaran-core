@@ -106,35 +106,86 @@ module PropagationVectorExport =
         | Error(Propagation.PropagationError.EvalNodeFailed(node, _)) ->
             [ "verdict", str "reject"; "error", str "evalNodeFailed"; "node", str node ]
 
-    let private vector (id: string) (case: string) input expected : CorpusCell =
+    /// One vector: the reference's `expected` members and the extracted model's answer to the same
+    /// input (Phase 478), rendered by the same cell builders; the stamp is `model:Propagation` when they
+    /// agree, and the export fails when they do not.
+    let private vector (id: string) (case: string) input expected (model: (string * CorpusCell) list) : CorpusCell =
+        let answer: VectorOracle.Answer =
+            { Model = VectorOracle.PropagationModel.Model
+              LadderRow = VectorOracle.PropagationModel.LadderRow
+              Cell = CorpusCell.Row model }
+
         CorpusCell.Row
             [ "id", str id
               "case", str case
               "input", CorpusCell.Row input
-              "expected", CorpusCell.Row expected ]
+              "expected", CorpusCell.Row expected
+              VectorOracle.stamp id (CorpusCell.Row expected) (Some answer) ]
 
-    /// Both drivers' answer to one evaluator: the shared answer, or `driversDisagree` — which the
-    /// tests below fail on, so it can never reach the corpus.
-    let private bothDrivers
-        (ev: (string -> int option) -> string -> Result<int, string>)
-        (d: PropagationLaws.DagDraw)
-        (changed: string)
-        : (string * CorpusCell) list =
-        let viaEval = Propagation.eval ev d.Deps
-        let viaEvalFrom = Propagation.evalFrom ev (prior d) (Set.singleton changed) d.Deps
-
+    /// Two drivers' shared answer, or `driversDisagree` — which the tests below fail on, so it can
+    /// never reach the corpus.
+    let private agreed viaEval viaEvalFrom : (string * CorpusCell) list =
         if viaEval = viaEvalFrom then
             outcome viaEval
         else
             [ "verdict", str "driversDisagree" ]
 
+    /// Both drivers' answer to one evaluator.
+    let private bothDrivers
+        (ev: (string -> int option) -> string -> Result<int, string>)
+        (d: PropagationLaws.DagDraw)
+        (changed: string)
+        : (string * CorpusCell) list =
+        agreed (Propagation.eval ev d.Deps) (Propagation.evalFrom ev (prior d) (Set.singleton changed) d.Deps)
+
+    /// The read witness the model takes for `evaluator`: what each node declares, and the leaked read
+    /// at the leaking node — derived from the evaluator's own inputs, never guessed.
+    let private touches (deps: Map<string, Set<string>>) (leak: (string * string) option) (id: string) =
+        let declared =
+            Map.tryFind id deps |> Option.map Set.toList |> Option.defaultValue []
+
+        match leak with
+        | Some(at, r) when at = id -> declared @ [ r ]
+        | _ -> declared
+
+    /// A fresh evaluator per model call: the model invokes it on its own walk.
+    let private modelEv baseOf deps leak =
+        evaluator baseOf deps leak (ResizeArray())
+
+    /// The model's prior: its own `eval` of the unedited bases.
+    let private modelPrior (d: PropagationLaws.DagDraw) : Map<string, int> =
+        match VectorOracle.PropagationModel.eval (modelEv d.Base0 d.Deps None) (touches d.Deps None) d.Deps with
+        | Ok o -> o.Values
+        | Error e -> failwithf "the model's prior evaluation of a drawn DAG failed: %A" e
+
+    let private topoCells (topo: Propagation.TopoResult) =
+        [ "order", ids topo.Order
+          "cycles", topo.Cycles |> List.map (List.sort >> ids) |> CorpusCell.List ]
+
     /// Every vector for one drawn graph.
     let internal vectorsFor (i: int) (d: PropagationLaws.DagDraw) : CorpusCell list =
         let topo = Propagation.sort d.Deps
         let invoked = ResizeArray()
+        let changedSet = Set.singleton d.ChangedId
 
         let incremental =
-            Propagation.evalFrom (evaluator d.Base1 d.Deps None invoked) (prior d) (Set.singleton d.ChangedId) d.Deps
+            Propagation.evalFrom (evaluator d.Base1 d.Deps None invoked) (prior d) changedSet d.Deps
+
+        let modelFrom leak baseOf changed =
+            VectorOracle.PropagationModel.evalFrom
+                (modelEv baseOf d.Deps leak)
+                (touches d.Deps leak)
+                (modelPrior d)
+                changed
+                d.Deps
+
+        let modelInvoked =
+            VectorOracle.PropagationModel.invoked
+                (modelEv d.Base1 d.Deps None)
+                (touches d.Deps None)
+                (modelPrior d)
+                changedSet
+                d.Deps
 
         let name suffix = sprintf "propagation-%d-%s" i suffix
         let changed = [ "changed", ids [ d.ChangedId ] ]
@@ -143,13 +194,14 @@ module PropagationVectorExport =
               (name "dirty-set")
               "dirtySet"
               ([ "deps", depsCell d.Deps ] @ changed)
-              [ "dirty", ids (Propagation.dirtyFromChangedIds d.Deps (Set.singleton d.ChangedId)) ]
+              [ "dirty", ids (Propagation.dirtyFromChangedIds d.Deps changedSet) ]
+              [ "dirty", ids (VectorOracle.PropagationModel.dirty d.Deps changedSet) ]
           vector
               (name "evaluation-order")
               "evaluationOrder"
               [ "deps", depsCell d.Deps ]
-              [ "order", ids topo.Order
-                "cycles", topo.Cycles |> List.map (List.sort >> ids) |> CorpusCell.List ]
+              (topoCells topo)
+              (topoCells (VectorOracle.PropagationModel.sort d.Deps))
           vector
               (name "incremental")
               "evalFrom"
@@ -157,6 +209,7 @@ module PropagationVectorExport =
                @ changed
                @ [ "changedBase", valuesCell d.Base1 ])
               (outcome incremental @ [ "recomputed", ids (Set.ofSeq invoked) ])
+              (outcome (modelFrom None d.Base1 changedSet) @ [ "recomputed", ids modelInvoked ])
           vector
               (name "unknown-change")
               "evalFrom"
@@ -171,9 +224,12 @@ module PropagationVectorExport =
                       (Set.singleton unknownChange)
                       d.Deps
               ))
+              (outcome (modelFrom None d.Base1 (Set.singleton unknownChange)))
           // Node "0" declares no reads on every graph the generator draws, so a read of node "1" is
           // a real node read undeclared; the second reaches an id the map does not hold.
           for leakAt, read in [ "0", "1"; d.ChangedId, absentRead ] do
+              let leak = Some(leakAt, read)
+
               vector
                   (name (
                       if read = absentRead then
@@ -186,7 +242,10 @@ module PropagationVectorExport =
                     "base", valuesCell d.Base1
                     "node", str leakAt
                     "read", str read ]
-                  (bothDrivers (evaluator d.Base1 d.Deps (Some(leakAt, read)) (ResizeArray())) d leakAt) ]
+                  (bothDrivers (evaluator d.Base1 d.Deps leak (ResizeArray())) d leakAt)
+                  (agreed
+                      (VectorOracle.PropagationModel.eval (modelEv d.Base1 d.Deps leak) (touches d.Deps leak) d.Deps)
+                      (modelFrom leak d.Base1 (Set.singleton leakAt))) ]
 
     /// The fixed cyclic graph of `dirtyPropagationLaws`: a 3-cycle and a reader of it. A cycle is data.
     let cyclic: Map<string, Set<string>> =
@@ -203,8 +262,8 @@ module PropagationVectorExport =
             "propagation-cycle-evaluation-order"
             "evaluationOrder"
             [ "deps", depsCell cyclic ]
-            [ "order", ids topo.Order
-              "cycles", topo.Cycles |> List.map (List.sort >> ids) |> CorpusCell.List ]
+            (topoCells topo)
+            (topoCells (VectorOracle.PropagationModel.sort cyclic))
 
     let internal allVectors () : CorpusCell list =
         (draws () |> List.mapi vectorsFor |> List.concat) @ [ cycleVector () ]
@@ -227,7 +286,9 @@ module PropagationVectorExport =
         + "invoked on, which is exactly the dirty set — or, for a changed id the graph does not hold, the "
         + "evalUnknownChange refusal naming it. `undeclaredRead` makes `node` also read `read`, which it never "
         + "declared: both eval and evalFrom (with `node` changed) refuse with evalUndeclaredRead naming the node "
-        + "and the read, whether the read names a node of the graph or an id it does not hold."
+        + "and the read, whether the read names a node of the graph or an id it does not hold. Every vector's "
+        + "`answeredBy` is [\"reference\", \"model:Propagation\"]: the export also ran the extracted F* model "
+        + "(proofs/Propagation.fst) on the input and found the same answer."
 
     /// Rendered with an explicit `kitVersion`, as its siblings in `LawVectorExport` are.
     let renderAt (stamp: string) : string =

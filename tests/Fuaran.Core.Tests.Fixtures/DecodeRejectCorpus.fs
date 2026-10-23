@@ -427,6 +427,7 @@ module DecodeRejectCorpus =
                 @ limits
                 @ defs
                 @ result
+                @ [ VectorOracle.stampValue vec.Name (JObj result) None ]
             )
         )
 

@@ -303,6 +303,78 @@ module internal HostAdoption =
             | [], _, _ -> Error(sprintf "%s carries no string `status` — %s" at remedy)
         | _ -> Error(sprintf "%s is neither a record nor a string — %s" at remedy)
 
+/// Who answered one committed vector (Phase 478, DECISIONS.md D223). The reference implementation
+/// answers every vector. An extracted model (`proofs/oracle`, the F* module of that name) answers one
+/// too when the vector's question is one the model asks AND the export ran the model on the vector's
+/// input and got the same answer. Written `["reference"]` or `["reference", "model:<Model>"]`: a host
+/// certified on a model-stamped vector agrees with the proved model, not only with this implementation.
+[<RequireQualifiedAccess>]
+type internal AnsweredBy =
+    /// The reference implementation alone: no extracted model asks this vector's question.
+    | Reference
+    /// The reference and the extracted model `model`, which the export evaluated and found agreeing.
+    | Model of model: string
+
+/// One extracted model's answer to a vector's question, rendered the way the vector's reference answer
+/// is rendered, and the proof-ladder row (`proofs.json`) whose differential holds that model to the code.
+type internal ModelAnswer =
+    {
+        /// The F* module that answered — `Propagation`, `DecimalText`.
+        Model: string
+        /// The ladder row a disagreement is reported against — `propagation-differential`.
+        LadderRow: string
+        /// The model's answer, rendered as the reference answer is.
+        Answer: string
+    }
+
+[<RequireQualifiedAccess>]
+module internal AnsweredBy =
+
+    let private isModelName (s: string) =
+        s.Length > 0
+        && System.Char.IsUpper s[0]
+        && s |> Seq.forall (fun c -> System.Char.IsLetterOrDigit c || c = '_')
+
+    /// The stamp as written: `reference` first, then `model:<Model>`.
+    let spellings (a: AnsweredBy) : string list =
+        match a with
+        | AnsweredBy.Reference -> [ "reference" ]
+        | AnsweredBy.Model m -> [ "reference"; "model:" + m ]
+
+    /// The stamp of vector `vectorId`, whose reference answer renders `reference`. No model answer is
+    /// `Reference`. A model answer that renders the same is `Model`; one that differs is the refusal —
+    /// the export fails rather than write a stamp, naming the vector, the model, the ladder row and both
+    /// answers.
+    let agree (vectorId: string) (reference: string) (model: ModelAnswer option) : Result<AnsweredBy, string> =
+        match model with
+        | None -> Ok AnsweredBy.Reference
+        | Some m when not (isModelName m.Model) ->
+            Error(sprintf "vector `%s`: `%s` is not an extracted model's name" vectorId m.Model)
+        | Some m when m.Answer = reference -> Ok(AnsweredBy.Model m.Model)
+        | Some m ->
+            Error(
+                sprintf
+                    "vector `%s`: the extracted model %s disagrees with the reference (ladder row `%s`) — reference %s, model %s"
+                    vectorId
+                    m.Model
+                    m.LadderRow
+                    reference
+                    m.Answer
+            )
+
+    /// A committed vector's stamp, read back. Refused: anything but an array of strings that is exactly
+    /// `["reference"]` or `["reference", "model:<Model>"]`.
+    let read (entry: JVal) : Result<AnsweredBy, string> =
+        match entry with
+        | JArr [ JStr "reference" ] -> Ok AnsweredBy.Reference
+        | JArr [ JStr "reference"; JStr m ] when m.StartsWith "model:" && isModelName (m.Substring 6) ->
+            Ok(AnsweredBy.Model(m.Substring 6))
+        | _ ->
+            Error(
+                "`answeredBy` is `[\"reference\"]` or `[\"reference\", \"model:<Model>\"]`, read "
+                + Canonical.write Rendering.CrossHost entry
+            )
+
 /// One family's row in a self-enumerated family manifest (Phase 508) — the ONE manifest schema the
 /// emitted families share, so a validator over a manifest reads one shape. Internal (D210): only this
 /// repository writes a manifest.
@@ -386,6 +458,10 @@ module CorpusFile =
 
     /// An integer's cell.
     let num (n: int) : CorpusCell = CorpusCell.Value(JInt n)
+
+    /// A vector's `answeredBy` stamp (Phase 478) as its compact cell — `["reference", "model:<Model>"]`.
+    let internal answeredBy (a: AnsweredBy) : CorpusCell =
+        CorpusCell.Value(JArr(AnsweredBy.spellings a |> List.map JStr))
 
     /// One cell as `render` writes it, indentation excluded — the text of one item line.
     let internal renderCell (c: CorpusCell) : string = cell c

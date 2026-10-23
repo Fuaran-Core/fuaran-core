@@ -426,15 +426,30 @@ module ApplyVectorExport =
     let hashOf (canonicalTree: string) : string =
         "sha256:" + Hash.sha256Hex canonicalTree
 
-    /// What the reference answered, in the terms a host compares against. Computed by CALLING
-    /// `Ops.apply`; nothing here restates what it ought to say.
-    let private expectedOf (c: Case) : CorpusCell =
-        match Ops.apply Policy.none (OpScope.plain nodew idw) c.Op c.Tree with
+    /// The model's rejection as the family pins it — the same class and address `rejectionJ` writes
+    /// for production's (Phase 478). The model carries neither `WouldNestUnderSelf`'s relation nor
+    /// `UnknownNode`'s enumeration, and the pinned projection reads neither, so nothing is invented.
+    let private modelRejectionJ (r: TreeOps.rejection) : JVal =
+        match r with
+        | TreeOps.DuplicateId d -> Canonical.typed "duplicateId" [ "id", JStr d ]
+        | TreeOps.UnknownNode(target, _) -> Canonical.typed "unknownNode" [ "target", JStr target ]
+        | TreeOps.CannotRemoveRoot -> Canonical.typed "cannotRemoveRoot" []
+        | TreeOps.WouldNestUnderSelf t -> Canonical.typed "wouldNestUnderSelf" [ "target", JStr t ]
+        | TreeOps.NotAContainer(target, kindTag) ->
+            Canonical.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
+        | TreeOps.ReorderMismatch(parent, _, _) -> Canonical.typed "reorderMismatch" [ "parent", JStr parent ]
+        | TreeOps.Rejected(code, _) -> Canonical.typed "rejected" [ "code", JStr code ]
+
+    /// An answer in the terms a host compares against — the applied tree's bytes and hash, or the
+    /// pinned rejection and the static host mapping. One renderer for both answers, so the reference's
+    /// and the model's can only differ where the ANSWERS do.
+    let private answerOf (c: Case) (answer: Result<RNode, JVal>) : CorpusCell =
+        match answer with
         | Ok result ->
             let bytes = encodeTree result
 
             jobj [ "verdict", jstr "accept"; "tree", jstr bytes; "hash", jstr (hashOf bytes) ]
-        | Error r ->
+        | Error rejection ->
             let hosts =
                 match c.Hosts with
                 | All code -> hostRoster |> List.map (fun h -> h, jstr code)
@@ -442,12 +457,28 @@ module ApplyVectorExport =
 
             jobj (
                 [ "verdict", jstr "reject"
-                  "rejection", jstr (Canonical.write Rendering.CrossHost (rejectionJ r)) ]
+                  "rejection", jstr (Canonical.write Rendering.CrossHost rejection) ]
                 @ [ "hosts", jobj hosts ]
                 @ (match c.Hosts with
                    | NoneWith note -> [ "hostsNote", jstr note ]
                    | All _ -> [])
             )
+
+    /// What the reference answered. Computed by CALLING `Ops.apply`; nothing here restates what it
+    /// ought to say.
+    let private expectedOf (c: Case) : CorpusCell =
+        Ops.apply Policy.none (OpScope.plain nodew idw) c.Op c.Tree
+        |> Result.mapError rejectionJ
+        |> answerOf c
+
+    /// What the extracted tree model answers to the same op on the same tree (Phase 478).
+    let private modelOf (c: Case) : VectorOracle.Answer =
+        { Model = VectorOracle.TreeModel.Model
+          LadderRow = VectorOracle.TreeModel.LadderRow
+          Cell =
+            VectorOracle.TreeModel.apply c.Op c.Tree
+            |> Result.mapError modelRejectionJ
+            |> answerOf c }
 
     /// The op tag, for a reader scanning the file by op rather than by vector id.
     let private caseTag (op: SkeletonOp<RNode, string>) : string =
@@ -465,7 +496,8 @@ module ApplyVectorExport =
               "case", jstr (caseTag c.Op)
               "description", jstr c.Description
               "input", jobj [ "tree", jstr (encodeTree c.Tree); "op", jstr (encodeOp c.Op) ]
-              "expected", expectedOf c ]
+              "expected", expectedOf c
+              VectorOracle.stamp c.Id (expectedOf c) (Some(modelOf c)) ]
 
     let private description =
         "Apply-engine conformance for the six skeleton tree ops (InsertChild, RemoveNode, "

@@ -530,9 +530,9 @@ let rec toModel (v: JVal) : MJVal =
 //       lists (`UnknownNode`'s `addressable`, `ReorderMismatch`'s two orders) and are outside it.
 // ---------------------------------------------------------------------------
 
-/// The reference node as the tree model reads it — the three accessors, and no more.
-let rec toModelTree (n: RNode) : TreeOps.tree =
-    TreeOps.TNode(n.Id, n.Kind, n.Children |> List.map toModelTree)
+/// The reference node as the tree model reads it — the three accessors, and no more. The bridge is
+/// the exporters' (`VectorOracle.TreeModel`, Phase 478): the apply vectors are stamped through it.
+let toModelTree (n: RNode) : TreeOps.tree = VectorOracle.TreeModel.toTree n
 
 /// The BLIND bridge — the go-red instrument, and the tree family's counterpart to the fold
 /// family's blind footprint. It erases every kind tag, so the model is asked about a different
@@ -562,14 +562,8 @@ let modelTreeW: NodeWitness<TreeOps.tree, string> =
       Children = mKids
       ReplaceChildren = fun t cs -> TreeOps.TNode(mTid t, mKind t, cs) }
 
-let rec toModelOpWith (bridge: RNode -> TreeOps.tree) (op: SkeletonOp<RNode, string>) : TreeOps.op =
-    match op with
-    | InsertChild(p, node) -> TreeOps.InsertChild(p, bridge node)
-    | RemoveNode t -> TreeOps.RemoveNode t
-    | MoveNode(t, np) -> TreeOps.MoveNode(t, np)
-    | ReorderChildren(p, order) -> TreeOps.ReorderChildren(p, order)
-    | Batch inner -> TreeOps.Batch(inner |> List.map (toModelOpWith bridge))
-    | UpdateNode node -> TreeOps.UpdateNode(bridge node)
+let toModelOpWith (bridge: RNode -> TreeOps.tree) (op: SkeletonOp<RNode, string>) : TreeOps.op =
+    VectorOracle.TreeModel.toOpWith bridge op
 
 let encWitnessNode (nodeId: string) (kindTag: string) = nodeId + "|" + kindTag
 
@@ -678,67 +672,10 @@ let drawnUpdatesAndBatches
 
 module JsonParseDiff =
 
-    /// A production character as the model reads it. Every character the parser DISTINGUISHES has
-    /// its own constructor; every other is carried verbatim, so two different characters are never
-    /// identified and the bridge loses nothing.
-    let toCh (c: char) : JsonParse.ch =
-        match c with
-        | ' ' -> JsonParse.CSpace
-        | '\t' -> JsonParse.CTab
-        | '\n' -> JsonParse.CNewline
-        | '\r' -> JsonParse.CReturn
-        | '"' -> JsonParse.CQuote
-        | '\\' -> JsonParse.CBackslash
-        | '/' -> JsonParse.CSlash
-        | '{' -> JsonParse.CLBrace
-        | '}' -> JsonParse.CRBrace
-        | '[' -> JsonParse.CLBrack
-        | ']' -> JsonParse.CRBrack
-        | ':' -> JsonParse.CColon
-        | ',' -> JsonParse.CComma
-        | '-' -> JsonParse.CMinus
-        | '+' -> JsonParse.CPlus
-        | '.' -> JsonParse.CDot
-        | '0' -> JsonParse.CD0
-        | '1' -> JsonParse.CD1
-        | '2' -> JsonParse.CD2
-        | '3' -> JsonParse.CD3
-        | '4' -> JsonParse.CD4
-        | '5' -> JsonParse.CD5
-        | '6' -> JsonParse.CD6
-        | '7' -> JsonParse.CD7
-        | '8' -> JsonParse.CD8
-        | '9' -> JsonParse.CD9
-        | 'a' -> JsonParse.CLa
-        | 'b' -> JsonParse.CLb
-        | 'c' -> JsonParse.CLc
-        | 'd' -> JsonParse.CLd
-        | 'e' -> JsonParse.CLe
-        | 'f' -> JsonParse.CLf
-        | 'l' -> JsonParse.CLl
-        | 'n' -> JsonParse.CLn
-        | 'r' -> JsonParse.CLr
-        | 's' -> JsonParse.CLs
-        | 't' -> JsonParse.CLt
-        | 'u' -> JsonParse.CLu
-        | 'A' -> JsonParse.CUa
-        | 'B' -> JsonParse.CUb
-        | 'C' -> JsonParse.CUc
-        | 'D' -> JsonParse.CUd
-        | 'E' -> JsonParse.CUe
-        | 'F' -> JsonParse.CUf
-        // A RAW surrogate unit is one of the model's two surrogate constructors (Phase 306): the
-        // parser distinguishes them — a string is well-formed UTF-16 or it is refused — and which
-        // class a raw unit is in is this bridge's to say.
-        | other when int other >= 0xD800 && int other <= 0xDBFF -> JsonParse.CHiSur(string other)
-        | other when int other >= 0xDC00 && int other <= 0xDFFF -> JsonParse.CLoSur(string other)
-        // A raw control other than the three whitespace ones above is the model's `CCtrl`
-        // (Phase 462), carrying the `U+00XX` spelling production's refusal names it by: the
-        // parser refuses it inside a string, and which units are controls is this bridge's to say.
-        | other when int other < 0x20 -> JsonParse.CCtrl(string other, "U+" + (int other).ToString("X4"))
-        | other -> JsonParse.COther(string other)
+    /// The character bridge is the exporters' (`VectorOracle.JsonModel`, Phase 478).
+    let toCh (c: char) : JsonParse.ch = VectorOracle.JsonModel.toCh c
 
-    let toChs (s: string) : JsonParse.ch list = s |> Seq.map toCh |> List.ofSeq
+    let toChs (s: string) : JsonParse.ch list = VectorOracle.JsonModel.toChs s
 
     /// A string from its UTF-16 units. An unpaired surrogate is built this way and never written
     /// as a `\u` escape in an F# literal, which the compiler replaces with U+FFFD.
@@ -761,33 +698,11 @@ module JsonParseDiff =
 
     let private inv = System.Globalization.CultureInfo.InvariantCulture
 
-    /// The model's own spelling of a character, so the two sides never disagree merely about how a
-    /// character is written.
-    let chStr (c: JsonParse.ch) : string = JsonParse.ch_str c
+    let chStr (c: JsonParse.ch) : string = VectorOracle.JsonModel.chStr c
 
-    let tokStr (t: JsonParse.ch list) : string = t |> List.map chStr |> String.concat ""
+    let tokStr (t: JsonParse.ch list) : string = VectorOracle.JsonModel.tokStr t
 
-    /// The four hex digits a `\uXXXX` carried, resolved to the code point HERE. The model declines
-    /// to compute it (it carries no integers); the host can, so the differential still compares the
-    /// decoded character rather than only the escape's guards.
-    let private hexVal (c: JsonParse.ch) : int = System.Convert.ToInt32(chStr c, 16)
-
-    let private ochToString (o: JsonParse.och) : string =
-        match o with
-        | JsonParse.OLit c -> chStr c
-        | JsonParse.OEsc e ->
-            match chStr e with
-            | "n" -> "\n"
-            | "r" -> "\r"
-            | "t" -> "\t"
-            | "b" -> "\b"
-            | "f" -> "\f"
-            | other -> other
-        | JsonParse.OUni(a, b, c, d) ->
-            string (char ((hexVal a <<< 12) + (hexVal b <<< 8) + (hexVal c <<< 4) + hexVal d))
-
-    let private modelStr (os: JsonParse.och list) : string =
-        os |> List.map ochToString |> String.concat ""
+    let private modelStr (os: JsonParse.och list) : string = VectorOracle.JsonModel.modelStr os
 
     let rec private renderProd (v: JVal) : string =
         match v with
@@ -822,27 +737,11 @@ module JsonParseDiff =
                |> String.concat ",")
             + "}"
 
-    /// The model's one opacity parameter, instantiated: `System.Double.TryParse` plus the
-    /// finiteness gate, which is exactly what `parseNumber` asks — and, since Phase 253, whether
-    /// the token is the canonical float layout of the double it reads as (`FCanonical`), which is
-    /// what `parseNumber` asks of an integer token past 2^53.
-    let floatRead (tok: JsonParse.ch list) : JsonParse.freadv =
-        let s = tokStr tok
+    let floatRead (tok: JsonParse.ch list) : JsonParse.freadv = VectorOracle.JsonModel.floatRead tok
 
-        match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, inv) with
-        | true, v when System.Double.IsNaN v || System.Double.IsInfinity v -> JsonParse.FNonFinite
-        | true, v when FloatLayout.finite v = s -> JsonParse.FCanonical
-        | true, _ -> JsonParse.FFinite
-        | _ -> JsonParse.FUnparsable
+    let budget (n: int) : unit list = VectorOracle.JsonModel.budget n
 
-    /// The depth cap as the model spends it — one element per descent (`proofs/README.md`: the
-    /// extraction carries no integers).
-    let budget (n: int) : unit list = List.replicate n ()
-
-    let private modelPolicy (p: NullPolicy) : JsonParse.policy =
-        match p with
-        | RejectNull -> JsonParse.RejectNull
-        | EraseMemberNull -> JsonParse.EraseMemberNull
+    let private modelPolicy (p: NullPolicy) : JsonParse.policy = VectorOracle.JsonModel.policy p
 
     /// The depth cap's one rendering, on both sides (Phase 519): production's `Depth` breach and the
     /// model's `MaxDepthExceeded` at the same position are the same answer by the lift.
@@ -1528,15 +1427,10 @@ let nextCanonSeed (r: int) : int = (r * 1103515245 + 12345) &&& 0x3FFFFFFF
 // own `Int32.TryParse`, `Double.TryParse`-against-a-float-range and `String.Length`. The go-red
 // blinds the int reader.
 
-let toMOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
-    match o with
-    | Some x -> FStar_Pervasives_Native.Some x
-    | None -> FStar_Pervasives_Native.None
+/// The option shims, once: the exporters' model bridges (`VectorOracle`, Phase 478) own them.
+let toMOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> = VectorOracle.toMOpt o
 
-let ofMOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option =
-    match o with
-    | FStar_Pervasives_Native.Some x -> Some x
-    | FStar_Pervasives_Native.None -> None
+let ofMOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option = VectorOracle.ofMOpt o
 
 let hostToModel (h: HostEffect) : ModelCap.host_effect =
     match h with
@@ -2876,3 +2770,155 @@ module UnitDiff =
     let concatenated (seed: int) (count: int) : Tally =
         tally
         |> Differential.over (drawn seed count |> List.pairwise) (fun (a, b) -> probeConcat "pair" a b)
+
+// ---------------------------------------------------------------------------
+//  Phase 478 — THE MODEL STAMP on the emitted vectors.
+//
+//  Each exporter evaluates the extracted model that asks a vector's question, through the bridges in
+//  the fixtures library (`VectorOracle`), and stamps the vector `["reference", "model:<Model>"]` — or
+//  fails the export on a disagreement. The committed files are held to a fresh render by the
+//  `Exporters` family, so a stamp that is in a file was earned by the render that wrote it. These
+//  cases hold the rest: every vector carries a well-formed stamp; the model stamps are where the
+//  models answer (a census, so an exporter that silently stops asking its model is red); and a
+//  disagreement refuses, naming the vector and the ladder row.
+// ---------------------------------------------------------------------------
+
+module VectorStamps =
+
+    /// Every `answeredBy` stamp in one committed file: one per vector of a `vectors` file, and the
+    /// file's own for a `lines` file, whose lines carry no member.
+    let internal stampsOf (text: string) : Result<AnsweredBy list, string> =
+        let memberOf k fields =
+            fields |> List.tryFind (fun (n, _) -> n = k) |> Option.map snd
+
+        let readAll entries =
+            entries
+            |> List.fold
+                (fun acc (at, entry) ->
+                    acc
+                    |> Result.bind (fun read ->
+                        match entry with
+                        | Some e ->
+                            AnsweredBy.read e
+                            |> Result.map (fun a -> read @ [ a ])
+                            |> Result.mapError (fun m -> at + ": " + m)
+                        | None -> Error(at + " carries no `answeredBy`")))
+                (Ok [])
+
+        match Json.parse text with
+        | Ok(JObj fields) ->
+            match memberOf "vectors" fields, memberOf "lines" fields with
+            | Some(JArr vectors), _ ->
+                vectors
+                |> List.mapi (fun i v ->
+                    match v with
+                    | JObj vf -> sprintf "vector %d" i, memberOf "answeredBy" vf
+                    | _ -> sprintf "vector %d" i, None)
+                |> readAll
+            | None, Some(JArr _) -> readAll [ "the file", memberOf "answeredBy" fields ]
+            | _ -> Error "neither a `vectors` nor a `lines` file"
+        | Ok _ -> Error "not an object"
+        | Error e -> Error("does not parse: " + e)
+
+    /// The committed vector files: every emitted file under `conformance/` but the manifests and the
+    /// IDL schema, which index and declare rather than answer.
+    let vectorFiles () : string list =
+        System.IO.Directory.GetFiles(OwnedConformance.root (), "*.json", System.IO.SearchOption.AllDirectories)
+        |> Array.filter (fun p ->
+            let name = System.IO.Path.GetFileName p
+            name <> "manifest.json" && not (name.EndsWith ".schema.json"))
+        |> Array.sort
+        |> List.ofArray
+
+    let relative (p: string) =
+        System.IO.Path.GetRelativePath(OwnedConformance.root (), p).Replace(System.IO.Path.DirectorySeparatorChar, '/')
+
+    /// The census: per file, how many vectors each extracted model answers. Every file not named here
+    /// is answered by the reference alone. A model wired into an exporter is one row here.
+    let modelStamps: (string * (string * int)) list =
+        [ "apply/skeleton-apply.json", ("TreeOps", 25)
+          "laws/decimal-laws.json", ("DecimalText", 49)
+          "laws/propagation-laws.json", ("Propagation", 73)
+          "refusals/codec-refusals.json", ("JsonParse", 56) ]
+
+    [<Tests>]
+    let tests =
+        testList
+            "Proofs.Oracle"
+            [ testCase "every committed vector carries an answeredBy stamp a host can read"
+              <| fun _ ->
+                  let files = vectorFiles ()
+                  Expect.isGreaterThanOrEqual (List.length files) 15 "the vector files were found"
+
+                  for p in files do
+                      match stampsOf (System.IO.File.ReadAllText p) with
+                      | Ok stamps -> Expect.isNonEmpty stamps (relative p + " carries stamps")
+                      | Error e -> failtestf "%s: %s" (relative p) e
+
+              testCase "the model stamps are where the extracted models answer, and nowhere else"
+              <| fun _ ->
+                  for p in vectorFiles () do
+                      let stamps =
+                          match stampsOf (System.IO.File.ReadAllText p) with
+                          | Ok s -> s
+                          | Error e -> failtestf "%s: %s" (relative p) e
+
+                      let models =
+                          stamps
+                          |> List.choose (function
+                              | AnsweredBy.Model m -> Some m
+                              | AnsweredBy.Reference -> None)
+                          |> List.countBy id
+
+                      let expected =
+                          modelStamps |> List.filter (fun (f, _) -> f = relative p) |> List.map snd
+
+                      Expect.equal models expected (relative p + "'s model stamps")
+
+              testCase "a disagreement refuses the stamp, naming the vector, the model and the ladder row"
+              <| fun _ ->
+                  let answer text : ModelAnswer =
+                      { Model = "Propagation"
+                        LadderRow = "propagation-differential"
+                        Answer = text }
+
+                  Expect.equal
+                      (AnsweredBy.agree "v-1" "{\"dirty\":[\"1\"]}" (Some(answer "{\"dirty\":[\"1\"]}")))
+                      (Ok(AnsweredBy.Model "Propagation"))
+                      "an agreeing model answer earns the model stamp"
+
+                  Expect.equal
+                      (AnsweredBy.agree "v-1" "x" None)
+                      (Ok AnsweredBy.Reference)
+                      "no model answer is the reference's"
+
+                  match AnsweredBy.agree "v-1" "{\"dirty\":[\"1\"]}" (Some(answer "{\"dirty\":[]}")) with
+                  | Ok a -> failtestf "a perturbed model answer was stamped %A" a
+                  | Error e ->
+                      for part in [ "v-1"; "Propagation"; "propagation-differential" ] do
+                          Expect.stringContains e part "the refusal names the vector, the model and the row"
+
+              testCase "go-red: an exporter handed a disagreeing model answer refuses to render the vector"
+              <| fun _ ->
+                  let reference = CorpusCell.Row [ "dirty", CorpusFile.str "1" ]
+
+                  let perturbed: VectorOracle.Answer =
+                      { Model = VectorOracle.PropagationModel.Model
+                        LadderRow = VectorOracle.PropagationModel.LadderRow
+                        Cell = CorpusCell.Row [ "dirty", CorpusFile.str "2" ] }
+
+                  Expect.throwsC
+                      (fun () ->
+                          VectorOracle.stamp "propagation-0-dirty-set" reference (Some perturbed)
+                          |> ignore)
+                      (fun e -> Expect.stringContains e.Message "propagation-0-dirty-set" "names the vector")
+
+              testCase "a stamp outside the two shapes is refused on read"
+              <| fun _ ->
+                  for bad in
+                      [ JArr []
+                        JArr [ JStr "model:Propagation" ]
+                        JArr [ JStr "reference"; JStr "model:" ]
+                        JArr [ JStr "reference"; JStr "oracle:Propagation" ]
+                        JStr "reference" ] do
+                      Expect.isError (AnsweredBy.read bad) (sprintf "%A is refused" bad) ]

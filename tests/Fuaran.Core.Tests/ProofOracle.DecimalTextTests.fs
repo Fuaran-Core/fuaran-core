@@ -19,25 +19,11 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 
 // ---------------------------------------------------------------------------
 
-let private decToSyms (s: string) : ModelDecimal.sym list =
-    [ for c in s ->
-          if c = '-' then
-              ModelDecimal.Minus
-          elif c = '.' then
-              ModelDecimal.Dot
-          elif c >= '0' && c <= '9' then
-              ModelDecimal.Digit(System.Numerics.BigInteger(int c - int '0'))
-          else
-              ModelDecimal.Other ]
+// The text bridge is the exporters' (`VectorOracle.DecimalModel`, Phase 478): the decimal law vectors
+// are stamped by the same model through the same bridge.
+let private decToSyms = VectorOracle.DecimalModel.toSyms
 
-let private decFromSyms (l: ModelDecimal.sym list) : string =
-    l
-    |> List.map (function
-        | ModelDecimal.Minus -> "-"
-        | ModelDecimal.Dot -> "."
-        | ModelDecimal.Digit d -> string (int d)
-        | ModelDecimal.Other -> "?")
-    |> String.concat ""
+let private decFromSyms = VectorOracle.DecimalModel.ofSyms
 
 /// A decimal text's render pair — `tryCanonical`'s answer and `add`'s, production's text beside the
 /// model's symbols spelt back, `None` on a refused text.

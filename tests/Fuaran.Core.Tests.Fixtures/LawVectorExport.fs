@@ -65,19 +65,23 @@ module LawVectorExport =
     //  the vectors
     // -----------------------------------------------------------------------
 
-    /// A single exported vector: what a host is given, and what the reference actually answered.
+    /// A single exported vector: what a host is given, what the reference actually answered, and —
+    /// where an extracted model asks the same question — the model's answer to the same input, which
+    /// the render holds equal to `Expected` before it stamps the vector (Phase 478).
     type internal Vector =
         { Id: string
           Case: string
           Input: (string * CorpusCell) list
-          Expected: (string * CorpusCell) list }
+          Expected: (string * CorpusCell) list
+          Model: VectorOracle.Answer option }
 
     let private renderVector (v: Vector) : CorpusCell =
         jobj
             [ "id", jstr v.Id
               "case", jstr v.Case
               "input", jobj v.Input
-              "expected", jobj v.Expected ]
+              "expected", jobj v.Expected
+              VectorOracle.stamp v.Id (jobj v.Expected) v.Model ]
 
     // -----------------------------------------------------------------------
     //  the capabilityLaws vectors (Phase 235)
@@ -199,21 +203,25 @@ module LawVectorExport =
 
             [ { Id = sprintf "capability-%d-accept" d.Iteration
                 Case = "validateArgs"
+                Model = None
                 Input = [ "capability", jstr declaration; "args", argsJson acceptArgs ]
                 Expected = verdictOf (Capability.validateArgs d.Cap acceptArgs) }
 
               { Id = sprintf "capability-%d-out-of-space" d.Iteration
                 Case = "validateArgs"
+                Model = None
                 Input = [ "capability", jstr declaration; "args", argsJson [ "h0", outOfSpace ] ]
                 Expected = verdictOf (Capability.validateArgs d.Cap [ "h0", outOfSpace ]) }
 
               { Id = sprintf "capability-%d-unknown-arg" d.Iteration
                 Case = "validateArgs"
+                Model = None
                 Input = [ "capability", jstr declaration; "args", argsJson [ "nope", inSpace ] ]
                 Expected = verdictOf (Capability.validateArgs d.Cap [ "nope", inSpace ]) }
 
               { Id = sprintf "capability-%d-invocation-key" d.Iteration
                 Case = "invocationKey"
+                Model = None
                 Input = [ "capability", jstr declaration; "args", argsJson acceptArgs ]
                 Expected =
                   [ "key", jstr (Capability.invocationKey d.Cap acceptArgs)
@@ -222,6 +230,7 @@ module LawVectorExport =
 
               { Id = sprintf "capability-%d-declaration-round-trip" d.Iteration
                 Case = "declarationRoundTrip"
+                Model = None
                 Input = [ "declaration", jstr declaration ]
                 Expected =
                   [ "declaration",
@@ -233,6 +242,7 @@ module LawVectorExport =
 
               { Id = sprintf "capability-%d-registry-enumerate" d.Iteration
                 Case = "registryEnumerate"
+                Model = None
                 Input = [ "declarations", jarr [ jstr declaration; jstr (CapabilityCodec.encode d.CapB) ] ]
                 Expected = [ "ids", jarr (registryIds |> List.map jstr) ] } ]
 
@@ -469,6 +479,12 @@ module LawVectorExport =
             [ for name, text in canonicalInputs ->
                   { Id = "canonical-" + name
                     Case = "canonical"
+                    Model =
+                      VectorOracle.DecimalModel.answer (
+                          match VectorOracle.DecimalModel.tryCanonical text with
+                          | Some c -> accept [ "canonical", jstr c ]
+                          | None -> reject "notDecimal"
+                      )
                     Input = [ "text", jstr text ]
                     Expected =
                       match DecimalText.tryCanonical text with
@@ -477,6 +493,12 @@ module LawVectorExport =
               for name, a, b in compareInputs ->
                   { Id = "compare-" + name
                     Case = "compare"
+                    Model =
+                      VectorOracle.DecimalModel.answer (
+                          match VectorOracle.DecimalModel.compare a b with
+                          | Some c -> accept [ "order", jint c ]
+                          | None -> reject "notDecimal"
+                      )
                     Input = [ "a", jstr a; "b", jstr b ]
                     Expected =
                       match DecimalText.compare a b with
@@ -485,6 +507,12 @@ module LawVectorExport =
               for name, a, b in addInputs ->
                   { Id = "add-" + name
                     Case = "add"
+                    Model =
+                      VectorOracle.DecimalModel.answer (
+                          match VectorOracle.DecimalModel.add a b with
+                          | Some s -> accept [ "sum", jstr s ]
+                          | None -> reject "notDecimal"
+                      )
                     Input = [ "a", jstr a; "b", jstr b ]
                     Expected =
                       match DecimalText.add a b with
@@ -493,6 +521,7 @@ module LawVectorExport =
               for name, text in toFloatInputs ->
                   { Id = "to-float-" + name
                     Case = "toFloat"
+                    Model = None
                     Input = [ "text", jstr text ]
                     Expected =
                       match DecimalText.tryToFloat text, DecimalText.tryCanonical text with
@@ -504,6 +533,7 @@ module LawVectorExport =
 
                   { Id = "decode-" + name
                     Case = "codecDecode"
+                    Model = None
                     Input = [ "document", jstr doc ]
                     Expected =
                       match ColumnCodec.decode doc with
@@ -512,6 +542,7 @@ module LawVectorExport =
               for name, cells in encodeInputs ->
                   { Id = "encode-" + name
                     Case = "codecEncode"
+                    Model = None
                     Input = [ "cells", jarr (cells |> List.map cellJson) ]
                     Expected =
                       match source cells |> Result.bind ColumnCodec.tryEncode with
@@ -520,6 +551,7 @@ module LawVectorExport =
               for name, fn, cells in aggregateInputs ->
                   { Id = "aggregate-" + name
                     Case = "aggregate"
+                    Model = None
                     Input = [ "fn", jstr (aggFnTag fn); "cells", jarr (cells |> List.map cellJson) ]
                     Expected =
                       match aggregate fn cells with
@@ -735,12 +767,14 @@ module LawVectorExport =
 
                   { Id = "encode-" + name
                     Case = "fieldEncode"
+                    Model = None
                     Input = members
                     Expected =
                       accept [ "canonical", jstr (Canonical.write Rendering.CrossHost (ColumnCodec.fieldJson f)) ] }
               for name, doc in decodeInputs ->
                   { Id = "decode-" + name
                     Case = "codecDecode"
+                    Model = None
                     Input = [ "document", jstr doc ]
                     Expected =
                       match ColumnCodec.decode doc with
@@ -749,6 +783,7 @@ module LawVectorExport =
               for name, schema in fingerprintInputs ->
                   { Id = "fingerprint-" + name
                     Case = "fingerprint"
+                    Model = None
                     Input = [ "schema", schemaCell schema ]
                     Expected = accept [ "fingerprint", jstr (Schema.fingerprint schema) ] }
               for name, old, target in deltaInputs ->
@@ -756,6 +791,7 @@ module LawVectorExport =
 
                   { Id = "delta-" + name
                     Case = "delta"
+                    Model = None
                     Input = [ "old", schemaCell old; "target", schemaCell target ]
                     Expected =
                       match Schema.patch old delta with
@@ -767,6 +803,7 @@ module LawVectorExport =
               for name, old, target, deps in classifyInputs ->
                   { Id = "classify-" + name
                     Case = "classify"
+                    Model = None
                     Input =
                       [ "old", schemaCell old
                         "target", schemaCell target

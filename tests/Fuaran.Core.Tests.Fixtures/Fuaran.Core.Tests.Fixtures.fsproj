@@ -37,6 +37,7 @@
     <Compile Include="CertificationVectors.fs" />
     <Compile Include="FStarModels.fs" />
     <Compile Include="GeneratedModules.fs" />
+    <Compile Include="VectorOracle.fs" />
     <Compile Include="ApplyVectorExport.fs" />
     <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="CanonicalFormVectorExport.fs" />
@@ -69,6 +70,7 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
+    <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

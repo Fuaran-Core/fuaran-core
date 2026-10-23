@@ -210,13 +210,34 @@ module RefusalCorpus =
             | Error(NotJson e) -> Error("NotJson/" + caseName (box e.Kind))
             | Error e -> Error(caseName (box e))
 
-    let private line (v: Vector) : CorpusCell =
-        let result =
-            match outcome v with
-            | Error cls -> [ "refusal", JStr cls ]
-            | Ok canonical -> [ "canonical", JStr canonical ]
+    /// An outcome as a vector records it.
+    let private outcomeMembers (o: Result<string, string>) : (string * JVal) list =
+        match o with
+        | Error cls -> [ "refusal", JStr cls ]
+        | Ok canonical -> [ "canonical", JStr canonical ]
 
-        CorpusCell.Value(JObj([ "name", JStr v.Name; "codec", JStr v.Codec; "input", JStr v.Input ] @ result))
+    /// The parser model's outcome for a `json` vector (Phase 478): its read, re-encoded by the same
+    /// canonical writer. The `column` and `profile` codecs are answered by the reference alone.
+    let private modelOutcome (v: Vector) : (string * string * JVal) option =
+        match v.Codec with
+        | "json" ->
+            let o =
+                VectorOracle.JsonModel.readStrict v.Input
+                |> Result.map (Canonical.write Rendering.CrossHost)
+
+            Some(VectorOracle.JsonModel.Model, VectorOracle.JsonModel.LadderRow, JObj(outcomeMembers o))
+        | _ -> None
+
+    let private line (v: Vector) : CorpusCell =
+        let result = outcomeMembers (outcome v)
+
+        CorpusCell.Value(
+            JObj(
+                [ "name", JStr v.Name; "codec", JStr v.Codec; "input", JStr v.Input ]
+                @ result
+                @ [ VectorOracle.stampValue v.Name (JObj result) (modelOutcome v) ]
+            )
+        )
 
     /// The vectors file, rendered: a header, then one canonical line per vector.
     let render () : string =
@@ -248,6 +269,8 @@ module RefusalCorpus =
             JObj(
                 [ "name", JStr v.Name; "reader", JStr v.Reader; "document", JStr v.Document ]
                 @ result
+                // The seam models encode; none reads a seam document back (Phase 478).
+                @ [ VectorOracle.stampValue v.Name (JObj result) None ]
             )
         )
 

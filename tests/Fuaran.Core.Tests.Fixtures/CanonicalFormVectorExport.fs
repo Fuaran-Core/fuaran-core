@@ -121,7 +121,9 @@ module CanonicalFormVectorExport =
                 [ "id", CorpusFile.str id
                   "law", CorpusFile.str law
                   "document", CorpusFile.str doc
-                  "expected", CorpusFile.str bytes ]
+                  "expected", CorpusFile.str bytes
+                  // No extracted model reads an IDL's aliases, presence or defaults (Phase 478).
+                  VectorOracle.stamp id (CorpusFile.str bytes) None ]
         | Error e -> failwithf "the canonical-form input %s did not read: %s" id e
 
     let internal allVectors () : CorpusCell list = inputs |> List.map vector

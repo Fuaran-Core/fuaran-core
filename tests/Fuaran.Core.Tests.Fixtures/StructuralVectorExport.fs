@@ -1207,12 +1207,17 @@ module StructuralVectorExport =
               Rows =
                 f.Vectors()
                 |> List.map (fun v ->
+                    let expected = expectationOf f v
+
                     CorpusCell.Row
                         [ "id", CorpusFile.str v.Id
                           "case", CorpusFile.str v.Case
                           "description", CorpusFile.str v.Description
                           "input", CorpusCell.Value v.Input
-                          "expected", CorpusCell.Value(expectationOf f v) ]) }
+                          "expected", CorpusCell.Value expected
+                          // Reference-only until the chain, DAG and diff models are evaluated here
+                          // (Phase 478 names the successor).
+                          VectorOracle.stamp v.Id (CorpusCell.Value expected) None ]) }
 
     /// The family's self-enumerated index, in the one manifest schema.
     let internal manifest (f: Family) : CorpusManifest =

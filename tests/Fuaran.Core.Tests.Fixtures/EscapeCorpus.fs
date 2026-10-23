@@ -20,7 +20,9 @@ module EscapeCorpus =
             { Head =
                 [ "family", CorpusFile.str "stringEscape"
                   "description", CorpusFile.str description
-                  "format", CorpusFile.str "name<TAB>spelling<TAB>pre-image" ]
+                  "format", CorpusFile.str "name<TAB>spelling<TAB>pre-image"
+                  // A line carries no member, so the stamp is the file's, for every line (Phase 478).
+                  "answeredBy", CorpusFile.answeredBy AnsweredBy.Reference ]
               Items = "lines"
               Rows = StringEscapeVectors.lines () |> List.map CorpusFile.str }
 
