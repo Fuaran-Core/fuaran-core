@@ -67,6 +67,28 @@ let tests =
                   let failures = vectors |> List.choose ApplyVectorExport.checkVector
                   Expect.isEmpty failures (sprintf "%A" failures)
 
+          // Phase 477: the manifest's `fuaran` record is THIS leg's measurement, so its count is the
+          // number of committed vectors the leg above checks, and it names no version or sha.
+          testCase "the committed manifest's own adoption record counts the cases this leg checks"
+          <| fun _ ->
+              let root = OwnedConformance.root ()
+
+              let checkedHere =
+                  match ApplyVectorExport.parseVectors (File.ReadAllText(ApplyVectorExport.vectorsPath root)) with
+                  | Ok vectors -> List.length vectors
+                  | Error m -> failtest m
+
+              match CorpusFile.readAdoption (File.ReadAllText(ApplyVectorExport.manifestPath root)) with
+              | Error e -> failtest e
+              | Ok families ->
+                  let hosts =
+                      families |> List.find (fun (id, _) -> id = ApplyVectorExport.familyId) |> snd
+
+                  Expect.equal
+                      (hosts |> List.tryFind (fun (h, _) -> h = "fuaran") |> Option.map snd)
+                      (Some(HostAdoption.Measured(checkedHere, AdoptionSource.Here)))
+                      "the reference leg's record is its own count, measured here"
+
           testCase "a wrong expected HASH reddens the leg"
           <| fun _ ->
               // Perturbed in the RENDERED TEXT rather than in a record, so the leg is proved to fail

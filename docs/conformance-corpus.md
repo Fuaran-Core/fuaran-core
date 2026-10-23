@@ -9,7 +9,7 @@ gate.
 |---|---|---|
 | **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read; every committed file is held to its exporter row's render by one reading (Phase 508) | `tests/Fuaran.Core.Tests/ExportersTests.fs` (freshness); `LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracle.PreservationTests.fs` (the oracle) |
 | **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (warn-first, on every workspace sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
-| **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
+| **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; every self-enumerated `manifest.json` records per-host adoption as a record with a case count (Phase 477) | not this repository's question — see [Host adoption is a record](#adoption-record) |
 
 ## What this repository owns
 
@@ -180,7 +180,7 @@ One table, one writer, one manifest schema, one freshness reading:
   file the corpus copies.
 - **The manifest schema** is `CorpusManifest` — a version, a description, and one `CorpusManifestRow` per
   family (`id`, `kind`, `file`, `vectors`, `adoption`, `description`, in that order, the adoption a spaced
-  object in roster order). `apply/`, `refusals/` and `decode/` all write it; the latter two wrote their
+  object in roster order, one record per host — [Host adoption is a record](#adoption-record)). `apply/`, `refusals/` and `decode/` all write it; the latter two wrote their
   adoption map in `Canon.render`'s compact sorted form until Phase 508, and moved onto the apply
   manifest's shape (neither file is copied into the corpus). The corpus's `laws/manifest.json` is not a
   self-enumerated manifest: it indexes families other producers own and is restamped, never rendered.
@@ -204,7 +204,7 @@ A new family is one row. The four host-compliance phases that were parked behind
 fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on the
 rows it stamps, written by the same writer; #479 (the chain, DAG, merge and diff vector families) is
 rows; #481 (the limits vector family) is one row; and #484 (each host declares its compliance and Core
-validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaces
+validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaced
 the `adoption` member's value in `CorpusManifestRow`, in one place, for every manifest at once.
 
 A tool verb rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
@@ -575,6 +575,49 @@ parser's `JsonErrorKind` names the class inside it, closed at thirteen cases (`U
 the sentence beside it is the host's own. The vectors are emitted, never hand-edited
 (`render refusals`, `render decode`), and the manifests are authoritative for the counts.
 
+## Host adoption is a record (Phase 477) {#adoption-record}
+
+Every self-enumerated manifest this repository emits (`apply/`, `refusals/`, `decode/`, `chain/`, `dag/`,
+`merge/`, `diff/`) records each host's adoption of each family as a RECORD, never a bare status string
+(DECISIONS.md D222):
+
+```json
+"adoption": { "fuaran": { "status": "adopted", "cases": 25 },
+              "fuaran-ts": { "status": "proposed" },
+              "fuaran-go": { "status": "adopted", "cases": 25, "kitVersion": "0.41.0", "sha": "0123abc" } }
+```
+
+| Member | When | Meaning |
+|---|---|---|
+| `status` | always | `proposed` (specified, not run), `adopted` (run, at least one case asserted), `vacuous` (run, nothing asserted), `declined` (the host will not run it) |
+| `cases` | `adopted` and `vacuous` only | how many vectors the host's leg asserted: at least one and at most the row's `vectors` for `adopted`, exactly `0` for `vacuous` |
+| `kitVersion`, `sha` | together, on a measurement made in ANOTHER repository | the Core version the host's leg certified against, and the host commit (7 to 40 lower-case hex digits) that landed it |
+
+**The status is derived, never asserted.** The writer (`CorpusFile.adoptionCell`) takes a measurement
+and writes `vacuous` at zero cases and `adopted` above it, so it cannot state an adoption with no case
+behind it — the failure Phase 196 named for Core's own law families, where a family that asserted
+nothing rendered the same cell as one that asserted everything. `proposed` and `declined` carry no
+other member: nothing is claimed that was not measured.
+
+**This repository's own entry carries no `kitVersion` and no `sha`.** Where Core's own suite is the F#
+leg (`apply/` and the four structural families, host `fuaran`), the measurement is the commit that
+carries the manifest: a file cannot name its own commit, and a version stamp would move these files
+on every `<Version>` move, which is exactly what they are built not to do (see [The `kitVersion`
+stamp](#the-kitversion-stamp)). `ApplyVectorTests` holds the apply family's own record to the number
+of committed vectors that leg checks.
+
+**The suite reads it back.** `CorpusFile.readAdoption` reads a committed manifest and refuses, naming
+the family, the host and the remedy: a bare string (the shape before `0.41.0`; re-render the manifest
+with its exporter, `render <family>`), a status outside the four, `adopted` with `cases: 0` (it must read
+`vacuous`), `vacuous` with any case, a count above the family's vectors, a measurement on a `proposed` or
+`declined` entry, a `kitVersion` without its `sha` or the reverse, and any other member.
+`ExportersTests` reads every committed manifest through it, beside the byte-for-byte freshness check.
+
+**A host flips its own entry** in the change-set that lands its leg, by editing the row's `Adoption` in
+this repository's exporter (the manifest is emitted, never hand-edited): `HostAdoption.Measured(cases,
+AdoptionSource.Host(kitVersion, sha))`. The corpus's `apply/manifest.json` is a shared index (D211); this
+repository owns only the `skeletonApply` row there, and other producers' rows keep their own shape.
+
 ## The `apply/` family
 
 Every other family in that corpus is a DECODE family: `nodes/`, `ops/`, `reject/` and `lenient/`
@@ -642,8 +685,8 @@ it with `NotAContainer(t, k)`.
 
 ### Adoption
 
-The F# host certifies first, and its `adoption` entry reads `adopted`. The other four read
-`proposed`: the family is fully specified and certified before any of them emits it, and a
+The F# host certifies first, and its `adoption` entry reads `adopted` with the case count its leg
+checked ([the record](#adoption-record)). The other four read `proposed`: the family is fully specified and certified before any of them emits it, and a
 `proposed` family is reported BY NAME by a host that has not adopted it rather than skipped
 silently. A host flips its own entry in the change-set that lands its leg.
 

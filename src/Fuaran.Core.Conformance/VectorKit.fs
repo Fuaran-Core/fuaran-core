@@ -164,9 +164,148 @@ type CorpusCell =
     /// An array in AUTHOR order, spaced — `[a, b]` — and `[]` with no item.
     | List of items: CorpusCell list
 
+/// Where a measured host adoption was measured (Phase 477, DECISIONS.md D222).
+[<RequireQualifiedAccess>]
+type internal AdoptionSource =
+    /// By this repository's own suite, in the commit that carries the manifest. No `kitVersion` and no
+    /// `sha` are written: a file cannot name the commit that holds it, and a version stamp would move
+    /// the file on every version move, which these families are built not to do.
+    | Here
+    /// By a host's leg in the host's own repository: the Core version that leg certified against, and
+    /// the host commit that landed it (lower-case hex, 7 to 40 digits).
+    | Host of kitVersion: string * sha: string
+
+/// One host's adoption of one family (Phase 477, D222): a record, never a bare status string. The
+/// written `status` is DERIVED, so the writer cannot state an adoption it did not measure: a leg that
+/// asserted no case reads `vacuous`, and only a leg that asserted at least one reads `adopted`.
+[<RequireQualifiedAccess>]
+type internal HostAdoption =
+    /// The family is specified; the host has not run it. Written `{ "status": "proposed" }`.
+    | Proposed
+    /// The host has decided not to run it. Written `{ "status": "declined" }`.
+    | Declined
+    /// The host's leg ran and asserted `cases` vectors — `adopted` above zero, `vacuous` at zero.
+    | Measured of cases: int * source: AdoptionSource
+
+[<RequireQualifiedAccess>]
+module internal HostAdoption =
+
+    /// The four statuses, as written.
+    let statuses = [ "proposed"; "adopted"; "vacuous"; "declined" ]
+
+    /// The status an adoption is written with.
+    let status (a: HostAdoption) : string =
+        match a with
+        | HostAdoption.Proposed -> "proposed"
+        | HostAdoption.Declined -> "declined"
+        | HostAdoption.Measured(0, _) -> "vacuous"
+        | HostAdoption.Measured _ -> "adopted"
+
+    let private isSha (s: string) =
+        s.Length >= 7
+        && s.Length <= 40
+        && s |> Seq.forall (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+
+    let private isVersion (s: string) =
+        s.Length > 0
+        && System.Char.IsDigit s[0]
+        && s |> Seq.forall (fun c -> System.Char.IsLetterOrDigit c || c = '.' || c = '-')
+
+    /// One adoption entry read back from a manifest, for `host` on a family of `vectors` vectors.
+    /// Refused, naming the remedy: a bare string (the shape before 0.41.0); a status outside the four;
+    /// a measurement on a `proposed` or `declined` entry; an `adopted` entry with no case or more cases
+    /// than the family holds; a `vacuous` one with any; a `kitVersion` without its `sha` or the reverse;
+    /// and any other member.
+    let read (vectors: int) (host: string) (entry: JVal) : Result<HostAdoption, string> =
+        let at = "adoption." + host
+        let remedy = "re-render the manifest with its exporter (`render <family>`)"
+
+        match entry with
+        | JStr s ->
+            Error(
+                sprintf
+                    "%s is the bare string \"%s\": since 0.41.0 an adoption entry is a record { \"status\", \"cases\", \"kitVersion\", \"sha\" } (Phase 477) — %s"
+                    at
+                    s
+                    remedy
+            )
+        | JObj members ->
+            let field k =
+                members |> List.tryFind (fun (n, _) -> n = k) |> Option.map snd
+
+            let unknown =
+                members
+                |> List.map fst
+                |> List.filter (fun k -> not (List.contains k [ "status"; "cases"; "kitVersion"; "sha" ]))
+
+            let source () =
+                match field "kitVersion", field "sha" with
+                | None, None -> Ok AdoptionSource.Here
+                | Some(JStr v), Some(JStr s) when isVersion v && isSha s -> Ok(AdoptionSource.Host(v, s))
+                | Some(JStr v), Some(JStr s) ->
+                    Error(
+                        sprintf
+                            "%s names kitVersion \"%s\" and sha \"%s\": a version starts with a digit, and a sha is 7 to 40 lower-case hex digits"
+                            at
+                            v
+                            s
+                    )
+                | Some _, None
+                | None, Some _ ->
+                    Error(
+                        sprintf
+                            "%s carries one of kitVersion and sha without the other: a host's measurement names both, the emitting repository's own names neither"
+                            at
+                    )
+                | _ -> Error(sprintf "%s: kitVersion and sha are strings" at)
+
+            match unknown, field "status", field "cases" with
+            | k :: _, _, _ ->
+                Error(sprintf "%s carries the member \"%s\": an entry has only status, cases, kitVersion and sha" at k)
+            | [], Some(JStr("proposed" | "declined" as s)), _ when members.Length > 1 ->
+                Error(
+                    sprintf
+                        "%s reads `%s` beside a measurement: an unmeasured entry is { \"status\": \"%s\" } and nothing else, so nothing is claimed that was not measured"
+                        at
+                        s
+                        s
+                )
+            | [], Some(JStr "proposed"), _ -> Ok HostAdoption.Proposed
+            | [], Some(JStr "declined"), _ -> Ok HostAdoption.Declined
+            | [], Some(JStr("adopted" | "vacuous" as s)), None ->
+                Error(
+                    sprintf
+                        "%s reads `%s` and carries no `cases`: a measured entry states how many cases its leg asserted"
+                        at
+                        s
+                )
+            | [], Some(JStr "adopted"), Some(JInt 0) ->
+                Error(
+                    sprintf
+                        "%s reads `adopted` with cases 0: a leg that asserted nothing is not an adoption — it must read `vacuous`"
+                        at
+                )
+            | [], Some(JStr "vacuous"), Some(JInt n) when n <> 0 ->
+                Error(
+                    sprintf
+                        "%s reads `vacuous` with cases %d: `vacuous` is the zero-case reading; %d cases read `adopted`"
+                        at
+                        n
+                        n
+                )
+            | [], Some(JStr("adopted" | "vacuous")), Some(JInt n) when n < 0 || n > vectors ->
+                Error(sprintf "%s claims %d cases of a family that holds %d vectors" at n vectors)
+            | [], Some(JStr("adopted" | "vacuous")), Some(JInt n) ->
+                source () |> Result.map (fun s -> HostAdoption.Measured(n, s))
+            | [], Some(JStr("adopted" | "vacuous")), Some _ -> Error(sprintf "%s: `cases` is an integer" at)
+            | [], Some(JStr s), _ ->
+                Error(sprintf "%s reads `%s`: the status is one of %s" at s (String.concat ", " statuses))
+            | [], _, _ -> Error(sprintf "%s carries no string `status` — %s" at remedy)
+        | _ -> Error(sprintf "%s is neither a record nor a string — %s" at remedy)
+
 /// One family's row in a self-enumerated family manifest (Phase 508) — the ONE manifest schema the
 /// emitted families share, so a validator over a manifest reads one shape. Internal (D210): only this
-/// repository writes a manifest, and fuaran-core#477's adoption record will replace `Adoption`.
+/// repository writes a manifest.
 type internal CorpusManifestRow =
     {
         /// The family's id.
@@ -177,8 +316,8 @@ type internal CorpusManifestRow =
         File: string
         /// How many vectors that file holds — the manifest is authoritative for the count.
         Vectors: int
-        /// Each host's adoption of the family, in roster order.
-        Adoption: (string * string) list
+        /// Each host's adoption of the family, in roster order — a record per host (Phase 477).
+        Adoption: (string * HostAdoption) list
         /// What the family pins.
         Description: string
     }
@@ -271,16 +410,68 @@ module CorpusFile =
         + rows
         + "  ]\n}\n"
 
+    /// One host's adoption as its record (Phase 477): `status`, then for a measurement `cases`, then
+    /// for a host's own measurement `kitVersion` and `sha`.
+    let internal adoptionCell (a: HostAdoption) : CorpusCell =
+        let measured =
+            match a with
+            | HostAdoption.Measured(cases, AdoptionSource.Here) -> [ "cases", num cases ]
+            | HostAdoption.Measured(cases, AdoptionSource.Host(kitVersion, sha)) ->
+                [ "cases", num cases; "kitVersion", str kitVersion; "sha", str sha ]
+            | HostAdoption.Proposed
+            | HostAdoption.Declined -> []
+
+        CorpusCell.Row(("status", str (HostAdoption.status a)) :: measured)
+
     /// A manifest row as one item: its members in schema order, the adoption a spaced object in
-    /// roster order.
+    /// roster order, one record per host.
     let internal manifestRow (r: CorpusManifestRow) : CorpusCell =
         CorpusCell.Row
             [ "id", str r.Id
               "kind", str r.Kind
               "file", str r.File
               "vectors", num r.Vectors
-              "adoption", CorpusCell.Row(r.Adoption |> List.map (fun (host, status) -> host, str status))
+              "adoption", CorpusCell.Row(r.Adoption |> List.map (fun (host, a) -> host, adoptionCell a))
               "description", str r.Description ]
+
+    /// A committed self-enumerated manifest's adoption, read back (Phase 477): per family, its id and
+    /// each host's record, in file order. The first entry that is not a record in the schema is the
+    /// refusal, naming its family, its host and the remedy.
+    let internal readAdoption (text: string) : Result<(string * (string * HostAdoption) list) list, string> =
+        let memberOf k (fields: (string * JVal) list) =
+            fields |> List.tryFind (fun (n, _) -> n = k) |> Option.map snd
+
+        let readRow (row: JVal) =
+            match row with
+            | JObj fields ->
+                match memberOf "id" fields, memberOf "vectors" fields, memberOf "adoption" fields with
+                | Some(JStr id), Some(JInt vectors), Some(JObj entries) ->
+                    entries
+                    |> List.fold
+                        (fun acc (host, entry) ->
+                            acc
+                            |> Result.bind (fun read ->
+                                HostAdoption.read vectors host entry
+                                |> Result.map (fun a -> read @ [ host, a ])
+                                |> Result.mapError (fun e -> "family `" + id + "`: " + e)))
+                        (Ok [])
+                    |> Result.map (fun hosts -> id, hosts)
+                | _ -> Error "a family row carries no string `id`, integer `vectors` and object `adoption`"
+            | _ -> Error "a family row is not an object"
+
+        match Json.parse text with
+        | Error e -> Error("the manifest does not parse: " + e)
+        | Ok(JObj fields) ->
+            match memberOf "families" fields with
+            | Some(JArr rows) ->
+                rows
+                |> List.fold
+                    (fun acc row ->
+                        acc
+                        |> Result.bind (fun read -> readRow row |> Result.map (fun r -> read @ [ r ])))
+                    (Ok [])
+            | _ -> Error "the manifest carries no `families` array"
+        | Ok _ -> Error "the manifest is not an object"
 
     /// A manifest as the document `render` writes.
     let internal manifest (m: CorpusManifest) : CorpusDocument =

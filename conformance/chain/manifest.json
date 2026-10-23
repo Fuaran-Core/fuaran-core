@@ -2,6 +2,6 @@
   "version": 1,
   "description": "A Core-owned structural family over the skeleton witness (Phase 549). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count.",
   "families": [
-    { "id": "skeletonChain", "kind": "chain-vectors", "file": "skeleton-chain.json", "vectors": 16, "adoption": { "fuaran": "adopted", "fuaran-ts": "proposed", "fuaran-py": "proposed", "fuaran-go": "proposed", "fuaran-rs": "proposed" }, "description": "The op-stream chain over opaque payloads: append (records, pre-images, hashes, tip) and walk (intact, or the first break)." }
+    { "id": "skeletonChain", "kind": "chain-vectors", "file": "skeleton-chain.json", "vectors": 16, "adoption": { "fuaran": { "status": "adopted", "cases": 16 }, "fuaran-ts": { "status": "proposed" }, "fuaran-py": { "status": "proposed" }, "fuaran-go": { "status": "proposed" }, "fuaran-rs": { "status": "proposed" } }, "description": "The op-stream chain over opaque payloads: append (records, pre-images, hashes, tip) and walk (intact, or the first break)." }
   ]
 }

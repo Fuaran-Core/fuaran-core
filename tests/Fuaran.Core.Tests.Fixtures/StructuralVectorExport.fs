@@ -1225,8 +1225,9 @@ module StructuralVectorExport =
                 File = f.FileName
                 Vectors = List.length (f.Vectors())
                 Adoption =
-                  ("fuaran", "adopted")
-                  :: (ApplyVectorExport.hostRoster |> List.map (fun h -> h, "proposed"))
+                  // Measured by this repository's own suite (`StructuralVectorTests`), every vector.
+                  ("fuaran", HostAdoption.Measured(List.length (f.Vectors()), AdoptionSource.Here))
+                  :: (ApplyVectorExport.hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
                 Description = f.Summary } ] }
 
     let renderManifest (f: Family) : string =

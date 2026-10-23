@@ -523,7 +523,11 @@ module ApplyVectorExport =
                 Kind = "apply-vectors"
                 File = vectorsFileName
                 Vectors = List.length (cases ())
-                Adoption = ("fuaran", "adopted") :: (hostRoster |> List.map (fun h -> h, "proposed"))
+                // The F# leg is this repository's own suite (`ApplyVectorTests`), which runs every
+                // case: measured here, so the record names no version and no sha (Phase 477).
+                Adoption =
+                  ("fuaran", HostAdoption.Measured(List.length (cases ()), AdoptionSource.Here))
+                  :: (hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
                 Description =
                   "The skeleton-op apply contract over the witness surface: accept with the "
                   + "result's canonical bytes and hash, or reject with the class, per validator "

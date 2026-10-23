@@ -450,7 +450,7 @@ module DecodeRejectCorpus =
                 Kind = "decode-rejects"
                 File = vectorsFileName
                 Vectors = List.length vectors
-                Adoption = RefusalCorpus.hostRoster |> List.map (fun h -> h, "proposed")
+                Adoption = RefusalCorpus.hostRoster |> List.map (fun h -> h, HostAdoption.Proposed)
                 Description =
                   "The wire-level decode error contract: every decode code, at the path it names, over a shape grammar each host reads with its own combinators." } ] }
 

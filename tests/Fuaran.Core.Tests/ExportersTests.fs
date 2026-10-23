@@ -74,6 +74,116 @@ let tests =
                       "{\n  \"family\": \"x\\u000a\\\"y\\\"\",\n  \"count\": 2,\n  \"vectors\": [\n  ]\n}\n"
                       "an empty array closes on the next line"
 
+          // Phase 477 — every self-enumerated manifest this repository commits reads as the record schema.
+          yield
+              testCase "every committed family manifest carries a record per host, and a measured one counts its cases"
+              <| fun _ ->
+                  let manifests =
+                      [ for e in table do
+                            for path, _ in e.Files(e.Root()) do
+                                if Path.GetFileName path = "manifest.json" && File.Exists path then
+                                    yield path ]
+                      |> List.distinct
+
+                  Expect.isGreaterThanOrEqual manifests.Length 7 "apply, refusals, decode, chain, dag, merge and diff"
+
+                  for path in manifests do
+                      match CorpusFile.readAdoption (File.ReadAllText path) with
+                      | Error e -> failtestf "%s: %s" path e
+                      | Ok families ->
+                          Expect.isNonEmpty families (sprintf "%s indexes a family" path)
+
+                          for id, hosts in families do
+                              Expect.isNonEmpty hosts (sprintf "%s: `%s` records adoption for its roster" path id)
+
+          yield
+              testCase "go-red: the adoption reader refuses every entry that claims what was not measured"
+              <| fun _ ->
+                  let entry (adoption: string) =
+                      "{\n  \"version\": 1,\n  \"families\": [\n    { \"id\": \"f\", \"vectors\": 3, \"adoption\": { \"h\": "
+                      + adoption
+                      + " } }\n  ]\n}\n"
+
+                  let refused (adoption: string) (says: string) =
+                      match CorpusFile.readAdoption (entry adoption) with
+                      | Ok read -> failtestf "%s was read as %A" adoption read
+                      | Error e ->
+                          Expect.stringContains e "family `f`: adoption.h" "names the family and the host"
+                          Expect.stringContains e says (sprintf "%s is refused, saying why" adoption)
+
+                  let reads (adoption: string) (expected: HostAdoption) =
+                      Expect.equal
+                          (CorpusFile.readAdoption (entry adoption))
+                          (Ok [ "f", [ "h", expected ] ])
+                          (sprintf "%s reads" adoption)
+
+                  refused "\"adopted\"" "bare string"
+                  refused "\"adopted\"" "render <family>"
+                  refused "{ \"status\": \"adopted\", \"cases\": 0 }" "must read `vacuous`"
+                  refused "{ \"status\": \"adopted\" }" "carries no `cases`"
+                  refused "{ \"status\": \"vacuous\", \"cases\": 2 }" "zero-case reading"
+                  refused "{ \"status\": \"adopted\", \"cases\": 4 }" "holds 3 vectors"
+                  refused "{ \"status\": \"proposed\", \"cases\": 3 }" "nothing is claimed"
+                  refused "{ \"status\": \"adopted\", \"cases\": 3, \"sha\": \"abcdef1\" }" "without the other"
+
+                  refused
+                      "{ \"status\": \"adopted\", \"cases\": 3, \"kitVersion\": \"0.41.0\", \"sha\": \"XYZ\" }"
+                      "hex"
+
+                  refused "{ \"status\": \"green\" }" "one of proposed, adopted, vacuous, declined"
+                  refused "{ \"status\": \"proposed\", \"note\": \"x\" }" "carries the member \"note\""
+
+                  reads "{ \"status\": \"proposed\" }" HostAdoption.Proposed
+                  reads "{ \"status\": \"declined\" }" HostAdoption.Declined
+                  reads "{ \"status\": \"vacuous\", \"cases\": 0 }" (HostAdoption.Measured(0, AdoptionSource.Here))
+
+                  reads
+                      "{ \"status\": \"adopted\", \"cases\": 3, \"kitVersion\": \"0.41.0\", \"sha\": \"abcdef1\" }"
+                      (HostAdoption.Measured(3, AdoptionSource.Host("0.41.0", "abcdef1")))
+
+          yield
+              testCase
+                  "the writer derives the status, so a zero-case leg is written `vacuous`, and reads back as written"
+              <| fun _ ->
+                  let written =
+                      [ HostAdoption.Proposed
+                        HostAdoption.Declined
+                        HostAdoption.Measured(0, AdoptionSource.Here)
+                        HostAdoption.Measured(2, AdoptionSource.Here)
+                        HostAdoption.Measured(
+                            3,
+                            AdoptionSource.Host("0.41.0", "0123456789abcdef0123456789abcdef01234567")
+                        ) ]
+
+                  Expect.equal
+                      (written |> List.map HostAdoption.status)
+                      [ "proposed"; "declined"; "vacuous"; "adopted"; "adopted" ]
+                      "the status is a function of the measurement"
+
+                  let text =
+                      CorpusFile.render (
+                          CorpusFile.manifest
+                              { Version = 1
+                                Description = "d"
+                                Families =
+                                  [ { Id = "f"
+                                      Kind = "k"
+                                      File = "f.json"
+                                      Vectors = 3
+                                      Adoption = written |> List.mapi (fun i a -> sprintf "h%d" i, a)
+                                      Description = "d" } ] }
+                      )
+
+                  Expect.stringContains
+                      text
+                      "\"h2\": { \"status\": \"vacuous\", \"cases\": 0 }"
+                      "a zero-case measurement is written vacuous"
+
+                  Expect.equal
+                      (CorpusFile.readAdoption text)
+                      (Ok [ "f", written |> List.mapi (fun i a -> sprintf "h%d" i, a) ])
+                      "every record the writer emits, the reader reads back unchanged"
+
           yield
               testCase "every family is one row, named once"
               <| fun _ ->
