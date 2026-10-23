@@ -1,0 +1,20 @@
+{
+  "family": "premiseRecursionDepth",
+  "premise": "host-recursion-depth",
+  "description": "The stack premise. The parser descends once per nesting level and refuses an object or array opened past 512 levels by name, before it descends: a document nested 512 deep is read, one nested 513 deep or more is `refused` with `LimitExceeded/depth`, however deep it goes. Each vector gives `input`: the text is `open` repeated `depth` times, then `inner`, then `close` repeated `depth` times. An accepted document's answer is `accepted`, the SHA-256 (lower-case hex) of its canonical rendering, which is the text itself. A host reproduces every answer on the SMALLEST stack it supports, so the 512-deep documents are read without exhausting it and the deeper ones are refused rather than overflowing it.",
+  "vectors": [
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"d0bca111f8628137adc4c16f123496dcdd1d590d06cb5d9acd68b39fe656fb97"},"id":"array-1","input":{"close":"]","depth":1,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"db407f11d7ede59abaab0e98e097ff2dae10a048207b801745d7199ef19c2387"},"id":"array-2","input":{"close":"]","depth":2,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"f0244ae1938270f711155b0a26a4307cde7050495140dd858a88a1cfc378cf40"},"id":"array-64","input":{"close":"]","depth":64,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"9cd13e3d387f21922247827f547ec757907ddbd9abedaf6c5efa817381626d0b"},"id":"array-256","input":{"close":"]","depth":256,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"c8442853d10e181abd4cf531ddf430e06eef54284550ae0a6172c916518b7e77"},"id":"array-511","input":{"close":"]","depth":511,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"8ffc0a1c6c684d5a33431fd2d1cd8295423335157134c42b1ee0be9ab57b36eb"},"id":"array-512","input":{"close":"]","depth":512,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"refused":"LimitExceeded/depth"},"id":"array-513","input":{"close":"]","depth":513,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"refused":"LimitExceeded/depth"},"id":"array-1024","input":{"close":"]","depth":1024,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"refused":"LimitExceeded/depth"},"id":"array-100000","input":{"close":"]","depth":100000,"inner":"0","open":"["}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"a36d9b25837988df0a819030f6051b1b1dfe46ac9e482c3e1e0ca0ad6df4276c"},"id":"object-511","input":{"close":"}","depth":511,"inner":"0","open":"{\"a\":"}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"accepted":"367c3e9f69e83d47483569127a477edf6372ecd398c63d3ce6a55abbfc377b9b"},"id":"object-512","input":{"close":"}","depth":512,"inner":"0","open":"{\"a\":"}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"refused":"LimitExceeded/depth"},"id":"object-513","input":{"close":"}","depth":513,"inner":"0","open":"{\"a\":"}},
+    {"answeredBy":["reference","model:JsonParse"],"expected":{"refused":"LimitExceeded/depth"},"id":"object-100000","input":{"close":"}","depth":100000,"inner":"0","open":"{\"a\":"}}
+  ]
+}

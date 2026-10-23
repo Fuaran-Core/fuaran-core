@@ -18,6 +18,7 @@
     "docs/conformance-families.md",
     "docs/host-evidence-map.json",
     "docs/host-evidence-map.md",
+    "docs/host-premises.md",
     "docs/idl-stability-classes.md",
     "docs/releases/**",
     "docs/units.md",

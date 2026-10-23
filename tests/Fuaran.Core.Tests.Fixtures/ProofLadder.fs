@@ -32,6 +32,11 @@ type LadderInputs =
         /// Phase 184 narrowed it from the `Conformance` module's whole public static surface, so
         /// an obligation can no longer name a law that no conformance census enumerates.
         Laws: Set<string>
+        /// The probe families a `host-premise` row's `probe` may name (Phase 483) — the family ids the
+        /// premise exporter writes under `conformance/premises/`, for the real file
+        /// (`PremiseProbeExport.familyIds`). Every one must be named by exactly one row: a probe no row
+        /// names is a premise the ladder never stated.
+        Probes: Set<string>
     }
 
 /// The closed level set, in ladder order (a message renders them in this order, not sorted).
@@ -48,8 +53,11 @@ let internal phaseForm = Regex(@"^fuaran-core#[1-9][0-9]*$", RegexOptions.Compil
 /// kind of ASSUMED an assumed row is, which is the question a domain instantiating this substrate
 /// actually has: `domain-obligation` is what it owes and what a green kit run at its own witness
 /// discharges, `model-bridge` is this repository's own model-to-production gap and is inherited,
-/// `premise` is what nothing discharges at all.
-let classOrder = [ "domain-obligation"; "model-bridge"; "premise" ]
+/// `premise` is what nothing discharges at all. `host-premise` (Phase 483) is what the models take from
+/// the runtime they run on — a string model, float digits, integer width, a hash, a stack — which this
+/// implementation's runtime gives it and another host's may not: each names a `probe`, the vector family
+/// under `conformance/premises/` whose every vector a HOST reproduces to discharge it on its own runtime.
+let classOrder = [ "domain-obligation"; "model-bridge"; "premise"; "host-premise" ]
 
 let internal classes = Set.ofList classOrder
 
@@ -364,6 +372,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                 let cls = strMember row "class"
                 let dischargedBy = strMember row "dischargedBy"
                 let closes = strMember row "closes"
+                let probe = strMember row "probe"
 
                 let misplaced (clause: string) (name: string) (value: string option) (why: string) =
                     match value with
@@ -390,6 +399,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                             dischargedBy
                             "only a `domain-obligation` names a discharging law"
                         @ misplaced "assumed-class" "closes" closes "only a `model-bridge` names a closing phase"
+                        @ misplaced "assumed-class" "probe" probe "only a `host-premise` names a probe"
                     else
                         match cls with
                         | None ->
@@ -436,6 +446,11 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 "closes"
                                 closes
                                 "a domain obligation is discharged by a law, not closed by a phase"
+                            @ misplaced
+                                "obligation-law"
+                                "probe"
+                                probe
+                                "a domain discharges an obligation at its witness, not a host on its runtime"
                         | Some "model-bridge" ->
                             let closesFindings =
                                 match closes with
@@ -460,6 +475,41 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 "dischargedBy"
                                 dischargedBy
                                 "no law a domain runs closes a gap between this repository's model and its own production code"
+                            @ misplaced
+                                "bridge-closes"
+                                "probe"
+                                probe
+                                "no host's run closes a gap between this repository's model and its own production code"
+                        | Some "host-premise" ->
+                            // Phase 483: discharged by a HOST reproducing its probe, so it names the
+                            // probe, and neither a law (no domain runs it) nor a `closes`.
+                            let probeFindings =
+                                match probe with
+                                | None ->
+                                    [ finding
+                                          id
+                                          "premise-probe"
+                                          "a `host-premise` carries no `probe` — a premise a host inherits with no probe is one no host can show it answered" ]
+                                | Some p when not (Set.contains p inputs.Probes) ->
+                                    [ finding
+                                          id
+                                          "premise-probe"
+                                          (sprintf
+                                              "`probe` names '%s', which is no probe family under conformance/premises/ — the row cites vectors no host can run"
+                                              p) ]
+                                | Some _ -> []
+
+                            probeFindings
+                            @ misplaced
+                                "premise-probe"
+                                "dischargedBy"
+                                dischargedBy
+                                "a host premise is discharged by a host's run of its probe, not by a domain's law"
+                            @ misplaced
+                                "premise-probe"
+                                "closes"
+                                closes
+                                "a host premise is answered per host, not closed"
                         | Some _ ->
                             // `premise`: nothing discharges it and no phase closes it, so either
                             // field on such a row is a citation to something that does not exist.
@@ -469,6 +519,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 dischargedBy
                                 "a `premise` is discharged by nothing"
                             @ misplaced "assumed-class" "closes" closes "a `premise` is closed by nothing"
+                            @ misplaced "assumed-class" "probe" probe "a `premise` is probed by nothing"
 
                 // ---- Phase 309: an obligation its law checks only against the domain's own word ----
                 // `"discharge": "domain-declared"` marks a `domain-obligation` whose named law can
@@ -515,7 +566,30 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                     "[every-module-has-a-row]: the proof leg checks '%s' and no `proved` row names it — a model whose claim was never written down"
                     m)
 
-        perRow @ uncovered
+        // Phase 483: every probe family is named by exactly one `host-premise` row, so a probe is
+        // never shipped for a premise the ladder does not state, nor stated twice.
+        let probeNames =
+            rows
+            |> List.filter (fun r -> strMember r "class" = Some "host-premise")
+            |> List.choose (fun r -> strMember r "probe")
+
+        let probeFindings =
+            [ for p in inputs.Probes do
+                  match probeNames |> List.filter ((=) p) |> List.length with
+                  | 0 ->
+                      yield
+                          sprintf
+                              "[premise-probe]: the probe family '%s' is named by no `host-premise` row — vectors for a premise the ladder never stated"
+                              p
+                  | 1 -> ()
+                  | n ->
+                      yield
+                          sprintf
+                              "[premise-probe]: the probe family '%s' is named by %d `host-premise` rows — one premise, one probe"
+                              p
+                              n ]
+
+        perRow @ uncovered @ probeFindings
 
 // ---------------------------------------------------------------------------
 //  The contract clause — the ONE piece of prose this family parses (Phase 174)
@@ -574,6 +648,11 @@ let contractFromLadder (ladderText: string) : (string * string * string) list =
 
             let third =
                 match strMember r "dischargedBy", strMember r "closes" with
+                | _ when strMember r "class" = Some "host-premise" ->
+                    // Phase 483 — the probe a host reproduces, or the em dash where it names none.
+                    strMember r "probe"
+                    |> Option.map (sprintf "`%s` (probe)")
+                    |> Option.defaultValue noThirdColumn
                 | Some d, _ when strMember r "discharge" = Some "domain-declared" ->
                     // Phase 309 — the law is named, and so is the limit of what its run says.
                     sprintf "`%s` (domain-declared, not discharged)" d
@@ -699,7 +778,7 @@ let renderLadderSummary (ladderText: string) : string =
         |> List.length
 
     sprintf
-        "**The ladder, counted:** %d claims — %d proved across %d models, %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`), %d policy."
+        "**The ladder, counted:** %d claims — %d proved across %d models, %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`, %d `host-premise`), %d policy."
         (List.length rows)
         (List.length (at "proved"))
         provedModels
@@ -708,6 +787,7 @@ let renderLadderSummary (ladderText: string) : string =
         (assumedIn "domain-obligation")
         (assumedIn "model-bridge")
         (assumedIn "premise")
+        (assumedIn "host-premise")
         (List.length (at "policy"))
 
 /// The README as the ladder says it must read: the summary block, the contract table's rows and the

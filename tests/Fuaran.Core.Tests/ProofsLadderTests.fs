@@ -208,7 +208,8 @@ let private fixtureInputs (modules: string list) =
                 Some(Set.ofList [ "a fixture case" ])
             else
                 None
-      Laws = Set.ofList [ "fixtureLaws" ] }
+      Laws = Set.ofList [ "fixtureLaws" ]
+      Probes = Set.empty }
 
 let private fixture (name: string) =
     File.ReadAllText(Path.Combine(fixtureDir, name))
@@ -256,6 +257,67 @@ let private withProse (field: string) (value: string) (row: Nodes.JsonObject) =
 
 let private expectMutationFinding (description: string) (rowId: string) mutate (clause: string) (subject: string) =
     expectOneFindingIn [ "Model" ] description (mutated rowId mutate) clause subject
+
+/// The probe family the Phase 483 go-reds name.
+let private fixtureProbe = "premiseFixture"
+
+/// `ladder-ok.json` with one `host-premise` row appended per entry of `probes` (its `probe` member,
+/// or none), each row then mutated by `mutate`.
+let private withHostPremises (probes: string option list) (mutate: Nodes.JsonObject -> unit) : string =
+    let root = Nodes.JsonNode.Parse(fixture "ladder-ok.json")
+    let claims = root["claims"].AsArray()
+
+    probes
+    |> List.iteri (fun i probe ->
+        let statement = "The fixture's runtime gives it what the model takes for granted."
+        let boundary = "Another runtime may not."
+
+        let row = Nodes.JsonObject()
+        row["id"] <- Nodes.JsonValue.Create(sprintf "fixture-host-premise-%d" i)
+        row["level"] <- Nodes.JsonValue.Create "assumed"
+        row["statement"] <- Nodes.JsonValue.Create statement
+        row["boundary"] <- Nodes.JsonValue.Create boundary
+        row["claim"] <- Nodes.JsonValue.Create(statement + " " + boundary)
+        row["phase"] <- Nodes.JsonValue.Create "fuaran-core#483"
+        row["class"] <- Nodes.JsonValue.Create "host-premise"
+
+        match probe with
+        | Some p -> row["probe"] <- Nodes.JsonValue.Create p
+        | None -> ()
+
+        let evidence = Nodes.JsonObject()
+        evidence["assumption"] <- Nodes.JsonValue.Create "the fixture's runtime holds the premise"
+        row["evidence"] <- evidence
+        mutate row
+        claims.Add row)
+
+    root.ToJsonString()
+
+/// The fixture inputs with the probe families `probes` shipped.
+let private probedInputs (probes: string list) =
+    { fixtureInputs [ "Model" ] with
+        Probes = Set.ofList probes }
+
+/// A Phase 483 go-red: exactly one finding, naming the clause and the subject.
+let private expectProbeFinding (probes: string list) (ladder: string) (clause: string) (subject: string) =
+    let findings = checkLadder (probedInputs probes) ladder
+
+    Expect.equal
+        (List.length findings)
+        1
+        (sprintf "one defect, so exactly one finding — got:\n%s" (String.concat "\n" findings))
+
+    Expect.stringContains (List.head findings) (sprintf "[%s]" clause) "the finding names the clause"
+    Expect.stringContains (List.head findings) subject "the finding names what it is about"
+
+/// The `host-premise` rows of the committed ladder: id and probe.
+let private realHostPremises () : (string * string option) list =
+    use doc = JsonDocument.Parse(File.ReadAllText ladderPath)
+
+    doc.RootElement.GetProperty("claims").EnumerateArray()
+    |> Seq.filter (fun r -> strMember r "class" = Some "host-premise")
+    |> Seq.map (fun r -> (strMember r "id" |> Option.defaultValue "<no id>"), strMember r "probe")
+    |> List.ofSeq
 
 [<Tests>]
 let proofsLadderTests =
@@ -430,7 +492,8 @@ let proofsLadderTests =
                       { Root = repoRoot
                         Modules = []
                         Suites = fun _ -> Some(Set.ofList [ "<a case name, as the family spells it>" ])
-                        Laws = Set.empty }
+                        Laws = Set.empty
+                        Probes = Set.empty }
                       template
                   |> List.filter (fun f -> shapeClauses |> List.exists f.Contains)
 
@@ -444,7 +507,8 @@ let proofsLadderTests =
                   { Root = repoRoot
                     Modules = realModels ()
                     Suites = suiteCases
-                    Laws = realLaws () }
+                    Laws = realLaws ()
+                    Probes = Set.ofList PremiseProbeExport.familyIds }
 
               let findings = checkLadder inputs text
 
@@ -739,7 +803,124 @@ let proofsLadderTests =
 
               Expect.equal (List.length findings) 1 (sprintf "one finding — got:\n%s" (String.concat "\n" findings))
 
-              Expect.stringContains (List.head findings) "[shape]" "the finding names the shape clause" ]
+              Expect.stringContains (List.head findings) "[shape]" "the finding names the shape clause"
+
+          // ---- Phase 483: the premises a host must answer, each with its probe ----
+
+          testCase "every host-premise row names its own probe, and every probe is a row's"
+          <| fun _ ->
+              let rows = realHostPremises ()
+
+              Expect.isNonEmpty rows "the ladder states the host premises, so the clauses below are not vacuous"
+
+              for p in PremiseProbeExport.probes do
+                  Expect.contains
+                      rows
+                      (p.Row, Some p.Id)
+                      (sprintf "the probe `%s` says it discharges `%s`, and that row names it" p.Id p.Row)
+
+              Expect.equal
+                  (rows |> List.map snd |> List.choose id |> Set.ofList)
+                  (Set.ofList PremiseProbeExport.familyIds)
+                  "the rows' probes are exactly the families conformance/premises/ ships"
+
+          testCase "every probe carries vectors, and a host-premise row is offered its probe in the evidence map"
+          <| fun _ ->
+              for p in PremiseProbeExport.probes do
+                  Expect.isNonEmpty (p.Vectors()) (sprintf "the probe `%s` carries vectors" p.Id)
+
+              match ProofCoverage.EvidenceMap.derive (ProofCoverage.EvidenceMap.liveInputs repoRoot) with
+              | Error e -> failtestf "the evidence map does not derive:\n%s" (String.concat "\n" e)
+              | Ok map ->
+                  for p in PremiseProbeExport.probes do
+                      let row = map.Rows |> List.find (fun r -> r.Id = p.Row)
+
+                      Expect.equal
+                          (row.Families |> List.map _.Family)
+                          [ p.Id ]
+                          (sprintf "`%s` is offered its probe and nothing else" p.Row)
+
+                      Expect.equal
+                          (row.Families |> List.sumBy _.Cases)
+                          (List.length (p.Vectors()))
+                          (sprintf "`%s` is offered every case of its probe" p.Row)
+
+          testCase "docs/host-premises.md states every host-premise row, with its probe, and no other"
+          <| fun _ ->
+              let doc = File.ReadAllText(Path.Combine(repoRoot, "docs", "host-premises.md"))
+
+              let headed =
+                  Regex.Matches(doc, @"^### `([a-z0-9-]+)`", RegexOptions.Multiline)
+                  |> Seq.map (fun m -> m.Groups[1].Value)
+                  |> List.ofSeq
+
+              let rows = realHostPremises ()
+
+              Expect.equal headed (rows |> List.map fst) "one section per host-premise row, in ladder order"
+
+              for p in PremiseProbeExport.probes do
+                  Expect.stringContains doc (sprintf "`%s`" p.Id) (sprintf "the page names the probe `%s`" p.Id)
+
+                  Expect.stringContains
+                      doc
+                      (sprintf "conformance/premises/%s" p.File)
+                      (sprintf "the page links the probe file `%s`" p.File)
+
+          testCase "a host-premise row naming a shipped probe is clean, and the contract table names the probe"
+          <| fun _ ->
+              let ladder = withHostPremises [ Some fixtureProbe ] ignore
+              let findings = checkLadder (probedInputs [ fixtureProbe ]) ladder
+
+              Expect.isEmpty
+                  findings
+                  (sprintf "a well-formed host premise yields nothing:\n%s" (String.concat "\n" findings))
+
+              Expect.contains
+                  (contractFromLadder ladder)
+                  ("fixture-host-premise-0", "host-premise", sprintf "`%s` (probe)" fixtureProbe)
+                  "the contract table's third column is the probe"
+
+              Expect.stringContains (renderLadderSummary ladder) "1 `host-premise`" "the summary counts the class"
+
+          testCase "go-red: premise-probe — a host-premise row with no probe"
+          <| fun _ -> expectProbeFinding [] (withHostPremises [ None ] ignore) "premise-probe" "fixture-host-premise-0"
+
+          testCase "go-red: premise-probe — a host-premise row naming a probe no family ships"
+          <| fun _ ->
+              expectProbeFinding
+                  []
+                  (withHostPremises [ Some "premiseNonesuch" ] ignore)
+                  "premise-probe"
+                  "premiseNonesuch"
+
+          testCase "go-red: premise-probe — a probe family no host-premise row names"
+          <| fun _ -> expectProbeFinding [ fixtureProbe ] (fixture "ladder-ok.json") "premise-probe" fixtureProbe
+
+          testCase "go-red: premise-probe — two host-premise rows naming one probe"
+          <| fun _ ->
+              expectProbeFinding
+                  [ fixtureProbe ]
+                  (withHostPremises [ Some fixtureProbe; Some fixtureProbe ] ignore)
+                  "premise-probe"
+                  "named by 2"
+
+          testCase "go-red: premise-probe — a host-premise row naming a discharging law"
+          <| fun _ ->
+              expectProbeFinding
+                  [ fixtureProbe ]
+                  (withHostPremises [ Some fixtureProbe ] (fun r ->
+                      r["dischargedBy"] <- Nodes.JsonValue.Create "Conformance.fixtureLaws"))
+                  "premise-probe"
+                  "dischargedBy"
+
+          testCase "go-red: assumed-class — a probe on a premise nothing discharges"
+          <| fun _ ->
+              expectMutationFinding
+                  "a premise row carrying a probe"
+                  "fixture-premise"
+                  (fun r -> r["probe"] <- Nodes.JsonValue.Create fixtureProbe)
+                  "assumed-class"
+                  "probe" ]
 
 // ---------------------------------------------------------------------------
 //  Phase 175 — the kit's instantiation template, and `Skeleton.fst` as its first instance

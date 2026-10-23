@@ -2839,6 +2839,9 @@ module VectorStamps =
         [ "apply/skeleton-apply.json", ("TreeOps", 25)
           "laws/decimal-laws.json", ("DecimalText", 49)
           "laws/propagation-laws.json", ("Propagation", 73)
+          "premises/int53.json", ("JsonParse", 29)
+          "premises/recursion-depth.json", ("JsonParse", 13)
+          "premises/string-model.json", ("JsonParse", 10)
           "refusals/codec-refusals.json", ("JsonParse", 56) ]
 
     [<Tests>]
