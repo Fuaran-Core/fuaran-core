@@ -618,6 +618,16 @@ this repository's exporter (the manifest is emitted, never hand-edited): `HostAd
 AdoptionSource.Host(kitVersion, sha))`. The corpus's `apply/manifest.json` is a shared index (D211); this
 repository owns only the `skeletonApply` row there, and other producers' rows keep their own shape.
 
+**The Rust Core spine is an adoption host and nothing else** (Phase 463, DECISIONS.md D225).
+`fuaran-core-rs` (`Fuaran-Core/fuaran-core-rs`) is this repository's twin in Rust, so it answers a
+rejection in Core's own vocabulary — the canonical rejection bytes a vector pins — and is never added
+to a roster that maps Core's classes to a wire host's codes (`ApplyVectorExport.hostRoster`, whose
+entries write `expected.hosts`). Its entry in every manifest above comes from ONE table,
+`SpineAdoption` (beside `ApplyVectorExport`): the cases each of its legs asserted, the Core version it
+certified against and the spine commit that landed them, and `proposed` for a family it does not run.
+It reads Core's vectors from a Core checkout at the commit its own `core-pin.json` names, not from the
+shared corpus, because most of the families it runs have no corpus copy.
+
 ## Who answered a vector (Phase 478) {#answered-by}
 
 A vector's answer is computed by calling the reference implementation, so a host certified on it
@@ -735,7 +745,7 @@ it with `NotAContainer(t, k)`.
 ### Adoption
 
 The F# host certifies first, and its `adoption` entry reads `adopted` with the case count its leg
-checked ([the record](#adoption-record)). The other four read `proposed`: the family is fully specified and certified before any of them emits it, and a
+checked ([the record](#adoption-record)). The Rust Core spine's reads `adopted` on every case (Phase 463). The four wire hosts read `proposed`: the family is fully specified and certified before any of them emits it, and a
 `proposed` family is reported BY NAME by a host that has not adopted it rather than skipped
 silently. A host flips its own entry in the change-set that lands its leg.
 
@@ -778,7 +788,7 @@ copies of the UI corpus's four; the next section is their contract.
 
 Four fixed vector sets, written by `render chain`, `render dag`, `render merge` and `render diff`, each a
 vector file and its own self-enumerated `manifest.json` (the one manifest schema; `fuaran` adopted, the
-four language hosts `proposed`). They exist so that a spine with no UI tier certifies Core's chain, DAG,
+four language hosts `proposed`, and the Rust Core spine adopted on `chain` and `dag` since Phase 463). They exist so that a spine with no UI tier certifies Core's chain, DAG,
 merge and diff end to end from its first commit. The design is DECISIONS.md D221.
 
 **One witness, and one codec a host already has.** The ops are the skeleton ops in the `apply/` family's

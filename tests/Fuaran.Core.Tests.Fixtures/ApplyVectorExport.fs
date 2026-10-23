@@ -51,6 +51,38 @@ namespace Fuaran.Core.Tests
 //     a reason that has nothing to do with its content.
 // ============================================================================
 
+/// The Rust Core spine's adoption of the families this repository emits (Phase 463, DECISIONS.md D225).
+/// `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in Core's vocabulary, so
+/// it is an ADOPTION host only and never joins a roster that maps Core's classes to a host's codes
+/// (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so each names
+/// the Core version its legs certified against and the spine commit that landed them; a family it does
+/// not run reads `proposed`. The counts are the cases its legs asserted, never this repository's
+/// vector counts: a family that grows after the measurement keeps the measured count.
+module SpineAdoption =
+
+    open Fuaran.Core
+
+    /// The host key every manifest carries the spine's entry under.
+    let host = "fuaran-core-rs"
+
+    /// The Core version the spine's legs certified against, and the spine commit that landed them.
+    let private measuredAt =
+        AdoptionSource.Host("0.41.0", "432509b7bbdf0f1a227914466d12c48abc35291f")
+
+    /// The families the spine runs, by family id, with the cases its legs asserted.
+    let private measured =
+        [ "skeletonApply", 25
+          "codecRefusals", 56
+          "decodeRejects", 47
+          "skeletonChain", 16
+          "skeletonDag", 11 ]
+
+    /// The spine's entry for one family.
+    let internal adoption (familyId: string) : string * HostAdoption =
+        match measured |> List.tryFind (fun (id, _) -> id = familyId) with
+        | Some(_, cases) -> host, HostAdoption.Measured(cases, measuredAt)
+        | None -> host, HostAdoption.Proposed
+
 module ApplyVectorExport =
 
     open System.IO
@@ -560,6 +592,7 @@ module ApplyVectorExport =
                 Adoption =
                   ("fuaran", HostAdoption.Measured(List.length (cases ()), AdoptionSource.Here))
                   :: (hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
+                  @ [ SpineAdoption.adoption familyId ]
                 Description =
                   "The skeleton-op apply contract over the witness surface: accept with the "
                   + "result's canonical bytes and hash, or reject with the class, per validator "

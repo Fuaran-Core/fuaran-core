@@ -301,14 +301,18 @@ module RefusalCorpus =
                 Kind = "codec-refusals"
                 File = vectorsFileName
                 Vectors = List.length vectors
-                Adoption = hostRoster |> List.map (fun h -> h, HostAdoption.Proposed)
+                Adoption =
+                  (hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
+                  @ [ SpineAdoption.adoption familyId ]
                 Description =
                   "The JSON number grammar, well-formed UTF-16 strings, the decode-determinism rows every wire's JSON layer shares (a repeated member, content after the root, a bare non-finite literal, a raw C0 control in a string; Phase 462), the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of." }
               { Id = seamFamilyId
                 Kind = "seam-refusals"
                 File = seamFileName
                 Vectors = List.length SeamRefusalLaws.vectors
-                Adoption = hostRoster |> List.map (fun h -> h, HostAdoption.Proposed)
+                Adoption =
+                  (hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
+                  @ [ SpineAdoption.adoption seamFamilyId ]
                 Description =
                   "The seams' refusal and declaration documents (Phase 551): every case of every seam union read back to its own bytes, and its readers' refusals by code and path, the strict readers' undeclared members among them." } ] }
 
