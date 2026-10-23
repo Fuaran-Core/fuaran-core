@@ -32,6 +32,16 @@ type internal CaseLayout =
     | Tagged
     | Bare of Result<IdlField, CodegenError>
 
+/// Phase 474 (DECISIONS.md D220) — an INLINE declaration a field holds: its members are keys of the
+/// object holding the field, so no printer sees a nested key. An inline record is read and written
+/// member by member from that object; a presence-keyed union's case is the one whose key is
+/// present ([[UnionDiscrimination.ByPresence]]), its members and its synthesised members laid out
+/// in the union's roster order.
+[<RequireQualifiedAccess>]
+type internal InlineSlot =
+    | Record of IdlRecord
+    | Keyed of IdlUnion * KeyedCase list
+
 /// A generic union instantiated at the arguments a vocabulary names: its instance name (the
 /// declaration's name plus its mangled arguments), the declaration, and the parameter binding.
 type internal Instantiation =
@@ -974,3 +984,68 @@ module internal Decl =
             )
         else
             Ok(found |> Map.toList |> List.map snd)
+
+    // -----------------------------------------------------------------------
+    // Phase 474 (DECISIONS.md D220) — the INLINE declarations. Each reads `Fuaran.Core.Idl`'s
+    // internal lowering, so each is `NoInlining` (D129).
+    // -----------------------------------------------------------------------
+
+    /// The inline declaration `t` names, if it names one — see [[InlineSlot]].
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let inlineSlot (idl: Idl) (t: IdlType) : InlineSlot option =
+        match WireForm.inlineRecord idl t, WireForm.keyedUnion idl t with
+        | Some r, _ -> Some(InlineSlot.Record r)
+        | _, Some(u, keyed) -> Some(InlineSlot.Keyed(u, keyed))
+        | None, None -> None
+
+    /// Whether the union is presence-keyed.
+    let isKeyed (u: IdlUnion) : bool =
+        u.Discrimination <> UnionDiscrimination.Tagged
+
+    /// The inline declarations a resolution reaches, each named as a refusal names it — the
+    /// backends that lay none out refuse a vocabulary by the first.
+    let inlineDeclarations (d: Decl) : string list =
+        (d.Records
+         |> List.filter _.Inline
+         |> List.map (fun r -> sprintf "the inline record '%s'" r.Name))
+        @ (d.Unions
+           |> List.filter isKeyed
+           |> List.map (fun u -> sprintf "the presence-keyed union '%s'" u.Name))
+
+    /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let keyedRoster (u: IdlUnion) : string list = WireForm.keyedRoster u
+
+    /// The interpreter's encoding of `v` at `t` (D129: the one call across the assembly boundary).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private encodedAt (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> = Encode.valueJson idl t v
+
+    /// A keyed case's synthesised members as the wire values the encoder writes, each the
+    /// interpreter's encoding of its declared value at the member's type.
+    let synthesisedJson (idl: Idl) (u: IdlUnion) (k: KeyedCase) : Result<(string * JVal) list, CodegenError> =
+        k.Synthesised
+        |> List.map (fun (name, v) ->
+            match
+                u.Cases
+                |> List.tryPick (fun c -> c.Fields |> List.tryFind (fun f -> f.Name = name))
+            with
+            | Some f ->
+                match encodedAt idl f.Type v with
+                | Ok j -> Ok(name, j)
+                | Error m ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            sprintf "the synthesised member '%s' of union '%s' case '%s'" name u.Name k.Case,
+                            sprintf "a synthesised member is written at a value of its type (%s)" m,
+                            "declare a value the member's type admits"
+                        )
+                    )
+            | None ->
+                Error(
+                    CodegenError.UnsupportedConstruct(
+                        sprintf "the synthesised member '%s' of union '%s' case '%s'" name u.Name k.Case,
+                        "a synthesised member is another case's member",
+                        "name a member another case declares"
+                    )
+                ))
+        |> sequenceR

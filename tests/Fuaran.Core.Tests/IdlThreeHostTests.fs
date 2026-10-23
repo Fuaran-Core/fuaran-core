@@ -551,7 +551,8 @@ let compiledFixtures =
                       Records =
                           { Name = "Empty"
                             Fields = []
-                            Annotations = Annotations.Empty }
+                            Annotations = Annotations.Empty
+                            Inline = false }
                           :: ScoreDomainIdl.scoreIdl.Records }
 
               match Gen.fsharpTypes idl with
@@ -828,7 +829,8 @@ let declarationRefusals =
                           Tag = "Ref"
                           Fields = [ reqField "name" TStr ]
                           Annotations = Annotations.Empty } ]
-                    Annotations = Annotations.Empty }
+                    Annotations = Annotations.Empty
+                    Discrimination = UnionDiscrimination.Tagged }
 
               let idl =
                   { ReferenceIdl.refIdl with
@@ -883,7 +885,8 @@ let private hardenIdl: Idl =
         Records =
             { Name = "Target"
               Fields = [ reqField "href" TStr ]
-              Annotations = Annotations.Empty }
+              Annotations = Annotations.Empty
+              Inline = false }
             :: ReferenceIdl.refIdl.Records
         Kinds =
             ReferenceIdl.refIdl.Kinds
@@ -1242,7 +1245,8 @@ module private Seam550 =
           Params = ps
           Cases = cases
           Annotations = ann
-          TagRule = UnionTagRule.LowerFirst }
+          TagRule = UnionTagRule.LowerFirst
+          Discrimination = UnionDiscrimination.Tagged }
 
     let typed (fs: string) (enc: string) (dec: string) : HostedCodec =
         { FSharp = fs
@@ -1291,7 +1295,8 @@ module private Seam550 =
     let window: IdlRecord =
         { Name = "Window"
           Fields = [ req "start" TInt; fld "label" TStr Optional ]
-          Annotations = ann }
+          Annotations = ann
+          Inline = false }
 
     let idl: Idl =
         { Kinds =

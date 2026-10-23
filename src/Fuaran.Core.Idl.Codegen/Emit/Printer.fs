@@ -184,6 +184,10 @@ type internal MemberDecPrinter =
         HostOnly: IdlField -> Result<string, CodegenError>
         /// The declared default `d` at `t`, as the literal the decoder restores.
         DefaultLit: IdlType -> IdlValue -> Result<string, CodegenError>
+        /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), read from the object
+        /// `o` its members sit on, or `None` for any other field (a backend that lays out no inline
+        /// declaration refuses the vocabulary first and answers `None`).
+        Inline: string -> IdlField -> string option
     }
 
 /// The one traversal over a member's presence when it is READ, printed by a [[MemberDecPrinter]].
@@ -200,30 +204,34 @@ module internal MemberTraversal =
         let key = p.Key f.Name
         let o = p.Object fields f
 
-        match f.Type with
-        | TClosure
-        | TFn _
-        | TOpaque ->
-            let placeholder = p.Placeholder f.Type
-
-            SlotTraversal.slotFn p.Slot f.Type
-            |> Result.map (fun d ->
-                match f.Opt with
-                | Required -> p.Req key o d
-                | Optional -> p.Opt key o d
-                | OmitDefault _ -> p.Def key o d placeholder
-                // Never on the wire — nothing to read, so take the placeholder.
-                | HostOnly -> p.HostOnlySentinel placeholder)
+        match p.Inline o f with
+        | Some e when f.Opt <> HostOnly -> Ok e
         | _ ->
-            match f.Opt with
-            | Required -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Req key o)
-            | Optional -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Opt key o)
-            | HostOnly -> p.HostOnly f
-            | OmitDefault d ->
-                p.DefaultLit f.Type d
-                |> Result.bind (fun lit ->
-                    SlotTraversal.slotFn p.Slot f.Type
-                    |> Result.map (fun dfn -> p.Def key o dfn lit))
+
+            match f.Type with
+            | TClosure
+            | TFn _
+            | TOpaque ->
+                let placeholder = p.Placeholder f.Type
+
+                SlotTraversal.slotFn p.Slot f.Type
+                |> Result.map (fun d ->
+                    match f.Opt with
+                    | Required -> p.Req key o d
+                    | Optional -> p.Opt key o d
+                    | OmitDefault _ -> p.Def key o d placeholder
+                    // Never on the wire — nothing to read, so take the placeholder.
+                    | HostOnly -> p.HostOnlySentinel placeholder)
+            | _ ->
+                match f.Opt with
+                | Required -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Req key o)
+                | Optional -> SlotTraversal.slotFn p.Slot f.Type |> Result.map (p.Opt key o)
+                | HostOnly -> p.HostOnly f
+                | OmitDefault d ->
+                    p.DefaultLit f.Type d
+                    |> Result.bind (fun lit ->
+                        SlotTraversal.slotFn p.Slot f.Type
+                        |> Result.map (fun dfn -> p.Def key o dfn lit))
 
     /// Every member of an object read, in declaration order, each paired with its field.
     let decMembers (p: MemberDecPrinter) (fields: IdlField list) : Result<(IdlField * string) list, CodegenError> =
@@ -344,6 +352,9 @@ type internal MemberEncPrinter =
         /// the expression the name maps to): a wrapper around the member's piece that omits it
         /// whenever the condition fails.
         When: IdlField list -> (string -> string) -> PresenceCondition -> Result<string -> string, CodegenError>
+        /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), its value read from
+        /// `src`: the piece that lays its members onto the object, or `None` for any other field.
+        Inline: string -> IdlField -> string option
     }
 
 /// The one traversal over a member's presence when it is WRITTEN, printed by a [[MemberEncPrinter]]
@@ -374,19 +385,24 @@ module internal MemberEncTraversal =
             | None -> name
 
         let piece =
-            match f.Opt with
-            | HostOnly -> Ok(MemberPiece.Conditional p.Absent)
-            | Required ->
-                SlotTraversal.encApplied p.Applied src f.Type
-                |> Result.map (fun e -> MemberPiece.Always(key, e))
-            | Optional ->
-                SlotTraversal.encApplied p.Applied (p.OptionalVar src) f.Type
-                |> Result.map (fun e -> MemberPiece.Conditional(p.Optional src key e))
-            | OmitDefault d ->
-                SlotTraversal.encApplied p.Applied src f.Type
-                |> Result.bind (fun e ->
-                    p.OmitAt src f.Type d
-                    |> Result.map (fun omit -> MemberPiece.Conditional(omit (p.Present key e))))
+            match f.Opt, p.Inline src f with
+            | HostOnly, _ -> Ok(MemberPiece.Conditional p.Absent)
+            | _, Some laid -> Ok(MemberPiece.Conditional laid)
+            | _ ->
+
+                match f.Opt with
+                | HostOnly -> Ok(MemberPiece.Conditional p.Absent)
+                | Required ->
+                    SlotTraversal.encApplied p.Applied src f.Type
+                    |> Result.map (fun e -> MemberPiece.Always(key, e))
+                | Optional ->
+                    SlotTraversal.encApplied p.Applied (p.OptionalVar src) f.Type
+                    |> Result.map (fun e -> MemberPiece.Conditional(p.Optional src key e))
+                | OmitDefault d ->
+                    SlotTraversal.encApplied p.Applied src f.Type
+                    |> Result.bind (fun e ->
+                        p.OmitAt src f.Type d
+                        |> Result.map (fun omit -> MemberPiece.Conditional(omit (p.Present key e))))
 
         piece
         |> Result.bind (fun piece ->

@@ -277,7 +277,10 @@ module internal TypeScriptCodec =
                         "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
                         "generate this vocabulary's codec with the F# backend, which applies it"
                     )
-                ) }
+                )
+          // Phase 474 — this codec lays out no inline declaration: [[Gen.typescriptModule]] refuses a
+          // vocabulary that declares one before any member is printed.
+          Inline = fun _ _ -> None }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
     /// node envelope) — the F# side's `specPieceOf`.
@@ -546,7 +549,9 @@ module internal TypeScriptCodec =
           Placeholder = fun _ -> "null"
           HostOnlySentinel = id
           HostOnly = fun _ -> Ok "undefined"
-          DefaultLit = tsDefaultLit idl disc }
+          DefaultLit = tsDefaultLit idl disc
+          // Phase 474 — see [[tsMemberEncPrinter]].
+          Inline = fun _ _ -> None }
 
     let tsDecField (idl: Idl) (disc: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
         MemberTraversal.decMember (tsMemberDecPrinter idl disc) fields f

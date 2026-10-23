@@ -536,12 +536,17 @@ module internal FStarModel =
             | TRecord n ->
                 match CodegenLookup.tryRecord idl n with
                 | None -> unmodellable ("an undeclared record '" + n + "'") ("record " + n)
+                // Phase 474 — an inline record's members sit on its holder's object, which the model
+                // does not lay out: refused by name, never modelled as a nested object.
+                | Some r when r.Inline -> unmodellable ("an inline record '" + n + "'") ("record " + n)
                 | Some r ->
                     fieldMembers idl Map.empty ("record " + n) r.Fields
                     |> Result.map (fun ms -> memberMap[slotName (SRecord n)] <- ms)
             | TUnion(n, args) ->
                 match CodegenLookup.tryUnion idl n with
                 | None -> unmodellable ("an undeclared union '" + n + "'") ("union " + n)
+                // Phase 474 — a presence-keyed union has no tag and no object of its own.
+                | Some u when Decl.isKeyed u -> unmodellable ("a presence-keyed union '" + n + "'") ("union " + n)
                 | Some u ->
                     match TypeParams.bind u args, slotOf ("union " + n) t with
                     | None, _ -> unmodellable ("a union arity mismatch on '" + n + "'") ("union " + n)

@@ -24,7 +24,7 @@ ctor Fuaran.Core.Idl.Codegen.Types.KindProjection..ctor(System.String, System.St
 ctor Fuaran.Core.Idl.Codegen.Types.KindVerdict..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Codegen.Types.Obligation..ctor(System.String, Fuaran.Core.Idl.Codegen.Types.Strength, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
-ctor Fuaran.Core.Idl.Codegen.Types.Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, System.String, System.String)
+ctor Fuaran.Core.Idl.Codegen.Types.Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, System.String, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.UnionSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.CaseSnap>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.VectorModel..ctor(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Idl.Codegen.Types.Verdict..ctor(System.Tuple`2<System.Int32, System.Int32>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.Classification>, Fuaran.Core.Versioning+Evolution, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.Classification>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FSharpConsequence>, System.String, System.String)
@@ -66,6 +66,7 @@ field Fuaran.Core.Idl.Codegen.Types.Change+Tags.RecordAdded : System.Int32 (lite
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.RecordRemoved : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.SupportChanged : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.TypeAnnotationsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.Change+Tags.TypeLayoutChanged : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.UnionAdded : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.UnionCaseAdded : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Change+Tags.UnionCaseAnnotationsChanged : System.Int32 (literal)
@@ -234,21 +235,22 @@ record-field Fuaran.Core.Idl.Codegen.Types.Obligation.Strength #1 : Fuaran.Core.
 record-field Fuaran.Core.Idl.Codegen.Types.Obligation.Surface #0 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.Provenance.Origin #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Provenance.Proves #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Defaults #10 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Defaults #11 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Enums #7 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.EnumSnap>
-record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Harden #14 : System.String
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Harden #15 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.KindAnnotations #3 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.KindCategory #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Kinds #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>
-record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.NodeFields #11 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.NodeFields #12 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.OpAnnotations #5 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Ops #4 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Records #8 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>
-record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Support #12 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Support #13 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.TypeAnnotations #9 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.TypeLayouts #10 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Unions #6 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.UnionSnap>
 record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Version #0 : System.Int32
-record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Wire #13 : System.String
+record-field Fuaran.Core.Idl.Codegen.Types.Snapshot.Wire #14 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.UnionSnap.CaseOrder #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.UnionSnap.Cases #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.CaseSnap>
 record-field Fuaran.Core.Idl.Codegen.Types.UnionSnap.Params #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
@@ -316,6 +318,7 @@ type Fuaran.Core.Idl.Codegen.Types.Change+RecordRemoved (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+SupportChanged (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+Tags (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+TypeAnnotationsChanged (type)
+type Fuaran.Core.Idl.Codegen.Types.Change+TypeLayoutChanged (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+UnionAdded (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+UnionCaseAdded (type)
 type Fuaran.Core.Idl.Codegen.Types.Change+UnionCaseAnnotationsChanged (type)
@@ -422,6 +425,7 @@ union-case Fuaran.Core.Idl.Codegen.Types.Change.NewRecordAdded #22(name: System.
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewRecordRemoved #23(name: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewSupportChanged #39(key: System.String, before: Microsoft.FSharp.Core.FSharpOption`1<System.String>, after: Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewTypeAnnotationsChanged #40(family: System.String, name: System.String, before: System.String, after: System.String)
+union-case Fuaran.Core.Idl.Codegen.Types.Change.NewTypeLayoutChanged #41(family: System.String, name: System.String, before: System.String, after: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewUnionAdded #9(name: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewUnionCaseAdded #11(union: System.String, case: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Change.NewUnionCaseAnnotationsChanged #32(union: System.String, case: System.String, before: System.String, after: System.String)

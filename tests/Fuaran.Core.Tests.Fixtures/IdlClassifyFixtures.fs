@@ -47,7 +47,8 @@ module Fixtures =
                 Cases =
                   [ case "Inline" [ fld "text" TStr Required ]
                     case "Ref" [ fld "id" TStr Required ] ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged } ]
           Enums =
             [ { Name = "Loudness"
                 Cases = [ "Plain"; "Loud" ]

@@ -167,6 +167,54 @@ let private encFloat (f: float) : JVal =
                 (SourceLit.fsString idl.Wire.Discriminator)
 
 
+    // Phase 474 — the pieces and reads of a field holding an INLINE declaration (see below).
+
+    /// The member that a REQUIRED presence-keyed union is refused `MissingField` at when no case's
+    /// key is present: its first case's key.
+    let private keyedFirst (keyed: KeyedCase list) : string =
+        match keyed with
+        | k :: _ -> SourceLit.fsString k.Key
+        | [] -> SourceLit.fsString ""
+
+    /// The F# piece laying an inline field's members onto the object being written, read from `src`.
+    let inlineEncPiece (idl: Idl) (src: string) (f: IdlField) : string option =
+        match Decl.inlineSlot idl f.Type, f.Opt with
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "yield! encMembers%s %s" r.Name src)
+        | Some(InlineSlot.Keyed(u, _)), Optional ->
+            Some(sprintf "yield! (match %s with Some __v -> encMembers%s __v | None -> [])" src u.Name)
+        | Some(InlineSlot.Keyed(u, _)), _ -> Some(sprintf "yield! encMembers%s %s" u.Name src)
+        | None, _ -> None
+
+    /// The F# expression reading an inline field from the object `o` its members sit on.
+    let inlineDecRead (idl: Idl) (o: string) (f: IdlField) : string option =
+        match Decl.inlineSlot idl f.Type, f.Opt with
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "decMembers%s %s" r.Name o)
+        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "decMembers%s %s" u.Name o)
+        | Some(InlineSlot.Keyed(u, keyed)), _ ->
+            Some(
+                sprintf
+                    "(decMembers%s %s |> Result.bind (function Some __v -> Ok __v | None -> Error(Decoder.missing %s)))"
+                    u.Name
+                    o
+                    (keyedFirst keyed)
+            )
+        | None, _ -> None
+
+    /// The collecting twin of [[inlineDecRead]].
+    let inlineColRead (idl: Idl) (o: string) (f: IdlField) : string option =
+        match Decl.inlineSlot idl f.Type, f.Opt with
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov %s" r.Name o)
+        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "colMembers%s __ov %s" u.Name o)
+        | Some(InlineSlot.Keyed(u, keyed)), _ ->
+            Some(
+                sprintf
+                    "(colMembers%s __ov %s |> Result.bind (function Some __v -> Ok __v | None -> Error [ Decoder.missing %s ]))"
+                    u.Name
+                    o
+                    (keyedFirst keyed)
+            )
+        | None, _ -> None
+
     /// Phase 524 — the F# printer of a member WRITTEN under its presence
     /// ([[MemberEncTraversal.encMember]]): a `(string * JVal) option` piece for `List.choose id`.
     /// `src` is the expression the member's value is read from — `s.Field` in a spec or record
@@ -225,7 +273,9 @@ let private encFloat (f: float) : JVal =
           When =
             fun fields srcOf c ->
                 presenceTest idl fields srcOf c
-                |> Result.map (fun test piece -> sprintf "(if %s then %s else None)" test piece) }
+                |> Result.map (fun test piece -> sprintf "(if %s then %s else None)" test piece)
+          // Phase 474 — an inline field's members, spliced into the piece list.
+          Inline = fun src f -> inlineEncPiece idl src f }
 
     /// A member read off the bound record variable `recv` (`s` for a spec/record encoder, `n` for
     /// the node envelope), as its piece of a `List.choose id` list.
@@ -513,7 +563,9 @@ let private encFloat (f: float) : JVal =
             | _ -> "()"
           HostOnlySentinel = sprintf "Ok (%s)"
           HostOnly = fun f -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
-          DefaultLit = fsDefaultLit idl }
+          DefaultLit = fsDefaultLit idl
+          // Phase 474 — an inline field read from the object its members sit on.
+          Inline = fun o f -> inlineDecRead idl o f }
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -749,7 +801,8 @@ let private encFloat (f: float) : JVal =
             Slot = colPrinter
             Req = sprintf "cReq %s %s %s"
             Opt = sprintf "cOpt %s %s %s"
-            Def = sprintf "cDef %s %s %s (%s)" }
+            Def = sprintf "cDef %s %s %s (%s)"
+            Inline = fun o f -> inlineColRead idl o f }
 
     /// Read every member (in declaration order — the order the defects are reported in), then
     /// build `final` when all of them decoded, else answer every member's defects, concatenated in
@@ -909,6 +962,256 @@ let private encFloat (f: float) : JVal =
             (objParams msg typeName [])
             (collectAll "        " binders ("Ok " + recordLit typeName assigns))
 
+    // -----------------------------------------------------------------------
+    // Phase 474 (DECISIONS.md D220) — the INLINE declarations. An inline record and a presence-keyed
+    // union have no object of their own: each is written as a list of member pieces the holding
+    // object splices in (`yield! encMembers<Name> …`), and read from the holding object's members
+    // (`decMembers<Name> __fs`, `colMembers<Name> __ov __fs`). A presence-keyed union's reading picks
+    // its case with `dPick` and checks each synthesised member with `dSynth`, the interpreter's
+    // reading (`Idl.Decode`) defect for defect.
+    // -----------------------------------------------------------------------
+
+    /// The decode helpers a presence-keyed union's reading needs, emitted only when one is reached:
+    /// `dPick` picks the case (the candidates whose key is present, less those whose key another
+    /// candidate synthesises; two left is `OutOfRange` at the second key), `dSynth` checks a
+    /// synthesised member is present and canonically equal to its declared value.
+    let keyedHelpers: string =
+        [ "// Phase 474 — a presence-keyed union's case: the cases whose key is present, less those whose key"
+          "// another present case synthesises. None left is `None`; two left is the both-present refusal,"
+          "// `OutOfRange` at the second one's key. `rules` is each case's key and the members it synthesises."
+          "let private dPick (fs: (string * JVal) list) (rules: (string * string list) list) : Result<int option, DecodeError> ="
+          "    let has (k: string) = fs |> List.exists (fun (n, _) -> n = k)"
+          "    let present = rules |> List.indexed |> List.filter (fun (_, (k, _)) -> has k)"
+          "    let explained (i: int, (k: string, _: string list)) ="
+          "        present |> List.exists (fun (j, (_, syn)) -> j <> i && List.contains k syn)"
+          "    match present |> List.filter (explained >> not) with"
+          "    | [] -> Ok None"
+          "    | [ (i, _) ] -> Ok(Some i)"
+          "    | (_, (a, _)) :: (_, (b, _)) :: _ ->"
+          "        dFail DecodeCode.OutOfRange (\"at most one of \" + (rules |> List.map (fun (k, _) -> \"'\" + k + \"'\") |> String.concat \", \")) (\"'\" + b + \"' beside '\" + a + \"'\")"
+          "        |> dUnder (PathSegment.Key b)"
+          ""
+          "// Phase 474 — a member a presence-keyed case synthesises: present, and canonically its declared value."
+          "let private dSynth (name: string) (expected: string) (fs: (string * JVal) list) : Result<unit, DecodeError> ="
+          "    match fs |> List.tryFind (fun (k, _) -> k = name) with"
+          "    | None -> Error(Decoder.missing name)"
+          "    | Some(_, j) when Canonical.write Rendering.CrossHost j = expected -> Ok()"
+          "    | Some(_, j) -> dFail DecodeCode.OutOfRange expected (Canonical.write Rendering.CrossHost j) |> dUnder (PathSegment.Key name)" ]
+        |> String.concat "\n"
+
+    /// The `dPick` rules literal of a presence-keyed union.
+    let private pickRules (keyed: KeyedCase list) : string =
+        "[ "
+        + (keyed
+           |> List.map (fun k ->
+               match k.Synthesised with
+               | [] -> sprintf "(%s, [])" (SourceLit.fsString k.Key)
+               | synthesised ->
+                   sprintf
+                       "(%s, [ %s ])"
+                       (SourceLit.fsString k.Key)
+                       (synthesised |> List.map (fst >> SourceLit.fsString) |> String.concat "; "))
+           |> String.concat "; ")
+        + " ]"
+
+    /// A keyed case's constructor over its members' binders.
+    let private keyedCtor (u: IdlUnion) (c: IdlUnionCase) : string =
+        match c.Fields with
+        | [] -> sprintf "%s.%s" u.Name c.Tag
+        | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
+
+    /// The synthesised members of a keyed case as `(binder, read)` pairs: each checked by `dSynth`.
+    let private synthBinders (idl: Idl) (u: IdlUnion) (k: KeyedCase) : Result<(string * string) list, CodegenError> =
+        Decl.synthesisedJson idl u k
+        |> Result.map (
+            List.map (fun (name, j) ->
+                "()",
+                sprintf
+                    "dSynth %s %s __fs"
+                    (SourceLit.fsString name)
+                    (SourceLit.fsString (Canonical.write Rendering.CrossHost j)))
+        )
+
+    /// An inline record's member writer: its members' pieces, read off `s`.
+    let inlineRecordEncoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
+        let ps = declParams msg r.Name []
+
+        objectPieces idl r.Fields
+        |> Result.map (fun pieces ->
+            sprintf
+                "and private encMembers%s%s (s: %s%s) : (string * JVal) option list =\n    [ %s ]"
+                r.Name
+                ps
+                r.Name
+                ps
+                pieces)
+
+    /// A presence-keyed union's member writer: per case, its members and its synthesised members,
+    /// in the union's roster order.
+    let keyedEncoder
+        (msg: Set<string>)
+        (idl: Idl)
+        (u: IdlUnion)
+        (keyed: KeyedCase list)
+        : Result<string, CodegenError> =
+        let ps = declParams msg u.Name []
+        let member' = memberEncPrinter idl
+        let roster = Decl.keyedRoster u
+
+        u.Cases
+        |> List.map (fun c ->
+            let k =
+                keyed
+                |> List.tryFind (fun k -> k.Case = c.Tag)
+                |> Option.defaultValue
+                    { Case = c.Tag
+                      Key = ""
+                      Synthesised = [] }
+
+            let own =
+                c.Fields
+                |> List.map (fun f ->
+                    MemberEncTraversal.encMember member' c.Fields (fun g -> ident g.Name) f
+                    |> Result.map (fun piece -> f.Name, MemberEncTraversal.print member' piece))
+                |> sequenceR
+
+            match own, Decl.synthesisedJson idl u k with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok own, Ok synth ->
+                let all =
+                    own
+                    @ (synth
+                       |> List.map (fun (n, j) ->
+                           n, sprintf "Some(%s, %s)" (SourceLit.fsString n) (FSharpDefaults.fsJValLit j)))
+
+                let pieces =
+                    roster
+                    |> List.choose (fun n -> all |> List.tryFind (fun (m, _) -> m = n) |> Option.map snd)
+                    |> String.concat "; "
+
+                let pat =
+                    match c.Fields with
+                    | [] -> ""
+                    | [ f ] -> " " + ident f.Name
+                    | fs -> " (" + (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ") + ")"
+
+                Ok(sprintf "    | %s.%s%s -> [ %s ]" u.Name c.Tag pat pieces))
+        |> sequenceR
+        |> Result.map (fun arms ->
+            sprintf
+                "and private encMembers%s%s (v: %s%s) : (string * JVal) option list =\n    match v with\n%s"
+                u.Name
+                ps
+                u.Name
+                ps
+                (String.concat "\n" arms))
+
+    /// An inline record's member reader: its members read from the holding object `__fs`.
+    let inlineRecordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
+        let assigns =
+            r.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+
+        fieldBinders idl r.Fields
+        |> Result.map (fun binders ->
+            sprintf
+                "and private decMembers%s (__fs: (string * JVal) list) : Result<%s%s, DecodeError> =\n%s"
+                r.Name
+                r.Name
+                (objParams msg r.Name [])
+                (bindChain "    " binders ("Ok " + recordLit r.Name assigns) 0))
+
+    /// A presence-keyed union's reader: the case `dPick` names, its members, then its synthesised
+    /// members; `None` when no case's key is present.
+    let keyedDecoder
+        (msg: Set<string>)
+        (idl: Idl)
+        (u: IdlUnion)
+        (keyed: KeyedCase list)
+        : Result<string, CodegenError> =
+        u.Cases
+        |> List.mapi (fun i c ->
+            match keyed |> List.tryFind (fun k -> k.Case = c.Tag) with
+            | None -> Ok ""
+            | Some k ->
+                match fieldBinders idl c.Fields, synthBinders idl u k with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok binders, Ok synth ->
+                    Ok(
+                        sprintf
+                            "    | Some %d ->\n%s"
+                            i
+                            (bindChain "        " (binders @ synth) (sprintf "Ok(Some(%s))" (keyedCtor u c)) 0)
+                    ))
+        |> sequenceR
+        |> Result.map (fun arms ->
+            sprintf
+                "and private decMembers%s (__fs: (string * JVal) list) : Result<%s%s option, DecodeError> =\n    dPick __fs %s |> Result.bind (fun __i ->\n    match __i with\n%s\n    | _ -> Ok None)"
+                u.Name
+                u.Name
+                (objParams msg u.Name [])
+                (pickRules keyed)
+                (arms |> List.filter (fun a -> a <> "") |> String.concat "\n"))
+
+    /// An inline record's collecting member reader.
+    let inlineRecordColDecoder (msg: Set<string>) (r: IdlRecord) (members: (IdlField * string) list) : string =
+        let assigns =
+            r.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+
+        let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
+
+        sprintf
+            "and private colMembers%s (__ov: CollectingDecoders) (__fs: (string * JVal) list) : Result<%s%s, DecodeError list> =\n%s"
+            r.Name
+            r.Name
+            (objParams msg r.Name [])
+            (collectAll "    " binders ("Ok " + recordLit r.Name assigns))
+
+    /// A presence-keyed union's collecting reader: [[keyedDecoder]]'s walk, every defect collected.
+    let keyedColDecoder
+        (msg: Set<string>)
+        (idl: Idl)
+        (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
+        (u: IdlUnion)
+        (keyed: KeyedCase list)
+        : Result<string, CodegenError> =
+        u.Cases
+        |> List.mapi (fun i c ->
+            match keyed |> List.tryFind (fun k -> k.Case = c.Tag) with
+            | None -> Ok ""
+            | Some k ->
+                match read c.Fields, synthBinders idl u k with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok members, Ok synth ->
+                    let binders =
+                        (members |> List.map (fun (f, e) -> ident f.Name, e))
+                        @ (synth |> List.map (fun (v, e) -> v, sprintf "cOne (%s)" e))
+
+                    Ok(
+                        sprintf
+                            "    | Some %d ->\n%s"
+                            i
+                            (collectAll "        " binders (sprintf "Ok(Some(%s))" (keyedCtor u c)))
+                    ))
+        |> sequenceR
+        |> Result.map (fun arms ->
+            sprintf
+                "and private colMembers%s (__ov: CollectingDecoders) (__fs: (string * JVal) list) : Result<%s%s option, DecodeError list> =\n    dPick __fs %s |> cOne |> Result.bind (fun __i ->\n    match __i with\n%s\n    | _ -> Ok None)"
+                u.Name
+                u.Name
+                (objParams msg u.Name [])
+                (pickRules keyed)
+                (arms |> List.filter (fun a -> a <> "") |> String.concat "\n"))
+
+    /// The resolution the codec groups print their ordinary encoders and decoders over: the
+    /// reached declarations less the inline ones, which the inline printers above print.
+    let private ordinary (decl: Decl) : Decl =
+        { decl with
+            Records = decl.Records |> List.filter (fun r -> not r.Inline)
+            Unions = decl.Unions |> List.filter (Decl.isKeyed >> not) }
+
     /// Phase 377 — the collecting prelude, the collecting decoder group (mirroring the decoder
     /// group: node kind, node, unions, records, specs) and the public entries: per kind
     /// `decode<Tag>Spec` (short-circuiting) and `decode<Tag>SpecAll` (collecting) over the kind's
@@ -934,13 +1237,16 @@ let private encFloat (f: float) : JVal =
         // A generic union has no monomorphic field: its instantiations are read through the
         // record by its own decoder (see [[colPrinter]]). A projected kind's decoder is the host
         // projection's, a leaf with no position beneath it.
+        // Phase 474 — an inline declaration is read from its holder's members, never from a value,
+        // so it has no slot: its readers take the record and the holder's members (`colMembers*`).
         let slots =
             [ yield "Node", "Node" + nodeTy
               for u in unions do
-                  if List.isEmpty u.Params then
+                  if List.isEmpty u.Params && not (Decl.isKeyed u) then
                       yield u.Name, u.Name + objParams msg u.Name []
               for r in records do
-                  yield r.Name, r.Name + objParams msg r.Name []
+                  if not r.Inline then
+                      yield r.Name, r.Name + objParams msg r.Name []
               for k in kinds do
                   if not (projected k) then
                       yield k.Tag + "Spec", specTy k ]
@@ -1010,6 +1316,20 @@ let private encFloat (f: float) : JVal =
             + collectAll "        " binders final
             + ")"
 
+        let colRead =
+            MemberTraversal.colMembers (memberDecPrinter idl) (colMemberPrinter idl) (sprintf "cOne (%s)")
+
+        let inlineCols =
+            (unions
+             |> List.choose (fun u ->
+                 match u.Discrimination with
+                 | UnionDiscrimination.ByPresence keyed -> Some(keyedColDecoder msg idl colRead u keyed)
+                 | UnionDiscrimination.Tagged -> None))
+            @ (records
+               |> List.filter _.Inline
+               |> List.map (fun r -> colRead r.Fields |> Result.map (inlineRecordColDecoder msg r)))
+            |> sequenceR
+
         let groupR =
             CollectingTraversal.group
                 { Dec = memberDecPrinter idl
@@ -1026,7 +1346,8 @@ let private encFloat (f: float) : JVal =
                         match members with
                         | Some ms -> colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg k.Fields ms
                         | None -> sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag }
-                decl
+                (ordinary decl)
+            |> Result.bind (fun group -> inlineCols |> Result.map (fun cols -> String.concat "\n\n" (group :: cols)))
 
         let generatedDecl =
             "/// Phase 541 — the generated collecting decoders: what every `decode*All` entry reads through, and\n"
@@ -1120,216 +1441,6 @@ let private encFloat (f: float) : JVal =
     /// [[HostedFormat.admits]] because the generated module carries no reference to this
     /// package; a test holds the two to the same answers.
     let fsFormatHelper = (Template.text "fs-format-helper.fs.txt")
-
-
-    // -----------------------------------------------------------------------
-    // Phase 317 increment 5 — the Core witness-record leg. Emit a
-    // `NodeWitness<Node, string>` for the generated `Node`, so the generated
-    // structural layer plugs straight into `Fuaran.Core.Tree` / `.Validator` /
-    // `.Observer` — the "serves every domain via the Core witness, not just UI"
-    // promise. `Children` / `ReplaceChildren` are derived from the IDL: a field
-    // is a child position iff `Derive.structural` says so — a node or
-    // node list the kind always carries (Phase 545: an optional node is a keyed
-    // position, on both the private and the public emission).
-    // -----------------------------------------------------------------------
-
-    /// Emit the `NodeWitness<Node, string>` + its three helper projections. Top-level
-    /// `match` functions (not record-literal lambdas) to dodge offside pitfalls in
-    /// generated code. `Error` on a kind mixing a `Node list` field with other node-bearing
-    /// fields (`ReplaceChildren` not generable — GP4/GP5) rather than emitting a runtime
-    /// throwing guard; kinds whose node-bearing fields are all single `Node` are generated
-    /// with positional re-assignment.
-    ///
-    /// Phase 374 — `publicAccess` is the derived structural-access emission: the same arms as
-    /// PUBLIC functions (`wireTag`, `allWireTags`, `children`, `withChildren`, kids first so
-    /// `withChildren (children n) n = n` reads as written) with `nodeWitness` built on them, and
-    /// an OPTIONAL node field is a keyed position rather than a child (it is not an ordered list
-    /// a structural edit may rebuild). `false` is the emission every module had before, byte for
-    /// byte.
-    ///
-    /// Phase 545 — both emissions read child positions through the one classifier,
-    /// `FSharpDerive.structuralField`. The private witness used to read them by type alone, so an
-    /// optional node field became `[ s.Hint ]` — a `Node option` where a `Node` is expected — and
-    /// a module requesting no StructuralAccess failed to compile (FS0001).
-    ///
-    /// Phase 403 — a projected kind's children are read from its declared record fields
-    /// (`Projection.RecordFields`); one that declares none and whose wire holds a node directly is
-    /// refused by name, because nothing says which member of the host record holds it.
-    let witnessDecl
-        (publicAccess: bool)
-        (projections: Map<string, KindProjection>)
-        (msg: Set<string>)
-        (kinds: IdlKind list)
-        : Result<string, CodegenError> =
-        let nodeArgs = declParams msg "Node" []
-
-        let construct, request =
-            if publicAccess then
-                "the structural children", "do not request StructuralAccess"
-            else
-                "the node witness's children", "do not select the kind"
-
-        let kindFields =
-            kinds
-            |> List.map (fun k ->
-                FSharpDerive.nodeFieldsOf
-                    projections
-                    (fun f ->
-                        match f.Type with
-                        | TNode
-                        | TList TNode -> true
-                        | _ -> false)
-                    construct
-                    request
-                    k
-                |> Result.map (fun fs -> k.Tag, fs))
-            |> sequenceR
-            |> Result.map Map.ofList
-
-        let fieldsOf (k: IdlKind) =
-            kindFields |> Result.map (fun m -> m[k.Tag]) |> Result.defaultValue []
-
-        let childBearing =
-            kinds
-            |> List.filter (fun k -> not (List.isEmpty (Derive.structuralFields (fieldsOf k))))
-
-        let allBearing = List.length childBearing = List.length kinds
-
-        let kindTagArms =
-            kinds
-            |> List.map (fun k -> sprintf "    | NodeKind.%s _ -> %s" k.Tag (SourceLit.fsString k.Tag))
-            |> String.concat "\n"
-
-        let childArm (k: IdlKind) =
-            let exprs =
-                Derive.structuralFields (fieldsOf k)
-                |> List.map (fun (f, isList) ->
-                    if isList then
-                        "s." + pascal f.Name
-                    else
-                        "[ s." + pascal f.Name + " ]")
-                |> String.concat " @ "
-
-            sprintf "    | NodeKind.%s s -> %s" k.Tag exprs
-
-        let replaceArm (k: IdlKind) : Result<string, CodegenError> =
-            Derive.childLayout k.Tag (Derive.structuralFields (fieldsOf k))
-            |> Result.map (fun layout ->
-                match layout with
-                | ChildLayout.Whole f ->
-                    sprintf
-                        "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }"
-                        k.Tag
-                        k.Tag
-                        (pascal f.Name)
-                | ChildLayout.Positional [ f ] ->
-                    sprintf
-                        "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = List.head kids } }"
-                        k.Tag
-                        k.Tag
-                        (pascal f.Name)
-                | ChildLayout.Positional fs ->
-                    // Several single-`Node` fields (real tier: `ErrorBoundary` has `child` +
-                    // `fallback`). `witnessChildren` returns them in field order, so re-assign `kids`
-                    // positionally.
-                    let assigns =
-                        fs
-                        |> List.mapi (fun i f -> sprintf "%s = List.item %d kids" (pascal f.Name) i)
-                        |> String.concat "; "
-
-                    sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s } }" k.Tag k.Tag assigns)
-
-        let childArms =
-            (childBearing |> List.map childArm)
-            @ (if allBearing then [] else [ "    | _ -> []" ])
-            |> String.concat "\n"
-
-        let replaceArms =
-            kindFields
-            |> Result.bind (fun _ -> childBearing |> List.map replaceArm |> sequenceR)
-            |> Result.map (fun arms -> (arms @ (if allBearing then [] else [ "    | _ -> n" ])) |> String.concat "\n")
-
-        let publicDecl (replaceArmsStr: string) =
-            String.concat
-                "\n"
-                [ "/// The kind's wire tag — the discriminator it is encoded under."
-                  sprintf "let wireTag (n: Node%s) : string =" nodeArgs
-                  "    match n.Kind with"
-                  kindTagArms
-                  ""
-                  "/// Every wire tag this module's kinds are encoded under, in declaration order."
-                  sprintf
-                      "let allWireTags: string list = [ %s ]"
-                      (kinds |> List.map (fun k -> SourceLit.fsString k.Tag) |> String.concat "; ")
-                  ""
-                  "/// The node's ordered structural children, in field order."
-                  sprintf "let children (n: Node%s) : Node%s list =" nodeArgs nodeArgs
-                  "    match n.Kind with"
-                  childArms
-                  ""
-                  "/// The node with exactly this structural child list, its id and kind kept."
-                  sprintf "let withChildren (kids: Node%s list) (n: Node%s) : Node%s =" nodeArgs nodeArgs nodeArgs
-                  "    match n.Kind with"
-                  replaceArmsStr
-                  ""
-                  sprintf "let nodeWitness: NodeWitness<Node%s, string> =" nodeArgs
-                  "    { Id = fun n -> n.Id"
-                  "      KindTag = wireTag"
-                  "      Children = children"
-                  "      ReplaceChildren = fun n kids -> withChildren kids n }" ]
-
-        replaceArms
-        |> Result.map (fun replaceArmsStr ->
-            if publicAccess then
-                publicDecl replaceArmsStr
-            else
-                String.concat
-                    "\n"
-                    [ sprintf "let private witnessKindTag (n: Node%s) : string =" nodeArgs
-                      "    match n.Kind with"
-                      kindTagArms
-                      ""
-                      sprintf "let private witnessChildren (n: Node%s) : Node%s list =" nodeArgs nodeArgs
-                      "    match n.Kind with"
-                      childArms
-                      ""
-                      sprintf
-                          "let private witnessReplaceChildren (n: Node%s) (kids: Node%s list) : Node%s ="
-                          nodeArgs
-                          nodeArgs
-                          nodeArgs
-                      "    match n.Kind with"
-                      replaceArmsStr
-                      ""
-                      sprintf "let nodeWitness: NodeWitness<Node%s, string> =" nodeArgs
-                      "    { Id = fun n -> n.Id"
-                      "      KindTag = witnessKindTag"
-                      "      Children = witnessChildren"
-                      "      ReplaceChildren = witnessReplaceChildren }" ])
-
-    // -----------------------------------------------------------------------
-    // Phase 317 increment 6 — the validator-rule-scaffold leg. Emit a
-    // `Fuaran.Core.Validator`-ready entry point wired through the generated
-    // `nodeWitness`. Rule *content* stays domain-side (that is the whole point
-    // of `Core.Validator` — `RuleFamily` packs are domain-supplied); what the
-    // generator owns is the scaffold: a `runValidator` that runs any registry
-    // over the generated `Node` via the witness. A domain registers its own
-    // families and gets build-time verification over generated nodes for free.
-    // -----------------------------------------------------------------------
-
-    /// Emit the validator scaffold — independent of the kind set (it wires the
-    /// generic `Validator.runAll` to the generated `Node` + `nodeWitness`).
-    let validatorDecl (msg: Set<string>) : string =
-        let nodeArgs = declParams msg "Node" []
-
-        String.concat
-            "\n"
-            [ "// Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side."
-              sprintf
-                  "let runValidator (reg: Validator.RuleRegistry<Node%s, string>) (root: Node%s) : Defect<string> list ="
-                  nodeArgs
-                  nodeArgs
-              "    Validator.runAll nodeWitness reg root" ]
 
 
     /// Phase 505 — the F# module's [[Stamp]], over its normalised text.
@@ -1456,8 +1567,19 @@ let private encFloat (f: float) : JVal =
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl :: (unions |> List.map (unionEncoder typedName doc decl))
-             @ (records |> List.map (recordEncoder msg idl))
+            (encNodeDecl
+             :: (unions
+                 |> List.map (fun u ->
+                     // Phase 474 — a presence-keyed union writes member pieces, not an object.
+                     match u.Discrimination with
+                     | UnionDiscrimination.ByPresence keyed -> keyedEncoder msg idl u keyed
+                     | UnionDiscrimination.Tagged -> unionEncoder typedName doc decl u))
+             @ (records
+                |> List.map (fun r ->
+                    if r.Inline then
+                        inlineRecordEncoder msg idl r
+                    else
+                        recordEncoder msg idl r))
              @ (kinds
                 |> List.map (fun k ->
                     // Phase 945 — a projected kind's encoder is the projection's, verbatim.
@@ -1545,8 +1667,17 @@ let private encFloat (f: float) : JVal =
 
             (Ok decNodeKindDecl
              :: decNodeDecl
-             :: (unions |> List.map (unionDecoder doc sup.CaseRefines decl))
-             @ (records |> List.map (recordDecoder msg idl))
+             :: (unions
+                 |> List.map (fun u ->
+                     match u.Discrimination with
+                     | UnionDiscrimination.ByPresence keyed -> keyedDecoder msg idl u keyed
+                     | UnionDiscrimination.Tagged -> unionDecoder doc sup.CaseRefines decl u))
+             @ (records
+                |> List.map (fun r ->
+                    if r.Inline then
+                        inlineRecordDecoder msg idl r
+                    else
+                        recordDecoder msg idl r))
              @ (kinds
                 |> List.map (fun k ->
                     // Phase 945 — a projected kind's decoder is the projection's, verbatim.
@@ -1566,7 +1697,7 @@ let private encFloat (f: float) : JVal =
         let witnessAndDerived =
             Decl.projectionsDeclared decl
             |> Result.bind (fun () -> hostedCaseDerivations decl requests)
-            |> Result.bind (fun () -> witnessDecl publicAccess decl.Projections msg kinds)
+            |> Result.bind (fun () -> FSharpWitness.witnessDecl publicAccess decl.Projections msg kinds)
             |> Result.bind (fun w -> FSharpDerive.derivedDecl decl requests |> Result.map (fun ds -> w, ds))
             // Phase 377 — the collecting decoders and the public per-spec entries, on request, after
             // every other member (they compose with the decoder group and nothing reads them).
@@ -1616,6 +1747,10 @@ let private encFloat (f: float) : JVal =
                      [ canonicalFormHelpers ]
                  else
                      [])
+              @ (if unions |> List.exists Decl.isKeyed then
+                     [ keyedHelpers ]
+                 else
+                     [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               // Phase 337 — the parser's refusal through `Decoder.parse` (under `ReadOptions.strict`
@@ -1625,7 +1760,7 @@ let private encFloat (f: float) : JVal =
                     "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\n/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter\n/// reports for the same document, and this layer's sentence (`DecodeError.describe`).\nlet decodeNode (s: string) : Result<Node%s, DecodeError> =\n    Decoder.parse ReadOptions.strict s |> Result.bind decNode"
                     (objParams msg "Node" []) ]
               [ witness ]
-              [ validatorDecl msg ]
+              [ FSharpWitness.validatorDecl msg ]
               [ defaults ]
               derived ]
             |> List.concat
@@ -1737,7 +1872,8 @@ let private encFloat (f: float) : JVal =
         |> Result.bind (fun () -> hostedCaseDerivations decl requests)
         |> Result.bind (fun () ->
             if publicAccess then
-                witnessDecl true decl.Projections decl.Msg decl.Kinds |> Result.map ignore
+                FSharpWitness.witnessDecl true decl.Projections decl.Msg decl.Kinds
+                |> Result.map ignore
             else
                 Ok())
         |> Result.bind (fun () -> FSharpDerive.derivedDecl decl requests |> Result.map ignore)

@@ -222,6 +222,21 @@ module internal DiffChanges =
                   | Some old when old <> ann -> TypeAnnotationsChanged(family, name, old, ann)
                   | _ -> ()
 
+              // Phase 474 — a type's inline layout, over the records and unions both revisions carry.
+              let carried (family: string) (name: string) =
+                  match family with
+                  | "record" -> before.Records.ContainsKey name && after.Records.ContainsKey name
+                  | _ -> before.Unions.ContainsKey name && after.Unions.ContainsKey name
+
+              for key in
+                  Set.union (before.TypeLayouts |> Map.keys |> Set.ofSeq) (after.TypeLayouts |> Map.keys |> Set.ofSeq) do
+                  let family, name = key
+                  let b = before.TypeLayouts |> Map.tryFind key |> Option.defaultValue ""
+                  let a = after.TypeLayouts |> Map.tryFind key |> Option.defaultValue ""
+
+                  if b <> a && carried family name then
+                      TypeLayoutChanged(family, name, b, a)
+
               yield! diffFields ONodeEnvelope before.NodeFields after.NodeFields
 
               for KeyValue((kd, f), v) in after.Defaults do

@@ -101,6 +101,7 @@ point.
 | a field's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `FieldAnnotationsChanged` |
 | a union case's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `UnionCaseAnnotationsChanged` |
 | a union's, a record's or an enum's own annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `TypeAnnotationsChanged` |
+| a record's or a union's inline layout | `breaking-wire` | `no-generated-shape-change` | `TypeLayoutChanged` |
 | a field's alias list | `additive` when no alias is withdrawn, `breaking-wire` otherwise | none | `FieldAliasesChanged` |
 | a field's presence condition | `breaking-wire` | none | `FieldPresenceChanged` |
 | an authoring default added | `additive` | `full-literal-construction` when the field is required — `mk<Kind>` loses the parameter, so every call site moves — else `no-generated-shape-change` | `DefaultAdded` |

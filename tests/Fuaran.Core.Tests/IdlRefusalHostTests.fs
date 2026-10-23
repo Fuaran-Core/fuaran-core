@@ -897,7 +897,8 @@ let declarationTests =
                               RefusalCornersIdl.idl.Records
                               @ [ { Name = name
                                     Fields = []
-                                    Annotations = Annotations.Empty } ]
+                                    Annotations = Annotations.Empty
+                                    Inline = false } ]
                           Kinds =
                               RefusalCornersIdl.idl.Kinds
                               |> List.map (fun k ->

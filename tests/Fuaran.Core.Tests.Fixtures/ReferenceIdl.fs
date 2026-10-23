@@ -154,7 +154,8 @@ let refIdl: Idl =
                       InProcessOnly = false
                       Since = Some "0.1.0"
                       Doc = None } } ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged }
           { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Text"
             Params = []
@@ -167,7 +168,8 @@ let refIdl: Idl =
                               InProcessOnly = true }
                           (opt "args" (TMap TStr))
                       req "key" TStr ] ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged } ]
       Enums =
         [ Declare.enumOf "LayoutKind" [ "Stack"; "Row"; "Grid" ]
           // A wire-mapped enum (Phase 707): host identifiers an F# DU can spell, wire
@@ -177,10 +179,12 @@ let refIdl: Idl =
       Records =
         [ { Name = "ContentHash"
             Fields = [ req "hash" TStr; req "strictness" (TEnum "Strictness") ]
-            Annotations = Annotations.Empty }
+            Annotations = Annotations.Empty
+            Inline = false }
           { Name = "Point"
             Fields = [ req "x" TFloat; req "y" TFloat ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Inline = false } ]
       // Declared defaults for the generated smart constructors. Scalars and enum cases
       // only, because that is what the F# emitter can write a default EXPRESSION for
       // (`CodegenError.UnsupportedDefault` refuses the rest) — so a composite default

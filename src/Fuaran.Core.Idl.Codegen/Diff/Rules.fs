@@ -1057,6 +1057,24 @@ module internal DiffRules =
                 (sprintf "type annotations %s: %s %s" (if b = "" then "declared" else "changed") f n)
                 [ annotationRow "a union's, a record's or an enum's own annotation set" ]
 
+        | TypeLayoutChanged(f, n, b, a) ->
+            rule
+                "TypeLayoutChanged"
+                "73"
+                NoFamily
+                (f + ":" + n)
+                (BreakingWire,
+                 sprintf
+                     "%s `%s` layout %s → %s — an inline declaration's members sit on the object holding it and a presence-keyed union's case is read from its keys, so this moves or re-reads the members of every document carrying it."
+                     f
+                     n
+                     (if b = "" then "(own object)" else b)
+                     (if a = "" then "(own object)" else a),
+                 "Idl.IdlRecord.Inline / Idl.UnionDiscrimination (Phase 474)")
+                (always noShape)
+                (sprintf "%s %s layout changed" f n)
+                [ row "a record's or a union's inline layout" "`breaking-wire`" "`no-generated-shape-change`" ]
+
         | FieldAliasesChanged(o, n, b, a) ->
             rule
                 "FieldAliasesChanged"
@@ -1244,6 +1262,7 @@ module internal DiffRules =
           FieldAnnotationsChanged(owner, "", "", "")
           UnionCaseAnnotationsChanged("", "", "", "")
           TypeAnnotationsChanged("", "", "", "")
+          TypeLayoutChanged("", "", "", "")
           FieldAliasesChanged(owner, "", [], [])
           FieldPresenceChanged(owner, "", "", "")
           DefaultAdded("", "", "")

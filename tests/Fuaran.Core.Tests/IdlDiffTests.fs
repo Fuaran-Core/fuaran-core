@@ -373,7 +373,8 @@ let tests =
                                             Wire = None
                                             Format = None })
                                       Optional ]
-                              Annotations = Annotations.Empty } ] }
+                              Annotations = Annotations.Empty
+                              Inline = false } ] }
 
               let declared =
                   { empty with
@@ -381,7 +382,8 @@ let tests =
                       Records =
                           [ { Name = "Accessibility"
                               Fields = [ f "liveRegion" (TEnum "LiveRegionKind") Optional ]
-                              Annotations = Annotations.Empty } ] }
+                              Annotations = Annotations.Empty
+                              Inline = false } ] }
 
               let cs = diffOf hosted declared
 
@@ -440,7 +442,8 @@ let tests =
                               Name = "Binding"
                               Params = [ "T" ]
                               Cases = cases
-                              Annotations = Annotations.Empty } ] }
+                              Annotations = Annotations.Empty
+                              Discrimination = UnionDiscrimination.Tagged } ] }
 
               let stat: IdlUnionCase =
                   { Hosted = None
@@ -1184,13 +1187,15 @@ let private typed (family: string) (typeAnn: Annotations) (fieldAnn: Annotations
                       Tag = "Lit"
                       Fields = [ f "text" TStr Required ]
                       Annotations = Annotations.Empty } ]
-                Annotations = on "union" } ]
+                Annotations = on "union"
+                Discrimination = UnionDiscrimination.Tagged } ]
         Records =
             [ { Name = "Span"
                 Fields =
                   [ { f "value" TStr Required with
                         Annotations = fieldAnn } ]
-                Annotations = on "record" } ]
+                Annotations = on "record"
+                Inline = false } ]
         Enums =
             [ { Declare.enumOf "Tone" [ "Quiet"; "Loud" ] with
                   Annotations = on "enum" } ] }
@@ -1265,7 +1270,8 @@ let typeAnnotationTests =
                           plain.Records
                           @ [ { Name = "Extra"
                                 Fields = [ f "n" TInt Required ]
-                                Annotations = Annotations.Empty } ] }
+                                Annotations = Annotations.Empty
+                                Inline = false } ] }
 
               Expect.isEmpty (typeMoves (diffOf plain grown)) "a type added unannotated is no annotation move")
 
@@ -1278,7 +1284,8 @@ let typeAnnotationTests =
                           plain.Records
                           @ [ { Name = "Extra"
                                 Fields = [ f "n" TInt Required ]
-                                Annotations = marked } ] }
+                                Annotations = marked
+                                Inline = false } ] }
 
               let cs = diffOf plain grown
               Expect.isEmpty (typeMoves cs) "no annotation row for a type the old revision lacks"

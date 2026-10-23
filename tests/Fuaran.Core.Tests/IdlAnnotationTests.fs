@@ -68,7 +68,8 @@ let private plainIdl: Idl =
                   Tag = "Ref"
                   Fields = [ f "target" TStr Required ]
                   Annotations = Annotations.Empty } ]
-            Annotations = Annotations.Empty } ]
+            Annotations = Annotations.Empty
+            Discrimination = UnionDiscrimination.Tagged } ]
       Enums = []
       Records = []
       Defaults = []
@@ -102,7 +103,8 @@ let private withAnnotations (caseAnn: Annotations) (fieldAnn: Annotations) : Idl
                       Tag = "Ref"
                       Fields = [ f "target" TStr Required ]
                       Annotations = Annotations.Empty } ]
-                Annotations = Annotations.Empty } ] }
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged } ] }
 
 let private authored =
     VNode("a", "Note", [ "label", VStr "x"; "src", VUnion("Lit", [ "value", VStr "y" ]) ])

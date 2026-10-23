@@ -1141,7 +1141,8 @@ module internal Projected =
                 Name = "Rule"
                 Params = []
                 Cases = [ case "Always" []; case "Equals" [ req "key" TStr; req "value" TStr ] ]
-                Annotations = Annotations.Empty }
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged }
               { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
                 Name = "Trigger"
                 Params = []
@@ -1156,11 +1157,13 @@ module internal Projected =
                                     TypeScript = "(x: int) => Msg"
                                     Placeholder = "(fun (_: int) -> box \"<closure>\")" }) ]
                     case "Manual" [ req "label" TStr ] ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged } ]
           Records =
             [ { Name = "Step"
                 Fields = [ req "label" TStr; req "body" TNode ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Inline = false } ]
           Kinds =
             [ { Tag = "Gate"
                 Category = "flow"
@@ -1501,7 +1504,8 @@ module private DeclLaws =
                 MiniIdl.miniIdl.Records
                 @ [ { Name = "Style"
                       Fields = [ field "tone" (TEnum "Tone") Required ]
-                      Annotations = Annotations.Empty } ]
+                      Annotations = Annotations.Empty
+                      Inline = false } ]
             NodeFields = [ field "style" (TRecord "Style") Optional ] }
 
     /// Every vocabulary the suite carries ahead of this file, named.
@@ -1599,7 +1603,8 @@ module private DeclLaws =
                     Cases =
                       [ case "Leaf" [ field "value" (TVar "T") Required ]
                         case "Deeper" [ field "next" (TUnion("Grow", [ TList(TVar "T") ])) Required ] ]
-                    Annotations = Annotations.Empty } ]
+                    Annotations = Annotations.Empty
+                    Discrimination = UnionDiscrimination.Tagged } ]
             Kinds =
                 [ { Tag = "Holder"
                     Category = "x"
@@ -1899,7 +1904,8 @@ module private NullChecked =
                 Cases =
                   [ case "Lit" [ field "value" (TVar "T") Required ]
                     case "Path" [ field "path" TStr Required ] ]
-                Annotations = Annotations.Empty } ]
+                Annotations = Annotations.Empty
+                Discrimination = UnionDiscrimination.Tagged } ]
           Records = []
           Kinds =
             [ kind

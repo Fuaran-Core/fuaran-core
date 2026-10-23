@@ -52,7 +52,8 @@ let private binding: IdlUnion =
             Tag = "Ref"
             Fields = [ field "name" TStr Required ]
             Annotations = Annotations.Empty } ]
-      Annotations = Annotations.Empty }
+      Annotations = Annotations.Empty
+      Discrimination = UnionDiscrimination.Tagged }
 
 /// The kind that carries a `Binding<int>`, so the placeholder's arm is reached from a public entry.
 let private bind: IdlKind =

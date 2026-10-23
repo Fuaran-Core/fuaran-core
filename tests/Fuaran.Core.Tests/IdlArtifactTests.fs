@@ -484,7 +484,48 @@ let private offDefaults: Idl =
                                   Decode = "Decoder.field \"at\" Decoder.str"
                                   Wire = None
                                   Format = None
-                                  Refusal = HostedRefusal.Typed } } ] } ] }
+                                  Refusal = HostedRefusal.Typed } } ]
+                    Discrimination = UnionDiscrimination.Tagged } ] }
+    // Phase 474 — a presence-keyed union whose second case synthesises the first's key, and an
+    // inline record.
+    |> fun idl ->
+        let req (name: string) : IdlField =
+            { Name = name
+              Type = TStr
+              Opt = Required
+              Aliases = []
+              Presence = None
+              Annotations = Annotations.Empty }
+
+        { idl with
+            Unions =
+                idl.Unions
+                @ [ { Name = "Pick"
+                      Params = []
+                      Annotations = Annotations.Empty
+                      TagRule = UnionTagRule.CaseName
+                      Cases =
+                        [ { Tag = "A"
+                            Fields = [ req "a" ]
+                            Annotations = Annotations.Empty
+                            Hosted = None }
+                          { Tag = "B"
+                            Fields = [ req "b" ]
+                            Annotations = Annotations.Empty
+                            Hosted = None } ]
+                      Discrimination =
+                        UnionDiscrimination.ByPresence
+                            [ { Case = "A"
+                                Key = "a"
+                                Synthesised = [] }
+                              { Case = "B"
+                                Key = "b"
+                                Synthesised = [ ("a", VStr "") ] } ] } ]
+            Records =
+                [ { Name = "Grouped"
+                    Fields = [ req "g" ]
+                    Annotations = Annotations.Empty
+                    Inline = true } ] }
 
 /// The same vocabulary AT every default the omit table names.
 let private atDefaults: Idl =
@@ -506,7 +547,9 @@ let private atDefaults: Idl =
             |> List.map (fun u ->
                 { u with
                     TagRule = UnionTagRule.CaseName
+                    Discrimination = UnionDiscrimination.Tagged
                     Cases = u.Cases |> List.map (fun c -> { c with Hosted = None }) })
+        Records = offDefaults.Records |> List.map (fun r -> { r with Inline = false })
         Ops = []
         Wire = WireShape.Default }
 
