@@ -20,6 +20,16 @@
       "heldBy": "ProofsLadderTests"
     },
     {
+      "path": "docs/host-evidence-map.json",
+      "render": "evidence-map",
+      "heldBy": "ProofCoverageTests"
+    },
+    {
+      "path": "docs/host-evidence-map.md",
+      "render": "evidence-map",
+      "heldBy": "ProofCoverageTests"
+    },
+    {
       "path": "README.md",
       "switch": "CORE_APPROVE_README",
       "stem": "README",

@@ -71,6 +71,8 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
     <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
+    <!-- Phase 480 - the host evidence map reads the oracle process's own function table. -->
+    <ProjectReference Include="..\..\tools\Fuaran.Core.Oracle.Cli\Fuaran.Core.Oracle.Cli.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

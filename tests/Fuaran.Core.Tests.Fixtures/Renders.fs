@@ -39,6 +39,21 @@ let private oracleProject () : int =
         printfn "regenerated %s" OracleProject.Path
         0
 
+/// The host evidence map (Phase 480): its JSON and its rendering, written together from the live tree.
+let private evidenceMap () : int =
+    let root = Repo.root ()
+
+    match ProofCoverage.EvidenceMap.render (ProofCoverage.EvidenceMap.liveInputs root) with
+    | Error findings ->
+        eprintfn "render %s:\n%s" ProofCoverage.EvidenceMap.Family (String.concat "\n" findings)
+        2
+    | Ok files ->
+        for path, text in files do
+            File.WriteAllText(Snapshots.repoFile path, text)
+            printfn "regenerated %s" path
+
+        0
+
 /// The table, given the reference run that measures the `families` exporter's `cases` column.
 let tableWith (measuredCases: unit -> (string * Fuaran.Core.CaseCount) list) : (string * Render) list =
     [ yield! Exporters.tableWith measuredCases |> List.map (fun e -> e.Family, exporter e)
@@ -52,7 +67,8 @@ let tableWith (measuredCases: unit -> (string * Fuaran.Core.CaseCount) list) : (
 
       yield "fstar", inRepo (fun () -> max (FStarModels.emit ()) (CertificationVectors.emitVectors ()))
       yield "oracle-project", inRepo oracleProject
-      yield ProofReadme.Family, inRepo ProofReadme.write ]
+      yield ProofReadme.Family, inRepo ProofReadme.write
+      yield ProofCoverage.EvidenceMap.Family, inRepo evidenceMap ]
 
 /// The family names, in table order (nothing is measured to list them).
 let names: string list = tableWith (fun () -> []) |> List.map fst
