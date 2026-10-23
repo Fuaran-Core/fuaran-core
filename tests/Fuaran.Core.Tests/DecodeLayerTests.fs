@@ -827,4 +827,77 @@ let tests =
                           JsonLimit.DocumentBytes ] do
                         Expect.isTrue (breached.Contains l) (sprintf "a vector breaches %s" (JsonLimit.name l))
 
-                    Expect.isGreaterThanOrEqual acceptedUnder 5 "a vector at each bound is accepted" ] ]
+                    Expect.isGreaterThanOrEqual acceptedUnder 5 "a vector at each bound is accepted"
+
+                // Phase 481 — the off-by-one go-red, kept in the suite: a host whose bound is one
+                // unit early (it refuses at the bound) or one unit late (it reads one past it)
+                // answers every vector exactly as the reference does under that limit shifted by
+                // one, so each such host is simulated here and the family must fail it, naming the
+                // vector. The at-the-bound acceptance kills the early host and the one-past refusal
+                // (with its pinned path) the late one, which is why the family carries no row just
+                // under a bound (DECISIONS.md D226). The parser's own nesting cap, which a vector
+                // with no `limits` member is read at, is held the same way.
+                testCase "a host one unit off any bound, early or late, fails the family by name"
+                <| fun _ ->
+                    let shift (l: JsonLimit) (delta: int) (limits: JsonLimits) : JsonLimits =
+                        let at (v: int) =
+                            if v = System.Int32.MaxValue then v else v + delta
+
+                        match l with
+                        | JsonLimit.Depth ->
+                            { limits with
+                                MaxDepth = at limits.MaxDepth }
+                        | JsonLimit.StringLength ->
+                            { limits with
+                                MaxStringLength = at limits.MaxStringLength }
+                        | JsonLimit.ArrayLength ->
+                            { limits with
+                                MaxArrayLength = at limits.MaxArrayLength }
+                        | JsonLimit.ObjectMembers ->
+                            { limits with
+                                MaxObjectMembers = at limits.MaxObjectMembers }
+                        | JsonLimit.DocumentBytes ->
+                            { limits with
+                                MaxDocumentBytes = at limits.MaxDocumentBytes }
+
+                    let failedBy (vec: DecodeRejectCorpus.Vector) (limits: JsonLimits) =
+                        match vec.Intent, DecodeRejectCorpus.outcome { vec with Limits = Some limits } with
+                        | DecodeRejectCorpus.Refuse(code, path), Error got -> got <> (code, path)
+                        | DecodeRejectCorpus.Accept, Ok() -> false
+                        | _ -> true
+
+                    // Each simulated host: the vectors it is run on, and the record it reads them under.
+                    let mutants =
+                        [ for l in
+                              [ JsonLimit.Depth
+                                JsonLimit.StringLength
+                                JsonLimit.ArrayLength
+                                JsonLimit.ObjectMembers
+                                JsonLimit.DocumentBytes ] do
+                              for delta in [ -1; 1 ] ->
+                                  sprintf "%s %+d" (JsonLimit.name l) delta,
+                                  [ for vec in DecodeRejectCorpus.vectors do
+                                        match vec.Limits with
+                                        | Some limits -> vec, shift l delta limits
+                                        | None -> () ]
+                          for delta in [ -1; 1 ] ->
+                              sprintf "the nesting cap %+d" delta,
+                              [ for vec in DecodeRejectCorpus.vectors do
+                                    if vec.Limits.IsNone then
+                                        vec, shift JsonLimit.Depth delta ReadOptions.strict.Limits ] ]
+
+                    // The probe can fail: the unshifted reading fails no vector, so a kill below is
+                    // the shift's doing and not a vector already out of step with its intent.
+                    for vec in DecodeRejectCorpus.vectors do
+                        Expect.isFalse
+                            (failedBy vec (defaultArg vec.Limits ReadOptions.strict.Limits))
+                            (sprintf "%s answers as authored unshifted" vec.Name)
+
+                    for mutant, runs in mutants do
+                        let killers =
+                            runs
+                            |> List.filter (fun (vec, limits) -> failedBy vec limits)
+                            |> List.map (fst >> _.Name)
+
+                        Expect.isNonEmpty killers (sprintf "a host off by one (%s) fails a vector of the family" mutant)
+                        printfn "decode family, a host off by one (%s): fails %s" mutant (String.concat ", " killers) ] ]

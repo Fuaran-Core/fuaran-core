@@ -203,7 +203,8 @@ difference; the manifest schema stays internal, because only this repository wri
 A new family is one row. The four host-compliance phases that were parked behind this table land on it:
 fuaran-core#478 (every answer the oracle can check stamped as agreed by the model) is a member on every
 vector the rows write, written by the same writer ([Who answered a vector](#answered-by)); #479 (the chain, DAG, merge and diff vector families) is
-rows; #481 (the limits vector family) is one row; and #484 (each host declares its compliance and Core
+rows; #481 (the limits vector family) needed no row, the `decode/` family's limit pairs already pinning every
+bound to the unit (D226); and #484 (each host declares its compliance and Core
 validates it) is a validator over the one manifest schema. fuaran-core#477's adoption record replaced
 the `adoption` member's value in `CorpusManifestRow`, in one place, for every manifest at once.
 
@@ -560,7 +561,13 @@ classified refusal of the text. The first fault in document order wins, whicheve
 `ReadOptions.strict` carries `JsonLimits.depthOnly 512`, under which only the depth cap can be
 passed. The `decode/` family carries one vector per bound at the bound (accepted) and one past it, each
 declaring its `limits` record, with the astral and CJK vectors that fail a host whose unit is wrong by
-name. The model (`proofs/JsonParse.fst`, section 13) proves the limited entry point at no bound is the
+name. The pair is what pins a bound to the unit (Phase 481, DECISIONS.md D226): a host one unit EARLY
+refuses the vector at the bound, and a host one unit LATE reads the vector past it (or, for the depth cap
+and the nested rows, breaches at a different path), so a row just under a bound would be one no
+off-by-one host fails, and the family carries none. The suite holds that, not this sentence: it runs
+every limits vector under each bound shifted by one either way, and the parser's own nesting cap the
+same way over the vectors with no record, and fails unless each of those twelve simulated hosts fails a
+vector, by name. The model (`proofs/JsonParse.fst`, section 13) proves the limited entry point at no bound is the
 parser, that a breach is never reported as malformed, and the string and items bounds exact on their
 canonical families. **A stricter host-operational ceiling is deployment policy, not conformance:** a
 host that applies one documents it and never describes a document it refuses under it as malformed.
