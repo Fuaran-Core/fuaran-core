@@ -485,6 +485,7 @@
     <!-- Phase 561 - the post-push registry probe's classification over recorded index answers and
          the v0.40.1 push records (registry-probe/). Appended (append-only). -->
     <Compile Include="RegistryProbeTests.fs" />
+    <Compile Include="GateReadsCensusTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
