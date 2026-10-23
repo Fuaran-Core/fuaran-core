@@ -258,6 +258,23 @@ let wireTests =
                   Expect.equal p.Placeholder (Some "type here") "the record payload holds the positional member"
               | other -> failtestf "expected a text field, got %A" other)
 
+          testCase
+              "every sampled layout value is read back alike by the interpreter, the generated module and the flat twin"
+              (fun _ ->
+                  match Sample.trySampleNodes LayoutIdl.layout [ "Grid"; "Form" ] 474 60 with
+                  | Error f -> failtestf "the sampler refused the layout vocabulary: %A" f
+                  | Ok values ->
+                      for v in values do
+                          match Encode.encode LayoutIdl.layout v with
+                          | Error m -> failtestf "a sampled value did not encode: %s" m
+                          | Ok doc ->
+                              Expect.equal (interpreted LayoutIdl.layout doc) doc "the interpreter re-writes it"
+                              Expect.equal (interpreted LayoutIdl.flat doc) doc "the flat twin reads the same wire"
+
+                              match Gen'.decodeNode doc with
+                              | Ok n -> Expect.equal (Gen'.encodeNode n) doc "the generated module re-writes it"
+                              | Error e -> failtestf "the generated decoder refused %s: %s" doc (DecodeError.render e))
+
           testCase "under declared key order the layout writes the flat twin's key sequence" (fun _ ->
               for doc in LayoutIdl.corpus do
                   Expect.equal
