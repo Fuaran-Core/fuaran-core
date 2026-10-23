@@ -16,6 +16,8 @@
     "docs/ADOPTION.md",
     "docs/conformance-families.json",
     "docs/conformance-families.md",
+    "docs/host-evidence-map.json",
+    "docs/host-evidence-map.md",
     "docs/idl-stability-classes.md",
     "docs/releases/**",
     "docs/units.md",
