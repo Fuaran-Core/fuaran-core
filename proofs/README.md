@@ -55,6 +55,11 @@ closed, because a ladder that can grow a level can hide a demotion; `kit/LADDER.
 cover in `boundary`, and a finding about a model is a row, or the boundary of the row it bounds. The rows,
 grouped by model, are "The models" below.
 
+What another host of this kernel can show for a row is computed, never read off a name:
+[`../docs/host-evidence-map.md`](../docs/host-evidence-map.md) (Phase 480) gives, for every row, the vector
+families whose cases its model answered and the oracle functions that ask its model, and lists the proved
+rows offered neither, by model, as the worklist for new families.
+
 ## The Core-to-domain proof contract
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until

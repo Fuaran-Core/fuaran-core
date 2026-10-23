@@ -874,3 +874,252 @@ let proofCoverageTests =
                   (withExclusion [ "Thing.reached" ] (fun e -> { e with StandIn = None }) opFixture)
                   "operation-stand-in"
                   "Thing.reached" ]
+
+// ---------------------------------------------------------------------------
+// Phase 480 — the host evidence map. For every ladder row, the vector families whose cases its model
+// answered and the oracle functions that ask its model, derived (`EvidenceMap.derive`) and written by
+// `render evidence-map`. The committed files are held to the render; the derivation is a function of
+// its inputs, so every go-red below runs it over the live inputs changed in exactly one way.
+// ---------------------------------------------------------------------------
+
+module private EvidenceMapCase =
+    open Fuaran.Core
+
+    let live () = EvidenceMap.liveInputs (Repo.root ())
+
+    let derived (inputs: EvidenceMap.Inputs) =
+        match EvidenceMap.derive inputs with
+        | Ok m -> m
+        | Error findings -> failtestf "the map does not derive:\n%s" (String.concat "\n" findings)
+
+    let findings (inputs: EvidenceMap.Inputs) =
+        match EvidenceMap.derive inputs with
+        | Ok _ -> []
+        | Error findings -> findings
+
+    /// `inputs` with the vector file at `path` rewritten by `edit` over its `vectors` array.
+    let withVectors (path: string) (edit: JVal list -> JVal list) (inputs: EvidenceMap.Inputs) =
+        let rewrite (text: string) =
+            match Json.parse text with
+            | Ok(JObj fields) ->
+                fields
+                |> List.map (fun (k, v) ->
+                    match k, v with
+                    | "vectors", JArr vs -> k, JArr(edit vs)
+                    | _ -> k, v)
+                |> JObj
+                |> Json.render
+            | _ -> failtestf "%s does not read as a vector file" path
+
+        Expect.isTrue (inputs.VectorFiles |> List.exists (fun (p, _) -> p = path)) (sprintf "%s is an input" path)
+
+        { inputs with
+            VectorFiles =
+                inputs.VectorFiles
+                |> List.map (fun (p, t) -> if p = path then p, rewrite t else p, t) }
+
+    let stampedBy (model: string) (v: JVal) =
+        match v with
+        | JObj fs ->
+            fs
+            |> List.exists (fun (k, s) -> k = "answeredBy" && s = JArr [ JStr "reference"; JStr("model:" + model) ])
+        | _ -> false
+
+    let row (m: EvidenceMap.EvidenceMap) (id: string) =
+        match m.Rows |> List.tryFind (fun r -> r.Id = id) with
+        | Some r -> r
+        | None -> failtestf "no row `%s` in the map" id
+
+    let expectFinding (what: string) (inputs: EvidenceMap.Inputs) (needle: string) =
+        let fs = findings inputs
+
+        Expect.isTrue
+            (fs |> List.exists (fun f -> f.Contains needle))
+            (sprintf "%s: a finding naming `%s`, got:\n%s" what needle (String.concat "\n" fs))
+
+    /// The file the go-reds edit and the model it answers: the one family a DecimalText row is offered.
+    let decimalFile = "conformance/laws/decimal-laws.json"
+
+open Fuaran.Core
+
+[<Tests>]
+let evidenceMapTests =
+    testList
+        "Proofs.Coverage.EvidenceMap"
+        [ testCase "the committed map and its rendering are the render"
+          <| fun _ ->
+              match EvidenceMap.render (EvidenceMapCase.live ()) with
+              | Error findings -> failtestf "the map does not derive:\n%s" (String.concat "\n" findings)
+              | Ok files ->
+                  for path, expected in files do
+                      let committed = File.ReadAllText(Snapshots.repoFile path).Replace("\r\n", "\n")
+
+                      if committed <> expected then
+                          failtestf
+                              "%s is not the render. Re-render with `%s` and commit both files."
+                              path
+                              (Tool.render EvidenceMap.Family)
+
+          testCase "every ladder row is in the map once, in ladder order, and every uncovered one is named"
+          <| fun _ ->
+              let inputs = EvidenceMapCase.live ()
+              let m = EvidenceMapCase.derived inputs
+
+              let ladderIds =
+                  use doc = JsonDocument.Parse inputs.Ladder
+
+                  [ for r in doc.RootElement.GetProperty("claims").EnumerateArray() -> r.GetProperty("id").GetString() ]
+
+              Expect.equal (m.Rows |> List.map _.Id) ladderIds "the map's rows are the ladder's, in its order"
+              let markdown = EvidenceMap.renderMarkdown m
+
+              let unnamed =
+                  m.Rows
+                  |> List.filter (fun r -> not r.Offered && not (markdown.Contains("`" + r.Id + "`")))
+                  |> List.map _.Id
+
+              Expect.isEmpty unnamed "every uncovered row is named on the rendered page"
+
+          testCase "the live map offers something by both routes (or every check here is vacuous)"
+          <| fun _ ->
+              let m = EvidenceMapCase.derived (EvidenceMapCase.live ())
+
+              Expect.isTrue
+                  (m.Rows
+                   |> List.exists (fun r -> r.Level = "proved" && not (List.isEmpty r.Families)))
+                  "a proved row is offered a vector family"
+
+              Expect.isTrue
+                  (m.Rows
+                   |> List.exists (fun r -> r.Level = "proved" && not (List.isEmpty r.Oracle)))
+                  "a proved row is offered an oracle function"
+
+              Expect.isNonEmpty
+                  (EvidenceMap.uncovered "proved" m)
+                  "the worklist is the measured one, not empty by accident"
+
+          testCase
+              "go-red: a family's case deleted for one row's model moves its count, and the last one leaves the row uncovered"
+          <| fun _ ->
+              let inputs = EvidenceMapCase.live ()
+              let before = EvidenceMapCase.derived inputs
+
+              let target =
+                  before.Rows
+                  |> List.find (fun r -> r.Model = Some "DecimalText" && r.Level = "proved")
+
+              let decimalCases (r: EvidenceMap.RowOffer) =
+                  r.Families
+                  |> List.tryFind (fun f -> f.File = EvidenceMapCase.decimalFile)
+                  |> Option.map _.Cases
+
+              let n =
+                  match decimalCases target with
+                  | Some n -> n
+                  | None ->
+                      failtestf "`%s` is offered no case of %s on the live tree" target.Id EvidenceMapCase.decimalFile
+
+              Expect.isEmpty target.Oracle "the measurement needs a row whose one offer is the family"
+
+              // One stamped case deleted: still offered, one case fewer.
+              let dropOne =
+                  EvidenceMapCase.withVectors
+                      EvidenceMapCase.decimalFile
+                      (fun vs ->
+                          let i = vs |> List.findIndex (EvidenceMapCase.stampedBy "DecimalText")
+                          vs |> List.removeAt i)
+                      inputs
+
+              let one = EvidenceMapCase.row (EvidenceMapCase.derived dropOne) target.Id
+              Expect.equal (decimalCases one) (Some(n - 1)) "one case fewer"
+              Expect.isTrue one.Offered "still offered"
+
+              // Every stamped case deleted: the row drops to uncovered and joins the worklist.
+              let dropAll =
+                  EvidenceMapCase.withVectors
+                      EvidenceMapCase.decimalFile
+                      (List.filter (EvidenceMapCase.stampedBy "DecimalText" >> not))
+                      inputs
+
+              let after = EvidenceMapCase.derived dropAll
+              Expect.isFalse (EvidenceMapCase.row after target.Id).Offered "the row is uncovered"
+
+              Expect.isTrue
+                  (EvidenceMap.uncovered "proved" after
+                   |> List.exists (fun (model, ids) -> model = "DecimalText" && List.contains target.Id ids))
+                  "the row is on the worklist under its model"
+
+              Expect.isFalse
+                  (EvidenceMap.uncovered "proved" before
+                   |> List.exists (fun (_, ids) -> List.contains target.Id ids))
+                  "and was not before (the probe moved the verdict)"
+
+          testCase "go-red: an oracle function removed leaves a row whose one offer it was uncovered"
+          <| fun _ ->
+              let inputs = EvidenceMapCase.live ()
+              let before = EvidenceMapCase.derived inputs
+
+              let target =
+                  before.Rows
+                  |> List.find (fun r -> r.Level = "proved" && List.isEmpty r.Families && r.Oracle = [ "chain.verify" ])
+
+              let after =
+                  EvidenceMapCase.derived
+                      { inputs with
+                          Oracle = inputs.Oracle |> List.filter (fun (name, _) -> name <> "chain.verify") }
+
+              Expect.isFalse (EvidenceMapCase.row after target.Id).Offered "the row is uncovered without the function"
+
+          testCase "go-red: a stamp naming a model no ladder row states is refused"
+          <| fun _ ->
+              let inputs =
+                  EvidenceMapCase.live ()
+                  |> EvidenceMapCase.withVectors EvidenceMapCase.decimalFile (fun vs ->
+                      match vs with
+                      | JObj fs :: rest ->
+                          JObj(
+                              fs
+                              |> List.map (fun (k, v) ->
+                                  if k = "answeredBy" then
+                                      k, JArr [ JStr "reference"; JStr "model:Nowhere" ]
+                                  else
+                                      k, v)
+                          )
+                          :: rest
+                      | _ -> failtest "the decimal file has an object vector")
+
+              EvidenceMapCase.expectFinding "a stale stamp" inputs "model:Nowhere"
+
+          testCase "go-red: an oracle function asking a model no ladder row states is refused"
+          <| fun _ ->
+              let inputs = EvidenceMapCase.live ()
+
+              EvidenceMapCase.expectFinding
+                  "a stale oracle model"
+                  { inputs with
+                      Oracle = inputs.Oracle @ [ "nowhere.ask", [ "Nowhere" ] ] }
+                  "nowhere.ask"
+
+          testCase "go-red: an unstamped vector, and two files claiming one family, are refused"
+          <| fun _ ->
+              let inputs = EvidenceMapCase.live ()
+
+              let unstamped =
+                  inputs
+                  |> EvidenceMapCase.withVectors EvidenceMapCase.decimalFile (fun vs ->
+                      match vs with
+                      | JObj fs :: rest -> JObj(fs |> List.filter (fun (k, _) -> k <> "answeredBy")) :: rest
+                      | _ -> failtest "the decimal file has an object vector")
+
+              EvidenceMapCase.expectFinding "an unstamped vector" unstamped "carries no `answeredBy`"
+
+              let copy =
+                  inputs.VectorFiles
+                  |> List.find (fun (p, _) -> p = EvidenceMapCase.decimalFile)
+                  |> snd
+
+              EvidenceMapCase.expectFinding
+                  "a family claimed twice"
+                  { inputs with
+                      VectorFiles = inputs.VectorFiles @ [ "conformance/laws/decimal-laws-copy.json", copy ] }
+                  "is claimed by" ]

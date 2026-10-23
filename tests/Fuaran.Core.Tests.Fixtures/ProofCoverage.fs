@@ -894,3 +894,442 @@ let liveOperationInputs () : OperationInputs =
         |> List.filter (fun o -> claimedObsolete.Contains o.Name && carriesObsolete o)
         |> List.map _.Name
         |> Set.ofList }
+
+// ---------------------------------------------------------------------------
+//  The host evidence map (Phase 480, DECISIONS.md D225)
+// ---------------------------------------------------------------------------
+
+/// For every ladder row, the evidence a host can offer for it: the vector families whose cases an
+/// extracted model answered (`answeredBy` naming the row's model, Phase 478) and the oracle functions
+/// (docs/oracle-protocol.md) that ask the row's model. Derived from three inputs and nothing authored:
+/// `proofs.json`, the committed vector files under `conformance/`, and the oracle's function table. A row
+/// with neither is a gap in what Core offers, never in a host. `render evidence-map` writes
+/// `docs/host-evidence-map.json` and its rendering beside it; `Proofs.Coverage` holds both to the render.
+/// The grain is the MODEL (D225): a stamp and the oracle table both name a model, never a function in it.
+module EvidenceMap =
+
+    open Fuaran.Core
+
+    /// The two files the render writes, repository-relative.
+    let JsonPath = "docs/host-evidence-map.json"
+
+    let MarkdownPath = "docs/host-evidence-map.md"
+
+    /// The tool family that writes both (`Renders`).
+    [<Literal>]
+    let Family = "evidence-map"
+
+    /// The corpus root the vector files are read from, repository-relative.
+    let CorpusRoot = "conformance"
+
+    /// One family's cases that one model answered.
+    type FamilyOffer =
+        { Family: string
+          File: string
+          Cases: int }
+
+    /// One ladder row and what a host can offer for it.
+    type RowOffer =
+        {
+            Id: string
+            Level: string
+            /// The F* module the row's evidence names (`proofs/<Model>.fst`), or none: an assumed or
+            /// policy row, or a law row.
+            Model: string option
+            Families: FamilyOffer list
+            /// The oracle's function names, in its table's order.
+            Oracle: string list
+        }
+
+        member r.Offered = not (List.isEmpty r.Families && List.isEmpty r.Oracle)
+
+    /// One committed vector file: its family, and how many of its cases each answerer answered
+    /// (`None`, the reference alone; `Some m`, the reference and the extracted model `m`).
+    type FamilyStamps =
+        { Family: string
+          File: string
+          ByModel: (string option * int) list }
+
+    type Inputs =
+        {
+            /// `proofs.json`'s text.
+            Ladder: string
+            /// Every JSON file under the corpus root, repository-relative with `/`, and its text.
+            VectorFiles: (string * string) list
+            /// The oracle's functions: each name and the models it asks.
+            Oracle: (string * string list) list
+        }
+
+    type EvidenceMap =
+        { Rows: RowOffer list
+          Families: FamilyStamps list }
+
+    let private find (fields: (string * JVal) list) (name: string) =
+        fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+
+    let private stampOf (where: string) (v: JVal option) : Result<string option, string> =
+        match v with
+        | None -> Error(sprintf "%s carries no `answeredBy`" where)
+        | Some s ->
+            match AnsweredBy.read s with
+            | Ok AnsweredBy.Reference -> Ok None
+            | Ok(AnsweredBy.Model m) -> Ok(Some m)
+            | Error e -> Error(sprintf "%s: %s" where e)
+
+    /// A vector file's stamps, or `None` for a JSON file that is no family's vector file (a manifest,
+    /// a schema): one with no string `family` at its root. A family file carries its cases as a
+    /// `vectors` array, each stamped, or as `lines` under one header stamp (Phase 478).
+    let stampsOf (path: string) (text: string) : Result<FamilyStamps option, string> =
+        match Json.parse text with
+        | Error e -> Error(sprintf "%s is not JSON (%s)" path e)
+        | Ok(JObj fields) ->
+            match find fields "family" with
+            | Some(JStr family) ->
+                let answers =
+                    match find fields "vectors", find fields "lines" with
+                    | Some(JArr vs), _ ->
+                        vs
+                        |> List.mapi (fun i v ->
+                            match v with
+                            | JObj vf -> stampOf (sprintf "%s vector %d" path i) (find vf "answeredBy")
+                            | _ -> Error(sprintf "%s vector %d is not an object" path i))
+                    | None, Some(JArr ls) ->
+                        let header = stampOf (sprintf "%s's header" path) (find fields "answeredBy")
+                        ls |> List.map (fun _ -> header)
+                    | _ ->
+                        [ Error(sprintf "%s (family `%s`) carries neither a `vectors` nor a `lines` array" path family) ]
+
+                match
+                    answers
+                    |> List.choose (function
+                        | Error e -> Some e
+                        | Ok _ -> None)
+                with
+                | e :: _ -> Error e
+                | [] ->
+                    let byModel =
+                        answers
+                        |> List.choose (function
+                            | Ok m -> Some m
+                            | Error _ -> None)
+                        |> List.countBy id
+
+                    Ok(
+                        Some
+                            { Family = family
+                              File = path
+                              ByModel = byModel }
+                    )
+            | _ -> Ok None
+        | Ok _ -> Ok None
+
+    let private ladderRows (ladderText: string) : (string * string * string option) list =
+        use doc = JsonDocument.Parse ladderText
+
+        match doc.RootElement.TryGetProperty "claims" with
+        | true, c when c.ValueKind = JsonValueKind.Array ->
+            c.EnumerateArray()
+            |> Seq.map (fun r ->
+                let model =
+                    objMember r "evidence"
+                    |> Option.bind (fun e -> strMember e "model")
+                    |> Option.map moduleOfPath
+
+                strMember r "id" |> Option.defaultValue "<no id>",
+                strMember r "level" |> Option.defaultValue "<no level>",
+                model)
+            |> List.ofSeq
+        | _ -> []
+
+    /// The map, or every reason it cannot be derived: an unreadable vector file, two files claiming
+    /// one family, and a stamp or an oracle function naming a model no ladder row states (a stale
+    /// name would offer evidence for nothing, silently).
+    let derive (inputs: Inputs) : Result<EvidenceMap, string list> =
+        let rows = ladderRows inputs.Ladder
+
+        let stamped =
+            inputs.VectorFiles
+            |> List.sortWith (fun (a, _) (b, _) -> String.CompareOrdinal(a, b))
+            |> List.map (fun (p, t) -> stampsOf p t)
+
+        let families =
+            stamped
+            |> List.choose (function
+                | Ok(Some f) -> Some f
+                | _ -> None)
+
+        let ladderModels = rows |> List.choose (fun (_, _, m) -> m) |> Set.ofList
+
+        let findings =
+            [ if List.isEmpty rows then
+                  yield "the ladder carries no `claims` rows"
+
+              for s in stamped do
+                  match s with
+                  | Error e -> yield e
+                  | Ok _ -> ()
+
+              for family, files in families |> List.groupBy _.Family do
+                  if List.length files > 1 then
+                      yield
+                          sprintf
+                              "family `%s` is claimed by %s"
+                              family
+                              (files |> List.map (fun f -> "`" + f.File + "`") |> String.concat " and ")
+
+              for f in families do
+                  for m, _ in f.ByModel do
+                      match m with
+                      | Some m when not (ladderModels.Contains m) ->
+                          yield sprintf "`%s` stamps `model:%s`, a model no ladder row states" f.File m
+                      | _ -> ()
+
+              for name, models in inputs.Oracle do
+                  for m in models do
+                      if not (ladderModels.Contains m) then
+                          yield sprintf "the oracle's `%s` asks `%s`, a model no ladder row states" name m ]
+
+        if not (List.isEmpty findings) then
+            Error findings
+        else
+            let offer (id, level, model) =
+                let families, oracle =
+                    match model with
+                    | None -> [], []
+                    | Some m ->
+                        families
+                        |> List.choose (fun f ->
+                            f.ByModel
+                            |> List.tryPick (fun (a, n) -> if a = Some m then Some n else None)
+                            |> Option.map (fun n ->
+                                { FamilyOffer.Family = f.Family
+                                  File = f.File
+                                  Cases = n })),
+                        inputs.Oracle
+                        |> List.filter (fun (_, models) -> List.contains m models)
+                        |> List.map fst
+
+                { Id = id
+                  Level = level
+                  Model = model
+                  Families = families
+                  Oracle = oracle }
+
+            Ok
+                { Rows = rows |> List.map offer
+                  Families = families }
+
+    let private ordinal (a: string, _) (b: string, _) = String.CompareOrdinal(a, b)
+
+    /// The rows of `level` no host can offer evidence for, grouped by model in ordinal order (a row
+    /// with no model groups under ""). Over `proved` this is the worklist for new families.
+    let uncovered (level: string) (m: EvidenceMap) : (string * string list) list =
+        m.Rows
+        |> List.filter (fun r -> r.Level = level && not r.Offered)
+        |> List.groupBy (fun r -> r.Model |> Option.defaultValue "")
+        |> List.sortWith ordinal
+        |> List.map (fun (model, rs) -> model, rs |> List.map _.Id)
+
+    /// The families no model answered a case of: certified against the reference implementation
+    /// alone, so they offer nothing for a proved row.
+    let referenceOnly (m: EvidenceMap) : FamilyStamps list =
+        m.Families
+        |> List.filter (fun f -> f.ByModel |> List.forall (fun (a, _) -> a.IsNone))
+
+    let casesOf (f: FamilyStamps) = f.ByModel |> List.sumBy snd
+
+    let private generatedBy =
+        sprintf "GENERATED by `dotnet run --project tools/Fuaran.Core.Tools -- render %s`; never edit it." Family
+
+    let private note =
+        generatedBy
+        + " For every row of the claims ladder (proofs.json), in ladder order, the evidence a host can offer for it:"
+        + " `families`, the vector families under conformance/ with cases the row's model answered (`answeredBy`"
+        + " names `model:<model>`; `cases` counts those cases), and `oracle`, the oracle functions"
+        + " (docs/oracle-protocol.md) that ask the row's model. `model` is the F* module the row's evidence names,"
+        + " absent when it names none. The grain is the model (DECISIONS.md D225). A row whose two lists are empty is"
+        + " uncovered: a gap in what Core offers, not in a host. `worklist` groups the uncovered proved rows by"
+        + " model; `referenceOnly` names the families no model answered. docs/host-evidence-map.md renders this file."
+
+    let private famObj (family: string) (file: string) (cases: int) =
+        JObj [ "family", JStr family; "file", JStr file; "cases", JInt cases ]
+
+    /// The JSON file: header members, then one line per row, per worklist group and per family.
+    let renderJson (m: EvidenceMap) : string =
+        let str (s: string) = Json.render (JStr s)
+
+        let rowLine (r: RowOffer) =
+            JObj
+                [ yield "id", JStr r.Id
+                  yield "level", JStr r.Level
+                  match r.Model with
+                  | Some model -> yield "model", JStr model
+                  | None -> ()
+                  yield "families", JArr(r.Families |> List.map (fun f -> famObj f.Family f.File f.Cases))
+                  yield "oracle", JArr(r.Oracle |> List.map JStr) ]
+            |> Json.render
+
+        let block (name: string) (lines: string list) =
+            match lines with
+            | [] -> sprintf "  %s: []" (str name)
+            | _ ->
+                sprintf "  %s: [\n%s\n  ]" (str name) (lines |> List.map (fun l -> "    " + l) |> String.concat ",\n")
+
+        let groups =
+            uncovered "proved" m
+            |> List.map (fun (model, ids) ->
+                JObj [ "model", JStr model; "rows", JArr(ids |> List.map JStr) ] |> Json.render)
+
+        let refOnly =
+            referenceOnly m
+            |> List.map (fun f -> famObj f.Family f.File (casesOf f) |> Json.render)
+
+        [ "{"
+          sprintf "  %s: %s," (str "kind") (str "hostEvidenceMap")
+          sprintf "  %s: %s," (str "$note") (str note)
+          sprintf "  %s: %s," (str "grain") (str "model")
+          block "rows" (m.Rows |> List.map rowLine) + ","
+          block "worklist" groups + ","
+          block "referenceOnly" refOnly
+          "}" ]
+        |> String.concat "\n"
+        |> fun s -> s + "\n"
+
+    let private code (s: string) = "`" + s + "`"
+
+    /// The Markdown rendering: the schema, the offers by model, the worklist, every other uncovered row
+    /// and the reference-only families.
+    let renderMarkdown (m: EvidenceMap) : string =
+        let offered = m.Rows |> List.filter _.Offered
+        let levels = m.Rows |> List.map _.Level |> List.distinct
+
+        let uncoveredCount level =
+            m.Rows |> List.filter (fun r -> r.Level = level && not r.Offered) |> List.length
+
+        let byModel =
+            offered
+            |> List.groupBy (fun r -> r.Model |> Option.defaultValue "")
+            |> List.sortWith ordinal
+
+        let groupLines (groups: (string * string list) list) =
+            [ for model, ids in groups do
+                  yield ""
+
+                  yield
+                      sprintf
+                          "- %s (%d): %s"
+                          (if model = "" then "no model" else code model)
+                          ids.Length
+                          (ids |> List.map code |> String.concat ", ") ]
+
+        [ yield "# Host evidence map"
+          yield ""
+          yield sprintf "<!-- %s -->" generatedBy
+          yield ""
+          yield
+              "For every row of the claims ladder ([`proofs.json`](../proofs.json)), the evidence a host can offer for it: the vector families whose cases the row's model answered, and the oracle functions that ask the row's model. A row with neither is a gap in what Core offers, not in a host. Nothing here is authored: [`host-evidence-map.json`](host-evidence-map.json) is derived from the ladder, the vector files under [`conformance/`](../conformance/) and the oracle's function table ([oracle-protocol.md](oracle-protocol.md)), and this page renders it. The `Proofs.Coverage` family holds both files to the render."
+          yield ""
+          yield "## The schema"
+          yield ""
+          yield
+              "- `rows[]`, one per ladder row in ladder order: `id` and `level` (the row's), `model` (the F* module its evidence names, `proofs/<model>.fst`; absent when it names none), `families[]` (`family`, `file`, and `cases`, the count of that family's cases whose `answeredBy` names `model:<model>`), and `oracle[]` (the protocol functions whose table entry asks the model). A row with both lists empty is uncovered."
+          yield "- `worklist[]`: the uncovered `proved` rows, grouped by `model` in ordinal order."
+          yield "- `referenceOnly[]`: the families no model answered a case of, with their case counts."
+          yield ""
+          yield
+              "**The grain is the model** ([DECISIONS.md](../DECISIONS.md) D225). A vector's stamp and the oracle's table both name a model, never a function in it, so a family or a function is offered for every row about that model. Which of a theorem's inputs a host's run exercised is the host's own declaration."
+          yield ""
+          yield "## Summary"
+          yield ""
+
+          yield
+              sprintf
+                  "%d rows: %d offered, %d uncovered (%s)."
+                  m.Rows.Length
+                  offered.Length
+                  (m.Rows.Length - offered.Length)
+                  (levels
+                   |> List.map (fun l -> sprintf "%s %d" l (uncoveredCount l))
+                   |> String.concat ", ")
+
+          yield ""
+          yield "## Offers, by model"
+          yield ""
+          yield "| Model | Rows | Families (cases) | Oracle functions |"
+          yield "|---|---|---|---|"
+
+          for model, rs in byModel do
+              let r = List.head rs
+
+              yield
+                  sprintf
+                      "| %s | %d | %s | %s |"
+                      (code model)
+                      rs.Length
+                      (match r.Families with
+                       | [] -> "—"
+                       | fs ->
+                           fs
+                           |> List.map (fun f -> sprintf "%s (%d)" (code f.Family) f.Cases)
+                           |> String.concat ", ")
+                      (match r.Oracle with
+                       | [] -> "—"
+                       | os -> os |> List.map code |> String.concat ", ")
+
+          yield ""
+          yield "## Worklist: proved rows no host can offer evidence for"
+          yield ""
+          yield "Grouped by model. Each group is a candidate vector family or oracle function."
+          yield! groupLines (uncovered "proved" m)
+          yield ""
+          yield "## Every other uncovered row"
+          yield ""
+
+          yield
+              "A row naming no model (an `assumed` or `policy` row, or a law row) is answered by a premise, a policy or a law run, never by an offer here."
+
+          for level in levels |> List.filter (fun l -> l <> "proved") do
+              let groups = uncovered level m
+
+              if not (List.isEmpty groups) then
+                  yield ""
+                  yield sprintf "### %s" level
+                  yield! groupLines groups
+
+          yield ""
+          yield "## Families no model answers"
+          yield ""
+          yield
+              "Certified against the reference implementation alone, so a host passing one offers nothing for a proved row."
+          yield ""
+          yield "| Family | File | Cases |"
+          yield "|---|---|---|"
+
+          for f in referenceOnly m do
+              yield sprintf "| %s | [%s](../%s) | %d |" (code f.Family) (code f.File) f.File (casesOf f) ]
+        |> String.concat "\n"
+        |> fun s -> s + "\n"
+
+    /// Every JSON file under the corpus root of the repository at `root`, repository-relative with `/`.
+    let vectorFilesUnder (root: string) : (string * string) list =
+        let dir = Path.Combine(root, CorpusRoot)
+
+        Directory.GetFiles(dir, "*.json", SearchOption.AllDirectories)
+        |> Array.map (fun p -> Path.GetRelativePath(root, p).Replace('\\', '/'), File.ReadAllText p)
+        |> List.ofArray
+
+    /// The oracle process's own function table (`Protocol.functions`), names and models.
+    let oracleTable () : (string * string list) list =
+        Fuaran.Core.Oracle.Cli.Protocol.functions
+        |> List.map (fun (name, models, _) -> name, models)
+
+    /// The inputs this repository's tree holds.
+    let liveInputs (root: string) : Inputs =
+        { Ladder = File.ReadAllText(Path.Combine(root, "proofs.json"))
+          VectorFiles = vectorFilesUnder root
+          Oracle = oracleTable () }
+
+    /// The two files, rendered from the inputs.
+    let render (inputs: Inputs) : Result<(string * string) list, string list> =
+        derive inputs
+        |> Result.map (fun m -> [ JsonPath, renderJson m; MarkdownPath, renderMarkdown m ])
