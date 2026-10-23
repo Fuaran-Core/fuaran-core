@@ -486,6 +486,10 @@
          the v0.40.1 push records (registry-probe/). Appended (append-only). -->
     <Compile Include="RegistryProbeTests.fs" />
     <Compile Include="GateReadsCensusTests.fs" />
+    <!-- Phase 549 - the structural families over the skeleton witness (chain, dag, merge, diff): each
+         committed vector re-answered from its own input, its law, the go-red and the adequacy.
+         Appended (append-only). -->
+    <Compile Include="StructuralVectorTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

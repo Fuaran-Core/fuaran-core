@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "A Core-owned structural family over the skeleton witness (Phase 549). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count.",
+  "families": [
+    { "id": "skeletonDag", "kind": "dag-vectors", "file": "skeleton-dag.json", "vectors": 11, "adoption": { "fuaran": "adopted", "fuaran-ts": "proposed", "fuaran-py": "proposed", "fuaran-go": "proposed", "fuaran-rs": "proposed" }, "description": "The op-DAG over skeleton ops: content ids and write refusals, heads, order, ranks, the fold, and the integrity walk." }
+  ]
+}
