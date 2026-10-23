@@ -490,6 +490,10 @@
          committed vector re-answered from its own input, its law, the go-red and the adequacy.
          Appended (append-only). -->
     <Compile Include="StructuralVectorTests.fs" />
+    <!-- Phase 494 - a declared keyed position: the generated layer's two enumerations (F# and TypeScript),
+         the generated-versus-hand witness pair law, and the declaration's validation, artifact and
+         classifier reading. Appended (append-only). -->
+    <Compile Include="IdlKeyedSlotTests.fs" />
     <!-- Phase 484 - a host's compliance declaration validated against the evidence map, the family
          manifests' adoption records and the host-premise rows (HostCompliance, in the fixtures
          library); a go-red per refusal, the verdict's labels, the schema and the page. Appended

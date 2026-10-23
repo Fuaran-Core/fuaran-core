@@ -322,6 +322,13 @@ module Artifact =
               Default = []
               Omits = List.isEmpty }
 
+        /// Phase 494 — a field that is not a declared keyed position writes no `keyed`.
+        let fieldKeyed: Omission<bool> =
+            { Owner = "a field"
+              Key = "keyed"
+              Default = false
+              Omits = not }
+
         /// Phase 539 — an enum none of whose cases declares an alias writes no `aliases`.
         let enumAliases: Omission<(string * string list) list> =
             { Owner = "an enum"
@@ -384,6 +391,7 @@ module Artifact =
           Omit.caseAnnotations.Owner, Omit.caseAnnotations.Key
           Omit.hostCases.Owner, Omit.hostCases.Key
           Omit.fieldAliases.Owner, Omit.fieldAliases.Key
+          Omit.fieldKeyed.Owner, Omit.fieldKeyed.Key
           Omit.enumAliases.Owner, Omit.enumAliases.Key
           Omit.tagRule.Owner, Omit.tagRule.Key
           Omit.hostedRefusal.Owner, Omit.hostedRefusal.Key
@@ -865,14 +873,16 @@ module Artifact =
 
     /// One field object. Field lists keep their AUTHORED order (the module's ordering contract).
     /// Phase 539 — `aliases` (in priority order) and `presence` follow the optionality, each
-    /// omitted when it says nothing, so a vocabulary that declares neither renders as it did.
+    /// omitted when it says nothing, so a vocabulary that declares neither renders as it did; Phase
+    /// 494's `keyed` follows them on the same terms.
     let internal field: Codec<IdlField> =
-        (Codec.record (fun name ty opt aliases presence ann ->
+        (Codec.record (fun name ty opt aliases presence keyed ann ->
             { Name = name
               Type = ty
               Opt = opt
               Aliases = aliases
               Presence = presence
+              Keyed = keyed
               Annotations = ann })
         : CodecFields<IdlField, _>)
         |> Codec.field "name" _.Name Codec.string
@@ -880,6 +890,8 @@ module Artifact =
         |> Codec.field "optionality" _.Opt optionality
         |> omitting Omit.fieldAliases _.Aliases (Codec.list Codec.string)
         |> Codec.optField "presence" _.Presence presenceCondition
+        // Phase 494 — a declared keyed position, omitted when the field is not one.
+        |> omitting Omit.fieldKeyed _.Keyed Codec.bool
         |> annotated _.Annotations
         |> Codec.build
         |> declared "field"

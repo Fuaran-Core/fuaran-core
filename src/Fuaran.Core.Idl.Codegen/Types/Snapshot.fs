@@ -109,6 +109,9 @@ type FieldSnap =
         /// The member's presence condition (Phase 539) as canonical JSON, `""` when it declares none.
         /// Named apart from [[Presence]], the declared optionality.
         PresenceCondition: string
+        /// The member is a declared keyed position (Phase 494); `false` when the artifact says
+        /// nothing, which is also how a revision predating the key reads.
+        Keyed: bool
     }
 
 /// What a field belongs to. `ONodeEnvelope` is the per-node field set beside

@@ -25,6 +25,7 @@ module CanonicalFormVectorExport =
           Type = t
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 

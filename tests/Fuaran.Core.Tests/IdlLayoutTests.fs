@@ -110,6 +110,7 @@ let declarationTests =
                                       Type = TList(TRecord "Paging")
                                       Opt = Required
                                       Aliases = []
+                                      Keyed = false
                                       Presence = None
                                       Annotations = Annotations.Empty } ] } ] }
 
@@ -142,6 +143,7 @@ let declarationTests =
                                                 Type = TRecord "Paging"
                                                 Opt = Required
                                                 Aliases = []
+                                                Keyed = false
                                                 Presence = None
                                                 Annotations = Annotations.Empty } ] }
                               else
@@ -163,6 +165,7 @@ let declarationTests =
                                                 Type = TInt
                                                 Opt = Optional
                                                 Aliases = []
+                                                Keyed = false
                                                 Presence = None
                                                 Annotations = Annotations.Empty } ] }
                               else

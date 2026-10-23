@@ -7,7 +7,7 @@ module Fuaran.Core.Tests.HostCompliance
 //  DECLARE LOCAL. A host commits `host-compliance.json` at its own root (docs/host-compliance.md;
 //  the schema is docs/host-compliance.schema.json). For a ladder row it names one or more pieces of
 //  evidence, each of one CLASS from a closed set: `vector-certified`, `oracle-differential`,
-//  `host-premise`, or `not-covered` with a reason (DECISIONS.md D228).
+//  `host-premise`, or `not-covered` with a reason (DECISIONS.md D229).
 //
 //  VALIDATE HERE. The validator reads three things this repository already derives, and nothing
 //  else: the evidence map (`ProofCoverage.EvidenceMap`, Phase 480: what Core offers for each row),
@@ -49,7 +49,7 @@ let SchemaPath = "docs/host-compliance.schema.json"
 
 let DocPath = "docs/host-compliance.md"
 
-/// One piece of evidence a host offers for one ladder row. The set is CLOSED (D228): a class outside
+/// One piece of evidence a host offers for one ladder row. The set is CLOSED (D229): a class outside
 /// it is refused, and a further class joins only by a recorded decision that amends this type, the
 /// schema's enumeration and the page together.
 [<RequireQualifiedAccess>]

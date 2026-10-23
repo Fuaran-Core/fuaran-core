@@ -104,6 +104,7 @@ point.
 | a record's or a union's inline layout | `breaking-wire` | `no-generated-shape-change` | `TypeLayoutChanged` |
 | a field's alias list | `additive` when no alias is withdrawn, `breaking-wire` otherwise | none | `FieldAliasesChanged` |
 | a field's presence condition | `breaking-wire` | none | `FieldPresenceChanged` |
+| a field's declared keyed position | `host-surface-only` | `no-generated-shape-change` — the witness's `children` and keyed walk move a slot between them; no declaration's shape moves | `FieldKeyedChanged` |
 | an authoring default added | `additive` | `full-literal-construction` when the field is required — `mk<Kind>` loses the parameter, so every call site moves — else `no-generated-shape-change` | `DefaultAdded` |
 | an authoring default removed | `breaking-for-emitters` | `full-literal-construction` when the field is required — `mk<Kind>` gains the parameter — else `no-generated-shape-change` | `DefaultRemoved` |
 | an authoring default changed | `breaking-for-emitters` | `no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not | `DefaultChanged` |

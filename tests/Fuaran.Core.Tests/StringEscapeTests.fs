@@ -480,6 +480,7 @@ module EmittedEncStr =
               Type = t
               Opt = Required
               Aliases = []
+              Keyed = false
               Presence = None
               Annotations = Annotations.Empty }
 

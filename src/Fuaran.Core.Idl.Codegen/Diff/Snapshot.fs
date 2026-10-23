@@ -140,7 +140,8 @@ module internal DiffSnapshot =
                   PresenceCondition =
                     match field "presence" v with
                     | Some c -> Canonical.write Rendering.CrossHost c
-                    | None -> "" }
+                    | None -> ""
+                  Keyed = (field "keyed" v = Some(JBool true)) }
         | _ -> None
 
     let private readFields (owner: JVal) : FieldSnap list =

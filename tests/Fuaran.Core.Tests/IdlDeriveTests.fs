@@ -155,6 +155,7 @@ let private contravariantIdl =
                                                 Placeholder = "(fun (_: obj) -> \"\")" }
                                         Opt = Required
                                         Aliases = []
+                                        Keyed = false
                                         Presence = None
                                         Annotations = Annotations.Empty } ]
                                   Annotations = Annotations.Empty } ] }) }
@@ -397,7 +398,7 @@ let tests =
                         "owner defaults")
 
                 testCase "the constants say what the vocabulary declares" (fun _ ->
-                    Expect.equal kindCategories["structure"] (set [ "Section"; "Choice" ]) "categories"
+                    Expect.equal kindCategories["structure"] (set [ "Section"; "Choice"; "Attempt" ]) "categories"
                     Expect.equal kindFieldNames["Note"] (set [ "text"; "priority" ]) "field names"
                     Expect.equal envelopeFieldNames (set [ "annotation" ]) "envelope"
                     Expect.equal opFieldNames["Move"] (set [ "target"; "index" ]) "ops") ]
@@ -1111,6 +1112,7 @@ module internal Projected =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 
@@ -1486,6 +1488,7 @@ module private DeclLaws =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 
@@ -1877,6 +1880,7 @@ module private NullChecked =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 
@@ -2408,6 +2412,7 @@ module private OptionalNode =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 

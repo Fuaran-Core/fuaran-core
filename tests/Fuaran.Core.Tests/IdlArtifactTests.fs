@@ -319,6 +319,7 @@ let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl
                   [ { Name = "departs"
                       Opt = Required
                       Aliases = []
+                      Keyed = false
                       Presence = None
                       Annotations = Annotations.Empty
                       Type =
@@ -439,8 +440,17 @@ let private offDefaults: Idl =
                       Type = TStr
                       Opt = Required
                       Aliases = [ "body" ]
+                      Keyed = false
                       Presence = None
-                      Annotations = note } ] } ]
+                      Annotations = note }
+                    // Phase 494 — a declared keyed position, the `keyed` row away from its default.
+                    { Name = "aside"
+                      Type = TNode
+                      Opt = Required
+                      Aliases = []
+                      Keyed = true
+                      Presence = None
+                      Annotations = Annotations.Empty } ] } ]
         Unions = []
         Records = []
         Defaults = []
@@ -474,6 +484,7 @@ let private offDefaults: Idl =
                                 Type = TStr
                                 Opt = Required
                                 Aliases = []
+                                Keyed = false
                                 Presence = None
                                 Annotations = Annotations.Empty } ]
                           Annotations = Annotations.Empty
@@ -494,6 +505,7 @@ let private offDefaults: Idl =
               Type = TStr
               Opt = Required
               Aliases = []
+              Keyed = false
               Presence = None
               Annotations = Annotations.Empty }
 
@@ -540,6 +552,7 @@ let private atDefaults: Idl =
                         |> List.map (fun f ->
                             { f with
                                 Aliases = []
+                                Keyed = false
                                 Annotations = Annotations.Empty }) })
         Enums = [ Declare.enumOf "Tone" [ "loud"; "quiet" ] ]
         Unions =
@@ -672,6 +685,7 @@ let codecTests =
                                     Type = TClosure
                                     Opt = Optional
                                     Aliases = []
+                                    Keyed = false
                                     Presence = None
                                     Annotations = Annotations.Empty } ] } ] }
 

@@ -938,6 +938,44 @@ module Declare =
                               (sprintf "%s: the omit-at-default value does not fit the field's type (%s)" at m)
                   | _ -> () ]
 
+        /// Phase 494 — a declared keyed position ([[IdlField.Keyed]]) is admitted only where the derived
+        /// rule would otherwise make the slot a STRUCTURAL child: on a node kind's field (`admitted`)
+        /// holding a node or a node list the kind always carries. Anywhere else it declares nothing —
+        /// an optional node, and a node in a record, a union case, an op or the envelope, is keyed
+        /// already, and a slot holding no node has no position — and a marking on nothing is a typo.
+        let keyedErrors
+            (admitted: bool)
+            (owner: string)
+            (fieldAt: int -> PathSegment list)
+            (fields: IdlField list)
+            : VocabularyFault list =
+            [ for j, f in List.indexed fields do
+                  if f.Keyed then
+                      let path = fieldAt j @ [ key "keyed" ]
+                      let at = sprintf "%s, field '%s'" owner f.Name
+
+                      if not admitted then
+                          fault
+                              path
+                              (sprintf
+                                  "%s: a keyed position is declared only on a node kind's field — every node held here is keyed already"
+                                  at)
+                      else
+                          match f.Opt, f.Type with
+                          | (Required | OmitDefault _), (TNode | TList TNode) -> ()
+                          | Optional, (TNode | TList TNode) ->
+                              fault
+                                  path
+                                  (sprintf
+                                      "%s: an optional node is a keyed position already — the marking declares nothing"
+                                      at)
+                          | _ ->
+                              fault
+                                  path
+                                  (sprintf
+                                      "%s: a keyed position is declared only on a node or a node list the kind always carries"
+                                      at) ]
+
         let kindErrors (what: string) (owner: PathSegment list) (k: IdlKind) : VocabularyFault list =
             let label = sprintf "%s '%s'" what k.Tag
 
@@ -947,7 +985,8 @@ module Declare =
                       (sprintf "%s: the category carries a line break, a control character or ill-formed UTF-16" label)
 
               yield! annotationErrors owner label k.Annotations
-              yield! fieldErrors label (fun j -> owner @ [ key "fields"; item j ]) [] k.Fields ]
+              yield! fieldErrors label (fun j -> owner @ [ key "fields"; item j ]) [] k.Fields
+              yield! keyedErrors (what = "kind") label (fun j -> owner @ [ key "fields"; item j ]) k.Fields ]
 
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl
@@ -1005,6 +1044,7 @@ module Declare =
 
           for i, r in List.indexed idl.Records do
               yield! fieldErrors (sprintf "record '%s'" r.Name) (recordField i) [] r.Fields
+              yield! keyedErrors false (sprintf "record '%s'" r.Name) (recordField i) r.Fields
 
           for i, u in List.indexed idl.Unions do
               let owner = sprintf "union '%s'" u.Name
@@ -1071,6 +1111,7 @@ module Declare =
                   let caseOwner = sprintf "union '%s' case '%s'" u.Name case.Tag
                   yield! annotationErrors (at @ [ key "cases"; item c ]) caseOwner case.Annotations
                   yield! fieldErrors caseOwner (caseField i c) u.Params case.Fields
+                  yield! keyedErrors false caseOwner (caseField i c) case.Fields
 
           for i, e in List.indexed idl.Enums do
               let owner = sprintf "enum '%s'" e.Name
@@ -1095,6 +1136,7 @@ module Declare =
                           a
 
           yield! fieldErrors "the node envelope" envelopeField [] idl.NodeFields
+          yield! keyedErrors false "the node envelope" envelopeField idl.NodeFields
 
           // The envelope's reserved names (Phase 292 amendment): `id` beside the node's own
           // id in every shape — the flat shape's rule is [[wireShapeErrors]]' — and `kind`

@@ -122,10 +122,13 @@ module internal Derive =
     /// A STRUCTURAL child position: a node or node list a kind always carries (`Some isList`). An
     /// optional node is a keyed position — it is not an ordered list a structural edit may rebuild —
     /// and so is a node held anywhere deeper (inside a record, a union case, a list of either, a map).
+    /// Phase 494 — and so is a node or node list the vocabulary DECLARES keyed ([[IdlField.Keyed]]):
+    /// a named arm leaves `Children` and joins the keyed walk, on every printer of this plan.
     let structural (f: IdlField) : bool option =
-        match f.Opt, f.Type with
-        | (Required | OmitDefault _), TNode -> Some false
-        | (Required | OmitDefault _), TList TNode -> Some true
+        match f.Keyed, f.Opt, f.Type with
+        | true, _, _ -> None
+        | false, (Required | OmitDefault _), TNode -> Some false
+        | false, (Required | OmitDefault _), TList TNode -> Some true
         | _ -> None
 
     /// The structural positions among `fields`, in field order, each with whether it is a list.

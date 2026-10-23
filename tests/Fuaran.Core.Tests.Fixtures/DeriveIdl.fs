@@ -10,7 +10,10 @@ open Fuaran.Core.Idl.Codegen.Types
 // one whose hand-written copies motivated it.
 //
 // It carries one instance of every construct a derivation is stated over:
-//   - structural children: `Section.children` (a node list), `Choice.otherwise` (a node);
+//   - structural children: `Section.children` (a node list), `Choice.otherwise` (a node),
+//     `Attempt.body` (a node beside a declared keyed one);
+//   - a DECLARED keyed position (Phase 494): `Attempt.recovery`, a node the kind always carries
+//     that the vocabulary marks keyed, so it leaves `children` and joins the keyed walk;
 //   - keyed positions: `Choice.branches` (a CASE TABLE — a list of records each holding a node),
 //     `Task.hint` (an optional node), `Task.extras` (a map of nodes), and the envelope's optional
 //     `annotation` node;
@@ -33,11 +36,17 @@ let private field name ty opt =
       Type = ty
       Opt = opt
       Aliases = []
+      Keyed = false
       Presence = None
       Annotations = Annotations.Empty }
 
 let private req name ty = field name ty Required
 let private opt name ty = field name ty Optional
+
+/// A node the kind always carries, DECLARED a keyed position (Phase 494).
+let private keyed name ty =
+    { field name ty Required with
+        Keyed = true }
 
 let private case tag fields =
     { Tag = tag
@@ -133,6 +142,7 @@ let deriveIdl: Idl =
                 opt "hint" TNode
                 req "extras" (TMap TNode)
                 req "owner" (TRecord "Owner") ]
+          kind "Attempt" "structure" [ req "body" TNode; keyed "recovery" TNode ]
           kind
               "Note"
               "work"

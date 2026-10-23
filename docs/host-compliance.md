@@ -4,7 +4,7 @@ A host that implements Core in another runtime cannot inherit the proofs in [`pr
 theorem is about the F\* model and this repository's code, not about a port. What a port CAN show is
 evidence, row by row of the claims ladder ([`proofs.json`](../proofs.json)). This page specifies how a
 host declares that evidence, how Core validates the declaration, and the two labels Core computes from
-it ([DECISIONS.md](../DECISIONS.md) D228).
+it ([DECISIONS.md](../DECISIONS.md) D229).
 
 **Declare local.** A host commits `host-compliance.json` at its own repository root. Its shape is
 [`host-compliance.schema.json`](host-compliance.schema.json).
@@ -137,7 +137,7 @@ a gate a port waits for.
 **Where the cross-host matrix renders.** Not here. This repository cannot read another repository's
 declaration, and its gate never crosses a repository boundary. The matrix of host by row is a projection
 over every host's declaration, made outside this repository by running this verb from each declaration's
-own Core checkout and reading the verdict (D228).
+own Core checkout and reading the verdict (D229).
 
 ## What the labels say today
 

@@ -297,6 +297,21 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                       ConformanceTests.kGen
                       1890
                       200)
+              // Phase 494 — the pair law at the reference keyed witness held against itself: the
+              // census cell is measured, both guard arms reached; the distinct-pair agreement and
+              // its go-red are IdlKeyedSlotTests', over the generated derivations module.
+              run
+                  "Conformance.witnessPairLawsAt"
+                  200
+                  (Conformance.witnessPairLawsAt
+                      ConformanceTests.knodew
+                      ConformanceTests.keyw
+                      ConformanceTests.knodew
+                      ConformanceTests.keyw
+                      idw
+                      ConformanceTests.kGen
+                      4940
+                      200)
               run
                   "Conformance.keyedApplyLawsAt"
                   300

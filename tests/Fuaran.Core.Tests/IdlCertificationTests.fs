@@ -240,6 +240,7 @@ let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
       Type = t
       Opt = opt
       Aliases = []
+      Keyed = false
       Presence = None
       Annotations = Annotations.Empty }
 
@@ -677,6 +678,7 @@ let artifactRoundTrip =
                                           Type = TStr
                                           Opt = Required
                                           Aliases = []
+                                          Keyed = false
                                           Presence = None
                                           Annotations = Annotations.Empty } ]
                                     Annotations = Annotations.Empty } ]

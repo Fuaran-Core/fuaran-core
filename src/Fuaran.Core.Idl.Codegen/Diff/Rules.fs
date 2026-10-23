@@ -1091,6 +1091,30 @@ module internal DiffRules =
                     (String.concat ", " a))
                 [ aliasRow "a field's alias list" ]
 
+        | FieldKeyedChanged(o, n, b, a) ->
+            let shown k =
+                if k then "a keyed position" else "structural when carried"
+
+            rule
+                "FieldKeyedChanged"
+                "74"
+                NoFamily
+                (o.Key + "/" + n)
+                (HostSurfaceOnly,
+                 sprintf
+                     "field `%s` on %s changed its declared position (%s → %s). Never on the wire — the codec does not read it, so every document's bytes are unchanged — but the generated structural witness moves the slot between `children` and the keyed walk: a regeneration-visible change for code that walks or rebuilds through either."
+                     n
+                     o.Describe
+                     (shown b)
+                     (shown a),
+                 "Idl.IdlField.Keyed (Phase 494); Phase 286 (Children is what the engine rebuilds through)")
+                (always noShape)
+                (sprintf "field keyed position %s: %s.%s" (if a then "declared" else "withdrawn") o.Describe n)
+                [ row
+                      "a field's declared keyed position"
+                      "`host-surface-only`"
+                      "`no-generated-shape-change` — the witness's `children` and keyed walk move a slot between them; no declaration's shape moves" ]
+
         | FieldPresenceChanged(o, n, b, a) ->
             let shown s = if s = "" then "none" else s
 
@@ -1222,7 +1246,8 @@ module internal DiffRules =
               Presence = PresenceSnap.Required
               Annotations = ""
               Aliases = []
-              PresenceCondition = "" }
+              PresenceCondition = ""
+              Keyed = false }
 
         let owner = ONodeEnvelope
         let host: HostSurface = { Blocks = [] }
@@ -1265,6 +1290,7 @@ module internal DiffRules =
           TypeLayoutChanged("", "", "", "")
           FieldAliasesChanged(owner, "", [], [])
           FieldPresenceChanged(owner, "", "", "")
+          FieldKeyedChanged(owner, "", false, false)
           DefaultAdded("", "", "")
           DefaultRemoved("", "", "")
           DefaultChanged("", "", "", "")
