@@ -896,7 +896,7 @@ let liveOperationInputs () : OperationInputs =
         |> Set.ofList }
 
 // ---------------------------------------------------------------------------
-//  The host evidence map (Phase 480, DECISIONS.md D225)
+//  The host evidence map (Phase 480, DECISIONS.md D224)
 // ---------------------------------------------------------------------------
 
 /// For every ladder row, the evidence a host can offer for it: the vector families whose cases an
@@ -905,7 +905,7 @@ let liveOperationInputs () : OperationInputs =
 /// `proofs.json`, the committed vector files under `conformance/`, and the oracle's function table. A row
 /// with neither is a gap in what Core offers, never in a host. `render evidence-map` writes
 /// `docs/host-evidence-map.json` and its rendering beside it; `Proofs.Coverage` holds both to the render.
-/// The grain is the MODEL (D225): a stamp and the oracle table both name a model, never a function in it.
+/// The grain is the MODEL (D224): a stamp and the oracle table both name a model, never a function in it.
 module EvidenceMap =
 
     open Fuaran.Core
@@ -1147,7 +1147,7 @@ module EvidenceMap =
         + " `families`, the vector families under conformance/ with cases the row's model answered (`answeredBy`"
         + " names `model:<model>`; `cases` counts those cases), and `oracle`, the oracle functions"
         + " (docs/oracle-protocol.md) that ask the row's model. `model` is the F* module the row's evidence names,"
-        + " absent when it names none. The grain is the model (DECISIONS.md D225). A row whose two lists are empty is"
+        + " absent when it names none. The grain is the model (DECISIONS.md D224). A row whose two lists are empty is"
         + " uncovered: a gap in what Core offers, not in a host. `worklist` groups the uncovered proved rows by"
         + " model; `referenceOnly` names the families no model answered. docs/host-evidence-map.md renders this file."
 
@@ -1237,7 +1237,7 @@ module EvidenceMap =
           yield "- `referenceOnly[]`: the families no model answered a case of, with their case counts."
           yield ""
           yield
-              "**The grain is the model** ([DECISIONS.md](../DECISIONS.md) D225). A vector's stamp and the oracle's table both name a model, never a function in it, so a family or a function is offered for every row about that model. Which of a theorem's inputs a host's run exercised is the host's own declaration."
+              "**The grain is the model** ([DECISIONS.md](../DECISIONS.md) D224). A vector's stamp and the oracle's table both name a model, never a function in it, so a family or a function is offered for every row about that model. Which of a theorem's inputs a host's run exercised is the host's own declaration."
           yield ""
           yield "## Summary"
           yield ""

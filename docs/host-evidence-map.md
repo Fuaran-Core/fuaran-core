@@ -10,7 +10,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 - `worklist[]`: the uncovered `proved` rows, grouped by `model` in ordinal order.
 - `referenceOnly[]`: the families no model answered a case of, with their case counts.
 
-**The grain is the model** ([DECISIONS.md](../DECISIONS.md) D225). A vector's stamp and the oracle's table both name a model, never a function in it, so a family or a function is offered for every row about that model. Which of a theorem's inputs a host's run exercised is the host's own declaration.
+**The grain is the model** ([DECISIONS.md](../DECISIONS.md) D224). A vector's stamp and the oracle's table both name a model, never a function in it, so a family or a function is offered for every row about that model. Which of a theorem's inputs a host's run exercised is the host's own declaration.
 
 ## Summary
 
