@@ -918,7 +918,7 @@ migration. This is a **definitional** boundary: `Conformance.streamLaws` already
 append / verify / replay over the default `canonicalConfig` pre-image, so no separate portability law
 is added — "the canonical profile is verifiable under `canonicalConfig`" is what `streamLaws` proves,
 and the non-portability of a bespoke pre-image is a declared contract, not a testable property. (The
-decision is recorded in [`DECISIONS.md`](DECISIONS.md) D11.) **In the next slot after `0.40.3` the canonical profile is pinned as Core-owned vectors (Phase 549, additive, DECISIONS.md D220):** `conformance/chain/`, `dag/`, `merge/` and `diff/` record, over SHA-256 and the skeleton witness, the chain's records and walk, the DAG's ids, order, ranks, fold and integrity walk, `Dag.reconcileMany`'s verdicts and `Diff.toOpsWith` / `Diff.changes`, each computed by calling Core; no public surface moved, and a change that moves one of their answers is breaking for every host certified against them.
+decision is recorded in [`DECISIONS.md`](DECISIONS.md) D11.) **In the next slot after `0.40.3` the canonical profile is pinned as Core-owned vectors (Phase 549, additive, DECISIONS.md D221):** `conformance/chain/`, `dag/`, `merge/` and `diff/` record, over SHA-256 and the skeleton witness, the chain's records and walk, the DAG's ids, order, ranks, fold and integrity walk, `Dag.reconcileMany`'s verdicts and `Diff.toOpsWith` / `Diff.changes`, each computed by calling Core; no public surface moved, and a change that moves one of their answers is breaking for every host certified against them.
 
 ## Deterministic replay posture (Phase 27, `0.0.1-alpha.8`)
 

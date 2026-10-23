@@ -687,7 +687,7 @@ copies of the UI corpus's four; the next section is their contract.
 Four fixed vector sets, written by `render chain`, `render dag`, `render merge` and `render diff`, each a
 vector file and its own self-enumerated `manifest.json` (the one manifest schema; `fuaran` adopted, the
 four language hosts `proposed`). They exist so that a spine with no UI tier certifies Core's chain, DAG,
-merge and diff end to end from its first commit. The design is DECISIONS.md D220.
+merge and diff end to end from its first commit. The design is DECISIONS.md D221.
 
 **One witness, and one codec a host already has.** The ops are the skeleton ops in the `apply/` family's
 encoding, over its tree envelope (`{"children","id","kind"}`), applied by the apply engine with no
