@@ -702,6 +702,7 @@ let threeWay =
                                 Type = TStr
                                 Opt = Required
                                 Aliases = []
+                                Keyed = false
                                 Presence = None
                                 Annotations = Annotations.Empty } ])
 
@@ -808,6 +809,7 @@ let private reqField (name: string) (t: IdlType) : IdlField =
       Type = t
       Opt = Required
       Aliases = []
+      Keyed = false
       Presence = None
       Annotations = Annotations.Empty }
 
@@ -1229,6 +1231,7 @@ module private Seam550 =
           Type = t
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = ann }
 

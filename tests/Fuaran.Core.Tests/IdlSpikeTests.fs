@@ -844,6 +844,7 @@ module private SecondVocabulary =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = Annotations.Empty }
 

@@ -25,7 +25,7 @@ ctor Fuaran.Core.Idl.HostedCodec..ctor(System.String, System.String, System.Stri
 ctor Fuaran.Core.Idl.Idl..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnion>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlRecord>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Fuaran.Core.Idl.WireShape, Fuaran.Core.Idl.HardenPolicy)
 ctor Fuaran.Core.Idl.IdlDefault..ctor(System.String, System.String, Fuaran.Core.Idl.IdlValue)
 ctor Fuaran.Core.Idl.IdlEnum..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Fuaran.Core.Idl.Annotations)
-ctor Fuaran.Core.Idl.IdlField..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>, Fuaran.Core.Idl.Annotations)
+ctor Fuaran.Core.Idl.IdlField..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlKind..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlRecord..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlUnion..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>, Fuaran.Core.Idl.Annotations, Fuaran.Core.Idl.UnionTagRule, Fuaran.Core.Idl.UnionDiscrimination)
@@ -234,6 +234,7 @@ record-field Fuaran.Core.Idl.IdlEnum.Name #0 : System.String
 record-field Fuaran.Core.Idl.IdlEnum.Wires #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.IdlField.Aliases #3 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.IdlField.Annotations #5 : Fuaran.Core.Idl.Annotations
+record-field Fuaran.Core.Idl.IdlField.Keyed #6 : System.Boolean
 record-field Fuaran.Core.Idl.IdlField.Name #0 : System.String
 record-field Fuaran.Core.Idl.IdlField.Opt #2 : Fuaran.Core.Idl.Optionality
 record-field Fuaran.Core.Idl.IdlField.Presence #4 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>

@@ -70,6 +70,7 @@ let private postIdl =
                     Type = TStr
                     Opt = Optional
                     Aliases = []
+                    Keyed = false
                     Presence = None
                     Annotations = Annotations.Empty }
               ) ]
@@ -278,6 +279,7 @@ let tests =
                                 Type = TStr
                                 Opt = Optional
                                 Aliases = []
+                                Keyed = false
                                 Presence = None
                                 Annotations = Annotations.Empty }
                           ) ]
@@ -298,6 +300,7 @@ let tests =
                                     Type = TStr
                                     Opt = Optional
                                     Aliases = []
+                                    Keyed = false
                                     Presence = None
                                     Annotations = Annotations.Empty }
                               ) ]
@@ -315,6 +318,7 @@ let tests =
                                     Type = TStr
                                     Opt = Optional
                                     Aliases = []
+                                    Keyed = false
                                     Presence = None
                                     Annotations = Annotations.Empty }
                               ) ]

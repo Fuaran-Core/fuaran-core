@@ -140,6 +140,11 @@ type Change =
     /// union's rules): the members move between the holder's object and an object of their own,
     /// or a case is read from other keys — a wire break. `""` is the declaration's own object.
     | TypeLayoutChanged of family: string * name: string * before: string * after: string
+    /// The member was declared a keyed position, or stopped being one (Phase 494): never a wire
+    /// event, but the generated structural witness moves the slot between `children` and the keyed
+    /// walk — a regeneration-visible change for code walking either. Appended last, so every
+    /// earlier case keeps its tag.
+    | FieldKeyedChanged of Owner * name: string * before: bool * after: bool
 
 /// A change's wire verdict — what an OLD document, or an old emitter, meets under the
 /// new vocabulary. Independent of the F# consequence reported beside it.

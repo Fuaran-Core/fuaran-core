@@ -19,6 +19,7 @@ let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
       Type = t
       Opt = opt
       Aliases = []
+      Keyed = false
       Presence = None
       Annotations = Annotations.Empty }
 

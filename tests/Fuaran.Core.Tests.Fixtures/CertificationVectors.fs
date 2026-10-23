@@ -170,6 +170,7 @@ let opsOf (idl: Idl) (seed: int) (count: int) : Idl * IdlValue list =
                             Type = TOp
                             Opt = Required
                             Aliases = []
+                            Keyed = false
                             Presence = None
                             Annotations = Annotations.Empty } ]
                       Annotations = Annotations.Empty } ] }

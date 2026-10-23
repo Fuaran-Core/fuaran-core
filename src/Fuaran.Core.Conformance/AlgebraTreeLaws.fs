@@ -1448,3 +1448,125 @@ module internal AlgebraTreeLaws =
                     "built arm"
                     [ "change below a keyed position", seenBuilds
                       "relocation across a keyed boundary", crossingBuilds ] ]
+
+    /// **One child enumeration per domain** (Phase 494) — certify that a domain's GENERATED witness
+    /// pair (the IDL emitter's `nodeWitness` and `keyedWitness`) and its HAND pair enumerate the same
+    /// tree. Phase 286 gave Core one answer to "where do ids live" — `Children` is what the engine
+    /// rebuilds through, `KeyedChildren` declares every other place a node holds a node — and a
+    /// domain that keeps a generated pair beside a hand one has two answers unless something holds
+    /// them together. This family is that something, stated as Core's law rather than as each
+    /// domain's own census.
+    ///
+    /// Two laws, over every node the HAND traversal reaches in a drawn tree:
+    ///
+    /// - **The structural children agree, in order.** `generated.Children n` and `hand.Children n`
+    ///   list the same ids in the same order: the ordered positions a structural edit inserts into,
+    ///   removes from and reorders are one list. A generated witness that still lists a named arm
+    ///   as an ordered child (a vocabulary that has not declared the slot keyed) fails here, at the
+    ///   node that holds it.
+    /// - **The keyed walks hold the same ids.** `Tree.idsKeyed` under each pair enumerates the same
+    ///   id multiset — every node either pair can reach, structural or keyed. Compared as a
+    ///   multiset because a domain's keyed order is its own (`KeyedChildren` is "in the domain's
+    ///   own order"); the structural law above is where order is demanded.
+    ///
+    /// **Guarded on reaching a keyed position**: a sample in which no node holds a keyed child cannot
+    /// tell a generated witness that lists a keyed arm as an ordered child from one that does not,
+    /// so the guard demands a keyed holder — unless NEITHER pair holds a keyed position anywhere in
+    /// the sample, which is vacuous BY DECLARATION and reported in those words.
+    ///
+    /// **Opt-in**, the `keyedChildrenLawsAt` shape: only a domain holding both pairs has anything
+    /// for it to say.
+    let witnessPairLawsAt
+        (generatedNodes: NodeWitness<'Node, 'Id>)
+        (generatedKeyed: KeyedWitness<'Node, 'Id>)
+        (handNodes: NodeWitness<'Node, 'Id>)
+        (handKeyed: KeyedWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (runner: LawKit.Runner)
+        (iterations: int)
+        : LawResult list =
+        let structural =
+            LawKit.LawCell("the generated and the hand witness list the same structural children, in order")
+
+        let keyedWalk =
+            LawKit.LawCell("the generated and the hand witness pair enumerate the same ids over the keyed walk")
+
+        let mutable keyedHolders = 0
+        let mutable structuralHolders = 0
+
+        let keys (ns: 'Node list) =
+            ns |> List.map (fun n -> idw.ToString(handNodes.Id n))
+
+        let handWalk = Tree.traversal handNodes handKeyed
+
+        LawKit.run runner iterations (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+
+            let mismatches =
+                Tree.preorder handWalk tree
+                |> List.choose (fun n ->
+                    let g = keys (generatedNodes.Children n)
+                    let h = keys (handNodes.Children n)
+
+                    if not (List.isEmpty h) then
+                        structuralHolders <- structuralHolders + 1
+
+                    if
+                        not (List.isEmpty (generatedKeyed.KeyedChildren n))
+                        || not (List.isEmpty (handKeyed.KeyedChildren n))
+                    then
+                        keyedHolders <- keyedHolders + 1
+
+                    if g = h then
+                        None
+                    else
+                        Some(idw.ToString(handNodes.Id n), handNodes.KindTag n, g, h))
+
+            structural.Check(
+                List.isEmpty mismatches,
+                fun () ->
+                    let id, kind, g, h = List.head mismatches
+
+                    at (
+                        sprintf
+                            "at %s (kind %s) the generated witness lists [%s] as its structural children and the hand witness [%s] — two child enumerations for one domain; a slot the hand witness holds keyed must be declared keyed in the vocabulary (%d node(s) disagree)"
+                            id
+                            kind
+                            (String.concat "; " g)
+                            (String.concat "; " h)
+                            (List.length mismatches)
+                    )
+            )
+
+            let generatedIds =
+                Tree.idsKeyed generatedNodes generatedKeyed tree
+                |> List.map idw.ToString
+                |> List.sort
+
+            let handIds =
+                Tree.idsKeyed handNodes handKeyed tree |> List.map idw.ToString |> List.sort
+
+            keyedWalk.Check(
+                (generatedIds = handIds),
+                fun () ->
+                    let onlyIn (a: string list) (b: string list) =
+                        a |> List.filter (fun x -> not (List.contains x b))
+
+                    at (
+                        sprintf
+                            "the keyed walks differ: only the generated pair reaches [%s], only the hand pair reaches [%s]"
+                            (String.concat "; " (onlyIn generatedIds handIds))
+                            (String.concat "; " (onlyIn handIds generatedIds))
+                    )
+            ))
+
+        if keyedHolders = 0 then
+            LawKit.results [ structural; keyedWalk ]
+            @ [ LawKit.declared
+                    runner
+                    "keyed position"
+                    "neither witness pair holds a keyed position anywhere in the sample, so the pair laws cannot tell a keyed arm from an ordered child — vacuous BY DECLARATION" ]
+        else
+            LawKit.results [ structural; keyedWalk ]
+            @ [ LawKit.guard runner "node held" [ "keyed holder", keyedHolders; "structural holder", structuralHolders ] ]

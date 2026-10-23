@@ -450,6 +450,13 @@ module Families =
           built
               "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms",
           "Ops.apply Tree.keyedIds"
+          ("Conformance.witnessPairLawsAt",
+           [ Takes.NodeWitness; Takes.KeyedWitness; Takes.IdWitness; Takes.OpGen ],
+           capability,
+           []),
+          Guarded [ "node held (keyed holder / structural holder)" ],
+          none "no refused outcome is read; a disagreement between the two pairs only fails a law",
+          "Tree.traversal Tree.idsKeyed"
           ("Conformance.placementLaws", tree, stronger, []),
           Guarded [ "placement arm (place / move across parents / move within a parent / non-final position)" ],
           built

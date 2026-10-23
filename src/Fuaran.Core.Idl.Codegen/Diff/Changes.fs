@@ -36,6 +36,9 @@ module internal DiffChanges =
                   if old.PresenceCondition <> f.PresenceCondition then
                       yield FieldPresenceChanged(owner, f.Name, old.PresenceCondition, f.PresenceCondition)
 
+                  if old.Keyed <> f.Keyed then
+                      yield FieldKeyedChanged(owner, f.Name, old.Keyed, f.Keyed)
+
           for f in before do
               if not (Map.containsKey f.Name a) then
                   yield FieldRemoved(owner, f.Name, f) ]

@@ -34,6 +34,7 @@ let private field name ty opt : IdlField =
       Type = ty
       Opt = opt
       Aliases = []
+      Keyed = false
       Presence = None
       Annotations = Annotations.Empty }
 

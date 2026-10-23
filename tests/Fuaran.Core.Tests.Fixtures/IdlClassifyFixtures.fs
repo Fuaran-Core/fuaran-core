@@ -19,6 +19,7 @@ module Fixtures =
           Type = ty
           Opt = opt
           Aliases = []
+          Keyed = false
           Presence = None
           Annotations = ann }
 

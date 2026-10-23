@@ -197,6 +197,21 @@ module Conformance =
         AlgebraTreeLaws.keyedChildrenLawsAt keyw nodew idw gen
         |> within (family "keyedChildrenLawsAt" seed) iterations
 
+    /// Forward — see `AlgebraTreeLaws.witnessPairLawsAt` (Phase 494): a domain's GENERATED witness
+    /// pair and its HAND pair enumerate the same children and the same keyed walk.
+    let witnessPairLawsAt
+        (generatedNodes: NodeWitness<'Node, 'Id>)
+        (generatedKeyed: KeyedWitness<'Node, 'Id>)
+        (handNodes: NodeWitness<'Node, 'Id>)
+        (handKeyed: KeyedWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        AlgebraTreeLaws.witnessPairLawsAt generatedNodes generatedKeyed handNodes handKeyed idw gen
+        |> within (family "witnessPairLawsAt" seed) iterations
+
     /// Forward — see `PlacementTreeLaws.placementLaws` (Phase 312).
     let placementLaws
         (nodew: NodeWitness<'Node, 'Id>)

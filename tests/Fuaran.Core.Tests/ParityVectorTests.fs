@@ -557,6 +557,7 @@ let tests =
                                 Type = Fuaran.Core.Idl.TEnum "Seven"
                                 Opt = Fuaran.Core.Idl.Required
                                 Aliases = []
+                                Keyed = false
                                 Presence = None
                                 Annotations = Fuaran.Core.Idl.Annotations.Empty } ] } ]
                     Unions = []

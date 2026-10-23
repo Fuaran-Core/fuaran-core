@@ -510,6 +510,21 @@ and IdlField =
         /// [[Annotations.Empty]] for a field that says nothing, which is every field
         /// declared before the set existed.
         Annotations: Annotations
+        /// **A declared KEYED POSITION (Phase 494)** — the node (or each node of the node list) this
+        /// field holds is a keyed position of its kind rather than a structural child: the generated
+        /// `NodeWitness.Children` does not list it, and the generated `KeyedWitness` does. Core's
+        /// rule (Phase 286): `Children` is what the engine rebuilds through — an ordered position a
+        /// structural edit may insert into, remove from or reorder — and every other place a node
+        /// holds a node is keyed. An optional node, and a node held inside a record, a union case or
+        /// a map, is keyed already; a node or node list a kind always carries is structural UNLESS
+        /// it says otherwise here (a named arm, such as a boundary's fallback or a switch's
+        /// default). So [[Declare.errors]] admits the marker only there, on a kind's field.
+        ///
+        /// Never on the wire: the encoder, the decoder and the sampler do not read it, so a
+        /// document's bytes are the same either side of a marking. `false` — every field declared
+        /// before the member existed — is the derived rule alone, and the artifact omits it. Declared
+        /// last, so every earlier member keeps its position.
+        Keyed: bool
     }
 
 /// A node kind — flat `$type`-discriminated on the wire (`Category` is metadata, not serialised).

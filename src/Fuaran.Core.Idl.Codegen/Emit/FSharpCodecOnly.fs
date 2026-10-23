@@ -44,6 +44,7 @@ module internal FSharpCodecOnly =
                       Type = t
                       Opt = Required
                       Aliases = []
+                      Keyed = false
                       Presence = None
                       Annotations = Annotations.Empty })
               Annotations = Annotations.Empty }
