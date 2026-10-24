@@ -21,6 +21,7 @@ module Fuaran.Core.Tests.JsonReaderTests
 
 open Expecto
 open Fuaran.Core
+open Fuaran.Core.Tests.ProofOracle
 open Fuaran.Core.Tests.ProofOracle.Bridges
 
 let private inv = System.Globalization.CultureInfo.InvariantCulture

@@ -97,16 +97,6 @@ let private mAll (render: 'a -> string) (r: M.result<'a, M.derr list>) : string 
     | M.Ok v -> "Ok " + render v
     | M.Error es -> "Error [" + (es |> List.map showErr |> String.concat "; ") + "]"
 
-let private mOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option =
-    match o with
-    | FStar_Pervasives_Native.Some v -> Some v
-    | FStar_Pervasives_Native.None -> None
-
-let private toMOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
-    match o with
-    | Some v -> FStar_Pervasives_Native.Some v
-    | None -> FStar_Pervasives_Native.None
-
 let private jr (v: JVal) = Json.render v
 
 /// A path without its first step — the go-red bridge's whole edit.
@@ -205,7 +195,7 @@ let private decoderProbes
       mR (List.map (fun (k, v) -> k + ":" + mjr v) >> String.concat ",") (M.obj m)
       "tryMember",
       (Decoder.tryMember "a" el |> Option.map jr |> string),
-      (M.try_member "a" m |> mOpt |> Option.map mjr |> string)
+      (M.try_member "a" m |> ofMOpt |> Option.map mjr |> string)
       "field str", pRes s (Decoder.field "a" Decoder.str el), mR s (M.field "a" M.str m)
       "field int", pRes i (Decoder.field "b" Decoder.int el), mR i (M.field "b" M.int_d m)
       "field field",
@@ -213,7 +203,7 @@ let private decoderProbes
       mR s (M.field "a" (M.field "b" M.str) m)
       "optField",
       pRes (Option.map b >> string) (Decoder.optField "c" Decoder.bool el),
-      mR (mOpt >> Option.map b >> string) (M.opt_field "c" M.bool_d m)
+      mR (ofMOpt >> Option.map b >> string) (M.opt_field "c" M.bool_d m)
       "fieldOr", pRes i (Decoder.fieldOr "a" 7 Decoder.int el), mR i (M.field_or "a" 7 M.int_d m)
       "at json", pRes jr (Decoder.at path Decoder.json el), mR mjr (M.at mp M.json m)
       "at int", pRes i (Decoder.at path Decoder.int el), mR i (M.at mp M.int_d m)
@@ -257,7 +247,7 @@ let private decoderProbes
       "missing", showErr (pErr (Decoder.missing "a")), showErr (drop (M.missing "a"))
       "resolve",
       (DecodePath.resolve path el |> Option.map jr |> string),
-      (M.resolve mp m |> mOpt |> Option.map mjr |> string) ]
+      (M.resolve mp m |> ofMOpt |> Option.map mjr |> string) ]
     @ [ for rc, mrc in rootCodes -> "fail " + string rc, pRes i (Decoder.fail rc "" "" el), mR i (M.fail mrc m) ]
     // Phase 453: `andThen`'s function refusing at every root code, over a decoder that answers, and
     // inside a member, so the refusal is anchored at the value and then carried one step down.
@@ -456,7 +446,7 @@ let private faultP (f: CodecDeclarationFault) : string =
 let private faultM (f: M.fault) : string =
     match f with
     | M.RepeatedSpelling s -> "RepeatedSpelling " + s
-    | M.RepeatedMember(n, c) -> sprintf "RepeatedMember %s %A" n (mOpt c)
+    | M.RepeatedMember(n, c) -> sprintf "RepeatedMember %s %A" n (ofMOpt c)
     | M.RepeatedTag t -> "RepeatedTag " + t
     | M.DiscriminatorAsMember(t, k) -> "DiscriminatorAsMember " + t + " " + k
     | M.Unrecognised p -> "Unrecognised $" + (p |> List.map showSeg |> String.concat "")
@@ -546,10 +536,14 @@ let private addM (f: FieldShape) (c: MCodec) (fs: MFields<FStar_Pervasives_Nativ
     if f.Opt then
         M.c_opt_field f.Name (lookup f.Name >> toMOpt) c fs
     else
-        M.c_field f.Name (lookup f.Name >> toMOpt) (M.c_map FStar_Pervasives_Native.Some (fun o -> (mOpt o).Value) c) fs
+        M.c_field
+            f.Name
+            (lookup f.Name >> toMOpt)
+            (M.c_map FStar_Pervasives_Native.Some (fun o -> (ofMOpt o).Value) c)
+            fs
 
 let private recOfM (fields: FieldShape list) (args: FStar_Pervasives_Native.option<DV> list) : DV =
-    recOf fields (args |> List.map mOpt)
+    recOf fields (args |> List.map ofMOpt)
 
 let rec private modelCodec (s: Shape) : M.result<MCodec, M.fault list> =
     match s with

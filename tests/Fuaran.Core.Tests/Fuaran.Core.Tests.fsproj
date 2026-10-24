@@ -140,9 +140,13 @@
          per-model files read only the bridge module, so their order among themselves is free; the
          twin roster (ProofOracle.TwinTests.fs) reads every extracted model and nothing here. -->
     <Compile Include="ProofOracle.Bridges.fs" />
+    <Compile Include="ProofOracle.JsonParseDiff.fs" />
+    <Compile Include="ProofOracle.VectorStampTests.fs" />
     <Compile Include="ProofOracle.ArbitrateTests.fs" />
     <Compile Include="ProofOracle.CapabilityTests.fs" />
+    <Compile Include="ProofOracle.CapabilityPipelineTests.fs" />
     <Compile Include="ProofOracle.ChainTests.fs" />
+    <Compile Include="ProofOracle.ChainSnapshotTests.fs" />
     <Compile Include="ProofOracle.ColumnRefinementTests.fs" />
     <Compile Include="ProofOracle.DagFoldTests.fs" />
     <Compile Include="ProofOracle.DecimalTextTests.fs" />

@@ -22,6 +22,7 @@ open Expecto
 
 open Fuaran.Core
 open Fuaran.Core.Tests
+open Fuaran.Core.Tests.ProofOracle
 open Fuaran.Core.Tests.ProofOracle.Bridges
 open Fuaran.Core.Tests.ChainOracle
 open Fuaran.Core.Tests.CanonOracle
@@ -485,12 +486,6 @@ let rec private genOp (r: Random) (tree: TreeOps.tree) (depth: int) : TreeOps.op
     | 4 -> TreeOps.UpdateNode(TreeOps.TNode(pick r idPool, pick r kinds, []))
     | _ -> TreeOps.Batch(List.init (1 + r.Next 2) (fun _ -> genOp r tree (depth + 1)))
 
-let rec private intOfPos (p: Chain.pos) =
-    match p with
-    | Chain.PZero -> 0
-    | Chain.PSucc q -> 1 + intOfPos q
-
-let private showPos (p: Chain.pos) = string (intOfPos p)
 
 /// A chain built by the model under PRODUCTION's hash, then perhaps tampered once.
 let private genChain (r: Random) : (string * CliJson.J) list * CliJson.J =

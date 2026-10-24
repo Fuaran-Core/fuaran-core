@@ -12,6 +12,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests.ProofOracle.Bridges
 open Fuaran.Core.Tests.ChainOracle
 open Fuaran.Core.Tests.ProofOracle.ChainTests
+open Fuaran.Core.Tests.ProofOracle.ChainSnapshotTests
 open Fuaran.Core.Tests.Reference.Counter
 
 let private stateEnc (s: int) = string s

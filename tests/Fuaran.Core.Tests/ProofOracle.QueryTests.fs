@@ -881,7 +881,7 @@ let private queryDifferential
 
 /// The decode refusal's render pair — its code and its path — is the capability codec's: the two
 /// seams share `DecodeError`, and one render of it is the comparison both read.
-let private decodeError = CapabilityTests.decodeError
+let private decodeError = CapabilityPipelineTests.decodeError
 
 /// A declaration as the codec model reads it: the bridge `queryToModel` is, its source the `Ref`
 /// the codec writes.

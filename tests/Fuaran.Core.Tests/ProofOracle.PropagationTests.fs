@@ -40,10 +40,6 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 // `reads_of deps id`, and the third case's evaluator reads `a` at `b` whatever the map says.
 // ------------------------------------------------------------------------------------------
 
-/// The deps bridge: a `Map<string, Set<string>>` as the model reads it (`sets-are-lists`).
-let private depsToModel (deps: Map<string, Set<string>>) : ModelProp.dmap =
-    deps |> Map.toList |> List.map (fun (k, rs) -> k, Set.toList rs)
-
 /// The go-red: a bridge that LOSES a read edge — every node's last read is dropped — so the
 /// model's dependents map, its dirty set and its reuse are all computed over a smaller graph
 /// than production's.
@@ -94,16 +90,6 @@ let private propProdEvaluator
     fun (resolve: string -> int option) (id: string) ->
         invoked.Add id
         spec resolve id
-
-/// The SAME evaluator as the model reads it: the resolver and the result cross the option and
-/// outcome shims and nothing else changes.
-let private propModelEvaluator
-    (spec: (string -> int option) -> string -> Result<int, string>)
-    : ModelProp.evaluator<int> =
-    fun resolve id ->
-        match spec (fun k -> ofMOpt (resolve k)) id with
-        | Ok v -> ModelProp.Ok v
-        | Error m -> ModelProp.Error m
 
 let private topoToModel (t: Propagation.TopoResult) : ModelProp.topo_result =
     { ModelProp.topo_result.order = t.Order
@@ -261,7 +247,9 @@ let private propProbe
     let spec0 = propSpec base0 deps
     let spec1 = propSpec base1 deps
     let prodPrior = Propagation.eval (propProdEvaluator spec0 (ResizeArray())) deps
-    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mreads mdeps
+
+    let modelPrior =
+        ModelProp.eval (VectorOracle.PropagationModel.evaluator spec0) mreads mdeps
 
     t <-
         t
@@ -294,7 +282,12 @@ let private propProbe
             Propagation.evalFrom (propProdEvaluator spec1 prodInvoked) priorValues changed deps
 
         let modelIncr =
-            ModelProp.eval_from (propModelEvaluator spec1) mreads (Map.toList priorValues) (Set.toList changed) mdeps
+            ModelProp.eval_from
+                (VectorOracle.PropagationModel.evaluator spec1)
+                mreads
+                (Map.toList priorValues)
+                (Set.toList changed)
+                mdeps
 
         t <-
             t
@@ -305,7 +298,12 @@ let private propProbe
                 modelIncr
 
         let modelInvoked =
-            ModelProp.walk_invoked (propModelEvaluator spec1) mreads (Map.toList priorValues) (Set.toList changed) mdeps
+            ModelProp.walk_invoked
+                (VectorOracle.PropagationModel.evaluator spec1)
+                mreads
+                (Map.toList priorValues)
+                (Set.toList changed)
+                mdeps
 
         t <-
             t
@@ -323,7 +321,7 @@ let private propProbe
                 outcome
                 (fun _ _ -> sprintf "%s: eval after the change disagrees" where)
                 prodFull
-                (ModelProp.eval (propModelEvaluator spec1) mreads mdeps)
+                (ModelProp.eval (VectorOracle.PropagationModel.evaluator spec1) mreads mdeps)
 
         match prodIncr with
         | Error(Propagation.PropagationError.EvalUnknownChange _) ->
@@ -398,7 +396,7 @@ let private propProbe
         Propagation.evalFor (propProdEvaluator spec1 pullInvoked) targets deps
 
     let modelPull =
-        ModelProp.eval_for (propModelEvaluator spec1) mreads (Set.toList targets) mdeps
+        ModelProp.eval_for (VectorOracle.PropagationModel.evaluator spec1) mreads (Set.toList targets) mdeps
 
     t <-
         t
@@ -409,7 +407,7 @@ let private propProbe
             modelPull
 
     let modelPullInvoked =
-        ModelProp.walk_for_invoked (propModelEvaluator spec1) mreads (Set.toList targets) mdeps
+        ModelProp.walk_for_invoked (VectorOracle.PropagationModel.evaluator spec1) mreads (Set.toList targets) mdeps
 
     t <-
         t
@@ -425,7 +423,11 @@ let private propProbe
         Propagation.evalForWith (fun resolve _ id -> spec1 resolve id) targets deps
 
     let modelPullWith =
-        ModelProp.eval_for_with (ModelProp.lift (propModelEvaluator spec1)) mreads (Set.toList targets) mdeps
+        ModelProp.eval_for_with
+            (ModelProp.lift (VectorOracle.PropagationModel.evaluator spec1))
+            mreads
+            (Set.toList targets)
+            mdeps
 
     t <-
         t
@@ -472,7 +474,7 @@ let tests =
           testCase
               "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, eval, evalFrom, neededFor, evalFor and evalForWith, over generated dependency maps, change sets and target sets"
           <| fun _ ->
-              let t = propDifferential depsToModel 1861 400
+              let t = propDifferential VectorOracle.PropagationModel.deps 1861 400
 
               Differential.expectAgrees "propagation" t
 
@@ -549,7 +551,10 @@ let tests =
                       "target sets that need less than the whole map arose (pullPartial=%d)"
                       (Tally.count "PullPartial" t))
 
-              Expect.equal (propDifferential depsToModel 1861 400) t "same seed => identical tally"
+              Expect.equal
+                  (propDifferential VectorOracle.PropagationModel.deps 1861 400)
+                  t
+                  "same seed => identical tally"
 
           testCase
               "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail"
@@ -663,7 +668,12 @@ let tests =
               // longer has.
               let modelRun (deps: Map<string, Set<string>>) (p: Map<string, int>) (chg: string list) =
 
-                  ModelProp.eval_from (propModelEvaluator (spec 2)) specReads (Map.toList p) chg (depsToModel deps)
+                  ModelProp.eval_from
+                      (VectorOracle.PropagationModel.evaluator (spec 2))
+                      specReads
+                      (Map.toList p)
+                      chg
+                      (VectorOracle.PropagationModel.deps deps)
                   |> modelOutcomeRender
 
               Expect.equal
@@ -761,7 +771,9 @@ let tests =
 
                   let probe (label: string, cand: Propagation.TopoResult) (t: Tally) =
                       let prod = Propagation.validTopo deps cand
-                      let model = ModelProp.valid_topo (depsToModel deps) (topoToModel cand)
+
+                      let model =
+                          ModelProp.valid_topo (VectorOracle.PropagationModel.deps deps) (topoToModel cand)
 
                       let t =
                           t
@@ -860,7 +872,7 @@ let tests =
                           | Ok v, _ -> ModelProp.Ok v
                           | Error m, _ -> ModelProp.Error m
 
-                  let mdeps = depsToModel deps
+                  let mdeps = VectorOracle.PropagationModel.deps deps
                   let mreads = declaredReads deps
 
                   let where =
