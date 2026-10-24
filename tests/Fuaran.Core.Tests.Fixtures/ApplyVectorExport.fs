@@ -51,57 +51,92 @@ namespace Fuaran.Core.Tests
 //     a reason that has nothing to do with its content.
 // ============================================================================
 
-/// The Rust Core spine's adoption of the families this repository emits (Phase 463, DECISIONS.md D225;
-/// Phase 564, D231). `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in
-/// Core's vocabulary, so it is an ADOPTION host only and never joins a roster that maps Core's classes to
-/// a host's codes (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so
-/// each names the Core version its legs certified against and the spine commit that landed them; a family
-/// it does not run reads `proposed`. The counts are the cases its legs asserted, never this repository's
-/// vector counts: a family that grows after a measurement keeps the measured count until the spine
-/// measures again. Every manifest takes the spine's entry from this one table, the law families' index
-/// (`conformance/laws/manifest.json`) among them.
+/// The Core spines' adoption of the families this repository emits (Phase 463, DECISIONS.md D225;
+/// Phase 564, D231; Phase 485, D234). A spine — `fuaran-core-rs`, `fuaran-core-go` — is Core's own twin
+/// in another language, not a wire host: it answers a rejection in Core's vocabulary, so it is an ADOPTION
+/// host only and never joins a roster that maps Core's classes to a host's codes
+/// (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so each names the
+/// Core version its legs certified against and the spine commit that landed them; a family a spine does not
+/// run reads `proposed`. The counts are the cases its legs asserted, never this repository's vector counts:
+/// a family that grows after a measurement keeps the measured count until the spine measures again. Every
+/// manifest takes every spine's entry from this one table, the law families' index
+/// (`conformance/laws/manifest.json`) among them, in the order the spines are listed here.
 module SpineAdoption =
 
     open Fuaran.Core
 
-    /// The host key every manifest carries the spine's entry under.
-    let host = "fuaran-core-rs"
+    /// One spine: the host key every manifest carries its entry under, and the families it runs, by
+    /// family id, with the cases its legs asserted and the measurement that asserted them.
+    type internal Spine =
+        { Host: string
+          Measured: (string * int * AdoptionSource) list }
 
-    /// Phase 463's measurement: Core 0.41.0, landed at this spine commit.
-    let private phase463 =
+    /// Phase 463's measurement of the Rust spine: Core 0.41.0, landed at this spine commit.
+    let private rs463 =
         AdoptionSource.Host("0.41.0", "432509b7bbdf0f1a227914466d12c48abc35291f")
 
-    /// Phase 564's measurement: Core 0.41.0, landed at this spine commit.
-    let private phase564 =
+    /// Phase 564's measurement of the Rust spine: Core 0.41.0, landed at this spine commit.
+    let private rs564 =
         AdoptionSource.Host("0.41.0", "0aa91dbcdd92834166add12c72d3606f483c6711")
 
-    /// The families the spine runs, by family id, with the cases its legs asserted and where. A family
-    /// whose leg did not change keeps the measurement that stands.
-    let private measured =
-        [ "skeletonApply", 25, phase463
-          "decodeRejects", 47, phase463
-          "skeletonChain", 16, phase463
-          "skeletonDag", 11, phase463
-          "codecRefusals", 101, phase564
-          "seamRefusals", 138, phase564
-          "skeletonMerge", 12, phase564
-          "skeletonDiff", 14, phase564
-          "capabilityLaws", 72, phase564
-          "decimal", 75, phase564
-          "fieldLaws", 43, phase564
-          "propagationLaws", 73, phase564
-          "canonicalFormLaws", 17, phase564
-          "premiseStringModel", 29, phase564
-          "premiseFloatDigits", 163, phase564
-          "premiseInt53", 29, phase564
-          "premiseSha256", 17, phase564
-          "premiseRecursionDepth", 13, phase564 ]
+    /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
+    /// measurement that stands.
+    let internal rust =
+        { Host = "fuaran-core-rs"
+          Measured =
+            [ "skeletonApply", 25, rs463
+              "decodeRejects", 47, rs463
+              "skeletonChain", 16, rs463
+              "skeletonDag", 11, rs463
+              "codecRefusals", 101, rs564
+              "seamRefusals", 138, rs564
+              "skeletonMerge", 12, rs564
+              "skeletonDiff", 14, rs564
+              "capabilityLaws", 72, rs564
+              "decimal", 75, rs564
+              "fieldLaws", 43, rs564
+              "propagationLaws", 73, rs564
+              "canonicalFormLaws", 17, rs564
+              "premiseStringModel", 29, rs564
+              "premiseFloatDigits", 163, rs564
+              "premiseInt53", 29, rs564
+              "premiseSha256", 17, rs564
+              "premiseRecursionDepth", 13, rs564 ] }
 
-    /// The spine's entry for one family.
-    let internal adoption (familyId: string) : string * HostAdoption =
-        match measured |> List.tryFind (fun (id, _, _) -> id = familyId) with
-        | Some(_, cases, source) -> host, HostAdoption.Measured(cases, source)
-        | None -> host, HostAdoption.Proposed
+    /// Phase 485's measurement of the Go spine: Core 0.41.0, landed at this spine commit.
+    let private go485 =
+        AdoptionSource.Host("0.41.0", "b1c903dbedeff7c936e08a7c635268804df875b9")
+
+    /// The Go spine (`Fuaran-Core/fuaran-core-go`): its first certification runs the json codec
+    /// refusals, the decode rejects, the canonical, compare, add and toFloat decimal laws, the apply,
+    /// chain and DAG skeleton families and every premise probe (its DECISIONS.md D4).
+    let internal go =
+        { Host = "fuaran-core-go"
+          Measured =
+            [ "codecRefusals", 56, go485
+              "decodeRejects", 47, go485
+              "decimal", 53, go485
+              "skeletonApply", 25, go485
+              "skeletonChain", 16, go485
+              "skeletonDag", 11, go485
+              "premiseStringModel", 29, go485
+              "premiseFloatDigits", 163, go485
+              "premiseInt53", 29, go485
+              "premiseSha256", 17, go485
+              "premiseRecursionDepth", 13, go485 ] }
+
+    /// The spines, in the order every manifest lists their entries.
+    let internal spines = [ rust; go ]
+
+    /// One spine's entry for one family.
+    let private entry (spine: Spine) (familyId: string) : string * HostAdoption =
+        match spine.Measured |> List.tryFind (fun (id, _, _) -> id = familyId) with
+        | Some(_, cases, source) -> spine.Host, HostAdoption.Measured(cases, source)
+        | None -> spine.Host, HostAdoption.Proposed
+
+    /// Every spine's entry for one family, in roster order.
+    let internal adoptions (familyId: string) : (string * HostAdoption) list =
+        spines |> List.map (fun spine -> entry spine familyId)
 
 module ApplyVectorExport =
 
@@ -612,7 +647,7 @@ module ApplyVectorExport =
                 Adoption =
                   ("fuaran", HostAdoption.Measured(List.length (cases ()), AdoptionSource.Here))
                   :: (hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
-                  @ [ SpineAdoption.adoption familyId ]
+                  @ SpineAdoption.adoptions familyId
                 Description =
                   "The skeleton-op apply contract over the witness surface: accept with the "
                   + "result's canonical bytes and hash, or reject with the class, per validator "

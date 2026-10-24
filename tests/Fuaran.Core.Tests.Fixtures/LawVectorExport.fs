@@ -1204,7 +1204,7 @@ module LawVectorExport =
                       Vectors = List.length vectors
                       Adoption =
                         (lawRoster |> List.map (fun h -> h, HostAdoption.Proposed))
-                        @ [ SpineAdoption.adoption id ]
+                        @ SpineAdoption.adoptions id
                       Description =
                         match fields |> List.tryFind (fun (k, _) -> k = "description") with
                         | Some(_, JStr d) -> d

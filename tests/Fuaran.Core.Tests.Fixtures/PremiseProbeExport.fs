@@ -492,7 +492,7 @@ let internal manifest () : CorpusManifest =
                 Vectors = List.length (p.Vectors())
                 Adoption =
                   (RefusalCorpus.hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
-                  @ [ SpineAdoption.adoption p.Id ]
+                  @ SpineAdoption.adoptions p.Id
                 Description = sprintf "The probe of the `%s` row." p.Row } ] }
 
 let renderManifest () : string =

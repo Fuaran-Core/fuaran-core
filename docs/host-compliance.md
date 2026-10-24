@@ -183,11 +183,14 @@ own Core checkout and reading the verdict (D229).
 
 ## What the labels say today
 
-No host carries a declaration yet. The Rust Core spine, `fuaran-core-rs`, is the first instance: its
-adoption records carry every family it certifies (the law families' in their own index, D231) and every
-premise probe at every vector, and the ladder records its proof of the canonical escape
-(`spine-escape-quoted`), so a declaration naming its certified rows, its discharged premises and its
-replayed proof validates against this tree. The suite's live cases are such a declaration.
+The Go Core spine, `fuaran-core-go`, carries the first committed declaration (Phase 485, D234): it declares
+every row this map offers, with `vector-certified` and `host-premise` evidence where its legs run the family
+and `oracle-differential` evidence on `json.parse`, `tree.apply` and `chain.verify`, and reads `compliant`.
+The Rust Core spine, `fuaran-core-rs`, has adoption records carrying every family it certifies (the law
+families' in their own index, D231) and every premise probe at every vector, and the ladder records its
+proof of the canonical escape (`spine-escape-quoted`), so a declaration naming its certified rows, its
+discharged premises and its replayed proof validates against this tree; the suite's live cases are such a
+declaration.
 
-No host is at parity yet: on every row the evidence map offers an oracle function for, `parity` also asks
-for a differential over that function, and no host has declared one.
+No host is at parity on every row yet: `parity` asks, on each offered row, for every offered family at every
+vector and a differential over every offered oracle function, and no host answers all of them.

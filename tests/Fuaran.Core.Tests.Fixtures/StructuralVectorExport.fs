@@ -1325,7 +1325,7 @@ module StructuralVectorExport =
                   // Measured by this repository's own suite (`StructuralVectorTests`), every vector.
                   ("fuaran", HostAdoption.Measured(List.length (f.Vectors()), AdoptionSource.Here))
                   :: (ApplyVectorExport.hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
-                  @ [ SpineAdoption.adoption f.FamilyId ]
+                  @ SpineAdoption.adoptions f.FamilyId
                 Description = f.Summary } ] }
 
     let renderManifest (f: Family) : string =

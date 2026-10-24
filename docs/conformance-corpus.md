@@ -626,15 +626,16 @@ this repository's exporter (the manifest is emitted, never hand-edited): `HostAd
 AdoptionSource.Host(kitVersion, sha))`. The corpus's `apply/manifest.json` is a shared index (D211); this
 repository owns only the `skeletonApply` row there, and other producers' rows keep their own shape.
 
-**The Rust Core spine is an adoption host and nothing else** (Phase 463, DECISIONS.md D225).
-`fuaran-core-rs` (`Fuaran-Core/fuaran-core-rs`) is this repository's twin in Rust, so it answers a
-rejection in Core's own vocabulary — the canonical rejection bytes a vector pins — and is never added
-to a roster that maps Core's classes to a wire host's codes (`ApplyVectorExport.hostRoster`, whose
-entries write `expected.hosts`). Its entry in every manifest above comes from ONE table,
-`SpineAdoption` (beside `ApplyVectorExport`): the cases each of its legs asserted, the Core version it
-certified against and the spine commit that landed them, and `proposed` for a family it does not run.
-It reads Core's vectors from a Core checkout at the commit its own `core-pin.json` names, not from the
-shared corpus, because most of the families it runs have no corpus copy.
+**The Core spines are adoption hosts and nothing else** (Phase 463, DECISIONS.md D225; Phase 485, D234).
+`fuaran-core-rs` (`Fuaran-Core/fuaran-core-rs`) and `fuaran-core-go` (`Fuaran-Core/fuaran-core-go`) are
+this repository's twins in Rust and in Go, so each answers a rejection in Core's own vocabulary — the
+canonical rejection bytes a vector pins — and is never added to a roster that maps Core's classes to a
+wire host's codes (`ApplyVectorExport.hostRoster`, whose entries write `expected.hosts`). Their entries in
+every manifest above come from ONE table, `SpineAdoption` (beside `ApplyVectorExport`), one measured list
+per spine: the cases each of its legs asserted, the Core version it certified against and the spine commit
+that landed them, and `proposed` for a family it does not run. Each reads Core's vectors from a Core
+checkout at the commit its own `core-pin.json` names, not from the shared corpus, because most of the
+families it runs have no corpus copy.
 
 **The law families have their own index** (Phase 564, DECISIONS.md D231). `conformance/laws/manifest.json`
 is the one manifest schema over the law files this repository emits — one row per file, its id the file's
