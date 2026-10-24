@@ -1132,18 +1132,71 @@ module LawVectorExport =
                 | Ok members -> id, members
                 | Error e -> failwithf "the %s this kit renders did not read back: %s" fileName e))
 
+    // -----------------------------------------------------------------------
+    //  Phase 564 — this repository's own law-family index, with the adoption record
+    // -----------------------------------------------------------------------
+    //  Every other family Core emits carries a self-enumerated manifest whose rows hold the D222
+    //  adoption record; the law families had none, so a host's measured law cases had nowhere to be
+    //  written but a decision's prose. `conformance/laws/manifest.json` is that index, in the one
+    //  manifest schema, one row per law file this repository emits. It is NOT the corpus's
+    //  `laws/manifest.json`, which is a hand-curated shared index spanning another producer's
+    //  families and whose Core rows are restamped above: the two share a file name as the apply
+    //  family's two indexes do (D211), and the corpus never receives this one.
+
+    /// The codec twins that read the law files from the shared corpus, as the refusal and decode
+    /// families record them (`RefusalCorpus.hostRoster`, which compiles after this module).
+    let private lawRoster = "fuaran" :: ApplyVectorExport.hostRoster
+
+    /// The index over the law files `files` renders, each row counted from the text it names.
+    let internal ownManifest (files: (string * string) list) : CorpusManifest =
+        let row (path: string, text: string) =
+            match Json.parse text with
+            | Ok(JObj fields) ->
+                match
+                    fields |> List.tryFind (fun (k, _) -> k = "family"),
+                    fields |> List.tryFind (fun (k, _) -> k = "vectors")
+                with
+                | Some(_, JStr id), Some(_, JArr vectors) ->
+                    { Id = id
+                      Kind = "law-vectors"
+                      File = Path.GetFileName path
+                      Vectors = List.length vectors
+                      Adoption =
+                        (lawRoster |> List.map (fun h -> h, HostAdoption.Proposed))
+                        @ [ SpineAdoption.adoption id ]
+                      Description =
+                        match fields |> List.tryFind (fun (k, _) -> k = "description") with
+                        | Some(_, JStr d) -> d
+                        | _ -> failwithf "%s declares no description" path }
+                | _ -> failwithf "%s declares no string `family` and `vectors` array" path
+            | _ -> failwithf "%s is not a JSON object" path
+
+        { Version = 1
+          Description =
+            "Law-vector families this repository emits (Phase 564). SELF-ENUMERATED, as apply/ and refusals/ are, and distinct from the shared corpus's laws/manifest.json, which indexes these files beside another producer's and carries no adoption. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry in the change-set that lands its leg. This manifest is authoritative for the vector counts."
+          Families = files |> List.map row }
+
+    /// The index, rendered over the law files as this kit stamps them (no row member carries the stamp).
+    let renderOwnManifest () : string =
+        CorpusFile.render (CorpusFile.manifest (ownManifest (emitted "")))
+
     /// Write `files` (law files under `corpusDir`, as `emittedAt` renders them) with LF endings,
     /// whatever the host platform — the corpus is byte-compared by several hosts on three operating
-    /// systems — and, where a family `manifest.json` sits beside them (the corpus; this repository's
-    /// `conformance/laws/` carries none), restamp the rows of the families written in the same act
-    /// (Phase 394). A manifest that cannot be restamped fails the command BEFORE any file is written,
-    /// so the files and their rows never part company. Only the files handed are written (Phase 560:
-    /// a corpus checkout receives only the copies it declares).
+    /// systems. Where `files` carries the family `manifest.json` (this repository's own index) it is
+    /// written whole like any other file; where it does not and one sits beside them (the corpus's
+    /// shared index), the rows of the families written are restamped in the same act (Phase 394). A
+    /// manifest that cannot be restamped fails the command BEFORE any file is written, so the files
+    /// and their rows never part company. Only the files handed are written (Phase 560: a corpus
+    /// checkout receives only the copies it declares).
     let writeFiles (corpusDir: string) (files: (string * string) list) : unit =
         let manifest = manifestPath corpusDir
 
+        let ownIndex =
+            files
+            |> List.exists (fun (p, _) -> Path.GetFullPath p = Path.GetFullPath manifest)
+
         let restamped =
-            if File.Exists manifest then
+            if not ownIndex && File.Exists manifest then
                 match restampManifest (File.ReadAllText manifest) (writtenRows files) with
                 | Ok text -> Some text
                 | Error why -> failwithf "%s (%s) — nothing was written" why manifest

@@ -1240,4 +1240,36 @@ let tests =
                                @ [ ""
                                    "`render laws <corpus dir>` restamps the rows with the files (Phase 394):"
                                    "    " + emitCopy ]))
-                          fatal ]
+                          fatal
+
+          // Phase 564 — this repository's own law-family index, at home only.
+          testCase "the own law index is written at the family's home and is never handed to a corpus checkout"
+          <| fun _ ->
+              let row =
+                  Exporters.tableWith (fun () -> [])
+                  |> List.find (fun e -> e.Family = LawVectorExport.familyDirName)
+
+              let rows = Approval.registry.Value
+              let own = LawVectorExport.manifestPath (OwnedConformance.root ())
+
+              let atHome =
+                  Exporters.filesFor rows None row (Exporters.Own(OwnedConformance.root ()))
+
+              Expect.isTrue
+                  (atHome |> List.exists (fun (p, _) -> Path.GetFullPath p = Path.GetFullPath own))
+                  "the family's home receives its own index"
+
+              let corpus =
+                  Path.Combine(Path.GetTempPath(), "core-564-laws-" + string (Guid.NewGuid()))
+
+              let elsewhere = Exporters.filesFor rows None row (Exporters.Elsewhere corpus)
+
+              Expect.isFalse
+                  (elsewhere
+                   |> List.exists (fun (p, _) -> Path.GetFileName p = LawVectorExport.manifestFileName))
+                  "a corpus checkout's laws/manifest.json is its shared index: the own index is never handed to it"
+
+              Expect.equal
+                  (LawVectorExport.ownManifest (LawVectorExport.emitted "")).Families.Length
+                  (LawVectorExport.emitted "").Length
+                  "the own index has one row per law file this repository emits" ]

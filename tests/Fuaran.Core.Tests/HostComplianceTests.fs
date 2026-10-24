@@ -271,15 +271,17 @@ let private goReds: GoRed list =
               |> Case.replaceRow
                   2
                   (row (Case.premiseRow i).Id [ Case.vc "premiseInt53" (Case.record i "premiseInt53").Vectors ])))
-      goRed
-          "adoption-missing"
-          "a family no manifest indexes (the law families carry no adoption record)"
-          (onRows (fun i rows ->
-              let decimalRow =
-                  Case.rowWhere i "offered `decimal`" (fun r ->
-                      r.Families |> List.exists (fun f -> f.Family = "decimal"))
+      goRed "adoption-missing" "a family no manifest indexes (an offered family whose index is withdrawn)" (fun i ->
+          let decimalRow =
+              Case.rowWhere i "offered `decimal`" (fun r -> r.Families |> List.exists (fun f -> f.Family = "decimal"))
 
-              rows @ [ row decimalRow.Id [ Case.vc "decimal" 49 ] ]))
+          // Since Phase 564 the law families have their own index, so the family is
+          // unindexed by withdrawing its record, as the case below withdraws a host's entry.
+          let i' =
+              { i with
+                  Records = i.Records |> List.filter (fun r -> r.Family <> "decimal") }
+
+          onRows (fun _ rows -> rows @ [ row decimalRow.Id [ Case.vc "decimal" 49 ] ]) i')
       goRed "adoption-missing" "a host the family's record has no entry for" (fun i ->
           let i' =
               { i with

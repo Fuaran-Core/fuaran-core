@@ -60,12 +60,27 @@ type Exporter =
 let private twoFiles (vectors: string -> string) (manifest: string -> string) render renderManifest =
     fun dir -> [ vectors dir, render (); manifest dir, renderManifest () ]
 
+/// This repository's own law-family index (Phase 564), at the family's home and nowhere else: under
+/// any other directory `laws/manifest.json` is the corpus's shared index, which the law writer
+/// restamps and never replaces, so the own index is not among the files a write there is handed.
+let private ownLawIndex (dir: string) : (string * string) list =
+    if
+        System.String.Equals(
+            Path.GetFullPath(dir).TrimEnd('/', '\\'),
+            Path.GetFullPath(OwnedConformance.root ()).TrimEnd('/', '\\'),
+            System.StringComparison.OrdinalIgnoreCase
+        )
+    then
+        [ LawVectorExport.manifestPath dir, LawVectorExport.renderOwnManifest () ]
+    else
+        []
+
 /// The table, given the reference run that measures the `families` row's `cases` column.
 let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list =
     [ { Family = "laws"
         Root = OwnedConformance.root
-        Files = LawVectorExport.emitted
-        FilesAt = Some LawVectorExport.emittedAt
+        Files = fun dir -> LawVectorExport.emitted dir @ ownLawIndex dir
+        FilesAt = Some(fun stamp dir -> LawVectorExport.emittedAt stamp dir @ ownLawIndex dir)
         Write = Some LawVectorExport.writeFiles
         // The corpus's `laws/manifest.json` indexes compute's families too; `write` restamps only
         // the rows of the families written here (Phase 394).

@@ -19,6 +19,7 @@ conformance/
   laws/decimal-laws.json       the exact decimal's documents (`render laws`, since Phase 276)
   laws/field-laws.json         the schema field's documents (`render laws`, since Phase 427)
   laws/propagation-laws.json   the propagation vectors (`render laws`, since Phase 538)
+  laws/manifest.json           the law families' own index + per-host adoption (`render laws`, since Phase 564; never the corpus's laws/manifest.json)
   apply/skeleton-apply.json    the skeleton-op apply contract (`render apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`render apply`)
   refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, the decode-determinism rows (Phase 462), column cells, the wire-profile grammar (`render refusals`, since Phase 299; profiles since Phase 306)
@@ -585,7 +586,7 @@ the sentence beside it is the host's own. The vectors are emitted, never hand-ed
 ## Host adoption is a record (Phase 477) {#adoption-record}
 
 Every self-enumerated manifest this repository emits (`apply/`, `refusals/`, `decode/`, `chain/`, `dag/`,
-`merge/`, `diff/`) records each host's adoption of each family as a RECORD, never a bare status string
+`merge/`, `diff/`, `premises/`, and `laws/` since Phase 564) records each host's adoption of each family as a RECORD, never a bare status string
 (DECISIONS.md D222):
 
 ```json
@@ -634,6 +635,18 @@ entries write `expected.hosts`). Its entry in every manifest above comes from ON
 certified against and the spine commit that landed them, and `proposed` for a family it does not run.
 It reads Core's vectors from a Core checkout at the commit its own `core-pin.json` names, not from the
 shared corpus, because most of the families it runs have no corpus copy.
+
+**The law families have their own index** (Phase 564, DECISIONS.md D230). `conformance/laws/manifest.json`
+is the one manifest schema over the law files this repository emits — one row per file, its id the file's
+own `family` member, its vector count read from the file, and the adoption record — so a host's measured law
+cases are written where a host reads them, not in a decision's prose. It is written at this repository's
+home only. In a checkout of the shared corpus `laws/manifest.json` is the hand-curated index over every
+family in `laws/`, another producer's among them, and `render laws <corpus dir>` restamps Core's rows
+there and never replaces it: the own index is not among the files a write elsewhere is handed, and the
+law writer writes it whole only when it is. The corpus index carries no adoption; the spine reads Core's
+own `conformance/`, and the wire hosts that read the law files from the corpus record their adoption
+here like any other host. A family a host runs only in part reads `adopted` with the cases it asserted,
+which a reader compares with the row's `vectors`; why the rest are not run is the host's own record.
 
 ## Who answered a vector (Phase 478) {#answered-by}
 

@@ -51,13 +51,15 @@ namespace Fuaran.Core.Tests
 //     a reason that has nothing to do with its content.
 // ============================================================================
 
-/// The Rust Core spine's adoption of the families this repository emits (Phase 463, DECISIONS.md D225).
-/// `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in Core's vocabulary, so
-/// it is an ADOPTION host only and never joins a roster that maps Core's classes to a host's codes
-/// (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so each names
-/// the Core version its legs certified against and the spine commit that landed them; a family it does
-/// not run reads `proposed`. The counts are the cases its legs asserted, never this repository's
-/// vector counts: a family that grows after the measurement keeps the measured count.
+/// The Rust Core spine's adoption of the families this repository emits (Phase 463, DECISIONS.md D225;
+/// Phase 564, D230). `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in
+/// Core's vocabulary, so it is an ADOPTION host only and never joins a roster that maps Core's classes to
+/// a host's codes (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so
+/// each names the Core version its legs certified against and the spine commit that landed them; a family
+/// it does not run reads `proposed`. The counts are the cases its legs asserted, never this repository's
+/// vector counts: a family that grows after a measurement keeps the measured count until the spine
+/// measures again. Every manifest takes the spine's entry from this one table, the law families' index
+/// (`conformance/laws/manifest.json`) among them.
 module SpineAdoption =
 
     open Fuaran.Core
@@ -65,22 +67,24 @@ module SpineAdoption =
     /// The host key every manifest carries the spine's entry under.
     let host = "fuaran-core-rs"
 
-    /// The Core version the spine's legs certified against, and the spine commit that landed them.
-    let private measuredAt =
+    /// Phase 463's measurement: Core 0.41.0, landed at this spine commit.
+    let private phase463 =
         AdoptionSource.Host("0.41.0", "432509b7bbdf0f1a227914466d12c48abc35291f")
 
-    /// The families the spine runs, by family id, with the cases its legs asserted.
+    /// The families the spine runs, by family id, with the cases its legs asserted and where.
     let private measured =
-        [ "skeletonApply", 25
-          "codecRefusals", 56
-          "decodeRejects", 47
-          "skeletonChain", 16
-          "skeletonDag", 11 ]
+        [ "skeletonApply", 25, phase463
+          "codecRefusals", 56, phase463
+          "decodeRejects", 47, phase463
+          "skeletonChain", 16, phase463
+          "skeletonDag", 11, phase463
+          // The `canonical`, `compare`, `add` and `toFloat` cases (Phase 463).
+          "decimal", 53, phase463 ]
 
     /// The spine's entry for one family.
     let internal adoption (familyId: string) : string * HostAdoption =
-        match measured |> List.tryFind (fun (id, _) -> id = familyId) with
-        | Some(_, cases) -> host, HostAdoption.Measured(cases, measuredAt)
+        match measured |> List.tryFind (fun (id, _, _) -> id = familyId) with
+        | Some(_, cases, source) -> host, HostAdoption.Measured(cases, source)
         | None -> host, HostAdoption.Proposed
 
 module ApplyVectorExport =
