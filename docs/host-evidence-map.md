@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-393 rows: 227 offered, 1 a host's own proof, 165 uncovered (proved 97, tested 26, assumed 40, policy 2).
+395 rows: 229 offered, 1 a host's own proof, 165 uncovered (proved 97, tested 26, assumed 40, policy 2).
 
 ## Offers, by model
 
@@ -22,8 +22,8 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 |---|---|---|---|
 | `Capability` | 34 | `capabilityLaws` (72), `seamRefusals` (55) | — |
 | `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
-| `DagClosure` | 25 | `skeletonMerge` (7) | — |
-| `DagFold` | 3 | — | `dag.fold` |
+| `DagClosure` | 26 | `skeletonMerge` (12) | — |
+| `DagFold` | 4 | — | `dag.fold` |
 | `DagPrimitives` | 9 | `skeletonMerge` (1) | — |
 | `DecimalText` | 12 | `decimal` (49) | — |
 | `DecodeLayer` | 4 | `decodeRejects` (28) | — |

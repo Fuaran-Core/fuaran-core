@@ -960,6 +960,17 @@ module StructuralVectorExport =
         let private unappliable (rejection: JVal) : (string * JVal) list =
             [ "verdict", JStr "unappliable"; "rejection", rejection ]
 
+        /// The `lanesRejected` verdict: each rejecting lane's head, the node that rejected and the
+        /// rejection, in the order given — the one renderer for the reference's report and the model's.
+        let private lanesRejected (lanes: (string * string * JVal) list) : (string * JVal) list =
+            [ "verdict", JStr "lanesRejected"
+              "lanes",
+              JArr(
+                  lanes
+                  |> List.map (fun (head, node, rejection) ->
+                      JObj [ "head", JStr head; "node", JStr node; "rejection", rejection ])
+              ) ]
+
         /// The answer to a `reconcile` vector, computed by calling Core.
         let answer (case: string) (input: JVal) : Result<JVal, string> =
             result {
@@ -1005,60 +1016,25 @@ module StructuralVectorExport =
                             | Error(ReconcileFault.SharedHistoryRejected(n, rej)) ->
                                 sharedRejected (label n) (rejection rej)
                             | Error(ReconcileFault.LanesRejected lanes) ->
-                                [ "verdict", JStr "lanesRejected"
-                                  "lanes",
-                                  JArr(
-                                      lanes
-                                      |> List.map (fun l ->
-                                          JObj
-                                              [ "head", JStr(label l.Head)
-                                                "node", JStr(label l.NodeId)
-                                                "rejection", rejection l.Reject ])
-                                  ) ]
+                                lanesRejected (
+                                    lanes |> List.map (fun l -> label l.Head, label l.NodeId, rejection l.Reject)
+                                )
 
                         return render label ids common (Some baseId) outcome
                 | other -> return! Error(sprintf "the merge family has no case `%s`" other)
             }
 
-        /// Why an `interfere` vector is the reference's: the models read sets as lists (`sets-are-lists`),
-        /// so the composition answers the conflicts as a SET, and the vector pins their order and count.
-        let private unorderedReport =
-            "the conflict report's order and multiplicity, which the vector pins, are not stated by the model: it reads sets as lists (ladder row sets-are-lists)"
-
-        /// Why a `lanesRejected` vector is the reference's: the model names which lanes do not apply, and
-        /// no model states the report the vector pins.
-        let private unstatedLaneReport =
-            "the rejected-lane report (each rejecting lane's head, the node that rejects and the rejection, sorted by head id) is stated by no model: DagFold.fold_once answers LanesRejected with the lanes alone"
-
-        /// The vectors the composition declines, each with the reason (D232.1): the export fails if the
-        /// composition declines another, or answers one of these after all.
-        let declaredNotAnswered: Map<string, string> =
-            Map
-                [ "insert-position-clash", unorderedReport
-                  "concurrent-update", unorderedReport
-                  "move-vs-remove", unorderedReport
-                  "lanes-rejected", unstatedLaneReport
-                  "lanes-rejected-id-order", unstatedLaneReport ]
-
-        /// An answer with its array `name` read as a set: each member through `pick`, deduplicated and
-        /// in canonical-text order — the reading under which a declined answer is still compared.
-        let private asSet (name: string) (pick: JVal -> JVal) (answer: JVal) : JVal =
-            match answer with
-            | JObj fields ->
-                fields
-                |> List.map (fun (k, x) ->
-                    match k, x with
-                    | k, JArr xs when k = name ->
-                        k, JArr(xs |> List.map pick |> List.distinctBy canonical |> List.sortBy canonical)
-                    | _ -> k, x)
-                |> JObj
-            | other -> other
+        /// The vectors the composition declines, each with the reason (D232.1): none since Phase 582 —
+        /// the models state the conflict report and the lane-rejection report as the reference emits
+        /// them (DECISIONS.md D239) — so the export fails if the composition declines any vector.
+        let declaredNotAnswered: Map<string, string> = Map.empty
 
         /// The models' answer to a vector (Phase 569): the composition `MergeOracle.reconcile` states
-        /// (DECISIONS.md D238), over the tree model's own `apply` and footprint, its answer rendered by
-        /// `render` as the reference's is. A `noBase` answer is the common base's, so its stamp names
-        /// `DagPrimitives`; every other answer is the reconcile's, `DagClosure`. `steps` are the
-        /// composition's (`modelSteps`), or one of them perturbed by a go-red.
+        /// (DECISIONS.md D238; its two reports as the reference emits them, D239), over the tree model's
+        /// own `apply` and footprint, its answer rendered by `render` as the reference's is. A `noBase`
+        /// answer is the common base's, so its stamp names `DagPrimitives`; every other answer is the
+        /// reconcile's, `DagClosure`. `steps` are the composition's (`modelSteps`), or one of them
+        /// perturbed by a go-red.
         let modelAnswerWith
             (steps: MergeOracle.Steps<SkeletonOp<RNode, string>, TreeOps.tree, TreeOps.rejection>)
             (v: Vector)
@@ -1080,32 +1056,6 @@ module StructuralVectorExport =
             let modelRejection r =
                 JStr(canonical (ApplyVectorExport.modelRejectionJ r))
 
-            let reference () =
-                match answer v.Case v.Input with
-                | Ok r -> r
-                | Error why -> failwithf "merge vector %s: %s" v.Id why
-
-            // A decline is for what the model does not state; what it does state still has to agree, so
-            // a declined answer is held to the reference's with the unstated array read as a set.
-            let declineAgreeing (name: string) (pick: JVal -> JVal) (model: JVal) (why: string) =
-                let m = canonical (asSet name pick model)
-                let r = canonical (asSet name pick (reference ()))
-
-                if m <> r then
-                    failwithf
-                        "the export refuses: vector `%s`: the extracted model %s disagrees with the reference (ladder row `%s`), `%s` read as a set — reference %s, model %s"
-                        v.Id
-                        MergeOracle.Model
-                        MergeOracle.LadderRow
-                        name
-                        r
-                        m
-
-                VectorOracle.Declined(MergeOracle.Model, MergeOracle.LadderRow, why)
-
-            let head (l: JVal) =
-                field "head" l |> Option.defaultValue (JStr "")
-
             let asked =
                 match
                     MergeOracle.reconcile
@@ -1117,21 +1067,17 @@ module StructuralVectorExport =
                         named
                 with
                 | Error why -> VectorOracle.Declined(MergeOracle.Model, MergeOracle.LadderRow, why)
-                | Ok({ Verdict = MergeOracle.Interfere cs } as a) ->
-                    interfere (cs |> List.map MergeOracle.ofModelConflict)
-                    |> render a.LabelOf a.Ids a.CommonBase a.Base
-                    |> fun m -> declineAgreeing "conflicts" id m unorderedReport
-                | Ok({ Verdict = MergeOracle.LanesRejected heads } as a) ->
-                    [ "verdict", JStr "lanesRejected"
-                      "lanes", JArr(heads |> List.map (fun h -> JObj [ "head", JStr(a.LabelOf h) ])) ]
-                    |> render a.LabelOf a.Ids a.CommonBase a.Base
-                    |> fun m -> declineAgreeing "lanes" head m unstatedLaneReport
                 | Ok a ->
                     let outcome =
                         match a.Verdict with
                         | MergeOracle.NoBase -> []
-                        | MergeOracle.Interfere _
-                        | MergeOracle.LanesRejected _ -> failwith "matched above"
+                        | MergeOracle.Interfere cs -> interfere (cs |> List.map MergeOracle.ofModelConflict)
+                        | MergeOracle.LanesRejected report ->
+                            lanesRejected (
+                                report
+                                |> List.map (fun r ->
+                                    a.LabelOf r.lr_head, a.LabelOf r.lr_node, modelRejection r.lr_reject)
+                            )
                         | MergeOracle.SharedRejected(n, rej) -> sharedRejected (a.LabelOf n) (modelRejection rej)
                         | MergeOracle.Merged(script, landed) -> merged script (VectorOracle.TreeModel.ofTree landed)
                         | MergeOracle.Unappliable rej -> unappliable (modelRejection rej)

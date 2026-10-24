@@ -621,6 +621,32 @@ let tests =
               Expect.isFalse (production = "") "the two deltas genuinely conflict"
               Expect.equal model production "the model enumerates the same interferences"
 
+          testCase "the model's emitted conflicts are Dag.conflicts verbatim, order and count, where the sweep is not"
+          <| fun _ ->
+              // Phase 582. Two retitles of one item put it in both content-write sets and both read
+              // sets: the set-as-list sweep lists it three times, production's `Set` once. The emitted
+              // report (`conflicts_emitted`, each address block the set's enumeration) is production's
+              // list, conflict for conflict and in order; the sweep agrees only read canonically.
+              let a = [ Retitle("p1", "t-a"); AddItem("n1", "title-0") ]
+              let b = [ Retitle("p1", "t-b"); AddDep("p2", "p1") ]
+              let fp = planFootprint >> toModelFootprint
+
+              let render (c: MergeConflict<PlanOp>) =
+                  encPlanOp c.Left, encPlanOp c.Right, c.Address, c.Shape
+
+              let production = Dag.conflicts planFootprint a b |> List.map render
+
+              let emitted =
+                  DagFold.conflicts_emitted ordLt fp a b |> List.map (ofModelConflict >> render)
+
+              let sweep = DagFold.conflicts fp a b |> List.map (ofModelConflict >> render)
+
+              Expect.equal (List.length production) 2 "the two deltas conflict at two op pairs, one address each"
+              Expect.equal emitted production "the emitted report is production's, conflict for conflict and in order"
+              // the go-red: the sweep, read under `sets-are-lists`, is not the report
+              Expect.equal (List.length sweep) 4 "the sweep lists the retitled item three times at the retitle pair"
+              Expect.notEqual sweep production "the sweep is the report only up to the canonical reading"
+
           // ---- the theorem's hypothesis, measured on the reference witness (Phase 132) ----
 
           testCase "the reference witness keeps the theorem's hypothesis: independent ops form a diamond"

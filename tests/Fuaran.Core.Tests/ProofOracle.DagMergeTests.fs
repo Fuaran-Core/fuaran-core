@@ -1276,7 +1276,13 @@ let tests =
                     "the apply, the identity",
                     { faithful with
                         Apply = fun _ t -> DagFold.Ok t },
-                    "clean-two-lanes" ] do
+                    "clean-two-lanes"
+                    // Phase 582: the id order the two reports ascend by; a single conflict is unmoved
+                    // by it, so the first vector to move is the first with two rejected lanes.
+                    "the id order the reports sort by, reversed",
+                    { faithful with
+                        Order = fun a b -> faithful.Order b a },
+                    "lanes-rejected" ] do
                   Expect.throwsC (fun () -> render perturbed |> ignore) (fun e ->
                       Expect.stringContains e.Message "the export refuses" (step + ": the render refuses")
 

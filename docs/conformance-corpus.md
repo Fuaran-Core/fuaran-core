@@ -740,22 +740,21 @@ reason:
 - **The model declines the input** (declared): 5 decimal and 10 column codec vectors whose input reaches a
   lenient-ingest arm of the column decoder (a JSON number where a decimal or timestamp column holds text, a
   bare-array column, an inferred schema), and the 11 decode rejects refused for a limit the parser breaches.
-  And 5 of the 13 merge vectors: the 3 `interfere` vectors, because the models read sets as lists
-  (`sets-are-lists`) and so state the conflict report as a set, where the vector pins its order and count; and
-  the 2 `lanesRejected` vectors, because no model states the report they pin (each rejecting lane's head, the
-  node that rejects and the rejection, sorted by head id: `DagFold.fold_once` names the lanes alone). Each
-  declined vector is still held to the reference as far as the models state it — every id, the base, the
-  verdict, and the conflicts or the rejecting heads read as a set — and a disagreement there fails the export.
+  No merge vector: the 5 that Phase 569 declared (the 3 `interfere` and the 2 `lanesRejected`) are stamped since
+  Phase 582, which states both reports as the reference emits them (D239).
 
 **The merge family is a composition (Phase 569, D238).** No single model answers a merge vector, so the
 export composes four, every step an extracted model function: the content ids from `Chain`'s DAG build
 (`apply_step`, minting by `node_hash`), the common base from `DagPrimitives.common_base`, the base's state
 from `DagClosure.replay_to`, and the reconcile as `reconcile_fold_order_free` states `Dag.reconcileMany` —
-the partition (`DagClosure.shared_ids` and `excl_lanes` over the union's drain), the interference sweep
-(`DagFold.reconcile_many`), the shared region's replay (`DagClosure.replay_ids`) and the checked fold of the
-exclusive lanes (`DagFold.fold_once`) — over the tree model's own `apply` and footprint (`TreeOps`). The
+the partition (`DagClosure.shared_ids` and `excl_lanes` over the union's drain), the interference sweep with its
+report as the reference emits it (`DagFold.reconcile_many_emitted`: each address block a set's enumeration, once
+and ascending, Phase 582), the shared region's replay (`DagClosure.replay_ids`), the checked fold of the exclusive
+lanes (`DagFold.fold_once`) and, for a lane that does not apply, the rejection report sorted by head id
+(`DagClosure.lane_rejection_report`, Phase 582) — over the tree model's own `apply` and footprint (`TreeOps`). The
 stamp names the model that answers the vector's question: `DagPrimitives` for a `noBase` answer, the common
-base's, and `DagClosure` for every other. `DagClosure.reconcile_many_drained` is not the reconcile: it folds
+base's, and `DagClosure` for every other. Every one of the 13 vectors is stamped: a report theorem states order
+and count, not membership (ladder rows `conflict-report-emitted` and `lane-rejection-report`, D239). `DagClosure.reconcile_many_drained` is not the reconcile: it folds
 each head's whole delta from the base, the rule Phase 300 replaced, and disagrees with the reference wherever
 heads share history above the base (`named-base`). The bridges are in
 `tests/Fuaran.Core.Tests.Fixtures/VectorOracle.Merge.fs`, and the suite perturbs each step alone and requires

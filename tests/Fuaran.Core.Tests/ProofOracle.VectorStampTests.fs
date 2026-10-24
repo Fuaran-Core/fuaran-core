@@ -83,7 +83,7 @@ let modelStamps: (string * (string * int)) list =
       "laws/decimal-laws.json", ("WireColumn", 7)
       "laws/field-laws.json", ("WireColumn", 24)
       "laws/propagation-laws.json", ("Propagation", 73)
-      "merge/skeleton-merge.json", ("DagClosure", 7)
+      "merge/skeleton-merge.json", ("DagClosure", 12)
       "merge/skeleton-merge.json", ("DagPrimitives", 1)
       "premises/int53.json", ("JsonParse", 29)
       "premises/recursion-depth.json", ("JsonParse", 13)

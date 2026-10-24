@@ -13,10 +13,12 @@ module Fuaran.Core.Tests.MergeOracle
 //    3. the base's state: `DagClosure.replay_to` from the vector's initial tree;
 //    4. the reconcile, as `reconcile_fold_order_free` states `Dag.reconcileMany`: the partition
 //       (`DagPrimitives.distinct_go` on the heads, `DagClosure.shared_ids` / `excl_lanes` over the
-//       union's drain), the interference sweep over the exclusive lanes (`DagFold.reconcile_many`),
-//       the shared region replayed from the base (`DagClosure.replay_ids`), and the checked fold of
-//       the exclusive lanes from there (`DagFold.fold_once`) — over the tree model's own `apply` and
-//       footprint (`TreeOps.apply`, `TreeOps.op_fp`).
+//       union's drain), the interference sweep over the exclusive lanes with its report as the
+//       reference emits it (`DagFold.reconcile_many_emitted`, Phase 582), the shared region replayed
+//       from the base (`DagClosure.replay_ids`), the checked fold of the exclusive lanes from there
+//       (`DagFold.fold_once`), and for a lane that does not apply the rejection report as the
+//       reference emits it (`DagClosure.lane_rejection_report`, Phase 582) — over the tree model's
+//       own `apply` and footprint (`TreeOps.apply`, `TreeOps.op_fp`).
 //
 //  `DagClosure.reconcile_many_drained` is NOT the reconcile: it folds each head's whole delta from
 //  the base, which is the rule Phase 300 replaced, and applies shared history once per lane.
@@ -127,14 +129,15 @@ type Write<'Op> =
 /// What the composition answers, in the model's own terms — and no more than the models state.
 type Verdict<'Op, 'State, 'Rej> =
     | NoBase
-    /// The interference sweep's conflicts. The model reads sets as lists (ladder row
-    /// `sets-are-lists`), so this is a SET of conflicts: its order and multiplicity are not stated.
+    /// The interference report as the reference emits it (`DagFold.all_conflicts_emitted`): every
+    /// unordered lane pair in lane order, each op pair in delta order, each shape's addresses once
+    /// and ascending — conflict for conflict and in order (ladder row `conflict-report-emitted`).
     | Interfere of DagFold.conflict<'Op> list
     | SharedRejected of nodeId: string * reject: 'Rej
-    /// The heads whose exclusive lanes do not apply from the shared state, in head order. The model's
-    /// `LanesRejected` names the lanes and nothing about them: not the node that rejects, the
-    /// rejection, or an order by head id.
-    | LanesRejected of heads: string list
+    /// The lane-rejection report as the reference emits it (`DagClosure.lane_rejection_report`): one
+    /// entry per lane that does not apply from the shared state — its head, its delta, the first node
+    /// refused and the rejection — sorted by head id (ladder row `lane-rejection-report`).
+    | LanesRejected of lanes: DagClosure.lane_rejection<'Op, 'Rej> list
     | Merged of script: 'Op list * landed: 'State
     | Unappliable of 'Rej
 
@@ -221,13 +224,20 @@ let partitionOf (model: DagClosure.dag<'Op>) (baseId: string) (heads: string lis
 
 /// The steps of the composition a test can perturb one at a time (`DagMergeTests`' go-red): the hash
 /// the DAG build mints ids with, the tree model's `apply` and footprint, how the base is chosen from
-/// the named base and the common base, and the partition.
+/// the named base and the common base, the partition, and the id order the two reports are stated
+/// over.
 type Steps<'Op, 'State, 'Rej> =
-    { Hash: HashFn
-      Apply: 'Op -> 'State -> DagFold.outcome<'State, 'Rej>
-      Fp: 'Op -> DagFold.footprint
-      Base: string option -> string option -> string option
-      Partition: DagClosure.dag<'Op> -> string -> string list -> Partition }
+    {
+        Hash: HashFn
+        Apply: 'Op -> 'State -> DagFold.outcome<'State, 'Rej>
+        Fp: 'Op -> DagFold.footprint
+        Base: string option -> string option -> string option
+        Partition: DagClosure.dag<'Op> -> string -> string list -> Partition
+        /// The id order the conflict report's addresses and the rejection report's heads ascend by
+        /// (the models' `lt`; production's `String.CompareOrdinal`). The partition's drain and the
+        /// common base read production's order directly, as D238.1 fixed them.
+        Order: string -> string -> bool
+    }
 
 /// The composition as the models state it: the vector's named base, else the common base; the
 /// reconcile's own partition.
@@ -240,7 +250,8 @@ let steps
       Apply = apply
       Fp = fp
       Base = fun named common -> Option.orElse common named
-      Partition = partitionOf }
+      Partition = partitionOf
+      Order = ordLt }
 
 /// A merge vector as the composition answers it, or the reason it does not (a write the DAG build
 /// does not state). `named` is the vector's own base label, if it names one.
@@ -288,9 +299,11 @@ let reconcile
                 | DagFold.Error _ -> failwithf "the model does not replay the base %s" baseId
 
             let r = s.Partition model baseId heads
-            let lanes = DagClosure.lanes_by (opOf model) r.Exclusive
+            // The lanes as `fold_once` is handed them, each the ops of its ids (`lanes_of_is_lanes_by`
+            // bridges to `reconcile_fold_order_free`'s spelling of the same lanes).
+            let lanes = DagClosure.lanes_of model r.Exclusive
 
-            match DagFold.reconcile_many fp lanes with
+            match DagFold.reconcile_many_emitted s.Order fp lanes with
             | DagFold.Error cs -> Ok(answered (Some baseId) (Interfere cs))
             | DagFold.Ok _ ->
                 match DagClosure.replay_ids apply model.nodes r.Shared baseState with
@@ -301,11 +314,10 @@ let reconcile
                     | DagFold.LaneFolded landed ->
                         Ok(answered (Some baseId) (Merged(DagClosure.ops_by (opOf model) r.Script, landed)))
                     | DagFold.LaneRejected rej -> Ok(answered (Some baseId) (Unappliable rej))
-                    | DagFold.LanesRejected rs ->
-                        let rejected =
-                            List.zip r.Heads lanes
-                            |> List.filter (fun (_, lane) -> List.contains lane rs)
-                            |> List.map fst
+                    | DagFold.LanesRejected _ ->
+                        // `fold_once_lanes_rejected`: the lanes it names are this report's deltas.
+                        let report =
+                            DagClosure.lane_rejection_report apply s.Order model r.Heads r.Exclusive sharedState
 
-                        Ok(answered (Some baseId) (LanesRejected rejected))
+                        Ok(answered (Some baseId) (LanesRejected report))
                     | DagFold.LaneHalted _ -> failwith "the interference sweep above already passed")
