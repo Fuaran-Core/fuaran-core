@@ -1483,10 +1483,6 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
 // ---- the codecs ----
 
-/// The one float read the codecs make — `float i`, as `Decoder.float` reads a `JInt`.
-let private codecReaders: ModelCap.codec_readers =
-    { ModelCap.codec_readers.float_of_int = fun i -> (float (int i)).ToString("R", inv) }
-
 /// The go-red: a `float_fault` that finds nothing, so a float range with a NaN, an infinite or an
 /// inverted bound is well-formed to the model and refused by production's readers.
 let private blindFaultReaders: ModelCap.readers =
@@ -1812,18 +1808,6 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
     Differential.seeded trials (ConfRng.ofSeed seed) step codecTally
 
 // ---- Phase 455 — the seam codec, whole: the invocation, the async envelope and the typed refusal ----
-
-let private modelCodeOf (c: ModelCap.decode_code) : DecodeCode =
-    match c with
-    | ModelCap.InvalidJson -> DecodeCode.InvalidJson
-    | ModelCap.MissingField -> DecodeCode.MissingField
-    | ModelCap.WrongKind -> DecodeCode.WrongKind
-    | ModelCap.UnknownTag -> DecodeCode.UnknownTag
-    | ModelCap.OutOfRange -> DecodeCode.OutOfRange
-    | ModelCap.UndeclaredMember -> DecodeCode.UndeclaredMember
-    | ModelCap.LimitExceeded -> DecodeCode.LimitExceeded
-    | ModelCap.NotAdmitted -> DecodeCode.NotAdmitted
-    | ModelCap.SchemaFault -> DecodeCode.SchemaFault
 
 let private faultToModel (f: DeclarationFault) : ModelCap.decl_fault =
     match f with

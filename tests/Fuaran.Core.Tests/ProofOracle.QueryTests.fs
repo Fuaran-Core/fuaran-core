@@ -21,6 +21,7 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
 open Fuaran.Core.Tests.CapabilityOracle
+open Fuaran.Core.Tests.QueryOracle
 
 // ------------------------------------------------------------------------------------------
 // Phase 187 — the DATA-ACQUISITION SEAM. `proofs/Query.fst` models `Fuaran.Core.Query`'s
@@ -39,31 +40,6 @@ open Fuaran.Core.Tests.CapabilityOracle
 // calls: `string` on an int, `FloatLayout.canonical`, `Hash.fnv1a`, and the ordinal order F#'s
 // `List.sortBy fst` compares strings by. A float cell crosses as its round-trip `R` text.
 // ------------------------------------------------------------------------------------------
-
-/// The query model's unit, restated in its own module (Phase 430).
-let private qUnitToModel (u: TimeUnit) : ModelQuery.time_unit =
-    match u with
-    | TimeUnit.Seconds -> ModelQuery.Seconds
-    | TimeUnit.Milliseconds -> ModelQuery.Milliseconds
-    | TimeUnit.Microseconds -> ModelQuery.Microseconds
-    | TimeUnit.Nanoseconds -> ModelQuery.Nanoseconds
-
-let private qUnitOfModel (u: ModelQuery.time_unit) : TimeUnit =
-    match u with
-    | ModelQuery.Seconds -> TimeUnit.Seconds
-    | ModelQuery.Milliseconds -> TimeUnit.Milliseconds
-    | ModelQuery.Microseconds -> TimeUnit.Microseconds
-    | ModelQuery.Nanoseconds -> TimeUnit.Nanoseconds
-
-let private qColToModel (t: ColumnType) : ModelQuery.column_type =
-    match t with
-    | IntType -> ModelQuery.IntType
-    | FloatType -> ModelQuery.FloatType
-    | BoolType -> ModelQuery.BoolType
-    | StringType -> ModelQuery.StringType
-    | DateType -> ModelQuery.DateType
-    | TimestampType u -> ModelQuery.TimestampType(qUnitToModel u)
-    | DecimalType -> ModelQuery.DecimalType
 
 let private qColTag (t: ColumnType) : string =
     match t with
@@ -84,20 +60,6 @@ let private qModelColTag (t: ModelQuery.column_type) : string =
     | ModelQuery.DateType -> "date"
     | ModelQuery.TimestampType u -> ColumnType.tag (TimestampType(qUnitOfModel u))
     | ModelQuery.DecimalType -> "decimal"
-
-let private qCellToModel (c: Cell) : ModelQuery.cell =
-    match c with
-    | Cell.Int v -> ModelQuery.Int(bigint v)
-    | Cell.Float v -> ModelQuery.Float(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
-    | Cell.Bool v -> ModelQuery.Bool v
-    | Cell.Str v -> ModelQuery.Str v
-    | Cell.Date v -> ModelQuery.Date v
-    // Phase 430: a timestamp crosses with the unit `Cell.typeOf` names for it — the coarsest unit
-    // holding its instant, `TemporalText.unitOf` — beside its text; the model reads the unit as the
-    // cell's type and the text as its payload (its header says why).
-    | Cell.Timestamp v -> ModelQuery.Timestamp(qUnitToModel (TemporalText.unitOf v), v)
-    | Cell.Decimal v -> ModelQuery.Decimal v
-    | Cell.Null -> ModelQuery.Null
 
 let private qArgsToModel (args: (string * Cell) list) : ModelQuery.arguments =
     args |> List.map (fun (n, c) -> n, qCellToModel c)
@@ -158,19 +120,6 @@ let private queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
 
 // ---- Phase 398: the shape renderers are production's own codec ----
 
-/// A model cell back as production's: the inverse of `qCellToModel` (a float's carrier is its
-/// round-trip text).
-let private qCellOfModel (c: ModelQuery.cell) : Cell =
-    match c with
-    | ModelQuery.Int v -> Cell.Int(int v)
-    | ModelQuery.Float v -> Cell.Float(System.Double.Parse(v, System.Globalization.CultureInfo.InvariantCulture))
-    | ModelQuery.Bool v -> Cell.Bool v
-    | ModelQuery.Str v -> Cell.Str v
-    | ModelQuery.Date v -> Cell.Date v
-    | ModelQuery.Timestamp(_, v) -> Cell.Timestamp v
-    | ModelQuery.Decimal v -> Cell.Decimal v
-    | ModelQuery.Null -> Cell.Null
-
 let private qPredOfModel (p: ModelQuery.predicate) : ColumnPredicate =
     match p with
     | ModelQuery.EqualTo(c, v) -> ColumnPredicate.EqualTo(c, qCellOfModel v)
@@ -188,18 +137,6 @@ let private qKeyOfModel (k: ModelQuery.sort_key) : SortKey =
         match k.k_direction with
         | ModelQuery.Ascending -> SortDirection.Ascending
         | ModelQuery.Descending -> SortDirection.Descending }
-
-/// The declaration a shape renderer encodes: everything but the member it reads is fixed.
-let private shapeCarrier: Query =
-    { Id = "shape"
-      Params = []
-      ResultSchema = []
-      Effect = Effect.pureDeterministic
-      Source = Ref "shape"
-      TimeoutMs = None
-      PageSize = None
-      Where = []
-      OrderBy = [] }
 
 /// The canonical text production's codec writes for one member of a declaration — the member the
 /// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
@@ -945,75 +882,6 @@ let private queryDifferential
 /// The decode refusal's render pair — its code and its path — is the capability codec's: the two
 /// seams share `DecodeError`, and one render of it is the comparison both read.
 let private decodeError = CapabilityTests.decodeError
-
-let private qColOfModel (t: ModelQuery.column_type) : ColumnType =
-    match t with
-    | ModelQuery.IntType -> IntType
-    | ModelQuery.FloatType -> FloatType
-    | ModelQuery.BoolType -> BoolType
-    | ModelQuery.StringType -> StringType
-    | ModelQuery.DateType -> DateType
-    | ModelQuery.TimestampType u -> TimestampType(qUnitOfModel u)
-    | ModelQuery.DecimalType -> DecimalType
-
-/// A predicate literal's value as `QueryCodec` writes it — read off the PUBLIC encoder, over a
-/// declaration whose only filter compares with that literal, so the writer is production's own call.
-let private literalValueJson (v: Cell) : JVal =
-    let q =
-        { shapeCarrier with
-            ResultSchema = [ Field.create "v" (Cell.typeOf v |> Option.defaultValue StringType) ]
-            Where = [ ColumnPredicate.EqualTo("v", v) ] }
-
-    match Json.parse (QueryCodec.encode q) with
-    | Ok(JObj ms) ->
-        match ms |> List.tryFind (fun (k, _) -> k = "where") with
-        | Some(_, JArr [ JObj p ]) ->
-            match p |> List.tryFind (fun (k, _) -> k = "value") with
-            | Some(_, v) -> v
-            | None -> JObj []
-        | _ -> JObj []
-    | _ -> JObj []
-
-/// A literal read at a stated type as `QueryShape.literalOf` reads it: the one cell of a one-row
-/// column of that type, through the column codec's public reader.
-let private literalOfJson (column: string) (ty: ColumnType) (v: JVal) : Cell option =
-    let doc =
-        JObj
-            [ "schema", JArr [ JObj [ "name", JStr column; "type", JStr(ColumnType.tag ty) ] ]
-              "columns", JObj [ column, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
-
-    match ColumnCodec.decodeJson doc with
-    | Ok(Embedded { Columns = [ c ] }) when Column.length c = 1 -> Some(Column.cell 0 c)
-    | _ -> None
-
-/// The model's column-codec parameter, instantiated at production's column codec: the schema entry,
-/// a `Ref` source, an embedded table of rows, and a predicate literal.
-let private columnCodec: ModelQuery.column_codec<Table> =
-    { ModelQuery.column_codec.field_json =
-        fun (n, t) -> jvalToModel (ColumnCodec.fieldJson (Field.create n (qColOfModel t)))
-      ModelQuery.column_codec.field_of =
-        fun j ->
-            match ColumnCodec.decodeField (jvalOfModel j) with
-            | Ok f -> FStar_Pervasives_Native.Some(f.Name, qColToModel f.Type)
-            | Error _ -> FStar_Pervasives_Native.None
-      ModelQuery.column_codec.source_json = fun s -> jvalToModel (ColumnCodec.encodeJson (Ref s))
-      ModelQuery.column_codec.source_of =
-        fun j ->
-            match ColumnCodec.decodeJson (jvalOfModel j) with
-            | Ok(Ref s) -> FStar_Pervasives_Native.Some s
-            | _ -> FStar_Pervasives_Native.None
-      ModelQuery.column_codec.rows_json = fun t -> jvalToModel (ColumnCodec.encodeJson (Embedded t))
-      ModelQuery.column_codec.rows_of =
-        fun j ->
-            match ColumnCodec.decodeJson (jvalOfModel j) with
-            | Ok(Embedded t) -> FStar_Pervasives_Native.Some t
-            | _ -> FStar_Pervasives_Native.None
-      ModelQuery.column_codec.lit_json = fun _ c -> jvalToModel (literalValueJson (qCellOfModel c))
-      ModelQuery.column_codec.lit_of =
-        fun c t j ->
-            match literalOfJson c (qColOfModel t) (jvalOfModel j) with
-            | Some cell -> FStar_Pervasives_Native.Some(qCellToModel cell)
-            | None -> FStar_Pervasives_Native.None }
 
 /// A declaration as the codec model reads it: the bridge `queryToModel` is, its source the `Ref`
 /// the codec writes.

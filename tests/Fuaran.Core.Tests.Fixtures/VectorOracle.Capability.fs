@@ -130,6 +130,43 @@ let keyRenderers: ModelCap.key_renderers =
             | Some c -> FStar_Pervasives_Native.Some c
             | None -> FStar_Pervasives_Native.None }
 
+/// A production `JVal` as the capability model's `jval` (Phase 354; shared with the query codec's
+/// differential since Phase 455), and back. A float crosses as its round-trip `R` text.
+let rec jvalToModel (v: JVal) : ModelCap.jval =
+    match v with
+    | JStr s -> ModelCap.JStr s
+    | JInt i -> ModelCap.JInt(bigint i)
+    | JBool b -> ModelCap.JBool b
+    | JFloat f -> ModelCap.JFloat(f.ToString("R", inv))
+    | JArr xs -> ModelCap.JArr(List.map jvalToModel xs)
+    | JObj fs -> ModelCap.JObj(fs |> List.map (fun (k, x) -> k, jvalToModel x))
+
+let rec jvalOfModel (v: ModelCap.jval) : JVal =
+    match v with
+    | ModelCap.JStr s -> JStr s
+    | ModelCap.JInt i -> JInt(int i)
+    | ModelCap.JBool b -> JBool b
+    | ModelCap.JFloat f -> JFloat(System.Double.Parse(f, inv))
+    | ModelCap.JArr xs -> JArr(List.map jvalOfModel xs)
+    | ModelCap.JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, jvalOfModel x))
+
+/// The one float read the codecs make — `float i`, as `Decoder.float` reads a `JInt`.
+let codecReaders: ModelCap.codec_readers =
+    { ModelCap.codec_readers.float_of_int = fun i -> (float (int i)).ToString("R", inv) }
+
+/// The model's decode code as production's.
+let modelCodeOf (c: ModelCap.decode_code) : DecodeCode =
+    match c with
+    | ModelCap.InvalidJson -> DecodeCode.InvalidJson
+    | ModelCap.MissingField -> DecodeCode.MissingField
+    | ModelCap.WrongKind -> DecodeCode.WrongKind
+    | ModelCap.UnknownTag -> DecodeCode.UnknownTag
+    | ModelCap.OutOfRange -> DecodeCode.OutOfRange
+    | ModelCap.UndeclaredMember -> DecodeCode.UndeclaredMember
+    | ModelCap.LimitExceeded -> DecodeCode.LimitExceeded
+    | ModelCap.NotAdmitted -> DecodeCode.NotAdmitted
+    | ModelCap.SchemaFault -> DecodeCode.SchemaFault
+
 /// An argument verdict, in the classes the `capabilityLaws` vectors distinguish: the exporter renders
 /// either side's verdict through this one shape.
 [<RequireQualifiedAccess>]

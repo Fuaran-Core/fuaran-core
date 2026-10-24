@@ -1324,26 +1324,6 @@ let allDeterminismSets: DeterminismSource list =
           |> List.map snd
           |> Set.ofList ]
 
-/// A production `JVal` as the capability model's `jval` (Phase 354; shared with the query codec's
-/// differential since Phase 455), and back. A float crosses as its round-trip `R` text.
-let rec jvalToModel (v: JVal) : ModelCap.jval =
-    match v with
-    | JStr s -> ModelCap.JStr s
-    | JInt i -> ModelCap.JInt(bigint i)
-    | JBool b -> ModelCap.JBool b
-    | JFloat f -> ModelCap.JFloat(f.ToString("R", inv))
-    | JArr xs -> ModelCap.JArr(List.map jvalToModel xs)
-    | JObj fs -> ModelCap.JObj(fs |> List.map (fun (k, x) -> k, jvalToModel x))
-
-let rec jvalOfModel (v: ModelCap.jval) : JVal =
-    match v with
-    | ModelCap.JStr s -> JStr s
-    | ModelCap.JInt i -> JInt(int i)
-    | ModelCap.JBool b -> JBool b
-    | ModelCap.JFloat f -> JFloat(System.Double.Parse(f, inv))
-    | ModelCap.JArr xs -> JArr(List.map jvalOfModel xs)
-    | ModelCap.JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, jvalOfModel x))
-
 // The document mutations the codec differentials read (Phase 354; shared with the query codec's since
 // Phase 455).
 
@@ -2335,7 +2315,9 @@ module VectorStamps =
           "premises/recursion-depth.json", ("JsonParse", 13)
           "premises/string-model.json", ("JsonParse", 10)
           "refusals/codec-refusals.json", ("JsonParse", 59)
-          "refusals/codec-refusals.json", ("WireColumn", 13) ]
+          "refusals/codec-refusals.json", ("WireColumn", 13)
+          "refusals/seam-refusals.json", ("Capability", 48)
+          "refusals/seam-refusals.json", ("Query", 45) ]
 
     [<Tests>]
     let tests =
