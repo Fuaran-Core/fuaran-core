@@ -52,7 +52,8 @@ namespace Fuaran.Core.Tests
 // ============================================================================
 
 /// The Core spines' adoption of the families this repository emits (Phase 463, DECISIONS.md D225;
-/// Phase 564, D231; Phase 485, D234). A spine — `fuaran-core-rs`, `fuaran-core-go` — is Core's own twin
+/// Phase 564, D231; Phase 485, D234; Phase 571, D236). A spine — `fuaran-core-rs`, `fuaran-core-go`,
+/// `fuaran-core-py` — is Core's own twin
 /// in another language, not a wire host: it answers a rejection in Core's vocabulary, so it is an ADOPTION
 /// host only and never joins a roster that maps Core's classes to a host's codes
 /// (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so each names the
@@ -129,21 +130,47 @@ module SpineAdoption =
               // Phase 568 — its first certification ran every line of the escape table (Phase 485).
               "stringEscape", 38, go485 ] }
 
+    /// Phase 571's measurement of the Python spine: Core 0.41.0, landed at this spine commit.
+    let private py571 =
+        AdoptionSource.Host("0.41.0", "0f396138c8f746a668fda1b25aad088c538ec404")
+
+    /// The Python spine (`Fuaran-Core/fuaran-core-py`): its first certification runs the same families
+    /// the Go spine's does — the json codec refusals, the decode rejects, the canonical, compare, add and
+    /// toFloat decimal laws, the apply, chain and DAG skeleton families and every premise probe (its
+    /// DECISIONS.md D4).
+    let internal python =
+        { Host = "fuaran-core-py"
+          Measured =
+            [ "codecRefusals", 56, py571
+              "decodeRejects", 47, py571
+              "decimal", 53, py571
+              "skeletonApply", 25, py571
+              "skeletonChain", 16, py571
+              "skeletonDag", 11, py571
+              "premiseStringModel", 29, py571
+              "premiseFloatDigits", 163, py571
+              "premiseInt53", 29, py571
+              "premiseSha256", 17, py571
+              "premiseRecursionDepth", 13, py571
+              // Phase 568 — its first certification ran every line of the escape table (Phase 571).
+              "stringEscape", 38, py571 ] }
+
     /// The spines, in the order every manifest lists their entries.
-    let internal spines = [ rust; go ]
+    let internal spines = [ rust; go; python ]
 
     /// The families a spine has decided not to run (Phase 568): its host key, the family id, and the
     /// reason its own record gives, which the family's manifest row states beside the entry, because a
-    /// `declined` entry carries nothing but its status (D222.1). Both spines decline the `encoding/`
+    /// `declined` entry carries nothing but its status (D222.1). Every spine declines the `encoding/`
     /// table: it pins the v1 profile of the stores the reference minted from `0.30.0` to `0.32.0`, and
-    /// a writer that keeps authored member order, and neither spine has read or minted such a store
-    /// (fuaran-core-rs D8, fuaran-core-go D4).
+    /// a writer that keeps authored member order, and no spine has read or minted such a store
+    /// (fuaran-core-rs D8, fuaran-core-go D4, fuaran-core-py D4).
     let internal declined: (string * string * string) list =
         let encodingWhy =
             "it pins the v1 profile of the stores the reference minted from 0.30.0 to 0.32.0 and a writer that keeps authored member order, which only a host that reads or mints such a store needs"
 
         [ "fuaran-core-rs", "encodingProfile", encodingWhy
-          "fuaran-core-go", "encodingProfile", encodingWhy ]
+          "fuaran-core-go", "encodingProfile", encodingWhy
+          "fuaran-core-py", "encodingProfile", encodingWhy ]
 
     /// One spine's entry for one family. A family both measured and declined is a contradiction in
     /// this table, refused rather than resolved either way.

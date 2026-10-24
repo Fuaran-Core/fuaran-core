@@ -650,13 +650,13 @@ own `conformance/`, and the wire hosts that read the law files from the corpus r
 here like any other host. A family a host runs only in part reads `adopted` with the cases it asserted,
 which a reader compares with the row's `vectors`; why the rest are not run is the host's own record.
 
-**The line tables have their own index** (Phase 568, DECISIONS.md D236). `escape/manifest.json` and
+**The line tables have their own index** (Phase 568, DECISIONS.md D237). `escape/manifest.json` and
 `encoding/manifest.json` each index the one table beside them in the same schema, `kind` `line-vectors`,
 its `vectors` the table's line count, each line one vector. The reference's entry, `fuaran`, is this
 repository's suite, which holds every line to the code (`StringEscapeTests`, `EncodingProfileTests`); the
-wire hosts read `proposed`; each spine's entry comes from `SpineAdoption`. Both spines ran every escape line
-from their first certification (`fuaran-core-rs` at Phase 463's commit, `fuaran-core-go` at Phase 485's), and
-both DECLINE the encoding table: `SpineAdoption.declined` holds each decline with its reason, and because a
+wire hosts read `proposed`; each spine's entry comes from `SpineAdoption`. Every spine ran every escape line
+from its first certification (`fuaran-core-rs` at Phase 463's commit, `fuaran-core-go` at Phase 485's,
+`fuaran-core-py` at Phase 571's), and every spine DECLINES the encoding table: `SpineAdoption.declined` holds each decline with its reason, and because a
 `declined` entry carries nothing but its status (D222.1), the row's `description` states the reason, once per
 reason, naming the spines that give it.
 
@@ -898,7 +898,7 @@ the op codec's question, which the `apply/` and the codec families answer. The s
 names each of these unreachable outcomes. The content-id collision a write from an empty DAG reaches only
 by a SHA-256 collision is reached since Phase 568 by a `write` vector over a held set carrying a forged node.
 
-**The planted defects (Phase 568, DECISIONS.md D236).** Porting every family to the Rust spine found four
+**The planted defects (Phase 568, DECISIONS.md D237).** Porting every family to the Rust spine found four
 places a port could be wrong and stay green, and each now has a vector and a go-red kept in the suite that
 plants the defect on Core's own answer, exactly as a host would carry it, and fails unless that vector names
 it:
