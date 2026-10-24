@@ -192,16 +192,15 @@ module Seams =
         | ModelCap.Ok v -> Ok(jvalOfModel (write v))
         | ModelCap.Error e -> Error(modelCodeOf e.d_code, e.d_path |> List.map segment)
 
-    /// The envelope's payload reader the vectors' `deferred` reader is built over: a string.
-    let private payload (j: ModelCap.jval) : ModelCap.outcome<string, string> =
-        match j with
-        | ModelCap.JStr s -> ModelCap.Ok s
-        | _ -> ModelCap.Error "a string payload"
-
     /// Each reader a model states: its model, its ladder row, and the model's read-and-write.
     let readers: (string * (string * string * (JVal -> Outcome))) list =
         [ "invokeError", (Model, SeamRow, run (ModelCap.invoke_error_of_j codecReaders) ModelCap.invoke_error_json)
-          "deferred", (Model, SeamRow, run (ModelCap.deferred_of_j payload) (ModelCap.deferred_json ModelCap.JStr))
+          // The vectors' `deferred` reader is `CapabilitySeamCodec.decodeDeferred Decoder.str`, the TYPED
+          // envelope reader: the model's `deferred_dec` over `d_str`, the payload's refusal passed through
+          // with its own code and path (Phase 570). `deferred_of_j` is `CapabilityCodec.decodeDeferred`'s
+          // reader, whose sentence-answering payload reader production raises `OutOfRange`.
+          "deferred",
+          (Model, SeamRow, run (ModelCap.deferred_dec ModelCap.d_str) (ModelCap.deferred_json ModelCap.JStr))
           "placement", (Model, SectionsRow, run ModelCap.placement_of_j ModelCap.placement_json)
           "declarationFault", (Model, SectionsRow, run (ModelCap.fault_of_j codecReaders) ModelCap.fault_json)
           "pipeline", (Model, SectionsRow, run (ModelCap.pipeline_of_j readers codecReaders) ModelCap.pipeline_json)

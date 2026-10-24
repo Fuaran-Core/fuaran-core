@@ -678,8 +678,9 @@ only when the model answers every line.
 its input: the input reaches a part of the code the model is not stated over. Such a vector is reference-only
 BY DECLARATION. Its exporter names it, with the reason, beside the vectors it emits, and the export holds the
 declaration to the model in both directions: a model that declines an undeclared vector fails the export, and so
-does a declared vector the model answers after all. A disagreement found on an emitted input is held the same
-way: the reader stays reference-only, and the export fails when the disagreement stops standing.
+does a declared vector the model answers after all. A disagreement found on an emitted input fails the export
+(D223), and no reader is held reference-only on one (D235: the one Phase 563 held was the oracle asking the
+model's sentence-reader `deferred_of_j` where the vector names the typed `CapabilitySeamCodec.decodeDeferred`).
 
 **One answer, several models.** The stamp names the model that answers the vector's question. A model that only
 reads the input on the way is evaluated in the same run: the parser model reads every column-codec and
@@ -699,7 +700,7 @@ is red:
 | `apply/skeleton-apply.json` | `TreeOps` | `tree-differential` | 25 of 25 |
 | `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 59 of 101 (every `json` vector, and 3 `column` parse refusals) |
 | `refusals/codec-refusals.json` | `WireColumn` | `column-codec-differential` | 13 of 101 (`column`) |
-| `refusals/seam-refusals.json` | `Capability` | `capability-seam-codec-differential`, `capability-sections-differential` | 48 of 138 |
+| `refusals/seam-refusals.json` | `Capability` | `capability-seam-codec-differential`, `capability-sections-differential` | 55 of 138 |
 | `refusals/seam-refusals.json` | `Query` | `query-codec-differential` | 45 of 138 |
 | `decode/decode-rejects.json` | `DecodeLayer` | `decode-layer-differential` | 28 of 47 |
 | `decode/decode-rejects.json` | `JsonParse` | `parser-differential` | 8 of 47 (`InvalidJson`, at the root) |
@@ -720,8 +721,6 @@ reason:
 - **The model declines the input** (declared): 5 decimal and 10 column codec vectors whose input reaches a
   lenient-ingest arm of the column decoder (a JSON number where a decimal or timestamp column holds text, a
   bare-array column, an inferred schema), and the 11 decode rejects refused for a limit the parser breaches.
-- **The model disagrees** (held): the seam `deferred` reader. On `ready-payload-refused` the model answers
-  `OutOfRange`, where the reference passes its payload reader's `WrongKind` through.
 - **Not yet asked:** the merge family, which a composition of models answers (`Chain`'s DAG build for the ids,
   `DagPrimitives.common_base`, `DagClosure.reconcile_many_drained`, `TreeOps` for the landing). A successor
   phase carries it.

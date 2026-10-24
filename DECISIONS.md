@@ -20,9 +20,10 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 | Id | Date | Decision | Status |
 |---|---|---|---|
 | D236 | 2026-10-24 | the Python Core spine is Core's twin in its own public repository, reached by a host as a published distribution, and its differential compares positions on every input | Live |
+| D235 | 2026-10-24 | the seam `deferred` vectors are answered by the model of the reader they name, the typed envelope reader, so all eleven seam readers a model states are stamped, and no reader is held reference-only on a disagreement | Live |
 | D234 | 2026-10-24 | the Go Core spine is Core's twin in its own public repository, and every manifest takes every spine's entry from one table of spines | Live |
 | D233 | 2026-10-24 | a host's own proof is a ladder row of its own, recording the host, the toolchain and the replay identity, and a fifth evidence class, `proof-replayed`, cites it; Core checks the citation and the row's shape, never the proof | Live |
-| D232 | 2026-10-24 | a vector a model declines is the reference's only where its family declares it, with the reason, and the export holds the declaration both ways; a model found disagreeing with the reference keeps its reader the reference's, the disagreement held | Live |
+| D232 | 2026-10-24 | a vector a model declines is the reference's only where its family declares it, with the reason, and the export holds the declaration both ways; a model found disagreeing with the reference keeps its reader the reference's, the disagreement held | Amended-by D235 |
 | D231 | 2026-10-24 | the law families carry the adoption record in their own index, written at home only, and every manifest takes the spine's entry from one table that names each measurement's own commit | Live |
 | D230 | 2026-10-24 | the collecting decoders take a host's decoder at every enumeration and JSON scalar, at every generic union through one generic seam, and at every declared member an object does not carry, which is where a host's own reading answers a member null by its position | Live |
 | D229 | 2026-10-23 | a host declares its compliance per ladder row in four closed evidence classes, Core's tool validates the declaration against the evidence map, the adoption records and the premise rows, and computes `compliant` and `parity`; the cross-host matrix is a projection outside this repository | Amended-by D233 |
@@ -311,6 +312,37 @@ naming the family or function the spine does not answer yet. The remaining famil
 successor phase's, as Phase 564 was Phase 463's; the `encoding/` table it declines as the other spines did
 (D231.4). The UI host's exact decimal, which duplicates what the spine's `decimal` certifies, is re-pointed in the
 same successor.
+## 2026-10-24 — D235: the seam `deferred` vectors are answered by the model of the reader they name, the typed envelope reader, so all eleven seam readers a model states are stamped, and no reader is held reference-only on a disagreement
+
+**Status:** Live
+
+**Recorded by Phase 570.** D232.2 held one disagreement: on `ready-payload-refused` the `Capability` model answered
+`OutOfRange` at `value` where the reference answers `WrongKind`, and the cause was recorded as the model refusing
+every payload `OutOfRange`. That diagnosis was wrong, and the model is unchanged. `proofs/Capability.fst` states
+BOTH production envelope readers. `deferred_dec` is `CapabilitySeamCodec.decodeDeferred`: its payload reader is
+typed, and a payload refusal crosses with its own code and path (`deferred_roundtrip`, and `deferred_dec_sound`
+for every payload reader whose own refusals resolve). `deferred_of_j` is `CapabilityCodec.decodeDeferred`: its
+payload reader answers a sentence, and production's `payloadOf` raises that refusal `OutOfRange` exactly as the
+model does (`deferred_of_roundtrip`, `deferred_refusals_resolve`). The seam vectors' `deferred` reader is
+`CapabilitySeamCodec.decodeDeferred Decoder.str`, and the oracle asked `deferred_of_j`. The fault was the wiring.
+
+*The oracle asks the reader the vector names (D235.1).* The seam oracle's `deferred` row is `deferred_dec d_str`,
+and all 7 `deferred` vectors are stamped `model:Capability`, so all eleven seam readers a model states are. On
+the old reader the export refuses `ready-payload-refused` by code (measured: `OutOfRange` against `WrongKind` at
+`value`).
+
+*The differential tests the real reader (D235.2).* The `capability-seam-codec` differential used to read the
+typed envelope through a payload reader written in the test to raise `OutOfRange`, a copy of the private
+`payloadOf`, and compared refusals by acceptance alone. It now runs both readers. The typed reader, over
+`Decoder.str`, is compared with `deferred_dec d_str` on code and path, and each refusal must resolve in its
+document. `CapabilityCodec.decodeDeferred` is compared with `deferred_of_j` on acceptance and value, because its
+refusal crosses as a sentence. Handed the old adaptation, the typed leg disagrees.
+
+*No holding record without a disagreement (amends D232.2).* `RefusalCorpus.disputedReaders` held one entry, and
+that entry was a wiring fault. It is removed with its guard, so a model that disagrees with the reference on an
+emitted vector fails the export (D223.1). *Declined:* keeping the mechanism with an empty map. It is generality
+with no instance. The phase that finds a genuine model fault can restate a holding record against that fault,
+together with the successor that owns it.
 
 ## 2026-10-24 — D234: the Go Core spine is Core's twin in its own public repository, and every manifest takes every spine's entry from one table of spines
 
@@ -400,7 +432,7 @@ would cross the repository boundary every gate here keeps (D229.5).
 
 ## 2026-10-24 — D232: a vector a model declines is the reference's only where its family declares it, with the reason, and the export holds the declaration both ways; a model found disagreeing with the reference keeps its reader the reference's, the disagreement held
 
-**Status:** Live
+**Status:** Amended-by D235
 
 **Recorded by Phase 563.** D223 stamped four families with their models and left every other vector
 `["reference"]`, although for most of them a model asks the question and only the exporter did not evaluate it.
