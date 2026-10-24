@@ -251,6 +251,53 @@ module JsonModel =
         | JsonParse.JArr xs -> JArr(xs |> List.map toJVal)
         | JsonParse.JObj fs -> JObj(fs |> List.map (fun (k, v) -> modelStr k, toJVal v))
 
+    /// The model's spelling of a limit, as production names it (`JsonLimit.name`).
+    let limitName (l: JsonParse.limit) : string =
+        match l with
+        | JsonParse.LDepth -> JsonLimit.name JsonLimit.Depth
+        | JsonParse.LString -> JsonLimit.name JsonLimit.StringLength
+        | JsonParse.LItems -> JsonLimit.name JsonLimit.ArrayLength
+        | JsonParse.LMembers -> JsonLimit.name JsonLimit.ObjectMembers
+        | JsonParse.LBytes -> JsonLimit.name JsonLimit.DocumentBytes
+
+    /// One bound as the model spends it: `Int32.MaxValue` — what `JsonLimits.depthOnly` carries —
+    /// is `Unbounded`, any other value a budget.
+    let modelBound (n: int) : JsonParse.bound =
+        if n = System.Int32.MaxValue then
+            JsonParse.Unbounded
+        else
+            JsonParse.Bounded(budget n)
+
+    /// The three bounds the model's descent enforces, from a production record. The depth cap is
+    /// the budget the model already threads; the byte bound is the model's `bytes_ok` parameter.
+    let modelLims (limits: JsonLimits) : JsonParse.lims =
+        { JsonParse.lstr = modelBound limits.MaxStringLength
+          JsonParse.litems = modelBound limits.MaxArrayLength
+          JsonParse.lmembers = modelBound limits.MaxObjectMembers }
+
+    /// The model's read of `input` under the strict null policy and `limits` (`parse_limited`): the
+    /// value, the refusal's `JsonErrorKind` case name, or a breach as `LimitExceeded/<limit>`. The byte
+    /// verdict is the model's parameter (its alphabet cannot count bytes), computed by the platform's
+    /// UTF-8 encoder, an oracle independent of production's own counter.
+    let readLimited (limits: JsonLimits) (input: string) : Result<JVal, string> =
+        let bytesOk =
+            System.Text.Encoding.UTF8.GetByteCount input <= limits.MaxDocumentBytes
+
+        match
+            JsonParse.parse_limited
+                floatRead
+                (string limits.MaxDepth)
+                (policy RejectNull)
+                (budget limits.MaxDepth)
+                (modelLims limits)
+                bytesOk
+                (toChs input)
+        with
+        | JsonParse.ROk v -> Ok(toJVal v)
+        | JsonParse.RErr(JsonParse.MaxDepthExceeded, _, _) -> Error("LimitExceeded/" + JsonLimit.name JsonLimit.Depth)
+        | JsonParse.RErr(k, _, _) -> Error(sprintf "%A" k)
+        | JsonParse.RLimit(l, _) -> Error("LimitExceeded/" + limitName l)
+
     /// The model's read of `input` under the strict options (`ReadOptions.strict`: null refused, the
     /// depth cap the only bound): the value, or the refusal's class as the codec family spells it —
     /// a `JsonErrorKind` case name, the cap's breach `LimitExceeded/depth` (the lift

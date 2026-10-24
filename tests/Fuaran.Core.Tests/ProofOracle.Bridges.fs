@@ -21,6 +21,7 @@ open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.CapabilityOracle
 open Fuaran.Core.Tests.CanonOracle
 open Fuaran.Core.Tests.ColumnOracle
+open Fuaran.Core.Tests.DecodeOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 535 — THE DIFFERENTIAL HARNESS. Every `Proofs.Oracle` differential is the same loop:
@@ -493,18 +494,7 @@ let field (fields: (string * JVal) list) (k: string) : JVal option =
 //  `as_float` the widening `(Decoder.describing Decoder.float)` performs as `float i`.
 // ---------------------------------------------------------------------------
 
-type MJVal = WireDecode.jval<int, float>
-
 let inv = System.Globalization.CultureInfo.InvariantCulture
-
-let rec toModel (v: JVal) : MJVal =
-    match v with
-    | JStr s -> WireDecode.JStr s
-    | JInt i -> WireDecode.JInt i
-    | JBool b -> WireDecode.JBool b
-    | JFloat f -> WireDecode.JFloat f
-    | JArr xs -> WireDecode.JArr(xs |> List.map toModel)
-    | JObj fields -> WireDecode.JObj(fields |> List.map (fun (k, v) -> k, toModel v))
 
 // ---------------------------------------------------------------------------
 //  Phase 133 — the TREE ALGEBRA as a third oracle.
@@ -784,31 +774,6 @@ module JsonParseDiff =
 
     // ---- the LIMITS (Phase 465) ----
 
-    /// The model's spelling of a limit, as production names it (`JsonLimit.name`), so a breach
-    /// renders the same on both sides.
-    let private limitName (l: JsonParse.limit) : string =
-        match l with
-        | JsonParse.LDepth -> JsonLimit.name JsonLimit.Depth
-        | JsonParse.LString -> JsonLimit.name JsonLimit.StringLength
-        | JsonParse.LItems -> JsonLimit.name JsonLimit.ArrayLength
-        | JsonParse.LMembers -> JsonLimit.name JsonLimit.ObjectMembers
-        | JsonParse.LBytes -> JsonLimit.name JsonLimit.DocumentBytes
-
-    /// One bound as the model spends it: `Int32.MaxValue` — what `JsonLimits.depthOnly` carries —
-    /// is `Unbounded`, any other value a budget.
-    let private modelBound (n: int) : JsonParse.bound =
-        if n = System.Int32.MaxValue then
-            JsonParse.Unbounded
-        else
-            JsonParse.Bounded(budget n)
-
-    /// The three bounds the model's descent enforces, from a production record. The depth cap is
-    /// the budget the model already threads; the byte bound is the model's `bytes_ok` parameter.
-    let modelLims (limits: JsonLimits) : JsonParse.lims =
-        { JsonParse.lstr = modelBound limits.MaxStringLength
-          JsonParse.litems = modelBound limits.MaxArrayLength
-          JsonParse.lmembers = modelBound limits.MaxObjectMembers }
-
     /// Production's answer under a limits record. A breach renders as `limit <name> @<position>`:
     /// the model does not carry the path, which the decode vectors compare instead.
     let prodAnswerLimited (policy: NullPolicy) (limits: JsonLimits) (input: string) : string =
@@ -833,13 +798,14 @@ module JsonParseDiff =
                 (string limits.MaxDepth)
                 (modelPolicy policy)
                 (budget limits.MaxDepth)
-                (modelLims limits)
+                (VectorOracle.JsonModel.modelLims limits)
                 bytesOk
                 (bridge input)
         with
         | JsonParse.ROk v -> "ok " + renderModel v
         | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
-        | JsonParse.RLimit(l, at) -> sprintf "limit %s @%d" (limitName l) (input.Length - List.length at)
+        | JsonParse.RLimit(l, at) ->
+            sprintf "limit %s @%d" (VectorOracle.JsonModel.limitName l) (input.Length - List.length at)
 
     /// Every way the two disagree over one pool, plus how many inputs reached each outcome class —
     /// a run that only ever refused has compared twelve error messages and measured no parse at
@@ -2306,6 +2272,8 @@ module VectorStamps =
     /// is answered by the reference alone. A model wired into an exporter is one row here.
     let modelStamps: (string * (string * int)) list =
         [ "apply/skeleton-apply.json", ("TreeOps", 25)
+          "decode/decode-rejects.json", ("JsonParse", 8)
+          "decode/decode-rejects.json", ("DecodeLayer", 28)
           "laws/capability-laws.json", ("Capability", 48)
           "laws/decimal-laws.json", ("DecimalText", 49)
           "laws/decimal-laws.json", ("WireColumn", 7)

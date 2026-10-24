@@ -404,12 +404,54 @@ module DecodeRejectCorpus =
         |> Result.bind (shapeDecoder defs (parse vec.Shape))
         |> Result.mapError (fun e -> e.Code, e.Path)
 
+    /// An outcome as a vector records it.
+    let private outcomeMembers (o: Result<unit, DecodeCode * PathSegment list>) : (string * JVal) list =
+        match o with
+        | Error(code, path) ->
+            [ "refusal", JObj [ "code", JStr(DecodeError.codeName code); "path", DecodePath.toJson path ] ]
+        | Ok() -> [ "accepted", JBool true ]
+
+    /// The vectors the models decline (the not-answered rule, D232): each is refused for a limit the
+    /// PARSER breaches, which the parser model names by its limit and position — the decode path the
+    /// reference names the breach at is not in the model. A bound the decode layer enforces itself
+    /// (`maxItems`) is the decode model's, and answered.
+    let breachOutOfModel: Map<string, string> =
+        [ "nesting-past-the-cap"
+          "limit-depth-past"
+          "limit-string-length-past"
+          "limit-string-length-astral-past"
+          "limit-string-length-in-a-key"
+          "limit-string-length-nested"
+          "limit-array-length-past"
+          "limit-array-length-nested"
+          "limit-object-members-past"
+          "limit-document-bytes-past"
+          "limit-breach-before-malformed-text" ]
+        |> List.map (fun n -> n, "a limit the parser breaches, whose decode path the parser model does not carry")
+        |> Map.ofList
+
+    /// The models' outcome for a vector (Phase 563): read by the parser model, decoded by the decode
+    /// layer's model over the same shape.
+    let private modelOutcome (vec: Vector) : (string * string * JVal) option =
+        let defs =
+            match parse vec.Definitions with
+            | JObj d -> d
+            | _ -> []
+
+        DecodeOracle.read
+            vec.Limits
+            defs
+            (parse vec.Shape)
+            (fun o -> CorpusCell.Value(JObj(outcomeMembers o)))
+            vec.Input
+        |> VectorOracle.admit breachOutOfModel vec.Name
+        |> Option.map (fun a ->
+            match a.Cell with
+            | CorpusCell.Value answer -> a.Model, a.LadderRow, answer
+            | other -> failwithf "a decode vector's answer is a compact value, not %A" other)
+
     let private line (vec: Vector) : CorpusCell =
-        let result =
-            match outcome vec with
-            | Error(code, path) ->
-                [ "refusal", JObj [ "code", JStr(DecodeError.codeName code); "path", DecodePath.toJson path ] ]
-            | Ok() -> [ "accepted", JBool true ]
+        let result = outcomeMembers (outcome vec)
 
         let defs =
             match parse vec.Definitions with
@@ -427,7 +469,7 @@ module DecodeRejectCorpus =
                 @ limits
                 @ defs
                 @ result
-                @ [ VectorOracle.stampValue vec.Name (JObj result) None ]
+                @ [ VectorOracle.stampValue vec.Name (JObj result) (modelOutcome vec) ]
             )
         )
 

@@ -11,6 +11,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.DecodeOracle
 
 type private MJValN = WireDecode.jvaln<int, float>
 

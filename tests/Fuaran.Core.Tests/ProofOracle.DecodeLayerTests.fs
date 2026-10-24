@@ -12,6 +12,7 @@ open Expecto
 
 open Fuaran.Core
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.DecodeOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 436 — the TYPED DECODE LAYER and the CODEC COMBINATORS: `DecodeLayer` beside
@@ -32,12 +33,6 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 // The model drops a refusal's prose and the codec's schema, so a refusal is compared by its code
 // and its path, never its sentence.
 
-/// A path step as the model spells it.
-let private segOf (s: PathSegment) : M.seg =
-    match s with
-    | PathSegment.Key k -> M.Key k
-    | PathSegment.Index i -> M.Index(bigint i)
-
 let private mCodeName (c: M.code) : string =
     match c with
     | M.InvalidJson -> "InvalidJson"
@@ -49,18 +44,6 @@ let private mCodeName (c: M.code) : string =
     | M.LimitExceeded -> "LimitExceeded"
     | M.NotAdmitted -> "NotAdmitted"
     | M.SchemaFault -> "SchemaFault"
-
-let private mCodeOf (c: DecodeCode) : M.code =
-    match c with
-    | DecodeCode.InvalidJson -> M.InvalidJson
-    | DecodeCode.MissingField -> M.MissingField
-    | DecodeCode.WrongKind -> M.WrongKind
-    | DecodeCode.UnknownTag -> M.UnknownTag
-    | DecodeCode.OutOfRange -> M.OutOfRange
-    | DecodeCode.UndeclaredMember -> M.UndeclaredMember
-    | DecodeCode.LimitExceeded -> M.LimitExceeded
-    | DecodeCode.NotAdmitted -> M.NotAdmitted
-    | DecodeCode.SchemaFault -> M.SchemaFault
 
 /// Every `RootDecodeCode` beside the model's `root_code` it is (Phase 443), in declaration order.
 let private rootCodes: (RootDecodeCode * M.root_code) list =

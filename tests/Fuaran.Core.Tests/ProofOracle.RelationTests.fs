@@ -20,6 +20,7 @@ module ModelRel = Relation
 
 open Fuaran.Core
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.DecodeOracle
 
 /// The bridge: a PREPARED relation as the model reads it — `toMap`'s keys ascending, each node's
 /// successors ascending (`sets-are-lists`). The model visits the list in this order, which is the

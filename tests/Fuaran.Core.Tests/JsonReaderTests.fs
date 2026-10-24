@@ -431,7 +431,7 @@ let tests =
               // extractor premise is sampled at the theorem rather than only at the twins.
               let cap = 512
               let b = JsonParseDiff.budget cap
-              let lims = JsonParseDiff.modelLims (JsonLimits.depthOnly cap)
+              let lims = VectorOracle.JsonModel.modelLims (JsonLimits.depthOnly cap)
               let fr = JsonParseDiff.floatRead
               let mutable accepted = 0
               let mutable refused = 0

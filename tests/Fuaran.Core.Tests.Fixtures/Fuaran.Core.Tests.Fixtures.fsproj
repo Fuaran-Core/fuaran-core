@@ -42,6 +42,7 @@
     <Compile Include="VectorOracle.Canon.fs" />
     <Compile Include="VectorOracle.Column.fs" />
     <Compile Include="VectorOracle.Query.fs" />
+    <Compile Include="VectorOracle.Decode.fs" />
     <Compile Include="ApplyVectorExport.fs" />
     <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="CanonicalFormVectorExport.fs" />
