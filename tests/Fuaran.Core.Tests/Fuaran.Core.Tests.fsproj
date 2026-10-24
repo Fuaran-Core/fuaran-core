@@ -11,7 +11,6 @@
   <ItemGroup>
     <!-- Phase 386 - a Dag.T is built through Dag.ofNodes (the constructor is private); the fixtures'
          one spelling of it. Depends on nothing here. -->
-    <Compile Include="DagOf.fs" />
     <!-- The `Hash` pin suite — the FIPS 180-4 known-answer vectors and platform byte-equality for
          SHA-256, plus the pinned FNV-1a values. First: everything below folds through one or the
          other, so a digest defect should surface as itself rather than as a downstream mismatch. -->

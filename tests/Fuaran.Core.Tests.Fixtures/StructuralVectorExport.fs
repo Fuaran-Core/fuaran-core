@@ -304,6 +304,54 @@ module StructuralVectorExport =
                 | other -> return! Error(sprintf "the chain family has no case `%s`" other)
             }
 
+        /// The chain model's answer to a vector (Phase 563), read from the same input: an actor is
+        /// its canonical text, which the model splices unread, as it does an op.
+        let modelAnswer (v: Vector) : VectorOracle.Answer option =
+            let answered =
+                result {
+                    let! anchor = readAnchor v.Input
+
+                    match v.Case with
+                    | "append" ->
+                        let! entries = reqArr "entries" v.Input
+
+                        let! pairs =
+                            entries
+                            |> traverse (fun e ->
+                                result {
+                                    let! actor = reqStr "actor" e
+                                    let! op = reqStr "op" e
+                                    return actor, op
+                                })
+
+                        return ChainOracle.append hashFn anchor.Seq anchor.PrevHash pairs
+                    | "walk" ->
+                        let! items = reqArr "records" v.Input
+
+                        let! records =
+                            items
+                            |> traverse (fun r ->
+                                result {
+                                    let! seq = reqInt "seq" r
+                                    let! actor = reqStr "actor" r
+                                    let! op = reqStr "op" r
+                                    let! prev = reqStr "prevHash" r
+                                    let! hash = reqStr "hash" r
+                                    return seq, actor, op, prev, hash
+                                })
+
+                        return ChainOracle.walk hashFn anchor.Seq anchor.PrevHash records
+                    | other -> return! Error(sprintf "the chain family has no case `%s`" other)
+                }
+
+            match answered with
+            | Ok answer ->
+                Some
+                    { Model = ChainOracle.Model
+                      LadderRow = ChainOracle.LadderRow
+                      Cell = CorpusCell.Value answer }
+            | Error why -> failwithf "chain vector %s: the model's input does not read: %s" v.Id why
+
         let private appendInput (anchor: Anchor) (entries: (Actor * string) list) : JVal =
             JObj
                 [ "anchor", anchorJ anchor
@@ -664,6 +712,37 @@ module StructuralVectorExport =
                                   "got", JStr b.Got ]
                 | other -> return! Error(sprintf "the dag family has no case `%s`" other)
             }
+
+        /// The models' answer to a vector (Phase 563). A `verify` vector is the DAG walker's model's
+        /// (`Chain.first_break`). A `build` vector is the reference's alone: its answer carries the heads
+        /// and the ranks, which no model states (`Dag.heads`, `Dag.ranks`), beside the content ids, the
+        /// order and the replays, so no model answers the whole of it.
+        let modelAnswer (v: Vector) : VectorOracle.Answer option =
+            match v.Case with
+            | "verify" ->
+                let answered =
+                    result {
+                        let! items = reqArr "nodes" v.Input
+                        let! nodes = items |> traverse readNode
+
+                        let! dag =
+                            nodes
+                            |> List.map (fun n -> n.Id, n)
+                            |> Map.ofList
+                            |> Dag.ofNodes
+                            |> Result.mapError (fun k -> sprintf "the node map is keyed wrongly at %s" k.Key)
+
+                        return ChainOracle.verify hashFn ApplyVectorExport.encodeOp dag
+                    }
+
+                match answered with
+                | Ok answer ->
+                    Some
+                        { Model = ChainOracle.Model
+                          LadderRow = ChainOracle.LadderRow
+                          Cell = CorpusCell.Value answer }
+                | Error why -> failwithf "dag vector %s: the model's input does not read: %s" v.Id why
+            | _ -> None
 
         /// Fork, cross-actor writes and a converging merge, on the base tree.
         let forkAndMerge =
@@ -1137,15 +1216,20 @@ module StructuralVectorExport =
 
     /// One structural family: where it lives, what it pins, its vectors and its answer.
     type Family =
-        { Name: string
-          DirName: string
-          FileName: string
-          FamilyId: string
-          Kind: string
-          Description: string
-          Summary: string
-          Vectors: unit -> Vector list
-          Answer: string -> JVal -> Result<JVal, string> }
+        {
+            Name: string
+            DirName: string
+            FileName: string
+            FamilyId: string
+            Kind: string
+            Description: string
+            Summary: string
+            Vectors: unit -> Vector list
+            Answer: string -> JVal -> Result<JVal, string>
+            /// The extracted model's answer to a vector, read from the same input (Phase 563): the
+            /// render holds it to `Answer`'s and stamps the vector, or fails on a disagreement.
+            Model: Vector -> VectorOracle.Answer option
+        }
 
     let families: Family list =
         [ { Name = "chain"
@@ -1157,7 +1241,8 @@ module StructuralVectorExport =
             Summary =
               "The op-stream chain over opaque payloads: append (records, pre-images, hashes, tip) and walk (intact, or the first break)."
             Vectors = Chain.vectors
-            Answer = Chain.answer }
+            Answer = Chain.answer
+            Model = Chain.modelAnswer }
           { Name = "dag"
             DirName = DagFamily.familyDirName
             FileName = DagFamily.vectorsFileName
@@ -1167,7 +1252,8 @@ module StructuralVectorExport =
             Summary =
               "The op-DAG over skeleton ops: content ids and write refusals, heads, order, ranks, the fold, and the integrity walk."
             Vectors = DagFamily.vectors
-            Answer = DagFamily.answer }
+            Answer = DagFamily.answer
+            Model = DagFamily.modelAnswer }
           { Name = "merge"
             DirName = Merge.familyDirName
             FileName = Merge.vectorsFileName
@@ -1177,7 +1263,11 @@ module StructuralVectorExport =
             Summary =
               "The common base and the N-lane reconcile over skeleton ops: the merge script and the tree it lands on, or the fault."
             Vectors = Merge.vectors
-            Answer = Merge.answer }
+            Answer = Merge.answer
+            // Reference-only, NOT yet asked of its models (D232): the content ids (`Chain`'s DAG build),
+            // the common base (`DagPrimitives.common_base`), the script (`DagClosure.reconcile_many_drained`)
+            // and the landing (`TreeOps`) each have one, and the export does not compose them yet.
+            Model = fun _ -> None }
           { Name = "diff"
             DirName = DiffFamily.familyDirName
             FileName = DiffFamily.vectorsFileName
@@ -1186,7 +1276,11 @@ module StructuralVectorExport =
             Description = DiffFamily.description
             Summary = "The content-aware skeleton diff: the script and the per-id classification, or the refusal."
             Vectors = DiffFamily.vectors
-            Answer = DiffFamily.answer } ]
+            Answer = DiffFamily.answer
+            // Reference-only by reason (D232): a vector's answer is the script AND the per-id
+            // classification, and no model states `Diff.changes` — `TreeDiff.fst`'s `d_*` state
+            // `Tree.Digests.diff`, a different function. The script alone is `TreeDiff.to_ops`'s.
+            Model = fun _ -> None } ]
 
     let tryFamily (name: string) : Family option =
         families |> List.tryFind (fun f -> f.Name = name)
@@ -1215,9 +1309,7 @@ module StructuralVectorExport =
                           "description", CorpusFile.str v.Description
                           "input", CorpusCell.Value v.Input
                           "expected", CorpusCell.Value expected
-                          // Reference-only until the chain, DAG and diff models are evaluated here
-                          // (Phase 478 names the successor).
-                          VectorOracle.stamp v.Id (CorpusCell.Value expected) None ]) }
+                          VectorOracle.stamp v.Id (CorpusCell.Value expected) (f.Model v) ]) }
 
     /// The family's self-enumerated index, in the one manifest schema.
     let internal manifest (f: Family) : CorpusManifest =

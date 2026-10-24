@@ -10,6 +10,7 @@ module Fuaran.Core.Tests.ProofOracle.CompactedTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.ChainOracle
 open Fuaran.Core.Tests.ProofOracle.ChainTests
 open Fuaran.Core.Tests.Reference.Counter
 

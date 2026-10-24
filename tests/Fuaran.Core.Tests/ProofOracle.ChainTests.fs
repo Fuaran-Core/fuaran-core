@@ -12,6 +12,7 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.ChainOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 136 — the two INTEGRITY WALKERS as a fourth oracle.
@@ -41,9 +42,6 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 //  asserted so the boundary goes red if it ever moves.
 // ---------------------------------------------------------------------------
 
-/// The model's `le`: F#'s `List.sortWith (fun a b -> String.CompareOrdinal(a, b))` as a predicate.
-let private ordinalLe (a: string) (b: string) : bool = System.String.CompareOrdinal(a, b) <= 0
-
 /// What a tamper puts in a work-plan op's place: a DIFFERENT op, on every case, so no tamper is
 /// silently a no-op. The tampers below skip any that lands back on the op it replaced.
 let private tamperedPlanOp (op: PlanOp) : PlanOp =
@@ -52,37 +50,6 @@ let private tamperedPlanOp (op: PlanOp) : PlanOp =
     | Retitle(i, t) -> Retitle(i, t + "!")
     | SetShipped i -> Retitle(i, "tampered")
     | AddDep(i, d) -> AddDep(i, d + "!")
-
-/// The order `Dag.firstBreak` walks a DAG since Phase 311: the whole DAG's drain (parents first,
-/// the smallest key among the ready nodes), then every node on or below a cycle in key order. Read
-/// off production rather than re-derived: `totalOrderBy` at a constant key is that drain, and where
-/// a cycle leaves nodes unplaced the drain of the rest — which no unplaced node is a parent of — is
-/// the placed prefix.
-let private firstBreakWalk (dag: Dag.T<'Op>) : string list =
-    match Dag.totalOrderBy (fun _ -> 0) dag with
-    | Ok order -> order
-    | Error { Unplaced = unplaced } ->
-        let rest: Dag.T<'Op> =
-            DagOf.nodes (dag.Nodes |> Map.filter (fun k _ -> not (List.contains k unplaced)))
-
-        (match Dag.totalOrderBy (fun _ -> 0) rest with
-         | Ok order -> order
-         | Error _ -> [])
-        @ unplaced
-
-/// A production `Dag.T` as the model reads it — in the order `Dag.firstBreak` walks
-/// (`firstBreakWalk`; `Map.toList`'s id order until Phase 311); the map KEY beside the node,
-/// because production compares the key and never the node's own `Id` field; and the actor as the
-/// string `Actor.encode` produces, which is the only thing the hash pre-image ever sees of it.
-let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
-    firstBreakWalk dag
-    |> List.map (fun k -> k, dag.Nodes[k])
-    |> List.map (fun (k, n) ->
-        { Chain.ekey = k
-          Chain.enode =
-            { Chain.dparents = n.Parents
-              Chain.dactor = Actor.encode n.Actor
-              Chain.dop = n.Op } })
 
 /// A DAG walker's verdict as a COMPARABLE VALUE (Phase 147). Production's break carries a typed
 /// `DagBreakReason`; the model's carries the string its extraction mints, classified through the
@@ -293,21 +260,6 @@ let private dagDifferential
     Differential.seeded iterations (ConfRng.ofSeed seed) step walkerTally
 
 // ---- the linear chain ----
-
-let rec posOfInt (i: int) : Chain.pos =
-    if i <= 0 then
-        Chain.PZero
-    else
-        Chain.PSucc(posOfInt (i - 1))
-
-let rec intOfPos (p: Chain.pos) : int =
-    match p with
-    | Chain.PZero -> 0
-    | Chain.PSucc m -> 1 + intOfPos m
-
-/// F#'s `string (seq: int)`, which the model takes as a parameter for the same reason it takes the
-/// hash: rendering an integer is not something a model of a hash chain owns.
-let showPos (p: Chain.pos) : string = string (intOfPos p)
 
 /// Production's records as the model reads them. `Seq` is a Peano numeral here (the extraction
 /// carries no integers — `proofs/README.md`, finding 2), so a tampered NEGATIVE sequence is

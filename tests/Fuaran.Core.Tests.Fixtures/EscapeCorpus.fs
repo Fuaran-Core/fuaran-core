@@ -16,15 +16,30 @@ module EscapeCorpus =
 
     /// The file, rendered: a header, then one JSON string per line of the table.
     let render () : string =
+        let lines = StringEscapeVectors.lines ()
+
+        // Every line as the escaper's model answers it, in table order (`ChainOracle`).
+        let model: VectorOracle.Answer option =
+            Some
+                { Model = ChainOracle.EscapeModel
+                  LadderRow = ChainOracle.EscapeRow
+                  Cell =
+                    CorpusCell.List(
+                        [ for v in StringEscapeVectors.vectors -> ChainOracle.characterLine v.Name v.Input
+                          for name, actor, _ in StringEscapeVectors.actorVectors -> ChainOracle.actorLine name actor ]
+                        |> List.map CorpusFile.str
+                    ) }
+
         CorpusFile.render
             { Head =
                 [ "family", CorpusFile.str "stringEscape"
                   "description", CorpusFile.str description
                   "format", CorpusFile.str "name<TAB>spelling<TAB>pre-image"
-                  // A line carries no member, so the stamp is the file's, for every line (Phase 478).
-                  "answeredBy", CorpusFile.answeredBy AnsweredBy.Reference ]
+                  // A line carries no member, so the stamp is the file's, for every line (Phase 478): the
+                  // model answers the whole table or the file is the reference's (Phase 563).
+                  VectorOracle.stamp "string-escape" (CorpusCell.List(lines |> List.map CorpusFile.str)) model ]
               Items = "lines"
-              Rows = StringEscapeVectors.lines () |> List.map CorpusFile.str }
+              Rows = lines |> List.map CorpusFile.str }
 
     let path (dir: string) =
         System.IO.Path.Combine(dir, familyDirName, fileName)

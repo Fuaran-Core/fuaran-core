@@ -23,6 +23,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.ChainOracle
 open Fuaran.Core.Tests.CanonOracle
 
 module CliJson = Fuaran.Core.Oracle.Cli.Json

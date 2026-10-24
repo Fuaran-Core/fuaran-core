@@ -2272,8 +2272,11 @@ module VectorStamps =
     /// is answered by the reference alone. A model wired into an exporter is one row here.
     let modelStamps: (string * (string * int)) list =
         [ "apply/skeleton-apply.json", ("TreeOps", 25)
+          "chain/skeleton-chain.json", ("Chain", 16)
+          "dag/skeleton-dag.json", ("Chain", 4)
           "decode/decode-rejects.json", ("JsonParse", 8)
           "decode/decode-rejects.json", ("DecodeLayer", 28)
+          "escape/string-escape.json", ("WireCanon", 1)
           "laws/capability-laws.json", ("Capability", 48)
           "laws/decimal-laws.json", ("DecimalText", 49)
           "laws/decimal-laws.json", ("WireColumn", 7)
