@@ -28,6 +28,7 @@ conformance/
   decode/manifest.json         the decode family's own index + per-host adoption (`render decode`)
   escape/string-escape.json   the string-escape table as the lines a host diffs (`render escape`, since Phase 349; no corpus copy yet)
   encoding/encoding-profiles.json the encoding-profile table as the lines a host diffs (`render encoding`, since Phase 360; no corpus copy yet)
+  escape|encoding/manifest.json each line table's own index + per-host adoption (`render escape`, `render encoding`, since Phase 568)
   chain/skeleton-chain.json    the chain over opaque payloads: append and walk (`render chain`, since Phase 549; no corpus copy yet)
   dag/skeleton-dag.json        the op-DAG over skeleton ops: ids, refusals, order, ranks, the fold, the integrity walk (`render dag`, since Phase 549)
   merge/skeleton-merge.json    the common base and the N-lane reconcile over skeleton ops (`render merge`, since Phase 549)
@@ -586,7 +587,7 @@ the sentence beside it is the host's own. The vectors are emitted, never hand-ed
 ## Host adoption is a record (Phase 477) {#adoption-record}
 
 Every self-enumerated manifest this repository emits (`apply/`, `refusals/`, `decode/`, `chain/`, `dag/`,
-`merge/`, `diff/`, `premises/`, and `laws/` since Phase 564) records each host's adoption of each family as a RECORD, never a bare status string
+`merge/`, `diff/`, `premises/`, `laws/` since Phase 564, and `escape/` and `encoding/` since Phase 568) records each host's adoption of each family as a RECORD, never a bare status string
 (DECISIONS.md D222):
 
 ```json
@@ -648,6 +649,21 @@ law writer writes it whole only when it is. The corpus index carries no adoption
 own `conformance/`, and the wire hosts that read the law files from the corpus record their adoption
 here like any other host. A family a host runs only in part reads `adopted` with the cases it asserted,
 which a reader compares with the row's `vectors`; why the rest are not run is the host's own record.
+
+**The line tables have their own index** (Phase 568, DECISIONS.md D236). `escape/manifest.json` and
+`encoding/manifest.json` each index the one table beside them in the same schema, `kind` `line-vectors`,
+its `vectors` the table's line count, each line one vector. The reference's entry, `fuaran`, is this
+repository's suite, which holds every line to the code (`StringEscapeTests`, `EncodingProfileTests`); the
+wire hosts read `proposed`; each spine's entry comes from `SpineAdoption`. Both spines ran every escape line
+from their first certification (`fuaran-core-rs` at Phase 463's commit, `fuaran-core-go` at Phase 485's), and
+both DECLINE the encoding table: `SpineAdoption.declined` holds each decline with its reason, and because a
+`declined` entry carries nothing but its status (D222.1), the row's `description` states the reason, once per
+reason, naming the spines that give it.
+
+**A family that grows keeps the measurements that stand.** When a vector is added to a family a host has
+adopted, the host's record keeps the cases its leg asserted at the commit it names (D231.3): `adopted` below
+the row's `vectors` is the reading that says the host has not run the new vector, and the evidence map's
+parity for that host reads the shortfall by name. The record moves only when the host measures again.
 
 ## Who answered a vector (Phase 478) {#answered-by}
 
@@ -716,7 +732,8 @@ reason:
   declaration's round trip (the model has an encoder and no decoder), a registry's enumeration (the model's
   `enumerate` answers which ids are registered, not the id order the vector pins), the seams' strict-members
   readings, `FieldChange` and the ops `Rejection` envelope, the DAG `build` vectors (they carry the heads and the
-  ranks, which no model states), and the diff family (its answer carries `Diff.changes`; `TreeDiff.fst`'s `d_*`
+  ranks, which no model states), the DAG `write` vectors (a write's refusal of an id the DAG holds for other
+  content, which no model states over a held node set), and the diff family (its answer carries `Diff.changes`; `TreeDiff.fst`'s `d_*`
   state `Tree.Digests.diff`, a different function).
 - **The model declines the input** (declared): 5 decimal and 10 column codec vectors whose input reaches a
   lenient-ingest arm of the column decoder (a JSON number where a decimal or timestamp column holds text, a
@@ -864,7 +881,7 @@ these files.
 | Family | Cases | What a host reproduces |
 |---|---|---|
 | `skeletonChain` | `append`, `walk` | each record's seq, prevHash, payload and hash, and the tip; a walk's `intact` and tip, or its first `break` (index, reason, expected, got) |
-| `skeletonDag` | `build`, `verify` | each write's id or refusal (`appendOn`, `mergeAll`), the heads, the whole-DAG drain order, the ranks, each head's replay and the whole DAG's (tree and hash, or the first rejecting node), and the integrity walk's first break |
+| `skeletonDag` | `build`, `write`, `verify` | each write's id or refusal (`appendOn`, `mergeAll`), the heads, the whole-DAG drain order, the ranks, each head's replay and the whole DAG's (tree and hash, or the first rejecting node); each write's id or refusal on a DAG that already holds nodes, a forged one among them (`write`, since Phase 568: the `contentIdCollision` refusal and its `nodeId`); and the integrity walk's first break |
 | `skeletonMerge` | `reconcile` | the common base, then `Dag.reconcileMany` under `Ops.footprint`: `merged` (script and tree), `interfere` (every conflict), `sharedRejected`, `lanesRejected` or `noBase` |
 | `skeletonDiff` | `diff` | `Diff.toOpsWith` and `Diff.changes` over the envelope: the script and the classification, or the refusal |
 
@@ -878,7 +895,23 @@ keyed position, and its content is its kind. So a host defect in slot-granular c
 UI corpus's `merge-conformance/` and `diff/`) is what catches it. Nor can the `chain` family catch a host
 that canonicalises an op differently before hashing it, because it hands the op over as bytes: that is
 the op codec's question, which the `apply/` and the codec families answer. The suite's adequacy check
-names each of these unreachable outcomes, and the content-id collision a SHA-256 profile cannot reach.
+names each of these unreachable outcomes. The content-id collision a write from an empty DAG reaches only
+by a SHA-256 collision is reached since Phase 568 by a `write` vector over a held set carrying a forged node.
+
+**The planted defects (Phase 568, DECISIONS.md D236).** Porting every family to the Rust spine found four
+places a port could be wrong and stay green, and each now has a vector and a go-red kept in the suite that
+plants the defect on Core's own answer, exactly as a host would carry it, and fails unless that vector names
+it:
+
+| Defect a host can carry | Pinned by | The go-red |
+|---|---|---|
+| `contentIdCollision` writing `id` for `nodeId` | `dag` `write-content-id-collision` | `StructuralVectorTests` |
+| a decoder that reads a member whose presence condition fails, leaving the drop to the encoder | the three `presence-*-fails-unread` canonical-form vectors (an ill-typed value under a failed condition) | `IdlCanonicalFormTests` |
+| an integer-range check one unit off a bound, early or late, at either end | each iteration's `at-upper-bound` and `past-lower-bound` capability vectors, beside `accept` and `out-of-space` (a pair per bound, D226's shape) | `LawVectorTests` |
+| the rejected lanes reversed, kept in the heads' order or sorted by label, in place of sorted by head id | `merge` `lanes-rejected-id-order` | `StructuralVectorTests` |
+
+Each go-red prints the vectors that catch its host. Before Phase 568 none of the four was caught by any
+vector except the heads-kept-in-order host, which `lanes-rejected` already failed.
 
 **No corpus copy yet.** Whether the shared corpus carries a copy is a fuaran-side act; until one is
 declared, the projection registry declares no `copies` for these files and `version-derives.json`
