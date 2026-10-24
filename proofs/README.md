@@ -3379,7 +3379,7 @@ type.
 
   The extracted section 18 agrees with `CapabilityCodec`'s invocation, envelope and invoke-error codecs over generated values (addresses drawn with replacement, every invoke-error case, every envelope case) and four mutations of each encoding — the canonical text or the encoded value, acceptance, the value read back, and, where production answers a typed refusal, its code and path — and on production every typed refusal resolves in the document it read. The go-red: a model writer that drops an argument disagrees.
 
-  _Boundary:_ The invoke-error reader (`CapabilitySeamCodec.decodeInvokeError`) and the envelope over a sentence-answering payload reader (`CapabilityCodec.decodeDeferred`) are compared on acceptance and value alone, as the model's refusal carries no sentence; the typed envelope reader (`CapabilitySeamCodec.decodeDeferred`) is compared on code and path (Phase 570). Agreement is over the pools drawn, never over all inputs.
+  _Boundary:_ The invoke-error reader (`CapabilitySeamCodec.decodeInvokeError`) and the envelope over a sentence-answering payload reader (`CapabilityCodec.decodeDeferred`) are compared on acceptance and value alone, as the model's refusal carries no sentence; the typed envelope reader (`CapabilitySeamCodec.decodeDeferred`) is compared on code and path. Agreement is over the pools drawn, never over all inputs.
 
 - <a id="row-capability-sections-differential"></a>**`capability-sections-differential`** — `Proofs.Oracle`, 6 cases · fuaran-core#354
 
