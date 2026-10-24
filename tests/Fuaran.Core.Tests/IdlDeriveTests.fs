@@ -2708,13 +2708,24 @@ module private Hooks =
               "            match j with"
               "            | JObj _ -> collectingDecoders.Binding.Decode(self, colT, j)"
               "            | _ -> colT j |> Result.map Binding.Lit }"
-              "let host = { collectingDecoders with Binding = bare }"
-              "let text = \"\"\"{\"hidden\":true,\"id\":\"t\",\"kind\":{\"$type\":\"Text\",\"text\":{\"$type\":\"Each\",\"items\":[\"a\",{\"$type\":\"Each\",\"items\":[\"b\"]}]},\"size\":3,\"all\":[false,{\"$type\":\"Path\",\"path\":\"p\"}]}}\"\"\""
+              "let bools = ref 0"
+              "let host ="
+              "    { collectingDecoders with"
+              "        Binding = bare"
+              "        Bool ="
+              "            fun self j ->"
+              "                bools.Value <- bools.Value + 1"
+              "                match j with"
+              "                | JStr \"yes\" -> Ok true"
+              "                | _ -> collectingDecoders.Bool self j }"
+              "let text = \"\"\"{\"hidden\":\"yes\",\"id\":\"t\",\"kind\":{\"$type\":\"Text\",\"text\":{\"$type\":\"Each\",\"items\":[\"a\",{\"$type\":\"Each\",\"items\":[\"b\"]}]},\"size\":3,\"all\":[\"yes\",{\"$type\":\"Path\",\"path\":\"p\"}]}}\"\"\""
               "match decodeNodeAllWith host text, decodeNodeAll text with"
               "| Ok n, Error es ->"
               "    printfn \"host\\tok\""
               "    printfn \"plain\\t%d\" es.Length"
               "    printfn \"seen\\t%s\" (seen |> Seq.countBy id |> Seq.sort |> Seq.map (fun (k, c) -> sprintf \"%s=%d\" k c) |> String.concat \",\")"
+              "    printfn \"bool\\t%d\" bools.Value"
+              "    printfn \"hidden\\t%A\" n.Hidden"
               "    match n.Kind with"
               "    | NodeKind.Text s -> printfn \"text\\t%A\" s.Text"
               "    | _ -> ()"
@@ -2806,6 +2817,16 @@ let collectingHookTests =
                       (lines.TryFind "seen")
                       (Some "Boolean=3,Int32=1,String=4")
                       "asked at string (four, two of them inside Each), int, and bool (the list and the envelope)"
+
+                  Expect.equal
+                      (lines.TryFind "bool")
+                      (Some "2")
+                      "the host's boolean, as the argument decoder at both bool positions"
+
+                  Expect.equal
+                      (lines.TryFind "hidden")
+                      (Some "Some (Lit true)")
+                      "the envelope's Binding<bool>, read through both hooks"
 
                   Expect.equal
                       (lines.TryFind "text")
